@@ -204,7 +204,7 @@ let test_arm_is_typed_by_kind () =
    carries the workspace guard. The voter is the route's to stamp. *)
 let test_comment_vote_body () =
   let identity : Masc.Tui_decode.server_identity =
-    { sid_version = "test"; sid_binary_commit = "0"; sid_binary_commit_age_s = None
+    { sid_version = "test"; sid_binary_commit = "0"; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
     ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace/base"; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/base/.masc"
     ; sid_executable_in_worktree = None; sid_state_ready = None; sid_uptime = None
     ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }

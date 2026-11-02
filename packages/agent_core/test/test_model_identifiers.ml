@@ -338,6 +338,7 @@ let test_scoped_lookup_retries_under_the_canonical_provider () =
   let catalog =
     catalog_of_toml ~source:"scoped lookup provider alias"
       "[[providers]]\n\
+       capabilities_base = \"models_only\"\n\
        id = \"alias-fixture\"\n\
        aliases = [\"alias-fixture-old\"]\n\
        kind = \"openai_compat\"\n\
@@ -406,6 +407,7 @@ let test_binding_and_enumeration_retain_catalog_owned_rows () =
   let catalog context =
     catalog_of_toml ~source:"binding owned rows"
       (Printf.sprintf {|[[providers]]
+capabilities_base = "models_only"
 id = "owner"
 kind = "anthropic"
 base_url = "https://example.invalid"
@@ -440,6 +442,7 @@ max_context_tokens = %d
 
 let test_exact_lookup_and_ownership_do_not_expand_names () =
   let owner = {|[[providers]]
+capabilities_base = "models_only"
 id = "owner"
 aliases = ["owner-alias"]
 kind = "anthropic"
@@ -488,7 +491,7 @@ let test_retired_prefix_keys_and_invalid_client_tags_are_rejected () =
     [ "[[models]]\nid_prefix = \"legacy\"\n"
     ; "[[models]]\nmodel_id = \"m\"\nsuggested_clients = [\"unknown\"]\n"
     ; "[[models]]\nmodel_id = \"m\"\nsuggested_clients = [\"codex\", \"codex\"]\n"
-    ; "[[providers]]\nid=\"owner\"\nkind=\"anthropic\"\nbase_url=\"https://example.invalid\"\nrequest_path=\"/v1/messages\"\nauth=\"none\"\nserves_bare_rows=[\"family\"]\n"
+    ; "[[providers]]\ncapabilities_base = \"models_only\"\nid=\"owner\"\nkind=\"anthropic\"\nbase_url=\"https://example.invalid\"\nrequest_path=\"/v1/messages\"\nauth=\"none\"\nserves_bare_rows=[\"family\"]\n"
     ]
 ;;
 

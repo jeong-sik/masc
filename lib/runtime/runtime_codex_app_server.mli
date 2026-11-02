@@ -17,11 +17,13 @@ type probe_result =
   ; user_agent : string option
   }
 
+type account = Runtime_official_account.codex Runtime_official_account.selection
+
 type config =
   { cli_path : string
-  ; account_home : string option
-    (** Operator-selected Codex login and configuration directory for normal
-        client turns. [None] inherits the process's ordinary Codex home. *)
+  ; account_home : account
+    (** Current declaration or captured login context. A captured selection
+        retains its admitted home and private credential environment. *)
   ; isolated_home : string option
     (** Verification-only private CODEX_HOME prepared with projected auth and
         provider configuration. Its safe CLI overrides apply only here. *)
@@ -67,11 +69,6 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
-val effective_account_home : string option -> string option
-(** The CODEX_HOME that a child receives: an explicit account home, the
-    process CODEX_HOME, or the default derived from HOME. Quota ownership
-    uses this same resolution. *)
-
 (** One image attached to a turn. [base64_data] is the raw base64 payload with
     no data-URL prefix and no newlines; the app-server [image] input variant
     takes an inline data URL, which this module builds. *)
@@ -406,8 +403,11 @@ val input_capacity_refusal : error -> input_capacity option
     remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
-val client_environment : string option -> (string array, error) result
-(** Selected-account child environment shared by execution and explicit login. *)
+val client_environment : ?isolated_home:string -> account -> (string array, error) result
+(** Selected-account child environment shared by execution and explicit login.
+    A private verification home reapplies the explicit isolation filter to the
+    captured environment and the private config's declared environment keys. *)
+
 
 val refused_for_spent_usage : error -> bool
 (** [true] when the account refused the turn because its usage is spent: the

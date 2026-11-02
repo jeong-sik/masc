@@ -1,0 +1,40 @@
+{
+  "metadata_derivative": "Enriched dispatch fields and repository-relative raw path; original byte digests preserved.",
+  "run": {
+    "name": "candidate",
+    "workflow": "Test",
+    "run_id": 41316474760,
+    "job_id": 124877500919,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/41316474760",
+    "head": "c9776cc2968353a1f66af2c127cf6b28f64ba49a",
+    "ref": "fix/terminal-media-identity-20261101",
+    "status": "completed",
+    "conclusion": "success",
+    "checkout_head": "c9776cc2968353a1f66af2c127cf6b28f64ba49a",
+    "raw_capture": "artifacts/issues-oldest-20261101/terminal-media-identity/candidate-124877500919.raw.log",
+    "raw_bytes": 232753,
+    "raw_sha256": "a725fa99995d4c6a8c6c094ccd17ca07eabcddbd0ba0d0d9dfcceb4d0498db70",
+    "selected_capture": "candidate.txt",
+    "selected_bytes": 16839,
+    "selected_sha256": "d3f9e8d5e4e1cd2b786d9f510c779dd6c7dfc8c5bf775982b774cd1113acecf1",
+    "actual_pass": 146,
+    "actual_fail": 0,
+    "retained_case_pass": 146,
+    "retained_case_fail": 0,
+    "summaries": [
+      "2026-11-01T14:31:54.1205092Z Test Successful in 2.689s. 125 tests run.",
+      "2026-11-01T14:31:56.1915560Z Test Successful in 0.300s. 21 tests run."
+    ],
+    "dispatch": {
+      "minimal": true,
+      "suite": "packages/agent_core/test/test_pipeline,packages/agent_core/test/test_execution_journal",
+      "suite_timeout_sec": 600,
+      "requested_at": "2026-11-01T14:29:53.186727+00:00"
+    }
+  },
+  "per_suite": {
+    "packages/agent_core/test/test_execution_journal.ml": 21,
+    "packages/agent_core/test/test_pipeline.ml": 125
+  },
+  "case_key_sha256": "03f3d690c042823b9d4f5bb23e965811518ebd2841a55ef6fbe8a36dcf7bb36a"
+}

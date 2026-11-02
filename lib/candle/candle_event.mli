@@ -18,16 +18,39 @@ type task_status =
   | Cancelled
 (** A Task's status as the backlog spells it. *)
 
+type task_found =
+  { title : string
+  ; assignee : string option
+  ; status : task_status
+  }
+
+type keeper_observation =
+  | Keeper_name of string
+  | Not_keeper of string
+  | No_assignee
+  | Keeper_unknown
+(** Whether the observed assignee was a Keeper. An unreadable or deleted Task
+    cannot be classified as a non-Keeper. *)
+
+type assignee_observation = Assigned of string | Unassigned | Unreadable_assignee
+type status_observation = Observed_status of task_status | Unreadable_status
+type task_fragment =
+  { title : string option
+  ; assignee : assignee_observation
+  ; status : status_observation
+  ; keeper : keeper_observation
+  }
+
 type task_lookup =
-  | Found of
-      { title : string
-      ; assignee : string option
-            (** Who did or is doing the work, as the Task's status names them. *)
-      ; status : task_status
-      }
-  | Deleted  (** Neither store has the Task, and the Goal no longer links it. *)
-(** What reading one linked Task found. A Task that could not be read has no row
-    here: nothing is written until every linked Task reads. *)
+  | Found of task_found
+  | Found_uncertain of task_fragment list
+      (** Readable rows whose source damage or duplication prevents trusting
+          their uniqueness; at least one is required in a serialized event. *)
+  | Deleted  (** Neither store has the Task and the Goal no longer links it;
+                the original status and assignee remain unknown. *)
+  | Unobserved (** The source could not establish this Task's state. *)
+(** What reading one linked Task found. [Unobserved] can accompany a retained
+    boundary observation but cannot be used to decide a candidate set. *)
 
 type attribution = {
   grade : Candle_grade.t;
@@ -38,6 +61,16 @@ type unattributed_reason = No_candidates | All_unrelated of attribution | No_rel
 (** Nobody could be paid. *)
 
 type equipment_choice = Default | Item of Keeper_portrait_item.t
+
+type candidate_observation =
+  { goal_id : string
+  ; request_id : string
+  ; verification_run_id : string
+  ; tasks : (string * task_lookup) list
+  ; candidate_task_ids : string list
+  ; candidate_keepers : string list
+  ; candidate_task_keepers : (string * string option) list
+  }
 
 type body =
   | Half_life_set of Candle_decay.half_life
@@ -66,18 +99,23 @@ type body =
       ; passed_at : Candle_time.t  (** When that request's passing result was made. *)
       ; confirmed_at : Candle_time.t  (** When the operator confirmed it. *)
       }
-  | Candidates of
+  | Candidates of candidate_observation
+      (** Historical observation without Task commit serialization proof. *)
+  | Candidates_fenced of candidate_observation
+      (** Observation and ledger append ran under the held backlog lease fence. *)
+  | Candidate_window_held of
       { goal_id : string
       ; request_id : string
       ; verification_run_id : string
+      ; passed_at : Candle_time.t
+      ; confirmed_at : Candle_time.t
       ; tasks : (string * task_lookup) list
-            (** One entry per Task the [Snapshot] linked, in its order. *)
-      ; candidate_task_ids : string list
-      ; candidate_keepers : string list
-      ; candidate_task_keepers : (string * string option) list
-          (** Each candidate Task has its frozen admitted Keeper name, or [None]
-              when its assignee was not a Keeper at candidate creation. *)
+            (** The complete linked-Task observation at the time of the hold. *)
+      ; task_keepers : (string * keeper_observation) list
+            (** Frozen Keeper classification for every observed Task. *)
       }
+      (** Some linked Task's ordering or original status cannot be determined.
+          This is an observation, not a candidate decision or settlement. *)
   | Unattributed of
       { goal_id : string
       ; request_id : string

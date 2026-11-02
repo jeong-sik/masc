@@ -1,0 +1,32 @@
+{
+  "corrected_baseline": "e185f43bf978cc4922584754f9e3e398ec2cff57",
+  "corrected_candidate": "c3d7d202c2abad5a9b5fa173757fe621fcc797e0",
+  "only_pair_delta": [
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.ml",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli"
+  ],
+  "whole_test_trees_identical": true,
+  "production_source_comparisons": {
+    "baseline": {
+      "head": "e185f43bf978cc4922584754f9e3e398ec2cff57",
+      "reference": "e95d3c79f9e3f846cc174bbfa5e1a1f465346785",
+      "trees": {
+        "lib": "40a7da14f61f03f8e03fb53ea8262c388c4e46e8",
+        "packages/agent_core/lib": "2a8d79aa6ab8d59a38f5ec05480a32ba1882bf53",
+        "config": "b9b3372a0113ac693ee297ea10f22bcb055c53ec"
+      }
+    },
+    "candidate": {
+      "head": "c3d7d202c2abad5a9b5fa173757fe621fcc797e0",
+      "reference": "68119836b420bee9d2b26be19cc913f08c2c41e0",
+      "trees": {
+        "lib": "40a7da14f61f03f8e03fb53ea8262c388c4e46e8",
+        "packages/agent_core/lib": "501ce78c5d171ef29990b3aa556a1b4ecc84bdef",
+        "config": "b9b3372a0113ac693ee297ea10f22bcb055c53ec"
+      }
+    }
+  },
+  "fresh_control_api": "public Agent.run; recovery also uses public regular/streaming/Advanced APIs",
+  "foreign_source_preserved_as_ancestor": "e95d3c79f9e3f846cc174bbfa5e1a1f465346785",
+  "publication_rule": "Evidence-only descendants must preserve all 19 named inputs and four recorded source trees; no final SHA checkout is implied."
+}

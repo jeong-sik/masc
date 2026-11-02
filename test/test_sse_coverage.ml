@@ -176,6 +176,32 @@ let test_register_uses_successful_commit_time_after_retry () =
       | None ->
           fail "client should be installed")
 
+(* Registration can overlap the old connection's removal before the new
+   client is published. Each removal must wake its own connection. *)
+let test_disconnect_hook_follows_the_registered_client () =
+  let session_id = "disconnect-owner-" ^ string_of_int (Random.bits ()) in
+  let original_hook = Atomic.get Sse.register_commit_test_hook in
+  let old_calls = ref 0 and new_calls = ref 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Sse.register_commit_test_hook original_hook;
+      Sse.unregister session_id)
+    (fun () ->
+      let old_id, _, _ = register_exn session_id ~last_event_id:0
+          ~on_disconnect:(fun () -> incr old_calls) in
+      let once = Atomic.make false in
+      Atomic.set Sse.register_commit_test_hook (Some (fun () ->
+        if Atomic.compare_and_set once false true then
+          Sse.unregister_if_current session_id old_id));
+      let new_id, _, _ = register_exn session_id ~last_event_id:0
+          ~on_disconnect:(fun () -> incr new_calls) in
+      Atomic.set Sse.register_commit_test_hook original_hook;
+      check int "old connection was notified" 1 !old_calls;
+      check int "new connection was not notified early" 0 !new_calls;
+      check bool "new client is registered" true (Sse.exists session_id);
+      Sse.unregister_if_current session_id new_id;
+      check int "new connection was notified when removed" 1 !new_calls)
+
 (* ============================================================
    client_count Tests
    ============================================================ *)
@@ -432,7 +458,7 @@ let test_concurrent_broadcast_preserves_replay_and_live_cursor_order () =
         |> List.map (fun (event : Sse.delivery) -> event.event_id)
       in
       let rec drain acc =
-        match Eio.Stream.take_nonblocking event_stream with
+        match Sse.take_delivery_nonblocking event_stream with
         | None -> List.rev acc
         | Some (event : Sse.delivery) -> drain (event.event_id :: acc)
       in
@@ -452,7 +478,7 @@ let test_broadcast_preserves_typed_payload () =
       in
       let expected = `Assoc [ "typed_payload", `String "preserved" ] in
       Sse.broadcast_to Sse.Observers expected;
-      let actual = (Eio.Stream.take event_stream : Sse.delivery).payload in
+      let actual = (Sse.take_delivery event_stream : Sse.delivery).payload in
       check bool "delivery retains producer JSON without wire reparse" true
         (expected = actual))
 
@@ -538,15 +564,12 @@ let test_send_to_nonexistent () =
    ============================================================ *)
 
 (* ============================================================
-   Snapshot Throttle Tests
+   Snapshot Publication Tests
    ============================================================ *)
 
-let test_sync_transport_snapshot_throttle_idempotent () =
-  (* Calling sync_transport_snapshot multiple times rapidly must not
-     crash or corrupt state.  The CAS throttle ensures only the first
-     call in each [snapshot_min_interval_sec] window computes; the
-     rest return () immediately. *)
-  let session_id = "test_throttle_" ^ string_of_int (Random.bits ()) in
+let test_sync_transport_snapshot_idempotent () =
+  (* Repeated publication must leave the client registry intact. *)
+  let session_id = "test_snapshot_" ^ string_of_int (Random.bits ()) in
   Fun.protect
     ~finally:(fun () -> Sse.unregister session_id)
     (fun () ->
@@ -557,15 +580,15 @@ let test_sync_transport_snapshot_throttle_idempotent () =
       check int "client count preserved after rapid snapshots"
         1 (Sse.client_count ()))
 
-let test_broadcast_throttled_snapshot_stability () =
+let test_broadcast_snapshot_stability () =
   (* broadcast_impl calls sync_transport_snapshot internally.
      Verify rapid broadcasts do not corrupt client state. *)
-  let session_id = "test_bcast_throttle_" ^ string_of_int (Random.bits ()) in
+  let session_id = "test_bcast_snapshot_" ^ string_of_int (Random.bits ()) in
   Fun.protect
     ~finally:(fun () -> Sse.unregister session_id)
     (fun () ->
       let (_id, _, _) = register_exn session_id ~last_event_id:0 in
-      let payload = `Assoc [ "test", `String "throttle" ] in
+      let payload = `Assoc [ "test", `String "snapshot" ] in
       for _ = 1 to 20 do
         Sse.broadcast payload
       done;
@@ -595,6 +618,8 @@ let () =
       test_case "unique ids" `Quick test_register_returns_unique_id;
       test_case "retry uses successful commit time" `Quick
         test_register_uses_successful_commit_time_after_retry;
+      test_case "disconnect hook belongs to the registered client" `Quick
+        test_disconnect_hook_follows_the_registered_client;
     ];
     "unregister_if_current", [
       test_case "matches" `Quick test_unregister_if_current_matches;
@@ -633,11 +658,11 @@ let () =
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;
       test_case "empty clients" `Quick test_broadcast_empty_clients;
     ];
-    "snapshot_throttle", [
+    "snapshot_publication", [
       test_case "rapid sync_transport_snapshot idempotent" `Quick
-        test_sync_transport_snapshot_throttle_idempotent;
+        test_sync_transport_snapshot_idempotent;
       test_case "rapid broadcast snapshot stable" `Quick
-        test_broadcast_throttled_snapshot_stability;
+        test_broadcast_snapshot_stability;
     ];
     "send_to", [
       test_case "existing" `Quick test_send_to_existing;

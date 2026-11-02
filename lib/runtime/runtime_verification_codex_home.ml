@@ -15,22 +15,10 @@ let project_config ?(disabled_mcp_servers = []) body =
   | Error _ -> Error "The Codex connection configuration could not be parsed."
   | Ok doc ->
     let fields = Otoml.get_table doc in
+    if List.mem_assoc "profile" fields || List.mem_assoc "profiles" fields then
+      Error "Codex no longer selects inline profile/profiles settings. Move the intended connection into this account home's config.toml; MASC does not pass --profile."
+    else
     let projected = List.filter (fun (key, _) -> connection_key key) fields in
-    let profile =
-      match List.assoc_opt "profile" fields, List.assoc_opt "profiles" fields with
-      | Some (Otoml.TomlString name), Some profiles ->
-        (match Otoml.find_opt profiles Fun.id [ name ] with
-         | Some profile -> List.filter (fun (key, _) -> connection_key key) (Otoml.get_table profile)
-         | None -> raise (Otoml.Type_error "Selected Codex profile is not declared"))
-      | None, _ -> []
-      | (Some (Otoml.TomlString _), _) | (Some (Otoml.TomlInteger _), _)
-      | (Some (Otoml.TomlFloat _), _) | (Some (Otoml.TomlBoolean _), _)
-      | (Some (Otoml.TomlOffsetDateTime _), _) | (Some (Otoml.TomlLocalDateTime _), _)
-      | (Some (Otoml.TomlLocalDate _), _) | (Some (Otoml.TomlLocalTime _), _)
-      | (Some (Otoml.TomlArray _), _) | (Some (Otoml.TomlTable _), _)
-      | (Some (Otoml.TomlInlineTable _), _) | (Some (Otoml.TomlTableArray _), _) -> raise (Otoml.Type_error "Selected Codex profile cannot be safely projected")
-    in
-    let projected = List.filter (fun (key, _) -> not (List.mem_assoc key profile)) projected @ profile in
     Ok (Otoml.Printer.to_string (Otoml.TomlTable (projected @ [
       "mcp_servers", Otoml.TomlTable (List.map (fun name -> name,
         Otoml.TomlTable ["enabled", Otoml.TomlBoolean false]) disabled_mcp_servers);
@@ -93,18 +81,10 @@ let inherited_server_names ~directory =
 let auth_file = "auth.json"
 let auth_path ~codex_home = Filename.concat codex_home auth_file
 
-let prepare ?source_home ~directory () =
-  (* These are the external Codex client's credential/configuration locations,
-     not MASC configuration knobs. Read its existing CODEX_HOME/HOME contract
-     at this projection boundary so the ordinary client and verifier select
-     the same credential source without introducing another environment key. *)
-  try let source =
-    match source_home, Sys.getenv_opt "CODEX_HOME" with
-    | Some value, _ -> value
-    | None, Some value when String.trim value <> "" -> Env_config.normalize_masc_base_path_input value
-    | None, _ -> Filename.concat (Sys.getenv "HOME") ".codex"
-  in
-  let source = if Filename.is_relative source then Filename.concat (Sys.getcwd ()) source else source in
+let prepare ~source_home ~directory () =
+  let ( let* ) = Result.bind in
+  let* source = Runtime_account_home.of_string source_home in
+  try
   let source_config = Filename.concat source "config.toml" in
   let body = if Sys.file_exists source_config then Fs_compat.load_file source_config else "" in
   match project_config ~disabled_mcp_servers:(inherited_server_names ~directory) body with
@@ -122,7 +102,8 @@ let prepare ?source_home ~directory () =
     if Sys.file_exists auth then write auth_file (Fs_compat.load_file auth);
     Ok destination
   with
-  | Not_found -> Error "HOME is required to find the Codex connection credentials."
   | Otoml.Type_error _ | Otoml.Parse_error _ ->
     Error "An inherited Codex configuration could not be inspected safely."
+  | Sys_error _ | Unix.Unix_error _ ->
+    Error "The selected Codex connection could not be copied into its private home."
 ;;

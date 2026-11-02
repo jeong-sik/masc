@@ -1164,10 +1164,29 @@ let persist_pending_entry_unlocked ~map ~(entry : pending_approval) updated_entr
     Ok true
 ;;
 
+let notify_waiting_approval ~source (entry : pending_approval) =
+  let report exn =
+    Log.Keeper.warn "approval waiting inventory notification failed keeper=%s: %s"
+      entry.keeper_name (Printexc.to_string exn) in
+  match Keeper_waiting_inventory_broadcast.changed
+          ~base_path:entry.audit_base_path ~keeper_name:entry.keeper_name ~source with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    (* The queue is already committed. A subscriber's own cancellation is
+       observational; the calling fiber's actual cancellation still wins. *)
+    (match Fs_compat.execution_context () with
+     | Eio_fiber -> Eio.Fiber.check ()
+     | Non_eio -> ());
+    report exn
+  | exception exn -> report exn
+;;
+
 let publish_summary_update ~id =
   let now = Time_compat.now () in
   match find_pending_entry_unchecked ~id with
-  | Some updated -> record_summary_updated ~now updated
+  | Some updated ->
+    notify_waiting_approval ~source:Approval_detail updated;
+    record_summary_updated ~now updated
   | None -> ()
 ;;
 
@@ -2083,6 +2102,7 @@ let submit_pending
   | Ok (`Folded_onto_unconsumed_grant approval_id) ->
     Ok { approval_id; disposition = Folded_onto_unconsumed_grant }
   | Ok (`Created entry) ->
+    notify_waiting_approval ~source:Approval_count entry;
     let audit_receipt = record_pending ~call_summary entry in
     Ok
       { approval_id = entry.id
@@ -2969,6 +2989,7 @@ let resolve_with_policy
                  ~rule_expires_at ~created_by with
          | Error _ as error -> error
          | Ok (Newly_journaled delivery) ->
+           notify_waiting_approval ~source:Approval_count delivery.entry;
            let resolution_receipt = record_journaled_resolution delivery in
            (match complete_delivery ~occasion:First_commit delivery with
             | Error _ as error -> error

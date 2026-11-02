@@ -10,11 +10,14 @@ type suggested_client = Claude_code | Codex
 type model_entry =
   { model_id : Model_identifiers.Model_id.t
   ; suggested_clients : suggested_client list
-  ; base_label : string option
+  ; base_label : Capability_preset.t option
+    (** Explicit model capability preset. Absence retains the existing
+        provider-scoped or bare-row inheritance rules; unknown labels cannot
+        enter this typed view. *)
+  ; provider_name : string option
     (** Registry provider identity for OpenAI-compatible model families whose
         wire kind alone would otherwise collapse to [openai_compat]. This is
         not a capability preset; [base_label] remains the capability base. *)
-  ; provider_name : string option
   ; max_context_tokens : int option
   ; serving_constraint : Serving_constraint.t option
     (** Evidence-backed input-token admission interval for this exact catalog
@@ -29,6 +32,7 @@ type model_entry =
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
+  ; emits_usage_tokens : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -90,22 +94,35 @@ type provider_entry = Model_provider_catalog.entry =
   ; requires_api_key : bool
   ; default_model : string option
   ; discovery_timeout_s : float option
-  ; capabilities_base : string option
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; capability_policy : Model_provider_catalog.capability_policy
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
 type t
 
-(** Raised by {!global} when the build-time generated catalog violates the
-    catalog syntax or schema. The generated catalog is an AGENT_CORE build invariant,
-    so there is no empty-catalog fallback. *)
-exception Invalid_embedded_catalog of string
-
 val empty : t
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
+
+val without_providers : t -> t
+(** Retain every model row while removing provider declarations, aliases,
+    defaults and bare-row permissions. Exact scoped model rows still answer
+    for explicitly named custom providers. No global catalog is consulted. *)
+
+val with_provider_entry : t -> provider_entry -> t
+(** Retain all exact model rows with only the supplied provider declaration as
+    lookup authority. Its aliases and bare-row permissions replace the seeds.
+    This pure view neither admits nor publishes a process configuration. *)
+
+val with_model_overrides : t -> Capability_manifest.t -> t
+(** Compose a parsed JSON capability declaration into a new immutable catalog.
+    Each exact bare model identity replaces its capability fields. Missing
+    capability fields inherit the declaration's own preset/default, never the
+    replaced row. Its pricing, cache multipliers, task, client suggestions and
+    serving evidence remain those of the exact previous bare row; new identities
+    have no such metadata. Scoped rows, provider declarations and bare-model
+    permissions remain unchanged. No process-global source is read or changed. *)
 
 type provider_reference =
   | Declared_provider of string
@@ -206,28 +223,3 @@ val model_entries_for_provider
     rows precede canonical scoped rows, then permitted bare rows; a row with
     the same whole id in an earlier scope shadows the later row. Model ids
     remain verbatim. Enumeration preserves declared exact identities. *)
-
-(** Return the active model catalog.
-
-    Resolution order:
-    - runtime override installed with {!set_global} (full replacement)
-    - build-time embedded AGENT_CORE [models.toml]
-
-    A provider or model fact is written in the embedded catalog and nowhere
-    else. A deployment names which rows it uses in its runtime configuration;
-    it does not restate what a row says. The second copy this module used to
-    accept disagreed with the first on tool support, on replay policy, and on
-    one model's window by a factor of five.
-
-    The embedded result is cached after first computation. Invalid generated
-    data raises {!Invalid_embedded_catalog}; it never becomes [None] or an
-    empty catalog. AGENT_CORE does not inspect an environment variable for an
-    alternate catalog. Callers that need a custom catalog must call
-    {!load_file} and {!set_global} explicitly.
-
-    {!clear_global} clears the runtime override and the cache. *)
-val global : unit -> t option
-
-val set_global : t -> unit
-
-val clear_global : unit -> unit

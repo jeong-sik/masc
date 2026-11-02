@@ -229,6 +229,11 @@
  (action
   (run %{exe:test_keeper_codex_current_context.exe} test "async receipt continuation")))
 
+(rule
+ (alias runtest-test_keeper_codex_completion_evidence)
+ (action
+  (run %{exe:test_keeper_codex_current_context.exe} test "completion evidence")))
+
 (test
  (name test_keeper_vision_official_client)
  (modules test_keeper_vision_official_client)
@@ -301,6 +306,8 @@
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
+
+(include stanzas/test_sse_queue_inventory.inc)
 
 (test
  (name test_server_exact_lane_retention_observation)
@@ -497,7 +504,7 @@
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
-  test_keeper_codex_effort_clamp
+  test_runtime_claude_effort_admission
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
@@ -851,7 +858,7 @@
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
-  test_keeper_codex_effort_clamp
+  test_runtime_claude_effort_admission
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
@@ -1511,6 +1518,19 @@
  (libraries masc_test_deps masc masc.runtime masc.fusion_core))
 
 (test
+ (name test_fusion_selected_timeout)
+ (modules test_fusion_selected_timeout)
+ (deps
+  (source_tree %{workspace_root}/config/prompts))
+ (libraries
+  masc_test_deps
+  masc
+  masc.runtime
+  masc.fusion_core
+  masc.masc_eio_context
+  eio_main))
+
+(test
  (name test_fusion_official_client_panel)
  (modules test_fusion_official_client_panel)
  (deps
@@ -1522,6 +1542,18 @@
   masc.fusion_core
   masc.masc_eio_context
   eio_main))
+
+(rule
+ (alias runtest-test_fusion_claude_effort_authority)
+ (action (run %{exe:test_fusion_official_client_panel.exe} test "Claude native effort authority")))
+
+(rule
+ (alias runtest-test_claude_probe_effort_authority)
+ (action (run %{exe:test_runtime_verification.exe} test "Claude native effort authority")))
+
+(rule
+ (alias runtest-test_capability_probe_selected_timeout)
+ (action (run %{exe:test_runtime_verification.exe} test "selected probe idle")))
 
 ; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
 
@@ -2707,6 +2739,13 @@
 
 (include stanzas/test_board_persistence_load_contract.inc)
 
+(include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_posts_preflight.inc)
+(include stanzas/test_board_posts_initialization.inc)
+(include stanzas/test_board_posts_initialization_offline.inc)
+(include stanzas/test_cli_board_posts_initialization.inc)
+(include stanzas/test_board_preparation.inc)
+
 (include stanzas/test_board_snapshot_rows.inc)
 
 (include stanzas/test_board_persistence_schema.inc)
@@ -2967,12 +3006,19 @@
 (include stanzas/bench_fleet_stream.inc)
 
 (include stanzas/test_tui_fleet_stream.inc)
+(include stanzas/test_tui_observer_handshake.inc)
+(include stanzas/test_tui_observer_cold_start.inc)
+(include stanzas/test_tui_observer_loss.inc)
+(include stanzas/test_tui_waiting_event.inc)
+(include stanzas/test_tui_task_event.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 
 (include stanzas/test_fs_compat_durable_append.inc)
+(include stanzas/test_fs_compat_unique_fold.inc)
+(include stanzas/test_fs_compat_missing_binding.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)
@@ -3069,6 +3115,8 @@
 (include stanzas/test_keeper_long_turn_9943.inc)
 
 (include stanzas/test_keeper_execution_join.inc)
+(include stanzas/test_full_health_wakeup.inc)
+(include stanzas/test_pending_confirm_expiry.inc)
 
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 
@@ -3295,6 +3343,7 @@
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
+(include stanzas/test_keeper_antigravity_selected_inference.inc)
 (include stanzas/test_keeper_claude_code_runtime.inc)
 (include stanzas/test_server_dashboard_official_client_probe.inc)
 (include stanzas/test_official_client_session_store.inc)
@@ -4033,7 +4082,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries masc_tui_pick_list masc_tui_presented astring masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc_workspace masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
+ (libraries masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc_workspace masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
 
 (test
  (name test_tool_transport_prefix)
@@ -4535,7 +4584,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
+ (libraries alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -4944,6 +4993,7 @@
 (include stanzas/test_tui_execute_stream.inc)
 (include stanzas/test_tui_execute_stream_job.inc)
 (include stanzas/test_tui_execute_stream_http.inc)
+(include stanzas/test_tui_sse_eof.inc)
 (include stanzas/test_tui_keeper_terminal_state.inc)
 (include stanzas/test_tui_keeper_terminal_stream_state.inc)
 (include stanzas/test_tui_hit.inc)
@@ -5314,6 +5364,12 @@
 (include stanzas/test_tui_memory_back.inc)
 
 (include stanzas/test_tui_keeper_runs_view.inc)
+
+(include stanzas/test_tui_fusion_refresh.inc)
+(include stanzas/test_tui_fusion_recovery.inc)
+(include stanzas/test_tui_fusion_sse.inc)
+
+(include stanzas/test_tui_fusion_workspace.inc)
 
 (include stanzas/test_runtime_toml_namespace.inc)
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
@@ -5881,8 +5937,8 @@
  (libraries alcotest yojson masc masc.fs_compat unix))
 
 (test
- (name test_lane_addon_orphan_body_sweep)
- (modules test_lane_addon_orphan_body_sweep)
+ (name test_lane_addon_original_body_inventory)
+ (modules test_lane_addon_original_body_inventory)
  (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
 
 (test
@@ -6390,6 +6446,12 @@
  (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))
 
+(include stanzas/test_runtime_construction_snapshot.inc)
+
+(include stanzas/test_runtime_batch_construction_snapshot.inc)
+
+(include stanzas/test_runtime_native_account_selection.inc)
+
 (test
  (name test_runtime_official_cli_install)
  (modules test_runtime_official_cli_install)
@@ -6862,7 +6924,7 @@
 (test
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
- (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads yojson mtime.clock.os
+ (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_loader masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads yojson mtime.clock.os
   masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates
   masc_tui_workspace_result masc_eio_context eio eio_main))
 

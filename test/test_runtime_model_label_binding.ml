@@ -64,10 +64,9 @@ let catalog endpoint = match Model_catalog.of_toml_string ~source:"label binding
   (catalog_text_for_endpoint endpoint) with
   | Ok catalog -> catalog | Error detail -> Alcotest.fail detail
 let with_catalog ?(endpoint="http://127.0.0.1:11434") f =
-  let previous = Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Model_catalog.set_global catalog | None -> Model_catalog.clear_global ())
-    (fun () -> Model_catalog.set_global (catalog endpoint); f ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog endpoint))) ~providers:(None))); f ())
 let config provider = match Runtime_model_string.parse_model_string (provider ^ ":overlap") with
   | Some config -> config | None -> Alcotest.fail "registered model label was refused"
 let caps config = match Provider_config.capabilities_for_config_model config with
@@ -232,19 +231,18 @@ let alias_default () = with_catalog (fun () ->
   Alcotest.(check string) "alias resolves declared default" "overlap" config.model_id;
   Alcotest.(check (option string)) "alias carries canonical binding identity" (Some "label-b") config.provider_id)
 let supported_is_not_default () = with_catalog (fun () ->
-  let previous = Provider_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Provider_catalog.set_global catalog | None -> Provider_catalog.clear_global ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
     (fun () ->
       let entry : Provider_catalog.entry =
         {id="label-a";aliases=[];kind=Provider_config.OpenAI_compat;
          base_url="https://a.invalid";request_path="/v1/chat/completions";
-         api_key_env="";auth=Provider_catalog.No_auth;default_model=None;discovery_timeout_s=None;max_context=None;
-         capabilities={Capabilities.default_capabilities with supported_models=Some ["supported-not-default"]};
+         auth=Provider_catalog.No_auth;default_model=None;discovery_timeout_s=None;max_context=None;
+         capabilities=Some {Capabilities.default_capabilities with supported_models=Some ["supported-not-default"]};
          credential_scope=None} in
       let overlay = match Provider_catalog.of_entries [entry] with
         | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
-      Provider_catalog.set_global overlay;
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (overlay))));
       Alcotest.(check bool) "supported-model metadata cannot invent an execution default" true
         (Result.is_error (Runtime_transport.resolve_provider_config_of_label "label-a:auto"))))
 let projected_defaults () = with_catalog (fun () ->
@@ -690,11 +688,9 @@ let ollama_auto_without_declared_deadline_does_not_probe () =
   with_mock_server handler (fun ~sw ~net ~clock ~endpoint ->
     Discovery_cache.set_env ~sw ~net ~clock;
     with_catalog ~endpoint (fun () ->
-      let previous = Provider_catalog.global () in
+      let previous = Llm_provider.Catalog_snapshot.current () in
       Fun.protect
-        ~finally:(fun () -> match previous with
-          | Some catalog -> Provider_catalog.set_global catalog
-          | None -> Provider_catalog.clear_global ())
+        ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
         (fun () ->
           let overlay = Provider_catalog.of_json (`Assoc [
             "schema_version", `Int 1;
@@ -706,7 +702,7 @@ let ollama_auto_without_declared_deadline_does_not_probe () =
               "auth", `Assoc ["type", `String "none"];
               "capabilities_base", `String "ollama"]]]) in
           (match overlay with
-           | Ok catalog -> Provider_catalog.set_global catalog
+           | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))))
            | Error detail -> Alcotest.fail detail);
           Alcotest.(check bool) "an undeclared deadline refuses discovery instead of waiting"
             true (Runtime_model_string.parse_model_string "ollama:auto" = None);

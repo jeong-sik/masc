@@ -30,14 +30,12 @@ let run_phase ~child root =
   ignore (Server_startup_state.mark_state_ready ());
   Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
     |> require "native execution runtime";
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog);
   let catalog = Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-context-test" catalog
-    |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
+    |> require "model catalog" |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let provider_calls = ref 0 and tool_calls = ref 0 and hook_calls = ref 0 in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
       (Exact_output_fixture.Reply_with (fun _ _ ->
@@ -198,14 +196,12 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
   ignore (Server_startup_state.mark_state_ready ());
   Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
   |> require "native execution runtime";
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog);
   let catalog = Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-input-test" catalog
-  |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
+  |> require "model catalog" |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let workspace = Workspace.default_config root in
   ignore (Workspace.init workspace ~agent_name:(Some "native-input-test"));
   let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
@@ -330,14 +326,12 @@ let test_retired_input_history_cut () =
   ignore (Server_startup_state.mark_state_ready ());
   Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
     |> require "native runtime";
-  let previous_catalog=Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog);
   let catalog=Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-cut-test" catalog
-    |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
+    |> require "model catalog" |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let workspace=Workspace.default_config root in
   ignore (Workspace.init workspace ~agent_name:(Some "native-cut-test"));
   let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;

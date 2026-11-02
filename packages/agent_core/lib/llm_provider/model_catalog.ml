@@ -11,7 +11,7 @@ type suggested_client = Claude_code | Codex
 type model_entry =
   { model_id : Model_identifiers.Model_id.t
   ; suggested_clients : suggested_client list
-  ; base_label : string option
+  ; base_label : Capability_preset.t option
   ; provider_name : string option
   ; max_context_tokens : int option
   ; serving_constraint : Serving_constraint.t option
@@ -25,6 +25,7 @@ type model_entry =
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
+  ; emits_usage_tokens : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -74,8 +75,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; requires_api_key : bool
   ; default_model : string option
   ; discovery_timeout_s : float option
-  ; capabilities_base : string option
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; capability_policy : Model_provider_catalog.capability_policy
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -92,8 +92,6 @@ type t =
        in [models]: the row [lookup_for_provider] answers with, found
        without scanning [models]. A catalog is never changed after [make]. *)
   }
-
-exception Invalid_embedded_catalog of string
 
 let normalize_label value = String.lowercase_ascii (String.trim value)
 
@@ -124,6 +122,81 @@ let make ~models ~providers =
 let empty = make ~models:[] ~providers:[]
 let model_entries t = t.models
 let provider_entries t = t.providers
+let without_providers t = { t with providers = [] }
+
+let with_model_overrides catalog declarations =
+  let entries = Capability_manifest.entries declarations in
+  let overrides = List.fold_left (fun index (entry : Capability_manifest.entry) ->
+    Row_key_map.add (Model_identifiers.Model_id.equality_key entry.model_id) entry index)
+    Row_key_map.empty entries in
+  let replace previous (entry : Capability_manifest.entry) : model_entry =
+    { model_id = entry.model_id
+    ; suggested_clients = (match previous with Some row -> row.suggested_clients | None -> [])
+    ; base_label = entry.base_label
+    ; provider_name = None
+    ; max_context_tokens = entry.max_context_tokens
+    ; serving_constraint = (match previous with Some row -> row.serving_constraint | None -> None)
+    ; max_output_tokens = entry.max_output_tokens
+    ; supports_tools = entry.supports_tools
+    ; supports_tool_choice = entry.supports_tool_choice
+    ; supports_required_tool_choice = entry.supports_required_tool_choice
+    ; supports_named_tool_choice = entry.supports_named_tool_choice
+    ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
+    ; assistant_tool_content_format = entry.assistant_tool_content_format
+    ; chat_output_budget_field = entry.chat_output_budget_field
+    ; tool_schema_conformance = entry.tool_schema_conformance
+    ; supports_reasoning = entry.supports_reasoning
+    ; emits_usage_tokens = entry.emits_usage_tokens
+    ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
+    ; supports_response_format_json = entry.supports_response_format_json
+    ; supports_structured_output = entry.supports_structured_output
+    ; json_schema_dialect = entry.json_schema_dialect
+    ; supports_multimodal_inputs = entry.supports_multimodal_inputs
+    ; supports_image_input = entry.supports_image_input
+    ; supports_audio_input = entry.supports_audio_input
+    ; supports_video_input = entry.supports_video_input
+    ; supports_document_input = entry.supports_document_input
+    ; modality_priority = entry.modality_priority
+    ; task = (match previous with Some row -> row.task | None -> None)
+    ; supported_models = entry.supported_models
+    ; supports_native_streaming = entry.supports_native_streaming
+    ; supports_system_prompt = entry.supports_system_prompt
+    ; supports_assistant_prefill = entry.supports_assistant_prefill
+    ; supports_prompt_caching = entry.supports_prompt_caching
+    ; supports_top_k = entry.supports_top_k
+    ; supports_min_p = entry.supports_min_p
+    ; supports_seed = entry.supports_seed
+    ; ignored_sampling_parameters = entry.ignored_sampling_parameters
+    ; thinking_control_format = entry.thinking_control_format
+    ; anthropic_thinking_control = entry.anthropic_thinking_control
+    ; preserve_thinking_control_format = entry.preserve_thinking_control_format
+    ; content_inline_reasoning = entry.content_inline_reasoning
+    ; reasoning_output_format = entry.reasoning_output_format
+    ; reasoning_streaming_format = entry.reasoning_streaming_format
+    ; reasoning_replay = entry.reasoning_replay
+    ; input_per_million = (match previous with Some row -> row.input_per_million | None -> None)
+    ; output_per_million = (match previous with Some row -> row.output_per_million | None -> None)
+    ; cache_write_multiplier = (match previous with Some row -> row.cache_write_multiplier | None -> None)
+    ; cache_read_multiplier = (match previous with Some row -> row.cache_read_multiplier | None -> None)
+    } in
+  let seen, models = List.fold_left (fun (seen, models) (row : model_entry) ->
+    match row.provider_name with
+    | Some _ -> seen, row :: models
+    | None ->
+      let key = Model_identifiers.Model_id.equality_key row.model_id in
+      match Row_key_map.find_opt key overrides with
+      | None -> seen, row :: models
+      | Some entry ->
+        Row_key_map.add key () seen, replace (Some row) entry :: models)
+    (Row_key_map.empty, []) catalog.models in
+  let added = List.filter_map (fun (entry : Capability_manifest.entry) ->
+    if Row_key_map.mem (Model_identifiers.Model_id.equality_key entry.model_id) seen
+    then None else Some (replace None entry)) entries in
+  make ~models:(List.rev_append models added) ~providers:catalog.providers
+;;
+
+let with_provider_entry t provider = { t with providers = [provider] }
+;;
 
 let find_string_field ~entry_id key toml =
   match Otoml.find_opt toml Otoml.get_string [ key ] with
@@ -369,6 +442,7 @@ let known_entry_keys =
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
+  ; "emits_usage_tokens"
   ; "accepted_reasoning_efforts"
   ; "supports_response_format_json"
   ; "supports_structured_output"
@@ -448,13 +522,19 @@ let parse_entry entry_toml =
         else parse (client :: seen) rest in
     parse [] (Option.value names ~default:[])
   in
-  let* base_label =
+  let* base_label_raw =
     canonical_string_opt
       ~entry_id
       "base"
       ~allowed:Capability_vocab.base_label_values
       entry_toml
   in
+  let* base_label = match base_label_raw with
+    | None -> Ok None
+    | Some raw ->
+      (match Capability_preset.of_string raw with
+       | Some preset -> Ok (Some preset)
+       | None -> Error (Printf.sprintf "model entry %S has unknown base preset %S" entry_id raw)) in
   let* provider_name =
     non_empty_string_field ~entry_id "provider_name" entry_toml
   in
@@ -465,6 +545,7 @@ let parse_entry entry_toml =
     Serving_constraint_catalog.parse ~entry_id entry_toml
   in
   let* max_output_tokens = int_field ~entry_id "max_output_tokens" entry_toml in
+  let* emits_usage_tokens = bool_field ~entry_id "emits_usage_tokens" entry_toml in
   let* supports_tools = bool_field ~entry_id "supports_tools" entry_toml in
   let* supports_tool_choice =
     bool_field ~entry_id "supports_tool_choice" entry_toml
@@ -654,6 +735,7 @@ let parse_entry entry_toml =
     ; chat_output_budget_field
     ; tool_schema_conformance
     ; supports_reasoning
+    ; emits_usage_tokens
     ; accepted_reasoning_efforts
     ; supports_response_format_json
     ; supports_structured_output
@@ -995,7 +1077,7 @@ let lookup_model_for_provider t ~provider ~model_id =
 ;;
 
 let lookup_model_for_provider_entry t ~(provider : provider_entry) ~model_id =
-  let selected = { t with providers = [provider] } in
+  let selected = with_provider_entry t provider in
   lookup_model_for_provider selected ~provider:(Declared_provider provider.id) ~model_id
 ;;
 
@@ -1029,53 +1111,4 @@ let lookup_for_provider t ~provider_name ~model_id =
     | Some kind -> Anonymous_wire kind
     | None -> Declared_provider provider_name in
   lookup_for_provider_reference t ~provider ~model_id
-;;
-
-type default_cache =
-  | Unloaded
-  | Loaded of t
-
-let load_embedded_catalog () =
-  match load_default () with
-  | Ok catalog -> catalog
-  | Error msg ->
-    raise
-      (Invalid_embedded_catalog
-         (Printf.sprintf "invalid generated embedded model catalog: %s" msg))
-;;
-
-let embedded_catalog : default_cache Atomic.t = Atomic.make Unloaded
-
-let load_embedded_once () =
-  match Atomic.get embedded_catalog with
-  | Loaded value -> value
-  | Unloaded ->
-    let value = load_embedded_catalog () in
-    if Atomic.compare_and_set embedded_catalog Unloaded (Loaded value)
-    then value
-    else (
-      match Atomic.get embedded_catalog with
-      | Loaded value -> value
-      | Unloaded -> value)
-;;
-
-let runtime_override : t option Atomic.t = Atomic.make None
-
-let set_global t = Atomic.set runtime_override (Some t)
-
-let clear_global () =
-  Atomic.set runtime_override None;
-  Atomic.set embedded_catalog Unloaded
-;;
-
-let global () =
-  match Atomic.get runtime_override with
-  | Some _ as o -> o
-  | None ->
-    let embedded_value = load_embedded_once () in
-    (* Re-read: [set_global] may have landed while the embedded catalog loaded,
-       and a full replacement wins over the embedded rows. *)
-    (match Atomic.get runtime_override with
-     | Some _ as o -> o
-     | None -> Some embedded_value)
 ;;

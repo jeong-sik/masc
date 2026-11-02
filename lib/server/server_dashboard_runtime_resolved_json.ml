@@ -118,13 +118,11 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
          picker draws them as identical rows. [null] is an unset effort, not
          an unknown one.
 
-         Declared, not effective: an official-client turn puts the value
-         through the catalog clamp and then the CLI's own vocabulary
-         ([Keeper_official_client_host.effective_reasoning_effort],
-         [Runtime_claude_code.cli_admitted_reasoning_effort]), which today
-         changes [minimal] and [ultra] on Claude Code and efforts outside a model's
-         accepted set. The key says which of the two it is; surfacing the
-         other belongs to the detail view, which has room to say both. *)
+         This is declared intent. The native transport owns admission:
+         Claude Code maps minimal/ultra to low/max in its CLI vocabulary,
+         while Codex consults the client's model/effort advertisement.
+         Actual client results remain the execution evidence. Surfacing
+         admitted effort belongs to the detail view. *)
     ; ( "declared_reasoning_effort"
       , match rt.model.reasoning_effort with
         | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)

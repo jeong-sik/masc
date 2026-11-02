@@ -38,7 +38,7 @@ type stalled =
   ; since_iso : string
   }
 
-(* A Goal the verifier proved and only the operator's confirmation closes. *)
+(* A Goal whose stored phase awaits operator confirmation. *)
 type goal_to_confirm =
   { goal_id : string
   ; title : string
@@ -256,21 +256,6 @@ let said (row : scheduled) =
   | what, who -> Printf.sprintf "%s \xc2\xb7 %s" what who
 ;;
 
-(* Whole minutes while there are any, then seconds. A held call is denied when
-   this reaches zero, so the number is the reason to look rather than
-   decoration. *)
-let time_left ~now (held : awaiting) =
-  let remaining = held.asked_at +. held.timeout_sec -. now in
-  if Float.compare remaining 0.0 <= 0
-  then "expired"
-  else begin
-    let whole = int_of_float remaining in
-    if whole >= 60
-    then Printf.sprintf "%dm %02ds left" (whole / 60) (whole mod 60)
-    else Printf.sprintf "%ds left" whole
-  end
-;;
-
 (* How long the operator has not answered. Coarse on purpose: the row exists
    because the wait is long, and minutes past the first day are noise. *)
 let waited_since ~now since =
@@ -286,11 +271,21 @@ let waited_since ~now since =
     else Printf.sprintf "%dm waiting" (whole / 60))
 ;;
 
-(* A stamp this cannot read says nothing rather than saying zero. *)
-let waited ~now since_iso =
+(* A Goal's update time is not the time it began awaiting confirmation. *)
+let updated ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
   | None -> ""
-  | Some since -> waited_since ~now since
+  | Some since ->
+    let seconds = now -. since in
+    if Float.compare seconds 0.0 <= 0
+    then "updated just now"
+    else (
+      let whole = int_of_float seconds in
+      if whole >= 86_400
+      then Printf.sprintf "updated %dd ago" (whole / 86_400)
+      else if whole >= 3_600
+      then Printf.sprintf "updated %dh ago" (whole / 3_600)
+      else Printf.sprintf "updated %dm ago" (whole / 60))
 ;;
 
 let overlay ~now ~localtime ~cols t =
@@ -346,7 +341,7 @@ let overlay ~now ~localtime ~cols t =
                two_column
                  ~cols
                  (Printf.sprintf "%s is holding %s" held.asked_by held.question)
-                 (time_left ~now held)
+                 (waited_since ~now held.asked_at)
            })
         rows
   in
@@ -409,8 +404,8 @@ let overlay ~now ~localtime ~cols t =
            ; text =
                two_column
                  ~cols
-                 (Printf.sprintf "%s \xe2\x80\x94 the verifier proved it" row.title)
-                 (waited ~now row.since_iso)
+                 (Printf.sprintf "%s \xe2\x80\x94 awaiting confirmation" row.title)
+                 (updated ~now row.since_iso)
            })
         rows
   in

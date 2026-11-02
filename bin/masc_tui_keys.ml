@@ -338,6 +338,7 @@ let global =
 
 (* The plain-listing tail every converted footer shares. *)
 let listing_refresh = b Meta "r" "refresh"
+let goal_candle_refresh_key = "z"
 let listing_next = b Meta "Tab" "next"
 let listing_quit = b Meta "q" "quit"
 let listing_meta = [ listing_refresh; listing_next; listing_quit ]
@@ -825,13 +826,16 @@ let for_surface = function
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "c" "request completion"
-          ~help:"send the goal to the completion judge; press again to submit"
-      ; b Act "a" "confirm proof"
-          ~help:"read the proven Goal evidence; press again to confirm that exact proof"
-      ; b Act "x" "drop"
-          ~help:"type why the goal is dropped; Enter drops it and cancels its unclaimed tasks"
-      ; b Act "o" "reopen"
+      ; b Act "c" "request completion" ~detail:Detail_only
+          ~help:"in Goal detail, request completion or recovery; press again to submit"
+      ; b Act "a" "confirm proof" ~detail:Detail_only
+          ~help:"in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation"
+      ; b Act "x" "drop" ~detail:Detail_only
+          ~help:"in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop"
+      ; b Act "o" "reopen" ~detail:Detail_only
+          ~help:"in Goal detail, press twice to request reopening"
+      ; b Act goal_candle_refresh_key "Candle read" ~detail:Detail_only
+          ~help:"read the selected Goal's Candle payout record again without changing the Goal"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
@@ -1239,6 +1243,15 @@ let footer_hints ?detail_open surface =
   hints_of_bindings
     (List.filter (answers_in_state ?detail_open) (for_surface surface))
 
+(* [r] is Resume for a paused Goal, so the generic refresh label must not
+   advertise it as a read in this detail. The Candle read has its own key. *)
+let footer_hints_planning_goal_detail =
+  let bindings = for_surface Planning
+    |> List.filter (answers_in_state ~detail_open:true)
+    |> List.filter (fun binding -> not (String.equal binding.key "r")) in
+  let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
+  hints_in_order (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
+
 let footer_hints_tools ~pane =
   let bracket = tools_bracket_binding ~pane in
   hints_of_bindings
@@ -1355,7 +1368,7 @@ let footer_hints_board_compose_armed ~reply =
 (* No [q] here either: while a drop reason has the keys, every printable
    scalar is a letter of it. *)
 let goal_drop_reason_bindings =
-  [ b Act "Enter" "drop" ~help:"drop the goal with this reason; its unclaimed tasks are cancelled"
+  [ b Act "Enter" "drop" ~help:"request a drop with this reason; Tasks observed unclaimed may be cancelled"
   ; b Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
   ]
 

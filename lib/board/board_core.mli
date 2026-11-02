@@ -1,36 +1,10 @@
-(** Board_core — in-memory board store, persistence, and
-    canonical post / comment operations.
+(** Board post/thread queries and the existing public operation surface.
 
-    The .ml is a 687-line module that splits into four
-    layers:
-
-    - {b Type / classification} re-exported via
-      [include Board_core_classify] (which itself does
-      [include Board_types]) — every {!Board_types} surface
-      entry and every visibility / post-kind variant reach callers via this facade.
-    - {b Payload normalisation} re-exported via
-      [include Board_core_payload] — metadata validation, post-title
-      derivation, and the canonical [normalize_post_payload].
-    - {b Local store + persistence} (this .mli's locally
-      pinned surface) — sweeper / lock / cache /
-      JSONL append helpers.
-    - {b Public board operations} — create / get / list /
-      search post + comment APIs.
-
-    Runtime-include preserves type identity end-to-end with
-    [include module type of struct include M end] (cycle
-    187 rationale).  {!Board_votes} does its own
-    [include Board_core], which transitively reaches the
-    top-level {!Board} facade — every helper consumed by
-    that chain (the 13 unqualified usages from
-    [board_votes.ml] plus the 15 [Board.X] dotted callers
-    that resolve into Board_core defs) is pinned below.
-
-    Internal helpers stay private at this boundary
-    ([persist_errors] atomic counter, [record_persist_error],
-    [remove_from_list_index], [maybe_sweep],
-    [board_masc_dir], [ensure_dir],
-    [append_post], [append_comment]). *)
+    The implementation composes persistence, classification and payload
+    helpers with private comment, reaction and sub-board owners. This explicit
+    interface retains canonical Board_types identities through the existing
+    Board_votes and Board includes. Owner-specific state and helper functions
+    remain private; the declarations below define the public surface. *)
 
 include module type of struct
   include Board_core_classify
@@ -70,8 +44,18 @@ val flush_interval_sec : float
 (** Builds a fresh empty store with default Hashtbl capacities
     (1024 posts / 4096 comments / 2048 vote-log entries),
     fresh [Eio.Mutex], cold caches, and an [Eio.Stream]
-    [flusher_inbox] capped by the persistence-layer flusher inbox capacity. *)
-val create_store : unit -> store
+    [flusher_inbox] capped by the persistence-layer flusher inbox capacity.
+    Captures the explicit existing BasePath and its no-follow state boundary,
+    anchoring relative input; empty input raises [Invalid_argument]. No directory
+    or payload is created. A failed capture remains refused on this store;
+    prepare the root before construction, then explicitly load sources. *)
+val create_store : base_path:string -> unit -> store
+
+val create_store_with_source_io_for_testing :
+  base_path:string -> io:posts_source_io -> unit -> store
+(** Same production store with immutable per-file guard/posts transaction IO.
+    None slots use production IO; the constructor creates/adopts nothing and
+    leaves posts unobserved until explicit load. *)
 
 (** {1 Locking + cache invalidation} *)
 
@@ -113,31 +97,28 @@ val sweep : store -> int * int
 
 (** {1 Persistence paths} *)
 
-(** Resolves the board base path from {!Env_config}.  Used by
-    {!persist_path}, {!comments_path}, and the
-    side-effect hook integration in {!create_post}. *)
+(** Resolves the configured base path. Store persistence uses its captured
+    directory instead of consulting this configuration helper. *)
 val board_base_path : unit -> string
+val workspace_masc_dir : store -> string
 
-(** Path to the board posts JSONL log under
-    [<base>/.masc/board_posts.jsonl]. *)
-val persist_path : unit -> string
+(** Path to the posts JSONL log in the store's captured workspace. *)
+val persist_path : store -> string
 
-(** Path to the board comments JSONL log under
-    [<base>/.masc/board_comments.jsonl]. *)
-val comments_path : unit -> string
+(** Path to the comments JSONL log in the store's captured workspace. *)
+val comments_path : store -> string
 
-(** Path to the board reactions JSONL snapshot under
-    [<base>/.masc/board_reactions.jsonl]. *)
-val reactions_path : unit -> string
+(** Path to the reactions snapshot in the store's captured workspace. *)
+val reactions_path : store -> string
 
-(** Idempotent [.masc] directory creation; called before
-    every JSONL append. *)
-val ensure_masc_dir : unit -> unit
+(** Checked directory preparation inside a persistence-protected writer. *)
+val ensure_masc_dir : where:string -> store -> (unit, board_error) result
 
 (** {1 Append-only persistence} *)
 
-(** Appends one post snapshot to {!persist_path}. *)
-val append_post : post -> (unit, board_error) result
+(** Appends one post snapshot only against its loaded exact source observation.
+    The stable-lock precondition rereads all prior bytes on each append. *)
+val append_post : store -> post -> posts_write_outcome
 
 (** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
     [posts_by_run_id]) from a post's [origin].  Used by the load path to
@@ -154,31 +135,77 @@ val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
 (** Appends one comment snapshot to {!comments_path}. *)
-val append_comment : comment -> (unit, board_error) result
+val append_comment : store -> comment -> (unit, board_error) result
 
 (** {1 Whole-state JSONL rewrite} *)
 
-(** Atomically replaces {!persist_path} with [content], a snapshot of
-    [store.posts]. Every posts snapshot write goes through here. Refused with
-    [Io_error] while [store.posts_load_result] is [Error]: memory then holds
-    every row the loader could decode but not the line it could not, and the
-    rewrite would delete that line (#38595). *)
-val save_posts_snapshot : store -> string -> (unit, board_error) result
+(** A captured whole-posts replacement uses the exact prior source bytes and
+    cursor. It cannot discard rejected source rows or adopt unrelated disk state. *)
+type posts_snapshot = Board_core_persist.posts_snapshot
+(** Frozen candidate rows and their exact expected source observation. *)
+val capture_posts_snapshot : ?replacement:post -> store -> posts_snapshot
+val save_posts_snapshot : store -> posts_snapshot -> posts_write_outcome
+(** Capture under persist then state; save retains persist and acquires no
+    recursive Board lock. A stale or unreadable source cannot authorize save.
+    Snapshots bind the physical workspace and exact source observation, not a store-owner
+    token; trusted callers sharing both may pass a captured snapshot. *)
+val require_posts_source_readable : store -> (unit, board_error) result
+(** Pure source gate; caller holds the persistence mutex. Refused and unsettled
+    sources never grant a write. Definite transient nonwrites retain the expected
+    observation, while observed stale identity/bytes/tail revoke it. *)
+val posts_source_failure_to_board_error : posts_source_failure -> board_error
+val finish_posts_write : posts_write_outcome -> (unit, board_error) result
+(** Caller holds persistence. Observe settlement diagnostics only after known
+    successful memory publication, or a proven nonwrite after rollback/refusal.
+    Reserved cleanup exceptions leave enclosing Board mutexes normally and are
+    reraised after unlocking with their original backtrace. *)
+val publish_posts_read : store -> posts_source_read -> unit
+(** Loader publication under persistence then state locks. *)
+val read_posts_source : store -> posts_source_read
+(** Caller holds persistence; general reads never recover tails or settle an
+    unknown write. Complete and partial reads retain the actual Fs snapshot. *)
+val finish_posts_read : posts_source_read -> unit
+type posts_inspection_framing = Board_core_persist.posts_inspection_framing =
+  | Complete_rows
+  | Torn_tail of { rows_end : int; end_offset : int }
+
+type posts_inspection_observation = Board_core_persist.posts_inspection_observation =
+  | Observed_missing
+  | Observed_present of {
+      accepted_rows : int;
+      errors : posts_row_error list;
+      framing : posts_inspection_framing;
+    }
+
+type posts_inspection = Board_core_persist.posts_inspection =
+  | Inspected of {
+      observation : posts_inspection_observation;
+      settlement_diagnostic : Fs_compat.private_jsonl_operation_failure option;
+    }
+  | Inspection_failed of {
+      error : Fs_compat.Private_jsonl_unique_fold.error;
+      settlement_diagnostic : Fs_compat.private_jsonl_operation_failure option;
+    }
+
+val inspect_posts_source : workspace_masc_dir:string -> posts_inspection
+(** Noncreating unique-regular read observation. This uses the data reader's
+    shared lock and before/after snapshot checks, not stable-sibling exclusion.
+    Missing is an observation, not initialized absence, a durability receipt or
+    authority to mutate any store. Reserved failures retain their backtrace. *)
+val inspect_posts_source_with_io_for_testing :
+  workspace_masc_dir:string ->
+  io:Fs_compat.private_jsonl_transaction_io_for_testing -> posts_inspection
+
 
 (** {!save_posts_snapshot} for {!comments_path}, guarded by
     [store.comments_load_result]. *)
 val save_comments_snapshot : store -> string -> (unit, board_error) result
 
-(** Atomically rewrites {!persist_path} from
-    [store.posts].  The implementation snapshots under [store.mutex]
-    and performs disk I/O under the persist lock after releasing the
-    state lock; callers must not invoke it while already holding
-    [store.mutex]. *)
-val rewrite_posts : store -> unit
-
 (** Atomically rewrites {!comments_path} from
-    [store.comments].  Same usage pattern as
-    {!rewrite_posts}. *)
+    [store.comments]. The snapshot is captured under the state lock and written
+    outside it while retaining the persistence lock. Failure re-marks comments
+    dirty for the flusher to retry; callers must not invoke this while already
+    holding the state lock. *)
 val rewrite_comments : store -> unit
 
 (** Marks one post for append-only deferred persistence.  Call with
@@ -259,7 +286,12 @@ val update_post_with_outcome
     meta] via {!normalize_post_payload}, then writes under
     {!with_lock}.  [ttl_hours = 0] persists indefinitely;
     positive values are preserved exactly and negative values are rejected.
-    Errors on validation or persistence failure.  The
+    Errors on validation or persistence failure.
+    Final sub-board policy admission precedes append while holding this
+    store's persistence lock, shared with runtime sub-board mutations.
+    A specified hearth requires a fully readable sub-board policy source;
+    an unscoped post is independent of that source. This boundary does not
+    serialize other stores/processes or supply durable operation receipts.
     JSONL append and side-effect hooks are intentionally
     performed {b outside} the state lock to avoid blocking concurrent
     readers on filesystem writes. *)
@@ -377,9 +409,9 @@ val current_post_cursor : store -> float * string option
     lock used by post creation, so a concurrently admitted first post is
     strictly newer than the returned cursor. *)
 
-(** Full-scan search over every post (no cap on the scan,
-    only on the result size).  Returns matches sorted by
-    [created_at desc]. *)
+(** Traverse the Recent index in [created_at DESC, post_id ASC] order until
+    [limit] matches are collected or the index is exhausted. A nonpositive
+    limit returns no posts. *)
 val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 (** {1 Comment operations} *)
@@ -412,8 +444,8 @@ val add_comment_with_audience
     comment id among comments with the same [created_at], so every read of an
     unchanged thread returns the same order. *)
 val read_comments : store -> post_id:string -> (comment list, board_read_error) Result.t
-(** A post that does not exist answers [Ok []], the same as a post with no
-    comments. *)
+(** No indexed rows answers [Ok []]. This lookup does not check post
+    existence; retained orphan comments remain readable by their post ID. *)
 
 
 (** Returns one comment by id. *)
@@ -454,9 +486,8 @@ val toggle_reaction
 
 (** {1 SubBoard operations} *)
 
-(** Path to the sub-boards JSONL snapshot under
-    [<base>/.masc/board_sub_boards.jsonl]. *)
-val sub_boards_path : unit -> string
+(** Path to the sub-board snapshot in the store's captured workspace. *)
+val sub_boards_path : store -> string
 
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
@@ -468,8 +499,9 @@ val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
-    Returns [Validation_error] when the slug is invalid or already taken. JSONL append
-    persistence is performed outside the state lock. *)
+    Returns [Validation_error] when the slug is invalid and [Already_exists]
+    when taken. The final uniqueness check precedes append under this store's
+    persistence lock; append runs outside the state lock. *)
 val create_sub_board
   :  store
   -> slug:string
@@ -488,12 +520,15 @@ val get_sub_board : store -> sub_board_id:string -> (sub_board, board_error) Res
 val list_sub_boards : store -> sub_board list
 
 (** Removes a sub-board by ID or slug under the state lock, then persists the
-    rewritten snapshot outside the state lock. *)
+    rewritten snapshot outside the state lock while retaining this store's
+    persistence lock. Snapshot-save failures retain their logging behavior. *)
 val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.
-    Persists the rewritten snapshot outside the state lock. *)
+    Takes this store's persistence lock before changing policy under the state
+    lock, then persists its snapshot outside the state lock. Snapshot-save
+    failures retain their logging behavior. *)
 val update_sub_board
   :  store
   -> sub_board_id:string

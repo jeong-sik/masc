@@ -217,6 +217,10 @@ type image_preparation =
   | Image_worker_busy
   | Image_prepared of (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result
 
+type observer_recovery_origin =
+  | Observer_existing_workspace of Masc.Tui_decode.server_identity
+  | Observer_initial_workspace of local_workspace_paths
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -517,7 +521,7 @@ type async_msg =
       caption : string list;
       page_url : string;
       image_url : string;
-      result : (string, string) result;
+      result : (Masc_tui_image_cache.remote_image, string) result;
     }
       (** A [v]-requested or /image-requested web image, downloaded and
           converted to PNG off the render loop. [request] is the exact pending
@@ -525,13 +529,16 @@ type async_msg =
           request cannot paint, notify another pane, or open its fallback.
           An explicit remote URL belongs to its workspace, independently of
           unrelated peer resource readings.
-          [result] is the PNG bytes
-          ready to draw, or why they could not be produced. [title] is what
+          [result] holds the prepared PNG or character frame, or why it could
+          not be produced. [title] is what
           the screen shows: [v] indents a display title, /image passes the URL
           itself. [image_url] is what was fetched; [page_url] is the link the
           operator chose, and the one a browser gets when drawing fails
           (see [Masc_tui_browser.browser_url]). *)
-  | Keeper_turns_loaded of (string * int) list * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_waiting_loaded of Keeper_waiting_read.request * keeper_waiting_snapshot
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -611,10 +618,10 @@ type async_msg =
       result : (string, string) result;
     }
   | Board_vote_done of Masc_tui_types.board_vote_target * (string, string) result
-  | Goal_transition_done of (string, string) result
-  | Goal_confirmation_submitted of (string, string) result
+  | Goal_transition_done of string * string * string * (string, string) result
+  | Goal_confirmation_submitted of string * string * string * Masc_tui_planning_detail.receipt_authority * (string, string) result
   | Goal_confirmation_loaded of
-      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, string) result
+      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, Masc_tui_planning_detail.confirmation_read_error) result
   | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
@@ -638,6 +645,8 @@ type async_msg =
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
+  | Goal_candle_loaded of
+      string Masc_tui_fetched.request * (unit ref * (string * Candle_goal_observation.t, Masc_tui_types.goal_candle_failure) result, string) result
   | Task_history_loaded of
       string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
@@ -768,12 +777,17 @@ type async_msg =
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Github_token_saved of string * (Yojson.Safe.t, string) result
+  | Observer_session_ready of string
   | Observer_opened of {
       session_id : string;
-      handshake : (Sse_wire.observer_handshake option, string) result;
+      handshake : Sse_wire.observer_handshake option;
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
+  | Observer_retry_due of workspace_authority * unit ref
+  | Observer_recovery_ready of workspace_authority * unit ref * string option
+  | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
+      * observer_recovery_origin * Sse_wire.observer_identity
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -830,6 +844,13 @@ val workspace_message_admitted :
   state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> bool
 (** A stale read never re-enters a reconfirmed workspace. Admitted operation
     and chat receipts keep their original workspace authority. *)
+
+val observer_retry_owned : state -> authority:workspace_authority -> unit ref -> bool
+val observer_recovery_owned : state -> authority:workspace_authority -> unit ref -> bool
+val observer_recovery_identity_owned :
+  state -> authority:workspace_authority -> owner:unit ref -> live:bool ref ->
+  instance:string -> origin:observer_recovery_origin -> bool
+(** A retry belongs only to the workspace and exact closed stream that scheduled it. *)
 
 val account_login_action_is_read : Masc_tui_account_login.action -> bool
 

@@ -13,19 +13,6 @@ type provider_kind = Provider_kind.t =
   | Gemini
   | Glm
 
-(** Default [request_path] for a given provider kind. Centralised so that
-    [make] and any caller building a record literal stay aligned with the
-    same wire-format defaults. Gemini returns [""] because
-    it does not dispatch over an HTTP path. *)
-let request_path_default_for_kind = function
-  | Anthropic -> "/v1/messages"
-  | Kimi -> "/v1/messages"
-  | OpenAI_compat -> "/v1/chat/completions"
-  | Ollama -> "/api/chat"
-  | Gemini -> ""
-  | Glm -> "/chat/completions"
-;;
-
 (** Authentication is independent of the inference wire. Vertex uses the
     Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
 type auth_scheme = Provider_default | Bearer_token
@@ -35,11 +22,19 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+type provider_authentication = No_auth | Api_key | Setup_token
+
+type provider_identity =
+  { authentication : provider_authentication
+  ; credential_scope : string option
+  }
+
 type request_policy_snapshot =
   { snapshot_kind : provider_kind
   ; snapshot_provider_id : string option
   ; snapshot_model_id : string
   ; policy : Capabilities.request_policy
+  ; provider_identity : provider_identity option
   }
 
 type t =
@@ -146,7 +141,7 @@ let make
   let request_path =
     match request_path with
     | Some p -> p
-    | None -> request_path_default_for_kind kind
+    | None -> Provider_kind.request_path_default kind
   in
   let provider_id =
     Option.map
@@ -244,10 +239,29 @@ let resolve_request_policy (config : t) =
     ~provider:(provider_reference config) ~model_id:config.model_id
 ;;
 
+let selected_provider_identity (config : t) =
+  match config.request_policy_snapshot with
+  | Some snapshot
+    when snapshot.snapshot_kind = config.kind
+         && snapshot.snapshot_provider_id = config.provider_id -> snapshot.provider_identity
+  | Some _ | None -> None
+;;
+
 let with_request_policy policy (config : t) =
   { config with request_policy_snapshot = Some
       { snapshot_kind=config.kind;snapshot_provider_id=config.provider_id
-      ; snapshot_model_id=config.model_id;policy } }
+      ; snapshot_model_id=config.model_id;policy
+      ; provider_identity=selected_provider_identity config } }
+;;
+
+let with_binding_policy ~authentication ~credential_scope policy (config : t) =
+  match config.provider_id with
+  | None -> invalid_arg "Provider_config.with_binding_policy requires a selected provider id"
+  | Some _ ->
+    { config with request_policy_snapshot = Some
+        { snapshot_kind=config.kind;snapshot_provider_id=config.provider_id
+        ; snapshot_model_id=config.model_id;policy
+        ; provider_identity=Some {authentication;credential_scope} } }
 ;;
 
 let freeze_for_request (config : t) =
@@ -256,6 +270,13 @@ let freeze_for_request (config : t) =
   | None ->
     let policy = resolve_request_policy config in
     with_request_policy policy config
+;;
+
+let pricing_source (config : t) =
+  let policy = match matching_request_policy config with
+    | Some policy -> policy
+    | None -> resolve_request_policy config in
+  Capabilities.request_policy_pricing_source policy
 ;;
 
 let capabilities_for_config_model (config : t) =

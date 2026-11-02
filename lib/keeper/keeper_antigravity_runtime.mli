@@ -28,6 +28,8 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
+  configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  turn_timeout_s:float option ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -75,6 +77,15 @@ val run :
     range is composed and before the prompt is rendered. Required
     rather than optional: a lane that reports nothing is what wrote every
     Antigravity turn's input attribution as zero (masc#32995).
+
+    [configured_reasoning_effort] and [turn_timeout_s] come from the already
+    selected model. They are not looked up again by [runtime_id] on fresh or
+    resumed turns. An absent idle declaration keeps
+    the captured provider timeout; a nonpositive declaration removes the model
+    idle bound. Native admission still uses the provider timeout.
+    Generic reasoning intent is passed through host hooks and remains subject
+    to Antigravity's existing refusal: only [config.effort] owns native effort.
+    [None] declares no generic reasoning intent; a hook may set or clear it.
 
     It reports [Whole_input_transmitted] only when the conversation starts,
     because only then does the rendered prompt carry the whole list. The

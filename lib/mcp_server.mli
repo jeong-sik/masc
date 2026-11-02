@@ -153,9 +153,22 @@ type publication_recovery_runtime
     transition. Callers can observe it but cannot mutate the cell. *)
 type publication_recovery_runtime_snapshot
 
+module Workspace_scope_epoch : sig
+  type t
+
+  val equal : t -> t -> bool
+  val to_string : t -> string
+end
+(** Opaque identity of one active workspace configuration. A successful
+    replacement gets a new epoch even if its paths match an earlier scope. *)
+
+type workspace_scope_lifetime
+
 type workspace_scope = private
   { config : Workspace.config
   ; publication_recovery : publication_recovery_runtime
+  ; epoch : Workspace_scope_epoch.t
+  ; lifetime : workspace_scope_lifetime
   }
 (** One immutable snapshot of the active workspace configuration carrying the
     same process-lifetime recovery handle. Runtime availability and the
@@ -185,6 +198,13 @@ type server_state = private {
 
 val workspace_scope : server_state -> workspace_scope
 (** Current immutable workspace runtime snapshot. *)
+
+val workspace_scope_replaced : workspace_scope -> unit Eio.Promise.t
+(** Resolves after this scope has been replaced. Consumers can subscribe even
+    if the replacement happened before they began awaiting the promise. A
+    pending promise does not prove the scope is still current: replacement and
+    notification are separate steps. A stream must bind and validate its own
+    scope evidence across publication and consumption. *)
 
 val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
@@ -273,6 +293,10 @@ module For_testing : sig
   (** Await only the one registry-open settlement. Discovery and exact owner
       work are deliberately outside this test-only boundary. *)
 end
+
+exception Board_initialization_failed of Board_dispatch.initialization_error
+(** Startup requested a workspace different from the retained Board store.
+    No server state is returned and the existing Board binding is retained. *)
 
 val create_state_eio :
   sw:Eio.Switch.t ->

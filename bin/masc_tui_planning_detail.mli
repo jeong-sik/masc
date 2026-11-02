@@ -36,27 +36,61 @@ type submitted_original =
   | Original_unreadable of { reference : string option; reason : string }
   | Original_unknown of string
 
+type confirmation_workspace = { base_path : string; masc_root : string }
+
 type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
+  recorded_confirmation : Goal_verification.confirmation option;
   submitted : submitted_original list;
+  workspace : confirmation_workspace;
+  inspection_operator_id : string;
+  runtime_instance_id : string;
+  credential_headers : (string * string) list;
+  credential_owner : unit ref;
 }
 
-type confirmation_state =
-  | Inspecting of (string, confirmation) Masc_tui_fetched.t
-  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+type receipt_authority = {
+  ra_workspace : confirmation_workspace;
+  ra_operator_id : string;
+  ra_runtime_instance_id : string;
+  ra_credential_owner : unit ref;
+}
 
-val decode_confirmation : goal_id:string -> Yojson.Safe.t -> (confirmation, string) result
+val confirmation_receipt_authority : confirmation -> receipt_authority
+
+type confirmation_read_error =
+  | Read_failed of unit ref option * string
+  | Read_http_error of unit ref * int
+  | Server_changed of unit ref
+
+type confirmation_read = (string, confirmation, confirmation_read_error) Masc_tui_fetched.source
+
+type confirmation_state =
+  | Inspecting of confirmation_read
+  | Submitting of string * confirmation_read
+
+val confirmation_read_error_message : credential_is_current:(unit ref -> bool) -> confirmation_read_error -> string
+
+val suspend_confirmation_read : confirmation_read -> confirmation_read
+(** Withdraw a proof's authority while retaining its key for a later reread. *)
+val confirmation_view_for : confirmation_read -> goal_id:string -> (confirmation, confirmation_read_error) Masc_tui_fetched.observation
+(** A revalidation hides the previous proof as soon as its read starts. *)
+
+val decode_confirmation : goal_id:string -> workspace:confirmation_workspace -> runtime_instance_id:string -> credential_headers:(string * string) list -> credential_owner:unit ref -> Yojson.Safe.t -> (confirmation, string) result
 val confirmation_body : confirmation -> Yojson.Safe.t
 val same_confirmation_binding : confirmation -> confirmation -> bool
+val same_recorded_confirmation : confirmation -> confirmation -> bool
+val receipt_authority_current : credential_current:bool -> current_instance:string option -> current_confirmation:confirmation option -> receipt:receipt_authority -> bool
+val receipt_outcome_text : ko:bool -> current:bool -> (string, string) result -> string
 val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
-(** The exact proof displayed before the operator confirms, in layers: the
-    instruction, the goal's promise, the binding fine print, then the
-    evidence. Its binding is retained for the POST, so a newer proof cannot
-    silently replace it. Confirmation requires a presented reader frame
-    containing the block's final row, which is why the evidence stays the
-    last group. *)
+(** The proof displayed before the operator confirms, in layers: the
+    instruction, the goal's promise, the binding, a candidate coverage
+    notice, and the evidence. Its binding is retained for the POST, so a
+    newer proof cannot silently replace it. Confirmation requires a
+    presented reader frame containing the block's final evidence row; this
+    does not establish that each earlier row was read. *)
 
 val timestamp_line : label:string -> string -> string
 (** One timeline row of the detail pane. The field is one wider than the
@@ -74,10 +108,9 @@ val body :
 val unreconciled_heading : Goal_reconcile_step.t -> string
 (** Which verifier step could not settle the goal, as the row's headline. *)
 
-val verifying_next_step : Tui_decode.verifier_unreconciled option -> tone * string
-(** The next-step sentence for a Verifying goal. Both offer [c] first: on a
-    goal the latest scan could not settle it is the retry that applies the
-    committed proof or re-arms the request, and shows why when it cannot. *)
+val verifying_next_step : can_retry:bool -> Tui_decode.verifier_unreconciled option -> tone * string
+(** The retry is offered only while the displayed proof has a readable binding.
+    Its response may report an unresolved original instead of a new review. *)
 
 val unreconciled_lines :
   width:int -> Tui_decode.verifier_unreconciled -> line list

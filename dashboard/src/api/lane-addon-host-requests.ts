@@ -12,7 +12,7 @@ const issue = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('relisted_delivered_request'), request_id: text }),
   Schema.Struct({ kind: Schema.Literal('result_delivery_failed', 'exact_record_failed', 'ask_record_failed'),
     request_id: text, detail: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('no_exact_runner') }),
+  Schema.Struct({ kind: Schema.Literal('no_exact_runner', 'no_web_search_runner') }),
 )
 const cycle = Schema.Struct({
   cycles: Schema.Int.pipe(Schema.nonNegative()),

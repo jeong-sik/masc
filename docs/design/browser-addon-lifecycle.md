@@ -14,12 +14,15 @@ failure of one source ends only its own worker. The configured Firefox profile
 keeps its logins across attachments.
 
 The ego connection owns no browser process. The worker receives its command
-and task space name as arguments (`--live-ego-command`, `--live-ego-space`),
-not through the cleanup descriptor, because nothing of it needs cleanup after
-the worker. It reads `ego-browser --version`, opens or resumes the task space
-by name, and registers one client. One serial `ego-browser nodejs` process
+and task space reference as startup arguments: `--live-ego-command` and either
+`--live-ego-space` for a name or `--live-ego-space-id` for an existing numeric ID.
+A name requests creation or resumption; a numeric ID requests exact resumption.
+Missing IDs and replies with a different requested name or ID are refused.
+The worker reads `ego-browser --version`, attaches
+to that Space, and registers one client. One serial `ego-browser nodejs` process
 serves the connection: the SDK's dialog and event state belongs to that
-process. The process-state gap is measured separately for installed 0.6.0.20 and 0.6.1.11 in
+process. A failed or cancelled session may be replaced before a later command.
+The process-state gap is measured separately for installed 0.6.0.20 and 0.6.1.11 in
 [session evidence](../evidence/ego-native-session-gap/). MASC sends fixed
 scripts through its private session socket; it does not expose host Node
 execution to Keeper-supplied code.
@@ -30,10 +33,12 @@ instead of a cumulative command deadline. Cancellation joins the SDK process;
 a lost effect reply remains uncertain and is never replayed. Results no longer
 owned by the original request are dropped, and the Keeper reobserves its page.
 Screenshots pass through a private directory that run creates and removes.
-Detaching ends the task space, which closes the pages it manages and keeps the
-tabs the operator opened there. An ego that cannot start, or a task space name
-the operator holds, fails the `browser-ego` worker's start as a configured live
-Firefox fails `browser-firefox`.
+Detaching stops the SDK session and preserves an unfinished Space, its tabs
+and browser-backed files. Explicit `finish_space` completes a successful task;
+its `keepPages` policy and native receipt identify which Pages and Space remain.
+A user-owned name is published as unavailable; attachment to a user-owned
+numeric ID is refused. A handed-off agent Space may attach, while Page reads
+and input still require agent control.
 
 The live Firefox path starts a new browser through the native process owner.
 It checks the original kernel lease and child identity, the configured profile

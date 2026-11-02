@@ -149,32 +149,32 @@ let test_a_task_in_the_backlog_is_found_with_what_its_status_says () =
      check (option string) "assignee" (Some "keeper-a") assignee;
      check bool "completed_at" true (Candle_time.equal completed_at (time "2026-09-25T00:00:00Z"))
    | Candle_event.Found _ -> fail "task-1 is done"
-   | Candle_event.Deleted -> fail "task-1 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-1 was not found");
   (match lookup_of "task-2" found with
    | Candle_event.Found { assignee; status = Candle_event.Todo; _ } ->
      check (option string) "no one on a todo Task" None assignee
    | Candle_event.Found _ -> fail "task-2 is todo"
-   | Candle_event.Deleted -> fail "task-2 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-2 was not found");
   (match lookup_of "task-3" found with
    | Candle_event.Found { assignee; status = Candle_event.Awaiting_verification; _ } ->
      check (option string) "the one who submitted it" (Some "keeper-c") assignee
    | Candle_event.Found _ -> fail "task-3 awaits verification"
-   | Candle_event.Deleted -> fail "task-3 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-3 was not found");
   (match lookup_of "task-4" found with
    | Candle_event.Found { assignee; status = Candle_event.Cancelled; _ } ->
      check (option string) "whoever cancelled it did not do the work" None assignee
    | Candle_event.Found _ -> fail "task-4 is cancelled"
-   | Candle_event.Deleted -> fail "task-4 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-4 was not found");
   (match lookup_of "task-5" found with
    | Candle_event.Found { assignee; status = Candle_event.Claimed; _ } ->
      check (option string) "the one who claimed it" (Some "keeper-d") assignee
    | Candle_event.Found _ -> fail "task-5 is claimed"
-   | Candle_event.Deleted -> fail "task-5 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-5 was not found");
   match lookup_of "task-6" found with
   | Candle_event.Found { assignee; status = Candle_event.In_progress; _ } ->
     check (option string) "the one working on it" (Some "keeper-e") assignee
   | Candle_event.Found _ -> fail "task-6 is in progress"
-  | Candle_event.Deleted -> fail "task-6 was not found"
+  | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-6 was not found"
 ;;
 
 let test_a_task_only_the_archive_has_is_found () =
@@ -186,7 +186,7 @@ let test_a_task_only_the_archive_has_is_found () =
   | Candle_event.Found { title; assignee; _ } ->
     check string "title" "Old" title;
     check (option string) "assignee" (Some "keeper-b") assignee
-  | Candle_event.Deleted -> fail "task-9 was not found"
+  | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-9 was not found"
 ;;
 
 let test_the_backlog_wins_over_the_archive () =
@@ -196,7 +196,50 @@ let test_the_backlog_wins_over_the_archive () =
   write_archive config [ make_task ~id:"task-1" ~title:"Stale copy" (done_by ()) ];
   match lookup_of "task-1" (lookups config [ "task-1" ]) with
   | Candle_event.Found { title; _ } -> check string "title" "Live" title
-  | Candle_event.Deleted -> fail "task-1 was not found"
+  | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-1 was not found"
+;;
+
+let test_stale_nonterminal_archive_after_deletion_is_not_current () =
+  with_workspace
+  @@ fun config ->
+  write_backlog config [make_task ~id:"task-1" (done_by ())];
+  write_archive config [make_task ~id:"task-1" Masc_domain.Todo];
+  write_links config ["goal-1", ["task-1"]];
+  (match Workspace_task.delete_task_r config ~task_id:"task-1" with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  error_names "a deleted Task's archive copy is not authoritative" ~needle:"deletion receipt"
+    (lookups config ["task-1"])
+;;
+
+let test_archive_only_nonterminal_and_duplicate_rows_are_unavailable () =
+  with_workspace
+  @@ fun config ->
+  write_backlog config [];
+  write_archive config [make_task ~id:"task-1" Masc_domain.Todo];
+  write_links config [];
+  error_names "an archive-only nonterminal may be stale" ~needle:"nonterminal archive"
+    (lookups config ["task-1"]);
+  write_backlog config [make_task ~id:"task-2" Masc_domain.Todo; make_task ~id:"task-2" (done_by ())];
+  error_names "conflicting backlog rows are not a single Task" ~needle:"duplicate rows"
+    (lookups config ["task-2"])
+;;
+
+let test_unidentifiable_archive_rows_keep_known_task_uncertain () =
+  List.iter (fun damaged ->
+    with_workspace @@ fun config ->
+    write_backlog config [];
+    let known = make_task ~id:"task-9" (done_by ()) |> Masc_domain.task_to_yojson in
+    Workspace_utils_ops.write_json config (Workspace_utils_paths_backend.archive_path config)
+      (`Assoc ["tasks", `List [known; damaged]]);
+    error_names "strict reader refuses unidentifiable row" ~needle:"no readable id"
+      (lookups config ["task-9"]);
+    (match Candle_tasks.observations config ~goal_id:"goal-1" ["task-9"] with
+     | Ok ["task-9", Candle_event.Found_uncertain [fragment]] ->
+       check bool "known completion remains in an uncertain fragment" true
+         (match fragment.status with Candle_event.Observed_status (Candle_event.Done _) -> true | _ -> false)
+     | _ -> fail "unidentifiable archive row erased a readable Task"))
+    [`Assoc []; `Assoc ["id", `String " "]; `Assoc ["id", `String "one"; "id", `String "two"]]
 ;;
 
 let test_the_order_asked_is_the_order_answered () =
@@ -216,7 +259,7 @@ let test_a_task_neither_store_has_is_deleted_when_the_goal_no_longer_links_it ()
   (* Another Goal's link does not keep this Goal's Task alive. *)
   (match lookup_of "task-3" (lookups config [ "task-3" ]) with
    | Candle_event.Deleted -> ()
-   | Candle_event.Found _ -> fail "a Task no store has was found");
+   | Candle_event.Found _ | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "a Task no store has was found");
   error_names "still linked" ~needle:"task-7" (lookups config [ "task-7" ])
 ;;
 
@@ -257,7 +300,7 @@ let test_an_archive_that_is_not_the_collectors_document_is_an_error () =
   write_file archive_path {|{"tasks":[]}|};
   match lookup_of "task-1" (lookups config [ "task-1" ]) with
   | Candle_event.Deleted -> ()
-  | Candle_event.Found _ -> fail "an empty archive found a Task"
+  | Candle_event.Found _ | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "an empty archive found a Task"
 ;;
 
 (* The archive grows for as long as the server runs. A row this build cannot
@@ -280,7 +323,7 @@ let test_a_row_nobody_asked_for_is_not_decoded () =
   write_file archive_path damaged;
   (match lookup_of "task-9" (lookups config [ "task-9" ]) with
    | Candle_event.Found { title; _ } -> check string "the wanted row reads" "Old" title
-   | Candle_event.Deleted -> fail "task-9 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-9 was not found");
   error_names "the damaged row is the wanted one" ~needle:"task-2" (lookups config [ "task-2" ])
 ;;
 
@@ -298,7 +341,7 @@ let test_only_a_missing_task_sends_the_read_to_the_archive () =
    | Error detail -> failf "%s" detail);
   (match lookup_of "task-1" (lookups config [ "task-1" ]) with
    | Candle_event.Found _ -> ()
-   | Candle_event.Deleted -> fail "task-1 was not found");
+   | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> fail "task-1 was not found");
   error_names "a Task the backlog lacks" ~needle:"tasks-archive.json" (lookups config [ "task-1"; "task-2" ])
 ;;
 
@@ -365,6 +408,12 @@ let () =
             test_a_task_in_the_backlog_is_found_with_what_its_status_says
         ; test_case "a task only the archive has is found" `Quick test_a_task_only_the_archive_has_is_found
         ; test_case "the backlog wins over the archive" `Quick test_the_backlog_wins_over_the_archive
+        ; test_case "stale archive after deletion is not current" `Quick
+            test_stale_nonterminal_archive_after_deletion_is_not_current
+        ; test_case "archive-only nonterminal and duplicate rows are unavailable" `Quick
+            test_archive_only_nonterminal_and_duplicate_rows_are_unavailable
+        ; test_case "unidentifiable archive rows retain known Tasks as uncertain" `Quick
+            test_unidentifiable_archive_rows_keep_known_task_uncertain
         ; test_case "the order asked is the order answered" `Quick test_the_order_asked_is_the_order_answered
         ; test_case
             "a task neither store has is deleted when the goal no longer links it"

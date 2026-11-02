@@ -1,0 +1,21 @@
+baseline: Test 41296985674 @ 6c1e7b08b58a5abc1600b5040bd88a3763e3ecdc FAILURE; zero executed cases
+2026-11-01T10:24:56.1070887Z File "test/test_fusion_selected_timeout.ml", line 228, characters 8-20:
+2026-11-01T10:24:56.1071323Z 228 |       | Fusion_types.Timeout -> ()
+2026-11-01T10:24:56.1071608Z               ^^^^^^^^^^^^
+2026-11-01T10:24:56.1071878Z Error: Unbound module Fusion_types
+
+candidate: Test 41297365380 @ 07854855a9c9665f68490c735738ce3bba3b7dc6 FAILURE; zero executed cases
+2026-11-01T10:27:53.7824128Z File "lib/fusion/fusion_official_client.ml", line 527, characters 6-16:
+2026-11-01T10:27:53.7825310Z 527 |   let runtime_id = runtime.id in
+2026-11-01T10:27:53.7825765Z             ^^^^^^^^^^
+2026-11-01T10:27:53.7826258Z Error (warning 26 [unused-var]): unused variable runtime_id.
+2026-11-01T10:29:50.4090589Z File "test/test_fusion_selected_timeout.ml", line 228, characters 8-20:
+2026-11-01T10:29:50.4091034Z 228 |       | Fusion_types.Timeout -> ()
+2026-11-01T10:29:50.4091317Z               ^^^^^^^^^^^^
+2026-11-01T10:29:50.4091568Z Error: Unbound module Fusion_types
+
+repro-baseline: Test 41297798909 @ 4b86eab05bae5dfcd4088fa8f34eef0deb03dbc8 FAILURE; zero executed cases
+2026-11-01T10:35:47.4109588Z File "test/test_fusion_selected_timeout.ml", line 228, characters 8-25:
+2026-11-01T10:35:47.4110017Z 228 |       | Masc.Fusion_types.Timeout -> ()
+2026-11-01T10:35:47.4110302Z               ^^^^^^^^^^^^^^^^^
+2026-11-01T10:35:47.4110560Z Error: Unbound module Masc.Fusion_types

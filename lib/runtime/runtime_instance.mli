@@ -9,6 +9,10 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
+  ; credential_admission : Runtime_credential_selection.admission option
+    (** Captured alongside an HTTP execution's secret; absent only for
+        official-client ownership. No secret is retained in this value.
+        Provider/credential declaration changes require rematerialization. *)
   ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
@@ -31,6 +35,8 @@ type dispatch_credential_error =
   | Undeclared_credential of { provider_id : string }
       (** The catalog row states [requires_api_key] and the runtime row declares
           no credential, so the request would leave without an auth header. *)
+  | Missing_credential_selection of { provider_id : string }
+      (** An Agent Core execution has no materialized credential authority. *)
 
 val dispatch_credential_error_to_string : dispatch_credential_error -> string
 
@@ -40,7 +46,8 @@ val dispatch_credential_error_to_core_error :
     [MissingEnvVar] configuration error. Other unavailable credential carriers,
     and an undeclared one, use the closed [CredentialUnavailable] variant, so
     consumers never infer terminal configuration state from broad
-    [InvalidConfig] text. *)
+    [InvalidConfig] text. Missing selection authority is a distinct invalid
+    runtime configuration, rather than a missing account credential. *)
 
 val validate_dispatch_credential :
   provider_config:Llm_provider.Provider_config.t ->
@@ -49,7 +56,10 @@ val validate_dispatch_credential :
 (** Fail closed immediately before an Agent Core dispatch when the runtime
     declares a credential but the final provider config has no secret. A
     credential-free provider remains valid. This check intentionally happens
-    after materialization so dashboard missing-auth projection stays intact. *)
+    after materialization so dashboard missing-auth projection stays intact.
+    Empty final credentials use only captured requirements and carriers.
+    Registry, environment and File credentials are not read again. A nonempty
+    transformed final credential remains sufficient. *)
 
 type max_context_source =
   | Override (** runtime.toml [model.max-context] override applies as-is. *)
@@ -82,7 +92,10 @@ val of_binding : config -> binding -> (t, drop_reason) result
     still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
     surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
     validation can report a dropped target's materialize failure instead of a
-    bare "not found among N runtimes" that points at a non-existent typo. *)
+    bare "not found among N runtimes" that points at a non-existent typo.
+    HTTP execution retains its selected model policy and pricing catalog;
+    replacing the active catalog does not rebind an existing runtime. This
+    standalone call starts a fresh construction lifetime. *)
 
 
 val is_local_runtime : t -> bool
@@ -103,8 +116,15 @@ val resolve_max_context_of_runtime : t -> (int * max_context_source) option
     observes [None] here in practice. *)
 
 val capabilities_for_runtime : t -> Llm_provider.Capabilities.capabilities option
+(** Project the HTTP execution's captured model policy, preserving a captured
+    absence. Official-client executions have no AGENT_CORE model policy. *)
 val is_local_provider : provider -> bool
 val partition_bindings : config -> binding list -> t list * (string * drop_reason) list
+(** All HTTP bindings share one immutable declaration selection, captured at
+    the first HTTP materialization before its credential I/O. Catalog replacement
+    during construction affects a fresh batch, not a later binding in this one.
+    Native-only, empty, disabled and unresolved batches do not read unused HTTP
+    declarations. Input order and typed drop reasons are preserved. *)
 
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime

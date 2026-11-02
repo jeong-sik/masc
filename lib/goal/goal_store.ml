@@ -288,9 +288,6 @@ let load_source config : source =
   | `Unavailable u -> Unavailable u
   | `Available prepared -> Available prepared.state
 
-let find_goal_in goals id =
-  List.find_opt (fun goal -> String.equal goal.id id) goals
-
 let find_goal config ~goal_id : lookup =
   match load_prepared_source config with
   | `Uninitialized -> Goal_absent
@@ -348,11 +345,13 @@ type delete_goal_outcome =
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Ambiguous_goal of string
   | Store_unavailable of unavailable
   | Persistence_failed of string
 
 let delete_goal_error_to_string = function
   | Unknown_goal msg -> msg
+  | Ambiguous_goal goal_id -> "goal ID has multiple rows: " ^ goal_id
   | Store_unavailable u -> unavailable_to_string u
   | Persistence_failed msg -> "goal persistence failed: " ^ msg
 
@@ -367,14 +366,33 @@ type goal_reference_error =
 type write_error =
   | Store_unavailable of unavailable
   | Goal_not_found of string
+  | Goal_identity_ambiguous of string
   | Rejected of string
   | Persist_failed of string
 
 let write_error_to_string = function
   | Store_unavailable u -> unavailable_to_string u
   | Goal_not_found goal_id -> "goal not found: " ^ goal_id
+  | Goal_identity_ambiguous goal_id -> "goal ID has multiple rows: " ^ goal_id
   | Rejected detail -> detail
   | Persist_failed detail -> "goal persistence failed: " ^ detail
+
+type goal_row_match = No_goal_row | One_goal_row of goal | Multiple_goal_rows
+
+(* Callers use this classification after the document decoder has rejected
+   duplicate JSON members, to detect multiple decoded rows with one ID. *)
+let classify_goal_rows goals goal_id =
+  match List.filter (fun (goal : goal) -> String.equal goal.id goal_id) goals with
+  | [] -> No_goal_row
+  | [goal] -> One_goal_row goal
+  | _ :: _ :: _ -> Multiple_goal_rows
+
+(* The caller must hold the Goal lock. *)
+let unique_goal_in goals goal_id =
+  match classify_goal_rows goals goal_id with
+  | No_goal_row -> Ok None
+  | One_goal_row goal -> Ok (Some goal)
+  | Multiple_goal_rows -> Error (Goal_identity_ambiguous goal_id)
 
 (* Goal membership and the dependent commit share the Goal lock. Callbacks
    may acquire backlog then link locks, never re-enter the Goal store. *)
@@ -425,9 +443,10 @@ let transact_goal ?effects config ~goal_id f =
         | Unavailable u -> Error (Store_unavailable u)
         | Uninitialized -> Error (Goal_not_found goal_id)
         | Available state ->
-          (match find_goal_in state.goals goal_id with
-           | None -> Error (Goal_not_found goal_id)
-           | Some goal -> Ok (goal, state))
+          (match unique_goal_in state.goals goal_id with
+           | Error error -> Error error
+           | Ok None -> Error (Goal_not_found goal_id)
+           | Ok (Some goal) -> Ok (goal, state))
       in
       let* current, state = loaded in
       match f current with
@@ -471,22 +490,26 @@ let update_goal_if_phase config ~goal_id ~expected_phase f
       | Unavailable u -> Error (Store_unavailable u)
       | Uninitialized -> Error (Goal_not_found goal_id)
       | Available state ->
-        (match find_goal_in state.goals goal_id with
-         | None -> Error (Goal_not_found goal_id)
-         | Some goal when goal.phase <> expected_phase ->
+        (match unique_goal_in state.goals goal_id with
+         | Error error -> Error error
+         | Ok None -> Error (Goal_not_found goal_id)
+         | Ok (Some goal) when goal.phase <> expected_phase ->
            Ok (Goal_phase_mismatch goal.phase)
-         | Some goal ->
+         | Ok (Some goal) ->
            let now = Masc_domain.now_iso () in
            let updated_goal = f { goal with updated_at = now } in
-           let next_state =
-             { state with version = state.version + 1
-             ; updated_at = now
-             ; goals = replace_goal state.goals updated_goal
-             }
-           in
-           (match write_state_result config next_state with
-            | Ok () -> Ok (Goal_updated updated_goal)
-            | Error detail -> Error (Persist_failed detail))))
+           if not (String.equal updated_goal.id goal.id) then
+             Error (Rejected "goal phase update cannot replace goal identity")
+           else
+             let next_state =
+               { state with version = state.version + 1
+               ; updated_at = now
+               ; goals = replace_goal state.goals updated_goal
+               }
+             in
+             (match write_state_result config next_state with
+              | Ok () -> Ok (Goal_updated updated_goal)
+              | Error detail -> Error (Persist_failed detail))))
 
 let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) result =
   Workspace_utils.with_file_lock config (goals_path config)
@@ -496,9 +519,10 @@ let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) resul
         | Unavailable u -> Error (Store_unavailable u)
         | Uninitialized -> Error (Unknown_goal "Goal not found")
         | Available state ->
-          if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
-            Error (Unknown_goal "Goal not found")
-          else (
+          (match classify_goal_rows state.goals goal_id with
+          | No_goal_row -> Error (Unknown_goal "Goal not found")
+          | Multiple_goal_rows -> Error (Ambiguous_goal goal_id)
+          | One_goal_row _ ->
             match
               write_state_result
                 config
@@ -777,19 +801,26 @@ let new_goal ~now ~id ~criterion_revision ~title ~metric ~target_value ~due_date
     last_review_note = None; last_review_at = None;
     created_at = now; updated_at = now }
 
+type goal_id_error = Goal_id_blank | Goal_id_padded of string
+
+let goal_id_error_to_string = function
+  | Goal_id_blank -> "goal id cannot be blank"
+  | Goal_id_padded raw_id ->
+    Printf.sprintf "goal id %S must not have leading or trailing whitespace" raw_id
+
+let validate_goal_id raw_id =
+  let trimmed = String.trim raw_id in
+  if String.equal trimmed "" then Error Goal_id_blank
+  else if not (String.equal trimmed raw_id) then
+    Error (Goal_id_padded raw_id)
+  else Ok ()
+
 let resolve_goal_id = function
   | None -> Ok (gen_goal_id ())
   | Some raw_id ->
-      let trimmed = String.trim raw_id in
-      if String.equal trimmed "" then
-        Error (Rejected "goal id cannot be blank")
-      else if not (String.equal trimmed raw_id) then
-        Error
-          (Rejected
-             (Printf.sprintf
-                "goal id %S must not have leading or trailing whitespace"
-                raw_id))
-      else Ok raw_id
+      let* () = Result.map_error (fun error -> Rejected (goal_id_error_to_string error))
+          (validate_goal_id raw_id) in
+      Ok raw_id
 
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
     ?priority () =
@@ -803,8 +834,9 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
     | None ->
         commit_state config (fun state ->
           let now = Masc_domain.now_iso () in
+          let* existing_goal = unique_goal_in state.goals resolved_id in
           let* goal, action =
-            match find_goal_in state.goals resolved_id with
+            match existing_goal with
             | Some existing ->
                 let updated, criterion_changed =
                   goal_with_fields ~now ?title ?metric ?target_value ?due_date

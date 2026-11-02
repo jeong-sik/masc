@@ -28,6 +28,7 @@ type broadcast_target =
   | Observers
   | Runtime_observers of runtime_authority
   | Presence_only
+  | Runtime_presence of runtime_authority
 
 type delivery_audience =
   | Broadcast_audience of broadcast_target
@@ -45,27 +46,24 @@ type delivery =
     are allocated once. Transport adapters consume [payload] rather than
     reparsing [frame]. *)
 
+type delivery_stream
+(** A registered client's queue, observed whenever a delivery is taken. *)
+
 type client = {
   id : int;
   kind : session_kind;
   runtime_authority : runtime_authority;
-  event_stream : delivery Eio.Stream.t;
+  event_stream : delivery_stream;
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
+  on_disconnect : (unit -> unit) option;
 }
 
 type client_registry_state = {
   entries : client SMap.t;
   count : int;
-}
-
-type session_snapshot = {
-  session_id : string;
-  kind : session_kind;
-  queue_depth : int;
-  last_event_id : int;
-  idle_seconds : float;
+  queue_inventory : Sse_queue_inventory.t;
 }
 
 (** {1 Constants} *)
@@ -103,7 +101,7 @@ val registration_error_to_string : registration_error -> string
 val register :
   ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
   auth:registration_auth -> string -> last_event_id:int ->
-  (int * delivery Eio.Stream.t * string option, registration_error) result
+  (int * delivery_stream * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
     bearer token and MCP session pair before admitting the client.
 
@@ -111,9 +109,8 @@ val register :
     was handed out by an earlier process, since ids only grow within one, and
     is registered as 0: every new event reaches the client.
 
-    [?on_disconnect] is installed atomically with registration via
-    {!set_disconnect_hook} before the client becomes broadcast-visible,
-    so a concurrent queue-overflow [unregister] always finds the hook.
+    [?on_disconnect] is part of the client published atomically in the
+    registry, so a removal wakes that client even if its session is reused.
 
     On validation failure a typed [registration_error] is returned so the
     transport layer can respond with an auth error and close the connection
@@ -161,11 +158,25 @@ val current_id : unit -> int
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
 
+val broadcast_to_with_commit
+  : broadcast_target -> on_committed:(unit -> unit) -> Yojson.Safe.t -> unit
+(** The non-yielding callback runs once the replay buffer and live queues have
+    accepted the delivery and failed sessions have been unregistered. A later
+    diagnostic or external-subscriber exception does not undo that receipt.
+    This callback is not a receipt for external subscribers. [Presence_only]
+    and [Runtime_presence] are rejected because presence is not replayable. *)
+
 val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
 (** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
     so the value is not encoded again under the fan-out lock. *)
 val broadcast_presence : Yojson.Safe.t -> unit
+val broadcast_presence_to_runtime : runtime_authority -> Yojson.Safe.t -> unit
+(** Deliver an ephemeral presence event only to sessions in this runtime.
+    It is not replay-buffered and does not reach external subscribers.
+    [Runtime_presence] cannot be passed to the generic broadcast functions. *)
 val send_to : string -> Yojson.Safe.t -> unit
+val take_delivery : delivery_stream -> delivery
+val take_delivery_nonblocking : delivery_stream -> delivery option
 val pop : string -> string option
 val try_pop : string -> string option
 
@@ -233,7 +244,7 @@ val rewrite_event_buffer_for_test : unit -> unit
 
 (** {1 Snapshots} *)
 
-val sync_transport_snapshot : ?force:bool -> unit -> unit
+val sync_transport_snapshot : unit -> unit
 (** {1 Test Hooks} *)
 
 val register_commit_test_hook : (unit -> unit) option Atomic.t

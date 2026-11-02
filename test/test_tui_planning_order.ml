@@ -11,6 +11,7 @@ let goal ?due ?updated id phase priority =
   ; pg_metric = None
   ; pg_target_value = None
   ; pg_proof = Tui_decode.Proof_idle
+  ; pg_retry_binding = None
   ; pg_verifier_unreconciled = None
   ; pg_last_review_note = None
   ; pg_last_review_at = None
@@ -156,7 +157,15 @@ let test_suspension_visibility_and_keys () =
   List.iter (fun (key, action) ->
     check bool ("key " ^ key) true (Masc_tui_render_prim.planning_action_of_key key = Some action))
     ["p", Goal_phase.Public_action.Pause; "R", Goal_phase.Public_action.Resume;
-     "b", Goal_phase.Public_action.Block; "U", Goal_phase.Public_action.Unblock]
+     "b", Goal_phase.Public_action.Block; "U", Goal_phase.Public_action.Unblock];
+  let read_key = Masc_tui_keys.goal_candle_refresh_key in
+  check bool "Candle read cannot arm a Goal action" true
+    (Masc_tui_render_prim.planning_action_of_key read_key = None);
+  check bool "paused Goal footer offers the Candle read" true
+    (List.mem (read_key ^ ":Candle")
+       (String.split_on_char ' ' Masc_tui_keys.footer_hints_planning_goal_detail));
+  check bool "paused Goal footer does not call Resume refresh" false
+    (List.mem "r:refresh" (String.split_on_char ' ' Masc_tui_keys.footer_hints_planning_goal_detail))
 
 let test_narrow_planning_rollup_and_clause_packing () =
   let cols = 80 in

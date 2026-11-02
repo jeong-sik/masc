@@ -40,13 +40,11 @@ let write_file path content =
     (fun () -> output_string oc content)
 
 let with_model_catalog_content content f =
-  let original = Llm_provider.Model_catalog.global () in
+  let original = Llm_provider.Catalog_snapshot.current () in
   let path = Filename.temp_file "runtime-failover-agent_core-models" ".toml" in
   Fun.protect
     ~finally:(fun () ->
-      (match original with
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      (Llm_provider.Catalog_snapshot.publish original);
       try Sys.remove path with
       | _ -> ())
     (fun () ->
@@ -54,7 +52,7 @@ let with_model_catalog_content content f =
       match Llm_provider.Model_catalog.load_file path with
       | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
-        Llm_provider.Model_catalog.set_global catalog;
+        (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
         f ())
 
 let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
@@ -4404,7 +4402,7 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
       let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
         "name", `String keeper_name; "trace_id", `String "direct-wait-trace";
         "activation_mode", `String "manual"]) |> string_ok in
-      let owner = Owner.start ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      let owner = Owner.start ~base_path:(Filename.dirname path) ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now ~operation_runner:(Some runner)
         ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta) |> ok in
       Eio.Promise.resolve resolve_owner owner;

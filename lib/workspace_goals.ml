@@ -129,6 +129,51 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
+type expected_verification_phase = Expect_executing | Expect_verifying
+
+type expected_verification =
+  { phase : expected_verification_phase
+  ; criterion_revision : string
+  ; request_id : string option
+  }
+
+let parse_expected_verification args =
+  match Json_util.assoc_member_opt "expected_verification" args with
+  | None -> Ok None
+  | Some (`Assoc fields) ->
+    let open Result.Syntax in
+    let* () = Json_util.reject_unknown_fields ~surface:"expected_verification"
+        ~allowed:["phase"; "criterion_revision"; "request_id"] fields in
+    let* phase = match List.assoc_opt "phase" fields with
+      | Some (`String "executing") -> Ok Expect_executing
+      | Some (`String "verifying") -> Ok Expect_verifying
+      | None | Some _ -> Error "expected_verification.phase must be executing or verifying" in
+    let* criterion_revision = Json_util.require_field_string
+        ~surface:"expected_verification" "criterion_revision" fields in
+    let* request_id = match List.assoc_opt "request_id" fields with
+      | None -> Ok None
+      | Some (`String id) when String.trim id <> "" -> Ok (Some id)
+      | Some _ -> Error "expected_verification.request_id must be a non-blank string" in
+    if String.trim criterion_revision = "" then
+      Error "expected_verification.criterion_revision must be non-blank"
+    else Ok (Some { phase; criterion_revision; request_id })
+  | Some _ -> Error "expected_verification must be an object"
+;;
+
+let matches_expected_verification expected (goal : Goal_store.goal) record =
+  let request = match record with
+    | None | Some { Goal_verification.completion = Completion_idle; _ } -> Some None
+    | Some { completion = Proof_pending pending; _ } -> Some (Some pending.request_id)
+    | Some { completion = (Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _)); _ } ->
+      Some (Some verdict.request_id) in
+  (match expected.phase, goal.phase with
+   | Expect_executing, Goal_phase.Executing | Expect_verifying, Goal_phase.Verifying -> true
+   | (Expect_executing | Expect_verifying),
+     (Goal_phase.Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _) -> false)
+  && String.equal goal.criterion_revision expected.criterion_revision
+  && Option.equal (Option.equal String.equal) request (Some expected.request_id)
+;;
+
 let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
   match Goal_store.append_audit_event_after_pending ctx.config
     (`Assoc
@@ -280,6 +325,9 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
           error_result_typed ~tool_name ~start_time ~code:Validation_error msg
         | Error (Goal_store.Store_unavailable unavailable) ->
           unavailable_result ~tool_name ~start_time unavailable
+        | Error (Goal_store.Goal_identity_ambiguous _ as error) ->
+          error_result_typed ~tool_name ~start_time ~code:Conflict
+            (Goal_store.write_error_to_string error)
         | Error (Goal_store.Goal_not_found _ as error) ->
           error_result_typed ~tool_name ~start_time ~code:Not_found
             (Goal_store.write_error_to_string error)
@@ -578,7 +626,7 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
     (match committed with
      | Error (Goal_store.Store_unavailable unavailable) ->
        unavailable_result ~tool_name ~start_time unavailable
-     | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
+     | Error (Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _
              | Goal_store.Persist_failed _ as error) ->
        error_result_typed ~tool_name ~start_time ~code:Conflict
          (Goal_store.write_error_to_string error)
@@ -593,6 +641,28 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
          ; "verification", Goal_verification.record_to_yojson_for_goal ~goal record ])
 ;;
 
+let current_committed_verdict (goal : Goal_store.goal) record =
+  match record with
+  | Some { Goal_verification.completion =
+      (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ }
+    when Goal_store.criterion_equal verdict.criterion (Goal_store.criterion_of_goal goal) ->
+      Some verdict
+  | None | Some { completion =
+      (Goal_verification.Completion_idle | Goal_verification.Proof_pending _
+      | Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _
+      | Goal_verification.Human_confirmed _); _ } -> None
+;;
+
+let apply_committed_verdict (goal : Goal_store.goal) (verdict : Goal_verification.verdict) =
+  let action, note = match verdict.outcome with
+    | Goal_verification.Proven -> Goal_phase.Record_proof_proven, None
+    | Goal_verification.Refuted { reason } -> Goal_phase.Record_proof_refuted, Some reason in
+  match Goal_phase.decide_transition ~phase:goal.phase ~action with
+  | Error detail -> Error detail
+  | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
+  | Ok (Goal_phase.Move_to phase) -> Ok (goal_after_proof goal phase note)
+;;
+
 let reconcile_committed_proof config ~goal_id =
   let effects goal (_, verdict) = match verdict with
     | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
@@ -601,24 +671,11 @@ let reconcile_committed_proof config ~goal_id =
       Ok (goal, (Reconciliation_not_needed goal.phase, None))
     else
       Result.bind (Goal_verification.get_record_authoritative config ~goal_id) (fun record ->
-        let proof = match record with
-          | Some { Goal_verification.completion = Goal_verification.Proof_proven verdict; _ }
-          | Some { Goal_verification.completion = Goal_verification.Proof_refuted verdict; _ } -> Some verdict
-          | Some { completion = (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | Goal_verification.Human_confirmed (_, _)));_}
-          | None -> None in
-        match proof with
+        match current_committed_verdict goal record with
         | None -> Ok (goal, (No_committed_proof, None))
-        | Some verdict when not (Goal_store.criterion_equal verdict.criterion (Goal_store.criterion_of_goal goal)) ->
-          Ok (goal, (No_committed_proof, None))
         | Some verdict ->
-          let action, note = match verdict.outcome with
-            | Goal_verification.Proven -> Goal_phase.Record_proof_proven, None
-            | Goal_verification.Refuted { reason } -> Goal_phase.Record_proof_refuted, Some reason in
-          match Goal_phase.decide_transition ~phase:goal.phase ~action with
-          | Error detail -> Error detail
-          | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
-          | Ok (Goal_phase.Move_to phase) ->
-            Ok (goal_after_proof goal phase note, (Reconciled phase, Some verdict)))) in
+          Result.map (fun (updated : Goal_store.goal) -> updated, (Reconciled updated.phase, Some verdict))
+            (apply_committed_verdict goal verdict))) in
   (* This locked re-read keeps its write_error typed — including a store that
      became unavailable after the verifier scan listed it. The scan records
      only its own list read as [Scan_skipped] (RFC-0444 PR-5); a failure here
@@ -676,6 +733,17 @@ let mark_proof_pending ?submitted_evidence config ~goal_id goal =
   |> Result.map_error (refuse Internal_error)
 ;;
 
+(* A Verifying retry can wake the existing request, but replacing its source
+   snapshot would create a new identity while the old review may still run. *)
+let preserve_pending_evidence config evidence_refs (record : Goal_verification.record) =
+  Result.bind (capture_goal_evidence config evidence_refs) (function
+    | None -> Ok ()
+    | Some submitted when submitted = record.submitted_evidence -> Ok ()
+    | Some _ ->
+      Error (refuse Conflict
+        "the active proof request has different evidence; its earlier review may still be active"))
+;;
+
 (* A refusal travels in the transaction's result with the goal unchanged, so
    [Goal_store.transact_goal] writes nothing and the refusal keeps its code
    instead of becoming [Goal_store.Rejected]'s string. *)
@@ -698,6 +766,9 @@ let proof_request_failure ~tool_name ~start_time = function
   | Store (Goal_store.Goal_not_found _ as error) ->
     error_result_typed ~tool_name ~start_time ~code:Not_found
       (Goal_store.write_error_to_string error)
+  | Store (Goal_store.Goal_identity_ambiguous _ as error) ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict
+      (Goal_store.write_error_to_string error)
   | Store (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
     error_result_typed ~tool_name ~start_time ~code:Internal_error
       (Goal_store.write_error_to_string error)
@@ -707,14 +778,49 @@ let proof_request_failure ~tool_name ~start_time = function
 (* The phase comes from [Goal_phase.decide_transition], so a proof request
    and a completion request cannot disagree on where the goal goes. Only a goal
    that is, or now enters, [Verifying] gets a pending proof. *)
-let request_current_proof ?evidence_refs config ~goal_id =
-  transact_or_refuse config ~goal_id (fun goal ->
+type proof_request_mode = Require_executing | Allow_verifying
+
+let request_current_proof_bound ?evidence_refs ?expected_verification ~mode config ~goal_id =
+  let effects goal (_, verdict) = match verdict with
+    | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
+  let result = transact_or_refuse ~effects config ~goal_id (fun goal ->
+    let open Result.Syntax in
+    let* () = match expected_verification with
+      | None -> Ok ()
+      | Some expected ->
+        let* record = Goal_verification.get_record_authoritative config ~goal_id
+          |> Result.map_error (refuse Internal_error) in
+        if matches_expected_verification expected goal record then Ok ()
+        else Error (refuse Conflict "The Goal or verification request changed; refresh before requesting completion") in
+    let request phase =
+      let* () = Goal_verification.check_authority_backend config
+        |> Result.map_error (fun error ->
+             refuse Internal_error (Goal_verification.authority_backend_error_to_string error)) in
+      let* submitted_evidence = capture_goal_evidence config evidence_refs in
+      let* record = mark_proof_pending ?submitted_evidence config ~goal_id goal in
+      Ok ({ goal with phase }, (record, None)) in
     match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
-    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase))
-    | Ok (Goal_phase.Already (Goal_phase.Verifying as phase)) ->
-      Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
-        Result.map (fun record -> { goal with phase }, record)
-          (mark_proof_pending ?submitted_evidence config ~goal_id goal))
+    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase)) -> request phase
+    | Ok (Goal_phase.Already Goal_phase.Verifying) ->
+      (match mode with
+       | Allow_verifying ->
+         let* record = Goal_verification.get_record_authoritative config ~goal_id
+           |> Result.map_error (refuse Internal_error) in
+         (match Goal_verification.classify_verifying_record ~goal record with
+          | Goal_verification.Current_pending (record, _, _) ->
+            let* () = preserve_pending_evidence config evidence_refs record in
+            Ok (goal, (record, None))
+          | Goal_verification.Current_verdict (record, verdict) ->
+            if Option.is_some evidence_refs then
+              Error (refuse Validation_error
+                "proof result is already committed; reconcile it without evidence_refs before submitting new evidence")
+            else
+              let* updated = apply_committed_verdict goal verdict |> Result.map_error (refuse Conflict) in
+              Ok (updated, (record, Some verdict))
+          | Goal_verification.Unavailable_request issue ->
+            Error (refuse Conflict (Goal_verification.verifying_issue_to_string issue)))
+       | Require_executing ->
+         Error (refuse Conflict "The Goal changed before this completion request; refresh before retrying"))
     | Ok (Goal_phase.Move_to
             ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
             | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ )
@@ -722,28 +828,42 @@ let request_current_proof ?evidence_refs config ~goal_id =
              ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
              | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ ))
     | Error _ ->
-      Error (refuse Precondition_failed "goal is not requesting verification"))
+      Error (refuse Precondition_failed "goal is not requesting verification")) in
+  Result.map (fun (goal, (record, verdict)) ->
+    (match verdict with None -> () | Some _ -> ignore (deliver_goal_effects config));
+    goal, record) result
+;;
+
+let request_current_proof ?evidence_refs config ~goal_id =
+  request_current_proof_bound ?evidence_refs ~mode:Allow_verifying config ~goal_id
 ;;
 
 let recover_current_proof config ~goal_id =
-  Goal_store.transact_goal config ~goal_id (fun goal ->
+  let effects goal (_, verdict) = match verdict with
+    | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
+  Goal_store.transact_goal ~effects config ~goal_id (fun goal ->
     match goal.phase with
     | Goal_phase.Verifying ->
-        Result.map (fun _record -> goal, true)
-          (Goal_verification.mark_proof_pending config ~goal_id
-             ~criterion:(Goal_store.criterion_of_goal goal))
+        Result.bind (Goal_verification.get_record_authoritative config ~goal_id) (fun record ->
+          match Goal_verification.classify_verifying_record ~goal record with
+          | Goal_verification.Current_verdict (_, verdict) ->
+              Result.map (fun updated -> updated, (false, Some verdict))
+                (apply_committed_verdict goal verdict)
+          | Goal_verification.Current_pending _ -> Ok (goal, (true, None))
+          | Goal_verification.Unavailable_request issue ->
+              Error (Goal_verification.verifying_issue_to_string issue))
     | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
     | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
-        Ok (goal, false))
-  |> Result.map snd
+        Ok (goal, (false, None)))
+  |> Result.map (fun (_, (rearmed, verdict)) ->
+       (match verdict with None -> () | Some _ -> ignore (deliver_goal_effects config));
+       rearmed)
 ;;
 
-(* A repeated [request_complete] on [Verifying] is the explicit retry that
-   replaces wall-clock expiry (RFC-0387 §5). A missing durable request is
-   re-armed, a standing pending request is woken again, and a committed
-   verdict whose phase/event write was interrupted is reconciled from that
-   exact ledger row without another model call. *)
-let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context) ~goal_id ~action _goal =
+(* A repeated [request_complete] on [Verifying] wakes the same pending request
+   or reconciles its committed verdict. An unavailable or inconsistent record
+   does not prove that an earlier review ended, so it cannot create a new ID. *)
+let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~start_time (ctx : context) ~goal_id ~action =
   let effects goal (_, reconciled) = match reconciled with
     | None -> no_goal_effects
     | Some (verdict, _) -> proof_effects ctx.config goal verdict in
@@ -752,12 +872,23 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
       (Goal_verification.get_record_authoritative ctx.config ~goal_id
        |> Result.map_error (refuse Internal_error))
       (fun record ->
-        if goal.phase <> Goal_phase.Verifying then Ok (goal, (record, None))
-        else
-          match record with
-          | Some ({ Goal_verification.completion =
-              (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ } as record)
-            when Goal_verification.relation_for_goal ~goal record = Goal_verification.Current ->
+        if Option.exists (fun expected -> not (matches_expected_verification expected goal record)) expected_verification then
+          Error (refuse Conflict "The Goal or verification request changed; refresh before retrying")
+        else match Goal_phase.decide_transition ~phase:goal.phase ~action with
+        | Error detail -> Error (refuse Conflict detail)
+        | Ok (Goal_phase.Move_to
+                (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+                | Goal_phase.Completed | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _))
+        | Ok (Goal_phase.Already
+                (Goal_phase.Executing | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _)) ->
+            Error (refuse Conflict "The Goal changed before this verification retry; refresh before requesting completion")
+        | Ok (Goal_phase.Already (Goal_phase.Awaiting_confirmation | Goal_phase.Completed)) ->
+            if Option.is_some evidence_refs then
+              Error (refuse Precondition_failed "this Goal has no active proof request that can accept evidence_refs")
+            else Ok (goal, (record, None))
+        | Ok (Goal_phase.Already Goal_phase.Verifying) ->
+          match Goal_verification.classify_verifying_record ~goal record with
+          | Goal_verification.Current_verdict (record, verdict) ->
               if Option.is_some evidence_refs then
                 Error
                   (refuse Validation_error
@@ -772,18 +903,11 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
                | Ok (Goal_phase.Already _) ->
                    Error (refuse Internal_error "proof reconciliation did not name a transition")
                | Error detail -> Error (refuse Conflict detail))
-          | Some
-              { Goal_verification.completion =
-                  ( Goal_verification.Completion_idle
-                  | Goal_verification.Proof_pending _
-                  | Goal_verification.Proof_proven _
-                  | Goal_verification.Proof_refuted _
-                  | Goal_verification.Human_confirmed _ )
-              ; _ }
-          | None ->
-              Result.bind (capture_goal_evidence ctx.config evidence_refs) (fun submitted_evidence ->
-                Result.map (fun record -> goal, (Some record, None))
-                  (mark_proof_pending ?submitted_evidence ctx.config ~goal_id goal)))) in
+          | Goal_verification.Current_pending (record, _, _) ->
+              Result.map (fun () -> goal, (Some record, None))
+                (preserve_pending_evidence ctx.config evidence_refs record)
+          | Goal_verification.Unavailable_request issue ->
+              Error (refuse Conflict (Goal_verification.verifying_issue_to_string issue)))) in
   match result with
   | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (goal, (record, reconciled)) ->
@@ -795,8 +919,11 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
             ~package_id:Goal_verifier_worker.host_package_id ~goal_id ~request_id
             ~requested_by:ctx.agent_name ~new_run:(fun () ->
               {Goal_verifier_worker.run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()})
-          |> Result.map_error (fun error -> Refused (refuse Internal_error
-            ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
+          |> Result.map_error (function
+            | Goal_verifier_worker.Execution_pending detail -> Refused (refuse Conflict detail)
+            | (Goal_verifier_worker.Store_unavailable _ | Original_invalid _ | Authority_changed _) as error ->
+              Refused (refuse Internal_error
+                ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
         | (Goal_phase.Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _), _
         | Verifying, (None | Some {completion=(Completion_idle | Proof_proven _ | Proof_refuted _ | Human_confirmed _); _}) -> Ok () in
       (match retry with
@@ -820,94 +947,157 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
              ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ]))
 ;;
 
-(* The work a dropped Goal leaves behind. A Task also linked to a Goal that is
-   not dropped still serves that Goal and is left alone. Of the rest, unclaimed
-   ones are cancelled once the drop commits; held ones keep running, because
-   cancelling would discard their work, and the drop notice names them so their
-   holders can finish, release or cancel them. *)
+(* Capture linked work before the Goal transaction. The link and Goal reads
+   can still race later changes. Each unclaimed Task is rechecked separately
+   before cancellation, subject to the backlog's existing cache and writer
+   contracts. Held Tasks are reported rather than selected for cancellation. *)
 type dropped_goal_work = {
-  unclaimed : string list;
+  unclaimed : Masc_domain.task list;
   held : (string * string) list;
+  ambiguous : (string * string) list;
 }
 
 let dropped_goal_work config ~goal_id =
   let ( let* ) = Result.bind in
-  let* links = Workspace_goal_index.read_goal_task_links_r config in
+  let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+  let linked = Option.value ~default:[] (List.assoc_opt goal_id links) in
   let* goals = match Goal_store.load_source config with
     | Goal_store.Available state -> Ok state.goals
     | Goal_store.Uninitialized -> Ok []
     | Goal_store.Unavailable error -> Error (Goal_store.unavailable_to_string error) in
-  let* tasks =
-    try Ok (Workspace.get_tasks_raw config) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn) in
-  let dropped_goal_ids =
+  let goals_by_id =
     List.fold_left
       (fun acc (goal : Goal_store.goal) ->
-         if goal.phase = Goal_phase.Dropped
-         then Workspace_backlog.Task_id_set.add goal.id acc
-         else acc)
-      (Workspace_backlog.Task_id_set.singleton goal_id)
-      goals
+         let rows = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt goal.id acc) in
+         Goal_store.Goal_id_map.add goal.id (goal :: rows) acc)
+      Goal_store.Goal_id_map.empty goals
   in
-  let dropped id = Workspace_backlog.Task_id_set.mem id dropped_goal_ids in
-  let linked_set =
-    match List.assoc_opt goal_id links with
-    | None -> Workspace_backlog.Task_id_set.empty
-    | Some ids -> Workspace_backlog.Task_id_set.of_list ids
-  in
-  let task_goal_map =
-    Workspace_goal_index.build_task_goal_map ~goal_task_links:links ()
-  in
-  let orphaned (task : Masc_domain.task) =
-    Workspace_backlog.Task_id_set.mem task.id linked_set
-    && List.for_all
-         dropped
-         (Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id:task.id)
-  in
-  let rev_unclaimed, rev_held =
+  let goal_rows id = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt id goals_by_id) in
+  let target_problem = match goal_rows goal_id with
+    | [_] -> None
+    | [] -> Some "not attempted: target Goal row was unavailable during Task observation"
+    | _ :: _ :: _ -> Some "not attempted: target Goal ID was ambiguous during Task observation" in
+  let* backlog =
+    try
+      if Workspace.is_initialized config then Workspace_backlog.read_backlog_r config
+      else Error "Workspace is not initialized"
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn) in
+  let linked_set = Workspace_backlog.Task_id_set.of_list linked in
+  let task_goal_map = Workspace_goal_index.build_task_goal_map ~goal_task_links:links () in
+  let deleted_task_ids =
     List.fold_left
-      (fun (rev_unclaimed, rev_held) (task : Masc_domain.task) ->
-         if not (orphaned task)
-         then rev_unclaimed, rev_held
-         else
-           match task.task_status with
-           | Masc_domain.Todo -> task.id :: rev_unclaimed, rev_held
-           | Masc_domain.Claimed _
-           | Masc_domain.InProgress _
-           | Masc_domain.AwaitingVerification _ ->
-             (match Masc_domain.task_assignee_of_status task.task_status with
-              | Some holder -> rev_unclaimed, (task.id, holder) :: rev_held
-              | None -> rev_unclaimed, rev_held)
-           | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
-             rev_unclaimed, rev_held)
-      ([], [])
-      tasks
+      (fun ids (receipt : Masc_domain.task_deletion_receipt) ->
+         Workspace_backlog.Task_id_set.add receipt.deleted_task_id ids)
+      Workspace_backlog.Task_id_set.empty backlog.task_deletion_receipts
   in
-  Ok { unclaimed = List.rev rev_unclaimed; held = List.rev rev_held }
+  let linkage task_id =
+    let other_ids =
+      Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id
+      |> List.filter (fun id -> not (String.equal id goal_id))
+      |> List.sort_uniq String.compare
+    in
+    match target_problem with
+    | Some detail -> `Ambiguous detail
+    | None ->
+        (match List.find_opt (fun id -> match goal_rows id with
+             | [] | [_] -> false
+             | _ :: _ :: _ -> true) other_ids with
+         | Some id -> `Ambiguous ("not attempted: linked Goal ID is ambiguous: " ^ id)
+         | None ->
+             if List.for_all (fun id -> match goal_rows id with
+                 | [goal] -> goal.phase = Goal_phase.Dropped
+                 | [] | _ :: _ :: _ -> false) other_ids
+             then `Orphaned else `Shared) in
+  let holders rows =
+    List.filter_map (fun (task : Masc_domain.task) ->
+        match task.task_status with
+        | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
+            Option.map (fun holder -> task.id, holder) (Masc_domain.task_assignee_of_status task.task_status)
+        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None) rows
+    |> List.sort_uniq compare in
+  let candidates_by_id =
+    List.fold_left
+      (fun acc (task : Masc_domain.task) ->
+         if not (Workspace_backlog.Task_id_set.mem task.id linked_set) then acc
+         else
+           Workspace_backlog.Task_id_map.update task.id
+             (function None -> Some [task] | Some rows -> Some (task :: rows)) acc)
+      Workspace_backlog.Task_id_map.empty backlog.tasks
+  in
+  let unclaimed, held, ambiguous = List.fold_right (fun (id, rows) (unclaimed, held, ambiguous) ->
+      let observed_holders = holders rows in
+      let deleted = Workspace_backlog.Task_id_set.mem id deleted_task_ids in
+      match linkage id with
+      | `Shared -> (unclaimed, held, ambiguous)
+      | `Ambiguous detail ->
+          (unclaimed, observed_holders @ held, (id, detail) :: ambiguous)
+      | `Orphaned ->
+          if deleted then
+            (unclaimed, observed_holders @ held, (id, "not attempted: Task ID has a deletion receipt") :: ambiguous)
+          else match rows with
+            | [task] ->
+                (match task.task_status with
+                 | Masc_domain.Todo -> (task :: unclaimed, held, ambiguous)
+                 | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
+                     (unclaimed, observed_holders @ held, ambiguous)
+                 | Masc_domain.Done _ | Masc_domain.Cancelled _ -> (unclaimed, held, ambiguous))
+            | [] | _ :: _ :: _ ->
+                (unclaimed, observed_holders @ held, (id, "not attempted: linked Task ID is ambiguous") :: ambiguous))
+    (Workspace_backlog.Task_id_map.bindings candidates_by_id) ([], [], []) in
+  Ok { unclaimed; held; ambiguous }
 ;;
 
 let dropped_goal_notice ~(goal : Goal_store.goal) held =
   Printf.sprintf
-    "[goal_dropped] %s — %s\nThese Tasks are still held and serve no live Goal. Finish, release or cancel them:\n%s"
+    "[goal_dropped] %s — %s\nBefore the drop, Task rows indicated these holders. Observations may be stale or ambiguous; check current Task status and Goal links before acting:\n%s"
     goal.id goal.title
     (String.concat "\n" (List.map (fun (task_id, holder) -> Printf.sprintf "- %s (%s)" task_id holder) held))
 ;;
 
-let cancel_dropped_goal_todos (ctx : context) ~goal_id ~reason task_ids =
+let cancel_dropped_goal_todos ?(before_transition = fun ~task_id:_ -> ()) (ctx : context) ~goal_id ~reason tasks =
   let reason = Printf.sprintf "Goal %s was dropped: %s" goal_id reason in
-  List.partition_map (fun task_id ->
-      match Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-              ~action:Masc_domain.Cancel ~reason () with
-      | Ok _ -> Either.Left task_id
-      | Error error -> Either.Right (task_id, Masc_domain.masc_error_to_string error))
-    task_ids
+  List.partition_map (fun (original : Masc_domain.task) ->
+      let task_id = original.id in
+      let observed =
+        try Workspace_backlog.read_backlog_r ctx.config with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      match observed with
+      | Error detail -> Either.Right (task_id, "not attempted: backlog unreadable: " ^ detail)
+      | Ok backlog ->
+          let deleted = List.exists (fun (receipt : Masc_domain.task_deletion_receipt) ->
+              String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
+          if deleted then Either.Right (task_id, "not attempted: Task ID has a deletion receipt")
+          else match List.filter (fun (task : Masc_domain.task) -> String.equal task.id task_id) backlog.tasks with
+            | [] -> Either.Right (task_id, "not attempted: Task is no longer in the backlog")
+            | [_; _] | _ :: _ :: _ :: _ -> Either.Right (task_id, "not attempted: Task ID is ambiguous")
+            | [task] ->
+                if not (Masc_domain.equal_task original task) then
+                  Either.Right (task_id, "not attempted: Task changed since the candidate observation")
+                else (match task.task_status with
+                 | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+                 | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
+                     Either.Right (task_id, "not attempted: Task is no longer Todo")
+                 | Masc_domain.Todo ->
+                     before_transition ~task_id;
+                     match Workspace.transition_task_outcome_r ctx.config ~agent_name:ctx.agent_name ~task_id
+                             ~action:Masc_domain.Cancel ~reason ~expected_version:backlog.version () with
+                     | Ok { noop = false; _ } -> Either.Left task_id
+                     | Ok { noop = true; _ } ->
+                         Either.Right (task_id, "Task cancellation reported a no-op; this call did not cancel it")
+                     | Error error ->
+                         Either.Right (task_id, "Task cancellation returned an error; its commit status may be unknown: "
+                                               ^ Masc_domain.masc_error_to_string error)))
+    tasks
 ;;
 
 let dropped_goal_tasks_json ctx ~goal_id ~reason = function
   | Error detail -> `Assoc [ "unread", `String detail ]
   | Ok work ->
       let cancelled, failed = cancel_dropped_goal_todos ctx ~goal_id ~reason work.unclaimed in
+      let failed = work.ambiguous @ failed in
       `Assoc
         [ "cancelled", `List (List.map (fun id -> `String id) cancelled)
         ; "cancel_failed", `List (List.map (fun (id, error) ->
@@ -947,6 +1137,9 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
       unavailable_result ~tool_name ~start_time unavailable
   | Error (Goal_store.Goal_not_found _ as error) ->
       error_result_typed ~tool_name ~start_time ~code:Not_found
+        (Goal_store.write_error_to_string error)
+  | Error (Goal_store.Goal_identity_ambiguous _ as error) ->
+      error_result_typed ~tool_name ~start_time ~code:Conflict
         (Goal_store.write_error_to_string error)
   | Error (Goal_store.Rejected detail) ->
       error_result_typed ~tool_name ~start_time ~code:Conflict detail
@@ -1016,7 +1209,7 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
             | Some text -> Some text, Some (Masc_domain.now_iso ()) in
           Ok ({ goal with phase; last_review_note; last_review_at }, true)) with
   | Error (Goal_store.Store_unavailable unavailable) -> unavailable_result ~tool_name ~start_time unavailable
-  | Error ((Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _) as error) ->
+  | Error ((Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _ | Goal_store.Persist_failed _) as error) ->
       error_result_typed ~tool_name ~start_time ~code:Conflict
         (Goal_store.write_error_to_string error)
   | Ok (goal, changed) ->
@@ -1034,11 +1227,66 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
         ; "goal", Goal_store.goal_to_yojson goal ]
 ;;
 
-let handle_goal_transition ~tool_name ~start_time (ctx : context) args
+let finish_goal_request_complete ?evidence_refs ?expected_verification
+    ~tool_name ~start_time (ctx : context) ~goal_id ~action =
+  match request_current_proof_bound ?evidence_refs ?expected_verification
+      ~mode:Require_executing ctx.config ~goal_id with
+  | Error error -> proof_request_failure ~tool_name ~start_time error
+  | Ok (updated_goal, record) ->
+    emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
+      ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase
+                        ; "actor", `String ctx.agent_name ]);
+    notify_goal_verification_pending ctx ~goal_id;
+    ok_result ~tool_name ~start_time
+      [ "goal_id", `String goal_id
+      ; "action", `String (Goal_phase.action_to_string action)
+      ; "goal", Goal_store.goal_to_yojson updated_goal
+      ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ]
+;;
+
+module For_testing = struct
+  let answer_verifying_repeat ?evidence_refs ctx ~goal_id =
+    answer_verifying_repeat ?evidence_refs ~tool_name:"masc_goal_transition"
+      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
+
+  let finish_goal_request_complete ?evidence_refs ctx ~goal_id =
+    finish_goal_request_complete ?evidence_refs ~tool_name:"masc_goal_transition"
+      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
+
+  let cancel_dropped_goal_todos = cancel_dropped_goal_todos
+end
+
+(* A transition targets the ID the caller supplied. The shared string
+   validator trims input, which could otherwise redirect a stored legacy ID
+   to a different Goal before the transaction checks its identity. *)
+let validate_transition_goal_id = function
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key "goal_id") fields with
+     | [_, `String raw] ->
+       (match Goal_store.validate_goal_id raw with
+        | Ok () | Error Goal_store.Goal_id_blank -> Ok ()
+        | Error (Goal_id_padded _ as error) -> Error (Goal_store.goal_id_error_to_string error))
+     | _ :: _ :: _ -> Error "goal_id must occur exactly once"
+     (* Leave missing or non-string fields to the standard field validator. *)
+     | [] | [_] -> Ok ())
+  | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> Ok ()
+;;
+
+let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
-  match parse_goal_evidence_refs args with
-  | Error detail -> error_result_typed ~tool_name ~start_time ~code:Validation_error detail
-  | Ok evidence_refs ->
+  match validate_transition_goal_id args, parse_goal_evidence_refs args, parse_expected_verification args with
+  | Error detail, _, _ ->
+    (* This branch performs only input validation, before any Goal effect. *)
+    let data = error_assoc
+        [ "error_code", `String (error_code_to_string Validation_error)
+        ; "message", `String detail ] in
+    Tool_result.make_err ~tool_name ~start_time ~data
+      ~class_:(failure_class_of_error_code Validation_error)
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Yojson.Safe.to_string data)
+  | Ok (), Error detail, _ | Ok (), _, Error detail ->
+    error_result_typed ~tool_name ~start_time ~code:Validation_error detail
+  | Ok (), Ok evidence_refs, Ok expected_verification ->
   match
     ( validate_string_required args "goal_id"
     , parse_optional_transition_action args "action" )
@@ -1049,6 +1297,10 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
       when Option.is_some evidence_refs && public_action <> Goal_phase.Public_action.Request_complete ->
       error_result_typed ~tool_name ~start_time ~code:Validation_error
         "evidence_refs is only accepted for request_complete"
+  | Ok _, Ok (Some public_action)
+      when Option.is_some expected_verification && public_action <> Goal_phase.Public_action.Request_complete ->
+      error_result_typed ~tool_name ~start_time ~code:Validation_error
+        "expected_verification is only accepted for request_complete"
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
@@ -1064,6 +1316,16 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
      | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
      | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
          finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
+     | Goal_phase.Public_action.Request_complete when Option.is_some expected_verification ->
+         (match expected_verification with
+          | Some ({phase=Expect_executing; _} as expected) ->
+            finish_goal_request_complete ?evidence_refs ~expected_verification:expected
+              ~tool_name ~start_time ctx ~goal_id ~action
+          | Some ({phase=Expect_verifying; _} as expected) ->
+            answer_verifying_repeat ?evidence_refs ~expected_verification:expected
+              ~tool_name ~start_time ctx ~goal_id ~action
+          | None -> error_result_typed ~tool_name ~start_time ~code:Internal_error
+              "completion binding disappeared")
      | Goal_phase.Public_action.Request_complete | Goal_phase.Public_action.Drop | Goal_phase.Public_action.Reopen ->
     (match Goal_store.find_goal ctx.config ~goal_id with
      | Goal_store.Goal_absent ->
@@ -1093,7 +1355,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
              (match phase with
               | Goal_phase.Verifying ->
                 answer_verifying_repeat ?evidence_refs
-                  ~tool_name ~start_time ctx ~goal_id ~action goal
+                  ~tool_name ~start_time ctx ~goal_id ~action
               | Goal_phase.Awaiting_confirmation
               | Goal_phase.Executing
               | Goal_phase.Completed
@@ -1119,18 +1381,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                    allowed. Asking to be judged is not a claim; the judgement is
                    the verdict, and refusing the request only hides the goal
                    from the thing that would judge it. *)
-                   (match request_current_proof ?evidence_refs ctx.config ~goal_id with
-                    | Error error -> proof_request_failure ~tool_name ~start_time error
-                    | Ok (updated_goal, record) ->
-                      emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-                        ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase
-                                          ; "actor", `String ctx.agent_name ]);
-                      notify_goal_verification_pending ctx ~goal_id;
-                      ok_result ~tool_name ~start_time
-                        [ "goal_id", `String goal_id
-                        ; "action", `String (Goal_phase.action_to_string action)
-                        ; "goal", Goal_store.goal_to_yojson updated_goal
-                        ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ])
+                   finish_goal_request_complete ?evidence_refs ~tool_name ~start_time ctx ~goal_id ~action
            | Goal_phase.Public_action.Reopen ->
                 finish_goal_reopen ~tool_name ~start_time ctx ~note goal
            | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
@@ -1149,6 +1400,15 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         ; received = None
         }
       ]
+;;
+
+let handle_goal_transition ~tool_name ~start_time (ctx : context) args =
+  match Workspace.validate_expected_workspace ~config:ctx.config args with
+  | Ok args -> handle_goal_transition_validated ~tool_name ~start_time ctx args
+  | Error Workspace.Invalid_workspace_precondition ->
+    error_result_typed ~tool_name ~start_time ~code:Validation_error "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict "workspace precondition failed"
 ;;
 
 let confirm_completion ?after_confirmation config ~goal_id ~operator_id

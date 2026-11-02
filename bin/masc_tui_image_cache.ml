@@ -389,10 +389,11 @@ let convert_frame ~run ~cache_dir input =
           | Ok bytes ->
             Fun.protect ~finally:(fun () -> discard attempt_file) (fun () ->
               Ok (converter, failures, bytes))
-          | Error (Decoder_runner_failed _ as failure) ->
+          (* A signalled converter can leave a descendant writing to this
+             pathname. Do not give that pathname to a fallback converter. *)
+          | Error ((Decoder_runner_failed _ | Decoder_signaled _ | Decoder_stopped _) as failure) ->
             Error (List.rev ((converter, failure) :: failures))
-          | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
-                   | Decoder_stopped _ | No_frame_written | Frame_unreadable _) as failure) ->
+          | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _) as failure) ->
             attempt ((converter, failure) :: failures) rest
       in
       attempt [] commands
@@ -516,3 +517,34 @@ let prepare_presentation ~run ~cache_dir display png =
           if String.length bytes <> columns * pixel_rows * 4 then
             Error "image decoder returned an incomplete or unexpected RGBA frame"
           else Ok (Rgba {columns;pixel_rows;bytes})))
+
+type remote_image =
+  | Remote_unfetched
+  | Remote_png of string
+  | Remote_cells of { png : string; cells : (presentation, string) result }
+  | Remote_busy of string option
+
+type remote_action =
+  | Fetch_remote
+  | Prepare_remote_cells of string
+  | Draw_remote_png of string
+  | Draw_remote_cells of { png : string; cells : presentation }
+  | Open_remote_page of string
+
+let decide_remote ~graphics ~colour image =
+  match graphics, colour, image with
+  | (None | Some true), (true | false), Remote_unfetched -> Fetch_remote
+  | (None | Some true), (true | false), (Remote_png png | Remote_cells {png;_}) ->
+      Draw_remote_png png
+  | (None | Some true), (true | false), Remote_busy (Some png) -> Draw_remote_png png
+  | (None | Some true), (true | false), Remote_busy None ->
+      Open_remote_page "another image is still preparing"
+  | Some false, false, (Remote_unfetched | Remote_png _ | Remote_cells _ | Remote_busy _) ->
+      Open_remote_page "terminal does not support pixel or colour-cell images"
+  | Some false, true, Remote_unfetched -> Fetch_remote
+  | Some false, true, Remote_png png -> Prepare_remote_cells png
+  | Some false, true, Remote_cells {png;cells=Ok (Rgba _ as cells)} -> Draw_remote_cells {png;cells}
+  | Some false, true, Remote_cells {cells=Ok (Png _);_} ->
+      Open_remote_page "colour-cell renderer did not return a character frame"
+  | Some false, true, Remote_cells {cells=Error detail;_} -> Open_remote_page detail
+  | Some false, true, Remote_busy _ -> Open_remote_page "another image is still preparing"

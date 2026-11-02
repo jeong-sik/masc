@@ -1,0 +1,34 @@
+2026-11-01T10:58:39.9182785Z fa138512cfb1c9a8b5cffbcc4bb331779ce9449c
+2026-11-01T10:58:42.0220880Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T10:58:42.0244362Z fa138512cfb1c9a8b5cffbcc4bb331779ce9449c
+2026-11-01T10:59:36.2823293Z   TARGET_SUITES: test/test_keeper_antigravity_selected_inference
+2026-11-01T10:59:36.3965125Z   TARGET_SUITES: test/test_keeper_antigravity_selected_inference
+2026-11-01T10:59:36.4239427Z [targeted] EIO_BACKEND=<unset> timeout=900s per suite
+2026-11-01T10:59:36.4457298Z [targeted] dune build test/test_keeper_antigravity_selected_inference.exe config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/pr-review-routing.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md
+2026-11-01T11:02:23.0199403Z [targeted] test/test_keeper_antigravity_selected_inference: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T11:02:23.0220966Z [targeted] test/test_keeper_antigravity_selected_inference: start 2026-11-01T11:02:23Z
+2026-11-01T11:02:23.0888707Z   [FAIL]        selected inference          0   selected absence ignores late...
+2026-11-01T11:02:23.5180981Z   [FAIL]        selected inference          1   selected generic effort remai...
+2026-11-01T11:02:23.9455715Z   [FAIL]        selected inference          2   runtime removal cannot clear ...
+2026-11-01T11:02:23.9514559Z   [OK]          selected inference          3   hook generic effort remains r...
+2026-11-01T11:02:24.8039243Z   [OK]          selected inference          4   hook may clear selected gener...
+2026-11-01T11:02:26.9288032Z   [FAIL]        selected inference          5   selected unbounded idle survi...
+2026-11-01T11:02:27.3566948Z   [FAIL]        selected inference          6   selected positive idle surviv...
+2026-11-01T11:02:29.4822764Z   [FAIL]        selected inference          7   selected idle absence ignores...
+2026-11-01T11:02:29.9126211Z   [FAIL]        selected inference          8   selected positive idle surviv...
+2026-11-01T11:02:30.7642585Z   [OK]          selected inference          9   unchanged absence retains pro...
+2026-11-01T11:02:30.7644730Z FAIL the native child consumed input before model-idle judgement
+2026-11-01T11:02:30.7644929Z    Expected: `true'
+2026-11-01T11:02:30.7645054Z    Received: `false'
+2026-11-01T11:02:30.7668407Z FAIL reasoning refusal happens before any native input
+2026-11-01T11:02:30.7668605Z    Expected: `0'
+2026-11-01T11:02:30.7668722Z    Received: `1'
+2026-11-01T11:02:30.7680174Z FAIL reasoning refusal happens before any native input
+2026-11-01T11:02:30.7680371Z    Expected: `0'
+2026-11-01T11:02:30.7680493Z    Received: `1'
+2026-11-01T11:02:30.7692468Z FAIL Timeout: Antigravity turn timed out after 0.100s
+2026-11-01T11:02:30.7704324Z FAIL a later catalog lookup replaced the selected admission or idle declaration
+2026-11-01T11:02:30.7715790Z FAIL Timeout: Antigravity turn timed out after 0.100s
+2026-11-01T11:02:30.7727347Z FAIL a later catalog lookup replaced the selected admission or idle declaration
+2026-11-01T11:02:30.7736844Z 7 failures! in 7.686s. 10 tests run.
+2026-11-01T11:02:30.7737598Z [targeted] test/test_keeper_antigravity_selected_inference: FAIL exit 1 in 7s

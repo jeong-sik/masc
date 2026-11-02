@@ -199,6 +199,7 @@ let pp_node formatter node =
 ;;
 
 type node_update =
+  | Turn_ready of string list
   | Checkpoint_snapshot of Checkpoint_snapshot.t
   | Provider_event of Yojson.Safe.t
   | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
@@ -318,6 +319,13 @@ let validate_content_block block =
 
 let validate_node_update update =
   match update with
+  | Turn_ready names ->
+    let rec validate = function
+      | [] -> Ok ()
+      | name :: rest ->
+        let* () = validate_non_blank "prepared tool name" name in
+        validate rest in
+    validate names
   | Checkpoint_snapshot _ -> Ok ()
   | Provider_request_snapshot _ -> Ok ()
   | Provider_response_snapshot value -> Response_snapshot.validate value
@@ -452,6 +460,7 @@ let payload event = event.payload
 
 let equal_update left right =
   match left, right with
+  | Turn_ready left, Turn_ready right -> List.equal String.equal left right
   | Checkpoint_snapshot left, Checkpoint_snapshot right -> Checkpoint_snapshot.equal left right
   | Provider_event left, Provider_event right
   | Output_delta left, Output_delta right
@@ -463,7 +472,8 @@ let equal_update left right =
   | Provider_request_snapshot left, Provider_request_snapshot right ->
     Llm_provider.Completion_outcome.equal_request_provenance left right
   | Provider_response_snapshot left, Provider_response_snapshot right -> left = right
-  | ( ( Checkpoint_snapshot _
+  | ( ( Turn_ready _
+      | Checkpoint_snapshot _
       | Provider_event _
       | Provider_request_snapshot _
       | Provider_response_snapshot _
@@ -689,6 +699,8 @@ let node_update_json kind value = `Assoc [ "type", `String kind; "value", value 
 
 let node_update_to_yojson_unchecked update =
   match update with
+  | Turn_ready names ->
+    node_update_json "turn_ready" (`List (List.map (fun name -> `String name) names))
   | Checkpoint_snapshot value -> node_update_json "checkpoint_snapshot" (Checkpoint_snapshot.to_yojson value)
   | Provider_request_snapshot value ->
     node_update_json "provider_request_snapshot"
@@ -726,6 +738,14 @@ let node_update_of_yojson json =
   let* value = field "value" fields in
   let* update =
     match kind with
+    | "turn_ready" ->
+      let rec names acc = function
+        | [] -> Ok (Turn_ready (List.rev acc))
+        | `String name :: rest -> names (name :: acc) rest
+        | _ :: _ -> Error "prepared tool names must be strings" in
+      (match value with
+       | `List values -> names [] values
+       | _ -> Error "prepared tool names must be an array")
     | "checkpoint_snapshot" ->
       let+ value=Checkpoint_snapshot.of_yojson value
           |> Result.map_error Checkpoint_snapshot.error_to_string in

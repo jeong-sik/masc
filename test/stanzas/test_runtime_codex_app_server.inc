@@ -10,3 +10,7 @@
 (rule
  (alias runtest-test_runtime_codex_app_server_last_projection)
  (action (run %{exe:test_runtime_codex_app_server.exe} test "last projection")))
+
+(rule
+ (alias runtest-test_keeper_codex_current_instructions)
+ (action (run %{exe:test_runtime_codex_app_server.exe} test "standing instructions")))

@@ -287,6 +287,15 @@ let with_mutex path f =
     ~finally:(fun () -> release_entry entry)
     (fun () -> with_entry_lock entry f)
 
+let try_with_mutex path f =
+  let entry = get_entry path in
+  Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
+    ~finally:(fun () -> release_entry entry)
+    (fun () -> Cross_context_mutex.try_with_lock entry.lock (fun () ->
+      match Eio_guard.execution_context () with
+      | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+      | Eio_guard.Non_eio -> f ()))
+
 let lock_file_path path = path ^ ".lock"
 
 (** Run [f] while holding both the per-path {!Cross_context_mutex} and an

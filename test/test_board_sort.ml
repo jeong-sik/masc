@@ -143,7 +143,15 @@ let test_hot_post_set_matches_hot_compare () =
 
 let test_indexed_reads_lifecycle_across_votes_deletions_and_reloads () =
   Eio_main.run @@ fun _env ->
-  let store = Board.create_store () in
+  let base_path = Filename.temp_file "masc-board-sort-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  let workspace_masc_dir = Filename.concat base_path Common.masc_dirname in
+  Unix.mkdir workspace_masc_dir 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir workspace_masc_dir; Unix.rmdir base_path)
+  @@ fun () ->
+  let store = Board.create_store ~base_path () in
   let now = 1_000_000.0 in
   let p1 =
     make_post ~id:"p-1" ~created_at:(now -. 30.0) ~votes_up:1 ~votes_down:0

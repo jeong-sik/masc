@@ -1,0 +1,105 @@
+2026-11-01T01:00:55.6898701Z   ref: 98b63fc277c8e129415acb50e6a33e4a9efcb230
+2026-11-01T01:00:56.1195738Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 98b63fc277c8e129415acb50e6a33e4a9efcb230
+2026-11-01T01:01:04.8642294Z  * branch              98b63fc277c8e129415acb50e6a33e4a9efcb230 -> FETCH_HEAD
+2026-11-01T01:01:04.8644423Z [command]/usr/bin/git rev-parse --verify --quiet 98b63fc277c8e129415acb50e6a33e4a9efcb230^{object}
+2026-11-01T01:01:04.8675869Z 98b63fc277c8e129415acb50e6a33e4a9efcb230
+2026-11-01T01:01:04.8779429Z [command]/usr/bin/git checkout --progress --force 98b63fc277c8e129415acb50e6a33e4a9efcb230
+2026-11-01T01:01:07.7367378Z Note: switching to '98b63fc277c8e129415acb50e6a33e4a9efcb230'.
+2026-11-01T01:01:07.7549086Z 98b63fc277c8e129415acb50e6a33e4a9efcb230
+2026-11-01T01:04:37.1622423Z   TARGET_SUITES: packages/agent_core/test/test_provider_failure_attribution
+2026-11-01T01:04:37.1764040Z   TARGET_SUITES: packages/agent_core/test/test_provider_failure_attribution
+2026-11-01T01:04:37.2222242Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T01:04:37.2251076Z [targeted] @@packages/agent_core/test/runtest-test_provider_failure_attribution: start 2026-11-01T01:04:37Z (dune alias)
+2026-11-01T01:05:19.8167385Z ASSERT RFC canonical configs equal
+2026-11-01T01:05:19.8168166Z ASSERT equal identities hash equally
+2026-11-01T01:05:19.8169005Z ASSERT request path participates
+2026-11-01T01:05:19.8169827Z ASSERT opaque credential participates
+2026-11-01T01:05:19.8171020Z ASSERT transport participates
+2026-11-01T01:05:19.8172027Z   [OK]          binding identity            0   structural equality.
+2026-11-01T01:05:19.8435363Z ASSERT selected authentication is retained
+2026-11-01T01:05:19.8436589Z ASSERT selected credential scope is retained
+2026-11-01T01:05:19.8437561Z ASSERT catalog replacement cannot change failure ownership
+2026-11-01T01:05:19.8438776Z   [FAIL]        binding identity            1   selected identity survives ca...
+2026-11-01T01:05:19.8439858Z ASSERT selected authentication is retained
+2026-11-01T01:05:19.8440971Z   [FAIL]        binding identity            2   identity selection precedes c...
+2026-11-01T01:05:19.8442246Z ASSERT an unselected config cannot acquire later declaration ownership
+2026-11-01T01:05:19.8443533Z   [FAIL]        binding identity            3   unselected identity cannot ac...
+2026-11-01T01:05:19.8444523Z ASSERT redacts raw-api-secret
+2026-11-01T01:05:19.8445419Z ASSERT redacts password
+2026-11-01T01:05:19.8446031Z ASSERT redacts secret-query-key
+2026-11-01T01:05:19.8446669Z ASSERT redacts base-secret
+2026-11-01T01:05:19.8447277Z ASSERT redacts path-secret
+2026-11-01T01:05:19.8447927Z ASSERT query values visibly redacted
+2026-11-01T01:05:19.8448846Z   [OK]          binding identity            4   redacted observation.
+2026-11-01T01:05:19.8449774Z ASSERT redacted snapshot roundtrips
+2026-11-01T01:05:19.8450412Z ASSERT convenience observation API is the snapshot codec
+2026-11-01T01:05:19.8451062Z ASSERT snapshot observes a different credential fingerprint
+2026-11-01T01:05:19.8451778Z   [OK]          binding identity            5   redacted snapshot closed codec.
+2026-11-01T01:05:19.8452966Z   [OK]          binding identity            6   redacted snapshot strict boun...
+2026-11-01T01:05:19.8453920Z   [OK]          binding identity            7   invalid model identity.
+2026-11-01T01:05:19.8454530Z ASSERT 401 with identity is credential pool
+2026-11-01T01:05:19.8455322Z ASSERT 401 without identity fails local
+2026-11-01T01:05:19.8456145Z ASSERT 402 with identity is credential pool
+2026-11-01T01:05:19.8456787Z ASSERT 402 without identity fails local
+2026-11-01T01:05:19.8457361Z ASSERT ambiguous HTTP 403
+2026-11-01T01:05:19.8457865Z ASSERT binding HTTP 404
+2026-11-01T01:05:19.8458387Z ASSERT ambiguous server HTTP 500
+2026-11-01T01:05:19.8459233Z ASSERT ambiguous server HTTP 503
+2026-11-01T01:05:19.8459785Z ASSERT endpoint network evidence
+2026-11-01T01:05:19.8460184Z ASSERT endpoint network evidence
+2026-11-01T01:05:19.8460507Z ASSERT endpoint network evidence
+2026-11-01T01:05:19.8460932Z ASSERT endpoint network evidence
+2026-11-01T01:05:19.8461250Z ASSERT endpoint network evidence
+2026-11-01T01:05:19.8461620Z ASSERT local resource exhaustion is attempt local
+2026-11-01T01:05:19.8462080Z ASSERT provider first-token timeout is not widened
+2026-11-01T01:05:19.8462444Z ASSERT model capacity
+2026-11-01T01:05:19.8462723Z ASSERT account capacity
+2026-11-01T01:05:19.8463076Z ASSERT account capacity without identity fails local
+2026-11-01T01:05:19.8463443Z ASSERT region capacity
+2026-11-01T01:05:19.8463726Z ASSERT provider capacity
+2026-11-01T01:05:19.8464025Z ASSERT parse is attempt local
+2026-11-01T01:05:19.8464433Z ASSERT provider-reported envelope is not attributed locally
+2026-11-01T01:05:19.8465077Z ASSERT terminal is session local
+2026-11-01T01:05:19.8465486Z ASSERT typed CLI startup auth
+2026-11-01T01:05:19.8465828Z ASSERT request validation is attempt local
+2026-11-01T01:05:19.8466204Z ASSERT response parse is not attempt owned
+2026-11-01T01:05:19.8466772Z ASSERT session conflict retains attempted binding
+2026-11-01T01:05:19.8467188Z ASSERT CLI startup retains attempted binding
+2026-11-01T01:05:19.8467629Z   [OK]          ownership                   0   closed matrix.
+2026-11-01T01:05:19.8468039Z ASSERT body retry_after carried
+2026-11-01T01:05:19.8468435Z ASSERT header retry_after carried when body has none
+2026-11-01T01:05:19.8469298Z   [OK]          ownership                   1   429 typed capacity evidence.
+2026-11-01T01:05:19.8469784Z ASSERT coarse provider error is never widened
+2026-11-01T01:05:19.8470175Z ASSERT coarse error has no invented binding
+2026-11-01T01:05:19.8470618Z ASSERT coarse provider error is never widened
+2026-11-01T01:05:19.8471281Z ASSERT coarse error has no invented binding
+2026-11-01T01:05:19.8471773Z   [OK]          ownership                   2   coarse provider fail-closed.
+2026-11-01T01:05:19.8472347Z   [OK]          ownership                   3   ContextWindowExceeded types a...
+2026-11-01T01:05:19.8472828Z ASSERT overflow is not transport-retryable
+2026-11-01T01:05:19.8473334Z   [OK]          ownership                   4   provider-reported overflow ty...
+2026-11-01T01:05:19.8473907Z   [OK]          ownership                   5   EndTurn stays provider unavai...
+2026-11-01T01:05:19.8474337Z ASSERT provider retained
+2026-11-01T01:05:19.8474655Z ASSERT unknown token remains typed
+2026-11-01T01:05:19.8475385Z ASSERT diagnostic retained
+2026-11-01T01:05:19.8475730Z ASSERT same-attempt retry refused
+2026-11-01T01:05:19.8476196Z   [OK]          ownership                   6   unmodeled stop_reason fails l...
+2026-11-01T01:05:19.8476621Z ASSERT provider retained
+2026-11-01T01:05:19.8476929Z ASSERT unknown token remains typed
+2026-11-01T01:05:19.8477251Z ASSERT diagnostic retained
+2026-11-01T01:05:19.8477680Z   [OK]          ownership                   7   error boundary retains typed ...
+2026-11-01T01:05:19.8478126Z ASSERT sync ownership
+2026-11-01T01:05:19.8478408Z ASSERT stream ownership
+2026-11-01T01:05:19.8478743Z ASSERT sync and stream binding identity equal
+2026-11-01T01:05:19.8479114Z ASSERT sync exact legacy projection
+2026-11-01T01:05:19.8479460Z ASSERT stream exact legacy projection
+2026-11-01T01:05:19.8479936Z   [OK]          agent detailed API          0   sync stream and legacy projec...
+2026-11-01T01:05:19.8480580Z ASSERT empty completion is attempt local
+2026-11-01T01:05:19.8481033Z   [OK]          agent detailed API          1   stream finalization.
+2026-11-01T01:05:19.8482265Z │ [FAIL]        binding identity            1   selected identity survives...  │
+2026-11-01T01:05:19.8483843Z FAIL catalog replacement cannot change failure ownership
+2026-11-01T01:05:19.8493962Z │ [FAIL]        binding identity            2   identity selection precede...  │
+2026-11-01T01:05:19.8495777Z FAIL selected authentication is retained
+2026-11-01T01:05:19.8504210Z │ [FAIL]        binding identity            3   unselected identity cannot...  │
+2026-11-01T01:05:19.8505840Z FAIL an unselected config cannot acquire later declaration ownership
+2026-11-01T01:05:19.8513373Z 3 failures! in 0.031s. 18 tests run.
+2026-11-01T01:05:19.8768769Z [targeted] @@packages/agent_core/test/runtest-test_provider_failure_attribution: FAIL exit 1 in 42s

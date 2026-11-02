@@ -1,5 +1,5 @@
 (** Which verifier step could not settle a Verifying goal: applying the
-    committed proof, re-arming its pending request, or reading its retained
+    committed proof, checking its pending request, or reading its retained
     original before dispatch.
 
     The goal verifier scan produces it and the planning wire carries it as a

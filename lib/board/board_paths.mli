@@ -1,12 +1,19 @@
 (** Board persistence paths.
 
-    Unbound path helpers are derived from [Env_config_core.base_path] via
-    [Common.masc_dir_from_base_path] at call time. Bound store loads
-    use the workspace directory captured before their global store was
-    loaded. *)
+    Configuration-root helpers are used when capturing a store at startup.
+    Every store file and directory mutation uses its captured workspace. *)
 
 val board_base_path : unit -> string
 val board_masc_dir : unit -> string
+val capture_workspace_masc_dir : string -> string
+(** Capture an explicit workspace directory. A relative input is anchored to
+    the current working directory synchronously before the single
+    [Fs_compat.realpath_lenient] call. Filesystem names are preserved without
+    trimming; no directory is created. This binds a path, not ongoing symlink
+    or resource identity.
+
+    @raise Invalid_argument if the input is exactly empty. *)
+
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
 val file_path : workspace_masc_dir:string -> persisted_file -> string
 val posts_file : workspace_masc_dir:string -> string
@@ -14,12 +21,25 @@ val posts_file : workspace_masc_dir:string -> string
     pass takes this to read every workspace's posts
     ([Tool_blob_maintenance.run ~board_posts_file]); that library sits below
     Board and does not repeat the name. *)
+val posts_initialization_guard_file : workspace_masc_dir:string -> string
+(** Separate posts initialization marker; not a persisted payload family.
+    This only derives a path and creates nothing. *)
+val workspace_masc_dir : Board_types.store -> string
+(** Derive the state path from the store's sole immutable BasePath binding.
+    This getter grants no filesystem authority. *)
+val check_workspace :
+  Board_types.store -> (unit, Board_workspace_binding.rejection) result
+(** Recheck the captured root and any retained actual state-directory witness.
+    Caller owns the persistence lock or a quiescent loader scope. *)
+val observe_workspace :
+  Board_types.store -> (Board_workspace_binding.observation, Board_workspace_binding.rejection) result
+(** Same check, retaining an actual Present directory in the store's sole
+    binding via an immutable refinement. Caller owns the persistence lock or
+    a quiescent loader scope, including when no posts have been loaded. *)
 val store_file_path : Board_types.store -> persisted_file -> string
-(** Bound stores use their captured workspace for every load. Standalone stores
-    use the current configured workspace. *)
-val persist_path : unit -> string
-val comments_path : unit -> string
-val reactions_path : unit -> string
-val sub_boards_path : unit -> string
+(** Every read and write uses the store's captured workspace. *)
+val persist_path : Board_types.store -> string
+val comments_path : Board_types.store -> string
+val reactions_path : Board_types.store -> string
+val sub_boards_path : Board_types.store -> string
 val ensure_dir : string -> unit
-val ensure_masc_dir : unit -> unit

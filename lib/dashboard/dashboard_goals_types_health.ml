@@ -29,8 +29,7 @@ let goal_fsm_state_kind = Goal_phase.to_string
 
 let goal_fsm_next_actions ~goal_phase =
   Goal_phase.Public_action.all
-  |> List.filter (fun action -> Goal_phase.moves_goal ~phase:goal_phase
-         ~action:(Goal_phase.Public_action.to_action action))
+  |> List.filter (fun action -> Goal_phase.offers_public_action ~phase:goal_phase ~action)
   |> List.map Goal_phase.Public_action.to_string
 
 let goal_fsm_to_json (goal : Goal_store.goal) (node : tree_node) =

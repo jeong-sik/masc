@@ -50,17 +50,19 @@ let write ~now (config : Workspace_utils_backend_setup.config) goal verdict =
 ;;
 
 let record ~now (config : Workspace_utils_backend_setup.config) goal verdict =
+  let refused detail =
+    "candle snapshot: " ^ detail
+    ^ "; repair the reported problem, then retry the same verification request"
+  in
   match Candle_status.for_recording ~base_path:config.base_path with
-  | Candle_config.Off -> Ok ()
-  | Candle_config.Disabled { reason } ->
-    Log.Candle.warn
-      "no snapshot for goal_id=%s because candle is disabled: %s"
-      goal.Goal_store.id
-      reason;
-    Ok ()
-  | Candle_config.Enabled _ ->
+  | Candle_status.Recording_off -> Ok ()
+  | Candle_status.Recording_disabled { reason } ->
+    Error (refused ("configuration unavailable: " ^ reason))
+  | Candle_status.Recording_unavailable { reason } ->
+    Error (refused ("ledger recovery unavailable: " ^ reason))
+  | Candle_status.Recording_enabled _ ->
     Result.map_error
-      (fun detail -> "candle snapshot: " ^ detail)
+      refused
       (write ~now config goal verdict)
 ;;
 

@@ -302,6 +302,8 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   let config = Workspace.default_config base in
   ignore (stage Initialize_workspace (fun () ->
     Workspace.init config ~agent_name:(Some "preparation-operator")) : string);
+  Masc_test_deps.Board_test_preparation.prepare ~base_path:base
+    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base ["base","masc-sandbox-base:fixture-owned-job"];
   write (config_path base) skills_config;
   let skill_path = Filename.concat base ".agents/skills/preparation-stdout/SKILL.md" in
@@ -899,7 +901,7 @@ let initialize_synthetic_runtime ~base ~endpoint runtime =
   write catalog_path (Printf.sprintf
     "[[models]]\nmodel_id = %S\nprovider_name = \"preparation_fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = %d\nmax_output_tokens = %d\nsupports_tools = true\nsupports_native_streaming = true\n"
     model (integer "max_context_tokens" runtime) (integer "max_output_tokens" runtime));
-  Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id |> Llm_provider.Model_catalog.set_global;
+  Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   write (config_path base) (Printf.sprintf
     "[runtime]\ndefault = \"preparation_fixture.sample\"\n[providers.preparation_fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = %S\n[models.sample]\napi-name = %S\nmax-context = %d\nstreaming = true\n[preparation_fixture.sample]\n%s"
     endpoint model (integer "max_context_tokens" runtime) skills_config);
@@ -964,7 +966,9 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
      publication_recovery_provider=Masc_test_deps.publication_recovery_provider publication_registry} in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:(Keeper_board_recipient_lookup.make ~config) ());
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"unaddressed fixture baseline"
       ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string);
   ignore (Keeper_world_observation.collect_board_events ~base_path:base ~meta);
@@ -1318,6 +1322,11 @@ let main () =
        Unix.chmod (Filename.concat base_path "docker-peer.sh") 0o700;
        setup ~base:base_path ~experiment ~counter ~receipt:!receipt ~sw ~env
      | "run" ->
+       (* The measured cycle owns real native request journals under this
+          application switch; model configuration alone does not install it. *)
+       Runtime_agent_execution_runtime.initialize
+         ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+       |> get Runtime_agent_execution_runtime.initialization_error_to_string;
        require (not (Filename.is_relative !prompt_root) && Sys.file_exists (Filename.concat !prompt_root "keeper.md"))
          "--prompt-root must be a frozen absolute prompt directory";
        run_trial ~base:base_path ~experiment ~strategy:(strategy_of_string !strategy)

@@ -90,6 +90,16 @@ current working directory. Runtime `evidence/`, blobs and published artifacts ar
 different owned stores, not aliases for repository documentation. Do not rename
 or merge them as a repository cleanup.
 
+At startup the original-request body inventory preserves live bodies even when
+the observed active and settled owner records do not name them. The startup log
+reports the count and logical bytes of bodies not protected by the digests it
+read, or reports the inventory as unavailable. The count is not a complete
+count of missing owners: a digest protects matching bodies in every scope, and
+archived bodies and incomplete staging files are excluded. These retained bodies
+can accumulate and the startup inventory reads them again on each start; the
+reported elapsed time helps show that cost. A preserved body alone does not
+establish its original owner or whether its request was dispatched.
+
 The [evidence provenance note](../evidence/README.md) explains sanitized captures.
 The [research index](../research/README.md) lists investigations; the
 [report index](../reports/README.md) lists retained reports.

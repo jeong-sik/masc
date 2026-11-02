@@ -1,0 +1,54 @@
+{
+  "initial_candidate": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+  "corrected_candidate": "b8a1523884e571a91b90971d8cb682442d4296f7",
+  "complete_delta": [
+    "docs/evidence/2026-11-01-terminal-stop-authority/README.md",
+    "packages/agent_core/test/test_pipeline.ml"
+  ],
+  "identical_production_trees": {
+    "lib": "40a7da14f61f03f8e03fb53ea8262c388c4e46e8",
+    "packages/agent_core/lib": "56b1043a68ed86083d2e011b27441a2390d62e6d",
+    "config": "b9b3372a0113ac693ee297ea10f22bcb055c53ec"
+  },
+  "fixture_changed": true,
+  "same_fixture_product_before_after_pair": false,
+  "source_sha256_by_execution": {
+    "candidate": {
+      "packages/agent_core/test/test_pipeline.ml": "9349a069d6284f9fa11fb0351e78cdd97703c08ff70984dd37e1f9f61f582fd7",
+      "packages/agent_core/test/test_execution_journal.ml": "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+    },
+    "corrected-candidate": {
+      "packages/agent_core/test/test_pipeline.ml": "ac9f9cf6a474fb6cf30f0b50064a4bfbcef9c50c3da0ee75e5a12a77913c6437",
+      "packages/agent_core/test/test_execution_journal.ml": "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+    }
+  },
+  "source_sealed_case_key_sha256": {
+    "candidate": "c29a78f528a8eecc3e639b8757fbba37e54e1e5d8932db7538910d18685f0b22",
+    "corrected-candidate": "ab2ae41b1f7e1f1ea347eec31dd34b9b3dcb1c9ea6d044db423d7668a4a4eb09"
+  },
+  "suite_counts": {
+    "candidate": {
+      "packages/agent_core/test/test_pipeline.ml": {
+        "pass": 103,
+        "fail": 19
+      },
+      "packages/agent_core/test/test_execution_journal.ml": {
+        "pass": 21,
+        "fail": 0
+      }
+    },
+    "corrected-candidate": {
+      "packages/agent_core/test/test_pipeline.ml": {
+        "pass": 122,
+        "fail": 0
+      },
+      "packages/agent_core/test/test_execution_journal.ml": {
+        "pass": 21,
+        "fail": 0
+      }
+    }
+  },
+  "failure_scope": "The 19 initial accepted controls fail on fresh raw-vs-completed full response equality before recovery. The corrected fixture independently checks id/stop/content/usage and compares actual AfterTurn records including telemetry.",
+  "publication_rule": "Evidence-only publication retains all 19 named inputs and four trees of the successful b8 source. No later publication-head execution is implied.",
+  "limits": "These are separate executions with different Pipeline fixture hashes. Do not label 19 fixture failures as product defects fixed or add earlier 135/0 to 143/0."
+}

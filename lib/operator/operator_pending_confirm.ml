@@ -317,18 +317,80 @@ let raw_pending_confirms config : pending_confirm list =
 let pending_confirms_to_yojson entries =
   `List (List.map pending_confirm_store_to_yojson entries)
 
-let write_pending_confirms config (entries : pending_confirm list) =
+let change_observer : (base_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ -> ())
+
+let install_change_observer observer = Atomic.set change_observer observer
+
+let replace_change_observer_if_current ~current ~replacement =
+  Atomic.compare_and_set change_observer current replacement
+;;
+
+let notify_change_observer config =
+  let base_path = config.Workspace.base_path in
+  let report exn =
+    Log.Misc.warn "pending confirm change observer failed for %s: %s"
+      base_path (Printexc.to_string exn)
+  in
+  match (Atomic.get change_observer) ~base_path with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    (match Fs_compat.execution_context () with
+     | Eio_fiber -> Eio.Fiber.check ()
+     | Non_eio -> ());
+    report exn
+  | exception exn -> report exn
+;;
+
+let write_pending_confirms_with ~on_attempt config (entries : pending_confirm list) =
   match
     decode_pending_confirm_entries
       (List.map pending_confirm_store_to_yojson entries)
   with
   | Error _ as error -> error
   | Ok validated_entries ->
+    on_attempt ();
     Workspace_utils.write_json_result config (pending_confirms_path config)
       (pending_confirms_to_yojson validated_entries)
 
+(* A write can fail after reaching the store. Wake once after an attempted
+   publication, including uncertain failures, and only after the store lock
+   has been released. Validation failures do not attempt a publication. *)
+let with_observed_write config f =
+  let attempted = ref false in
+  let write entries =
+    write_pending_confirms_with ~on_attempt:(fun () -> attempted := true)
+      config entries
+  in
+  let result =
+    try Ok (f write) with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  match result with
+  | Ok value ->
+    if !attempted then notify_change_observer config;
+    value
+  | Error (exn, backtrace) ->
+    if !attempted then (
+      match notify_change_observer config with
+      | () -> ()
+      | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+        (match exn with
+         | Eio.Cancel.Cancelled _ -> ()
+         | _ -> raise cancelled));
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let write_pending_confirms config entries =
+  with_observed_write config (fun write -> write entries)
+;;
+
 let with_store_lock config f =
   File_lock_eio.with_mutex (pending_confirms_path config) f
+;;
+
+let with_observed_store_lock config f =
+  with_observed_write config (fun write ->
+    with_store_lock config (fun () -> f write))
 ;;
 
 let pending_confirm_expired (entry : pending_confirm) =
@@ -340,13 +402,13 @@ let pending_confirm_expired (entry : pending_confirm) =
      | Error reason -> raise_store_error reason)
   | None -> false
 
-let read_pending_confirms_result_unlocked config =
+let read_pending_confirms_result_unlocked ~write config =
   match raw_pending_confirms_result config with
   | Error _ as error -> error
   | Ok entries ->
   let active = List.filter (fun entry -> not (pending_confirm_expired entry)) entries in
   if List.length active <> List.length entries then
-    match write_pending_confirms config active with
+    match write active with
     | Ok () -> Ok active
     | Error msg ->
       Error
@@ -356,7 +418,8 @@ let read_pending_confirms_result_unlocked config =
   else Ok active
 
 let read_pending_confirms_result config =
-  with_store_lock config (fun () -> read_pending_confirms_result_unlocked config)
+  with_observed_store_lock config (fun write ->
+    read_pending_confirms_result_unlocked ~write config)
 ;;
 
 let read_pending_confirms config : pending_confirm list =
@@ -365,7 +428,7 @@ let read_pending_confirms config : pending_confirm list =
   | Error msg -> raise_store_error msg
 
 let upsert_pending_confirm config entry =
-  with_store_lock config (fun () ->
+  with_observed_store_lock config (fun write ->
     let open Result.Syntax in
     let* target = target_of_entry entry in
     let* target_gate =
@@ -374,17 +437,17 @@ let upsert_pending_confirm config entry =
       | None -> Error "pending-confirm target gate is not registered"
     in
     let* () = target_gate config target in
-    let* entries = read_pending_confirms_result_unlocked config in
+    let* entries = read_pending_confirms_result_unlocked ~write config in
     let remaining =
       entries
       |> List.filter (fun existing ->
              not (String.equal existing.confirm_token entry.confirm_token))
     in
-    write_pending_confirms config (entry :: remaining))
+    write (entry :: remaining))
 
 let remove_pending_confirm config confirm_token =
-  with_store_lock config (fun () ->
-    match read_pending_confirms_result_unlocked config with
+  with_observed_store_lock config (fun write ->
+    match read_pending_confirms_result_unlocked ~write config with
     | Error _ as error -> error
     | Ok entries ->
       let remaining =
@@ -392,10 +455,10 @@ let remove_pending_confirm config confirm_token =
         |> List.filter (fun existing ->
                not (String.equal existing.confirm_token confirm_token))
       in
-      write_pending_confirms config remaining)
+      write remaining)
 
 let remove_pending_confirms_by_typed_target config target =
-  with_store_lock config (fun () ->
+  with_observed_store_lock config (fun write ->
     match raw_pending_confirms_result config with
     | Error _ as error -> error
     | Ok all ->
@@ -412,7 +475,7 @@ let remove_pending_confirms_by_typed_target config target =
       in
       let removed = List.length all - List.length remaining in
       if removed > 0
-      then write_pending_confirms config remaining |> Result.map (fun () -> removed)
+      then write remaining |> Result.map (fun () -> removed)
       else Ok 0)
 
 let remove_pending_confirms_by_target config ~target_type ~target_id =

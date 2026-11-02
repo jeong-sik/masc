@@ -21,7 +21,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_ids;
+          status=Candle_event.Done {completed_at=(match Candle_time.of_rfc3339 "2026-09-20T00:00:00Z" with
+            | Ok value -> value | Error detail -> Alcotest.fail detail)}}) task_ids;
        candidate_task_ids=task_ids;candidate_keepers=[keeper];
        candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}
@@ -6830,7 +6831,11 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   Lib.Board.reset_global_for_test ();
   Lib.Board_dispatch.reset_for_test ();
-  Lib.Board_dispatch.init_jsonl ~recipient_lookup:Lib.Recipient_lookup.none_declared ();
+  Masc_test_deps.Board_test_preparation.prepare ~base_path:config.base_path
+    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
+  Result.get_ok (Lib.Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Lib.Recipient_lookup.none_declared ());
   Fun.protect
     ~finally:(fun () ->
       Lib.Board.reset_global_for_test ();
@@ -7065,7 +7070,7 @@ let with_direct_assignment_model_catalog f =
   (* Assignment publication validates the configured provider/model against
      AGENT_CORE. Declare the synthetic model used by config_sync_runtime_toml
      for the whole fixture, including its Keeper fiber cleanup. *)
-  let previous = Catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let catalog =
     match
       Catalog.of_toml_string ~source:"direct-assignment-fixture"
@@ -7081,11 +7086,9 @@ max_context_tokens = 8192
   in
   Fun.protect
     ~finally:(fun () ->
-      match previous with
-      | Some catalog -> Catalog.set_global catalog
-      | None -> Catalog.clear_global ())
+      Llm_provider.Catalog_snapshot.publish previous)
     (fun () ->
-      Catalog.set_global catalog;
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
       f ())
 
 let test_direct_assignment_route_rejects_stale_revision_without_write () =

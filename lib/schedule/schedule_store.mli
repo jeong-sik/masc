@@ -144,6 +144,13 @@ val read_state : Workspace_utils.config -> state
     Never writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
+val install_change_observer : (base_path:string -> unit) -> unit
+(** Observe an attempted ledger publication after its mutation lock is
+    released. The callback is an invalidation, not a receipt: a failed write
+    may have landed. Calls that do not attempt a write do not notify. The
+    callback runs on the caller, so it must be short and non-yielding; it must
+    not perform network fanout. *)
+
 val with_ledger_lock : Workspace_utils.config -> (unit -> 'a) -> 'a
 (** Serialize a composed durable transfer through its target projection with
     schedule mutation. Acquire any ordered Keeper intake fences before this
@@ -391,7 +398,8 @@ val cancel_matching :
 val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result
-(** Deletes terminal schedule requests and their wake-delivery records. *)
+(** Deletes terminal schedule requests and wake-delivery records with no
+    remaining schedule. If neither changes, no ledger write is made. *)
 
 val append_note :
   Workspace_utils.config ->

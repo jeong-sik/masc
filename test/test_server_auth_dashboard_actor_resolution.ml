@@ -423,7 +423,7 @@ let test_history_read_keeps_original_workspace_through_replacement () =
   let config_b = Masc.Workspace.default_config base_b in
   let identity base : Masc.Tui_decode.server_identity =
     { sid_version = "0.24.0"; sid_binary_commit = "original-history"
-    ; sid_binary_commit_age_s = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base)
+    ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base)
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Filename.concat base ".masc"))
     ; sid_executable_in_worktree = None; sid_state_ready = Some true
     ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
@@ -572,7 +572,7 @@ let test_file_changes_read_keeps_its_workspace () =
   List.iter (fun base -> Unix.mkdir (Filename.concat base ".masc") 0o700)
     [base_a; base_b];
   let identity base : Masc.Tui_decode.server_identity =
-    { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None
+    { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
     ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base)
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path
         (Unix.realpath (Filename.concat base ".masc"))

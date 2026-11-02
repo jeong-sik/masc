@@ -543,7 +543,7 @@ let claude_auth_status = function
    as a candidate rather than the account the operator looks at first. *)
 let claude_auth_refusal ~account_home ~status detail =
   let inherited =
-    if Runtime_claude_code.runs_on_environment_credential account_home
+    if Runtime_claude_code.runs_on_environment_credential (Runtime_official_account.Captured account_home)
     then
       " (this child inherited an environment credential, which Claude Code uses \
        before the signed-in account)"
@@ -633,13 +633,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
         let reasoning_effort =
-          Runtime_inference.clamp_reasoning_effort_to_catalog
-            ~model_id:(Some execution.model) ~requested:runtime.model.reasoning_effort
-          |> Option.map (function
-            | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
-            | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
-            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
-            | Ultra -> Effort_ultra) in
+          Option.map Runtime_muse_msp.reasoning_effort_of_requested
+            runtime.model.reasoning_effort in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
            ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
@@ -782,6 +777,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error
              (Unavailable
                 (Missing_credential (Runtime_instance.dispatch_credential_error_to_string error)))
+         | Error (Runtime_instance.Missing_credential_selection _ as error) ->
+           Error
+             (Unavailable
+                (Invalid_configuration (Runtime_instance.dispatch_credential_error_to_string error)))
          | Ok () ->
            let seed =
              Runtime_inference.seed_of_thinking_support
@@ -903,7 +902,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
-            account_home = execution.account_home;
+            account_home = Runtime_official_account.Captured execution.account_home;
             cli_path = execution.cli_path
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
@@ -911,9 +910,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           }
         in
         let reasoning_effort =
-          Runtime_inference.clamp_reasoning_effort_to_catalog
-            ~model_id:execution.model ~requested:runtime.model.reasoning_effort
-          |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+          Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+            runtime.model.reasoning_effort
         in
         (match
            Runtime_claude_code.run_turn
@@ -996,7 +994,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               | Runtime_claude_code.Unhandled_exception _ ) as error) ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
-        (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path () with
+        (match Runtime_verification_codex_home.prepare
+          ~source_home:(Runtime_official_account.home execution.account_home) ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
@@ -1005,6 +1004,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         let config =
           { (Runtime_codex_app_server.default_config ()) with
             cli_path = execution.cli_path
+          ; account_home = Runtime_official_account.Captured execution.account_home
           ; isolated_home = Some isolated_home
           ; model = execution.model
           ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)

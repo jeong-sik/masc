@@ -23,12 +23,6 @@ type provider_kind = Provider_kind.t =
   | Glm
   (** ZhipuAI GLM native: OpenAI_compat wire format + JWT auth + GLM error parsing. @since 0.83.0 *)
 
-(** Default HTTP request path for a given provider kind.
-    Single source of truth shared by [make] and direct record-literal
-    callers; pin the [kind] and the [request_path] together via this
-    helper to avoid the two fields drifting out of sync. *)
-val request_path_default_for_kind : provider_kind -> string
-
 (** Authentication is independent of the inference wire. Vertex uses the
     Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
 type auth_scheme = Provider_default | Bearer_token
@@ -40,6 +34,15 @@ type credential_source =
 
 type request_policy_snapshot
 (** Internal request-owned catalog resolution, including absent entries. *)
+
+type provider_authentication = No_auth | Api_key | Setup_token
+
+type provider_identity = private
+  { authentication : provider_authentication
+  ; credential_scope : string option
+  }
+(** Attribution facts from the admitted provider selection. No credential
+    material or mutable catalog handle is retained here. *)
 
 type t =
   { kind : provider_kind
@@ -380,6 +383,12 @@ val provider_reference : t -> Model_catalog.provider_reference
     including [None]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
 
+val pricing_source : t -> Pricing.source
+(** Read request-owned price authority from a matching policy snapshot. An
+    unfrozen config resolves its first source from the current catalog; request
+    preparation freezes it before dispatch. Endpoint changes retain authority;
+    provider/kind/model changes invalidate the old request snapshot. *)
+
 type capability_source = Model_capability | Provider_default_capability
 
 val resolve_request_capabilities : t -> Capabilities.capabilities * capability_source
@@ -395,8 +404,24 @@ val resolve_request_capabilities : t -> Capabilities.capabilities * capability_s
 
 
 val with_request_policy : Capabilities.request_policy -> t -> t
-(** Install an already resolved policy, including absent facts, for this exact
-    kind/provider/model identity. Does not read global state or alter overrides. *)
+(** Attach an already selected policy, preserving existing provider identity
+    when it still matches. This does not look up any catalog or credential. *)
+
+val with_binding_policy
+  :  authentication:provider_authentication
+  -> credential_scope:string option
+  -> Capabilities.request_policy
+  -> t
+  -> t
+(** Attach the admitted binding's policy and attribution facts together.
+    Requires an explicit canonical [provider_id]. This is not a lookup;
+    the caller supplies facts from its already selected declaration. *)
+
+val selected_provider_identity : t -> provider_identity option
+(** Read only selection-owned authentication and credential scope. Changing
+    [provider_id] or [kind] invalidates that selection. Model or endpoint
+    overrides do not change provider identity. An unselected config never
+    acquires attribution facts from a later global catalog. *)
 
 val freeze_for_request : t -> t
 (** Capture the catalog resolution for this request without changing explicit

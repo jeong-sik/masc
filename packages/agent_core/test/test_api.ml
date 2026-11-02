@@ -31,7 +31,7 @@ let source_path path =
 let install_repo_model_catalog () =
   let path = source_path "models.toml" in
   match Llm_provider.Model_catalog.load_file path with
-  | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+  | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
   | Error message -> fail (Printf.sprintf "failed to load %s: %s" path message)
 ;;
 

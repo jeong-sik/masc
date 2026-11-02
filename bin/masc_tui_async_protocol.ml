@@ -230,6 +230,10 @@ type image_preparation =
   | Image_worker_busy
   | Image_prepared of (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result
 
+type observer_recovery_origin =
+  | Observer_existing_workspace of Masc.Tui_decode.server_identity
+  | Observer_initial_workspace of local_workspace_paths
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -527,7 +531,7 @@ type async_msg =
       caption : string list;
       page_url : string;
       image_url : string;
-      result : (string, string) result;
+      result : (Masc_tui_image_cache.remote_image, string) result;
     }
       (** A [v]-requested or /image-requested web image, downloaded and
           converted to PNG off the render loop. [request] is the exact pending
@@ -535,13 +539,16 @@ type async_msg =
           request cannot paint, notify another pane, or open its fallback.
           An explicit remote URL belongs to its workspace, independently of
           unrelated peer resource readings.
-          [result] is the PNG bytes
-          ready to draw, or why they could not be produced. [title] is what
+          [result] holds the prepared PNG or character frame, or why it could
+          not be produced. [title] is what
           the screen shows: [v] indents a display title, /image passes the URL
           itself. [image_url] is what was fetched; [page_url] is the link the
           operator chose, and the one a browser gets when drawing fails
           (see [Masc_tui_browser.browser_url]). *)
-  | Keeper_turns_loaded of (string * int) list * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_waiting_loaded of Keeper_waiting_read.request * keeper_waiting_snapshot
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -620,10 +627,10 @@ type async_msg =
       result : (string, string) result;
     }
   | Board_vote_done of board_vote_target * (string, string) result
-  | Goal_transition_done of (string, string) result
-  | Goal_confirmation_submitted of (string, string) result
+  | Goal_transition_done of string * string * string * (string, string) result
+  | Goal_confirmation_submitted of string * string * string * Masc_tui_planning_detail.receipt_authority * (string, string) result
   | Goal_confirmation_loaded of
-      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, string) result
+      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, Masc_tui_planning_detail.confirmation_read_error) result
   | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
@@ -647,6 +654,8 @@ type async_msg =
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
+  | Goal_candle_loaded of
+      string Masc_tui_fetched.request * (unit ref * (string * Candle_goal_observation.t, Masc_tui_types.goal_candle_failure) result, string) result
   | Task_history_loaded of
       string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
@@ -777,12 +786,17 @@ type async_msg =
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Github_token_saved of string * (Yojson.Safe.t, string) result
+  | Observer_session_ready of string
   | Observer_opened of {
       session_id : string;
-      handshake : (Sse_wire.observer_handshake option, string) result;
+      handshake : Sse_wire.observer_handshake option;
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
+  | Observer_retry_due of workspace_authority * unit ref
+  | Observer_recovery_ready of workspace_authority * unit ref * string option
+  | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
+      * observer_recovery_origin * Sse_wire.observer_identity
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -993,7 +1007,7 @@ let rec workspace_message_is_read = function
   | Approvals_summary_loaded _
   | Listen_prepared _
   | Sent_image_ready _
-  | Keeper_turns_loaded _
+  | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Gate_snapshot_loaded _
   | Keeper_gate_settings_loaded _
   | Keeper_tool_modes_loaded _
@@ -1004,7 +1018,7 @@ let rec workspace_message_is_read = function
   | System_logs_loaded _
   | Ask_followup_observed _ | Ask_followup_finished _
   | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded _
-  | Goal_timeline_loaded _
+  | Goal_timeline_loaded _ | Goal_candle_loaded _
   | Task_history_loaded _
   | Verification_evidence_loaded _
   | Keeper_settings_editor_loaded _
@@ -1035,9 +1049,9 @@ let rec workspace_message_is_read = function
   | Resource_read _ | Resource_share_recovery_loaded _ | Resource_diagram_ready _
   | Github_identity_view_loaded _
   | Identity_providers_loaded _
-  | Observer_opened _
+  | Observer_session_ready _ | Observer_opened _
   | Observer_received _
-  | Observer_closed _
+  | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
   | Fleet_stream_view _
   | Fleet_stream_reader_ended _
   | Keeper_chat_dispatch_started _
@@ -1181,7 +1195,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
   | Keeper_tool_approvals_loaded _ | Listen_prepared _ | Resource_diagram_ready _
-  | Keeper_turns_loaded _
+  | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
@@ -1192,7 +1206,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Schedule_wake_history_loaded _ | Keeper_schedules_loaded _ | System_logs_loaded _
   | Schedule_cancel_done _ | Verification_verdict_done _ | Harness_label_done _
   | Chat_call_loaded _ | Board_attachment_loaded _ | Board_attachment_prepared _
-  | Keeper_calls_loaded _ | Goal_timeline_loaded _
+  | Keeper_calls_loaded _ | Goal_timeline_loaded _ | Goal_candle_loaded _
   | Task_history_loaded _ | Task_cancel_done _ | Verification_evidence_exported _
   | Verification_evidence_loaded _ | Keeper_settings_editor_loaded _
   | Keeper_config_view_loaded _ | Keeper_items_loaded _ | Keeper_sandbox_view_loaded _
@@ -1212,7 +1226,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _ | Account_login_event _ | Account_login_json _
   | Account_login_removal _ | Github_login_lines _ | Github_login_finished _
-  | Github_token_saved _ | Observer_opened _ | Observer_received _ | Observer_closed _
+  | Github_token_saved _ | Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
   | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
   | Task_creation_read_done _ | Keeper_queue_action_received _
@@ -1221,6 +1235,40 @@ let workspace_message_admitted state ~authority ~reading message =
   workspace_reply_admitted state ~authority ~reading
     ~kind:(if workspace_message_is_read message
       then Workspace_observation else Workspace_operation_outcome)
+
+let observer_retry_owned state ~authority expected =
+  authority = state.workspace_authority
+  && match state.observer_retry_owner, state.observer with
+     | Some current, (Observer_closed_before_answer _ | Observer_closed_after_live _) ->
+         current == expected
+     | None, _ | Some _, (Observer_off | Observer_opening | Observer_live _) -> false
+
+let observer_recovery_owned state ~authority expected =
+  authority = state.workspace_authority
+  && match state.observer_recovery_owner, state.workspace_identity, state.server_identity with
+     | Some current, Workspace_identity_match_unconfirmed _, Some _
+     | Some current, Workspace_identity_unread, None -> current == expected
+     | None, _, _
+     | Some _, (Workspace_identity_match | Workspace_identity_mismatch _), _
+     | Some _, Workspace_identity_match_unconfirmed _, None
+     | Some _, Workspace_identity_unread, Some _ -> false
+
+let observer_recovery_identity_owned state ~authority ~owner ~live ~instance ~origin =
+  !live && observer_recovery_owned state ~authority owner
+  && match origin, state.workspace_identity, state.server_identity, state.observer_scope_binding with
+     | Observer_existing_workspace expected, Workspace_identity_match_unconfirmed _,
+       Some current, Observer_scope_bound previous ->
+         expected.Masc.Tui_decode.sid_state_ready <> Some false
+         && String.equal previous instance
+         && server_workspace_matches ~expected:(Some expected) (Ok current)
+     | Observer_initial_workspace expected, Workspace_identity_unread, None, Observer_scope_unbound ->
+         state.local_workspace_paths = Some expected
+         && not (Canonical_path.is_empty expected.lw_base_path)
+         && not (Canonical_path.is_empty expected.lw_masc_root)
+     | (Observer_existing_workspace _ | Observer_initial_workspace _),
+       (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+       | Workspace_identity_match | Workspace_identity_mismatch _), _,
+       (Observer_scope_unbound | Observer_scope_bound _ | Observer_scope_retired) -> false
 
 (* Capture the read intent while the exact effect owner is still Loading.
    The UI applies the receipt first, then retains or dispatches this read. *)
@@ -1297,7 +1345,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
     | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
-    | Image_render_ready _ | Keeper_turns_loaded (_, _)
+    | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
     | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
     | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
@@ -1310,7 +1358,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
     | System_logs_loaded _ | Schedule_cancel_done (_, _)
     | Verification_verdict_done _ | Harness_label_done _
-    | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+    | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
     | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
     | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -1339,7 +1387,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
-    | Observer_opened _ | Observer_received (_, _) | Observer_closed _
+    | Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
     | Fleet_stream_view _ | Fleet_stream_reader_ended _
     | Task_dispatch_completed _ -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
@@ -1435,7 +1483,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)
   | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
-  | Image_render_ready _ | Keeper_turns_loaded (_, _)
+  | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)
   | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
@@ -1448,7 +1496,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
   | System_logs_loaded _ | Schedule_cancel_done (_, _)
   | Verification_verdict_done _ | Harness_label_done _
-  | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+  | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
   | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
   | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -1476,6 +1524,6 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Identity_disconnected (_, _, _)
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
-  | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Fleet_stream_view _
+  | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
+  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _
   | Fleet_stream_reader_ended _ | Task_dispatch_completed _ -> message

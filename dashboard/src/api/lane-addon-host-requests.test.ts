@@ -43,6 +43,7 @@ describe('original worker host request observations', () => {
     { kind: 'exact_record_failed', request_id: 'original-request', detail: 'store unavailable' },
     { kind: 'ask_record_failed', request_id: 'original-question', detail: 'store unavailable' },
     { kind: 'no_exact_runner' },
+    { kind: 'no_web_search_runner' },
   ])('retains the actual host cycle stop without converting it to a result: %j', issue => {
     const cycle = { cycles: 1, waiting: [], issue }
     expect(snapshot(cycle).instances[0]?.host_requests).toEqual({ kind: 'observed', cycle })

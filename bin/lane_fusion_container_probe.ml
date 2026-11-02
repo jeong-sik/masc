@@ -74,13 +74,12 @@ let run ~repo_root ~output_dir ~head_sha =
       let old_context = Eio_context.snapshot_state () in
       let old_runtime = Runtime.For_testing.snapshot () in
       let old_startup = Runtime_startup_state.get () in
-      let old_catalog = Llm_provider.Model_catalog.global () in
+      let old_catalog = Llm_provider.Catalog_snapshot.current () in
       Fun.protect ~finally:(fun () ->
         Eio_context.restore_state old_context;
         Runtime.For_testing.restore old_runtime;
         Runtime_startup_state.set old_startup;
-        match old_catalog with None -> Llm_provider.Model_catalog.clear_global ()
-          | Some catalog -> Llm_provider.Model_catalog.set_global catalog) (fun () ->
+        Llm_provider.Catalog_snapshot.publish old_catalog) (fun () ->
       (* Probe controls include prerequisite and release-time Docker calls, so
          they need their own qualification deadline outside the scenario bound.
          The process switch kills and reaps an interrupted CLI child; draining
@@ -251,7 +250,10 @@ let run ~repo_root ~output_dir ~head_sha =
           write catalog_path (String.concat "\n" (List.map (fun (provider,_) -> Printf.sprintf
             "[[models]]\nmodel_id=\"container-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=256\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n"
             (installation_id provider)) providers));
-          Llm_provider.Model_catalog.load_file catalog_path |> require |> Llm_provider.Model_catalog.set_global;
+          let models = Llm_provider.Model_catalog.load_file catalog_path |> require in
+          Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some models) ~providers:None
+          |> Result.map_error Llm_provider.Catalog_snapshot.error_to_string
+          |> require |> Llm_provider.Catalog_snapshot.publish;
           let runtime_path = Filename.concat root "runtime.toml" in
           let runtime = "[runtime]\ndefault=\"panel-a.sample\"\n"
             ^ String.concat "\n" (List.map (fun (provider,port) -> let name = installation_id provider in

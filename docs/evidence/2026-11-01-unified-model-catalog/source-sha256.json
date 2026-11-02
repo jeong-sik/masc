@@ -1,0 +1,132 @@
+{
+  "candidate_head": "c895615a9bfe6b885cb47a27b9ea80b095d80242",
+  "inputs": [
+    {
+      "path": "lib/runtime/runtime_inference.ml",
+      "executed_sha256": "f039cf9607f02af603ca7ee01984875305bac938a6f42c3eb30e2d3d686d7c81",
+      "current_sha256": "f039cf9607f02af603ca7ee01984875305bac938a6f42c3eb30e2d3d686d7c81",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/capabilities.ml",
+      "executed_sha256": "2afddfec7f83184e56f50abcdecd97baeb965f3889bce248991ce8034f00d40a",
+      "current_sha256": "2afddfec7f83184e56f50abcdecd97baeb965f3889bce248991ce8034f00d40a",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/capabilities.mli",
+      "executed_sha256": "f50fb5a1c9c745b61d8ef32dc4f74c9ba5eb5fbd983208ead3ccea98e80da913",
+      "current_sha256": "f50fb5a1c9c745b61d8ef32dc4f74c9ba5eb5fbd983208ead3ccea98e80da913",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/capability_manifest.ml",
+      "executed_sha256": "f0132b02edd687230e3ddf240110741ba0c76ef2eb6d13254f4a9e0465137456",
+      "current_sha256": "f0132b02edd687230e3ddf240110741ba0c76ef2eb6d13254f4a9e0465137456",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/capability_manifest.mli",
+      "executed_sha256": "733df9860c521111e3b54ac22e322ae852ba3072dc1d4463ca42ec6e2dfa4f46",
+      "current_sha256": "733df9860c521111e3b54ac22e322ae852ba3072dc1d4463ca42ec6e2dfa4f46",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/exact_output_catalog_binding.ml",
+      "executed_sha256": "3f90fa4da07a67592b383e7ff66068d417c8818c43b792de5ac7d12655680b2d",
+      "current_sha256": "3f90fa4da07a67592b383e7ff66068d417c8818c43b792de5ac7d12655680b2d",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/model_catalog.ml",
+      "executed_sha256": "b3415ec27e0e739726c597d7631627035f6526a80365efe2cad532723800d87b",
+      "current_sha256": "b3415ec27e0e739726c597d7631627035f6526a80365efe2cad532723800d87b",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/model_catalog.mli",
+      "executed_sha256": "9ee5c83ed86dbe6b8869c5612fb92783ba40d4c8ab38613c030eaa43247a286d",
+      "current_sha256": "9ee5c83ed86dbe6b8869c5612fb92783ba40d4c8ab38613c030eaa43247a286d",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/dune",
+      "executed_sha256": "b25eeb5d4b589daec7763722cbe610701f59daca5fceeff80874e09cff996e5c",
+      "current_sha256": "b25eeb5d4b589daec7763722cbe610701f59daca5fceeff80874e09cff996e5c",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_backend_gemini.ml",
+      "executed_sha256": "9c1220e20aaa870e10c20b6d8a4b09bee4199e4613df30f25a2765635067b45b",
+      "current_sha256": "9c1220e20aaa870e10c20b6d8a4b09bee4199e4613df30f25a2765635067b45b",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_capabilities.ml",
+      "executed_sha256": "8d2ecdbc2eb1c7fbec91a0f7241899b293147161b983c19836b5aacc6125d3cd",
+      "current_sha256": "8d2ecdbc2eb1c7fbec91a0f7241899b293147161b983c19836b5aacc6125d3cd",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_cohere_schema_wire.ml",
+      "executed_sha256": "c1b643e91b0f3256328312025b681bb62a5e52e107f76b9708e4ef44fc25c536",
+      "current_sha256": "c1b643e91b0f3256328312025b681bb62a5e52e107f76b9708e4ef44fc25c536",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_model_catalog_composition.ml",
+      "executed_sha256": "37b9fc4d6954a07997f61ea447de5a1dfc876681d468955dd20be8e4314d743c",
+      "current_sha256": "37b9fc4d6954a07997f61ea447de5a1dfc876681d468955dd20be8e4314d743c",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_model_catalog_default.ml",
+      "executed_sha256": "be3c406145ca4155b1227f9b7d8adcf0d2483bf6f1059103ac6ae6872c3bd27a",
+      "current_sha256": "cef49f1ac0477ea1b89d86899f9cdd39b7928e2490bd753b41e18a92a158fc25",
+      "matches_executed": false
+    },
+    {
+      "path": "packages/agent_core/test/test_provider_config.ml",
+      "executed_sha256": "d8b039926cd8f79916139bd6e4469f2134232b6fc84ac537c0803de2e4d6d5ae",
+      "current_sha256": "d8b039926cd8f79916139bd6e4469f2134232b6fc84ac537c0803de2e4d6d5ae",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_responses_reasoning_content.ml",
+      "executed_sha256": "e9887b03e6337e97e8886fc13ab5450a38a9ce4bb08c46604926fa9aaca618ab",
+      "current_sha256": "e9887b03e6337e97e8886fc13ab5450a38a9ce4bb08c46604926fa9aaca618ab",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_snapshot_provider_serialization.ml",
+      "executed_sha256": "b472ed08a5090cec33fc11a872d50917750e33cb25a5e4fa4221261b7581b75e",
+      "current_sha256": "b472ed08a5090cec33fc11a872d50917750e33cb25a5e4fa4221261b7581b75e",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/test_thinking_control_dialects.ml",
+      "executed_sha256": "33f3b8411d1030dd714f3d167602c8ca1130a8141ea095b026dd7a2e4d1b6c83",
+      "current_sha256": "33f3b8411d1030dd714f3d167602c8ca1130a8141ea095b026dd7a2e4d1b6c83",
+      "matches_executed": true
+    },
+    {
+      "path": "test/test_runtime_config_validity.ml",
+      "executed_sha256": "8629deb62c83ccde72e7210f8fbea363da479970a74995e72ca5b794d910b7f6",
+      "current_sha256": "8629deb62c83ccde72e7210f8fbea363da479970a74995e72ca5b794d910b7f6",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/models.toml",
+      "executed_sha256": "98715a31795637c7736809e419d0075f5620d0d7f44db93a15d6bdaaad7d6145",
+      "current_sha256": "98715a31795637c7736809e419d0075f5620d0d7f44db93a15d6bdaaad7d6145",
+      "matches_executed": true
+    },
+    {
+      "path": "packages/agent_core/test/model_catalog_test_support.ml",
+      "executed_sha256": "7bd9f46ac8422c7a6b1ba978e92083184c966edc00058235d2d5b043d9c42f9e",
+      "current_sha256": "7bd9f46ac8422c7a6b1ba978e92083184c966edc00058235d2d5b043d9c42f9e",
+      "matches_executed": true
+    }
+  ],
+  "post_execution_source_delta": "Only the introductory normal comment in test_model_catalog_default.ml changes after candidate c895615; no declarations, expressions or assertions change."
+}

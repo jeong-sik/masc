@@ -4,7 +4,7 @@
  (name masc_board)
  (public_name masc.masc_board)
  (wrapped false)
- (modules board_types)
+ (modules board_posts_guard_json board_workspace_binding board_types)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
@@ -14,9 +14,12 @@
  ; in the masc umbrella, which already depends on masc_board.
  (libraries
   yojson
+  fs_compat
   re
   re.pcre
   eio
+  eio.unix
+  unix
   masc_random_id
   masc.config
   masc_core

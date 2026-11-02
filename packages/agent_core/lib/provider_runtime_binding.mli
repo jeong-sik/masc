@@ -10,7 +10,7 @@
 type provider_kind = Llm_provider.Provider_config.provider_kind
 type capabilities = Llm_provider.Capabilities.capabilities
 
-type auth =
+type auth = Llm_provider.Provider_config.provider_authentication =
   | No_auth
   | Api_key
   | Setup_token
@@ -27,43 +27,34 @@ type t = private
   ; discovery_timeout_s : float option
     (** Explicit total deadline for one discovery HTTP request. *)
   ; max_context : int option
-  ; capabilities : capabilities
+  ; capabilities : capabilities option
+    (** [None] is an explicitly models-only provider: inspect the selected exact
+        model policy rather than inventing a provider-wide capability record. *)
   ; available : bool
   ; credential_scope : string option
-  ; declarations : Llm_provider.Provider_declarations.t
+  ; declarations : Llm_provider.Catalog_snapshot.t
     (** Immutable catalog selection owning this binding; construction and record
         updates are restricted to this module. *)
   }
 
-val all_from_declarations : Llm_provider.Provider_declarations.t -> t list
+val all_from_declarations : Llm_provider.Catalog_snapshot.t -> t list
 (** Project exactly one admitted provider snapshot. Credentials are observed
     at this edge; model request policy is not resolved by metadata projection. *)
 
-val find_in_declarations : Llm_provider.Provider_declarations.t -> string -> t option
+val find_in_declarations : Llm_provider.Catalog_snapshot.t -> string -> t option
 (** Select id or alias from the same immutable snapshot used for listing. *)
 
-(** Return runtime bindings from one captured declaration snapshot. Invalid
-    declarations raise the typed admission error rather than fallback. *)
+(** Return runtime bindings from one already admitted whole publication. *)
 val all : unit -> t list
 
 (** Find a runtime binding by provider id or alias. Lookup is
     case-insensitive and whitespace-trimmed. *)
 val find : string -> t option
 
-(** Find a runtime binding only from the explicitly installed provider-catalog
-    overlay. Embedded and registry providers are intentionally excluded. *)
-val find_catalog : string -> t option
-
-(** Resolve the runtime binding explicitly carried by a concrete provider
-    config. Provider aliases are canonicalized through {!find}. A config with
-    no [provider_id], or an unknown explicit id, has no binding; endpoint URLs,
-    request paths, and model ids are never reverse-matched. *)
-val binding_for_provider_config : Llm_provider.Provider_config.t -> t option
-
-(** Runtime provider id for a concrete provider config. A known explicit id or
-    alias resolves to the canonical binding id; an unknown explicit id remains
-    an opaque normalized id. Configs without an id use only their typed wire
-    kind. Endpoint URLs, request paths, and model ids are never interpreted. *)
+(** Runtime provider id already carried by a concrete config. Binding selection
+    resolves aliases before {!to_provider_config}; raw ids remain opaque and
+    normalized. Configs without an id use only their typed wire kind. This
+    projection never reads current catalogs or re-resolves aliases. *)
 val provider_id_of_provider_config : Llm_provider.Provider_config.t -> string
 
 (** Project the config-owned capabilities used by completion admission.
@@ -84,8 +75,9 @@ val capabilities_for_provider_config
     invents a provider-specific model or expands aliases. *)
 val resolve_model : t -> requested_model:string option -> (string, Error.t) result
 
-(** Convert a binding into a config with its selection-owned model policy
-    already frozen, before any later global catalog replacement. *)
+(** Convert a binding into a config with its selection-owned model policy,
+    authentication and credential scope frozen before any later global
+    catalog replacement. *)
 val to_provider_config
   :  ?model:string
   -> t

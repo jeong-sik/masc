@@ -464,7 +464,7 @@ let respond_keeper_tool_json ?config ?(project = Fun.id) ?(kind = Pool_work.Cpu)
    this bound says so instead of returning a short list that looks complete. *)
 let keeper_list_max_limit = 200
 
-(** GET /api/v1/gate/keepers?limit=200&detailed=true
+(** GET /api/v1/gate/keepers?limit=200&detailed=true&fresh=true
 
     Authenticated keeper discovery for channel-side connectors. [limit] only
     narrows: it is clamped to [1, keeper_list_max_limit] and defaults to the
@@ -494,13 +494,26 @@ let handle_gate_keepers ~sw ~clock state request reqd =
       respond_json_value_with_cors ~status:`Conflict request reqd
         (Channel_gate.error_json "Server workspace changed; refresh its identity before reading Keepers")
   | Ok _ ->
+  let fresh =
+    Uri.query (Uri.of_string request.Httpun.Request.target)
+    |> List.filter (fun (key, _) -> String.equal key "fresh")
+    |> function
+       | [] | [ (_, [ "false" ]) ] -> Some false
+       | [ (_, [ "true" ]) ] -> Some true
+       | _ -> None
+  in
+  match fresh with
+  | None ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "fresh must be one boolean value")
+  | Some fresh ->
   let limit =
     int_query_param request "limit" ~default:keeper_list_max_limit
     |> fun value -> max 1 (min keeper_list_max_limit value)
   in
   let detailed = bool_query_param request "detailed" ~default:true in
   let args =
-    `Assoc [ ("limit", `Int limit); ("detailed", `Bool detailed) ]
+    `Assoc [ ("limit", `Int limit); ("detailed", `Bool detailed); ("fresh", `Bool fresh) ]
   in
   let project =
     match authorize_token_bound_permission_request ~base_path:config.base_path

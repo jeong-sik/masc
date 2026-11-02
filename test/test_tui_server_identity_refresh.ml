@@ -6,7 +6,7 @@ let local_paths = Masc_tui_types.local_workspace_paths_of_base_path
 let identity base_path : Tui_decode.server_identity =
   { Tui_decode.sid_version = "0.24.0"
   ; sid_binary_commit = "abc1234"
-  ; sid_binary_commit_age_s = Some 10.
+  ; sid_binary_commit_age_s = Some 10.; sid_runtime_instance_id = None
   ; sid_base_path = canonical base_path
   ; sid_masc_root = canonical (base_path ^ "/.masc")
   ; sid_executable_in_worktree = Some false
@@ -16,6 +16,128 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_gc = None
   ; sid_scheduler = None
   }
+
+let test_goal_candle_read_rejects_stale_authority_and_refusals () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"goal-candle" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  let instance name = { (identity "/workspace/a") with sid_runtime_instance_id = Some name } in
+  state.server_identity <- Some (instance "server-a");
+  let owner = ref () in
+  Alcotest.(check bool) "first authority mismatch can revalidate" true
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  Alcotest.(check bool) "confirmation mismatch can revalidate once" true
+    (take_goal_confirmation_revalidation state ~goal_id:"goal-a" ~owner);
+  Alcotest.(check bool) "confirmation mismatch cannot spin" false
+    (take_goal_confirmation_revalidation state ~goal_id:"goal-a" ~owner);
+  clear_goal_confirmation_revalidation state ~goal_id:"goal-a";
+  Alcotest.(check bool) "explicit confirmation retry can revalidate" true
+    (take_goal_confirmation_revalidation state ~goal_id:"goal-a" ~owner);
+  withdraw_detail_histories state;
+  Alcotest.(check bool) "workspace withdrawal keeps the revalidation receipt" false
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  Alcotest.(check bool) "same mismatch cannot spin" false
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  clear_goal_candle_revalidation state ~goal_id:"goal-a";
+  Alcotest.(check bool) "explicit retry permits one more revalidation" true
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  clear_goal_candle_revalidation state ~goal_id:"goal-a";
+  let observation = Candle_goal_observation.{configuration=Off; ledger=Missing} in
+  let start () = match begin_goal_candle_read state ~goal_id:"goal-a" with
+    | Some request -> request | None -> Alcotest.fail "read did not start" in
+  let view () = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:"goal-a" in
+  let complete request result = complete_goal_candle_read state ~credential_is_current:(fun candidate -> candidate == owner) request result in
+  let first = start () in
+  complete first (Ok (owner, Ok ("server-a", observation)));
+  (match view () with Masc_tui_fetched.Ready (_, "server-a", _) -> () | _ -> Alcotest.fail "first reading absent");
+  let old = start () in
+  (match view () with Masc_tui_fetched.Loading -> () | _ -> Alcotest.fail "refresh retained the prior admin reading");
+  let current = start () in
+  complete old (Ok (owner, Error (Goal_candle_access_denied 403)));
+  (match view () with Masc_tui_fetched.Loading -> () | _ -> Alcotest.fail "retired refusal changed the current read");
+  complete current (Ok (owner, Error (Goal_candle_authority_changed (Some 409))));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "authority change retained old value");
+  let retry = start () in
+  Alcotest.(check bool) "retry is visibly in flight" true (Masc_tui_fetched.in_flight state.goal_candle);
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "retry lost its previous failure");
+  complete retry (Ok (owner, Error (Goal_candle_read_failed "private-alpha")));
+  let first_failure = match view () with
+    | Masc_tui_fetched.Failed detail -> detail
+    | _ -> Alcotest.fail "interrupted response retained admin data" in
+  Alcotest.(check bool) "first failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
+  Alcotest.(check bool) "first unowned detail is absent from state" false
+    (Astring.String.is_infix ~affix:"private-alpha" first_failure);
+  let another = start () in
+  complete another (Ok (owner, Error (Goal_candle_read_failed "secret-beta")));
+  (match view () with
+   | Masc_tui_fetched.Failed detail ->
+     Alcotest.(check bool) "second failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
+     Alcotest.(check bool) "second unowned detail is absent from state" false
+       (Astring.String.is_infix ~affix:"secret-beta" detail);
+     Alcotest.(check string) "unowned details do not alter retained failure" first_failure detail
+   | _ -> Alcotest.fail "another failure retained admin data");
+  state.server_identity <- Some (instance "server-b");
+  let replacement = start () in
+  complete replacement (Ok (owner, Ok ("server-b", observation)));
+  let denied = start () in
+  complete denied (Ok (owner, Error (Goal_candle_access_denied 403)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "access refusal retained old value");
+  let unauthenticated = start () in
+  complete unauthenticated (Ok (owner, Error (Goal_candle_access_denied 401)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "authentication failure retained old value");
+  let late = start () in
+  state.server_identity <- Some (instance "server-c");
+  complete late (Ok (owner, Ok ("server-b", observation)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "old process response was accepted")
+;;
+
+let test_goal_candle_http_status_and_instance_classification () =
+  let open Masc_tui_types in
+  let response status headers = Masc_tui_http.Masc_http_client.{status; headers; body="{\"error\":\"fixture\"}"} in
+  let decode status headers = Masc_tui_http.decode_goal_candle_response (response status headers) in
+  let admission_name, admission_value = Masc.Workspace.read_precondition_admission_header in
+  let headers instance = [admission_name, admission_value; "x-masc-runtime-instance-id", instance] in
+  let early status headers = Masc_tui_http.goal_candle_header_failure ~expected_instance:"server-a" ~status ~headers in
+  Alcotest.(check bool) "authentication headers stop before body" true (early 401 [] = Some (Goal_candle_access_denied 401));
+  Alcotest.(check bool) "forbidden headers stop before body" true (early 403 [] = Some (Goal_candle_access_denied 403));
+  Alcotest.(check bool) "conflict headers stop before body" true (early 409 [] = Some (Goal_candle_authority_changed (Some 409)));
+  Alcotest.(check bool) "rate limit stops before body and keeps status" true (early 429 [] = Some (Goal_candle_http_status 429));
+  Alcotest.(check bool) "new process headers stop before body" true (early 200 (headers "server-b") = Some (Goal_candle_authority_changed None));
+  Alcotest.(check bool) "matching headers permit the body" true (early 200 (headers "server-a") = None);
+  (match early 200 ["x-masc-runtime-instance-id", "server-b"] with
+   | Some (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "unattested headers claimed authority change");
+  Alcotest.(check bool) "forbidden withdraws access" true (decode 403 [] = Error (Goal_candle_access_denied 403));
+  Alcotest.(check bool) "workspace conflict requires authority refresh" true (decode 409 [] = Error (Goal_candle_authority_changed (Some 409)));
+  Alcotest.(check bool) "rate limit status survives without body" true
+    (decode 429 [] = Error (Goal_candle_http_status 429));
+  (match decode 200 [] with Error (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "missing instance accepted");
+  (match decode 200 ["x-masc-runtime-instance-id", "server-a"] with
+   | Ok ("server-a", `Assoc _) -> () | _ -> Alcotest.fail "instance-bound response rejected");
+  (match decode 200 ["x-masc-runtime-instance-id", "server-a"; "X-MASC-RUNTIME-INSTANCE-ID", "server-b"] with
+   | Error (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "duplicate instance accepted")
+;;
+
+let test_goal_confirmation_http_requires_one_matching_instance () =
+  let response headers = Masc_tui_http.Masc_http_client.{status=200; headers; body="{}"} in
+  let decode headers = Masc_tui_http.decode_goal_confirmation_response ~expected_instance:"server-a" (response headers) in
+  let admission = Masc.Workspace.read_precondition_admission_header in
+  Alcotest.(check bool) "matching server is accepted" true
+    (Result.is_ok (decode [admission; "x-masc-runtime-instance-id", "server-a"]));
+  List.iter (fun headers ->
+    Alcotest.(check bool) "missing, different or duplicate server is refused" true (Result.is_error (decode headers)))
+    [[admission]; [admission; "x-masc-runtime-instance-id", "server-b"];
+     [admission; "x-masc-runtime-instance-id", "server-a"; "X-MASC-RUNTIME-INSTANCE-ID", "server-a"]];
+  Alcotest.(check bool) "different server is visible before body" true
+    (Masc_tui_http.goal_confirmation_header_failure ~expected_instance:"server-a" ~status:200
+       ~headers:[admission; "x-masc-runtime-instance-id", "server-b"] = Some Masc_tui_http.Confirmation_server_changed);
+  Alcotest.(check bool) "an HTTP refusal is available before its body" true
+    (Masc_tui_http.goal_confirmation_header_failure ~expected_instance:"server-a" ~status:403 ~headers:[]
+       = Some (Masc_tui_http.Confirmation_status 403));
+  (match Masc_tui_http.goal_confirmation_header_failure ~expected_instance:"server-a" ~status:200
+       ~headers:["x-masc-runtime-instance-id", "server-b"] with
+   | Some (Masc_tui_http.Confirmation_read_failed _) -> ()
+   | None | Some (Masc_tui_http.Confirmation_server_changed | Confirmation_status _) -> Alcotest.fail "unattested server claimed a change")
+;;
 
 let test_keeper_purge_header_and_body_share_workspace () =
   let workspace = identity "/workspace/a" in
@@ -777,6 +899,9 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   Masc_tui_message_input.insert state.msg_input "unsent draft";
   state.keeper_yolo_names <- ["A-keeper"];
   state.keeper_turns_inflight <- true;
+  let keeper_waiting_read, keeper_turns_request = Keeper_waiting_read.start state.keeper_waiting_read in
+  state.keeper_waiting_read <- keeper_waiting_read;
+  Alcotest.(check bool) "keeper-turns read starts" true (Option.is_some keeper_turns_request);
   let browser = Browser_lane_view.create () in
   state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (1, Read)};
   state.keeper_queue_inflight <- ["reading"; "writing"; "mutation-observation"];
@@ -795,7 +920,9 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
     (admitted Workspace_operation_outcome);
   Alcotest.(check bool) "observation stream is cancelled" true !cancelled_observation;
   Alcotest.(check bool) "admitted operation is not cancelled" false !cancelled_write;
-  Alcotest.(check bool) "read-only in-flight slot is released" false state.keeper_turns_inflight;
+  Alcotest.(check bool) "read-only in-flight slot is released" false
+    (Keeper_waiting_read.in_flight state.keeper_waiting_read);
+  Alcotest.(check bool) "independent turns slot is released" false state.keeper_turns_inflight;
   Alcotest.(check string) "draft is preserved" "unsent draft"
     (Masc_tui_message_input.contents state.msg_input);
   Alcotest.(check (list string)) "retained mode rows are preserved" ["A-keeper"] state.keeper_yolo_names;
@@ -2111,6 +2238,133 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
     (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
+let test_observer_retry_retires_with_workspace_read_authority () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  let closed = Observer_closed_before_answer { reason = "closed"; at = 1. } in
+  let owner = ref () in
+  let retry = Masc_tui_async_protocol.Observer_retry_due (authority, owner) in
+  state.observer <- closed;
+  state.observer_retry_owner <- Some owner;
+  Alcotest.(check bool) "closed stream owns its retry" true
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.observer <- Observer_closed_before_answer { reason = "closed"; at = 1. };
+  state.observer_retry_owner <- Some (ref ());
+  Alcotest.(check bool) "an equal later close does not own the earlier retry" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.observer_retry_owner <- Some owner;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a replaced workspace cannot own the earlier retry" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.workspace_authority <- authority;
+  state.observer <- Observer_opening;
+  Alcotest.(check bool) "an opening stream cannot be retried" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  Alcotest.(check bool) "retry is a workspace observation" true
+    (Masc_tui_async_protocol.workspace_message_is_read retry);
+  Alcotest.(check bool) "current workspace admits the retry" true
+    (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry);
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "retired workspace cannot admit the retry" false
+    (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry)
+
+let test_observer_recovery_belongs_to_unconfirmed_workspace () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-recovery" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "unavailable";
+  let authority = state.workspace_authority in
+  let owner = ref () in
+  state.observer_recovery_owner <- Some owner;
+  Alcotest.(check bool) "unconfirmed workspace owns recovery" true
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  let expected = identity "/workspace/a" in
+  let live = ref true in
+  let first = Sse_wire.{instance_id="instance-a"; replay=Fresh} in
+  let next = Sse_wire.{instance_id="instance-b"; replay=Fresh} in
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  let owns_identity () =
+    Masc_tui_async_protocol.observer_recovery_identity_owned state
+      ~authority ~owner ~live ~instance:"instance-a"
+      ~origin:(Masc_tui_async_protocol.Observer_existing_workspace expected) in
+  Alcotest.(check bool) "live scoped stream owns its identity" true (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
+  Alcotest.(check bool) "same epoch retains its authority" true (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some next);
+  Alcotest.(check bool) "different process or epoch rejects old workspace evidence" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
+  Alcotest.(check bool) "old epoch cannot revive retired authority" false (owns_identity ());
+  state.observer_scope_binding <- Observer_scope_unbound;
+  Alcotest.(check bool) "unscoped prior connection cannot authorize recovery" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding None;
+  Alcotest.(check bool) "an unscoped successor retires prior evidence" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  live := false;
+  Alcotest.(check bool) "closed stream cannot authorize identity" false (owns_identity ());
+  live := true;
+  state.server_identity <- Some (identity "/workspace/b");
+  Alcotest.(check bool) "a different workspace rejects old identity" false (owns_identity ());
+  state.server_identity <- Some expected;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "read suspension retains recovery owner" true
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  state.observer_recovery_owner <- Some (ref ());
+  Alcotest.(check bool) "successor owner rejects stale recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "successor owner rejects stale identity" false (owns_identity ());
+  state.observer_recovery_owner <- Some owner;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "successor workspace rejects stale recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "successor workspace rejects stale identity" false (owns_identity ());
+  state.workspace_authority <- authority;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "confirmed workspace no longer owns recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "confirmed workspace rejects late identity" false (owns_identity ())
+
+let test_observer_initial_identity_ownership () =
+  let open Masc_tui_types in
+  let open Masc_tui_async_protocol in
+  let state = create_state ~workspace:"observer-cold" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  let authority = state.workspace_authority in
+  let owner = ref () and live = ref true in
+  let paths = Option.get state.local_workspace_paths in
+  let origin = Observer_initial_workspace paths in
+  state.observer_recovery_owner <- Some owner;
+  let accepted () = observer_recovery_identity_owned state ~authority ~owner ~live
+      ~instance:"instance-a" ~origin in
+  Alcotest.(check bool) "live initial matching workspace may establish authority" true (accepted ());
+  live := false;
+  Alcotest.(check bool) "closed initial stream cannot establish authority" false (accepted ());
+  live := true;
+  state.observer_recovery_owner <- Some (ref ());
+  Alcotest.(check bool) "a replaced initial owner cannot establish authority" false (accepted ());
+  state.observer_recovery_owner <- Some owner;
+  let foreign = Observer_initial_workspace (Option.get (local_paths "/workspace/b")) in
+  Alcotest.(check bool) "foreign local paths cannot establish authority" false
+    (observer_recovery_identity_owned state ~authority ~owner ~live
+       ~instance:"instance-a" ~origin:foreign);
+  state.observer_scope_binding <- Observer_scope_retired;
+  Alcotest.(check bool) "a retired scope cannot be reintroduced as initial" false (accepted ());
+  state.observer_scope_binding <- Observer_scope_unbound;
+  state.server_identity <- Some (identity "/workspace/a");
+  Alcotest.(check bool) "a separate identity observation supersedes the cold path" false (accepted ());
+  state.server_identity <- None;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a later authority rejects a stale initial receipt" false (accepted ())
+
 let test_archive_cache_does_not_cross_equal_stat_files () =
   let first = Filename.temp_file "tui-archive-source-a-" ".json" in
   let second = Filename.temp_file "tui-archive-source-b-" ".json" in
@@ -2133,6 +2387,53 @@ let test_archive_cache_does_not_cross_equal_stat_files () =
       | Error detail -> Alcotest.fail detail in
     Alcotest.(check int) "first archive retains invalid-row evidence" 1 (undecoded first);
     Alcotest.(check int) "second path cannot reuse first archive evidence" 0 (undecoded second))
+
+let test_fresh_local_work_reloads_equal_stat_archive () =
+  let dir = Filename.temp_file "tui-archive-refresh-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let masc = Filename.concat dir ".masc" in
+  let tasks = Filename.concat masc "tasks" in
+  Unix.mkdir masc 0o700;
+  Unix.mkdir tasks 0o700;
+  let backlog = Filename.concat tasks "backlog.json" in
+  let archive = Filename.concat masc "tasks-archive.json" in
+  let write path contents =
+    Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents) in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
+      (match previous_base_path with
+       | Some path -> Unix.putenv "MASC_BASE_PATH" path
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      Sys.remove backlog;
+      Sys.remove archive;
+      Unix.rmdir tasks;
+      Unix.rmdir masc;
+      Unix.rmdir dir)
+    (fun () ->
+      write backlog "{\"tasks\":[],\"last_updated\":\"2026-01-01T00:00:00Z\",\"version\":1}";
+      write archive "{\"tasks\":[0]}";
+      let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+      Unix.utimes archive stamp stamp;
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let observe ?(fresh = false) () =
+          (Masc_tui_loader.read_local_workspace ~fresh dir).lr_tasks_error in
+        let error = Some "1 archived tasks could not be read; the day bars miss them" in
+        Alcotest.(check (option string)) "unreadable archive is visible" error (observe ());
+        let before = Unix.stat archive in
+        write archive "{\"tasks\":[] }";
+        Unix.utimes archive before.Unix.st_atime before.Unix.st_mtime;
+        let after = Unix.stat archive in
+        Alcotest.(check bool) "archive replacement keeps cache stat" true
+          (before.Unix.st_size = after.Unix.st_size
+           && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+        Alcotest.(check (option string)) "ordinary read retains its cache" error (observe ());
+        Alcotest.(check (option string)) "fresh work read clears archive error" None
+          (observe ~fresh:true ())))
 
 let test_local_cache_cancel_releases_source_for_followup () =
   let exception Read_replaced in
@@ -5972,10 +6273,355 @@ let test_queue_detail_respects_source_reading () =
     {current with qp_detail=Some event};
   check "successful server messages remain available" (Queue_detail_ready (server, server_row)) current
 
+let test_keeper_turns_event_demand_coalesces () =
+  let open Masc_tui_types in
+  let module Read = Keeper_waiting_read in
+  let state = Read.note_change Read.idle in
+  let state, first = Read.start state in
+  let first = Option.get first in
+  Alcotest.(check bool) "waiting remains unavailable while the read runs" true
+    (Read.awaiting_change state);
+  let state = Read.note_change (Read.note_change state) in
+  let state, overlapping = Read.start state in
+  Alcotest.(check bool) "an in-flight read is not duplicated" true (Option.is_none overlapping);
+  let state, follow_up = Option.get (Read.finish state first ~observed:true ~success:true) in
+  Alcotest.(check bool) "changes during the read request one follow-up" true follow_up;
+  let state, second = Read.start state in
+  let second = Option.get second in
+  let state, follow_up = Option.get (Read.finish state second ~observed:true ~success:true) in
+  Alcotest.(check bool) "the follow-up settles the demand" false follow_up;
+  Alcotest.(check bool) "no change remains pending" false (Read.change_pending state)
+;;
+
+let test_keeper_turns_event_demand_survives_failure_and_suspension () =
+  let open Masc_tui_types in
+  let module Read = Keeper_waiting_read in
+  let state, first = Read.start (Read.note_change Read.idle) in
+  let first = Option.get first in
+  let state, follow_up = Option.get (Read.finish state first ~observed:false ~success:false) in
+  Alcotest.(check bool) "a failed launch does not immediately retry" false follow_up;
+  Alcotest.(check bool) "a failed launch retains demand" true (Read.change_pending state);
+  let state, failed = Read.start state in
+  let failed = Option.get failed in
+  let state, follow_up = Option.get (Read.finish state failed ~observed:false ~success:false) in
+  Alcotest.(check bool) "a failed read does not spin" false follow_up;
+  Alcotest.(check bool) "a failed read retains demand" true (Read.change_pending state);
+  let state, retired = Read.start state in
+  let retired = Option.get retired in
+  let state = Read.suspend state in
+  Alcotest.(check bool) "suspension retains the in-flight demand" true (Read.change_pending state);
+  let state, current = Read.start state in
+  let current = Option.get current in
+  Alcotest.(check bool) "retired completion cannot release the new read" true
+    (Option.is_none (Read.finish state retired ~observed:true ~success:true));
+  let state, follow_up = Option.get (Read.finish state current ~observed:true ~success:true) in
+  Alcotest.(check bool) "successful retry needs no follow-up" false follow_up;
+  Alcotest.(check bool) "successful retry clears demand" false (Read.change_pending state);
+  let state = Read.clear (Read.note_change state) in
+  Alcotest.(check bool) "workspace replacement clears old demand" false (Read.change_pending state)
+;;
+
+let test_keeper_turns_waiting_completeness () =
+  let open Masc_tui_types in
+  let open Tui_decode in
+  let turn = { ktr_keeper_name = "alpha"; ktr_chat_control_token = None; ktr_state = Keeper_turn_idle } in
+  let row = { kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle; kwr_waiting_count = 0;
+              kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  let projection waiting = Ok Masc.Tui_decode.{ rows = [turn]; waiting } in
+  let complete = keeper_turns_projection_complete ~current:(fun _ -> true) in
+  Alcotest.(check bool) "complete fleet waiting is authoritative" true
+    (complete (projection (Keeper_waiting_observed [row])));
+  Alcotest.(check bool) "missing keeper waiting is incomplete" false
+    (complete (projection (Keeper_waiting_observed [])));
+  let error = { kwi_source = Waiting_source_read_error; kwi_waiting_on = "queue";
+                kwi_what = "failed"; kwi_wake_producer = Wake_read_model_reader;
+                kwi_since = None; kwi_due_at = None; kwi_next_action = "retry" } in
+  Alcotest.(check bool) "partial keeper read failure is incomplete" false
+    (complete (projection (Keeper_waiting_observed [{row with kwr_waiting_on = [error]}])));
+  Alcotest.(check bool) "retired control generation is incomplete" false
+    (keeper_turns_projection_complete ~current:(fun _ -> false)
+       (projection (Keeper_waiting_observed [row])));
+  Alcotest.(check bool) "missing fleet waiting is not authoritative" false
+    (complete (projection (Keeper_waiting_fleet_unreported [row])));
+  Alcotest.(check bool) "unavailable waiting is not authoritative" false
+    (complete (projection (Keeper_waiting_unavailable (Keeper_waiting_invalid "invalid"))));
+  Alcotest.(check bool) "transport failure is not authoritative" false
+    (complete (Error "unavailable"))
+;;
+
+let test_waiting_event_rejects_old_poll_receipts () =
+  let module Read = Masc_tui_types.Keeper_waiting_read in
+  let before = Read.poll_receipt Read.idle in
+  let changed = Read.note_change Read.idle in
+  Alcotest.(check bool) "an event retires an earlier poll" false (Read.accepts_poll changed before);
+  let reading, request = Read.start changed in
+  let during = Read.poll_receipt reading in
+  Alcotest.(check bool) "a concurrent post-event poll may repair waiting" true (Read.accepts_poll reading during);
+  let settled, _ = Option.get (Read.finish reading (Option.get request) ~observed:true ~success:true) in
+  let settled = Read.publish_event settled ~observed:true in
+  Alcotest.(check bool) "a poll cannot overwrite a completed event read" false (Read.accepts_poll settled during);
+  Alcotest.(check bool) "the rejected overlapping poll requires a later observation" true
+    (Read.poll_needs_reconciliation settled during);
+  Alcotest.(check bool) "a poll started before the event stays retired" false (Read.accepts_poll settled before);
+  Alcotest.(check bool) "a subsequent poll may apply waiting" true
+    (Read.accepts_poll settled (Read.poll_receipt settled))
+;;
+
+let test_waiting_failure_can_recover_through_new_poll () =
+  let module Read = Masc_tui_types.Keeper_waiting_read in
+  let reading, request = Read.start (Read.note_change Read.idle) in
+  let failed, follow_up = Option.get (Read.finish reading (Option.get request)
+    ~observed:false ~success:false) in
+  Alcotest.(check bool) "failure retains demand without spinning" true
+    (Read.change_pending failed && not follow_up);
+  let receipt = Read.poll_receipt failed in
+  Alcotest.(check bool) "a post-failure poll may repair waiting" true (Read.accepts_poll failed receipt);
+  let repaired = Read.settle_poll failed ~success:true in
+  Alcotest.(check bool) "a complete poll clears retry demand" false (Read.needs_revalidation repaired);
+  let changed = Read.note_change failed in
+  Alcotest.(check bool) "a newer event retires the poll" false (Read.accepts_poll changed receipt);
+  let event_reading, event_request = Read.start changed in
+  let concurrent = Read.poll_receipt event_reading in
+  Alcotest.(check bool) "a concurrent poll can complete first" true
+    (Read.accepts_poll event_reading concurrent);
+  let poll_won = Read.settle_poll event_reading ~success:true in
+  Alcotest.(check bool) "the old event result cannot overwrite the completed poll" false
+    (Read.accepts_event poll_won (Option.get event_request));
+  Alcotest.(check bool) "the rejected event read requires a later observation" true
+    (Read.event_needs_reconciliation poll_won (Option.get event_request));
+  let partial_poll = Read.settle_poll event_reading ~success:false in
+  Alcotest.(check bool) "a partial poll retires the older event result" false
+    (Read.accepts_event partial_poll (Option.get event_request));
+  Alcotest.(check bool) "a partial poll retains the unfinished demand" true
+    (Read.change_pending partial_poll)
+;;
+
+let test_reconciliation_does_not_compete_with_periodic_reads () =
+  let module Read = Masc_tui_types.Keeper_waiting_read in
+  let competing, older_event = Read.start (Read.note_change Read.idle) in
+  let partial_poll = Read.settle_poll competing ~success:false in
+  let older_event = Option.get older_event in
+  Alcotest.(check bool) "the partial poll retires the older event" false
+    (Read.accepts_event partial_poll older_event);
+  Alcotest.(check bool) "the retired result requires reconciliation" true
+    (Read.event_needs_reconciliation partial_poll older_event);
+  let waiting, follow_up = Option.get (Read.finish partial_poll older_event
+    ~observed:true ~success:true) in
+  Alcotest.(check bool) "partial poll demand survives the retired completion" true follow_up;
+  let started_before_exclusive = Read.poll_receipt waiting in
+  let exclusive = Read.exclusive waiting in
+  Alcotest.(check bool) "exclusive ownership retires an already-started waiting poll" false
+    (Read.accepts_poll exclusive started_before_exclusive);
+  let reconciliation = Read.exclusive (Read.note_change waiting) in
+  let reconciliation, request = Read.start reconciliation in
+  Alcotest.(check bool) "the partial-poll follow-up excludes competing waiting polls" true
+    (Option.is_none (Read.poll_receipt reconciliation));
+  ignore (Read.finish reconciliation (Option.get request) ~observed:true ~success:true);
+  let active, request = Read.start (Read.exclusive (Read.note_change Read.idle)) in
+  Alcotest.(check bool) "periodic waiting is retired during reconciliation" true
+    (Option.is_none (Read.poll_receipt active));
+  let active = Read.note_change active in
+  let active, follow_up = Option.get (Read.finish active (Option.get request)
+    ~observed:true ~success:false) in
+  Alcotest.(check bool) "a concurrent change needs a follow-up" true follow_up;
+  let next, request = Read.start active in
+  Alcotest.(check bool) "the follow-up keeps exclusive waiting ownership" true
+    (Option.is_none (Read.poll_receipt next));
+  let finished, follow_up = Option.get (Read.finish next (Option.get request)
+    ~observed:true ~success:true) in
+  Alcotest.(check bool) "a settled reconciliation terminates" false follow_up;
+  Alcotest.(check bool) "subsequent periodic reads may observe waiting again" true
+    (Option.is_some (Read.poll_receipt finished))
+;;
+
+let test_waiting_row_epochs_isolate_other_keepers_and_controls () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let beta = { alpha with Tui_decode.k_name = "beta" } in
+  let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                               ktr_state = Keeper_turn_idle } in
+  let row name = Tui_decode.{ kwr_keeper_name = name; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keepers <- [alpha; beta];
+  note_keeper_waiting_change state Waiting_all;
+  let before = capture_keeper_waiting_snapshot state in
+  note_keeper_waiting_change state (Waiting_keepers ["beta"]);
+  let current = keeper_waiting_row_current state before in
+  let result = Ok Tui_decode.{ rows = [turn "alpha"; turn "beta"];
+    waiting = Keeper_waiting_observed [row "alpha"; row "beta"] } in
+  Alcotest.(check bool) "the unaffected alpha row is current" true (current (turn "alpha"));
+  Alcotest.(check bool) "the changed beta row is retired" false (current (turn "beta"));
+  Alcotest.(check (list string)) "only beta remains unverified" ["beta"]
+    (keeper_waiting_unverified_after state ~current
+       ~current_name:(keeper_waiting_name_current state before) result);
+  let stable = capture_keeper_waiting_snapshot state in
+  let census = Ok Tui_decode.{ rows = [turn "alpha"];
+    waiting = Keeper_waiting_observed [row "alpha"] } in
+  Alcotest.(check (list string)) "a current complete census resolves an absent keeper" []
+    (keeper_waiting_unverified_after state
+       ~current:(keeper_waiting_row_current state stable)
+       ~current_name:(keeper_waiting_name_current state stable) census);
+  note_keeper_waiting_change state (Waiting_keepers ["beta"]);
+  Alcotest.(check (list string)) "a later beta event retires that absence" ["beta"]
+    (keeper_waiting_unverified_after state
+       ~current:(keeper_waiting_row_current state stable)
+       ~current_name:(keeper_waiting_name_current state stable) census);
+  let before_control = capture_keeper_waiting_snapshot state in
+  state.keeper_chat_control_generations <- ["alpha", 1];
+  Alcotest.(check bool) "control generation retires the earlier alpha row" false
+    (keeper_waiting_row_current state before_control (turn "alpha"));
+  state.keeper_chat_control_pending <- ["beta", 1L];
+  let during_control = capture_keeper_waiting_snapshot state in
+  state.keeper_chat_control_pending <- [];
+  Alcotest.(check bool) "a read begun during control stays retired after receipt" false
+    (keeper_waiting_row_current state during_control (turn "beta"));
+  note_keeper_waiting_change state Waiting_all;
+  Alcotest.(check bool) "a new observer epoch retires the old row" false
+    (keeper_waiting_row_current state during_control (turn "alpha"))
+;;
+
+let test_interactive_generation_revalidates_waiting () =
+  let open Masc_tui_types in
+  let state, _, _ = local_keeper_source_fixture () in
+  let turn = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
+                          ktr_state = Keeper_turn_idle } in
+  note_keeper_waiting_change state (Waiting_keepers ["alpha"]);
+  let reading, request = Keeper_waiting_read.start state.keeper_waiting_read in
+  state.keeper_waiting_read <- reading;
+  let before = capture_keeper_waiting_snapshot state in
+  ignore (advance_keeper_interactive_control state "alpha" : int);
+  Alcotest.(check bool) "interactive dispatch retires the earlier row" false
+    (keeper_waiting_row_current state before turn);
+  let reading, follow_up = Option.get (Keeper_waiting_read.finish state.keeper_waiting_read
+    (Option.get request) ~observed:true ~success:false) in
+  Alcotest.(check bool) "the outstanding read owes an event-driven follow-up" true follow_up;
+  Alcotest.(check bool) "the demand survives a rejected submission" true
+    (Keeper_waiting_read.change_pending reading)
+;;
+
+let test_partial_waiting_only_hides_missing_keepers () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let beta = { alpha with Tui_decode.k_name = "beta" } in
+  let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                               ktr_state = Keeper_turn_idle } in
+  let row name = Tui_decode.{ kwr_keeper_name = name; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keepers <- [alpha; beta];
+  state.keeper_turns <- [turn "alpha"; turn "beta"];
+  state.keeper_waiting <- [row "alpha"; row "beta"];
+  let observation = Ok Tui_decode.{ rows = [turn "alpha"; turn "beta"];
+    waiting = Keeper_waiting_observed [row "alpha"] } in
+  state.keeper_waiting_unverified <- keeper_waiting_unverified_names ~current:(fun _ -> true) observation;
+  let reading, request = Keeper_waiting_read.start (Keeper_waiting_read.note_change state.keeper_waiting_read) in
+  let reading, _ = Option.get (Keeper_waiting_read.finish reading (Option.get request)
+    ~observed:true ~success:false) in
+  state.keeper_waiting_read <- reading;
+  Alcotest.(check bool) "partial inventory retains retry demand" true
+    (Keeper_waiting_read.change_pending reading);
+  let rows = keeper_list_rows state in
+  let find name = List.find (fun row -> row.Masc_tui_keeper_list_model.keeper.k_name = name) rows in
+  Alcotest.(check bool) "healthy keeper remains observed" true
+    ((find "alpha").waiting = Masc_tui_keeper_list_model.Waiting_observed (row "alpha"));
+  Alcotest.(check bool) "missing keeper alone is unavailable" true
+    ((find "beta").waiting = Masc_tui_keeper_list_model.Waiting_unavailable)
+;;
+
+let test_waiting_event_does_not_hide_turns () =
+  let open Masc_tui_types in
+  let state, keeper, _ = local_keeper_source_fixture () in
+  let turn = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
+                          ktr_state = Keeper_turn_idle } in
+  let waiting = Tui_decode.{ kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keepers <- [keeper];
+  state.keeper_turns <- [turn];
+  state.keeper_waiting <- [waiting];
+  note_keeper_waiting_change state (Waiting_keepers ["alpha"]);
+  let row = List.hd (keeper_list_rows state) in
+  Alcotest.(check bool) "changed waiting is unavailable pending a fresh answer" true
+    (row.waiting = Masc_tui_keeper_list_model.Waiting_unavailable);
+  Alcotest.(check bool) "known turn remains separate" true
+    (row.turn = Some Tui_decode.Keeper_turn_idle);
+  let reading, request = Keeper_waiting_read.start state.keeper_waiting_read in
+  let reading, follow_up = Option.get
+    (Keeper_waiting_read.finish reading (Option.get request) ~observed:true ~success:true) in
+  state.keeper_waiting_read <- reading;
+  state.keeper_waiting_unverified <- keeper_waiting_unverified_after state
+    ~current:(fun _ -> true) ~current_name:(fun _ -> true)
+    (Ok Tui_decode.{ rows = [turn]; waiting = Keeper_waiting_observed [waiting] });
+  Alcotest.(check bool) "no extra read is needed" false follow_up;
+  let row = List.hd (keeper_list_rows state) in
+  Alcotest.(check bool) "completed waiting is available again" true
+    (row.waiting = Masc_tui_keeper_list_model.Waiting_observed waiting)
+;;
+
+let test_continuous_waiting_events_preserve_turn_controls () =
+  let open Masc_tui_types in
+  let state, _, _ = local_keeper_source_fixture () in
+  let turn token = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
+    ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.;
+      interrupt_token = token; turn_ref = None; preview = None } } in
+  let waiting = Tui_decode.{ kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keeper_turns <- [turn "old-token"];
+  state.keeper_waiting <- [waiting];
+  let reading, first = Keeper_waiting_read.start (Keeper_waiting_read.note_change state.keeper_waiting_read) in
+  let rec supersede reading request remaining =
+    if remaining = 0 then reading else begin
+      let reading = Keeper_waiting_read.note_change reading in
+      let reading, follow_up = Option.get (Keeper_waiting_read.finish reading request
+        ~observed:true ~success:true) in
+      Alcotest.(check bool) "each newer event requests a follow-up" true follow_up;
+      let reading, next = Keeper_waiting_read.start reading in
+      supersede reading (Option.get next) (remaining - 1)
+    end in
+  state.keeper_waiting_read <- supersede reading (Option.get first) 3;
+  accept_keeper_turn_observation ~accept_waiting:false state ~rows:[turn "new-token"]
+    ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:2.;
+  Alcotest.(check (option (pair (float 0.001) string)))
+    "turn refresh continues to provide an interrupt target" (Some (1., "new-token"))
+    (keeper_observed_turn state "alpha");
+  Alcotest.(check bool) "the turns read cannot overwrite pending waiting" true
+    (state.keeper_waiting = [waiting]);
+  Alcotest.(check bool) "waiting remains pending independently" true
+    (Keeper_waiting_read.awaiting_change state.keeper_waiting_read)
+;;
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
-    [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
+    [ ( "keeper-turn-event-read"
+      , [ Alcotest.test_case "coalesces changes during a read" `Quick
+            test_keeper_turns_event_demand_coalesces
+        ; Alcotest.test_case "retains demand across failure and suspension" `Quick
+            test_keeper_turns_event_demand_survives_failure_and_suspension
+        ; Alcotest.test_case "requires complete waiting inventory" `Quick
+            test_keeper_turns_waiting_completeness
+        ; Alcotest.test_case "waiting rejects overlapping poll receipts" `Quick
+            test_waiting_event_rejects_old_poll_receipts
+        ; Alcotest.test_case "waiting recovers through a later poll" `Quick
+            test_waiting_failure_can_recover_through_new_poll
+        ; Alcotest.test_case "reconciliation does not compete with periodic reads" `Quick
+            test_reconciliation_does_not_compete_with_periodic_reads
+        ; Alcotest.test_case "waiting isolates per-keeper and control epochs" `Quick
+            test_waiting_row_epochs_isolate_other_keepers_and_controls
+        ; Alcotest.test_case "interactive generation revalidates waiting" `Quick
+            test_interactive_generation_revalidates_waiting
+        ; Alcotest.test_case "partial waiting isolates missing keepers" `Quick
+            test_partial_waiting_only_hides_missing_keepers
+        ; Alcotest.test_case "waiting refresh preserves turns" `Quick
+            test_waiting_event_does_not_hide_turns
+        ; Alcotest.test_case "continuous waiting events preserve turn controls" `Quick
+            test_continuous_waiting_events_preserve_turn_controls
+        ] )
+    ; ( "server-identity-refresh"
+      , [ Alcotest.test_case "Goal Candle HTTP status and process classification" `Quick
+            test_goal_candle_http_status_and_instance_classification
+        ; Alcotest.test_case "Goal confirmation requires one matching server instance" `Quick
+            test_goal_confirmation_http_requires_one_matching_instance
+        ; Alcotest.test_case "Goal Candle reads follow credential and process authority" `Quick
+            test_goal_candle_read_rejects_stale_authority_and_refusals
+        ; Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
             test_task_history_progressive_read_keeps_owner_and_cursor
         ; Alcotest.test_case "pending Task End survives an uncertain backlog" `Quick
             test_task_detail_end_survives_uncertain_backlog
@@ -6127,8 +6773,16 @@ let () =
             test_failed_read_keeps_followup_and_withdrawal_retires_it
         ; Alcotest.test_case "concurrent creations retain individual refresh coverage" `Quick
             test_concurrent_created_keepers_retain_individual_refresh_coverage
+        ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
+            test_observer_retry_retires_with_workspace_read_authority
+        ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick
+            test_observer_recovery_belongs_to_unconfirmed_workspace
+        ; Alcotest.test_case "initial Observer identity is locally owned" `Quick
+            test_observer_initial_identity_ownership
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
+        ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick
+            test_fresh_local_work_reloads_equal_stat_archive
         ; Alcotest.test_case "created Keeper waits for owned metadata without Work" `Quick
             test_created_keeper_waits_for_owned_metadata_without_work
         ; Alcotest.test_case "fresh metadata confirms deletion without detail retargeting" `Quick

@@ -29,10 +29,12 @@ let runtime_config () =
       else provider) config.providers }
 
 let with_catalog f =
+  let previous = Provider.Catalog_snapshot.current () in
+  let _,providers = Provider.Catalog_snapshot.sources previous in
   let catalog = Provider.Model_catalog.load_file (Sys.getenv "MASC_TEST_MODEL_CATALOG")
       |> expect_ok in
-  Fun.protect ~finally:Provider.Model_catalog.clear_global (fun () ->
-    Provider.Model_catalog.set_global catalog;
+  Fun.protect ~finally:(fun () -> Provider.Catalog_snapshot.publish previous) (fun () ->
+    Provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some catalog) ~providers);
     f ())
 
 let provider_config runtime model_id =

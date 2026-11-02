@@ -252,12 +252,18 @@ let found ?(assignee = Some "keeper-a") ?(status = done_at "2026-09-25T00:00:00Z
   E.Found { title = "t"; assignee; status }
 ;;
 
-let decide ?(keepers = [ "keeper-a"; "keeper-b" ]) tasks =
+let decide_result ?(keepers = [ "keeper-a"; "keeper-b" ]) tasks =
   Candle_payout.decide_candidates
     ~goal_created_at:(at "2026-09-20T01:00:00Z")
     ~confirmed_at:(at "2026-09-29T05:00:00Z")
     ~is_keeper:(fun name -> List.mem name keepers)
     tasks
+;;
+
+let decide ?keepers tasks =
+  match decide_result ?keepers tasks with
+  | Ok decided -> decided
+  | Error issues -> Alcotest.fail (String.concat "; " (List.map Candle_payout.window_issue_to_string issues))
 ;;
 
 let ids (decided : Candle_payout.candidates) = decided.candidate_task_ids
@@ -269,15 +275,38 @@ let test_a_candidate_task_was_done_between_the_goal_and_the_confirmation () =
   in
   check_candidate "well inside" [ "task-1" ] "2026-09-25T00:00:00Z";
   check_candidate "the second after the Goal was created" [ "task-1" ] "2026-09-20T01:00:01Z";
-  check_candidate "at the Goal's creation" [] "2026-09-20T01:00:00Z";
   check_candidate "before the Goal existed" [] "2026-09-19T00:00:00Z";
-  check_candidate "at the confirmation" [ "task-1" ] "2026-09-29T05:00:00Z";
   check_candidate "after the confirmation" [] "2026-09-29T05:00:01Z"
+;;
+
+let test_same_second_or_missing_task_never_decides_a_partial_set () =
+  let check_issue label expected tasks =
+    match decide_result tasks with
+    | Ok _ -> Alcotest.fail (label ^ ": unexpectedly decided candidates")
+    | Error issues -> Alcotest.(check bool) label true (List.exists expected issues) in
+  let inside = "inside", found () in
+  check_issue "creation boundary"
+    (function Candle_payout.Same_second {task_id="creation"; boundary=Goal_created; _} -> true | _ -> false)
+    [ inside; "creation", found ~status:(done_at "2026-09-20T01:00:00Z") () ];
+  check_issue "confirmation boundary"
+    (function Candle_payout.Same_second {task_id="confirmation"; boundary=Human_confirmed; _} -> true | _ -> false)
+    [ inside; "confirmation", found ~status:(done_at "2026-09-29T05:00:00Z") () ];
+  check_issue "missing Task"
+    (function Candle_payout.Task_missing {task_id="missing"} -> true | _ -> false)
+    [ inside; "missing", E.Deleted ];
+  let instant = at "2026-09-29T05:00:00Z" in
+  let issues = Candle_payout.window_issues ~goal_created_at:instant ~confirmed_at:instant
+      [ "both", found ~status:(done_at "2026-09-29T05:00:00Z") () ] in
+  Alcotest.(check int) "both boundaries are retained" 2 (List.length issues);
+  let reversed = Candle_payout.window_issues
+      ~goal_created_at:(at "2026-09-29T05:00:01Z") ~confirmed_at:instant [ inside ] in
+  Alcotest.(check bool) "reversed clock is a separate issue" true
+    (List.exists (function Candle_payout.Reversed_window _ -> true | _ -> false) reversed)
 ;;
 
 let test_only_a_done_task_found_in_a_store_is_a_candidate () =
   Alcotest.(check (list string))
-    "every other status, deleted, done"
+    "every other status and done"
     [ "task-7" ]
     (ids
        (decide
@@ -286,7 +315,6 @@ let test_only_a_done_task_found_in_a_store_is_a_candidate () =
           ; "task-3", found ~status:E.In_progress ()
           ; "task-4", found ~status:E.Awaiting_verification ()
           ; "task-5", found ~status:E.Cancelled ()
-          ; "task-6", E.Deleted
           ; "task-7", found ()
           ]))
 ;;
@@ -499,10 +527,93 @@ let test_validate_settlement_requires_matching_failed_due_date () =
           (failed "not-a-date")))
 ;;
 
+let test_goal_observation_preserves_owed_held_and_terminal_facts () =
+  let open Candle_goal_observation in
+  let base = [snapshot (); owed ()] in
+  (match project ~goal_id:"other" base with No_recorded_obligation -> () | _ -> Alcotest.fail "another Goal leaked into the projection");
+  (match project ~goal_id:"goal-1" base with
+   | Owed {snapshot=Snapshot_matching; stage=Candidates_unrecorded; _} -> ()
+   | _ -> Alcotest.fail "unprepared payout was not owed");
+  let conflict = match snapshot () with
+    | {E.at; body=E.Snapshot s} -> {E.at; body=E.Snapshot {s with title="conflicting title"}}
+    | _ -> Alcotest.fail "snapshot fixture" in
+  (match project ~goal_id:"goal-1" (base @ [conflict]) with
+   | Owed {snapshot=Snapshot_conflicting; _} -> ()
+   | _ -> Alcotest.fail "conflicting Snapshot was hidden");
+  let task = E.Found {title="task"; assignee=Some "keeper-a";
+                      status=E.Done {completed_at=at "2026-09-20T01:00:00Z"}} in
+  let linked_snapshot = match snapshot () with
+    | {E.at; body=E.Snapshot s} -> {E.at; body=E.Snapshot {s with linked_task_ids=["task-1"]}}
+    | _ -> Alcotest.fail "snapshot fixture" in
+  let linked_base = [linked_snapshot; owed ()] in
+  let held = {E.at=at "2026-09-29T05:10:00Z"; body=E.Candidate_window_held
+    {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1";
+     passed_at=at pass_text; confirmed_at=at "2026-09-29T05:00:00Z";
+     tasks=["task-1", task]; task_keepers=["task-1", E.Keeper_name "keeper-a"]}} in
+  Alcotest.(check bool) "hold is accepted against its preceding ledger" true
+    (Result.is_ok (Candle_payout.validate_record linked_base held.body));
+  (match project ~goal_id:"goal-1" (linked_base @ [held]) with
+   | Held {origin=Stored; issues=Complete_issues [Candle_payout.Same_second {task_id="task-1";_}];_} -> ()
+   | _ -> Alcotest.fail "stored boundary hold was lost");
+  (match project ~goal_id:"goal-1" (linked_base @ [held; conflict]) with
+   | Held {snapshot=Snapshot_conflicting; issues=Complete_issues [Candle_payout.Same_second {task_id="task-1";_}];_} -> ()
+   | _ -> Alcotest.fail "later Snapshot conflict erased the stored hold's evidence");
+  let legacy = {E.at=at "2026-09-29T05:10:00Z"; body=E.Candidates
+    {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1";
+     tasks=["task-1", E.Found {title="task";assignee=Some "keeper-a";status=E.In_progress}];
+     candidate_task_ids=[];candidate_keepers=[];candidate_task_keepers=[]}} in
+  (match project ~goal_id:"goal-1" (linked_base @ [legacy]) with
+   | Held {origin=Derived_candidates; issues=Complete_issues [Candle_payout.Unfenced_nonterminal {task_id="task-1"}];_} -> ()
+   | _ -> Alcotest.fail "legacy nonterminal hold was lost");
+  (match project ~goal_id:"goal-1" (linked_base @ [legacy; conflict]) with
+   | Held {origin=Derived_candidates; snapshot=Snapshot_conflicting;
+           issues=Snapshot_independent_issues [Candle_payout.Unfenced_nonterminal {task_id="task-1"}];_} -> ()
+   | _ -> Alcotest.fail "Snapshot conflict erased a snapshot-independent hold");
+  let incomplete = {E.at=at "2026-09-29T05:10:00Z"; body=E.Candidates
+    {goal_id="goal-1";request_id="req-1";verification_run_id="run-1";tasks=[];
+     candidate_task_ids=[];candidate_keepers=[];candidate_task_keepers=[]}} in
+  (match project ~goal_id:"goal-1" (linked_base @ [incomplete]) with
+   | Owed {stage=Candidates_inconsistent;_} -> ()
+   | _ -> Alcotest.fail "incomplete candidate evidence was reported as consistent");
+  (match project ~goal_id:"goal-1" (base @ [unattributed ()]) with
+   | Unattributed {reason=No_candidates;_} -> ()
+   | _ -> Alcotest.fail "unattributed was confused with paid");
+  let failed = {E.at=at "2026-09-29T05:20:00Z"; body=E.Payout_failed
+    {goal_id="goal-1"; request_id="req-1";verification_run_id="run-1";due_date="bad"}} in
+  (match project ~goal_id:"goal-1" (base @ [failed]) with
+   | Payout_failed _ -> () | _ -> Alcotest.fail "failed obligation was hidden")
+;;
+
+let test_goal_observation_wire_is_closed_and_goal_bound () =
+  let open Candle_goal_observation in
+  let id = {request_id="req-1"; verification_run_id="run-1"} in
+  let values = [
+    {configuration=Off; ledger=Missing};
+    {configuration=Disabled; ledger=Unavailable Invalid_row};
+    {configuration=Enabled; ledger=Observed (Owed {identity=id; snapshot=Snapshot_conflicting; stage=Candidates_unchecked})};
+    {configuration=Off; ledger=Observed (Held {identity=id; snapshot=Snapshot_matching; origin=Stored;
+      issues=Complete_issues [Candle_payout.Same_second {task_id="task-1"; boundary=Human_confirmed;
+                                                        completed_at=at "2026-09-29T05:00:00Z"}]})};
+    {configuration=Off; ledger=Observed (Unattributed {identity=id; recorded_at=at pass_text; reason=No_candidates})};
+    {configuration=Off; ledger=Observed (Paid {identity=id; recorded_at=at pass_text;
+      allocations=[{keeper="keeper-a"; weight=7; amount_milli=max_int}]})}
+  ] in
+  List.iter (fun value ->
+    let json = to_yojson ~goal_id:"goal-1" value in
+    let decoded = of_yojson ~goal_id:"goal-1" json |> ok_or_fail in
+    Alcotest.(check string) "roundtrip" (Yojson.Safe.to_string json) (Yojson.Safe.to_string (to_yojson ~goal_id:"goal-1" decoded));
+    Alcotest.(check bool) "foreign Goal rejected" true (Result.is_error (of_yojson ~goal_id:"other" json));
+    let incomplete = match json with `Assoc fields -> `Assoc (List.remove_assoc "execution" fields) | _ -> assert false in
+    Alcotest.(check bool) "missing execution axis rejected" true (Result.is_error (of_yojson ~goal_id:"goal-1" incomplete))) values
+;;
+
 let () =
   Alcotest.run
     "candle_payout"
-    [ ( "state"
+    [ ( "observation"
+      , [ Alcotest.test_case "Goal payout facts remain distinct" `Quick test_goal_observation_preserves_owed_held_and_terminal_facts
+        ; Alcotest.test_case "wire is closed and Goal-bound" `Quick test_goal_observation_wire_is_closed_and_goal_bound ] )
+    ; ( "state"
       , [ Alcotest.test_case "the state of a Goal's payout" `Quick test_the_state_of_a_goals_payout
         ; Alcotest.test_case "the last open payout is the one that waits" `Quick
             test_the_last_open_payout_is_the_one_that_waits
@@ -516,6 +627,8 @@ let () =
     ; ( "decide_candidates"
       , [ Alcotest.test_case "a candidate task was done between the goal and the confirmation" `Quick
             test_a_candidate_task_was_done_between_the_goal_and_the_confirmation
+        ; Alcotest.test_case "same-second or missing Task never decides a partial set" `Quick
+            test_same_second_or_missing_task_never_decides_a_partial_set
         ; Alcotest.test_case "only a done task found in a store is a candidate" `Quick
             test_only_a_done_task_found_in_a_store_is_a_candidate
         ; Alcotest.test_case "candidate keepers are the keepers among the candidate assignees" `Quick

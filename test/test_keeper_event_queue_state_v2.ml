@@ -2577,6 +2577,41 @@ let test_scope_replay_publishes_what_a_raising_publication_did_not () =
 (* The maintenance tick's Ask pass replays this for every answered Ask of a
    Keeper that is not running. Each replay used to rewrite the snapshot and
    send the Librarian work (#43350). *)
+let test_durable_enqueue_waiting_event_is_workspace_scoped () =
+  with_temp_dir "keeper-queue-scope-a" (fun base_path ->
+    with_temp_dir "keeper-queue-scope-b" (fun other_path ->
+      let matching = Masc.Sse.runtime_authority_exn ~base_path in
+      let other = Masc.Sse.runtime_authority_exn ~base_path:other_path in
+      let matching_events = ref 0 and other_events = ref 0 in
+      let observe counter (event : Masc.Sse.external_event) =
+        if Json_util.assoc_string_opt "type" event.ext_payload
+           = Some "keeper_waiting_inventory_changed"
+        then incr counter
+      in
+      Masc.Sse.subscribe_external ~runtime_authority:matching ~id:"queue-scope-matching"
+        ~callback:(observe matching_events) ();
+      Masc.Sse.subscribe_external ~runtime_authority:other ~id:"queue-scope-other"
+        ~callback:(observe other_events) ();
+      Fun.protect
+        ~finally:(fun () ->
+          Masc.Sse.unsubscribe_external "queue-scope-matching";
+          Masc.Sse.unsubscribe_external "queue-scope-other")
+        (fun () ->
+          Eio_main.run (fun _env ->
+            let enqueue () =
+              Registry_event_queue.enqueue_stimulus_once_durable_result ~base_path
+                "scoped-queue" (stimulus "scoped-source" 1.0) in
+            (match enqueue () with
+             | Registry_event_queue.Stimulus_enqueued -> ()
+             | _ -> Alcotest.fail "durable stimulus was not committed");
+            Alcotest.(check int) "owning workspace receives the change" 1 !matching_events;
+            Alcotest.(check int) "other workspace receives no change" 0 !other_events;
+            (match enqueue () with
+             | Registry_event_queue.Stimulus_already_present -> ()
+             | _ -> Alcotest.fail "durable stimulus replay was not idempotent");
+            Alcotest.(check int) "idempotent replay sends no new event" 1 !matching_events))))
+;;
+
 let test_durable_enqueue_replays_write_and_signal_nothing () =
   with_temp_dir "keeper-durable-enqueue-replay" (fun base_path ->
     let keeper_name = "durable-replay" in
@@ -2760,7 +2795,9 @@ let () =
         ; Alcotest.test_case "a raising publication is published by the replay" `Quick
             test_scope_replay_publishes_what_a_raising_publication_did_not
         ; Alcotest.test_case "durable enqueue replays write and signal nothing" `Quick
-            test_durable_enqueue_replays_write_and_signal_nothing ] )
+            test_durable_enqueue_replays_write_and_signal_nothing
+        ; Alcotest.test_case "durable enqueue event stays in its workspace" `Quick
+            test_durable_enqueue_waiting_event_is_workspace_scoped ] )
     ; ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case

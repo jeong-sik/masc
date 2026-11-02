@@ -11,6 +11,27 @@ type pricing =
   ; cache_read_multiplier : float option
   }
 
+(** Immutable catalog and provider authority for observing one request's cost.
+    A missing row/rate stays missing across global catalog replacement. *)
+type source
+
+val of_catalog :
+  catalog:Model_catalog.t option -> provider:Model_catalog.provider_reference -> source
+
+val of_provider_entry :
+  catalog:Model_catalog.t option -> provider:Model_catalog.provider_entry -> source
+(** Preserve the effective selected provider declaration, including its exact
+    permission to use bare model rows. Do not re-resolve it from a seed catalog. *)
+
+val of_snapshot :
+  snapshot:Catalog_snapshot.t -> provider:Model_catalog.provider_reference -> source
+(** Preserve the admitted provider authority in this whole selection. Removed
+    aliases cannot recover seed permissions. Exact custom scoped rows survive. *)
+
+val pricing_for_model : source -> string -> pricing option
+(** Read the exact reported model from the captured catalog. A different
+    reported ID never inherits the requested model's rates. *)
+
 (** Cache-price components that are required by observed usage but absent from
     the selected catalog row. *)
 type cache_price_component =
@@ -24,7 +45,8 @@ type cost_estimate =
   | Estimated of float
   | Incomplete of cache_price_component list
 
-(** Return the price declared by the active model catalog.
+(** Read-only inspection of the price declared by the active model catalog.
+    Request execution uses a captured {!source} instead.
 
     When [provider] is present, the authoritative scoped row takes precedence;
     bare rows are consulted only when that provider permits them. Omitting
@@ -48,13 +70,17 @@ val estimate_cost
 (** Fill [usage.cost_usd] only when catalog pricing is available and exact for
     the observed usage.  An absent or incomplete price remains absent. *)
 val annotate_usage_cost
-  :  ?provider:Model_catalog.provider_reference
+  :  source:source
   -> model_id:string
   -> Types.api_usage
   -> Types.api_usage
 
-(** Apply {!annotate_usage_cost} to a response usage record. *)
+(** Apply {!annotate_usage_cost} using the producer's typed reported-model
+    observation when available. An observed absence grants no estimate, even
+    when [response.model] contains a display fallback. An unavailable observation
+    also grants no estimate; raw custom producers can capture their observation
+    with [Types.with_reported_model]. Explicit charges always remain known. *)
 val annotate_response_cost
-  :  ?provider:Model_catalog.provider_reference
+  :  source:source
   -> Types.api_response
   -> Types.api_response

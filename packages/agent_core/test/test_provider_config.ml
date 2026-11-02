@@ -2,6 +2,13 @@
 
 open Llm_provider
 
+let with_catalog_overrides input run =
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  let catalog = match Llm_provider.Catalog_snapshot.models previous with Some catalog -> catalog | None -> Model_catalog.empty in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.with_model_overrides catalog input))) ~providers:(None))); run ())
+;;
+
 let check_string = Alcotest.(check string)
 let check_int = Alcotest.(check int)
 let check_bool = Alcotest.(check bool)
@@ -713,11 +720,9 @@ let test_openai_compat_raw_minimax_does_not_infer_bare_reasoning_dialect () =
 ;;
 
 let with_model_catalog_toml contents f =
-  let previous_catalog = Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   let restore () =
-    match previous_catalog with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()
+    Llm_provider.Catalog_snapshot.publish previous_catalog
   in
   let path = Filename.temp_file "agent_core-provider-config-models" ".toml" in
   Fun.protect
@@ -729,7 +734,7 @@ let with_model_catalog_toml contents f =
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "failed to load model catalog: %s" msg
        | Ok catalog ->
-         Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          Fun.protect f ~finally:restore)
 ;;
 
@@ -790,6 +795,7 @@ kind = "openai_compat"
 base_url = "https://vllm.example.test/v1"
 request_path = "/v1/chat/completions"
 auth = "api-key"
+capabilities_base = "openai_chat"
 
 [[models]]
 model_id = "qwen36-35b-a3b-mtp"
@@ -1235,8 +1241,7 @@ let test_validate_reasoning_effort_subset_rejects_unsupported () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let declared_capabilities =
       match Capabilities.for_model_id "effort-subset-model" with
       | Some capabilities -> capabilities
@@ -1360,8 +1365,7 @@ let test_validate_reasoning_effort_checks_the_explicit_disable () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let cfg model_id =
       let declared_capabilities =
         match Capabilities.for_model_id model_id with
@@ -1424,8 +1428,7 @@ let test_thinking_admission_asks_the_effort_ladder_about_a_disable () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let cfg model_id =
       let declared_capabilities =
         match Capabilities.for_model_id model_id with
@@ -1485,8 +1488,7 @@ let test_the_router_base_answers_a_row_that_names_it () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let cfg ?enable_thinking ?reasoning_effort () =
       let declared_capabilities =
         match Capabilities.for_model_id "router-row" with
@@ -1624,11 +1626,9 @@ let test_structured_output_name_of_schema () =
 (* ── provider_name_of_config ─────────────────────────── *)
 
 let with_repository_model_catalog f =
-  let previous_catalog = Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   let restore () =
-    match previous_catalog with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()
+    Llm_provider.Catalog_snapshot.publish previous_catalog
   in
   let candidates = [ "models.toml"; "../models.toml" ] in
   match List.find_opt Sys.file_exists candidates with
@@ -1637,7 +1637,7 @@ let with_repository_model_catalog f =
     (match Model_catalog.load_file path with
      | Error msg -> Alcotest.failf "failed to load %s: %s" path msg
      | Ok catalog ->
-       Model_catalog.set_global catalog;
+       (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
        Fun.protect f ~finally:restore)
 ;;
 
@@ -1747,7 +1747,7 @@ let test_openai_chat_catalog_reasoning_and_output_field () =
 
 let test_openai_chat_catalog_endpoint_identity () =
   with_repository_model_catalog (fun () ->
-    let catalog = Model_catalog.global () |> Option.get in
+    let catalog = (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) |> Option.get in
     let provider = Model_catalog.provider_entry_for_reference catalog
       (Model_catalog.Declared_provider "openai") |> Option.get in
     check_string "Chat declares its exact endpoint" "/chat/completions" provider.request_path;
@@ -2676,7 +2676,7 @@ let test_reported_model_survives_normalization_without_inventing_missing_evidenc
         ; "call_id", `String "call-1"; "name", `String "lookup"; "arguments", `String "{}" ] ] ] in
     let fields = fields @ Option.to_list (Option.map (fun model -> "model", `String model) model) in
     match Backend_openai_responses.parse_response_result (Yojson.Safe.to_string (`Assoc fields)) with
-    | Ok response -> response | Error detail -> Alcotest.fail detail in
+    | Ok {response;_} -> response | Error {detail;_} -> Alcotest.fail detail in
   List.iter (fun model ->
     let parsed = raw model in
     let expected = match model with
@@ -2725,7 +2725,7 @@ let test_declared_native_catalog_facts kind provider_id model_id context =
      | Provider_kind.Anthropic | OpenAI_compat | Ollama | Glm ->
        Alcotest.fail "unexpected native fixture wire");
     let frozen = Provider_config.freeze_for_request config in
-    Model_catalog.set_global Model_catalog.empty;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (Model_catalog.empty)) ~providers:(None)));
     check_bool "frozen request retains the resolved native facts" true
       (Provider_config.capabilities_for_config_model frozen = Some caps);
     check_bool "unfrozen request sees the replaced catalog" true
@@ -2809,14 +2809,13 @@ let test_anonymous_verbatim_row_keeps_its_own_base ~row_base ~wire_base () =
 let test_manifest_authority_and_frozen_missing_policy () =
   with_model_catalog_toml (identity_catalog ~verbatim:false ~row_base:false ~wire_base:false)
     (fun () ->
-      let previous = Capability_manifest.global () in
-      Fun.protect ~finally:(fun () -> match previous with
-        | Some manifest -> Capability_manifest.set_global manifest
-        | None -> Capability_manifest.clear_global ()) (fun () ->
+      let previous = Llm_provider.Catalog_snapshot.current () in
+      Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) (fun () ->
         let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
           {|{"schema_version":2,"models":[{"model_id":"manifest-only","max_context_tokens":44444}]}|})
           |> Result.get_ok in
-        Capability_manifest.set_global manifest;
+        (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.with_model_overrides
+          (match Llm_provider.Catalog_snapshot.models previous with Some catalog -> catalog | None -> Model_catalog.empty) manifest))) ~providers:(None)));
         Alcotest.(check (option int)) "anonymous native wire retains manifest facts"
           (Some 44444)
           (resolved_capabilities (identity_config "manifest-only")).max_context_tokens;
@@ -2828,12 +2827,12 @@ let test_manifest_authority_and_frozen_missing_policy () =
         check_bool "unknown declared provider cannot borrow manifest facts" true
           (Provider_config.capabilities_for_config_model unknown = None);
         let frozen = Provider_config.freeze_for_request unknown in
-        Model_catalog.set_global (Model_catalog.of_toml_string ~source:"later"
+        (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.of_toml_string ~source:"later"
           {|[[models]]
 model_id = "manifest-only"
 provider_name = "unknown"
 max_context_tokens = 55555
-|} |> Result.get_ok);
+|} |> Result.get_ok))) ~providers:(None)));
         check_bool "frozen missing policy remains missing" true
           (Provider_config.capabilities_for_config_model frozen = None);
         Alcotest.(check (option int)) "unfrozen request sees the new exact row"
@@ -2868,7 +2867,7 @@ let test_catalog_policy_native_and_proxy () =
       {input_tokens = 100; output_tokens = 10; cache_creation_input_tokens = 0;
        cache_read_input_tokens = 0; cost_usd = None} in
     let annotate usage = Pricing.annotate_usage_cost
-      ~provider:(Provider_config.provider_reference proxy) ~model_id:proxy.model_id usage in
+      ~source:(Provider_config.pricing_source proxy) ~model_id:proxy.model_id usage in
     Alcotest.(check (option (float 0.000001))) "missing proxy price remains unknown"
       None (annotate usage).cost_usd;
     Alcotest.(check (option (float 0.000001))) "provider-observed cost is retained"
@@ -2879,12 +2878,12 @@ let test_catalog_policy_native_and_proxy () =
       (Result.is_error (Backend_anthropic.validate_nonexact_thinking_controls
         {proxy with enable_thinking = Some true}));
     let frozen = Provider_config.freeze_for_request proxy in
-    Model_catalog.set_global (Model_catalog.of_toml_string ~source:"replacement"
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.of_toml_string ~source:"replacement"
       {|[[models]]
 model_id = "claude-fable-5"
 provider_name = "deepseek-anthropic"
 anthropic_thinking_control = "always_adaptive"
-|} |> Result.get_ok);
+|} |> Result.get_ok))) ~providers:(None)));
     check_bool "unfrozen proxy sees later explicit policy" true
       (Option.is_some (Provider_config.anthropic_thinking_control proxy));
     check_bool "frozen absent proxy policy stays absent" true
@@ -2898,6 +2897,7 @@ kind = "anthropic"
 base_url = "https://example.invalid"
 request_path = "/v1/messages"
 auth = "none"
+capabilities_base = "anthropic"
 serves_bare_models = ["shared"]
 [[models]]
 model_id = "shared"
@@ -2930,6 +2930,7 @@ kind = "openai_compat"
 base_url = "https://example.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
+capabilities_base = "openai_chat"
 serves_bare_models = ["shared"]
 [[models]]
 model_id = "shared"
@@ -2951,14 +2952,13 @@ output_per_million = 2.0
 
 let test_thinking_manifest_is_anonymous_native_only () =
   with_repository_model_catalog (fun () ->
-    let previous = Capability_manifest.global () in
-    Fun.protect ~finally:(fun () -> match previous with
-      | Some manifest -> Capability_manifest.set_global manifest
-      | None -> Capability_manifest.clear_global ()) (fun () ->
+    let previous = Llm_provider.Catalog_snapshot.current () in
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) (fun () ->
       let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
         {|{"schema_version":2,"models":[{"model_id":"manifest-only","anthropic_thinking_control":"adaptive_default"}]}|})
         |> Result.get_ok in
-      Capability_manifest.set_global manifest;
+      (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.with_model_overrides
+          (match Llm_provider.Catalog_snapshot.models previous with Some catalog -> catalog | None -> Model_catalog.empty) manifest))) ~providers:(None)));
       let policy provider = Capabilities.anthropic_thinking_control_for_provider_model_id
         ~provider ~model_id:"manifest-only" in
       check_bool "anonymous native retains manifest policy" true

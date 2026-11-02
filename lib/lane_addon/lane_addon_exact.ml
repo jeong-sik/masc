@@ -616,7 +616,21 @@ let decode_proof ~store ~declaration_id request ~attempt_ordinal json =
   let* outcome = field "outcome" in
   let* outcome = outcome_of_json ~schema request outcome in
   let* receipt = field "receipt" in
-  let* receipt = Keeper_exact_walk_receipt.of_json receipt in
+  (* Version 1 was historically decoded after wrapper canonicalization. Keep
+     that read behavior, while version 2 checks the original JSON types before
+     canonicalization can turn an integral float into an integer. *)
+  let* receipt = match receipt with
+    | `Assoc fields when List.assoc_opt "version" fields=Some (`Int 2) ->
+      (match json with
+       | `Assoc original ->
+         let* ()=if List.assoc_opt "version" original=Some (`Int 1)
+             && List.assoc_opt "attempt_ordinal" original=Some (`Int attempt_ordinal)
+           then Ok () else Error "version 2 original proof requires integer wrapper identity" in
+         (match List.assoc_opt "receipt" original with
+          | Some raw -> Keeper_exact_walk_receipt.of_json raw
+          | None -> Error "missing original execution receipt")
+       | _ -> Error "original execution proof must be an object")
+    | _ -> Keeper_exact_walk_receipt.of_json receipt in
   let execution = {outcome; receipt} in
   let* () = validate_execution execution in
   let* encoded = Lane_addon_action.canonical
@@ -639,14 +653,15 @@ let load_proofs ~store ~declaration_id request =
   | None -> Ok []
   | Some wire ->
     let* normalized=Lane_addon_action.canonical wire in
-    let* values=match normalized with
+    let* values=match wire with
       | `Assoc fields -> (match List.assoc_opt "executions" fields with
           | Some (`List (_::_ as values)) -> Ok values
           | Some _ | None -> Error "original execution link requires nonempty completed attempts")
       | _ -> Error "original execution link must be an object" in
     let* _,proofs=List.fold_left (fun state wire ->
       let* previous,proofs=state in
-      let* attempt_ordinal=match wire with
+      let* normalized_entry=Lane_addon_action.canonical wire in
+      let* attempt_ordinal=match normalized_entry with
         | `Assoc fields -> (match List.assoc_opt "attempt_ordinal" fields with
             | Some (`Int ordinal) when ordinal>previous -> Ok ordinal
             | Some _ | None -> Error "original execution ordinals must be positive and strictly increasing")
@@ -747,7 +762,15 @@ let read_latest_original_execution ~store ~declaration_id ~schema request =
     let* record=bound_record ~declaration_id request wire in
     let* _=validate_record ~request ~schema:None record in
     let* proofs=bound_proofs ~store ~declaration_id request record in
-    let attempt_ordinal=List.length record.attempts in
+    let rec last_execution_ordinal ordinal = function
+      | Delivery_refused _ :: earlier -> last_execution_ordinal (ordinal - 1) earlier
+      | [] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted
+          | Unknown_cut | Unknown_raised _ | Reused) :: _ -> ordinal in
+    let length=List.length record.attempts in
+    let attempt_ordinal = match record.final with
+      | Some (Call_final _ | Outcome_unknown | Request_id_reused) ->
+          last_execution_ordinal length (List.rev record.attempts)
+      | None | Some (Not_allowed _) -> length in
     match selected_proof ~attempt_ordinal proofs with
     | None -> Ok No_completed_latest
     | Some (retained_schema,execution) ->

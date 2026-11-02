@@ -69,6 +69,9 @@ type execution_http_response =
   | Execution_json of Yojson.Safe.t
   | Execution_payload of Dashboard_cache.cached_payload
 
+val execution_publication_epoch : string
+(** Process-scoped identity of the execution publication stream. *)
+
 val execution_cache : cached_surface
 (** Cached execution surface JSON.  Reached by
     [Server_dashboard_http_namespace_truth] (via the
@@ -121,8 +124,9 @@ val invalidate_execution_cache : unit -> unit
 val install_task_mutation_cache_invalidation :
   invalidate_full_health_snapshot:(unit -> unit) -> unit -> unit
 (** Connects task mutation commits to {!invalidate_execution_cache} and the
-    supplied full-health snapshot invalidator. Server bootstrap installs the
-    composed callback before Workspace mutation hooks become available. *)
+    supplied full-health snapshot invalidator. Health is invalidated after the
+    execution caches and before the execution SSE broadcast. Server bootstrap
+    installs the callback before Workspace mutation hooks become available. *)
 
 module For_testing : sig
   val execution_publication_generation : unit -> int

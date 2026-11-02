@@ -7,7 +7,7 @@ let fail message =
 ;;
 
 let () =
-  Model_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.reset ());
   match Model_catalog.load_default () with
   | Error detail -> fail ("embedded default catalog was unavailable: " ^ detail)
   | Ok catalog ->

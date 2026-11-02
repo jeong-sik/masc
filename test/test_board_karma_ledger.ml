@@ -7,6 +7,8 @@
 
 open Masc
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
@@ -16,6 +18,7 @@ let fresh_test_base_path () =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-karma-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
@@ -36,7 +39,11 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 (** Variant of [with_eio] that forwards the Eio environment to [f].
@@ -48,7 +55,11 @@ let with_eio_env f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f env
 
 (** Create a post and fail the test on error *)
@@ -298,17 +309,17 @@ let test_delete_post_rewrites_persisted_snapshots () =
     if file_contains path needle then
       Alcotest.failf "%s: %S is still present in %s" label needle path
   in
-  check_absent "posts snapshot removes deleted post" (Board.persist_path ()) pid;
-  check_absent "comments snapshot removes deleted comment" (Board.comments_path ()) cid;
-  check_absent "vote snapshot removes deleted post vote" (Board_votes.vote_log_path ()) pid;
+  check_absent "posts snapshot removes deleted post" (Board.persist_path (Board.global ())) pid;
+  check_absent "comments snapshot removes deleted comment" (Board.comments_path (Board.global ())) cid;
+  check_absent "vote snapshot removes deleted post vote" (Board_votes.vote_log_path (Board.global ())) pid;
   check_absent
     "vote snapshot removes deleted comment vote"
-    (Board_votes.vote_log_path ())
+    (Board_votes.vote_log_path (Board.global ()))
     cid;
-  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path ()) pid;
+  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path (Board.global ())) pid;
   check_absent
     "reaction snapshot removes deleted comment reaction"
-    (Board.reactions_path ())
+    (Board.reactions_path (Board.global ()))
     cid;
   let store =
     match Board_dispatch.backend () with

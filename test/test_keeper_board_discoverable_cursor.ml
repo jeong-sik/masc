@@ -43,7 +43,11 @@ let with_temp_workspace f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
-       Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+       Masc_test_deps.Board_test_preparation.prepare ~base_path
+         ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
+       Result.get_ok (Board_dispatch.init_jsonl
+         ~base_path:(Env_config_core.base_path ())
+         ~recipient_lookup:every_name_declared ());
        f config)
 ;;
 

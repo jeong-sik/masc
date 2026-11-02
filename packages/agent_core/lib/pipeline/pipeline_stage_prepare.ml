@@ -213,7 +213,7 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
          Option.map Llm_provider.Utf8_sanitize.sanitize base)
     }
   in
-  (match agent.options.event_bus with
+  (match Pipeline_common.transient_event_bus agent with
    | Some bus ->
      safe_publish
        bus
@@ -240,8 +240,9 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
      to verify deterministically
      which tools the autonomous agent actually has access to, before
      making claims about LLM behaviour from a missing tool call.
-     Sibling of TurnStarted (announce) and TurnCompleted (post-LLM). *)
-  (match agent.options.event_bus with
+     Durable TurnCompleted follows the owning turn's successful settlement;
+     store-free runs report successful assistant collection. *)
+  (match Pipeline_common.transient_event_bus agent with
    | Some bus ->
      safe_publish
        bus

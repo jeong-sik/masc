@@ -1,0 +1,71 @@
+2026-11-01T05:04:33.2322446Z   TARGET_SUITES: test/test_runtime_account_declaration
+2026-11-01T05:04:33.2505785Z   TARGET_SUITES: test/test_runtime_account_declaration
+2026-11-01T05:04:33.2905373Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T05:04:33.2934157Z [targeted] @@test/runtest-test_runtime_account_declaration: start 2026-11-01T05:04:33Z (dune alias)
+2026-11-01T05:06:39.9809515Z   [OK]          declare          0   bases are the signed-in clients.
+2026-11-01T05:06:39.9843841Z   [OK]          declare          1   codex copy signs in at the new home.
+2026-11-01T05:06:39.9867836Z   [OK]          declare          2   claude copy keeps the command.
+2026-11-01T05:06:39.9887958Z   [OK]          declare          3   muse copy signs in at the new home.
+2026-11-01T05:06:39.9911092Z   [OK]          declare          4   antigravity copy reads the new oauth file.
+2026-11-01T05:06:39.9965861Z   [OK]          declare          5   refusals.
+2026-11-01T05:06:40.0005128Z   [OK]          declare          6   one directory by any spelling.
+2026-11-01T05:06:40.0043692Z   [OK]          declare          7   a home that does not exist yet.
+2026-11-01T05:06:40.0073546Z   [OK]          declare          8   an oauth file by any name.
+2026-11-01T05:06:40.0104167Z   [OK]          declare          9   copied numbers keep their value.
+2026-11-01T05:06:40.0125303Z   [OK]          declare         10   shared model set account copy.
+2026-11-01T05:06:40.0126711Z   [OK]          declare         11   layouts the append cannot carry.
+2026-11-01T05:06:40.0669290Z   [FAIL]        declare         12   every seed client takes a second account.
+2026-11-01T05:06:40.0673048Z FAIL a new account's shared list includes every shipped Codex profile
+2026-11-01T05:06:40.0673454Z
+2026-11-01T05:06:40.0673758Z    Expected: `["codex-gpt-5-5-high"; "codex-gpt-5-5-low";
+2026-11-01T05:06:40.0674281Z                "codex-gpt-5-5-medium"; "codex-gpt-5-5-xhigh";
+2026-11-01T05:06:40.0674754Z                "codex-gpt-5-6"; "codex-gpt-5-6-luna-high";
+2026-11-01T05:06:40.0675217Z                "codex-gpt-5-6-luna-low"; "codex-gpt-5-6-luna-max";
+2026-11-01T05:06:40.0675625Z                "codex-gpt-5-6-luna-medium"; "codex-gpt-5-6-luna-xhigh";
+2026-11-01T05:06:40.0676033Z                "codex-gpt-5-6-sol-high"; "codex-gpt-5-6-sol-max";
+2026-11-01T05:06:40.0676439Z                "codex-gpt-5-6-sol-medium"; "codex-gpt-5-6-sol-ultra";
+2026-11-01T05:06:40.0677099Z                "codex-gpt-5-6-sol-xhigh"; "codex-gpt-5-6-terra-high";
+2026-11-01T05:06:40.0677541Z                "codex-gpt-5-6-terra-low"; "codex-gpt-5-6-terra-max";
+2026-11-01T05:06:40.0677969Z                "codex-gpt-5-6-terra-medium"; "codex-gpt-5-6-terra-ultra";
+2026-11-01T05:06:40.0678387Z                "codex-gpt-5-6-terra-xhigh"; "codex-gpt-6-1-sol-high";
+2026-11-01T05:06:40.0678780Z                "codex-gpt-6-1-sol-low"; "codex-gpt-6-1-sol-max";
+2026-11-01T05:06:40.0679162Z                "codex-gpt-6-1-sol-medium"; "codex-gpt-6-1-sol-ultra";
+2026-11-01T05:06:40.0679542Z                "codex-gpt-6-1-sol-xhigh"; "codex-gpt-6-1-terra-high";
+2026-11-01T05:06:40.0679923Z                "codex-gpt-6-1-terra-low"; "codex-gpt-6-1-terra-max";
+2026-11-01T05:06:40.0680325Z                "codex-gpt-6-1-terra-medium"; "codex-gpt-6-1-terra-ultra";
+2026-11-01T05:06:40.0681008Z                "codex-gpt-6-1-terra-xhigh"; "codex-gpt-6-astra-high";
+2026-11-01T05:06:40.0681388Z                "codex-gpt-6-astra-low"; "codex-gpt-6-astra-max";
+2026-11-01T05:06:40.0681770Z                "codex-gpt-6-astra-medium"; "codex-gpt-6-astra-ultra";
+2026-11-01T05:06:40.0682163Z                "codex-gpt-6-astra-xhigh"; "codex-gpt-6-luna-high";
+2026-11-01T05:06:40.0682539Z                "codex-gpt-6-luna-low"; "codex-gpt-6-luna-max";
+2026-11-01T05:06:40.0682913Z                "codex-gpt-6-luna-medium"; "codex-gpt-6-luna-xhigh";
+2026-11-01T05:06:40.0683414Z                "codex-gpt-6-sol-high"; "codex-gpt-6-sol-low";
+2026-11-01T05:06:40.0683921Z                "codex-gpt-6-sol-max"; "codex-gpt-6-sol-medium";
+2026-11-01T05:06:40.0684460Z                "codex-gpt-6-sol-ultra"; "codex-gpt-6-sol-xhigh"]'
+2026-11-01T05:06:40.0684701Z
+2026-11-01T05:06:40.0684903Z    Received: `["codex-gpt-5-5-high"; "codex-gpt-5-5-low";
+2026-11-01T05:06:40.0685282Z                "codex-gpt-5-5-medium"; "codex-gpt-5-5-xhigh";
+2026-11-01T05:06:40.0685614Z                "codex-gpt-5-6"; "codex-gpt-5-6-luna-high";
+2026-11-01T05:06:40.0685970Z                "codex-gpt-5-6-luna-low"; "codex-gpt-5-6-luna-max";
+2026-11-01T05:06:40.0686707Z                "codex-gpt-5-6-luna-medium"; "codex-gpt-5-6-luna-xhigh";
+2026-11-01T05:06:40.0687171Z                "codex-gpt-5-6-sol-high"; "codex-gpt-5-6-sol-max";
+2026-11-01T05:06:40.0687544Z                "codex-gpt-5-6-sol-medium"; "codex-gpt-5-6-sol-ultra";
+2026-11-01T05:06:40.0687943Z                "codex-gpt-5-6-sol-xhigh"; "codex-gpt-5-6-terra-high";
+2026-11-01T05:06:40.0688328Z                "codex-gpt-5-6-terra-low"; "codex-gpt-5-6-terra-max";
+2026-11-01T05:06:40.0688761Z                "codex-gpt-5-6-terra-medium"; "codex-gpt-5-6-terra-ultra";
+2026-11-01T05:06:40.0689183Z                "codex-gpt-5-6-terra-xhigh"; "codex-gpt-6-1-sol-high";
+2026-11-01T05:06:40.0689562Z                "codex-gpt-6-1-sol-low"; "codex-gpt-6-1-sol-max";
+2026-11-01T05:06:40.0689949Z                "codex-gpt-6-1-sol-medium"; "codex-gpt-6-1-sol-ultra";
+2026-11-01T05:06:40.0690355Z                "codex-gpt-6-1-sol-xhigh"; "codex-gpt-6-astra-high";
+2026-11-01T05:06:40.0690826Z                "codex-gpt-6-astra-low"; "codex-gpt-6-astra-max";
+2026-11-01T05:06:40.0691445Z                "codex-gpt-6-astra-medium"; "codex-gpt-6-astra-ultra";
+2026-11-01T05:06:40.0691951Z                "codex-gpt-6-astra-xhigh"; "codex-gpt-6-luna-high";
+2026-11-01T05:06:40.0692566Z                "codex-gpt-6-luna-low"; "codex-gpt-6-luna-max";
+2026-11-01T05:06:40.0693068Z                "codex-gpt-6-luna-medium"; "codex-gpt-6-luna-xhigh";
+2026-11-01T05:06:40.0693439Z                "codex-gpt-6-sol-high"; "codex-gpt-6-sol-low";
+2026-11-01T05:06:40.0693797Z                "codex-gpt-6-sol-max"; "codex-gpt-6-sol-medium";
+2026-11-01T05:06:40.0694285Z                "codex-gpt-6-sol-ultra"; "codex-gpt-6-sol-xhigh"]'
+2026-11-01T05:06:40.0694523Z
+2026-11-01T05:06:40.0694849Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T05:06:40.0698938Z 1 failure! in 0.086s. 13 tests run.
+2026-11-01T05:06:40.1749272Z [targeted] @@test/runtest-test_runtime_account_declaration: FAIL exit 1 in 127s

@@ -16,11 +16,12 @@
     the same request within one second are distinct even when their
     [recorded_at] strings are equal.
 
-    It writes nothing unless Candle configuration and ledger recovery enable
-    recording. Appraiser availability is not consulted: a busy or unpublished
-    lane postpones settlement without discarding the debt. It also writes nothing when the
-    pass has no [Snapshot], because Candle was not on when the Goal passed, and
-    when the Goal already owes a payout ({!Candle_payout.owed_pass}). While
+    It writes nothing when Candle is Off. Invalid configuration or ledger
+    recovery failure refuses confirmation until repaired. Appraiser availability
+    is not consulted: a busy or unpublished lane postpones settlement without
+    discarding the debt. It also writes nothing when the pass has no [Snapshot],
+    such as when Candle was not on when the Goal passed, or when the Goal already
+    owes a payout ({!Candle_payout.owed_pass}). While
     Candle is enabled, a row that cannot be written refuses the confirmation.
     The operator confirms again, and the step gives the same answer the second
     time. *)

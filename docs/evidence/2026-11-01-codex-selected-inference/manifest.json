@@ -1,0 +1,106 @@
+{
+  "kind": "focused native process execution, not full regression or live account proof",
+  "source_head": "cbf6196ffa5b2e9067548a8d5a7fc5db825dba6f",
+  "pr_base": "3aaa7542f97e40f08214f175f601f398afebce84",
+  "records": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41282920501,
+      "job_id": 124778334291,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41282920501",
+      "head": "8602b0e1d906a633481411da013d64c7b6c63214",
+      "ref": "fix/codex-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "8602b0e1d906a633481411da013d64c7b6c63214",
+      "raw_capture": "artifacts/issues-oldest-20261101/codex-selected-inference/baseline-124778334291.raw.log",
+      "raw_bytes": 275800,
+      "raw_sha256": "b7bfdae52522f5902c1c6427489e6181211696bb087240ca86aba02bfb6dff47",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 6746,
+      "selected_sha256": "411c1e44e4bb0bea6a7b5d06a43c80e24da6913286d88be8f0a9373ab2dab07c",
+      "actual_pass": 33,
+      "actual_fail": 7,
+      "retained_case_pass": 33,
+      "retained_case_fail": 7,
+      "summaries": [
+        "2026-11-01T07:07:16.0895324Z 7 failures! in 201.114s. 40 tests run."
+      ],
+      "suites": {
+        "test/test_keeper_codex_current_context": {
+          "pass": 33,
+          "fail": 7
+        }
+      }
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41283161863,
+      "job_id": 124779042185,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41283161863",
+      "head": "cbf6196ffa5b2e9067548a8d5a7fc5db825dba6f",
+      "ref": "fix/codex-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "cbf6196ffa5b2e9067548a8d5a7fc5db825dba6f",
+      "raw_capture": "artifacts/issues-oldest-20261101/codex-selected-inference/candidate-124779042185.raw.log",
+      "raw_bytes": 308237,
+      "raw_sha256": "8a177b50fb74badaa4382226d226f35602035501a497af1bc250209e5de4996d",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 8370,
+      "selected_sha256": "3e091f7569b17248f9fea21036a8d0945b15d324fad1a18e03653f3114673453",
+      "actual_pass": 54,
+      "actual_fail": 1,
+      "retained_case_pass": 54,
+      "retained_case_fail": 1,
+      "summaries": [
+        "2026-11-01T07:11:12.6072119Z 1 failure! in 215.820s. 41 tests run.",
+        "2026-11-01T07:11:14.7943417Z Test Successful in 2.011s. 2 tests run.",
+        "2026-11-01T07:11:14.9807724Z Test Successful in 0.043s. 12 tests run."
+      ],
+      "suites": {
+        "test/test_keeper_codex_current_context": {
+          "pass": 40,
+          "fail": 1
+        },
+        "test/test_keeper_codex_blank_system_prompt": {
+          "pass": 2,
+          "fail": 0
+        },
+        "test/test_official_client_claim_cause": {
+          "pass": 12,
+          "fail": 0
+        }
+      }
+    }
+  ],
+  "comparison": {
+    "common_cases": 40,
+    "transitions": {
+      "PASS->PASS": 33,
+      "FAIL->PASS": 6,
+      "FAIL->FAIL": 1,
+      "PASS->FAIL": 0
+    },
+    "added_candidate_passes": 1,
+    "case_keys_sha256": "1e88d600cf3cf13e29ed00b39a09137f6da18d6a7a24a6f011db4e446140b3ac"
+  },
+  "selection": "ANSI/BOM-normalized derivative retaining every timestamped actual case row, workflow target/start/end/summary, actual checkout receipt, all FAIL/assertion expected/received and timeout failure lines. Decorative duplicate case rows and unrelated routine output are omitted. Raw and selected digests name different byte streams.",
+  "baseline_production_parent_identical": {
+    "lib": true,
+    "packages/agent_core": true,
+    "config": true
+  },
+  "source_input_count": 33,
+  "source_tree_count": 4,
+  "full_regression": "not run",
+  "limits": [
+    "Both workflow conclusions are FAILURE.",
+    "The existing completion evidence case remains FAIL in both executions.",
+    "Candidate test tree differs by the required adapter input arguments and one added public-driver case.",
+    "The large tool-dispatch suite whose API call was migrated was not selected for execution.",
+    "No real account/model entitlement, installed runtime, integration, deployment or full issue acceptance demonstrated."
+  ]
+}

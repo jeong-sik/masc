@@ -1,5 +1,6 @@
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 module VAT = Verification_authority_tools
 let () = Mirage_crypto_rng_unix.use_default ()
 (* These tests pin what the verification evidence reads from a post, not who is
@@ -30,7 +31,10 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "producer"));
-      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~base_path:(Env_config_core.base_path ())
+        ~recipient_lookup:every_name_declared ());
       f config)
 let call surface name args = VAT.dispatch surface ~name ~args
 let read surface name args =
@@ -315,7 +319,11 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
      `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
              "comment_tail", `Int 1; "comment_offset", `Int 0]];
   let Board_dispatch.Jsonl store = Board_dispatch.backend () in
-  store.Board.posts_load_result <- Error "unreadable persisted source";
+  let path = Board.persist_path store in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+    (fun out -> output_string out "{invalid-post-source\n");
+  Alcotest.(check bool) "actual malformed posts source fails reload" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   Evidence.capture ~config ~authority:(Evidence.Task_producer "producer") ~references:[board_ref p]
     |> require_error "corrupt source captured";
   ignore (read task "masc_board_post_get" (post_args p)))

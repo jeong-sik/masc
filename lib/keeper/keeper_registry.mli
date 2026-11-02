@@ -18,10 +18,18 @@ open Keeper_types_profile
     [Keeper_registry.packed_turn_phase] etc. unchanged. *)
 include module type of Keeper_registry_types
 
-val install_state_change_observer : (unit -> unit) -> unit
-(** Install the process-wide non-yielding observer called after a successful
-    registry event CAS. Observer failures are logged and never roll back the
-    committed transition. *)
+type state_change =
+  | Lifecycle_phase_changed
+  | Failure_reason_changed
+  | Membership_changed
+
+val install_state_change_observer : (base_path:string -> state_change -> unit) -> unit
+(** Install the process-wide non-yielding observer called after a committed
+    lifecycle phase transition, a failure reason change via an entry update,
+    or a registry membership installation or removal.
+    The path is the committed entry's canonical workspace. Observer failures
+    are logged and do not roll back the committed change; Eio cancellation
+    propagates after the commit. *)
 
 
 
@@ -398,6 +406,7 @@ val started_at : base_path:string -> string -> float option
 val count_running : ?base_path:string -> unit -> int
 
 module For_testing : sig
+  val finish_unregistration_cleanup : base_path:string -> (unit -> unit) -> unit
   (** Test-only bypass: install an entry without validation so tests can seed
       corrupted registry state. *)
   val unsafe_put_entry :

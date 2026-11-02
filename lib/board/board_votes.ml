@@ -1,303 +1,7 @@
 include Board_core
+include Board_voting
 
 open Result.Syntax
-
-let vote_direction_to_string = function Up -> "up" | Down -> "down"
-
-(* Variant witness used to derive the schema enum from the canonical encoder. *)
-let all_vote_directions = [ Up; Down ]
-let valid_vote_direction_strings =
-  List.map vote_direction_to_string all_vote_directions
-
-(* Sound partial parser — case-insensitive, trims whitespace, and
-   rejects empty input. Missing direction defaults belong at the tool
-   boundary, not in the wire-value parser. *)
-let vote_direction_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "up" -> Some Up
-  | "down" -> Some Down
-  | _ -> None
-
-let vote_log_path () =
-  Board_paths.file_path ~workspace_masc_dir:(Board_paths.board_masc_dir ()) Board_paths.Votes
-
-(* Append and snapshot writers persist the cast timestamp stored for the exact
-   [(target, voter)] vote identity. Returns [Error (Io_error _)] instead of
-   swallowing the write failure, so a disk-full or permission error propagates
-   to the caller instead of leaving the in-memory vote as the only copy. *)
-let append_vote_log ~target ~voter ~direction ~ts : (unit, board_error) Result.t =
-  try
-    ensure_masc_dir ();
-    let path = vote_log_path () in
-    let json = `Assoc [
-      ("target", `String target);
-      ("voter", `String voter);
-      ("direction", `String (vote_direction_to_string direction));
-      ("ts", `Float ts);
-    ] in
-    Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
-    Ok ()
-  with Sys_error msg ->
-    record_persist_error ~where:"append_vote_log" msg;
-    Error (Io_error (Printf.sprintf "append_vote_log: %s" msg))
-
-let vote_log_jsonl store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter
-    (fun target (direction, ts) ->
-      let voter =
-        match Board_vote_key.of_string target with
-        | Some vote -> Board_vote_key.voter vote |> Agent_id.to_string
-        | None -> invalid_arg (Printf.sprintf "invalid in-memory vote key: %S" target)
-      in
-      let json =
-        `Assoc
-          [
-            ("target", `String target);
-            ("voter", `String voter);
-            ("direction", `String (vote_direction_to_string direction));
-            (* Snapshot rewrites preserve the cast timestamp. *)
-            ("ts", `Float ts);
-          ]
-      in
-      Buffer.add_string buf (Yojson.Safe.to_string json);
-      Buffer.add_char buf '\n')
-    store.vote_log;
-  Buffer.contents buf
-
-(* Full snapshot rewrite of the vote log, used by [flush_dirty] (compaction)
-   and [delete_post] (removing a target's votes). Returns
-   [Error (Io_error _)] instead of only logging, on the same contract as
-   [append_vote_log] — the previous unit-returning version logged via
-   [Log.BoardLog.error] directly, which meant this write's failures never
-   incremented [persist_errors], unlike every other persist path in this
-   file. *)
-let save_vote_log_jsonl content : (unit, board_error) Result.t =
-  try
-    ensure_masc_dir ();
-    let path = vote_log_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg ->
-      record_persist_error ~where:"save_vote_log_jsonl" msg;
-      Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
-  with Sys_error msg ->
-    record_persist_error ~where:"save_vote_log_jsonl" msg;
-    Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
-
-let persisted_vote_direction_of_string_opt = function
-  | "up" -> Some Up
-  | "down" -> Some Down
-  | _ -> None
-
-let persisted_vote_row_of_yojson = function
-  | `Assoc fields ->
-    let has_exact_fields =
-      let allowed = [ "target"; "voter"; "direction"; "ts" ] in
-      let rec loop seen = function
-        | [] -> true
-        | (name, _) :: rest ->
-          if List.mem name seen || not (List.mem name allowed)
-          then false
-          else loop (name :: seen) rest
-      in
-      loop [] fields
-    in
-    if not has_exact_fields
-    then None
-    else
-      (match
-         ( List.assoc_opt "target" fields
-         , List.assoc_opt "voter" fields
-         , List.assoc_opt "direction" fields
-         , List.assoc_opt "ts" fields )
-       with
-       | ( Some (`String target)
-         , Some (`String voter)
-         , Some (`String direction_raw)
-         , Some (`Float ts) )
-         when Float.is_finite ts && Float.compare ts 0.0 > 0 ->
-         (match
-            Board_vote_key.of_string target,
-            persisted_vote_direction_of_string_opt direction_raw
-          with
-          | Some vote, Some direction
-            when String.equal voter (Agent_id.to_string (Board_vote_key.voter vote)) ->
-            Some (vote, direction, ts)
-          | Some _, Some _ | Some _, None | None, _ -> None)
-       | _ -> None)
-  | _ -> None
-
-(* Durable append for one cast vote, outside [store.mutex] (it takes
-   [store.persist_mutex] itself via [with_persist_lock]). Write-ahead design
-   (PR #28934 review): this is called from [vote]/[vote_comment] {b before}
-   any [store.posts]/[store.comments]/[store.vote_log] mutation, specifically
-   so a racing [flush_dirty] can never snapshot-write a vote that turns out
-   to have failed its durable append — mutating first and appending second
-   (the original shape here, and still [add_comment_with_audience]'s shape
-   for comments — a known, separately-tracked class of the same race) leaves
-   a window where [flush_dirty] can pick up the not-yet-durable mutation
-   before the append either confirms or rolls it back. *)
-let record_vote_side_effect store ~target ~voter ~direction ~ts
-    : (unit, board_error) Result.t =
-  let* () = require_persisted_snapshot_readable store.votes_load_result in
-  with_persist_lock store (fun () -> append_vote_log ~target ~voter ~direction ~ts)
-
-let current_vote_for_post store ~voter ~post_id
-    : (vote_direction option, board_error) Result.t =
-  match Agent_id.of_string voter with
-  | Error e -> Error e
-  | Ok agent ->
-  match Post_id.of_string post_id with
-  | Error e -> Error e
-  | Ok pid ->
-      with_lock store (fun () ->
-        let post_key = Post_id.to_string pid in
-        if not (Hashtbl.mem store.posts post_key) then Error (Post_not_found post_id)
-        else
-          let vote_key =
-            Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
-          in
-          Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
-
-(* Write-ahead: validate under [with_lock] with no mutation, durably append
-   outside any lock, then commit under [with_lock] re-deciding the branch
-   from a fresh read (not the stale staged one) so a concurrent unrelated
-   post mutation is not clobbered and a same-key race is caught rather than
-   silently overwritten. If step 1 rejects or step 2's append fails, nothing
-   was ever mutated, so there is nothing to roll back. *)
-let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
-  match Agent_id.of_string voter with
-  | Error e -> Error e
-  | Ok agent ->
-  let voter = Agent_id.to_string agent in
-  match Post_id.of_string post_id with
-  | Error e -> Error e
-  | Ok pid ->
-      let post_key = Post_id.to_string pid in
-      let vote_key =
-        Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
-      in
-      let staged : (float, board_error) Result.t =
-        with_lock store (fun () ->
-          match Hashtbl.find_opt store.posts post_key with
-          | None -> Error (Post_not_found post_id)
-          | Some _post ->
-              let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
-              match Board_vote_transition.decide ~previous ~direction with
-              | Board_vote_transition.Already_cast ->
-                  Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
-                    voter (vote_direction_to_string direction) post_id))
-              | Board_vote_transition.Cast _ -> Ok (Time_compat.now ()))
-      in
-      (match staged with
-       | Error _ as e -> e
-       | Ok ts ->
-         (match record_vote_side_effect store ~target:vote_key ~voter ~direction ~ts with
-          | Error _ as e -> e
-          | Ok () ->
-              with_lock store (fun () ->
-                match Hashtbl.find_opt store.posts post_key with
-                | None -> Error (Post_not_found post_id)
-                | Some post ->
-                  let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
-                  match Board_vote_transition.decide ~previous ~direction with
-                  | Board_vote_transition.Already_cast ->
-                      (* Another call for this exact voter+target committed
-                         first while our append was in flight. Our append is
-                         now an orphan row on disk; the winner's own
-                         [mark_dirty_post] schedules a [flush_dirty] snapshot
-                         rewrite that overwrites it with the committed truth
-                         before a restart would ever replay it. *)
-                      Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
-                        voter (vote_direction_to_string direction) post_id))
-                  | Board_vote_transition.Cast transition ->
-                      let votes_up, votes_down =
-                        Board_vote_transition.apply_counts transition
-                          ~votes_up:post.votes_up ~votes_down:post.votes_down
-                      in
-                      let updated =
-                        { post with votes_up; votes_down; updated_at = ts }
-                      in
-                      Hashtbl.replace store.posts post_key updated;
-                      reindex_hot_post store ~previous:post ~updated:updated;
-                      Hashtbl.replace store.vote_log vote_key (direction, ts);
-                      mark_dirty_post store post_key;
-                      invalidate_post_caches store;
-                      Ok (updated.votes_up - updated.votes_down))))
-
-let current_vote_for_comment store ~voter ~comment_id
-    : (vote_direction option, board_error) Result.t =
-  match Agent_id.of_string voter with
-  | Error e -> Error e
-  | Ok agent ->
-  match Comment_id.of_string comment_id with
-  | Error e -> Error e
-  | Ok cid ->
-      with_lock store (fun () ->
-        let comment_key = Comment_id.to_string cid in
-        if not (Hashtbl.mem store.comments comment_key) then
-          Error (Comment_not_found comment_id)
-        else
-          let vote_key =
-            Board_vote_key.comment ~comment_id:cid ~voter:agent
-            |> Board_vote_key.to_string
-          in
-          Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
-
-(** Vote on a comment. Same write-ahead shape as {!vote}. *)
-let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result.t =
-  match Agent_id.of_string voter with
-  | Error e -> Error e
-  | Ok agent ->
-  let voter = Agent_id.to_string agent in
-  match Comment_id.of_string comment_id with
-  | Error e -> Error e
-  | Ok cid ->
-      let comment_key = Comment_id.to_string cid in
-      let vote_key =
-        Board_vote_key.comment ~comment_id:cid ~voter:agent |> Board_vote_key.to_string
-      in
-      let staged : (float, board_error) Result.t =
-        with_lock store (fun () ->
-          match Hashtbl.find_opt store.comments comment_key with
-          | None -> Error (Comment_not_found comment_id)
-          | Some _cmt ->
-              let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
-              match Board_vote_transition.decide ~previous ~direction with
-              | Board_vote_transition.Already_cast ->
-                  Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
-                    voter (vote_direction_to_string direction) comment_id))
-              | Board_vote_transition.Cast _ -> Ok (Time_compat.now ()))
-      in
-      (match staged with
-       | Error _ as e -> e
-       | Ok ts ->
-         (match record_vote_side_effect store ~target:vote_key ~voter ~direction ~ts with
-          | Error _ as e -> e
-          | Ok () ->
-              with_lock store (fun () ->
-                match Hashtbl.find_opt store.comments comment_key with
-                | None -> Error (Comment_not_found comment_id)
-                | Some cmt ->
-                  let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
-                  match Board_vote_transition.decide ~previous ~direction with
-                  | Board_vote_transition.Already_cast ->
-                      Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
-                        voter (vote_direction_to_string direction) comment_id))
-                  | Board_vote_transition.Cast transition ->
-                      let votes_up, votes_down =
-                        Board_vote_transition.apply_counts transition
-                          ~votes_up:cmt.votes_up ~votes_down:cmt.votes_down
-                      in
-                      let updated =
-                        { cmt with votes_up; votes_down }
-                      in
-                      Hashtbl.replace store.comments comment_key updated;
-                      Hashtbl.replace store.vote_log vote_key (direction, ts);
-                      mark_dirty_comment store comment_key;
-                      invalidate_comment_caches store;
-                      Ok (updated.votes_up - updated.votes_down))))
 
 (** {1 Stats} *)
 
@@ -321,195 +25,6 @@ let stats store =
 let visibility_of_string = Board_votes_json.visibility_of_string
 let post_of_yojson = Board_votes_json.post_of_yojson
 let comment_of_yojson = Board_votes_json.comment_of_yojson
-let load_persisted_posts = Board_votes_json.load_persisted_posts
-let load_persisted_comments = Board_votes_json.load_persisted_comments
-
-(** Recalculate reply_count for all posts based on actual comments, and
-    restore each post's [updated_at] high-water mark from its comments'
-    [created_at]. This ensures data consistency after loading from disk:
-    the posts snapshot can predate comment WAL rows appended after the
-    last flush, so both the count and the timestamp are re-derived. *)
-let recalculate_reply_counts store =
-  (* First, reset all reply_counts to 0 *)
-  Hashtbl.iter (fun key (p : post) ->
-    Hashtbl.replace store.posts key { p with reply_count = 0 }
-  ) store.posts;
-  (* Then, count actual comments per post *)
-  Hashtbl.iter (fun _ (c : comment) ->
-    let post_key = Post_id.to_string c.post_id in
-    match Hashtbl.find_opt store.posts post_key with
-    | Some p ->
-        Hashtbl.replace store.posts post_key
-          { p with
-            reply_count = p.reply_count + 1
-          ; updated_at = Stdlib.Float.max p.updated_at c.created_at }
-    | None -> ()
-  ) store.comments;
-  let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
-  Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
-
-let recalculate_vote_counts store =
-  Hashtbl.iter
-    (fun key (post : post) ->
-       Hashtbl.replace store.posts key { post with votes_up = 0; votes_down = 0 })
-    store.posts;
-  Hashtbl.iter
-    (fun key (comment : comment) ->
-       Hashtbl.replace store.comments key { comment with votes_up = 0; votes_down = 0 })
-    store.comments;
-  Hashtbl.iter
-    (fun key (direction, ts) ->
-       match Board_vote_key.of_string key with
-       | None -> ()
-       | Some vote ->
-         let target_id = Board_vote_key.target_id vote in
-         (match Board_vote_key.target_kind vote with
-          | Board_vote_key.Post ->
-            (match Hashtbl.find_opt store.posts target_id with
-             | None -> ()
-             | Some post ->
-               let votes_up, votes_down =
-                 match direction with
-                 | Up -> post.votes_up + 1, post.votes_down
-                 | Down -> post.votes_up, post.votes_down + 1
-               in
-               Hashtbl.replace
-                 store.posts
-                 target_id
-                 { post
-                   with
-                   votes_up
-                 ; votes_down
-                 ; updated_at = Float.max post.updated_at ts
-                 })
-          | Board_vote_key.Comment ->
-            (match Hashtbl.find_opt store.comments target_id with
-             | None -> ()
-             | Some comment ->
-               let votes_up, votes_down =
-                 match direction with
-                 | Up -> comment.votes_up + 1, comment.votes_down
-                 | Down -> comment.votes_up, comment.votes_down + 1
-               in
-               Hashtbl.replace
-                 store.comments
-                 target_id
-                 { comment with votes_up; votes_down })))
-    store.vote_log;
-  rebuild_hot_post_index store;
-  invalidate_post_caches store;
-  invalidate_comment_caches store
-;;
-
-let load_persisted_votes store =
-  let path = Board_paths.store_file_path store Board_paths.Votes in
-  let result =
-    if not (Fs_compat.file_exists path)
-    then (
-      recalculate_vote_counts store;
-      Ok 0)
-    else begin
-      try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:persisted_vote_row_of_yojson
-          ~accept:(fun (vote, direction, ts) ->
-            (* A vote is kept whether or not its post or comment is loaded.
-               The snapshot writes [store.vote_log] back whole, so a vote
-               skipped here is gone from disk at the next flush. On
-               2026-09-19 the posts file had been renamed away, the board
-               loaded no posts, and all 225 votes were skipped and then
-               overwritten. Deleting a post already removes its votes
-               ([delete_post]); a vote whose target is absent at load is not
-               stale data but a sign the target failed to load, and
-               [recalculate_vote_counts] leaves it out of every count. *)
-            Hashtbl.replace
-              store.vote_log
-              (Board_vote_key.to_string vote)
-              (direction, ts);
-            Stdlib.incr loaded)
-      in
-      if Result.is_ok parsed then recalculate_vote_counts store;
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"vote entries" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  Board_votes_json.record_load_result
-    (fun result -> store.votes_load_result <- result)
-    result
-
-let load_persisted_reactions store =
-  let path = Board_paths.store_file_path store Board_paths.Reactions in
-  let result =
-    if not (Fs_compat.file_exists path) then Ok 0
-    else begin
-      try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:reaction_of_yojson
-          ~accept:(fun reaction ->
-            let user_id = Agent_id.to_string reaction.user_id in
-            let key =
-              reaction_key
-                ~target_type:reaction.target_type
-                ~target_id:reaction.target_id
-                ~user_id
-                ~emoji:reaction.emoji
-            in
-            Hashtbl.replace store.reactions key reaction;
-            Stdlib.incr loaded)
-      in
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"reactions" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  Board_votes_json.record_load_result
-    (fun result -> store.reactions_load_result <- result)
-    result
-
-let load_persisted_sub_boards store =
-  let path = Board_paths.store_file_path store Board_paths.Sub_boards in
-  let result =
-    if not (Fs_compat.file_exists path) then Ok 0
-    else begin
-      try
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 in
-      let parsed =
-        Board_votes_json.load_source_rows
-          path
-          ~decode:sub_board_of_yojson
-          ~accept:(fun sb ->
-            let id = Sub_board_id.to_string sb.id in
-            Hashtbl.replace store.sub_boards id sb;
-            Hashtbl.replace store.sub_boards_by_slug sb.slug id;
-            Stdlib.incr loaded)
-      in
-      let elapsed = Time_compat.now () -. t0 in
-      Board_votes_json.log_loaded ~noun:"sub-boards" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (path, e)
-    end
-  in
-  Board_votes_json.record_load_result
-    (fun result -> store.sub_boards_load_result <- result)
-    result
 
 (** {1 Hearth (topic) operations} *)
 
@@ -578,9 +93,9 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
       match result with
       | Error e -> Error e
       | Ok (previous, updated) ->
-          (match append_post updated with
-           | Ok () -> Ok ()
-           | Error e ->
+          (match append_post store updated with
+           | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
+           | (Posts_not_written _ as outcome) ->
                with_lock store (fun () ->
                  let key = Post_id.to_string previous.id in
                  (match Hashtbl.find_opt store.posts key with
@@ -590,7 +105,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                     Hashtbl.replace store.posts key previous;
                     invalidate_post_caches store
                   | _ -> ()));
-               Error e))
+               finish_posts_write outcome))
 
 (** A close must state its successor decision explicitly: [Successor id]
     continues the thread, [No_successor] says there is none. There is no
@@ -686,9 +201,9 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
          match result with
          | Error e -> Error e
          | Ok (previous, updated) ->
-           (match append_post updated with
-            | Ok () -> Ok ()
-            | Error e ->
+           (match append_post store updated with
+            | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
+            | (Posts_not_written _ as outcome) ->
               with_lock store (fun () ->
                 let key = Post_id.to_string previous.id in
                 (match Hashtbl.find_opt store.posts key with
@@ -698,7 +213,7 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
                    Hashtbl.replace store.posts key previous;
                    invalidate_post_caches store
                  | _ -> ()));
-              Error e)))
+              finish_posts_write outcome)))
 ;;
 
 (** Reopen a closed post: clears [closed] back to [None]. A true no-op on an
@@ -728,9 +243,9 @@ let reopen store ~post_id : (unit, board_error) Result.t =
       | Error e -> Error e
       | Ok None -> Ok () (* already open: no write, no updated_at bump *)
       | Ok (Some (previous, updated)) ->
-        (match append_post updated with
-         | Ok () -> Ok ()
-         | Error e ->
+        (match append_post store updated with
+         | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
+         | (Posts_not_written _ as outcome) ->
            with_lock store (fun () ->
              let key = Post_id.to_string previous.id in
              (match Hashtbl.find_opt store.posts key with
@@ -740,11 +255,8 @@ let reopen store ~post_id : (unit, board_error) Result.t =
                 Hashtbl.replace store.posts key previous;
                 invalidate_post_caches store
               | _ -> ()));
-           Error e))
+           finish_posts_write outcome))
 ;;
-
-let posts_jsonl_snapshot store =
-  Board_snapshot_rows.render ~rows:store.post_rows ~to_json:post_to_yojson store.posts
 
 let comments_jsonl_snapshot store =
   Board_snapshot_rows.render
@@ -765,19 +277,18 @@ module Snapshot_batch = Board_snapshot_batch
 
 (* Snapshot rendering updates the row caches, so callers hold the state lock. *)
 let capture_snapshot_batch store selection =
-  Snapshot_batch.capture selection ~read:(function
-    | Snapshot_batch.Posts -> posts_jsonl_snapshot store
-    | Snapshot_batch.Comments -> comments_jsonl_snapshot store
-    | Snapshot_batch.Votes -> vote_log_jsonl store
-    | Snapshot_batch.Reactions -> reactions_jsonl_snapshot store)
+  Snapshot_batch.capture selection
+    ~posts:(fun () -> capture_posts_snapshot store)
+    ~comments:(fun () -> comments_jsonl_snapshot store)
+    ~votes:(fun () -> vote_log_jsonl store)
+    ~reactions:(fun () -> reactions_jsonl_snapshot store)
 ;;
 
-(* Callers retain the persistence lock and release the state lock for writes. *)
 let write_snapshot store = function
-  | Snapshot_batch.Posts -> save_posts_snapshot store
-  | Snapshot_batch.Comments -> save_comments_snapshot store
-  | Snapshot_batch.Votes -> save_vote_log_jsonl
-  | Snapshot_batch.Reactions -> Board_core_persist.save_reactions_jsonl_result
+  | Snapshot_batch.Posts_payload snapshot -> finish_posts_write (save_posts_snapshot store snapshot)
+  | Snapshot_batch.Comments_payload content -> save_comments_snapshot store content
+  | Snapshot_batch.Votes_payload content -> save_vote_log_jsonl store content
+  | Snapshot_batch.Reactions_payload content -> Board_core_persist.save_reactions_jsonl_result store content
 ;;
 
 (* Re-mark everything dirty after a failed snapshot write, so the next flush
@@ -808,14 +319,14 @@ type deletion_outcome =
 let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
   (* Deleting rewrites every snapshot below after the post has left memory, so
      each file it rewrites must have loaded fully first (#38595). *)
-  let* () = require_persisted_snapshot_readable store.posts_load_result in
+  with_persist_lock store (fun () ->
+  let* () = require_posts_source_readable store in
   let* () = require_persisted_snapshot_readable store.comments_load_result in
   let* () = require_persisted_snapshot_readable store.votes_load_result in
   let* () = require_persisted_snapshot_readable store.reactions_load_result in
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-    with_persist_lock store (fun () ->
     let snapshot =
       with_lock store (fun () ->
       let post_key = Post_id.to_string pid in
@@ -886,6 +397,7 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
           Preserve failed writes for a later flush. *)
        with_lock store (fun () ->
          List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
+       Snapshot_batch.finish_settlement outcome;
        let failures =
          List.map show_board_error (Snapshot_batch.errors outcome)
        in
@@ -893,47 +405,10 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
        | [] -> Ok Durable_deletion
        | _ :: _ -> Ok (Deletion_persistence_pending (String.concat "; " failures))))
 
-(** {1 Global Store}
+(** {1 Store lifecycle and flushing} *)
 
-    Uses [Eio.Lazy] for fiber-safe initialization.
-    [cancel:`Protect] ensures store creation completes even if the
-    forcing fiber is cancelled. *)
-
-(* Loaders return [(int, string * exn) result] so the caller is forced to
-   acknowledge persistence-load failures.  Best-effort semantics live here
-   at the call site, not hidden inside the loader bodies. *)
-let log_persistence_result ~kind = function
-  | Ok _ -> ()
-  | Error (path, e) ->
-    Log.BoardLog.error
-      "load %s failed: path=%s reason=%s (continuing with best-effort partial state)"
-      kind path (Printexc.to_string e)
-
-let load_all_persisted store =
-  log_persistence_result ~kind:"posts" (load_persisted_posts store);
-  log_persistence_result ~kind:"comments" (load_persisted_comments store);
-  recalculate_reply_counts store;
-  log_persistence_result ~kind:"votes" (load_persisted_votes store);
-  log_persistence_result ~kind:"reactions" (load_persisted_reactions store);
-  log_persistence_result ~kind:"sub-boards" (load_persisted_sub_boards store)
-
-let global_lazy : store Eio.Lazy.t ref =
-  ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let workspace_masc_dir = Some (Fs_compat.realpath_lenient (Board_paths.board_masc_dir ())) in
-    let store = { (create_store ()) with workspace_masc_dir } in
-    load_all_persisted store;
-    store))
-
-let global () = Eio.Lazy.force !global_lazy
-
-(** Reset global store for test isolation. Next [global ()] call creates fresh store.
-    Safe: only called from test setup before concurrent fibers exist. *)
-let reset_global_for_test () =
-  global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let workspace_masc_dir = Some (Fs_compat.realpath_lenient (Board_paths.board_masc_dir ())) in
-    let store = { (create_store ()) with workspace_masc_dir } in
-    load_all_persisted store;
-    store)
+let global = Board_store_lifecycle.global
+let reset_global_for_test = Board_store_lifecycle.reset_global_for_test
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss.
 
@@ -943,7 +418,7 @@ let reset_global_for_test () =
     [List.iter append_post posts] grew [board_posts.jsonl] by one line per
     vote/mutation per post, sharing the same .id, producing the dup vector
     that motivated the RFC. The snapshot path was already canonical for
-    restart-load ([load_persisted_posts]), so promoting it to the
+    restart-load ([Board_votes_json.load_persisted_posts]), so promoting it to the
     flush-write path makes [board_posts.jsonl] a true snapshot file with
     one line per id and atomic rewrite semantics. *)
 let flush_dirty store =
@@ -967,14 +442,18 @@ let flush_dirty store =
   in
   (* Flush requeues each failed write before attempting the next. Captured
      empty snapshots still write, and later edits keep their own dirty flags. *)
-  ignore
-    (Snapshot_batch.persist batch ~write:(fun kind content ->
-       match write_snapshot store kind content with
+  let outcome = Snapshot_batch.persist batch ~write:(fun content ->
+       match write_snapshot store content with
        | Ok () -> Ok ()
        | Error _ as error ->
          with_lock store (fun () ->
-           remark_snapshot_retry store (Snapshot_batch.retry_for_kind kind));
-         error)))
+           remark_snapshot_retry store (Snapshot_batch.retry_for_kind (Snapshot_batch.kind_of_payload content)));
+         error) in
+  (* A proven nonwrite may carry reserved descriptor cleanup as typed data,
+     bypassing the callback's normal returned-error retry arm. *)
+  with_lock store (fun () ->
+    List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
+  Snapshot_batch.finish_settlement outcome)
 
 
 (** {1 Karma & Flair - Reddit-style} *)

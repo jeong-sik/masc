@@ -39,6 +39,13 @@ let sort_order_of_string_opt s =
 type board_backend =
   | Jsonl of Board.store
 
+type initialization_error =
+  | Workspace_mismatch of
+      { active_workspace_masc_dir : string
+      ; requested_workspace_masc_dir : string
+      }
+  | Workspace_binding_refused of Board_workspace_binding.rejection
+
 (** Marker carried inside [Active] tracking whether the flusher fiber has
     been spawned for the current backend.  [Eio.Fiber.fork_daemon] returns
     [unit], so there's no cancel handle to thread through; the [bool]
@@ -267,27 +274,70 @@ let warn_comment_cap_once () =
   | Some msg -> Log.BoardLog.warn "%s" msg
   | None -> ()
 
-let init_jsonl ~recipient_lookup () =
+let workspace_result = function
+  | Ok value -> Ok value
+  | Error rejection ->
+    Option.iter (fun (exception_, backtrace) ->
+      Board_posts_source.propagate_reserved exception_ backtrace)
+      (Board_workspace_binding.raised rejection);
+    Error (Workspace_binding_refused rejection)
+
+let validate_workspace requested (store : Board.store) =
+  let open Result.Syntax in
+  let* requested_observation = workspace_result (Board_workspace_binding.observe requested) in
+  let* active_observation = workspace_result
+    (Board.with_persist_lock store (fun () -> Board_paths.observe_workspace store)) in
+  if not (Board_workspace_binding.same_root active_observation requested_observation) then
+    Error (Workspace_mismatch
+      { active_workspace_masc_dir = Board.workspace_masc_dir store
+      ; requested_workspace_masc_dir = Board_workspace_binding.workspace_masc_dir requested })
+  else
+    let* () = workspace_result
+      (Board_workspace_binding.revalidate requested requested_observation) in
+    workspace_result
+      (Board_workspace_binding.revalidate store.workspace_binding active_observation)
+
+let check_store_workspace ~base_path store =
+  validate_workspace (Board_workspace_binding.capture ~base_path) store
+
+let init_jsonl ~base_path ~recipient_lookup () =
+  let open Result.Syntax in
+  let requested = Board_workspace_binding.capture ~base_path in
+  (* Refuse an invalid incoming root before forcing global or starting actors.
+     Global loading can create metadata, so each attempt observes it anew. *)
+  let* _ = workspace_result (Board_workspace_binding.observe requested) in
   let installed = Lookup_installed recipient_lookup in
   let rec install () =
     match Atomic.get backend_state with
-    | Active (_, _, Lookup_installed _) ->
-      Log.BoardLog.debug "already initialized, ignoring init_jsonl"
-    | Active (backend, flusher, Lookup_not_installed) as current ->
-      (* A read started the backend before the server did, so it has no
-         lookup and refuses every address.  The server's lookup goes in now. *)
-      if Atomic.compare_and_set
-           backend_state current (Active (backend, flusher, installed))
-      then Log.BoardLog.info "JSONL backend recipient lookup installed"
-      else install ()
+    | Active ((Jsonl store as backend), flusher, lookup) as current ->
+      (match validate_workspace requested store with
+       | Error _ as error -> error
+       | Ok () ->
+         (match lookup with
+          | Lookup_installed _ ->
+            Log.BoardLog.debug "already initialized, ignoring init_jsonl";
+            Ok ()
+          | Lookup_not_installed ->
+            (* A read started this same workspace before the server supplied
+               its lookup. A different workspace cannot replace that authority. *)
+            if Atomic.compare_and_set
+                 backend_state current (Active (backend, flusher, installed))
+            then (
+              Log.BoardLog.info "JSONL backend recipient lookup installed";
+              Ok ())
+            else install ()))
     | Uninitialized ->
       let store = Board.global () in
-      let backend = Active (Jsonl store, false, installed) in
-      if Atomic.compare_and_set backend_state Uninitialized backend then begin
-        ensure_flusher_actor store;
-        warn_comment_cap_once ();
-        Log.BoardLog.info "JSONL backend initialized"
-      end else install ()
+      (match validate_workspace requested store with
+       | Error _ as error -> error
+       | Ok () ->
+         let backend = Active (Jsonl store, false, installed) in
+         if Atomic.compare_and_set backend_state Uninitialized backend then (
+           ensure_flusher_actor store;
+           warn_comment_cap_once ();
+           Log.BoardLog.info "JSONL backend initialized";
+           Ok ())
+         else install ())
   in
   install ()
 
@@ -401,6 +451,8 @@ let notify_post_creation (creation : Board.post_creation) =
     | Stack_overflow | Sys.Break) as exn ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.propagate_reserved exn backtrace;
     Error
       (Board.Post_publication_failure.after_commit creation
          (Board.Post_publication_failure.Raised exn))
@@ -415,6 +467,8 @@ let resolve_post_dispatch_context () =
     | Stack_overflow | Sys.Break) as exn ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.propagate_reserved exn backtrace;
     Error
       (Board.Post_publication_failure.before_effect
          (Board.Post_publication_failure.Raised exn))
@@ -449,6 +503,8 @@ let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_j
        | Stack_overflow | Sys.Break) as exn ->
        Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
      | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Board_posts_source.propagate_reserved exn backtrace;
        Error
          (Board.Post_publication_failure.unknown
             (Board.Post_publication_failure.Raised exn)))
@@ -479,6 +535,8 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
        | Stack_overflow | Sys.Break) as exn ->
        Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
      | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Board_posts_source.propagate_reserved exn backtrace;
        Error
          (Board.Post_publication_failure.unknown
             (Board.Post_publication_failure.Raised exn)))
@@ -637,9 +695,13 @@ let get_comments ~post_id =
 let require_persisted_sources_readable () =
   match backend () with
   | Jsonl store ->
-      (match store.Board.posts_load_result, store.Board.comments_load_result with
-       | Ok (), Ok () -> Ok ()
-       | Error detail, _ | _, Error detail -> Error (Board.Io_error detail))
+      Board.with_persist_lock store (fun () ->
+        let open Result.Syntax in
+        let* () = Board.require_posts_source_readable store in
+        Board.with_lock store (fun () ->
+          match store.Board.comments_load_result with
+          | Ok () -> Ok ()
+          | Error detail -> Error (Board.Io_error detail)))
 
 let get_post_and_comments ~post_id =
   match backend () with

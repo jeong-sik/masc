@@ -149,7 +149,8 @@ let test_strict_declarations () =
   let parsed_provider = get_ok "typed provider override" (Provider_catalog.of_json (provider valid)) in
   (match Provider_catalog.entries parsed_provider with
    | [ row ] -> check bool "provider override carries typed dialect" true
-       (row.capabilities.json_schema_dialect = Capabilities.Json_object_schema)
+       (Option.map (fun capabilities -> capabilities.Capabilities.json_schema_dialect)
+          row.capabilities = Some Capabilities.Json_object_schema)
    | _ -> fail "expected one provider");
   List.iter (fun invalid ->
     check bool "unknown TOML dialect is an error" true
@@ -186,9 +187,8 @@ let test_exact_frozen_contract () =
   check bool "GLM exact admission keeps the named wire fingerprint" false glm_raw_schema
 
 let () =
-  Model_catalog.set_global (get_ok "embedded catalog" (Model_catalog.load_default ()));
-  Capability_manifest.set_global Capability_manifest.empty;
-  Provider_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((get_ok "embedded catalog" (Model_catalog.load_default ())))) ~providers:(None)));
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
   run "Cohere schema wire" [ "contract", [
     test_case "Complete sync/SSE reaches the peer with declared shape" `Quick test_complete_sync_and_sse;
     test_case "explicit override and provider isolation" `Quick test_explicit_override_and_provider_isolation;

@@ -1,5 +1,7 @@
 open Masc
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
@@ -12,6 +14,7 @@ let fresh_test_base_path () =
          (Unix.getpid ())
          (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 ;;
@@ -22,7 +25,11 @@ let with_board f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 ;;
 
@@ -97,7 +104,7 @@ let retired_post_keys = [ "content"; "score" ]
 let test_persisted_post_row_carries_no_retired_key () =
   let post = create_post ~content:"row shape" in
   let rows =
-    In_channel.with_open_text (Board.persist_path ()) In_channel.input_lines
+    In_channel.with_open_text (Board.persist_path (Board.global ())) In_channel.input_lines
     |> List.filter (fun line -> not (String.equal (String.trim line) ""))
   in
   Alcotest.(check int) "one row" 1 (List.length rows);
@@ -153,10 +160,12 @@ let test_post_file_past_ten_mib_is_not_renamed () =
   Alcotest.(check bool)
     "no renamed copy beside the posts file"
     false
-    (Sys.file_exists (Board.persist_path () ^ ".1"));
+    (Sys.file_exists (Board.persist_path (Board.global ()) ^ ".1"));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   List.iter
     (fun (label, (post : Board.post)) ->
        match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with

@@ -121,16 +121,17 @@ let error_json message =
 ;;
 
 (* A confirmation the store refused (wrong binding, unknown goal, failed
-   write) is the caller's 400 as before. A store this build cannot read is
-   not: it answers the RFC-0444 envelope with the status this module already
-   uses for a dependency that is not there. *)
+   write) is the caller's 400 as before. Goal-store and proof-backend
+   unavailability are separate dependency failures. *)
 type confirmation_error =
   | Confirmation_rejected of string
   | Goal_store_unavailable of Goal_store.unavailable
+  | Proof_backend_unavailable of Goal_verification.authority_backend_error
 
 let confirmation_error_to_string = function
   | Confirmation_rejected detail -> detail
   | Goal_store_unavailable unavailable -> Goal_store.unavailable_to_string unavailable
+  | Proof_backend_unavailable unavailable -> Goal_verification.authority_backend_error_to_string unavailable
 ;;
 
 (* Annotated: [Store_unavailable] is a constructor of three Goal_store sums
@@ -139,16 +140,60 @@ let confirmation_error_to_string = function
 let confirmation_error_of_write_error (error : Goal_store.write_error) =
   match error with
   | Goal_store.Store_unavailable unavailable -> Goal_store_unavailable unavailable
-  | Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error ->
+  | Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error ->
     Confirmation_rejected (Goal_store.write_error_to_string error)
 ;;
 
-let respond_confirmation_error request reqd = function
-  | Confirmation_rejected detail ->
-    respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail)
-  | Goal_store_unavailable unavailable ->
-    respond_json_value_with_cors ~status:`Service_unavailable request reqd
-      (Goal_unavailable_envelope.to_yojson unavailable)
+(* Preserve the Goal lookup result while reporting an unsupported proof
+   backend as a dependency failure. The backend selection is immutable in the
+   config; the actual proof operation still checks it at its own boundary. *)
+let require_confirmation_backend ~config ~goal_id =
+  match Goal_verification.check_authority_backend config with
+  | Ok () -> Ok ()
+  | Error unavailable ->
+    (match Goal_store.transact_goal config ~goal_id (fun goal -> Ok (goal, ())) with
+     | Ok _ -> Error (Proof_backend_unavailable unavailable)
+     | Error error -> Error (confirmation_error_of_write_error error))
+;;
+
+(* Keep the two HTTP transports on the same projection and error contract.
+   Both callers authenticate the token-bound operator and validate the read
+   workspace before invoking [read_goal_confirmation]. *)
+let read_goal_confirmation ~config ~operator_id req =
+  match trimmed_query_param req "goal_id" with
+  | None -> Error (Confirmation_rejected "goal_id is required")
+  | Some goal_id ->
+      let open Result.Syntax in
+      let* () = require_confirmation_backend ~config ~goal_id in
+      Goal_store.transact_goal config ~goal_id (fun goal ->
+      Goal_verification.get_record_authoritative config ~goal_id
+      |> Result.map (fun record -> goal, `Assoc ["inspection_operator_id", `String operator_id;
+          "goal", Goal_store.goal_to_yojson goal;
+          "verification", (match record with None -> `Null | Some record ->
+            Goal_verification.record_to_yojson_for_goal ~goal record)]))
+      |> Result.map snd
+      |> Result.map_error confirmation_error_of_write_error
+;;
+
+let goal_confirmation_response result : Httpun.Status.t * Yojson.Safe.t =
+  match result with
+  | Ok json -> `OK, json
+  | Error (Confirmation_rejected detail) -> `Bad_request, error_json detail
+  | Error (Goal_store_unavailable unavailable) ->
+    `Service_unavailable, Goal_unavailable_envelope.to_yojson unavailable
+  | Error (Proof_backend_unavailable unavailable) ->
+    `Service_unavailable, error_json (Goal_verification.authority_backend_error_to_string unavailable)
+;;
+
+(* Confirmation evidence is credential-bound and must be read afresh. The
+   general JSON responder applies conditional GETs even when no-store is in
+   extra headers, so use an unconditionally emitted JSON body here. *)
+let respond_goal_confirmation ~cors reqd result =
+  let status, json = goal_confirmation_response result in
+  let status = Http.Response.timeout_envelope_status_override ~status json in
+  Http.Response.bytes ~status
+    ~headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ cors)
+    ~content_type:"application/json; charset=utf-8" (Yojson.Safe.to_string json) reqd
 ;;
 
 let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, confirmation_error) result =
@@ -156,7 +201,7 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
   match json with
                | `Assoc fields ->
                  let names = List.map fst fields in
-                 let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"] in
+                 let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"; "expected_workspace"; "expected_operator_id"; "expected_runtime_instance_id"] in
                  if List.exists (fun key -> not (List.mem key allowed)) names
                     || List.length names <> List.length (List.sort_uniq String.compare names)
                  then Error (Confirmation_rejected "unknown or duplicate confirmation fields")
@@ -166,12 +211,38 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
                    let* criterion_revision = rejected (non_empty_string_field fields "criterion_revision") in
                    let* request_id = rejected (non_empty_string_field fields "request_id") in
                    let* verification_run_id = rejected (non_empty_string_field fields "verification_run_id") in
+                   let* expected_operator_id = rejected (non_empty_string_field fields "expected_operator_id") in
+                   let* expected_runtime_instance_id = rejected (non_empty_string_field fields "expected_runtime_instance_id") in
+                   let* () = if String.equal expected_runtime_instance_id Build_identity.runtime_instance_id then Ok ()
+                     else Error (Confirmation_rejected "server instance changed; inspect the proof again") in
+                   let* () = if String.equal expected_operator_id operator_id then Ok ()
+                     else Error (Confirmation_rejected "operator changed; inspect the proof again") in
+                   let* () =
+                     if not (List.mem_assoc "expected_workspace" fields) then
+                       Error (Confirmation_rejected "expected_workspace precondition is required")
+                     else
+                       match Workspace.validate_expected_workspace ~config json with
+                       | Ok _ -> Ok ()
+                       | Error Workspace.Invalid_workspace_precondition ->
+                         Error (Confirmation_rejected "invalid expected_workspace precondition")
+                       | Error Workspace.Workspace_precondition_failed ->
+                         Error (Confirmation_rejected "workspace precondition failed") in
+                   let* () = require_confirmation_backend ~config ~goal_id in
                    Workspace_goals.confirm_completion config
                      ~after_confirmation:(Candle_payout_owed.after_confirmation config)
                      ~goal_id ~operator_id ~criterion_revision ~request_id ~verification_run_id
                    |> Result.map_error confirmation_error_of_write_error
+                   |> Result.map (function
+                     | `Assoc result -> `Assoc (("inspection_operator_id", `String operator_id) :: result)
+                     | other -> other)
                | _ -> Error (Confirmation_rejected "request body must be an object")
 
+;;
+
+let commit_goal_confirmation_body ~config ~operator_id body =
+  match Yojson.Safe.from_string body with
+  | json -> commit_goal_confirmation_json ~config ~operator_id json
+  | exception Yojson.Json_error detail -> Error (Confirmation_rejected detail)
 ;;
 
 (* Task cancellation is an operator lifecycle action, alongside the verdict
@@ -213,29 +284,21 @@ let commit_operator_cancel_json ~config ~operator_id json =
 
 let add_routes router =
   router
-  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state _operator_id req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state operator_id req reqd ->
            let request = req in let config = Mcp_server.workspace_config state in
-           let result = match trimmed_query_param req "goal_id" with
-             | None -> Error (Confirmation_rejected "goal_id is required")
-             | Some goal_id -> Goal_store.transact_goal config ~goal_id (fun goal ->
-                 Goal_verification.get_record_authoritative config ~goal_id
-                 |> Result.map (fun record -> goal, `Assoc ["goal", Goal_store.goal_to_yojson goal;
-                     "verification", (match record with None -> `Null | Some record ->
-                       Goal_verification.record_to_yojson_for_goal ~goal record)]))
-                 |> Result.map snd
-                 |> Result.map_error confirmation_error_of_write_error in
-           match result with
-           | Ok result -> respond_json_value_with_cors request reqd result
-           | Error error -> respond_confirmation_error request reqd error)
+           match Server_auth.validate_read_workspace_precondition ~config req with
+           | Error error ->
+               let body, status = Server_auth.read_workspace_precondition_error_response error in
+               respond_json_value_with_cors ~status request reqd body
+           | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
+           read_goal_confirmation ~config ~operator_id req
+           |> respond_goal_confirmation ~cors:(public_read_cors_headers request) reqd)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state operator_id request reqd ->
+           (* The body callback runs after the request-authority binding ends. *)
+           let cors = public_read_cors_headers request in
            Http.Request.read_body_async reqd (fun body ->
-             let parsed = try
-               commit_goal_confirmation_json ~config:(Mcp_server.workspace_config state)
-                 ~operator_id (Yojson.Safe.from_string body)
-             with Yojson.Json_error detail -> Error (Confirmation_rejected detail) in
-             match parsed with
-             | Ok result -> respond_json_value_with_cors request reqd result
-             | Error error -> respond_confirmation_error request reqd error))
+             commit_goal_confirmation_body ~config:(Mcp_server.workspace_config state)
+               ~operator_id body |> respond_goal_confirmation ~cors reqd))
   |> Server_route.get Server_route.Public_read "/api/v1/verification/requests" (fun state req reqd ->
          let request = req in let task_id = trimmed_query_param req "task_id" in
          let limit =

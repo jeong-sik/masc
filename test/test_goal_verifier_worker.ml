@@ -87,8 +87,8 @@ let submit_measurement config goal_id value =
 let pending config =
   let goal,_ = stored (Goal_store.upsert_goal config ~title:"Measure the original result"
     ~metric:measurement_reference ~target_value:"100" ()) in
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
   submit_measurement config goal.id 100;
+  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
   goal.id
 let prepared config store =
   let goal_id = pending config in
@@ -100,6 +100,12 @@ let prepared config store =
   } in
   let retained = checked (W.retain ~store ~installation_id ~package_id ~run original) in
   authority, retained
+let observe_request ~store ~installation_id ~package_id ~config authority =
+  let subject = A.goal_review_subject authority in
+  let binding : W.observation_binding = {base_path=config.Workspace.base_path;
+    goal_id=subject.goal_id; request_id=subject.request_id; criterion=subject.criterion;
+    submitted_evidence=A.goal_review_evidence authority} in
+  W.observe_for_request ~store ~installation_id ~package_id ~binding
 let load store original =
   let subject = V.subject original in
   match checked (W.load ~store ~installation_id ~package_id ~goal_id:subject.goal_id
@@ -306,6 +312,19 @@ let test_unknown_and_cancellation_never_redispatch () =
       pending (); pending ();
       let original = W.original retained in
       let subject = V.subject original in
+      let observation = checked (observe_request ~store ~installation_id ~package_id ~config authority) in
+      Alcotest.(check bool) "original observation has no discovery issues" true
+        (observation.issues = []);
+      (match observation.observed_records with
+       | [observed] ->
+         Alcotest.(check string) "observation retains the original run" (W.run_identity retained).run_id
+           (W.run_identity observed).run_id;
+         (match P.phase (W.progress observed) with
+          | Dispatch_pending (Some (Outcome_unknown _)) -> ()
+          | Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Absent _))
+          | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+          | Subdividing _ | Subdivided _ -> Alcotest.fail "unknown original observation changed phase")
+       | [] | _::_::_ -> Alcotest.fail "observation did not retain the one original");
       (match checked (W.frontier ~store ~installation_id ~package_id ~goal_id:subject.goal_id
           ~request_id:subject.request_id ~new_run:(fun () -> Alcotest.fail "unknown allocated a new run")) with
        | Some restored -> Alcotest.(check int) "unknown frontier retains the original attempt" 0
@@ -419,9 +438,9 @@ let test_linked_frontier_and_staged_run_recovery () =
         let orphan = Yojson.Safe.to_string (`String "unreferenced interrupted retain") in
         get (Lane_addon_store.save_tool_request_body store ~scope:"unused-scope"
           ~request_digest:(Lane_addon_store.digest orphan) orphan);
-        let report = get (Lane_addon_orphan_body_sweep.run ~store
-          |> Result.map_error Lane_addon_orphan_body_sweep.error_to_string) in
-        Alcotest.(check int) "restart removes the orphan while retaining the staged Goal input" 1 report.removed);
+        let report = get (Lane_addon_original_body_inventory.run ~store
+          |> Result.map_error Lane_addon_original_body_inventory.error_to_string) in
+        Alcotest.(check int) "restart retains the unprotected body and staged Goal input" 1 report.unprotected_files);
       let next () = match checked (W.frontier ~store ~installation_id ~package_id
           ~goal_id:subject.goal_id ~request_id:subject.request_id ~new_run:(fun () ->
             if crash_before_child then Alcotest.fail "restart invented another child run";
@@ -534,6 +553,7 @@ let test_actual_goal_commit_reply_loss_and_conflict () =
           ~decision:Workspace_goals.Proof_proven ~evidence:"actual proof" in
         if Tool_result.is_success result then Error "actual proof committed but reply lost"
         else Error (Tool_result.message result) in
+      (* Model an old or out-of-contract writer replacing the pending snapshot. *)
       if conflict then submit_measurement config subject.goal_id 101;
       (match W.commit ~store ~retained ~change:{P.before; after} ~observe ~apply with
        | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "commit frontier was not retained");
@@ -779,6 +799,76 @@ let retain_noncanonical_metadata store ~goal_id ~request_id ~attempt =
     ~package_id:W.host_package_id ~tool:"goal_proof_review"
     ~summary:(`Assoc []) ~request:(`Assoc [])
     |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
+
+let test_request_observation_reports_ambiguous_metadata () =
+  let exercise expected_issue add_invalid = with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let subject = V.subject (W.original retained) in
+    let observe () = checked (observe_request ~store ~installation_id:W.host_installation_id
+      ~package_id:W.host_package_id ~config authority) in
+    (match (observe ()).observed_records with
+     | [observed] -> Alcotest.(check string) "the valid observation names the fixed run"
+         (W.run_identity retained).run_id (W.run_identity observed).run_id
+     | [] | _::_::_ -> Alcotest.fail "fixture did not expose one original");
+    ignore (retain_noncanonical_metadata store ~goal_id:"other-goal"
+      ~request_id:"other-request" ~attempt:0);
+    Alcotest.(check bool) "attributable metadata for another Goal is isolated" true
+      ((observe ()).issues = []);
+    add_invalid store subject;
+    let observation = observe () in
+    Alcotest.(check int) "a known original survives an incomplete discovery" 1
+      (List.length observation.observed_records);
+    Alcotest.(check bool) "ambiguous metadata remains an explicit issue" true
+      (observation.issues = [expected_issue])) in
+  exercise W.Noncanonical_request_metadata (fun store subject ->
+    ignore (retain_noncanonical_metadata store ~goal_id:subject.A.goal_id
+      ~request_id:subject.request_id ~attempt:1));
+  exercise W.Unattributable_metadata (fun store _ -> ignore (retain_unattributable_metadata store));
+  exercise W.Unattributable_metadata (fun store _ ->
+    ignore (retain_unattributable_metadata store);
+    let path = Filename.concat (Lane_addon_store.root store)
+      (Filename.concat Lane_addon_store.tool_request_owners_directory
+         (Filename.concat (Lane_addon_store.digest "goal-proof-reviews")
+            (Lane_addon_store.digest "malformed" ^ ".json"))) in
+    get (Fs_compat.save_file_atomic_strict path "{invalid JSON"))
+;;
+
+let test_request_observation_refuses_unsafe_original_read () =
+  with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let assert_damaged = corrupt_host_original_body store retained in
+    (match observe_request ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id ~config authority with
+     | Error (W.Store_unavailable _) -> ()
+     | Error (Original_invalid _ | Authority_changed _ | Execution_pending _) | Ok _ ->
+       Alcotest.fail "an unsafe original read became a partial success");
+    assert_damaged ())
+;;
+
+let test_request_observation_requires_original_binding () =
+  with_workspace (fun config store _ ->
+    let authority, _ = host_prepared config store in
+    let subject = A.goal_review_subject authority in
+    let evidence = A.goal_review_evidence authority in
+    let observe ~base_path ~criterion ~submitted_evidence =
+      let binding : W.observation_binding = {base_path; criterion; submitted_evidence;
+        goal_id=subject.goal_id; request_id=subject.request_id} in
+      checked (W.observe_for_request ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id ~binding) in
+    let expect_mismatch observation =
+      (match observation.W.observed_records, observation.issues with
+       | [], [W.Original_binding_mismatch] -> ()
+       | [], ([] | [W.Unattributable_metadata | W.Noncanonical_request_metadata] | _::_::_)
+       | _::_, _ -> Alcotest.fail "a different binding was presented as this request's original") in
+    expect_mismatch (observe ~base_path:(config.Workspace.base_path ^ "-other")
+      ~criterion:subject.criterion ~submitted_evidence:evidence);
+    let changed_criterion = match subject.criterion with
+      | Goal_store.Criterion fields -> Goal_store.Criterion {fields with title=fields.title ^ " changed"} in
+    expect_mismatch (observe ~base_path:config.Workspace.base_path
+      ~criterion:changed_criterion ~submitted_evidence:evidence);
+    expect_mismatch (observe ~base_path:config.Workspace.base_path
+      ~criterion:subject.criterion ~submitted_evidence:[]))
+;;
 
 let test_actual_pending_goal_survives_unattributable_foreign_metadata () =
   with_workspace (fun config store _ ->
@@ -1112,7 +1202,14 @@ let test_actual_explicit_retry_and_unknown_fence () =
         {message="reply lost"; kind=Llm_provider.Http_client.Connection_reset}))
       else Error (Agent_core.Error.Api (Agent_core.Retry.NotFound {message="candidate removed"}))) (fun () ->
       ignore (run store retained authority);
-      transition config subject.goal_id "request_complete";
+      let ctx : Workspace_types.context = {config; agent_name="planner"} in
+      let result = Workspace_goals.handle_goal_transition ~tool_name:"goal_transition"
+          ~start_time:(Tool_timing.start ()) ctx
+          (`Assoc ["goal_id", `String subject.goal_id; "action", `String "request_complete"]) in
+      Alcotest.(check bool) "retry response distinguishes unknown from settled refusal"
+        (not unknown) (Tool_result.is_success result);
+      if unknown then Alcotest.(check bool) "unknown response explains why no review started" true
+        (String_util.contains_substring (Tool_result.message result) "outcome is unknown");
       let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id) in
       Alcotest.(check int) "explicit request links only a definitely settled failure" (if unknown then 1 else 2) (List.length rows);
       Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
@@ -1122,6 +1219,69 @@ let test_actual_explicit_retry_and_unknown_fence () =
         (phase config subject.goal_id = if unknown then Goal_phase.Verifying else Awaiting_confirmation))) in
   exercise false;
   exercise true
+
+(* The verifier's retained judgment has already crossed the model boundary
+   when Candle refuses its commit. A later explicit retry must commit that same
+   judgment, rather than ask the reviewer again. *)
+let test_candle_config_repair_recovers_the_actual_retained_judgment () =
+  with_workspace (fun config store _ ->
+    let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path "invalid = true\n";
+    let _, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let run_id = (W.run_identity retained).run_id in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      drain config;
+      Alcotest.(check int) "reviewer entered exactly once" 1 !calls;
+      Alcotest.(check bool) "invalid configuration leaves the Goal verifying" true
+        (phase config subject.goal_id = Goal_phase.Verifying);
+      (match P.phase (W.progress (host_load store original)) with
+       | Commit_unknown _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "the refused commit did not retain the original intent");
+      Fs_compat.save_file path {|half_life = "off"
+[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|};
+      transition config subject.goal_id "request_complete";
+      drain config;
+      Alcotest.(check int) "repair and retry do not invoke another reviewer" 1 !calls;
+      Alcotest.(check bool) "the original judgment reaches human confirmation" true
+        (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
+      assert_host_proof_published config store original;
+      (match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+       | Some {completion=Goal_verification.Proof_proven verdict; _} ->
+         Alcotest.(check string) "same request" subject.request_id verdict.request_id;
+         Alcotest.(check string) "same run" run_id verdict.verification_run_id
+       | None | Some _ -> Alcotest.fail "recovered proof is missing");
+      (match Candle_ledger.read ~base_path:config.base_path with
+       | Ok view ->
+         (match Candle_ledger.events view with
+          | [{Candle_event.body=Candle_event.Snapshot snapshot; _}] ->
+            Alcotest.(check string) "one Snapshot names the original run" run_id snapshot.verification_run_id
+          | _ -> Alcotest.fail "recovered proof did not write exactly one Snapshot")
+       | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error))))
 
 let test_reasonless_goal_reply_requires_explicit_retry () =
   let exercise reason = with_workspace (fun config store _ ->
@@ -1328,6 +1488,12 @@ let () = match restart_probe with
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;
+  Alcotest.test_case "request observation reports ambiguous metadata" `Quick
+    test_request_observation_reports_ambiguous_metadata;
+  Alcotest.test_case "request observation refuses unsafe original read" `Quick
+    test_request_observation_refuses_unsafe_original_read;
+  Alcotest.test_case "request observation requires the original binding" `Quick
+    test_request_observation_requires_original_binding;
   Alcotest.test_case "actual pending Goal survives unattributable foreign metadata" `Quick
     test_actual_pending_goal_survives_unattributable_foreign_metadata;
   Alcotest.test_case "unattributable metadata never starts a new review" `Quick
@@ -1353,6 +1519,8 @@ let () = match restart_probe with
   Alcotest.test_case "raised review retains actual tool observation" `Quick test_raised_review_retains_actual_tool_observation;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
+  Alcotest.test_case "Candle config repair recovers the actual retained judgment" `Quick
+    test_candle_config_repair_recovers_the_actual_retained_judgment;
   Alcotest.test_case "reasonless Goal reply needs an explicit linked retry" `Quick test_reasonless_goal_reply_requires_explicit_retry;
   Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop;
   Alcotest.test_case "cloned workspace refuses the original judgment" `Quick test_cloned_workspace_cannot_commit_original]]

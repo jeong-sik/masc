@@ -2,11 +2,15 @@
 
 The verifier reads a fixture file through the production tool before reporting
 APPROVE. No Goal, proof or confirmation ledger is manufactured by this script.
+The output's runtime workspace and server.log are private: the workspace may
+contain the synthetic server's Admin token. Share only individually reviewed
+evidence files, never the entire output directory.
 """
 import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import socket
@@ -16,10 +20,115 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
+from urllib.parse import urlencode
 
 
 def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+
+
+def contains_credential(value, token):
+    if isinstance(value, str):
+        return contains_encoded_credential(value, token)
+    if isinstance(value, dict):
+        return any(contains_credential(key, token) or contains_credential(item, token) for key, item in value.items())
+    if isinstance(value, list):
+        return any(contains_credential(item, token) for item in value)
+    return False
+
+
+def unicode_escape_layers(text):
+    # The fixture token is ASCII hex; JSON/SSE can encode its characters as
+    # unicode escapes, including in a different SSE frame from the response.
+    previous = None
+    while text != previous:
+        yield text
+        previous = text
+        text = re.sub(r'\\+u([0-9a-fA-F]{4})', lambda match: chr(int(match.group(1), 16)), text)
+
+
+def contains_encoded_credential(text, token):
+    return any(token in layer for layer in unicode_escape_layers(text))
+
+
+class CredentialEchoWithheld(ValueError):
+    pass
+
+
+def decode_response_payload(raw, token):
+    if contains_encoded_credential(raw, token):
+        raise CredentialEchoWithheld('Credential echo withheld')
+    lines = [line[6:] for line in raw.splitlines() if line.startswith('data: ')]
+    if lines:
+        frames = [(line, json.loads(line)) for line in lines if line.strip() != '[DONE]']
+        if any(contains_credential(frame, token) for _, frame in frames):
+            raise CredentialEchoWithheld('Credential echo withheld')
+        payload = next(frame for line, frame in frames if '"id"' in line)
+    else:
+        payload = json.loads(raw)
+    if contains_credential(payload, token):
+        raise CredentialEchoWithheld('Credential echo withheld')
+    return payload
+
+
+def http_evidence(path, body, authenticated, status, raw, content_type):
+    evidence = {'path': path, 'request': body, 'authenticated': authenticated, 'status': status}
+    is_event_stream = (content_type.partition(';')[0].strip().lower() == 'text/event-stream'
+                       or any(line.startswith('data:') for line in raw.splitlines()))
+    if is_event_stream:
+        evidence['response_body'] = {'state': 'not_retained', 'reason': 'event_stream_may_contain_split_credentials'}
+    else:
+        evidence['raw'] = raw
+    return evidence
+
+
+class ProviderFailure:
+    """Transfer only a fixed failure category across the provider thread boundary."""
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._reason = None
+
+    def record(self, error):
+        reason = ('Credential echo withheld' if isinstance(error, CredentialEchoWithheld)
+                  else 'Synthetic verifier provider handler failed; details withheld')
+        with self._lock:
+            if not self._event.is_set():
+                self._reason = reason
+                self._event.set()
+
+    def raise_if_failed(self):
+        if self._event.is_set():
+            raise RuntimeError(self._reason) from None
+
+    def wait(self, timeout):
+        self._event.wait(timeout)
+        self.raise_if_failed()
+
+
+def run_provider_handler(failure, operation):
+    try:
+        operation()
+        return True
+    except Exception as error:
+        failure.record(error)
+        return False
+
+
+def wait_for_confirmation(read, provider_failure, on_observation_error, interval=0.5):
+    while True:
+        provider_failure.raise_if_failed()
+        try:
+            evidence = read()
+        except (URLError, ConnectionError) as error:
+            provider_failure.raise_if_failed()
+            on_observation_error(error)
+        else:
+            provider_failure.raise_if_failed()
+            if evidence['goal']['phase'] == 'awaiting_confirmation':
+                return evidence
+        provider_failure.wait(interval)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -44,16 +153,26 @@ def main():
     artifact.write_text('synthetic goal evidence: exactly one marker\n')
     requests = []
     token = secrets.token_hex(32)
+    provider_failure = ProviderFailure()
+
+    def safe_save(path, value):
+        if contains_credential(value, token):
+            raise CredentialEchoWithheld('Credential echo withheld')
+        save(path, value)
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
         def do_POST(self):
+            if not run_provider_handler(provider_failure, self.handle_request_body):
+                self.close_connection = True
+
+        def handle_request_body(self):
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             index = len(requests)
             requests.append(body)
-            save(out / f'verifier-request-{index:03}.json', body)
+            safe_save(out / f'verifier-request-{index:03}.json', body)
             names = [tool['function']['name'] for tool in body['tools']]
             if index == 0:
                 assert 'tool_read_file' in names
@@ -104,13 +223,21 @@ def main():
     opener = build_opener(ProxyHandler({}), NoRedirect)
     counter = 0
     session = None
-    receipt = {'scope': 'real isolated server and operator HTTP; synthetic verifier, no semantic LLM acceptance', 'status': 'started',
+    receipt = {'scope': 'confirmation GETs match the first ready health instance while the launched process is alive; PID-to-socket and MCP process ownership are not attested; synthetic verifier, no semantic LLM acceptance; runtime workspace and server.log are private', 'status': 'started',
         'expected_commit': a.expected_commit, 'base_path': str(base), 'port': a.port,
         'binary_sha256': hashlib.sha256(a.binary.read_bytes()).hexdigest()}
-    save(out / 'receipt.json', receipt)
+    safe_save(out / 'receipt.json', receipt)
+
+    confirmation_instance = None
+    initial_health_instance = None
 
     def http(path, body=None, *, authenticated=True, expected_status=200):
-        nonlocal counter, session
+        nonlocal counter, session, confirmation_instance
+        provider_failure.raise_if_failed()
+        if server.poll() is not None:
+            raise RuntimeError('Started server exited before the request')
+        if body is not None and contains_credential(body, token):
+            raise ValueError('Credential echo withheld')
         counter += 1
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'x-agent-name': 'spoofed-human'}
         if authenticated:
@@ -125,17 +252,27 @@ def main():
         with response:
             raw = response.read().decode()
             status = response.status
+            content_type = response.headers.get('Content-Type', '')
             session = response.headers.get('Mcp-Session-Id', session)
-        if token in raw:
-            raise ValueError('Credential echo withheld')
-        save(out / f'http-{counter:03}.json', {'path': path, 'request': body, 'authenticated': authenticated, 'status': status, 'raw': raw})
-        assert status == expected_status, (path, status, raw)
-        lines = [line[6:] for line in raw.splitlines() if line.startswith('data: ')]
-        return json.loads(next(line for line in lines if '"id"' in line) if lines else raw)
+            if path.startswith('/api/v1/goals/confirmation?') and authenticated and status == 200:
+                assert response.headers.get_all('x-masc-workspace-read', []) == ['matched-v1']
+                instances = response.headers.get_all('x-masc-runtime-instance-id', [])
+                assert len(instances) == 1 and instances[0]
+                if token in instances[0]:
+                    raise ValueError('Credential echo withheld')
+                if initial_health_instance is None or instances[0] != initial_health_instance or server.poll() is not None:
+                    raise RuntimeError('Confirmation response did not match the first ready health instance')
+                confirmation_instance = instances[0]
+        payload = decode_response_payload(raw, token)
+        safe_save(out / f'http-{counter:03}.json', http_evidence(path, body, authenticated, status, raw, content_type))
+        if status != expected_status:
+            raise RuntimeError(f'{path}: unexpected HTTP status {status} (expected {expected_status})')
+        return payload
 
     def mcp(name, arguments):
         result = http('/mcp', {'jsonrpc': '2.0', 'id': counter + 1, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}})['result']
-        assert not result.get('isError'), result
+        if result.get('isError'):
+            raise RuntimeError(f'MCP tool {name} returned an error; response details withheld')
         return result.get('structuredContent') or json.loads(result['content'][0]['text'])
 
     try:
@@ -146,36 +283,39 @@ def main():
                 if health['startup']['state_ready']:
                     break
             except (URLError, ConnectionError) as error:
-                save(out / f'readiness-observation-error-{counter:03}.json',
+                safe_save(out / f'readiness-observation-error-{counter:03}.json',
                      {'error': str(error), 'server_pid': server.pid,
                       'action': 'continue_read_observation_on_same_server'})
             time.sleep(0.2)
         assert health['build']['binary_commit'] == a.expected_commit
+        initial_health_instance = health['build']['runtime_instance_id']
+        if not isinstance(initial_health_instance, str) or not initial_health_instance or token in initial_health_instance:
+            raise ValueError('Initial health instance unavailable or credential echo withheld')
         assert Path(health['paths']['effective_base_path']).resolve() == base
-        save(out / 'health.json', health)
+        expected_workspace = {'base_path': health['paths']['effective_base_path'],
+                              'masc_root': health['paths']['effective_masc_root']}
+        safe_save(out / 'health.json', health)
         http('/mcp', {'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'goal-confirmation-fixture', 'version': '1'}}})
         created = mcp('masc_goal_upsert', {'title': 'Synthetic marker inspection', 'metric': 'marker count in fixture/evidence.txt', 'target_value': '1'})
         goal_id = created['goal']['id']
         mcp('masc_goal_transition', {'goal_id': goal_id, 'action': 'request_complete'})
-        path = '/api/v1/goals/confirmation?goal_id=' + goal_id
-        while True:
-            try:
-                evidence = http(path)
-            except (URLError, ConnectionError) as error:
-                save(out / f'proof-observation-error-{counter:03}.json',
-                     {'path': path, 'error': str(error), 'server_pid': server.pid,
-                      'action': 'continue_read_observation_on_same_server'})
-                if server.poll() is not None:
-                    raise RuntimeError('Server exited during proof observation') from error
-                time.sleep(0.5)
-                continue
-            if evidence['goal']['phase'] == 'awaiting_confirmation':
-                break
-            time.sleep(0.5)
-        save(out / 'awaiting-evidence.json', evidence)
+        path = '/api/v1/goals/confirmation?' + urlencode({'goal_id': goal_id,
+            'expected_base_path': expected_workspace['base_path'], 'expected_masc_root': expected_workspace['masc_root']})
+        def on_proof_observation_error(error):
+            safe_save(out / f'proof-observation-error-{counter:03}.json',
+                 {'path': path, 'error': str(error), 'server_pid': server.pid,
+                  'action': 'continue_read_observation_on_same_server'})
+            if server.poll() is not None:
+                raise RuntimeError('Server exited during proof observation') from error
+
+        evidence = wait_for_confirmation(lambda: http(path), provider_failure, on_proof_observation_error)
+        safe_save(out / 'awaiting-evidence.json', evidence)
         verdict = evidence['verification']['completion']['verdict']
         assert evidence['verification']['completion']['state'] == 'proof_proven'
-        binding = {'goal_id': goal_id, 'criterion_revision': evidence['goal']['criterion_revision'], 'request_id': verdict['request_id'], 'verification_run_id': verdict['verification_run_id']}
+        binding = {'goal_id': goal_id, 'criterion_revision': evidence['goal']['criterion_revision'], 'request_id': verdict['request_id'],
+            'verification_run_id': verdict['verification_run_id'], 'expected_workspace': expected_workspace,
+            'expected_operator_id': evidence['inspection_operator_id'],
+            'expected_runtime_instance_id': confirmation_instance}
         http(path, authenticated=False, expected_status=401)
         endpoint = '/api/v1/goals/confirmation'
         http(endpoint, {**binding, 'actor': 'pretend-human'}, expected_status=400)
@@ -184,25 +324,27 @@ def main():
         assert unchanged['goal']['phase'] == 'awaiting_confirmation'
         applied = http(endpoint, binding)
         readback = http(path)
+        assert confirmation_instance == binding['expected_runtime_instance_id']
         assert applied == readback
         confirmation = readback['verification']['completion']
         assert readback['goal']['phase'] == 'completed' and confirmation['state'] == 'human_confirmed'
         assert confirmation['operator_id'] == 'admin' and confirmation['operator_id'] != 'spoofed-human'
         assert confirmation['verdict'] == verdict
         assert http(endpoint, binding) == applied
-        save(out / 'confirmed-readback.json', readback)
+        safe_save(out / 'confirmed-readback.json', readback)
         events = [json.loads(line) for line in (base / '.masc/goal_events.jsonl').read_text().splitlines()]
         completions = [event for event in events if event.get('payload', {}).get('phase') == 'completed']
         assert len(completions) == 1 and completions[0]['payload']['actor'] == confirmation['operator_id']
         assert completions[0]['payload']['request_id'] == binding['request_id']
-        save(out / 'confirmation-event.json', completions[0])
+        safe_save(out / 'confirmation-event.json', completions[0])
         mcp('masc_goal_transition', {'goal_id': goal_id, 'action': 'reopen'})
         http(endpoint, binding, expected_status=400)
+        provider_failure.raise_if_failed()
         receipt.update(status='verified', goal_id=goal_id, binding=binding, operator_id=confirmation['operator_id'], confirmed_at=confirmation['confirmed_at'], verifier_requests=len(requests), unauthenticated_status=401, spoof_body_status=400, stale_run_status=400, reopened_replay_status=400)
-        save(out / 'receipt.json', receipt)
+        safe_save(out / 'receipt.json', receipt)
     except Exception as error:
         receipt.update(status='failed', error=str(error))
-        save(out / 'receipt.json', receipt)
+        safe_save(out / 'receipt.json', receipt)
         raise
     finally:
         server.terminate()

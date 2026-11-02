@@ -18,6 +18,22 @@ module Chart = Masc_tui_chart
 
 module Task_id_set = Set.Make (String)
 
+let goal_receipt_authority_current (state : state) (receipt : goal_action_receipt) =
+  match receipt.gar_authority with
+  | None -> true
+  | Some authority ->
+      let current_confirmation = match state.goal_confirmation with
+        | Planning_detail.Inspecting read ->
+          (match Planning_detail.confirmation_view_for read ~goal_id:receipt.gar_goal_id with
+           | Ready confirmation -> Some confirmation
+           | Absent | Loading | Stale _ | Failed _ -> None)
+        | Planning_detail.Submitting _ -> None in
+      let credential_current = state.workspace_identity = Workspace_identity_match
+        && Masc_tui_http.credential_owner_is_current authority.ra_credential_owner in
+      let current_instance = Option.bind state.server_identity (fun identity -> identity.sid_runtime_instance_id) in
+      Planning_detail.receipt_authority_current ~credential_current ~current_instance
+        ~current_confirmation ~receipt:authority
+
 let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
@@ -346,7 +362,7 @@ let planning_stage_rail (phase : Goal_phase.t) =
   | Goal_phase.Dropped ->
     planning_phase_color Goal_phase.Dropped
     ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
-    ^ Ansi.dim ^ "  (off the line; [o] puts it back on executing)" ^ Ansi.reset
+    ^ Ansi.dim ^ "  (off the line; [o] requests reopen)" ^ Ansi.reset
   | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed ->
     String.concat arrow
       [ stop Goal_phase.Executing
@@ -371,7 +387,13 @@ let planning_detail_tone (tone : Planning_detail.tone) =
    word. Only the goal phase decides here -- the linked tasks have their own
    surface and their own verdicts. *)
 let planning_next_step (goal : planning_goal) =
-  match goal.pg_phase, goal.pg_proof with
+  if not (planning_goal_has_valid_id goal) then
+    (Theme.warn (), "Goal ID is blank or has disallowed surrounding whitespace; inspect the stored ID")
+  else match goal.pg_phase, goal.pg_proof with
+  | Goal_phase.Executing, Tui_decode.Proof_unreadable _ when Option.is_none goal.pg_retry_binding ->
+    (Theme.warn (), "verification binding unavailable - inspect proof, server storage and runtime, then [r] refresh")
+  | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
+    (Theme.warn (), "verification binding unavailable - inspect the Goal and proof, then [r] refresh")
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
     , "refused - fix what the verdict names below, then [c] to resubmit" )
@@ -383,7 +405,8 @@ let planning_next_step (goal : planning_goal) =
   | (Goal_phase.Verifying, Proof_idle) | (Goal_phase.Verifying, Proof_pending)
   | (Goal_phase.Verifying, Proof_proven _) | (Goal_phase.Verifying, Proof_refuted _)
   | (Goal_phase.Verifying, Proof_stale _) | (Goal_phase.Verifying, Proof_unreadable _) ->
-    let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
+    let tone, text = Planning_detail.verifying_next_step
+        ~can_retry:(Option.is_some goal.pg_retry_binding) goal.pg_verifier_unreconciled in
     (planning_detail_tone tone, text)
   | (Goal_phase.Awaiting_confirmation, Proof_idle)
   | (Goal_phase.Awaiting_confirmation, Proof_pending)
@@ -391,13 +414,13 @@ let planning_next_step (goal : planning_goal) =
   | (Goal_phase.Awaiting_confirmation, Proof_refuted _)
   | (Goal_phase.Awaiting_confirmation, Proof_stale _)
   | (Goal_phase.Awaiting_confirmation, Proof_unreadable _) ->
-    (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
+    (Theme.warn (), "awaiting confirmation - [a] requests proof or confirms after review")
   | (Goal_phase.Completed, Proof_idle) | (Goal_phase.Completed, Proof_pending)
   | (Goal_phase.Completed, Proof_proven _) | (Goal_phase.Completed, Proof_refuted _)
-  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, "reached its target - [o] reopens it")
+  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, "completed - [o] requests reopen")
   | (Goal_phase.Dropped, Proof_idle) | (Goal_phase.Dropped, Proof_pending)
   | (Goal_phase.Dropped, Proof_proven _) | (Goal_phase.Dropped, Proof_refuted _)
-  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, "abandoned - [o] reopens it")
+  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, "abandoned - [o] requests reopen")
   | (Goal_phase.Paused _, Proof_idle) | (Goal_phase.Paused _, Proof_pending)
   | (Goal_phase.Paused _, Proof_proven _) | (Goal_phase.Paused _, Proof_refuted _)
   | (Goal_phase.Paused _, Proof_stale _) | (Goal_phase.Paused _, Proof_unreadable _) -> (Theme.warn (), "paused - [r] restores the prior state; linked Tasks continue independently")
@@ -420,7 +443,7 @@ let planning_proof_detail ~ko (goal : planning_goal) =
       , Printf.sprintf "%s: %s"
           (if ko then match blocked.vu_step with
            | Goal_reconcile_step.Reconcile_proof -> "검증기가 확정 증거를 적용하지 못함"
-           | Goal_reconcile_step.Rearm_proof -> "검증기가 요청을 다시 준비하지 못함"
+           | Goal_reconcile_step.Rearm_proof -> "검증기가 증명 요청을 확인하지 못함"
            | Goal_reconcile_step.Read_original -> "검증기가 보존된 요청을 읽지 못함"
            else Planning_detail.unreconciled_heading blocked.vu_step)
           (Terminal_text.single_line blocked.vu_detail) )
@@ -432,7 +455,7 @@ let planning_proof_detail ~ko (goal : planning_goal) =
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), text "검증 거절" "refused")
   | Tui_decode.Proof_refuted (Some reason) ->
       Some ((Theme.bad ()), text "검증 거절: " "refused: " ^ Terminal_text.single_line reason)
-  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), text "완료 판정 대기" "waiting for the completion judge")
+  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), text "완료 판정 대기" "verification result pending")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), text "기준 변경 · 이전 증거는 이력" "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
@@ -590,6 +613,13 @@ let planning_summary_reading ~cols (state : state) =
          section (text "기준 대비 변화" "Change from baseline") change_rows;
          section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
   in
+  let retired = List.rev state.goal_action_receipts |> List.map (fun receipt ->
+    let answer = Planning_detail.receipt_outcome_text ~ko ~current:(goal_receipt_authority_current state receipt) receipt.gar_result in
+    Printf.sprintf "%s · %s · %s · %s" (Terminal_text.single_line receipt.gar_goal_id)
+      (Terminal_text.single_line receipt.gar_workspace) (Terminal_text.single_line receipt.gar_ticket) answer) in
+  let sections = sections @ (match retired with
+    | [] -> []
+    | _ -> [section (text "Goal 요청 결과" "Goal request results") retired]) in
   Masc_tui_detail_reading.create ~ko ~title:(text "작업 요약" "Work summary") sections
 
 (* The list owns the first row of the summary; its complete counts and the
@@ -991,7 +1021,26 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
 let planning_confirmation_view (state : state) ~goal_id =
   match state.goal_confirmation with
   | Planning_detail.Inspecting read ->
-      `Inspect (Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id)
+      let view = Planning_detail.confirmation_view_for read ~goal_id in
+      let view = match view with
+        | (Ready _ | Stale _ | Failed _) when state.workspace_identity <> Workspace_identity_match ->
+            Masc_tui_fetched.Failed "Workspace identity is unconfirmed; read the proof again"
+        | (Ready confirmation | Stale (confirmation, _))
+          when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
+            Masc_tui_fetched.Failed "Credential changed; read the proof again"
+        | (Ready confirmation | Stale (confirmation, _))
+          when not (Option.exists (fun identity -> identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
+            Masc_tui_fetched.Failed "Server changed; read the proof again"
+        | Stale (confirmation, error) ->
+            Stale (confirmation, Planning_detail.confirmation_read_error_message
+              ~credential_is_current:Masc_tui_http.credential_owner_is_current error)
+        | Failed error ->
+            Failed (Planning_detail.confirmation_read_error_message
+              ~credential_is_current:Masc_tui_http.credential_owner_is_current error)
+        | Ready confirmation -> Ready confirmation
+        | Loading -> Loading
+        | Absent -> Absent in
+      `Inspect view
   | Planning_detail.Submitting (submitted_goal, _) when String.equal submitted_goal goal_id -> `Submitting
   | Planning_detail.Submitting _ -> `Inspect Absent
 
@@ -999,18 +1048,23 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
   let item action =
     let key = planning_action_key action and label = planning_action_label action in
     let text = Printf.sprintf "[%s] %s" key label in
-    if Goal_phase.moves_goal ~phase:goal.pg_phase
-         ~action:(Goal_phase.Public_action.to_action action)
+    if planning_goal_offers_action goal action
     then text else Ansi.dim ^ text ^ Ansi.reset
   in
   let actions = List.map item Goal_phase.Public_action.all
-    @ (if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
-       then ["[a] Confirm proof"] else []) in
+    @ (if not (planning_goal_has_valid_id goal) then []
+       else if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
+       then ["[a] Confirm proof"] else if goal.pg_phase = Goal_phase.Completed
+       then ["[a] Inspect confirmation"] else []) in
   (* These are commands, so every action stays visible while its evidence is
      read. Their physical rows are subtracted before the reader is allocated. *)
   Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
     ("Actions: " ^ String.concat "   " actions)
   |> List.map (fun line -> "  " ^ line)
+  |> fun rows -> rows @ (if planning_goal_has_valid_id goal then [] else
+       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+         "Goal ID is blank or has disallowed surrounding whitespace; lifecycle actions are unavailable."
+       |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
   |> fun rows -> rows @ (match armed with
        | None -> []
        | Some action ->
@@ -1022,7 +1076,7 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
        | None -> []
        | Some reason ->
            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-             (Printf.sprintf "DROP REASON: %s_ -- Enter drops the Goal and cancels its unclaimed Tasks"
+             (Printf.sprintf "DROP REASON: %s_ -- Enter requests drop; linked Tasks may be cancelled"
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
@@ -1069,7 +1123,17 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
          | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label value)
          ["Created", goal.pg_created_at; "Updated", goal.pg_updated_at; "Reviewed", goal.pg_last_review_at])
     @ field ~tone:Planning_detail.Quiet "Link" (Link.reference Goal goal.pg_id)
-    @ (match state.goal_action_error with None -> [] | Some error -> field ~tone:Planning_detail.Refused "Error" error)
+    @ (match List.assoc_opt goal.pg_id state.goal_action_errors with
+       | Some error ->
+         field ~tone:Planning_detail.Refused "Error" error
+       | None -> [])
+    @ (state.goal_action_receipts |> List.filter_map (fun receipt ->
+         if not (String.equal receipt.gar_goal_id goal.pg_id) then None
+         else Some (field ~tone:Planning_detail.Unreadable "Request result"
+           (Printf.sprintf "%s · %s · %s" receipt.gar_workspace receipt.gar_ticket
+             (Planning_detail.receipt_outcome_text ~ko:(state.ui_language = Lang_ko)
+               ~current:(goal_receipt_authority_current state receipt) receipt.gar_result))))
+       |> List.concat)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
   let linked =
@@ -1107,6 +1171,104 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   in
   let measurement = planning_measurement_lines state goal in
   let timeline = Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
+  let candle =
+    let open Candle_goal_observation in
+    let coverage = field ~tone:Planning_detail.Quiet "Candidate coverage"
+      "current candidate preparation reads Snapshot links saved during proof recording; this ledger cannot establish full link history or missing contributions" in
+    let describe ({configuration; ledger} : Candle_goal_observation.t) =
+      let config = match configuration with Enabled -> "enabled" | Off -> "off" | Disabled -> "disabled or unreadable" in
+      let identity (id : identity) =
+        field ~tone:Planning_detail.Quiet "Verification request" id.request_id
+        @ field ~tone:Planning_detail.Quiet "Verifier run" id.verification_run_id in
+      let snapshot = function
+        | Snapshot_matching -> []
+        | Snapshot_missing -> field ~tone:Planning_detail.Unreadable "Snapshot" "missing for this confirmed run"
+        | Snapshot_conflicting -> field ~tone:Planning_detail.Unreadable "Snapshot" "conflicting records for this confirmed run" in
+      let payout = function
+        | No_recorded_obligation ->
+          field "Payout" "no obligation recorded in this ledger; prior history is not established"
+        | Inconsistent -> field ~tone:Planning_detail.Unreadable "Payout" "ledger state could not be interpreted"
+        | Owed {identity=id; snapshot=pass; stage} ->
+          field ~tone:Planning_detail.Waiting "Payout"
+            (match stage with
+             | Candidates_unrecorded ->
+               (match pass with Snapshot_matching -> "owed; candidates not recorded; waiting reason not observed"
+                | Snapshot_missing | Snapshot_conflicting -> "owed; candidate preparation waits for the unresolved Snapshot")
+             | Candidates_consistent -> "owed; candidates recorded; awaiting settlement"
+             | Candidates_inconsistent -> "owed; recorded candidate evidence is inconsistent"
+             | Candidates_unchecked -> "owed; recorded candidate evidence is not checked")
+          @ snapshot pass @ identity id
+        | Held {identity=id; snapshot=pass; origin; issues} ->
+          field ~tone:Planning_detail.Waiting "Payout" "held: contribution window is uncertain"
+          @ field ~tone:Planning_detail.Quiet "Hold evidence"
+              (match origin with Stored -> "recorded in ledger" | Derived_candidates -> "derived from recorded candidates")
+          @ snapshot pass @ identity id
+          @ (match issues with
+             | Issues_unavailable -> field ~tone:Planning_detail.Unreadable "Issues" "hold details are not observed"
+             | Complete_issues issues -> List.concat_map (fun issue ->
+                 field ~tone:Planning_detail.Unreadable "Issue" (Candle_payout.window_issue_to_string issue)) issues
+             | Snapshot_independent_issues issues ->
+               List.concat_map (fun issue ->
+                 field ~tone:Planning_detail.Unreadable "Issue" (Candle_payout.window_issue_to_string issue)) issues
+               @ field ~tone:Planning_detail.Unreadable "Time boundary" "additional issues are not observed while the Snapshot is unresolved")
+          @ (match origin with
+             | Stored -> []
+             | Derived_candidates -> field ~tone:Planning_detail.Unreadable "Candidate evidence"
+                 "Task coverage and candidate consistency have not been checked")
+        | Paid {identity=id; recorded_at; allocations} ->
+          field ~tone:Planning_detail.Proven "Payout" ("recorded paid at " ^ Candle_time.to_rfc3339 recorded_at)
+          @ identity id
+          @ List.concat_map (fun (allocation : allocation) ->
+              field "Recorded allocation" (Printf.sprintf "%s: %d.%03d Candle (weight %d)"
+                allocation.keeper (allocation.amount_milli / 1000) (allocation.amount_milli mod 1000) allocation.weight)) allocations
+          @ field ~tone:Planning_detail.Quiet "Amounts" "at payout; current balances may differ"
+        | Unattributed {identity=id; recorded_at; reason} ->
+          field "Payout" ((match reason with
+            | No_candidates -> "no payable candidates"
+            | All_unrelated -> "candidate tasks unrelated"
+            | No_related_keepers -> "no related Keepers") ^ " (" ^ Candle_time.to_rfc3339 recorded_at ^ ")")
+          @ identity id
+        | Payout_failed {identity=id} ->
+          field ~tone:Planning_detail.Refused "Payout" "failure recorded as unreadable due date" @ identity id in
+      field "Last observed config" config
+      @ (match ledger with
+         | Missing -> field ~tone:Planning_detail.Unreadable "Ledger" "file absent; earlier history is not observed"
+         | Unavailable reason -> field ~tone:Planning_detail.Unreadable "Ledger"
+             (match reason with Locked -> "locked" | Unreadable -> "unreadable" | Invalid_row -> "invalid row")
+         | Observed result -> payout result)
+      @ (match ledger with
+         | Observed (Owed _ | Held _ | Paid _ | Unattributed _ | Payout_failed _) -> coverage
+         | Missing | Unavailable _ | Observed _ -> [])
+      @ field ~tone:Planning_detail.Quiet "Model execution" "not observed from the payout ledger" in
+    let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
+    let rows =
+      if not (server_authority_ready state) then
+        field ~tone:Planning_detail.Unreadable "Candle" "workspace authority unavailable"
+      else match reading with
+      | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet "Candle" "not read"
+      | Loading -> field ~tone:Planning_detail.Waiting "Candle" "reading payout ledger"
+      | Failed error ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" ("reading; previous read failed: " ^ error)
+        else field ~tone:Planning_detail.Unreadable "Candle" error
+      | Ready (owner, _, _) | Stale ((owner, _, _), _) when not (Masc_tui_http.credential_owner_is_current owner) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" "reading; previous credential observation hidden"
+        else field ~tone:Planning_detail.Unreadable "Candle" "credential changed; read again"
+      | Ready (_, instance, _) | Stale ((_, instance, _), _)
+        when not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
+        field ~tone:Planning_detail.Unreadable "Candle" "server instance changed; read again"
+      | Ready (_, _, observation) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" "reading payout ledger"
+        else describe observation
+      | Stale (_, error) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" ("reading; previous read failed: " ^ error)
+        else field ~tone:Planning_detail.Unreadable "Candle" error in
+    gap @ section (Printf.sprintf "%s [%s:%s]"
+      (ui_text state ~ko:"Candle 지급 기록" ~en:"Candle payout record")
+      Masc_tui_keys.goal_candle_refresh_key (ui_text state ~ko:"조회" ~en:"read")) @ rows in
   (* While a proof waits for confirmation, the decision block leads and the
      timeline -- context, not decision input -- moves behind the goal's own
      summary, so the promise and the metadata read adjacently instead of a
@@ -1119,13 +1281,13 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
    | `Inspect Masc_tui_fetched.Absent ->
-       metadata @ linked @ gap
+       metadata @ linked @ candle @ gap
        @ section
            (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력"
               ~en:"3. Verification & Measurement")
        @ wrapped_proof
    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-       wrapped_proof @ gap @ metadata @ linked @ timeline)
+       wrapped_proof @ gap @ metadata @ linked @ candle @ timeline)
 
 let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
   let phase = "  " ^ bracketed ~max_cells:planning_phase_column
@@ -1284,7 +1446,7 @@ let render_planning_detail (state : state)
        ~hints:
          (match goal_drop_reason_for state goal.pg_id with
           | Some _ -> Masc_tui_keys.footer_hints_goal_drop_reason
-          | None -> Masc_tui_keys.footer_hints ~detail_open:true state.view));
+          | None -> Masc_tui_keys.footer_hints_planning_goal_detail));
   finish_surface state ~clamped:(Planning_confirmation_scroll (scroll, seen))
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
   end

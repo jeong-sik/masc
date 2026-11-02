@@ -73,7 +73,7 @@ let native_replay model family =
     (producer=consumer && producer.replay_policy=All_assistant_messages);
   let sync = match Backend_openai_responses.parse_response_result
       (Yojson.Safe.to_string (response_json model)) with
-    | Ok response -> response | Error detail -> Alcotest.fail detail in
+    | Ok {response;_} -> response | Error {detail;_} -> Alcotest.fail detail in
   List.iter (fun (mode,response) ->
     let first = restored config response in
     let messages = [first;make_message ~role:Tool [ToolResult {tool_use_id="call";

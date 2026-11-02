@@ -59,8 +59,19 @@ let with_temp_model_catalog contents f =
     (fun () -> f path)
 ;;
 
+let current_catalog () =
+  match (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) with
+  | Some catalog -> catalog | None -> Model_catalog.empty
+;;
+
+let catalog_capabilities catalog model_id =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error _ -> None
+  | Ok model_id -> Model_catalog.lookup catalog model_id
+    |> Option.map (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None)
+;;
+
 let isolate_ambient_runtime_sources () =
-  Capability_manifest.set_global Capability_manifest.empty;
   Model_catalog_test_support.install_embedded_model_catalog ~suite:"Capabilities"
 ;;
 
@@ -750,7 +761,7 @@ let test_lookup_qwen3_thinking_control () =
      No_thinking_control never reached
      the wire.
 
-     Route through [for_model_id_with_manifest] with a non-matching manifest
+     Compose a non-matching JSON declaration with the current model catalog
      so this assertion pins the catalog fallback instead of any ambient
      manifest entry supplied by the test environment. *)
   let non_matching =
@@ -761,7 +772,7 @@ let test_lookup_qwen3_thinking_control () =
     | Ok m -> m
     | Error e -> Alcotest.failf "manifest parse error: %s" e
   in
-  match Capabilities.for_model_id_with_manifest non_matching "qwen3" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) non_matching) "qwen3" with
   | Some c ->
     check bool "supports reasoning" true c.supports_reasoning;
     check_thinking_control
@@ -1724,9 +1735,8 @@ let make_manifest ?(base = "default_capabilities") ?(extra_fields = []) model_id
   | Error e -> Alcotest.failf "manifest parse error: %s" e
 ;;
 
-let test_explicit_manifest_lookup_precedes_catalog_fallback () =
-  (* [for_model_id_with_manifest] is the explicit-manifest API, so the supplied
-     manifest wins before falling back to the globally loaded catalog. *)
+let test_explicit_composition_replaces_exact_model () =
+  (* Compose the explicit declaration before reading the single catalog. *)
   let m =
     make_manifest
       ~base:"openai_chat"
@@ -1736,20 +1746,19 @@ let test_explicit_manifest_lookup_precedes_catalog_fallback () =
         ]
       "claude-opus-5-5"
   in
-  match Capabilities.for_model_id_with_manifest m "claude-opus-5-5" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "claude-opus-5-5" with
   | Some c ->
     check (option int) "manifest overrides ctx" (Some 999999) c.max_context_tokens;
     check bool "manifest keeps tools" true c.supports_tools
   | None -> fail "expected Some from manifest"
 ;;
 
-let test_explicit_manifest_lookup_falls_back_to_catalog () =
-  (* Manifest has no entry for claude-opus, so the lookup should fall through to
-     the loaded model catalog. *)
+let test_explicit_composition_retains_other_models () =
+  (* The composed catalog retains unrelated original model rows. *)
   let m = make_manifest "totally-other-model" in
-  match Capabilities.for_model_id_with_manifest m "claude-opus-5-5" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "claude-opus-5-5" with
   | Some c ->
-    check (option int) "fallback ctx 1M" (Some 1_000_000) c.max_context_tokens
+    check (option int) "unmodified model context 1M" (Some 1_000_000) c.max_context_tokens
   | None -> fail "should fall through to model catalog"
 ;;
 
@@ -1761,7 +1770,7 @@ let test_manifest_exact_identity_and_order () =
   and exact = entry "custom-exact-fixture-q4" true in
   List.iter (fun entries ->
     let manifest = parse entries in
-    let caps id = Capabilities.for_model_id_with_manifest manifest id in
+    let caps id = catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) manifest) id in
     (match caps "CUSTOM-EXACT-FIXTURE-Q4" with
      | Some caps -> check bool "exact row owns its tool permission" true caps.supports_tools
      | None -> fail "exact case-folded row must resolve");
@@ -1774,11 +1783,11 @@ let test_manifest_exact_identity_and_order () =
        "vendor/custom-exact-fixture-q4";"vendor:custom-exact-fixture-q4"])
     [[broad;exact];[exact;broad]];
   let qualified = parse [entry "vendor/custom-exact-fixture:q4" true] in
-  (match Capabilities.for_model_id_with_manifest qualified "VENDOR/CUSTOM-EXACT-FIXTURE:Q4" with
+  (match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) qualified) "VENDOR/CUSTOM-EXACT-FIXTURE:Q4" with
    | Some caps -> check bool "an explicitly declared qualified ID remains exact" true caps.supports_tools
    | None -> fail "qualified exact declaration must resolve");
   check bool "qualified declaration does not grant bare identity" true
-    (Capabilities.for_model_id_with_manifest qualified "custom-exact-fixture:q4"=None)
+    (catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) qualified) "custom-exact-fixture:q4"=None)
 ;;
 
 let test_manifest_requires_explicit_v2_model_identity () =
@@ -1800,16 +1809,16 @@ let test_manifest_unknown_model_still_none () =
     bool
     "unknown → None"
     true
-    (Capabilities.for_model_id_with_manifest m "totally-unknown-xyz" = None)
+    (catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "totally-unknown-xyz" = None)
 ;;
 
-let test_malformed_model_id_does_not_fallback_to_manifest () =
+let test_malformed_model_id_is_rejected_before_composition_lookup () =
   let m = make_manifest "claude-opus-5-5" in
   check
     bool
-    "malformed id is refused before manifest fallback"
+    "malformed id is refused before catalog lookup"
     true
-    (Capabilities.for_model_id_with_manifest m " claude-opus-5-5 " = None)
+    (catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) " claude-opus-5-5 " = None)
 ;;
 
 let test_manifest_base_label_openai_chat () =
@@ -1819,7 +1828,7 @@ let test_manifest_base_label_openai_chat () =
       ~extra_fields:[ "max_context_tokens", "65536" ]
       "custom-gpt-v2"
   in
-  match Capabilities.for_model_id_with_manifest m "custom-gpt-v2" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "custom-gpt-v2" with
   | Some c ->
     check (option int) "custom ctx" (Some 65536) c.max_context_tokens;
     check bool "openai_chat base: tools" true c.supports_tools;
@@ -1834,7 +1843,7 @@ let test_manifest_base_label_anthropic () =
       ~extra_fields:[ "max_context_tokens", "512000" ]
       "my-claude-custom"
   in
-  match Capabilities.for_model_id_with_manifest m "my-claude-custom" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "my-claude-custom" with
   | Some c ->
     check (option int) "custom ctx 512K" (Some 512000) c.max_context_tokens
   | None -> fail "expected Some"
@@ -1847,7 +1856,7 @@ let test_manifest_base_absent_uses_default () =
       ~extra_fields:[ "supports_tools", "true"; "max_context_tokens", "32768" ]
       "my-special-model-q4"
   in
-  match Capabilities.for_model_id_with_manifest m "my-special-model-q4" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "my-special-model-q4" with
   | Some c ->
     check bool "tools overridden true" true c.supports_tools;
     check (option int) "ctx overridden" (Some 32768) c.max_context_tokens;
@@ -1856,21 +1865,21 @@ let test_manifest_base_absent_uses_default () =
   | None -> fail "expected Some"
 ;;
 
-let test_manifest_base_label_constructor_rejects_unknown () =
-  match Capability_manifest.base_label_of_string "not_a_preset" with
-  | Error _ -> ()
-  | Ok _ -> fail "unknown base label should not be constructible"
+let test_shared_preset_constructor_rejects_unknown () =
+  match Capability_preset.of_string "not_a_preset" with
+  | None -> ()
+  | Some _ -> fail "unknown base label should not be constructible"
 ;;
 
-let test_manifest_base_label_constructor_canonicalizes () =
-  match Capability_manifest.base_label_of_string " OpenAI_CHAT " with
-  | Ok label ->
+let test_shared_preset_constructor_canonicalizes () =
+  match Capability_preset.of_string " OpenAI_CHAT " with
+  | Some preset ->
     check
       string
       "canonical base label"
       "openai_chat"
-      (Capability_manifest.base_label_to_string label)
-  | Error msg -> failf "known base label should parse: %s" msg
+      (Capability_preset.to_string preset)
+  | None -> fail "known base label should parse"
 ;;
 
 let test_example_manifest_base_labels_are_canonical () =
@@ -1912,8 +1921,8 @@ let test_example_manifest_base_labels_are_canonical () =
            if model_id <> "gpt-5.3-codex-spark"
            then
              check bool (Printf.sprintf "expected base for %s" model_id) true false
-         | Some label ->
-           let label = Capability_manifest.base_label_to_string label in
+         | Some preset ->
+           let label = Capability_preset.to_string preset in
            check
              bool
              (Printf.sprintf "base label resolves for %s: %s" model_id label)
@@ -1922,23 +1931,22 @@ let test_example_manifest_base_labels_are_canonical () =
       entries
 ;;
 
-let test_explicit_manifest_exact_model_precedes_catalog_fallback () =
-  (* Explicit manifest lookup lets callers test or apply a manifest before
-     consulting the global catalog fallback. *)
+let test_composed_exact_model_replaces_original_capabilities () =
+  (* The exact composed row supplies the replacement capabilities. *)
   let m =
     make_manifest
       ~base:"openai_chat"
       ~extra_fields:[ "supports_reasoning", "false" ]
       "qwen3.5-35b-a3b-q4"
   in
-  match Capabilities.for_model_id_with_manifest m "qwen3.5-35b-a3b-q4" with
+  match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "qwen3.5-35b-a3b-q4" with
   | Some c ->
     check bool "manifest disables reasoning" false c.supports_reasoning;
     check bool "base openai_chat: tools" true c.supports_tools
   | None -> fail "expected Some"
 ;;
 
-let test_global_catalog_precedes_global_manifest () =
+let test_composed_catalog_replaces_exact_capability_row () =
   let manifest =
     make_manifest
       ~base:"anthropic"
@@ -1962,18 +1970,18 @@ thinking_control_format = "chat_template_kwargs"
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "model catalog parse error: %s" msg
        | Ok catalog ->
-         Model_catalog.set_global catalog;
-         Capability_manifest.set_global manifest;
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.with_model_overrides catalog manifest))) ~providers:(None)));
          Fun.protect
            ~finally:(fun () -> isolate_ambient_runtime_sources ())
            (fun () ->
               match Capabilities.for_model_id "s9-precedence-model-v1" with
               | Some c ->
-                check (option int) "catalog ctx wins" (Some 123456) c.max_context_tokens;
-                check bool "catalog tools wins" true c.supports_tools;
+                check (option int) "composed JSON context" (Some 999999) c.max_context_tokens;
+                check bool "composed JSON tools" false c.supports_tools;
                 check_thinking_control
-                  "catalog thinking format wins"
-                  Capabilities.Chat_template_kwargs
+                  "composed JSON thinking format"
+                  Capabilities.Thinking_object
                   c.thinking_control_format
               | None -> fail "expected catalog-backed capabilities"))
 ;;
@@ -2000,14 +2008,12 @@ thinking_control_token = "<|provider|>"
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "model catalog parse error: %s" msg
        | Ok catalog ->
-         let previous_catalog = Model_catalog.global () in
+         let previous_catalog = Llm_provider.Catalog_snapshot.current () in
          let restore () =
-           match previous_catalog with
-           | Some catalog -> Model_catalog.set_global catalog
-           | None -> Model_catalog.clear_global ()
+           Llm_provider.Catalog_snapshot.publish previous_catalog
          in
          Fun.protect ~finally:restore (fun () ->
-           Model_catalog.set_global catalog;
+           (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
            (match
               Capabilities.for_provider_model_id
                 ~wire:None
@@ -2051,15 +2057,15 @@ thinking_control_token = "<|provider|>"
                 ~model_id:"exact-model-preview")))
 ;;
 
-let test_apply_manifest_entry_all_none_uses_base () =
+let test_catalog_json_entry_all_none_uses_base () =
   (* Entry with only model_id set — should be identical to base. *)
   let json =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"x","base":"anthropic"}]}|}
   in
   let manifest = Capability_manifest.of_json json |> Result.get_ok in
-  let entry = List.hd (Capability_manifest.entries manifest) in
-  let caps = Capabilities.apply_manifest_entry entry in
+  let entry = List.hd (Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty manifest)) in
+  let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
   let base = Capabilities.anthropic_capabilities in
   check bool "tools matches base" base.supports_tools caps.supports_tools;
   check (option int) "ctx matches base" base.max_context_tokens caps.max_context_tokens
@@ -2201,9 +2207,9 @@ let test_manifest_accepts_ollama_think_policy_string () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"ollama-manifest","thinking_control_format":"ollama_think"}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
-    let caps = Capabilities.apply_manifest_entry entry in
+    let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
     check_thinking_control
       "manifest ollama_think"
       Capabilities.Ollama_think
@@ -2269,9 +2275,9 @@ let test_manifest_accepts_thinking_object_adaptive_policy_string () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"adaptive-manifest","thinking_control_format":"thinking_object_adaptive"}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
-    let caps = Capabilities.apply_manifest_entry entry in
+    let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
     check_thinking_control
       "manifest thinking_object_adaptive"
       Capabilities.Thinking_object_adaptive
@@ -2285,9 +2291,9 @@ let test_manifest_accepts_reasoning_output_format () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"split-manifest","reasoning_output_format":"split_reasoning_fields"}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
-    let caps = Capabilities.apply_manifest_entry entry in
+    let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
     check
       bool
       "manifest split_reasoning_fields"
@@ -2302,9 +2308,9 @@ let test_manifest_accepts_reasoning_streaming_format () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"stream-manifest","reasoning_streaming_format":"delta:reasoning"}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
-    let caps = Capabilities.apply_manifest_entry entry in
+    let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
     check
       bool
       "manifest delta reasoning stream"
@@ -2319,9 +2325,9 @@ let test_manifest_applies_ignored_sampling_parameters () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"sampling-manifest","ignored_sampling_parameters":["temperature","top_p"]}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
-    let caps = Capabilities.apply_manifest_entry entry in
+    let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
     check
       (list string)
       "ignored sampling parameters"
@@ -2411,14 +2417,14 @@ let test_manifest_applies_accepted_reasoning_efforts () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"effort-ok","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
     Alcotest.(check (option (list string)))
       "accepted subset"
       (Some [ "none"; "low"; "high" ])
       (Option.map
          (List.map Reasoning_effort.to_string)
-         (Capabilities.apply_manifest_entry entry).accepted_reasoning_efforts)
+         (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).accepted_reasoning_efforts)
   | Ok _ -> Alcotest.fail "expected one manifest entry"
   | Error msg -> Alcotest.failf "unexpected parse error: %s" msg
 ;;
@@ -2479,8 +2485,8 @@ let test_manifest_intlit_out_of_range_rejects () =
   | Ok _ -> Alcotest.fail "out-of-range manifest int literal should reject"
 ;;
 
-let parse_single_manifest_entry json_text =
-  match Capability_manifest.of_json (Yojson.Safe.from_string json_text) |> Result.map Capability_manifest.entries with
+let parse_single_catalog_json_entry json_text =
+  match Capability_manifest.of_json (Yojson.Safe.from_string json_text) |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] -> entry
   | Ok _ -> Alcotest.fail "expected one manifest entry"
   | Error msg -> Alcotest.failf "unexpected parse error: %s" msg
@@ -2488,13 +2494,13 @@ let parse_single_manifest_entry json_text =
 
 let test_manifest_applies_modality_priority () =
   let entry =
-    parse_single_manifest_entry
+    parse_single_catalog_json_entry
       {|{"schema_version":2,"models":[{"model_id":"visual-manifest","base":"anthropic","modality_priority":"visual_first"}]}|}
   in
   (match Capabilities.anthropic_capabilities.modality_priority with
    | Modality.Preserve_input_order -> ()
    | Modality.Visual_first -> Alcotest.fail "anthropic base should preserve input order");
-  match (Capabilities.apply_manifest_entry entry).modality_priority with
+  match (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).modality_priority with
   | Modality.Visual_first -> ()
   | Modality.Preserve_input_order ->
     Alcotest.fail "manifest modality_priority should override the base preset"
@@ -2502,7 +2508,7 @@ let test_manifest_applies_modality_priority () =
 
 let test_manifest_applies_emits_usage_tokens () =
   let entry =
-    parse_single_manifest_entry
+    parse_single_catalog_json_entry
       {|{"schema_version":2,"models":[{"model_id":"usage-manifest","base":"anthropic","emits_usage_tokens":false}]}|}
   in
   check
@@ -2514,12 +2520,12 @@ let test_manifest_applies_emits_usage_tokens () =
     bool
     "manifest emits_usage_tokens overrides base"
     false
-    (Capabilities.apply_manifest_entry entry).emits_usage_tokens
+    (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).emits_usage_tokens
 ;;
 
 let test_manifest_applies_supported_models () =
   let entry =
-    parse_single_manifest_entry
+    parse_single_catalog_json_entry
       {|{"schema_version":2,"models":[{"model_id":"restricted-manifest","base":"anthropic","supported_models":["model-a","model-b"]}]}|}
   in
   check
@@ -2531,15 +2537,15 @@ let test_manifest_applies_supported_models () =
     (option (list string))
     "manifest supported_models overrides base"
     (Some [ "model-a"; "model-b" ])
-    (Capabilities.apply_manifest_entry entry).supported_models
+    (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).supported_models
 ;;
 
 let test_manifest_newer_fields_inherit_base_when_absent () =
   let entry =
-    parse_single_manifest_entry
+    parse_single_catalog_json_entry
       {|{"schema_version":2,"models":[{"model_id":"inherit-manifest","base":"kimi"}]}|}
   in
-  let caps = Capabilities.apply_manifest_entry entry in
+  let caps = Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry in
   let base = Capabilities.kimi_capabilities in
   check
     bool
@@ -2860,8 +2866,8 @@ let test_manifest_and_catalog_common_override_parity () =
           }]
         }|}
     in
-    match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
-    | Ok [ entry ] -> Capabilities.apply_manifest_entry entry
+    match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
+    | Ok [ entry ] -> Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry
     | Ok _ -> Alcotest.fail "expected one capability manifest entry"
     | Error msg -> Alcotest.failf "manifest parse failed: %s" msg
   in
@@ -2901,16 +2907,14 @@ reasoning_replay = "preserve_always"
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "model catalog parse failed: %s" msg
        | Ok catalog ->
-         let previous_catalog = Model_catalog.global () in
+         let previous_catalog = Llm_provider.Catalog_snapshot.current () in
          let restore () =
-           match previous_catalog with
-           | Some catalog -> Model_catalog.set_global catalog
-           | None -> Model_catalog.clear_global ()
+           Llm_provider.Catalog_snapshot.publish previous_catalog
          in
          Fun.protect ~finally:restore (fun () ->
-           Model_catalog.set_global catalog;
+           (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
            let catalog_caps =
-             match Capabilities.for_model_id_catalog "parity-model" with
+             match Capabilities.for_model_id "parity-model" with
              | Some caps -> caps
              | None -> Alcotest.fail "expected parity model catalog lookup"
            in
@@ -3010,7 +3014,7 @@ let test_a_declared_effort_ladder_survives_its_own_row () =
     Yojson.Safe.from_string
       {|{"schema_version":2,"models":[{"model_id":"declares-efforts","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
-  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
+  match Capability_manifest.of_json json |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
   | Ok [ entry ] ->
     check
       (option (list string))
@@ -3018,7 +3022,7 @@ let test_a_declared_effort_ladder_survives_its_own_row () =
       (Some [ "none"; "low"; "high" ])
       (Option.map
          (List.map Reasoning_effort.to_string)
-         (Capabilities.apply_manifest_entry entry).accepted_reasoning_efforts)
+         (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).accepted_reasoning_efforts)
   | Ok _ -> fail "expected one manifest entry"
   | Error msg -> failf "unexpected parse error: %s" msg
 ;;
@@ -3064,15 +3068,13 @@ supports_reasoning = true
 accepted_reasoning_efforts = ["high"]
 |} (if serves_bare_models then {|["precedence-model"]|} else "[]"))
     (fun path ->
-      let previous = Model_catalog.global () in
+      let previous = Llm_provider.Catalog_snapshot.current () in
       Fun.protect
-        ~finally:(fun () -> match previous with
-          | Some catalog -> Model_catalog.set_global catalog
-          | None -> Model_catalog.clear_global ())
+        ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
         (fun () ->
           match Model_catalog.load_file path with
           | Error detail -> fail detail
-          | Ok catalog -> Model_catalog.set_global catalog; f ()))
+          | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))); f ()))
 ;;
 
 let test_a_bare_row_outranks_the_provider_base () =
@@ -3098,6 +3100,7 @@ let test_a_named_provider_still_refuses_the_bare_row () =
 let test_declared_bare_models_bind_original_rows () =
   let catalog = Model_catalog.of_toml_string ~source:"served bare families"
     {|[[providers]]
+capabilities_base = "models_only"
 id = "native"
 aliases = ["gemini"]
 kind = "anthropic"
@@ -3391,47 +3394,47 @@ let () =
     ; "merge", [ test_case "with_context_size" `Quick test_with_context_size ]
     ; ( "manifest"
       , [ test_case
-            "explicit manifest precedes catalog fallback"
+            "explicit composition replaces exact model"
             `Quick
-            test_explicit_manifest_lookup_precedes_catalog_fallback
+            test_explicit_composition_replaces_exact_model
         ; test_case
-            "explicit manifest falls back to catalog"
+            "composition retains unrelated catalog rows"
             `Quick
-            test_explicit_manifest_lookup_falls_back_to_catalog
+            test_explicit_composition_retains_other_models
         ; test_case "exact model identity and order" `Quick test_manifest_exact_identity_and_order
         ; test_case "explicit v2 model identity" `Quick test_manifest_requires_explicit_v2_model_identity
         ; test_case "unknown model → None" `Quick test_manifest_unknown_model_still_none
         ; test_case
-            "malformed model id does not fall back to manifest"
+            "malformed model identity is refused"
             `Quick
-            test_malformed_model_id_does_not_fallback_to_manifest
+            test_malformed_model_id_is_rejected_before_composition_lookup
         ; test_case "base openai_chat" `Quick test_manifest_base_label_openai_chat
         ; test_case "base anthropic" `Quick test_manifest_base_label_anthropic
         ; test_case "base absent = default" `Quick test_manifest_base_absent_uses_default
         ; test_case
-            "base label constructor rejects unknown"
+            "shared preset constructor rejects unknown"
             `Quick
-            test_manifest_base_label_constructor_rejects_unknown
+            test_shared_preset_constructor_rejects_unknown
         ; test_case
-            "base label constructor canonicalizes"
+            "shared preset constructor canonicalizes"
             `Quick
-            test_manifest_base_label_constructor_canonicalizes
+            test_shared_preset_constructor_canonicalizes
         ; test_case
             "example base labels are canonical"
             `Quick
             test_example_manifest_base_labels_are_canonical
         ; test_case
-            "explicit exact manifest precedes catalog fallback"
+            "exact composed declaration replaces original capabilities"
             `Quick
-            test_explicit_manifest_exact_model_precedes_catalog_fallback
+            test_composed_exact_model_replaces_original_capabilities
         ; test_case
-            "global catalog precedes global manifest"
+            "single composed catalog owns exact capability fields"
             `Quick
-            test_global_catalog_precedes_global_manifest
+            test_composed_catalog_replaces_exact_capability_row
         ; test_case
             "all-None entry matches base"
             `Quick
-            test_apply_manifest_entry_all_none_uses_base
+            test_catalog_json_entry_all_none_uses_base
         ; test_case "wrong-type bool rejects" `Quick test_manifest_rejects_wrong_type_bool
         ; test_case "wrong-type int rejects" `Quick test_manifest_rejects_wrong_type_int
         ; test_case

@@ -67,7 +67,11 @@ selection is not declared. The SDK's typed `None_` selection creates a local
 tool-free request rather than sending an undocumented wire `none` value.
 This does not establish what the separate Chat endpoint accepts: its
 [official guide](https://platform.minimax.io/docs/api-reference/text-openai-api)
-and schema do not specify that tool-choice range.
+and schema do not specify that tool-choice range. The vendor's
+[M3 provider verifier](https://github.com/MiniMax-AI/MiniMax-Provider-Verifier/blob/336ccc735f9f13fdfacdacdda8733eb9e2813095/m3_format_check/m3_text_tests.py)
+expects `none`, `required` and `auto` from a configurable Chat endpoint. It is
+a test specification, not a published result for `api.minimax.io`, and does
+not establish M3.1 or named-function support.
 
 Native Responses replay preserves the declared reasoning text across cache and
 canonical message persistence, then emits it in the next Responses input.
@@ -102,7 +106,9 @@ records failed candidates and the corrected 42-case public contract run:
 native binding/admission 4, sync replay 16 and SSE replay 22. It includes actual
 cache/message-file/serializer assertions, not vendor HTTP or a complete Agent
 restart. [Issue #27924](https://github.com/jeong-sik/masc/issues/27924) tracks
-integration, Chat tool-choice and model-availability residuals.
+Chat tool-choice and model-availability residuals. The sync/SSE/native binding
+stack #45978 and this guide are integrated into main; see the
+[integration and source refresh](../evidence/2026-11-01-minimax-contract-refresh/README.md).
 
 This guide's TOML was checked for syntax and against the current parser,
 catalog and adapter source. It has not been applied to a live workspace or

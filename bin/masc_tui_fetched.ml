@@ -121,6 +121,16 @@ let refresh ~equal state ~key = start_with Refresh ~equal state ~key
 
 let clear state = { state with status = Status_absent }
 
+let invalidate ~reason state =
+  let status = match state.status with
+    | Status_ready (request, value) -> Status_stale (request, value, reason)
+    | Status_refreshing (request, value, None) ->
+        Status_refreshing (request, value, Some reason)
+    | (Status_absent | Status_loading _ | Status_retrying _ | Status_failed _
+      | Status_stale _ | Status_refreshing (_, _, Some _)) as status -> status
+  in
+  { state with status }
+
 let cancel_pending ~reason state =
   match state.status with
   | Status_loading request ->
@@ -162,6 +172,11 @@ let complete ~equal state request result =
         -> Status_failed (request, error)
     in
     { state with status })
+;;
+
+let refuse ~equal state request error =
+  if is_current ~equal state request then { state with status = Status_failed (request, error) }
+  else state
 ;;
 
 (* What this pane is about right now, and what is known about it. A pane

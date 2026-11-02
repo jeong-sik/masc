@@ -55,6 +55,95 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+(* One event-driven waiting read, plus a change observed while it was running.
+   A failed event-triggered read keeps the demand for a later retry. *)
+module Keeper_waiting_read : sig
+  type t
+  type request
+
+  val idle : t
+  val note_change : t -> t
+  val start : t -> t * request option
+  val finish : t -> request -> observed:bool -> success:bool -> (t * bool) option
+  val suspend : t -> t
+  val clear : t -> t
+  val in_flight : t -> bool
+  val change_pending : t -> bool
+  val awaiting_change : t -> bool
+  val needs_revalidation : t -> bool
+  val poll_receipt : t -> (int * int) option
+  val accepts_poll : t -> (int * int) option -> bool
+  val settle_poll : t -> success:bool -> t
+  val accepts_event : t -> request -> bool
+  val publish_event : t -> observed:bool -> t
+  val poll_needs_reconciliation : t -> (int * int) option -> bool
+  val event_needs_reconciliation : t -> request -> bool
+  val exclusive : t -> t
+end = struct
+  type request = { ticket : Snapshot_read.request; after_change : bool; revision : int; publication : int }
+  type t = { reading : Snapshot_read.t; pending : bool; active_after_change : bool;
+             awaiting : bool; revision : int; publication : int; exclusive : bool }
+
+  let idle = { reading = Snapshot_read.idle; pending = false; active_after_change = false;
+               awaiting = false; revision = 0; publication = 0; exclusive = false }
+  let note_change t = { t with pending = true; awaiting = true; revision = t.revision + 1 }
+  let in_flight t = Snapshot_read.in_flight t.reading
+  let change_pending t = t.pending
+  let awaiting_change t = t.awaiting
+  let needs_revalidation t = t.pending || t.active_after_change
+  let poll_receipt t = if t.exclusive then None else Some (t.revision, t.publication)
+  let accepts_poll t = function
+    | Some (revision, publication) ->
+        revision = t.revision && publication = t.publication && not t.exclusive
+    | None -> false
+  let settle_poll t ~success =
+    if success then { t with pending = false; awaiting = false; publication = t.publication + 1 }
+    else { t with pending = t.pending || t.active_after_change;
+                  publication = t.publication + 1 }
+  let accepts_event (t : t) (request : request) = request.publication = t.publication
+  let publish_event (t : t) ~observed =
+    if observed then { t with publication = t.publication + 1 } else t
+  let poll_needs_reconciliation (t : t) = function
+    | Some (revision, publication) -> revision = t.revision && publication <> t.publication
+    | None -> false
+  let event_needs_reconciliation (t : t) (request : request) =
+    request.revision = t.revision && request.publication <> t.publication
+  let exclusive t = { t with exclusive = true }
+
+  let start t =
+    let reading, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll t.reading in
+    match ticket with
+    | None -> t, None
+    | Some ticket ->
+      let request = { ticket; after_change = t.pending; revision = t.revision; publication = t.publication } in
+      { t with reading; pending = false; active_after_change = request.after_change }, Some request
+
+  let finish t request ~observed ~success =
+    match Snapshot_read.settle t.reading request.ticket with
+    | None -> None
+    | Some reading ->
+      let follow_up = t.pending in
+      let pending = t.pending || (request.after_change && not success) in
+      let awaiting = t.pending || (request.after_change && not observed) in
+      Some ({ t with reading; pending; active_after_change = false; awaiting;
+                     exclusive = t.exclusive && follow_up }, follow_up)
+
+  let suspend t =
+    { reading = Snapshot_read.invalidate t.reading
+    ; pending = t.pending || t.active_after_change
+    ; active_after_change = false
+    ; awaiting = t.awaiting
+    ; revision = t.revision + 1
+    ; publication = t.publication + 1
+    ; exclusive = false
+    }
+
+  let clear t =
+    { reading = Snapshot_read.invalidate t.reading; pending = false; active_after_change = false;
+      awaiting = false; revision = t.revision + 1; publication = t.publication + 1;
+      exclusive = false }
+end
+
 (* Original read ownership and a fresh observation owed after a binding write.
    Tokens are supplied by the UI edge; these transitions do not launch work. *)
 module Connector_read : sig
@@ -3557,9 +3646,8 @@ type workspace_health =
   | Workspace_health_unknown
 
 (** What the runtime event feed ([GET /mcp?sse_kind=observer]) is doing.
-    The feed is opened once the server has answered a refresh and reopened
-    on the refresh cadence after it closes, so an operator reads the same
-    row for "no server yet" and "the stream dropped" -- with the reason. *)
+    The feed opens after server contact and has a workspace-scoped delayed
+    retry after it closes. The reason remains visible while retry is pending. *)
 type observer_status =
   | Observer_off  (** not opened: no server has answered yet *)
   | Observer_opening  (** initialize and subscribe in flight *)
@@ -3593,10 +3681,29 @@ type observer_replay_status =
   | Observer_replay_unobserved
   | Observer_replay_scoped of Sse_wire.observer_handshake
   | Observer_replay_unavailable of string
+  | Observer_replay_rejected of string
 
-let observer_replay_description = function
+(* Unlike the latest replay handshake, this is tied to the admitted workspace
+   authority. A later unscoped or different stream cannot replace its origin. *)
+type observer_scope_binding =
+  | Observer_scope_unbound
+  | Observer_scope_bound of string
+  | Observer_scope_retired
+
+let note_observer_scope binding handshake =
+  match binding, handshake with
+  | Observer_scope_unbound, None -> Observer_scope_unbound
+  | Observer_scope_unbound, Some handshake -> Observer_scope_bound handshake.Sse_wire.instance_id
+  | Observer_scope_bound previous, Some handshake
+    when String.equal previous handshake.Sse_wire.instance_id -> binding
+  | Observer_scope_bound _, (Some _ | None) | Observer_scope_retired, (Some _ | None) ->
+      Observer_scope_retired
+
+let observer_replay_description ?(source_loss = false) replay =
+  let description = match replay with
   | Observer_replay_unobserved -> "Replay: not negotiated"
   | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
@@ -3606,9 +3713,21 @@ let observer_replay_description = function
         "Replay resumed after a gap: events up to #%d expired while disconnected"
         missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
-      "Replay reset: server instance changed; disconnected history not recovered"
+      "Replay reset: server or workspace changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
       "Replay reset: previous cursor had no instance; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->
+      "Replay reset: cursor ahead of server; disconnected history not recovered"
+  in
+  if source_loss then "SOURCE EVENTS LOST · " ^ description
+  else description
+
+(* A retry after a partially published SSE event can have a new transport
+   cursor. Remember the highest notice sequence independently per source. *)
+let note_observer_source_loss ~source_id ~sequence seen =
+  match List.assoc_opt source_id seen with
+  | Some previous when previous >= sequence -> false, seen
+  | Some _ | None -> true, (source_id, sequence) :: List.remove_assoc source_id seen
 
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
@@ -3721,12 +3840,25 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_retry_binding: Tui_decode.goal_retry_binding option;
   pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
   pg_updated_at: string option;
 }
+
+let planning_goal_has_valid_id (goal : planning_goal) =
+  Result.is_ok (Goal_store.validate_goal_id goal.pg_id)
+
+let planning_goal_offers_action (goal : planning_goal) action =
+  planning_goal_has_valid_id goal
+  && Goal_phase.offers_public_action ~phase:goal.pg_phase ~action
+  && (action <> Goal_phase.Public_action.Request_complete || Option.is_some goal.pg_retry_binding)
+
+let planning_goal_retains_arm (goal : planning_goal) ~action ~phase ~retry_binding =
+  goal.pg_phase = phase && planning_goal_offers_action goal action
+  && (action <> Goal_phase.Public_action.Request_complete || goal.pg_retry_binding = retry_binding)
 
 type planning_rollup = Tui_decode.planning_rollup
   = {
@@ -8737,7 +8869,8 @@ type runtime_catalog_request = {
    must state, because the Tasks it cancels tell their authors that sentence:
    typing it is the confirmation, Enter sends it and Esc cancels. *)
 type goal_action_pending =
-  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
+  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t;
+      phase : Goal_phase.t; retry_binding : Tui_decode.goal_retry_binding option }
   | Goal_drop_reason of { goal_id : string; reason : string }
 
 (* The Config presets pane's writes that wait for a second press of their
@@ -8880,6 +9013,23 @@ type image_inspection = {
   ii_origin : sent_image_read option;
   ii_frame : image_inspection_frame;
 }
+
+(* The text image lives outside the frame presenter. Keep its rendered rows
+   while it owns the screen so they can be redrawn after a terminal resize. *)
+type image_cell_frame = {
+  ic_title : string;
+  ic_caption : string list;
+  ic_lines : string list;
+  ic_columns : int;
+  ic_terminal_size : int * int;
+  ic_workspace : workspace_authority;
+  ic_origin : sent_image_read;
+  ic_unconfirmed : bool;
+}
+
+type image_cell_view =
+  | Image_cells of image_cell_frame
+  | Image_cells_withdrawn of (int * int) option
 
 type lane_nested_read =
   | Lane_subscriptions_read
@@ -9035,6 +9185,16 @@ type keeper_peer_status =
   | Keeper_peer_failed of { page : int; retained : int option; reason : string }
   | Keeper_peer_current of int
   | Keeper_peer_unread
+
+type goal_candle_failure = Goal_candle_access_denied of int | Goal_candle_authority_changed of int option | Goal_candle_http_status of int | Goal_candle_read_failed of string
+
+type goal_action_receipt = {
+  gar_goal_id : string;
+  gar_ticket : string;
+  gar_workspace : string;
+  gar_authority : Masc_tui_planning_detail.receipt_authority option;
+  gar_result : (string, string) result;
+}
 
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
@@ -9276,6 +9436,8 @@ type state = {
      complete a tool call and on the operator cadence. *)
   mutable acting_pane_changes:
     (acting_pane_key, acting_pane_read) Masc_tui_fetched.t;
+  (* A loss during a read owes one more reading after that read settles. *)
+  mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
@@ -9323,11 +9485,10 @@ type state = {
      leave the rest. While this is set the loop draws no frames at all, and
      the next key takes the picture away and repaints everything. A refusal
      has nothing to draw, so it never sets this: refusals go to the pane as
-     text, like every other thing that did not happen. A plain flag, not a
-     record of what was drawn -- the title line above the picture is drawn by
-     [draw_image] from its own parameter, and nothing reads the rest. *)
+     text, like every other thing that did not happen. *)
   mutable image_open: bool;
   mutable image_inspection : image_inspection option;
+  mutable image_cell_view : image_cell_view option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;
@@ -9828,6 +9989,10 @@ type state = {
   (* Detail histories retain their exact request and last good value. A key
      alone cannot reject an older response after refreshing the same item. *)
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
+  mutable goal_candle: (string, unit ref * string * Candle_goal_observation.t) Masc_tui_fetched.t;
+  mutable goal_candle_revalidation_attempts: (string * unit ref) list;
+  mutable goal_confirmation_revalidation_attempts: (string * unit ref) list;
+  mutable goal_confirmation_identity_refresh: (string * Masc_tui_planning_detail.confirmation_workspace) option;
   mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable task_history_request: string task_history_request option;
   mutable task_history_last_reading: unit ref option;
@@ -9934,8 +10099,13 @@ type state = {
      field stays absent here; neither it nor a failed refresh means idle. *)
   mutable keeper_waiting: Tui_decode.keeper_waiting_row list;
   mutable keeper_waiting_failure: Tui_decode.keeper_waiting_failure option;
+  mutable keeper_waiting_unverified: string list;
+  mutable keeper_waiting_error: string option;
+  mutable keeper_waiting_epoch: int;
+  mutable keeper_waiting_versions: (string * int) list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
@@ -10108,7 +10278,10 @@ type state = {
      letters safe: c/x/o are lifecycle only once, and any other key disarms.
      A drop waits for its typed reason instead. *)
   mutable goal_action_pending: goal_action_pending option;
-  mutable goal_action_error: string option;
+  mutable goal_action_errors: (string * string) list;
+  mutable goal_transition_latest: (string * string) list;
+  mutable goal_action_inflight: (string * string) list;
+  mutable goal_action_receipts: goal_action_receipt list;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
@@ -10542,6 +10715,10 @@ type state = {
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
   mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
+  (* A change observed after the current list read started needs one later read. *)
+  mutable fusion_runs_reread_pending: bool;
+  mutable fusion_runs_awaiting_observer: bool;
+  mutable fusion_runs_open_at_start: string option;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
@@ -10550,6 +10727,7 @@ type state = {
   mutable fusion_mode: fusion_mode;
   mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
+  mutable fusion_detail_stale: bool;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
   mutable fusion_detail_generation: int;
@@ -10557,8 +10735,13 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
+  mutable fusion_detail_reread_pending: bool;
+  mutable fusion_detail_awaiting_observer: bool;
   mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_detail_stale: bool;
   mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
+  mutable fusion_historical_reread_pending: bool;
+  mutable fusion_historical_awaiting_observer: bool;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -10568,6 +10751,9 @@ type state = {
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
   mutable observer: observer_status;
+  mutable observer_retry_owner: unit ref option;
+  mutable observer_recovery_owner: unit ref option;
+  mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
@@ -10576,6 +10762,8 @@ type state = {
   mutable observer_cursor: Sse_wire.observer_cursor option;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
+  mutable observer_source_loss: bool;
+  mutable observer_source_loss_sequences: (string * int) list;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] + [acting_retained_quiet] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -10683,6 +10871,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
+  mutable msg_history_loss_followup: (string * workspace_authority * unit ref) option;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -10770,6 +10959,37 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+let clear_goal_action_error state ~goal_id =
+  state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors
+
+let set_goal_action_error state ~goal_id error =
+  state.goal_action_errors <- (goal_id, error) :: List.remove_assoc goal_id state.goal_action_errors
+
+let note_goal_action_started state ~goal_id ~ticket =
+  if List.mem_assoc goal_id state.goal_action_inflight then false
+  else begin
+    clear_goal_action_error state ~goal_id;
+    state.goal_transition_latest <- (goal_id, ticket) :: List.remove_assoc goal_id state.goal_transition_latest;
+    state.goal_action_inflight <- (goal_id, ticket) :: state.goal_action_inflight;
+    true
+  end
+
+let note_goal_action_result state ~goal_id ~ticket result =
+  if List.assoc_opt goal_id state.goal_transition_latest <> Some ticket then false
+  else begin
+    if List.assoc_opt goal_id state.goal_action_inflight = Some ticket then
+      state.goal_action_inflight <- List.remove_assoc goal_id state.goal_action_inflight;
+    (match result with
+     | Ok _ -> clear_goal_action_error state ~goal_id
+     | Error error -> set_goal_action_error state ~goal_id error);
+    true
+  end
+
+let record_goal_action_receipt ?authority state ~goal_id ~ticket ~workspace result =
+  state.goal_action_receipts <-
+    { gar_goal_id = goal_id; gar_ticket = ticket; gar_workspace = workspace;
+      gar_authority = authority; gar_result = result } :: state.goal_action_receipts
 
 (* The server trims names and accepts ASCII only. Group case aliases
    conservatively even when its filesystem happens to be case-sensitive. *)
@@ -12130,10 +12350,11 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
           state.keeper_waiting
       in
       let waiting, activity_waiting =
-        match state.keeper_waiting_failure, observed_waiting with
-        | Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
-        | None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
-        | None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
+        match List.mem name state.keeper_waiting_unverified,
+              state.keeper_waiting_failure, observed_waiting with
+        | true, _, _ | false, Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
+        | false, None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
+        | false, None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
       in
       let approval =
         List.find_opt
@@ -12338,10 +12559,95 @@ let select_keeper_waiting_observation ~fresh ~stale ~previous_failure observatio
   | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
       select waiting (fun rows -> Tui_decode.Keeper_waiting_fleet_unreported rows)
 
-let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
-  preserve_keeper_list_selection state (fun () ->
-    state.keeper_turns <- rows;
-    (match waiting with
+let keeper_turns_projection_complete ~current = function
+  | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_observed waiting } ->
+      List.for_all (fun (turn : Tui_decode.keeper_turn_row) ->
+        current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+          String.equal row.kwr_keeper_name turn.ktr_keeper_name
+          && List.for_all (fun item ->
+            item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error)
+              row.kwr_waiting_on) waiting) rows
+  | Ok { Tui_decode.waiting = (Tui_decode.Keeper_waiting_fleet_unreported _
+                             | Tui_decode.Keeper_waiting_unavailable _); _ }
+  | Error _ -> false
+
+type keeper_waiting_snapshot = {
+  kws_epoch : int;
+  kws_versions : (string * int) list;
+  kws_controls : (string * int) list;
+  kws_pending_controls : string list;
+}
+
+type keeper_waiting_change = Waiting_all | Waiting_keepers of string list
+
+let note_keeper_waiting_change state change =
+  let names = match change with
+    | Waiting_all ->
+        state.keeper_waiting_epoch <- state.keeper_waiting_epoch + 1;
+        List.map (fun (keeper : Tui_decode.keeper) -> keeper.k_name) state.keepers
+        @ List.map (fun (turn : Tui_decode.keeper_turn_row) -> turn.ktr_keeper_name) state.keeper_turns
+        @ List.map (fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name) state.keeper_waiting
+    | Waiting_keepers names ->
+        List.iter (fun name ->
+          let version = Option.value ~default:0 (List.assoc_opt name state.keeper_waiting_versions) in
+          state.keeper_waiting_versions <- (name, version + 1) ::
+            List.remove_assoc name state.keeper_waiting_versions) names;
+        names in
+  state.keeper_waiting_unverified <-
+    List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
+  state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read
+
+let capture_keeper_waiting_snapshot state =
+  { kws_epoch = state.keeper_waiting_epoch
+  ; kws_versions = state.keeper_waiting_versions
+  ; kws_controls = state.keeper_chat_control_generations
+  ; kws_pending_controls = List.map fst state.keeper_chat_control_pending
+  }
+
+let keeper_waiting_name_current state snapshot name =
+  let version versions = Option.value ~default:0 (List.assoc_opt name versions) in
+  snapshot.kws_epoch = state.keeper_waiting_epoch
+  && version snapshot.kws_versions = version state.keeper_waiting_versions
+  && version snapshot.kws_controls = version state.keeper_chat_control_generations
+  && not (List.mem name snapshot.kws_pending_controls)
+  && not (List.mem_assoc name state.keeper_chat_control_pending)
+
+let keeper_waiting_row_current state snapshot (turn : Tui_decode.keeper_turn_row) =
+  keeper_waiting_name_current state snapshot turn.ktr_keeper_name
+
+let keeper_waiting_unverified_names ~current = function
+  | Ok { Tui_decode.rows; waiting = (Tui_decode.Keeper_waiting_observed waiting
+                                    | Tui_decode.Keeper_waiting_fleet_unreported waiting) } ->
+      List.filter_map (fun (turn : Tui_decode.keeper_turn_row) ->
+        if current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+            String.equal row.kwr_keeper_name turn.ktr_keeper_name) waiting
+        then None else Some turn.ktr_keeper_name) rows
+  | Ok { Tui_decode.waiting = Tui_decode.Keeper_waiting_unavailable _; _ }
+  | Error _ -> []
+
+let keeper_waiting_unverified_after state ~current ~current_name result =
+  let resolved name =
+    match result with
+    | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_observed waiting } ->
+        let found = List.find_opt (fun (turn : Tui_decode.keeper_turn_row) ->
+          String.equal turn.ktr_keeper_name name) rows in
+        (match found with
+         | None -> current_name name
+         | Some turn -> current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+             String.equal row.kwr_keeper_name name) waiting)
+    | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_fleet_unreported waiting } ->
+        List.exists (fun (turn : Tui_decode.keeper_turn_row) ->
+          String.equal turn.ktr_keeper_name name && current turn) rows
+        && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+          String.equal row.kwr_keeper_name name) waiting
+    | Ok { Tui_decode.waiting = Tui_decode.Keeper_waiting_unavailable _; _ }
+    | Error _ -> false in
+  List.sort_uniq String.compare
+    (List.filter (fun name -> not (resolved name)) state.keeper_waiting_unverified
+     @ keeper_waiting_unverified_names ~current result)
+
+let update_keeper_waiting state ~rows ~waiting =
+    match waiting with
      | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting
@@ -12359,7 +12665,15 @@ let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
      | Tui_decode.Keeper_waiting_unavailable failure ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting:[];
-       state.keeper_waiting_failure <- Some failure);
+       state.keeper_waiting_failure <- Some failure
+
+let accept_keeper_waiting_observation state ~rows ~waiting =
+  preserve_keeper_list_selection state (fun () -> update_keeper_waiting state ~rows ~waiting)
+
+let accept_keeper_turn_observation ?(accept_waiting = true) state ~rows ~waiting ~observed_at =
+  preserve_keeper_list_selection state (fun () ->
+    state.keeper_turns <- rows;
+    if accept_waiting then update_keeper_waiting state ~rows ~waiting;
     state.keeper_turns_observed_at <- Some observed_at;
     state.keeper_turns_error <- None)
 
@@ -13947,6 +14261,7 @@ let suspend_workspace_readings state =
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
+  state.observer_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
@@ -13994,6 +14309,7 @@ let suspend_workspace_readings state =
   state.lane_addons_reading <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
   state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
@@ -14015,10 +14331,15 @@ let suspend_workspace_readings state =
   state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
   state.code_location_offer <- None;
   state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None;
+  state.goal_confirmation_presented <- None;
+  state.goal_candle <- Masc_tui_fetched.suspend state.goal_candle;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
-         (Masc_tui_fetched.suspend reading)
+         (Masc_tui_planning_detail.suspend_confirmation_read reading)
    | Masc_tui_planning_detail.Submitting _ -> ());
   state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
   state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
@@ -14060,9 +14381,14 @@ let suspend_workspace_readings state =
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
+  state.keeper_waiting_read <- Keeper_waiting_read.suspend state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
@@ -14073,6 +14399,7 @@ let suspend_workspace_readings state =
     | Some request -> Keeper_history_read.page_pending request
     | None -> false in
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   (* A cold page is refresh preparation, not an explicit older-page demand.
      Normal eligible history dispatch can request it again. A scrolled view
      retains its cached source and uses explicit refresh/paging instead. *)
@@ -14420,6 +14747,24 @@ let tools_skill_profiles (state : state) =
 let selected_tools_skill_profile (state : state) =
   List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
 
+(* A cell image owns the input until it is dismissed.  Its source is the
+   selection to restore after a partial roster or Skill inventory recovers. *)
+let tools_skill_cell_image_owner (state : state) =
+  if not state.image_open || state.msx_open || state.view <> Tools then None
+  else match state.image_cell_view with
+  | Some (Image_cells {ic_workspace;ic_origin;_}) when ic_workspace=state.workspace_authority ->
+      if ic_origin.sir_view <> Tools then None
+      else (match ic_origin.sir_keeper, ic_origin.sir_skill_reference with
+        | Some keeper, Some reference -> Some (keeper,reference)
+        | None, (Some _ | None) | Some _, None -> None)
+  | Some (Image_cells _ | Image_cells_withdrawn _) | None -> None
+
+let tools_skill_reference_for_refresh state ~keeper_name =
+  match tools_skill_cell_image_owner state with
+  | Some (keeper, reference) when keeper_name=Some keeper -> Some reference
+  | Some _ | None -> Option.map (fun profile -> profile.Masc.Tui_decode_tools.esp_reference)
+      (selected_tools_skill_profile state)
+
 let adjacent_skill_evidence_run (state : state) ~reference ~selection ~runs ~delta =
   let selection = match state.tools_evidence_request, state.tools_evidence_reference with
     | Some _, Some pending when Skill_reference.equal reference pending ->
@@ -14725,11 +15070,20 @@ let abandon_fusion_launch (state : state) =
 let withdraw_fusion_workspace (state : state) =
   ignore (abandon_fusion_launch state);
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None;
   state.fusion_detail_generation <- state.fusion_detail_generation + 1;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.fusion_detail <- None;
+  state.fusion_detail_stale <- false;
   state.fusion_historical_detail <- None;
+  state.fusion_historical_detail_stale <- false;
   state.fusion_detail_error <- None;
   state.fusion_launch_error <- None;
   state.fusion_mode <- Fusion_list;
@@ -16025,6 +16379,11 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
+let advance_keeper_interactive_control state keeper_name =
+  let generation = advance_keeper_chat_control state keeper_name in
+  note_keeper_waiting_change state (Waiting_keepers [keeper_name]);
+  generation
+
 (* A server control that stops or resumes the owner supersedes the priority
    requests still waiting locally for that Keeper. *)
 let clear_keeper_priority_requests state keeper_name =
@@ -16059,6 +16418,7 @@ let begin_keeper_chat_control ?(preserve_input_holds = false)
     ?(preserve_priority_requests = false) state keeper_name =
   let previous_generation = keeper_chat_control_generation state keeper_name in
   let generation = advance_keeper_chat_control state keeper_name in
+  note_keeper_waiting_change state (Waiting_keepers [keeper_name]);
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
   if not preserve_priority_requests then clear_keeper_priority_requests state keeper_name;
@@ -17693,8 +18053,32 @@ let board_preview_subject_is_current state subject =
            && List.exists (( = ) (Ok attachment)) post.bp_attachments
        | None -> false)
 
+let tools_keeper_observation_confirmed (state : state) =
+  state.workspace_identity = Workspace_identity_match
+  && state.local_keepers = Local_workspace_read && Option.is_none state.keepers_error
+
 let image_keeper_is_current (state : state) ~view ~keeper_name =
   view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+
+let image_request_keeper_is_current (state : state) (request : sent_image_read) =
+  match request.sir_view, request.sir_skill_reference with
+  | Tools, Some _ ->
+      tools_keeper_observation_confirmed state && Option.is_some request.sir_keeper
+      && Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) = request.sir_keeper
+  | Tools, None
+  | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+    | Connectors | Runtime | Config | Resources | System_logs), (Some _ | None) ->
+      image_keeper_is_current state ~view:request.sir_view ~keeper_name:request.sir_keeper
+
+let tools_skill_inventory_matches_keeper (state : state) keeper_name =
+  match keeper_name, state.tools_inventory with
+  | Some expected, Some {Masc.Tui_decode_tools.ts_effective=
+      Some (Masc.Tui_decode_tools.Effective_surface_available {ets_keeper_name;_});_} ->
+      String.equal expected ets_keeper_name
+  | None, (Some _ | None)
+  | Some _, (None | Some {ts_effective=(None | Some
+      (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> false
 
 (* Local files, drafts and explicit remote URLs survive peer reconfirmation
    but never a workspace replacement. Peer images retain their exact reading.
@@ -17703,7 +18087,8 @@ let image_reading_is_current (state : state) (pending : sent_image_read) =
   let same_skill = match pending.sir_skill_reference with
     | None -> true
     | Some reference ->
-        (match selected_tools_skill_profile state with
+        (pending.sir_view <> Tools || tools_skill_inventory_matches_keeper state pending.sir_keeper)
+        && (match selected_tools_skill_profile state with
          | Some profile -> Skill_reference.equal reference profile.esp_reference
          | None -> false) in
   same_skill &&
@@ -17725,6 +18110,160 @@ let image_reading_is_current (state : state) (pending : sent_image_read) =
     reading == state.workspace_read_authority && server_authority_ready state
     && pending.sir_view = Board && board_preview_subject_is_current state subject
 
+(* Diagnostics may include unread documents or unrelated advisories.  They do
+   not identify which absent profile failed, so absence is inconclusive while
+   any diagnostic remains.  A new revision of the same identity is evidence
+   of replacement even when another document has a diagnostic. *)
+let tools_skill_may_be_unread (state : state) (origin : sent_image_read) =
+  match origin.sir_skill_reference, state.tools_inventory with
+  | Some expected, Some {Masc.Tui_decode_tools.ts_effective=
+      Some (Masc.Tui_decode_tools.Effective_surface_available
+        {ets_skills_left_out;ets_skill_profiles;_});_} ->
+      origin.sir_view = Tools && ets_skills_left_out <> []
+      && not (List.exists (fun profile ->
+        Skill_reference.equal_identity expected.identity
+          profile.Masc.Tui_decode_tools.esp_reference.identity) ets_skill_profiles)
+  | Some _, (None | Some {ts_effective=(None | Some
+      (Effective_surface_unavailable _ | Effective_surface_warming _));_})
+  | None, (Some _ | None) -> false
+
+(* A displayed observation outlives the request epoch that admitted it. A
+   failed revalidation or an in-flight reread does not prove that its source
+   changed. A completed equal resource reread can replace the retained source
+   reference, avoiding repeated comparisons of its bytes on every loop. *)
+let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image_read) =
+  let same_skill = if origin.sir_view = Tools
+      && (not (tools_keeper_observation_confirmed state)
+          || not (tools_skill_inventory_matches_keeper state origin.sir_keeper)
+          || tools_skill_may_be_unread state origin) then true
+    else match origin.sir_skill_reference, state.tools_inventory with
+    | None, (Some _ | None) -> true
+    | Some expected, Some {Masc.Tui_decode_tools.ts_effective=
+        Some (Masc.Tui_decode_tools.Effective_surface_available {ets_skill_profiles;_});_} ->
+        (* The image owns input; the cursor may move only as the refreshed
+           inventory is reconciled.  Check the displayed source itself. *)
+        List.exists (fun profile -> Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
+          ets_skill_profiles
+    | Some _, (None | Some {ts_effective=(None | Some
+        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+  let keeper_changed = match origin.sir_view, origin.sir_skill_reference, selected_keeper state with
+    | Tools, Some _, (Some _ | None) ->
+        (* As with the Skill cursor, roster reconciliation can move the
+           cursor while the image owns input. Test its captured Keeper. *)
+        tools_keeper_observation_confirmed state
+        && not (Option.exists (fun name -> List.exists (fun (keeper : keeper) ->
+          String.equal name keeper.k_name) state.keepers) origin.sir_keeper)
+    | Tools, None, (Some _ | None)
+    | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
+      | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+      | Connectors | Runtime | Config | Resources | System_logs), (Some _ | None), (Some _ | None) ->
+        not (image_keeper_is_current state ~view:origin.sir_view ~keeper_name:origin.sir_keeper) in
+  if workspace <> state.workspace_authority || origin.sir_view <> state.view
+     || keeper_changed
+     || not same_skill then None
+  else match origin.sir_owner with
+    | Local_file_image_read authority | Remote_url_image_read authority ->
+        if authority = state.workspace_authority then Some origin else None
+    | Draft_image_read (authority, attachment) ->
+        if authority = state.workspace_authority
+           && List.exists (fun current -> current == attachment) state.msg_attachments
+        then Some origin else None
+    | Peer_image_read _ when origin.sir_view = Resources ->
+        (match origin.sir_resource, state.resource_content,
+               state.resource_pending_key, state.resource_content_error with
+         | Some (old_key, old_parts), Some (new_key, new_parts), pending, error ->
+             let equal = Masc_tui_resource_catalog.equal_key old_key in
+             if not (equal new_key)
+                || Option.exists (fun key -> not (equal key)) pending
+                || Option.exists (fun (key, _) -> not (equal key)) error then None
+             else if old_parts == new_parts then Some origin
+             else if old_parts = new_parts then Some {origin with sir_resource=state.resource_content}
+             else None
+         | Some (old_key, _), None, pending, error ->
+             let equal = Masc_tui_resource_catalog.equal_key old_key in
+             let different_selection = Option.exists (fun key -> not (equal key)) pending
+               || Option.exists (fun (key, _) -> not (equal key)) error in
+             let report_absent = match old_key, state.resource_inventory_notice with
+               | Masc_tui_resource_catalog.Report_revision _, notice ->
+                   Option.exists (fun (report, _) -> equal (Report_revision report)) notice
+                   || (state.resources_reports_complete && Option.exists (fun entries ->
+                     not (List.exists (fun entry -> Masc_tui_resource_catalog.owns_key entry old_key) entries))
+                     state.resources_list)
+               | Mcp_uri _, (Some _ | None) -> false in
+             if different_selection || report_absent then None else Some origin
+         | None, (Some _ | None), (Some _ | None), (Some _ | None) -> None)
+    | Peer_image_read _ -> Some origin
+    | Board_image_read (reading, subject, job) ->
+        let post_id = match subject with
+          | Board_diagram (Board_post_diagram {post_id;_}
+                          | Board_comment_diagram {post_id;_})
+          | Board_attachment_image {post_id;_} -> post_id in
+        (match state.board_mode with
+         | Board_read current when String.equal current post_id ->
+             (match Masc_tui_board_detail.view_for state.board_detail ~post_id with
+              | Ready (post, comments, _) when String.equal post.bp_id post_id ->
+                  let retain_body ~previous ~current make_subject =
+                    if previous == current then Some origin
+                    else if String.equal previous current then
+                      Some {origin with sir_owner=Board_image_read (reading, make_subject current, job)}
+                    else None in
+                  (match subject with
+                   | Board_diagram (Board_post_diagram {body;_}) ->
+                       retain_body ~previous:body ~current:post.bp_body
+                         (fun body -> Board_diagram (Board_post_diagram {post_id;body}))
+                   | Board_diagram (Board_comment_diagram {comment_id;body;_}) ->
+                       (match List.find_opt (fun comment -> String.equal comment.bc_id comment_id) comments with
+                        | Some comment -> retain_body ~previous:body ~current:comment.bc_content
+                            (fun body -> Board_diagram (Board_comment_diagram {post_id;comment_id;body}))
+                        | None -> Some origin)
+                   | Board_attachment_image _ -> Some origin)
+              | Ready _ -> Some origin
+              | Absent | Loading | Failed _ -> Some origin)
+         | Board_read _ | Board_list | Board_compose -> None)
+
+(* Retaining an earlier image is useful during a failed observation, but it
+   must not look like the source was just confirmed. *)
+let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
+  let workspace_unconfirmed = match state.workspace_identity with
+    | Workspace_identity_match -> false
+    | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _ -> true in
+  let skill_unconfirmed = match origin.sir_skill_reference, state.tools_inventory with
+    | None, (Some _ | None) -> false
+    | Some expected, Some {Masc.Tui_decode_tools.ts_effective=
+        Some (Masc.Tui_decode_tools.Effective_surface_available _);_} ->
+        Option.is_some state.tools_error
+        || (origin.sir_view = Tools && not (tools_skill_inventory_matches_keeper state origin.sir_keeper))
+        || (origin.sir_view = Tools && not (Option.exists (fun profile ->
+          Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
+          (selected_tools_skill_profile state)))
+    | Some _, (None | Some {ts_effective=(None | Some
+        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+  skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
+  | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
+  | Peer_image_read _ ->
+      workspace_unconfirmed ||
+      (if origin.sir_view = Resources then
+         Option.is_none state.resource_content || Option.is_some state.resource_content_error
+       else if origin.sir_view = Tools && Option.is_some origin.sir_skill_reference then
+         not (tools_keeper_observation_confirmed state)
+         || Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) <> origin.sir_keeper
+       else Option.is_none origin.sir_skill_reference)
+  | Board_image_read (_, subject, _) ->
+      workspace_unconfirmed ||
+      (match state.board_mode with
+       | Board_read post_id ->
+           (match Masc_tui_board_detail.view_for state.board_detail ~post_id with
+            | Ready (post, comments, _) ->
+                (match subject with
+                 | Board_diagram (Board_comment_diagram {comment_id;_}) ->
+                     not (List.exists (fun comment -> String.equal comment.bc_id comment_id) comments)
+                 | Board_attachment_image {attachment;_} ->
+                     not (List.exists (( = ) (Ok attachment)) post.bp_attachments)
+                 | Board_diagram (Board_post_diagram _) -> false)
+            | Absent | Loading | Failed _ -> true)
+       | Board_list | Board_compose -> true)
+
 (* A completion belongs to the exact read that launched it, even if a later
    read happens to have the same name, surface and generation. *)
 let take_image_read (state : state) (request : sent_image_read) =
@@ -17742,6 +18281,23 @@ let withdraw_image_open (state : state) =
       state.sent_image_read <- None;
       Some pending
   | Some {sir_purpose=Inspect_image _;_} | None -> None
+
+(* The read epoch is already invalid; retain only its input-cancellable marker
+   until the loop can announce the interrupted Skill preview. *)
+let retired_skill_image_notice (state : state) =
+  match state.sent_image_read with
+  | None -> None
+  | Some pending ->
+      let retired = match pending.sir_owner with
+        | Peer_image_read reading -> reading != state.workspace_read_authority
+        | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _
+        | Board_image_read _ -> false in
+      let opening = match pending.sir_purpose with
+        | Open_image -> true | Inspect_image _ -> false in
+      if pending.sir_view=Tools && Option.is_some pending.sir_skill_reference
+         && opening && retired && state.view=Tools
+         && pending.sir_generation=state.image_request_generation && not state.msx_open
+      then Some pending else None
 
 let board_successor (state : state) =
   Option.bind (board_post_on_screen state) (fun post ->
@@ -18167,6 +18723,75 @@ let begin_goal_timeline_read (state : state) ~goal_id =
   | Masc_tui_fetched.Already_loading -> None
   | Masc_tui_fetched.Started (reading, request) -> state.goal_timeline <- reading; Some request
 
+let clear_goal_candle_revalidation (state : state) ~goal_id =
+  state.goal_candle_revalidation_attempts <-
+    List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_candle_revalidation_attempts
+
+let clear_goal_confirmation_revalidation (state : state) ~goal_id =
+  state.goal_confirmation_revalidation_attempts <-
+    List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_confirmation_revalidation_attempts
+
+let take_goal_confirmation_revalidation (state : state) ~goal_id ~owner =
+  if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
+      state.goal_confirmation_revalidation_attempts then false
+  else begin
+    clear_goal_confirmation_revalidation state ~goal_id;
+    state.goal_confirmation_revalidation_attempts <- (goal_id, owner) :: state.goal_confirmation_revalidation_attempts;
+    true
+  end
+
+let take_goal_candle_revalidation (state : state) ~goal_id ~owner =
+  if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
+      state.goal_candle_revalidation_attempts then false
+  else begin
+    clear_goal_candle_revalidation state ~goal_id;
+    state.goal_candle_revalidation_attempts <- (goal_id, owner) :: state.goal_candle_revalidation_attempts;
+    true
+  end
+
+let begin_goal_candle_read (state : state) ~goal_id =
+  (* Withdraw an earlier admin observation immediately. A new request may
+     be refused or come from a different process before its body arrives. *)
+  let previous = match Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal_id with
+    | Masc_tui_fetched.Ready _ | Stale _ -> Masc_tui_fetched.clear state.goal_candle
+    | Absent | Loading | Failed _ -> state.goal_candle in
+  match Masc_tui_fetched.refresh ~equal:String.equal previous ~key:goal_id with
+  | Masc_tui_fetched.Already_loading -> None
+  | Masc_tui_fetched.Started (reading, request) -> state.goal_candle <- reading; Some request
+
+let complete_goal_candle_read (state : state) ~credential_is_current request result =
+  match result with
+    | Ok (owner, Error (Goal_candle_access_denied status)) when credential_is_current owner ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        (if status = 401 then "Candle authentication failed (HTTP 401); check the credential"
+         else Printf.sprintf "Candle access denied (HTTP %d); administrator permission is required" status)
+    | Ok (owner, Error (Goal_candle_authority_changed status)) when credential_is_current owner ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d); read again" code
+         | None -> "Candle server or workspace identity changed; read again")
+    | Ok (owner, Ok (instance, _))
+      when credential_is_current owner
+           && not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        "Candle server process changed; read again"
+    | Error _ | Ok (_, (Ok _ | Error (Goal_candle_access_denied _ | Goal_candle_authority_changed _ | Goal_candle_http_status _ | Goal_candle_read_failed _))) ->
+  let result = match result with
+    | Error _ -> Error "Candle read unavailable; check the connection and read again"
+    | Ok (owner, _) when not (credential_is_current owner) ->
+      Error "Candle credential changed; read again"
+    | Ok (_, Error (Goal_candle_access_denied status)) -> Error (Printf.sprintf "Candle access denied (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_authority_changed status)) -> Error
+        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d)" code
+         | None -> "Candle server or workspace identity changed")
+    | Ok (_, Error (Goal_candle_http_status status)) -> Error (Printf.sprintf "Candle read failed (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_read_failed _)) -> Error "Candle read failed; check the connection and read again"
+    | Ok (owner, Ok (instance_id, observation)) ->
+      (match state.server_identity with
+       | Some identity when identity.Tui_decode.sid_runtime_instance_id = Some instance_id ->
+         Ok (owner, instance_id, observation)
+       | Some _ | None -> Error "Candle server instance changed; read again") in
+  state.goal_candle <- Masc_tui_fetched.complete ~equal:String.equal state.goal_candle request result
+
 let complete_goal_timeline_read (state : state) request result =
   let result = Result.bind result (function
     | Tui_decode.Goal_timeline_ready events -> Ok events
@@ -18230,6 +18855,9 @@ let ui_text (state : state) ~ko ~en =
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
+  state.goal_candle <- Masc_tui_fetched.clear state.goal_candle;
+  (* Keep the revalidation receipt across workspace withdrawal: alternating
+     server identities must not reset it and start an automatic read loop. *)
   state.task_history <- Masc_tui_fetched.clear state.task_history;
   state.task_history_request <- None;
   state.task_history_last_reading <- None
@@ -18357,6 +18985,7 @@ let create_state
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
@@ -18383,6 +19012,7 @@ let create_state
   help_scroll = 0;
   image_open = false;
   image_inspection = None;
+  image_cell_view = None;
   browser_viewport = None;
   image_request_generation = 0;
   image_catalog = None;
@@ -18644,6 +19274,10 @@ let create_state
   runtime_catalog_resume = false;
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = Masc_tui_fetched.initial;
+  goal_candle = Masc_tui_fetched.initial;
+  goal_candle_revalidation_attempts = [];
+  goal_confirmation_revalidation_attempts = [];
+  goal_confirmation_identity_refresh = None;
   task_history = Masc_tui_fetched.initial;
   task_history_request = None;
   task_history_last_reading = None;
@@ -18710,8 +19344,13 @@ let create_state
   keeper_turns = [];
   keeper_waiting = [];
   keeper_waiting_failure = None;
+  keeper_waiting_unverified = [];
+  keeper_waiting_error = None;
+  keeper_waiting_epoch = 0;
+  keeper_waiting_versions = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
@@ -18788,7 +19427,10 @@ let create_state
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;
   goal_action_pending = None;
-  goal_action_error = None;
+  goal_action_errors = [];
+  goal_transition_latest = [];
+  goal_action_inflight = [];
+  goal_action_receipts = [];
   goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
   schedules = None;
@@ -19038,22 +19680,36 @@ let create_state
   harness_detail = None;
   harness_detail_scroll = 0;
   fusion_runs = Masc_tui_fetched.initial;
+  fusion_runs_reread_pending = false;
+  fusion_runs_awaiting_observer = false;
+  fusion_runs_open_at_start = None;
   fusion_launch_error = None;
   fusion_cursor = 0;
   fusion_scroll = 0;
   fusion_mode = Fusion_list;
   fusion_detail = None;
   fusion_detail_error = None;
+  fusion_detail_stale = false;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
+  fusion_detail_reread_pending = false;
+  fusion_detail_awaiting_observer = false;
   fusion_historical_detail = None;
+  fusion_historical_detail_stale = false;
   fusion_historical_inflight = None;
+  fusion_historical_reread_pending = false;
+  fusion_historical_awaiting_observer = false;
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;
+  observer_retry_owner = None;
+  observer_recovery_owner = None;
+  observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;
+  observer_source_loss = false;
+  observer_source_loss_sequences = [];
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -19109,6 +19765,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
+  msg_history_loss_followup = None;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -19448,6 +20105,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   state.msg_older_loading <- false;
   match List.assoc_opt keeper_name state.msg_loaded_pages with
   | Some page ->

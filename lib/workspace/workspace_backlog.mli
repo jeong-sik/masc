@@ -29,6 +29,13 @@ val find_task_in_backlog_opt :
 val read_prepared_backlog_r :
   Workspace_utils_backend_setup.config -> (prepared_backlog, string) result
 
+val invalidate_backlog_cache : Workspace_utils_backend_setup.config -> unit
+(** Discard this process's cached primary snapshot and prevent older in-flight
+    cache misses from registering after the invalidation. *)
+
+(** Test seam: runs after a cache miss is decoded, before registration. *)
+val before_backlog_cache_registration_hook : (unit -> unit) Atomic.t
+
 val read_backlog_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
 (** Strict authoritative read for code that may make a durable decision or

@@ -2,27 +2,9 @@
 
     @since 0.188.0 *)
 
-type base_label = string
-
-let normalize_base_label raw = String.lowercase_ascii (String.trim raw)
-
-let base_label_of_string raw =
-  let normalized = normalize_base_label raw in
-  if List.mem normalized Capability_vocab.base_label_values
-  then Ok normalized
-  else
-    Error
-      (Printf.sprintf
-         "unknown base preset %S (canonical: %s)"
-         normalized
-         (String.concat ", " Capability_vocab.base_label_values))
-;;
-
-let base_label_to_string label = label
-
 type entry =
   { model_id : Model_identifiers.Model_id.t
-  ; base_label : base_label option
+  ; base_label : Capability_preset.t option
   ; max_context_tokens : int option
   ; max_output_tokens : int option
   ; supports_tools : bool option
@@ -49,7 +31,7 @@ type entry =
     (** Canonical multimodal block ordering policy (preserve_input_order /
         visual_first, plus the catalog's hyphenated aliases), validated
         against {!Capability_vocab.modality_priority_values}. Parsed + applied
-        in {!Capabilities.apply_manifest_entry}. *)
+        in [Capabilities.apply_catalog_entry]. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
@@ -62,7 +44,7 @@ type entry =
     (** Canonical thinking-wire format the model uses (none / thinking_object /
         thinking_object_adaptive / thinking_object_only / chat_template_kwargs /
         chat_template_token / ollama_think / reasoning_effort). Parsed + applied in
-        {!Capabilities.apply_manifest_entry}. Without this field a manifest
+        [Capabilities.apply_catalog_entry]. Without this field a manifest
         entry silently dropped the model's thinking knob (Agent Core contract).
 
         Joined from the JSON [thinking_control_format] and [thinking_control_token]
@@ -75,20 +57,20 @@ type entry =
     (** Canonical historical reasoning preservation wire format (none /
         thinking_object_keep_all / chat_template_kwargs_preserve_thinking /
         top_level_preserve_thinking / always_preserved). Parsed + applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
     (** Canonical request-side reasoning output split control (none /
         split_reasoning_fields). Parsed + applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; reasoning_streaming_format : string option
     (** Canonical streaming reasoning side-channel (default / none /
         template_parser / delta:<field>). Parsed + applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; reasoning_replay : string option
     (** Optional multi-turn reasoning replay policy override (default / no_replay
         / drop_without_tool / preserve_always); applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; emits_usage_tokens : bool option
     (** Whether the standard response carries usage tokens. [None] inherits
         the base preset's declaration. *)
@@ -428,7 +410,10 @@ let parse_entry json =
   let* base_label =
     match base_label_raw with
     | None -> Ok None
-    | Some raw -> Result.map (fun label -> Some label) (base_label_of_string raw)
+    | Some raw ->
+      (match Capability_preset.of_string raw with
+       | Some preset -> Ok (Some preset)
+       | None -> Error (Printf.sprintf "unknown base preset %S" raw))
   in
   (* Read the raw label/token pair and decode it through the exact vocabulary
      authority. The codec owns label exactness, token exactness, and the
@@ -664,21 +649,6 @@ let lookup (t : t) model_id =
     t
 ;;
 
-(* ── Global manifest ───────────────────────────────────────
-   Embedding applications explicitly parse and install a manifest. *)
-
-(* Process-wide runtime override. [Atomic.t] makes [set_global] /
-   [clear_global] / [global] safe under OCaml 5 multi-domain concurrency
-   (cf. [lib/llm_provider/pricing.ml]'s [_overrides] table). *)
-let runtime_override : t option Atomic.t = Atomic.make None
-let set_global m = Atomic.set runtime_override (Some m)
-let clear_global () = Atomic.set runtime_override None
-let global () = Atomic.get runtime_override
-
-(* ── Inline tests ───────────────────────────────────────── *)
-
-[@@@coverage off]
-
 let%test "of_json: valid manifest parses successfully" =
   let json =
     Yojson.Safe.from_string
@@ -687,7 +657,7 @@ let%test "of_json: valid manifest parses successfully" =
   match of_json json with
   | Ok [ entry ] ->
     Model_identifiers.Model_id.to_string entry.model_id = "my-llm"
-    && entry.base_label = Some "openai_chat"
+    && entry.base_label = Some Capability_preset.Openai_chat
     && entry.max_context_tokens = Some 131072
     && entry.supports_tools = Some true
   | Ok _ | Error _ -> false
@@ -832,53 +802,4 @@ let%test "of_json: unknown base preset returns error, not silent default" =
   match of_json json with
   | Error _ -> true
   | Ok _ -> false
-;;
-
-let%test "set_global / clear_global: runtime override roundtrips" =
-  let json =
-    Yojson.Safe.from_string
-      {|{"schema_version":2,"models":[{"model_id":"runtime-override-token-9fX","base":"openai_chat"}]}|}
-  in
-  match of_json json with
-  | Error _ -> false
-  | Ok manifest ->
-    (* Always restore process-global state on exit so a failure in this
-       test cannot leak the override into siblings (order-dependent
-       failure source). *)
-    Fun.protect ~finally:clear_global (fun () ->
-      set_global manifest;
-      let observed_after_set =
-        match global () with
-        | Some entries ->
-          List.exists
-            (fun e ->
-               Model_identifiers.Model_id.to_string e.model_id
-               = "runtime-override-token-9fX")
-            entries
-        | None -> false
-      in
-      clear_global ();
-      let observed_after_clear = Option.is_none (global ()) in
-      observed_after_set && observed_after_clear)
-;;
-
-let%test "set_global installs runtime override and returns it from global ()" =
-  let json =
-    Yojson.Safe.from_string
-      {|{"schema_version":2,"models":[{"model_id":"override-precedence-test"}]}|}
-  in
-  match of_json json with
-  | Error _ -> false
-  | Ok manifest ->
-    Fun.protect ~finally:clear_global (fun () ->
-      set_global manifest;
-      match global () with
-      | None -> false
-      | Some m ->
-        (* Option.get/Result.get_ok would raise on the unhappy path and
-             skip [clear_global] — Fun.protect's finally restores state
-             either way, but matching explicitly avoids relying on
-             exception flow. *)
-        Option.is_some
-          (lookup m (Model_identifiers.Model_id.of_string_exn "override-precedence-test-v2")))
 ;;

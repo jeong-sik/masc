@@ -4,6 +4,7 @@
    cycle directly, so the outer heartbeat scheduler and its admission checks
    are outside this test. No sandbox tools are invoked. *)
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* These tests check how the Board routes a text, not who is declared: every
    name with the shape of a Keeper name stands for itself. *)
@@ -28,7 +29,7 @@ let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
     "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = true\n"
     model_id);
   Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id
-  |> Llm_provider.Model_catalog.set_global;
+  |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let path = Filename.concat
     (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
     "runtime.toml" in
@@ -105,22 +106,25 @@ let run base_path prompt_root =
   Eio_context.set_mono_clock env#mono_clock;
   Process_eio.init ~cwd_default:Eio.Path.(env#fs / base_path)
     ~proc_mgr:env#process_mgr ~clock:env#clock;
+  (* This probe drives native requests without server bootstrap; its root
+     switch owns the same durable execution capability for the whole run. *)
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+    |> get Runtime_agent_execution_runtime.initialization_error_to_string;
   Masc_test_deps.ensure_rng_initialized ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () ->
     Board_dispatch.reset_for_test ();
     Board.reset_global_for_test ();
     Keeper_registry.For_testing.clear ();
     Runtime.For_testing.restore runtime_snapshot;
-    match catalog_snapshot with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Llm_provider.Catalog_snapshot.publish catalog_snapshot);
   let config = Workspace.default_config base_path in
   (match config.backend with
    | Workspace.FileSystem _ -> ()
    | Workspace.Memory _ -> failwith "probe requires a FileSystem workspace backend");
   ignore (Workspace.init config ~agent_name:(Some "board-probe-operator") : string);
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   (* The call ledger is initialized by the server bootstrap, which this probe
      does not run; initialize it to capture the probe's actual tool receipts. *)
   Keeper_tool_call_log.init ~base_path ();
@@ -191,7 +195,9 @@ data: [DONE]
     ; publication_recovery_provider = Masc_test_deps.publication_recovery_provider publication_registry } in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   (* Initialize at an existing head, then deliberately miss the live hook. *)
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"cursor baseline"
     ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string);

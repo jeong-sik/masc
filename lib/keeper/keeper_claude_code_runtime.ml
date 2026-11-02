@@ -707,7 +707,7 @@ let note_transport_uncertainty effect_disposition =
   |> ignore
 ;;
 
-let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -794,7 +794,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
-        ?account_home:(Runtime_claude_code.effective_account_home config.account_home)
+        ?account_home:(Some (Runtime_official_account.home config.account_home))
         ~native_posture tools
     in
     let* () = match official_client_continuation with
@@ -822,8 +822,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     let* prepared =
       Host.prepare_turn
         ~composed_context
-        ~configured_reasoning_effort:
-          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~configured_reasoning_effort
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -937,13 +936,14 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path
-      ; account_home = config.account_home
+      ; account_home = Runtime_official_account.Captured config.account_home
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
-      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
+      ; timeout_s = Runtime_inference.turn_timeout_s_of_declared
+          ~default:config.timeout_s turn_timeout_s
         (* A keeper turn is a conversation, not a schema contract: nothing
            downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1008,23 +1008,12 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       | Ok subscription -> Ok subscription
       | Error error -> Error (claude_error_to_core_error error)
     in
-    (* Snap the operator-declared effort so a value this lane cannot send does
-       not fail the turn — the same posture as the Codex lane's catalog clamp,
-       so which lane a keeper runs on no longer decides whether a config value
-       is survivable. Two layers because they answer different owners: the
-       catalog clamp obeys the model row (no-op today for anthropic rows,
-       whose accepted set the capability layer withholds), and
-       [cli_admitted_reasoning_effort] obeys the CLI's own vocabulary
-       ([minimal] -> [low], [ultra] -> [max]). The same value feeds the raw_trace start record
-       and the command line so observation matches the wire. *)
+    (* Claude Code owns the native vocabulary. The prepared intent reaches
+       that admission directly, independent of a bare HTTP catalog row.
+       The same admitted value feeds raw trace and native argv. *)
     let effective_reasoning_effort =
-      Host.effective_reasoning_effort
-        ~runtime_label
-        ~keeper_name
-        ~runtime_id
-        ~model_id:config.model
-        ~requested:prepared.reasoning_effort
-      |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+      Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+        prepared.reasoning_effort
     in
     (match prepared.reasoning_effort, effective_reasoning_effort with
      | Some asked, Some snapped
@@ -1629,7 +1618,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                   recovery_detail))))
 ;;
 
-let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1648,7 +1637,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
   let quota_scope =
     Runtime_quota_window.scope_of_claude_code_home
-      (Runtime_claude_code.effective_account_home config.account_home)
+      (Some (Runtime_official_account.home config.account_home))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in
@@ -1700,6 +1689,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
           run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
+            ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
             ~runtime_id
             ~quota_scope

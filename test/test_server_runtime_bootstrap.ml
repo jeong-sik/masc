@@ -270,7 +270,7 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
       ~load_catalog:(fun path ->
         load_calls := path :: !load_calls;
         Ok Llm_provider.Model_catalog.empty)
-      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+      ~publish_catalog:(fun (_ : Llm_provider.Catalog_snapshot.t) -> incr set_calls)
       ()
   in
   Alcotest.(check (option string))
@@ -282,6 +282,57 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
     [ "/explicit/agent-core-models.toml" ]
     (List.rev !load_calls);
   Alcotest.(check int) "set catalog override" 1 !set_calls
+
+let test_model_catalog_configuration_rejects_before_publication () =
+  let module Snapshot = Llm_provider.Catalog_snapshot in
+  let previous = Snapshot.current () in
+  Fun.protect ~finally:(fun () -> Snapshot.publish previous) (fun () ->
+    let invalid = Llm_provider.Model_catalog.of_toml_string
+      ~source:"bootstrap rejected fixture" {|[[providers]]
+id = "unmapped-bootstrap-provider"
+kind = "openai_compat"
+base_url = "https://bootstrap.example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+|} in
+    Alcotest.(check bool) "missing capability declaration fails decoding" true
+      (Result.is_error invalid);
+    let env = function
+      | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/rejected-catalog.toml"
+      | _ -> None in
+    (match Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+       ~env ~load_catalog:(fun _ -> invalid) () with
+     | _ -> Alcotest.fail "invalid provider admission must stop bootstrap"
+     | exception Env_config_core.Config_error detail ->
+       Alcotest.(check bool) "diagnostic retains the catalog path" true
+         (String_util.contains_substring detail "/fixture/rejected-catalog.toml"));
+    Alcotest.(check bool) "bootstrap failure preserves whole prior selection" true
+      (Snapshot.current () == previous))
+
+let test_model_catalog_configuration_replaces_whole_selection () =
+  let module Snapshot = Llm_provider.Catalog_snapshot in
+  let previous = Snapshot.current () in
+  Fun.protect ~finally:(fun () -> Snapshot.publish previous) (fun () ->
+    let providers = match Llm_provider.Provider_catalog.of_json
+      (Yojson.Safe.from_string
+        {|{"schema_version":1,"providers":[{"id":"retired-bootstrap-provider","aliases":["retired-bootstrap-alias"],"kind":"openai_compat","base_url":"https://old.example.invalid","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat"}]}|}) with
+      | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+    let original = Masc_test_deps.admit_catalogs ~models:None ~providers:(Some providers) in
+    Snapshot.publish original;
+    let env = function
+      | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/replacement-catalog.toml"
+      | _ -> None in
+    ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+      ~env ~load_catalog:(fun _ -> Ok Llm_provider.Model_catalog.empty) ());
+    let models, providers = Snapshot.sources (Snapshot.current ()) in
+    Alcotest.(check bool) "replacement installs explicit model facts" true
+      (Option.is_some models);
+    Alcotest.(check bool) "full replacement selects no provider overlay" true
+      (Option.is_none providers);
+    Alcotest.(check bool) "replacement removes old overlay identity" true
+      (Snapshot.find (Snapshot.current ()) "retired-bootstrap-alias" = None);
+    Alcotest.(check bool) "captured selection retains old overlay identity" true
+      (Option.is_some (Snapshot.find original "retired-bootstrap-alias")))
 
 let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
   let catalog_calls = ref 0 in
@@ -300,7 +351,7 @@ let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
       ~load_catalog:(fun (_ : string) ->
         incr load_calls;
         Ok Llm_provider.Model_catalog.empty)
-      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+      ~publish_catalog:(fun (_ : Llm_provider.Catalog_snapshot.t) -> incr set_calls)
       ()
   in
   Alcotest.(check bool) "ambient catalog selected" true (Option.is_none result);
@@ -696,46 +747,31 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
   in
   loop ()
 
-let write_invalid_local_only_runtime base_path =
+(* These fixtures reach runtime catalog admission, rather than failing the
+   TOML parser or exercising retired profile/route syntax. The optional model
+   is deliberately absent from the embedded capability catalog. *)
+let write_uncatalogued_only_runtime base_path =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
   write_file
     (Filename.concat config_root "runtime.toml")
-    {|[providers.ollama]
-protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+    {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
 
-[models.qwen]
-api-name = "qwen3.6:35b-a3b-mlx-bf16"
-max-context = 32768
-tools-support = false
+[models.uncatalogued]
+api-name = "startup-uncatalogued-fixture"
+max-context = 8192
 
-[runtime.invalid_local_lane]
-members = ["missing_provider.qwen"]
+[local.uncatalogued]
 
-[runtime.invalid_local_lane]
-tiers = ["invalid_local_lane"]
-
-[routes.keeper_turn]
-target = "runtime.invalid_local_lane"
+[runtime]
+default = "local.uncatalogued"
 |}
 
-let split_custom_model_spec spec =
-  let after_scheme =
-    match String.index_opt spec ':' with
-    | Some idx -> String.sub spec (idx + 1) (String.length spec - idx - 1)
-    | None -> spec
-  in
-  match String.index_opt after_scheme '@' with
-  | Some idx ->
-      ( String.sub after_scheme 0 idx,
-        String.sub after_scheme (idx + 1) (String.length after_scheme - idx - 1) )
-  | None -> after_scheme, "http://127.0.0.1:9/v1"
-
-let write_partially_invalid_runtime ~base_path ~valid_model =
+let write_partial_catalog_runtime ~base_path ~endpoint ~default_runtime_id =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
-  let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
     (Filename.concat config_root "runtime.toml")
     (Printf.sprintf
@@ -744,63 +780,27 @@ protocol = "openai-compatible-http"
 endpoint = %S
 
 [models.stable]
-api-name = %S
-max-context = 128000
+api-name = "startup-catalogued-fixture"
+max-context = 8192
 tools-support = true
+
+[models.stable.capabilities]
+max-output-tokens = 512
+thinking-control-format = "none"
+supports-system-prompt = true
+
+[models.uncatalogued]
+api-name = "startup-uncatalogued-fixture"
+max-context = 8192
 
 [custom.stable]
 
-[runtime.primary_profile]
-members = ["custom.stable"]
+[custom.uncatalogued]
 
-[runtime.primary_profile]
-tiers = ["primary_profile"]
-
-[runtime.broken_profile]
-members = ["missing_provider.fake"]
-
-[runtime.broken_profile]
-tiers = ["broken_profile"]
-
-[routes.keeper_turn]
-target = "runtime.primary_profile"
+[runtime]
+default = %S
 |}
-       endpoint model_id)
-
-let write_partially_invalid_default_runtime ~base_path ~valid_model =
-  let config_root = Filename.concat base_path ".masc/config" in
-  mkdir_p config_root;
-  let model_id, endpoint = split_custom_model_spec valid_model in
-  write_file
-    (Filename.concat config_root "runtime.toml")
-    (Printf.sprintf
-       {|[providers.custom]
-protocol = "openai-compatible-http"
-endpoint = %S
-
-[models.stable]
-api-name = %S
-max-context = 128000
-tools-support = true
-
-[custom.stable]
-
-[runtime.primary_profile]
-members = ["missing_provider.fake"]
-
-[runtime.primary_profile]
-tiers = ["primary_profile"]
-
-[runtime.secondary_profile]
-members = ["custom.stable"]
-
-[runtime.secondary_profile]
-tiers = ["secondary_profile"]
-
-[routes.keeper_turn]
-target = "runtime.primary_profile"
-|}
-       endpoint model_id)
+       endpoint default_runtime_id)
 
 let stop_process pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
@@ -4903,6 +4903,121 @@ let test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts () =
     Alcotest.(check int) "a turn that carried events broadcasts once" 1 !broadcasts;
     Alcotest.(check int) "a turn that lost nothing invalidates nothing" 0 !invalidations)
 
+let test_keeper_lifecycle_listener_waits_for_publication () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let bus = Agent_core.Event_bus.create () in
+      Event_bus_slots.set_masc bus;
+      let subscription = Runtime_event_bus.subscribe
+          ~capacity:8 ~overflow:Agent_core.Event_bus.Drop_oldest
+          ~purpose:"lifecycle_wait_test"
+          ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle") bus in
+      let active = ref true in
+      let unsubscribe () =
+        if !active then (active := false; Runtime_event_bus.unsubscribe bus subscription)
+      in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        let first, first_seen = Eio.Promise.create () in
+        let second, second_seen = Eio.Promise.create () in
+        let stopped, mark_stopped = Eio.Promise.create () in
+        let observed = ref [] and broadcasts = ref 0 and invalidations = ref 0 in
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_loops.For_testing.run_keeper_lifecycle_listener
+            ~clock:(Eio.Stdenv.clock env) ~subscription ~retry_interval_s:60.0
+            ~refresh:(fun ~keeper_name _ ->
+              observed := keeper_name :: !observed;
+              if String.equal keeper_name "wait-a" then Eio.Promise.resolve first_seen ();
+              if String.equal keeper_name "wait-b" then Eio.Promise.resolve second_seen ())
+            ~invalidate_all:(fun () -> incr invalidations)
+            ~broadcast:(fun () -> incr broadcasts);
+          Eio.Promise.resolve mark_stopped ());
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          Eio.Fiber.yield ();
+          Alcotest.(check int) "idle listener does not broadcast" 0 !broadcasts;
+          publish_keeper_started "wait-a";
+          Eio.Promise.await first;
+          Eio.Fiber.yield ();
+          publish_keeper_started "wait-b";
+          Eio.Promise.await second;
+          unsubscribe ();
+          Eio.Promise.await stopped);
+        Alcotest.(check (list string)) "events are refreshed in order"
+          [ "wait-a"; "wait-b" ] (List.rev !observed);
+        Alcotest.(check int) "each event batch broadcasts" 2 !broadcasts;
+        Alcotest.(check int) "no invalidation on successful events" 0 !invalidations)))
+
+let test_keeper_lifecycle_listener_resumes_after_iteration_failure () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let bus = Agent_core.Event_bus.create () in
+      Event_bus_slots.set_masc bus;
+      let subscription = Runtime_event_bus.subscribe
+          ~capacity:8 ~overflow:Agent_core.Event_bus.Drop_oldest
+          ~purpose:"lifecycle_retry_test"
+          ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle") bus in
+      let active = ref true in
+      let unsubscribe () =
+        if !active then (active := false; Runtime_event_bus.unsubscribe bus subscription)
+      in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        let failed, mark_failed = Eio.Promise.create () in
+        let second, second_seen = Eio.Promise.create () in
+        let stopped, mark_stopped = Eio.Promise.create () in
+        let attempts = ref 0 in
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_loops.For_testing.run_keeper_lifecycle_listener
+            ~clock:(Eio.Stdenv.clock env) ~subscription ~retry_interval_s:0.02
+            ~refresh:(fun ~keeper_name _ ->
+              if String.equal keeper_name "retry-b" then Eio.Promise.resolve second_seen ())
+            ~invalidate_all:(fun () -> ())
+            ~broadcast:(fun () ->
+              incr attempts;
+              if !attempts = 1 then (
+                Eio.Promise.resolve mark_failed ();
+                failwith "injected lifecycle broadcast failure"));
+          Eio.Promise.resolve mark_stopped ());
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          publish_keeper_started "retry-a";
+          Eio.Promise.await failed;
+          publish_keeper_started "retry-b";
+          Eio.Promise.await second;
+          unsubscribe ();
+          Eio.Promise.await stopped);
+        Alcotest.(check int) "later event broadcasts after failure" 2 !attempts)))
+
+let test_keeper_lifecycle_wait_reports_queued_overflow () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let bus = Agent_core.Event_bus.create () in
+      Event_bus_slots.set_masc bus;
+      let subscription = Runtime_event_bus.subscribe
+          ~capacity:2 ~overflow:Agent_core.Event_bus.Drop_oldest
+          ~purpose:"lifecycle_wait_overflow_test"
+          ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle") bus in
+      let active = ref true in
+      let unsubscribe () =
+        if !active then (active := false; Runtime_event_bus.unsubscribe bus subscription)
+      in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        let broadcasted, mark_broadcasted = Eio.Promise.create () in
+        let stopped, mark_stopped = Eio.Promise.create () in
+        let observed = ref [] and invalidations = ref 0 in
+        List.iter publish_keeper_started [ "overflow-a"; "overflow-b"; "overflow-c" ];
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_loops.For_testing.run_keeper_lifecycle_listener
+            ~clock:(Eio.Stdenv.clock env) ~subscription ~retry_interval_s:60.0
+            ~refresh:(fun ~keeper_name _ -> observed := keeper_name :: !observed)
+            ~invalidate_all:(fun () -> incr invalidations)
+            ~broadcast:(fun () -> Eio.Promise.resolve mark_broadcasted ());
+          Eio.Promise.resolve mark_stopped ());
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          Eio.Promise.await broadcasted;
+          unsubscribe ();
+          Eio.Promise.await stopped);
+        Alcotest.(check (list string)) "the newest queued events are handled"
+          [ "overflow-b"; "overflow-c" ] (List.rev !observed);
+        Alcotest.(check int) "a lost event invalidates all dependent caches" 1 !invalidations)))
+
 let test_startup_state_json () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
@@ -5322,8 +5437,8 @@ let test_create_server_state_invalidates_health_on_skill_publication () =
         true
         (full_health_invalidation_generation () > before))
 
-(* An observer can fire outside Eio (a test, a systhread). The invalidation
-   still lands there, and the Eio wakeup it skips stays usable. *)
+(* An observer can fire outside Eio (a test, a systhread). Its invalidation
+   and a subsequent Eio invalidation both retain their generation. *)
 let test_full_health_invalidation_outside_eio_keeps_the_wakeup () =
   let before = full_health_invalidation_generation () in
   Server_routes_http_runtime.invalidate_full_health_snapshot ();
@@ -6243,8 +6358,57 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
           Alcotest.(check bool) "primary server stays healthy" true
             (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
 
-let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
-  with_temp_dir "startup-invalid-runtime" (fun dir ->
+let require_startup_ready ~pid ~port ~log_file =
+  if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then
+    Alcotest.failf
+      "main_eio did not reach startup.phase=ready; startup failure is not a skip.\nlog:\n%s"
+      (read_file log_file)
+
+let read_startup_health ~output_dir ~port =
+  let headers, body =
+    curl_request_capture ~output_dir ~name:"catalog-health" ~method_:"GET"
+      ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
+  in
+  Alcotest.(check int) "health responds" 200
+    (require_http_status_from_headers headers);
+  let json = parse_json_response_file body in
+  let startup = Yojson.Safe.Util.member "startup" json in
+  Alcotest.(check string) "owner phase ready" "ready"
+    Yojson.Safe.Util.(startup |> member "phase" |> to_string);
+  Alcotest.(check bool) "owner state ready" true
+    Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
+  json, Yojson.Safe.Util.member "model_runtime" startup
+
+let read_dashboard_runtime_defaults ~output_dir ~port =
+  let headers, body =
+    curl_request_capture ~headers:[main_eio_auth_header] ~output_dir
+      ~name:"catalog-dashboard" ~method_:"GET"
+      ~url:(Printf.sprintf
+        "http://127.0.0.1:%d/api/v1/dashboard/runtime-defaults" port) ()
+  in
+  Alcotest.(check int) "dashboard runtime settings respond" 200
+    (require_http_status_from_headers headers);
+  parse_json_response_file body
+
+let check_model_setup_required model_runtime ~diagnostic =
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "model setup remains required" "setup_required"
+    (model_runtime |> member "status" |> to_string);
+  Alcotest.(check string) "model setup reports invalid configuration" "config_invalid"
+    (model_runtime |> member "reason" |> to_string);
+  Alcotest.(check bool) "model setup preserves catalog diagnostic" true
+    (String_util.contains_substring
+       (model_runtime |> member "message" |> to_string) diagnostic)
+
+let check_no_dashboard_runtime_fallback dashboard =
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "dashboard invents no default runtime" true
+    (dashboard |> member "default_runtime_id" = `Null);
+  Alcotest.(check int) "dashboard publishes no rejected runtimes" 0
+    (dashboard |> member "runtimes" |> to_list |> List.length)
+
+let test_main_eio_uncatalogued_runtime_serves_setup_without_fallback () =
+  with_temp_dir "startup-uncatalogued-runtime" (fun dir ->
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
@@ -6254,12 +6418,12 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_invalid_local_only_runtime dir;
+      write_uncatalogued_only_runtime dir;
       let env =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
+            ("AGENT_CORE_MODEL_CATALOG", "");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
@@ -6267,46 +6431,22 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
       in
       let pid =
         Unix.create_process_env exe
-          [|
-            exe;
-            "--host";
-            "127.0.0.1";
-            "--port";
-            string_of_int port;
-            "--base-path";
-            dir;
-          |]
+          [| exe; "--host"; "127.0.0.1"; "--port"; string_of_int port;
+             "--base-path"; dir |]
           env Unix.stdin log_fd log_fd
       in
       Unix.close log_fd;
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "degraded") then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio invalid runtime did not reach startup.phase=degraded within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end;
-          let health_headers, health_body =
-            curl_request_capture ~output_dir:dir ~name:"health-invalid" ~method_:"GET"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
-          in
-          ignore health_headers;
-          let health_json = parse_json_response_file health_body in
-          let startup = Yojson.Safe.Util.member "startup" health_json in
-          Alcotest.(check string) "startup phase degraded" "degraded"
-            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
-          Alcotest.(check bool) "startup remains ready" true
-            Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
-          let startup_error =
-            Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
-          in
-          Alcotest.(check bool) "last error mentions catalog validation" true
-            (String.starts_with ~prefix:"startup catalog validation failed:" startup_error)))
+          require_startup_ready ~pid ~port ~log_file;
+          let _, model_runtime = read_startup_health ~output_dir:dir ~port in
+          check_model_setup_required model_runtime
+            ~diagnostic:"all configured runtime models are absent";
+          let dashboard = read_dashboard_runtime_defaults ~output_dir:dir ~port in
+          check_no_dashboard_runtime_fallback dashboard))
 
-let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
+let test_main_eio_partial_catalog_excludes_uncatalogued_optional_runtime () =
   with_temp_dir "startup-partial-runtime" (fun dir ->
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
@@ -6322,13 +6462,14 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_partially_invalid_runtime ~base_path:dir
-        ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
+      write_partial_catalog_runtime ~base_path:dir
+        ~endpoint:(Printf.sprintf "http://127.0.0.1:%d/v1" mock_port)
+        ~default_runtime_id:"custom.stable";
       let env =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
+            ("AGENT_CORE_MODEL_CATALOG", "");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
@@ -6336,46 +6477,35 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
       in
       let pid =
         Unix.create_process_env exe
-          [|
-            exe;
-            "--host";
-            "127.0.0.1";
-            "--port";
-            string_of_int port;
-            "--base-path";
-            dir;
-          |]
+          [| exe; "--host"; "127.0.0.1"; "--port"; string_of_int port;
+             "--base-path"; dir |]
           env Unix.stdin log_fd log_fd
       in
       Unix.close log_fd;
       Fun.protect
-        ~finally:(fun () ->
-          stop_process pid;
-          stop_process mock_pid)
+        ~finally:(fun () -> stop_process pid; stop_process mock_pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio partial catalog did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end;
-          let health_headers, health_body =
-            curl_request_capture ~output_dir:dir ~name:"health-partial" ~method_:"GET"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
-          in
-          ignore health_headers;
-          let health_json = parse_json_response_file health_body in
-          let startup = Yojson.Safe.Util.member "startup" health_json in
-          Alcotest.(check string) "startup phase stays ready" "ready"
-            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
-          Alcotest.(check bool) "startup remains ready" true
-            Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
-          Alcotest.(check bool) "last error remains unset" true
-            Yojson.Safe.Util.(startup |> member "last_error" |> to_string_option = None)))
+          require_startup_ready ~pid ~port ~log_file;
+          let health, model_runtime = read_startup_health ~output_dir:dir ~port in
+          Alcotest.(check string) "catalogued default remains available" "available"
+            Yojson.Safe.Util.(model_runtime |> member "status" |> to_string);
+          let degradation = Yojson.Safe.Util.member "runtime_startup_degradation" health in
+          Alcotest.(check bool) "uncatalogued optional runtime is surfaced" true
+            Yojson.Safe.Util.(degradation |> member "degraded" |> to_bool);
+          Alcotest.(check (list string)) "only uncatalogued runtime is excluded"
+            ["custom.uncatalogued"]
+            Yojson.Safe.Util.(degradation |> member "disabled_runtime_ids"
+              |> to_list |> List.map to_string);
+          let dashboard = read_dashboard_runtime_defaults ~output_dir:dir ~port in
+          Alcotest.(check string) "dashboard retains configured default" "custom.stable"
+            Yojson.Safe.Util.(dashboard |> member "default_runtime_id" |> to_string);
+          Alcotest.(check (list string)) "dashboard lists only admitted runtime"
+            ["custom.stable"]
+            Yojson.Safe.Util.(dashboard |> member "runtimes" |> to_list
+              |> List.map (fun row -> row |> member "id" |> to_string))))
 
-let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
-  with_temp_dir "startup-default-invalid-partial-runtime" (fun dir ->
+let test_main_eio_uncatalogued_default_never_selects_catalogued_alternative () =
+  with_temp_dir "startup-default-uncatalogued-runtime" (fun dir ->
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let mock_port = find_free_port_from (port + 1) in
@@ -6390,13 +6520,14 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
-      write_partially_invalid_default_runtime ~base_path:dir
-        ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
+      write_partial_catalog_runtime ~base_path:dir
+        ~endpoint:(Printf.sprintf "http://127.0.0.1:%d/v1" mock_port)
+        ~default_runtime_id:"custom.uncatalogued";
       let env =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
+            ("AGENT_CORE_MODEL_CATALOG", "");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
@@ -6404,62 +6535,24 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
       in
       let pid =
         Unix.create_process_env exe
-          [|
-            exe;
-            "--host";
-            "127.0.0.1";
-            "--port";
-            string_of_int port;
-            "--base-path";
-            dir;
-          |]
+          [| exe; "--host"; "127.0.0.1"; "--port"; string_of_int port;
+             "--base-path"; dir |]
           env Unix.stdin log_fd log_fd
       in
       Unix.close log_fd;
       Fun.protect
-        ~finally:(fun () ->
-          stop_process pid;
-          stop_process mock_pid)
+        ~finally:(fun () -> stop_process pid; stop_process mock_pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "degraded") then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio default-invalid partial catalog did not reach startup.phase=degraded within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end;
-          let health_headers, health_body =
-            curl_request_capture ~output_dir:dir ~name:"health-default-invalid"
-              ~method_:"GET"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
-          in
-          ignore health_headers;
-          let health_json = parse_json_response_file health_body in
-          let startup = Yojson.Safe.Util.member "startup" health_json in
-          Alcotest.(check string) "startup phase degraded" "degraded"
-            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
-          let startup_error =
-            Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
-          in
-          let rejection_prefix = "startup catalog validation failed: " in
-          if not (String.starts_with ~prefix:rejection_prefix startup_error) then
-            Alcotest.failf
-              "last error missing catalog rejection prefix: %S"
-              startup_error;
-          let rejection_json =
-            String.sub startup_error (String.length rejection_prefix)
-              (String.length startup_error - String.length rejection_prefix)
-            |> Yojson.Safe.from_string
-          in
-          let rejection_errors =
-            Yojson.Safe.Util.(rejection_json |> member "errors" |> to_list)
-            |> List.map Yojson.Safe.Util.to_string
-          in
-          Alcotest.(check bool) "last error includes default-profile failure" true
-            (List.exists
-               (fun error ->
-                  String_util.contains_substring error "required default profile")
-               rejection_errors)))
+          require_startup_ready ~pid ~port ~log_file;
+          let _, model_runtime = read_startup_health ~output_dir:dir ~port in
+          check_model_setup_required model_runtime
+            ~diagnostic:"will not select a different default runtime";
+          Alcotest.(check bool) "diagnostic names the configured rejected default" true
+            (String_util.contains_substring
+               Yojson.Safe.Util.(model_runtime |> member "message" |> to_string)
+               "custom.uncatalogued");
+          let dashboard = read_dashboard_runtime_defaults ~output_dir:dir ~port in
+          check_no_dashboard_runtime_fallback dashboard))
 
 let test_main_eio_start_does_not_record_default_without_flag () =
   with_temp_dir "start-no-record-default" (fun dir ->
@@ -6893,6 +6986,12 @@ let () =
             "model catalog installs explicit env override"
             `Quick test_model_catalog_configuration_installs_explicit_env_override;
           Alcotest.test_case
+            "model catalog rejects before publication"
+            `Quick test_model_catalog_configuration_rejects_before_publication;
+          Alcotest.test_case
+            "model catalog replaces whole selection"
+            `Quick test_model_catalog_configuration_replaces_whole_selection;
+          Alcotest.test_case
             "model catalog ignores legacy discovery inputs"
             `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;
           Alcotest.test_case
@@ -6978,6 +7077,18 @@ let () =
             "keeper lifecycle listener turn refreshes and broadcasts"
             `Quick
             test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts;
+          Alcotest.test_case
+            "keeper lifecycle listener waits for publication"
+            `Quick
+            test_keeper_lifecycle_listener_waits_for_publication;
+          Alcotest.test_case
+            "keeper lifecycle listener resumes after iteration failure"
+            `Quick
+            test_keeper_lifecycle_listener_resumes_after_iteration_failure;
+          Alcotest.test_case
+            "keeper lifecycle wait reports queued overflow"
+            `Quick
+            test_keeper_lifecycle_wait_reports_queued_overflow;
           Alcotest.test_case
             "keeper lifecycle undecodable invalidates every keeper cache"
             `Quick
@@ -7233,21 +7344,21 @@ let () =
             "main_eio rejects second server on same base path"
             `Slow test_main_eio_rejects_same_base_path_on_second_server;
           Alcotest.test_case
-            "main_eio partial catalog stays ready and surfaces rejections"
+            "main_eio partial catalog excludes uncatalogued optional runtime"
             `Slow
-            test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections;
+            test_main_eio_partial_catalog_excludes_uncatalogued_optional_runtime;
           Alcotest.test_case
-            "main_eio invalid default partial catalog stays degraded"
+            "main_eio uncatalogued default never selects catalogued alternative"
             `Slow
-            test_main_eio_invalid_default_partial_catalog_stays_degraded;
+            test_main_eio_uncatalogued_default_never_selects_catalogued_alternative;
           Alcotest.test_case
             "main_eio starts with an unsynced config root"
             `Slow
             test_main_eio_starts_with_an_unsynced_config_root;
           Alcotest.test_case
-            "main_eio invalid runtime stays degraded but serves dashboard"
+            "main_eio uncatalogued runtime serves setup without fallback"
             `Slow
-            test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard;
+            test_main_eio_uncatalogued_runtime_serves_setup_without_fallback;
           Alcotest.test_case
             "main_eio start does not record default without flag"
             `Slow

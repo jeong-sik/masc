@@ -1079,7 +1079,7 @@ let test_preflight_first_post_respects_control_epoch () =
   let path = Tui_decode.Canonical_path.of_path in
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.server_identity <- Some
-    { Tui_decode.sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None;
+    { Tui_decode.sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
       sid_base_path=path "/workspace"; sid_masc_root=path "/workspace/.masc";
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
       sid_sse_clients=None; sid_gc=None; sid_scheduler=None };
@@ -1648,7 +1648,7 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   let module Q = Masc_tui_keeper_chat_queue in
   let path = Tui_decode.Canonical_path.of_path in
   let identity root : Tui_decode.server_identity =
-    { sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None;
+    { sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
       sid_base_path=path "/workspace"; sid_masc_root=path root;
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
       sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in

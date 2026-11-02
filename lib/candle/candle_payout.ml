@@ -27,6 +27,22 @@ type candidates =
   ; candidate_task_keepers : (string * string option) list
   }
 
+type boundary = Goal_created | Human_confirmed
+
+type window_issue =
+  | Same_second of { task_id : string; boundary : boundary; completed_at : Candle_time.t }
+  | Task_missing of { task_id : string }
+  | Task_unobserved of { task_id : string }
+  | Unfenced_nonterminal of { task_id : string }
+  | Reversed_window of { goal_created_at : Candle_time.t; confirmed_at : Candle_time.t }
+
+type held_window =
+  { passed_at : Candle_time.t
+  ; confirmed_at : Candle_time.t
+  ; tasks : (string * Candle_event.task_lookup) list
+  ; task_keepers : (string * Candle_event.keeper_observation) list
+  }
+
 let is_settled ~goal_id events =
   List.exists
     (fun (event : Candle_event.t) ->
@@ -34,7 +50,8 @@ let is_settled ~goal_id events =
        | Candle_event.Unattributed unattributed -> String.equal unattributed.goal_id goal_id
        | Candle_event.Paid p -> String.equal p.identity.goal_id goal_id
        | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> false
-       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
+       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+       | Candle_event.Candidate_window_held _ ->
          false)
     events
 ;;
@@ -53,7 +70,8 @@ let last_owed ~goal_id events =
            }
        | Candle_event.Payout_owed _
        | Candle_event.Snapshot _
-       | Candle_event.Candidates _
+       | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+       | Candle_event.Candidate_window_held _
        | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> last)
     None
     events
@@ -63,7 +81,8 @@ let failed_run ~goal_id ~request_id ~verification_run_id events =
   List.exists (fun (event : Candle_event.t) -> match event.body with
     | Candle_event.Payout_failed f -> f.goal_id = goal_id && f.request_id = request_id
         && f.verification_run_id = verification_run_id
-    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+    | Candle_event.Candidate_window_held _
     | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> false) events
 
 let state ~goal_id events =
@@ -83,7 +102,7 @@ let waiting events =
          match event.body with
          | Candle_event.Payout_owed owed ->
            if List.mem owed.goal_id seen then seen else owed.goal_id :: seen
-         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ ->
+         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ ->
            seen)
       []
       events
@@ -117,7 +136,8 @@ let find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
              } )
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
-       | Candle_event.Candidates _
+       | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+       | Candle_event.Candidate_window_held _
        | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None)
     events
 ;;
@@ -141,22 +161,185 @@ let pass_of (waiting : waiting) events =
        events)
 ;;
 
+(* A verifier can write a Snapshot before its proof is durably saved and retry
+   within the same second. The same identity can then have different linked
+   Tasks or Goal facts. Older settled history still replays against its recorded
+   first Snapshot, but a new decision must not choose between conflicting facts. *)
+type pass_observation = Missing_snapshot | Conflicting_snapshots | Matching_snapshot of pass
+
+let observe_current_pass (waiting : waiting) events =
+  let passes = List.filter_map (fun (event : Candle_event.t) ->
+    match event.body with
+    | Candle_event.Snapshot snapshot
+      when snapshot.goal_id = waiting.goal_id
+           && snapshot.request_id = waiting.request_id
+           && snapshot.verification_run_id = waiting.verification_run_id
+           && Candle_time.equal snapshot.passed_at waiting.passed_at ->
+      Some {goal_created_at = snapshot.goal_created_at;
+            goal = {Candle_appraisal.title = snapshot.title; metric = snapshot.metric;
+                    target_value = snapshot.target_value};
+            due_date = snapshot.due_date; linked_task_ids = snapshot.linked_task_ids}
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _
+    | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _
+    | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events in
+  match passes with
+  | [] -> Missing_snapshot
+  | pass :: rest when List.for_all ((=) pass) rest -> Matching_snapshot pass
+  | _ :: _ -> Conflicting_snapshots
+;;
+
+let current_pass_of waiting events =
+  match observe_current_pass waiting events with
+  | Missing_snapshot -> Error "no Snapshot names the confirmed verifier run and pass time"
+  | Conflicting_snapshots -> Error "conflicting Snapshots name the same confirmed verifier run and pass time"
+  | Matching_snapshot pass -> Ok pass
+;;
+
 let candidates_of (waiting : waiting) events =
   List.find_map
     (fun (event : Candle_event.t) ->
        match event.body with
-       | Candle_event.Candidates c
+       | (Candle_event.Candidates c | Candle_event.Candidates_fenced c)
          when String.equal c.goal_id waiting.goal_id
               && String.equal c.request_id waiting.request_id
               && String.equal c.verification_run_id waiting.verification_run_id ->
          Some
            { candidate_task_ids = c.candidate_task_ids; candidate_keepers = c.candidate_keepers;
              candidate_task_keepers = c.candidate_task_keepers }
-       | Candle_event.Candidates _
+       | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+       | Candle_event.Candidate_window_held _
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
        | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None)
     events
+;;
+
+type observation_provenance = Unfenced | Backlog_fenced
+
+let candidate_observations_of (waiting : waiting) events =
+  List.find_map (fun (event : Candle_event.t) -> match event.body with
+    | Candle_event.Candidates c
+      when String.equal c.goal_id waiting.goal_id
+           && String.equal c.request_id waiting.request_id
+           && String.equal c.verification_run_id waiting.verification_run_id -> Some (c.tasks, Unfenced)
+    | Candle_event.Candidates_fenced c
+      when String.equal c.goal_id waiting.goal_id
+           && String.equal c.request_id waiting.request_id
+           && String.equal c.verification_run_id waiting.verification_run_id -> Some (c.tasks, Backlog_fenced)
+    | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Unattributed _
+    | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
+    | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
+    | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events
+;;
+
+let held_window_of (waiting : waiting) events =
+  List.find_map (fun (event : Candle_event.t) -> match event.body with
+    | Candle_event.Candidate_window_held held
+      when String.equal held.goal_id waiting.goal_id
+           && String.equal held.request_id waiting.request_id
+           && String.equal held.verification_run_id waiting.verification_run_id ->
+      Some { passed_at=held.passed_at; confirmed_at=held.confirmed_at;
+             tasks = held.tasks; task_keepers = held.task_keepers }
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Unattributed _
+    | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
+    | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
+    | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events
+;;
+
+let window_issues ~goal_created_at ~confirmed_at tasks =
+  let reversed =
+    if tasks <> [] && Candle_time.compare goal_created_at confirmed_at > 0
+    then [Reversed_window {goal_created_at; confirmed_at}] else [] in
+  let completed_issues task_id completed_at =
+    let creation = Candle_time.compare completed_at goal_created_at in
+    let confirmation = Candle_time.compare completed_at confirmed_at in
+    (if creation = 0 && confirmation <= 0
+     then [Same_second {task_id; boundary=Goal_created; completed_at}] else [])
+    @ (if confirmation = 0 && creation >= 0
+       then [Same_second {task_id; boundary=Human_confirmed; completed_at}] else []) in
+  reversed @ List.concat_map (fun (task_id, lookup) -> match lookup with
+    | Candle_event.Deleted -> [Task_missing {task_id}]
+    | Candle_event.Unobserved -> [Task_unobserved {task_id}]
+    | Candle_event.Found {status = Candle_event.Done {completed_at}; _} ->
+      completed_issues task_id completed_at
+    | Candle_event.Found_uncertain observations ->
+      Task_unobserved {task_id} :: List.concat_map (fun (row : Candle_event.task_fragment) ->
+        match row.status with
+        | Candle_event.Observed_status (Candle_event.Done {completed_at}) -> completed_issues task_id completed_at
+        | Candle_event.Observed_status (Todo | Claimed | In_progress | Awaiting_verification | Cancelled)
+        | Candle_event.Unreadable_status -> []) observations
+    | Candle_event.Found {status = (Candle_event.Todo | Claimed | In_progress
+        | Awaiting_verification | Cancelled); _} -> []) tasks
+;;
+
+let unfenced_nonterminal_issues ~provenance tasks =
+  match provenance with
+    | Backlog_fenced -> []
+    | Unfenced -> List.filter_map (fun (task_id, lookup) -> match lookup with
+        | Candle_event.Found {status=(Candle_event.Todo | Claimed | In_progress | Awaiting_verification);_} ->
+          Some (Unfenced_nonterminal {task_id})
+        | Candle_event.Found {status=(Candle_event.Done _ | Cancelled);_}
+        | Candle_event.Found_uncertain _
+        | Candle_event.Deleted | Candle_event.Unobserved -> None) tasks
+;;
+
+let snapshot_independent_issues ~provenance tasks =
+  let unavailable = List.filter_map (fun (task_id, lookup) -> match lookup with
+    | Candle_event.Deleted -> Some (Task_missing {task_id})
+    | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> Some (Task_unobserved {task_id})
+    | Candle_event.Found _ -> None) tasks in
+  unavailable @ unfenced_nonterminal_issues ~provenance tasks
+;;
+
+let observation_issues ~provenance ~goal_created_at ~confirmed_at tasks =
+  window_issues ~goal_created_at ~confirmed_at tasks @ unfenced_nonterminal_issues ~provenance tasks
+;;
+
+let window_issue_to_string = function
+  | Task_missing {task_id} ->
+    Printf.sprintf "task %s original status is unavailable" task_id
+  | Task_unobserved {task_id} ->
+    Printf.sprintf "task %s could not be observed from its source" task_id
+  | Unfenced_nonterminal {task_id} ->
+    Printf.sprintf "task %s was recorded before Task completion ordering was fenced" task_id
+  | Reversed_window {goal_created_at; confirmed_at} ->
+    Printf.sprintf "human confirmation %s precedes Goal creation %s in the recorded clock"
+      (Candle_time.to_rfc3339 confirmed_at) (Candle_time.to_rfc3339 goal_created_at)
+  | Same_second {task_id; boundary; completed_at} ->
+    let boundary = match boundary with Goal_created -> "Goal creation" | Human_confirmed -> "human confirmation" in
+    Printf.sprintf "task %s completed in the same recorded second as %s (%s)"
+      task_id boundary (Candle_time.to_rfc3339 completed_at)
+;;
+
+let classify_keepers ~is_keeper tasks =
+  List.map (fun (task_id, lookup) ->
+    let observation = match lookup with
+      | Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> Candle_event.Keeper_unknown
+      | Candle_event.Found {assignee=None; _} -> Candle_event.No_assignee
+      | Candle_event.Found {assignee=Some name; _} ->
+        (match is_keeper with
+         | None -> Candle_event.Keeper_unknown
+         | Some is_keeper ->
+           if is_keeper name then Candle_event.Keeper_name name else Candle_event.Not_keeper name) in
+    task_id, observation) tasks
+;;
+
+let classify_fragments ~is_keeper tasks =
+  List.map (fun (task_id, lookup) -> task_id,
+    match lookup with
+    | Candle_event.Found_uncertain rows ->
+      Candle_event.Found_uncertain (List.map (fun (row : Candle_event.task_fragment) ->
+        let keeper = match row.assignee, is_keeper with
+          | Candle_event.Assigned name, Some is_keeper ->
+            if is_keeper name then Candle_event.Keeper_name name else Candle_event.Not_keeper name
+          | Candle_event.Assigned _, None | Candle_event.Unreadable_assignee, _ -> Candle_event.Keeper_unknown
+          | Candle_event.Unassigned, _ -> Candle_event.No_assignee in
+        {row with keeper}) rows)
+    | (Candle_event.Found _ | Candle_event.Deleted | Candle_event.Unobserved) as lookup -> lookup) tasks
 ;;
 
 let is_candidate ~goal_created_at ~confirmed_at = function
@@ -172,7 +355,7 @@ let is_candidate ~goal_created_at ~confirmed_at = function
           | Candle_event.Cancelled )
       ; _
       }
-  | Candle_event.Deleted -> false
+  | Candle_event.Found_uncertain _ | Candle_event.Deleted | Candle_event.Unobserved -> false
 ;;
 
 (* Which eligibility rule judges the candidate list of a stored [Candidates]
@@ -187,18 +370,24 @@ type rules =
 
 let validate_durable_candidates_internal ~rules (waiting : waiting) events =
   let open Result.Syntax in
-  let* pass = match pass_of waiting events with
-    | Some pass -> Ok pass
-    | None -> Error "settlement requires the confirmed Snapshot" in
+  let* pass = match rules with
+    | Current_rules -> current_pass_of waiting events
+    | Recorded_rules ->
+      (match pass_of waiting events with
+       | Some pass -> Ok pass
+       | None -> Error "settlement requires the confirmed Snapshot") in
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in
   let candidates = List.find_map (fun (event : Candle_event.t) -> match event.body with
     | Candle_event.Candidates c when matches c.goal_id c.request_id c.verification_run_id ->
-      Some (c.tasks, c.candidate_task_ids, c.candidate_keepers, c.candidate_task_keepers)
-    | Candle_event.Candidates _ | Candle_event.Snapshot _ | Candle_event.Payout_owed _
+      Some (c.tasks, c.candidate_task_ids, c.candidate_keepers, c.candidate_task_keepers, Unfenced)
+    | Candle_event.Candidates_fenced c when matches c.goal_id c.request_id c.verification_run_id ->
+      Some (c.tasks, c.candidate_task_ids, c.candidate_keepers, c.candidate_task_keepers, Backlog_fenced)
+    | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _
     | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events in
-  let* tasks, ids, keepers, task_keepers = match candidates with
+  let* tasks, ids, keepers, task_keepers, provenance = match candidates with
     | None -> Error "settlement requires durable Candidates" | Some c -> Ok c in
   let* () =
     let observed_ids = List.map fst tasks in
@@ -208,12 +397,16 @@ let validate_durable_candidates_internal ~rules (waiting : waiting) events =
     else
       match rules with
       | Current_rules ->
-        let eligible_ids = List.filter_map (fun (id, task) ->
-          if is_candidate ~goal_created_at:pass.goal_created_at
-              ~confirmed_at:waiting.confirmed_at task then Some id else None) tasks in
-        if List.sort String.compare ids <> List.sort String.compare eligible_ids
-        then Error "durable candidate tasks must equal the complete eligible Snapshot subset"
-        else Ok ()
+        (match observation_issues ~provenance ~goal_created_at:pass.goal_created_at
+            ~confirmed_at:waiting.confirmed_at tasks with
+         | _ :: _ as issues -> Error (String.concat "; " (List.map window_issue_to_string issues))
+         | [] ->
+           let eligible_ids = List.filter_map (fun (id, task) ->
+             if is_candidate ~goal_created_at:pass.goal_created_at
+                 ~confirmed_at:waiting.confirmed_at task then Some id else None) tasks in
+           if List.sort String.compare ids <> List.sort String.compare eligible_ids
+           then Error "durable candidate tasks must equal the complete eligible Snapshot subset"
+           else Ok ())
       | Recorded_rules ->
         if List.for_all (fun id -> List.mem id observed_ids) ids then Ok ()
         else Error "durable candidate tasks must be observed Snapshot-linked tasks" in
@@ -229,7 +422,8 @@ let validate_durable_candidates_internal ~rules (waiting : waiting) events =
         | None, Some (Candle_event.Found {assignee=None;_}) -> false
         | Some keeper, Some (Candle_event.Found {assignee=Some assignee;_}) -> not (String.equal keeper assignee)
         | Some _, Some (Candle_event.Found {assignee=None;_}) -> true
-        | (None | Some _), (None | Some Candle_event.Deleted) -> true) task_keepers
+        | (None | Some _), (None | Some Candle_event.Deleted | Some Candle_event.Unobserved
+          | Some (Candle_event.Found_uncertain _)) -> true) task_keepers
     then Error "candidate Keeper eligibility does not match the observed assignee"
     else
       let classified = List.filter_map snd task_keepers |> List.sort_uniq String.compare in
@@ -238,10 +432,15 @@ let validate_durable_candidates_internal ~rules (waiting : waiting) events =
   Ok (pass, tasks, ids, keepers, task_keepers)
 
 let validate_durable_candidates (waiting : waiting) events =
-  Result.map ignore (validate_durable_candidates_internal ~rules:Current_rules waiting events)
+  match held_window_of waiting events with
+  | Some _ -> Error "candidate window is held"
+  | None -> Result.map ignore (validate_durable_candidates_internal ~rules:Current_rules waiting events)
 
 let validate_settlement_under ~rules (waiting : waiting) events body =
   let open Result.Syntax in
+  let* () = match held_window_of waiting events with
+    | None -> Ok ()
+    | Some _ -> Error "settlement requires resolving the retained candidate window" in
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in
@@ -254,7 +453,8 @@ let validate_settlement_under ~rules (waiting : waiting) events body =
        || List.sort String.compare actual <> List.sort String.compare ids then
       Error "relation decisions must cover each durable candidate task exactly once"
     else if List.exists (fun id -> match List.assoc_opt id tasks with
-        | Some (Candle_event.Found _) -> false | Some Candle_event.Deleted | None -> true) ids then
+        | Some (Candle_event.Found _) -> false
+        | Some (Candle_event.Found_uncertain _) | Some Candle_event.Deleted | Some Candle_event.Unobserved | None -> true) ids then
       Error "durable candidate task has no found row"
     else Ok (List.filter_map (fun (r : Candle_appraisal.task_relation) ->
       match r.relation, List.assoc_opt r.task_id task_keepers with
@@ -282,18 +482,83 @@ let validate_settlement_under ~rules (waiting : waiting) events body =
     if pass.due_date = Some f.due_date then Ok ()
     else Error "failed due date differs from the confirmed Snapshot"
   | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _
-  | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
+  | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+  | Candle_event.Candidate_window_held _ ->
     Error "settlement does not name the confirmed verifier run"
 
 let validate_settlement waiting events body =
   validate_settlement_under ~rules:Current_rules waiting events body
 
+let validate_hold (waiting : waiting) events ~passed_at ~confirmed_at tasks task_keepers =
+  let open Result.Syntax in
+  let* () =
+    if Candle_time.equal passed_at waiting.passed_at && Candle_time.equal confirmed_at waiting.confirmed_at
+    then Ok () else Error "held candidate window differs from the open payout times" in
+  let* pass = current_pass_of waiting events in
+  let* () =
+    if Option.is_some (held_window_of waiting events) || Option.is_some (candidates_of waiting events)
+    then Error "candidate observation is already durable"
+    else Ok () in
+  let ids = List.map fst tasks in
+  let keeper_ids = List.map fst task_keepers in
+  let* () =
+    if List.length ids <> List.length (List.sort_uniq String.compare ids)
+       || List.sort String.compare ids <> List.sort String.compare pass.linked_task_ids
+    then Error "held observations must cover every Snapshot-linked task exactly once"
+    else if List.length keeper_ids <> List.length (List.sort_uniq String.compare keeper_ids)
+            || List.sort String.compare keeper_ids <> List.sort String.compare ids
+    then Error "held Keeper observations must cover every linked task exactly once"
+    else Ok () in
+  let* () =
+    if List.exists (fun (task_id, keeper) ->
+      match List.assoc_opt task_id tasks, keeper with
+      | Some (Candle_event.Found {assignee=Some name; _}),
+        (Candle_event.Keeper_name actual | Candle_event.Not_keeper actual) ->
+        not (String.equal name actual)
+      | Some (Candle_event.Found {assignee=Some _; _}), Candle_event.Keeper_unknown -> false
+      | Some (Candle_event.Found {assignee=None; _}), Candle_event.No_assignee
+      | Some (Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _), Candle_event.Keeper_unknown -> false
+      | (None | Some (Candle_event.Found _ | Found_uncertain _ | Deleted | Unobserved)),
+        (Candle_event.Keeper_name _ | Not_keeper _ | No_assignee | Keeper_unknown) -> true) task_keepers
+    then Error "held Keeper observation does not match its Task assignee"
+    else Ok () in
+  if List.exists (function Same_second _ | Reversed_window _ -> true
+      | Task_missing _ | Task_unobserved _ | Unfenced_nonterminal _ -> false)
+      (window_issues ~goal_created_at:pass.goal_created_at ~confirmed_at:waiting.confirmed_at tasks)
+  then Ok ()
+  else Error "held candidate window requires an ambiguous or reversed observation"
+;;
+
 let validate_under ~rules events body =
+  let identity_matches (waiting : waiting) goal_id request_id verification_run_id =
+    String.equal waiting.goal_id goal_id && String.equal waiting.request_id request_id
+    && String.equal waiting.verification_run_id verification_run_id in
+  match body with
+  | Candle_event.Payout_owed owed ->
+    (match state ~goal_id:owed.goal_id events with
+     | Waiting waiting when Option.is_some (held_window_of waiting events) ->
+       Error "candidate window is held; a new payout obligation cannot replace it"
+     | Waiting _ | No_obligation | Failed _ | Settled -> Ok ())
+  | Candle_event.Candidate_window_held held ->
+    (match state ~goal_id:held.goal_id events with
+     | Waiting waiting when identity_matches waiting held.goal_id held.request_id held.verification_run_id ->
+       validate_hold waiting events ~passed_at:held.passed_at ~confirmed_at:held.confirmed_at
+         held.tasks held.task_keepers
+     | Waiting _ | No_obligation | Failed _ | Settled ->
+       Error "held candidate window requires the current open payout")
+  | Candle_event.Candidates c | Candle_event.Candidates_fenced c ->
+    (match state ~goal_id:c.goal_id events with
+     | Waiting waiting when Option.is_some (held_window_of waiting events) ->
+       Error "candidate window is held"
+     | Waiting _ | No_obligation | Failed _ | Settled -> Ok ())
+  | (Candle_event.Paid _ | Unattributed _ | Payout_failed _ | Snapshot _
+    | Half_life_set _ | Equipped _ | Purchased _ | Granted _ | Gifted _ | Gifted_item _) ->
   let goal_id = match body with
     | Candle_event.Paid p -> Some p.identity.goal_id
     | Candle_event.Unattributed u -> Some u.goal_id
     | Candle_event.Payout_failed f -> Some f.goal_id
-    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+    | Candle_event.Candidate_window_held _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> None in
   match goal_id with
   | None -> Ok ()
@@ -307,17 +572,20 @@ let validate_replay events body = validate_under ~rules:Recorded_rules events bo
 
 let keeper_name ~is_keeper = function
   | Candle_event.Found { assignee = Some name; _ } -> if is_keeper name then Some name else None
-  | Candle_event.Found { assignee = None; _ } | Candle_event.Deleted -> None
+  | Candle_event.Found { assignee = None; _ } | Candle_event.Found_uncertain _
+  | Candle_event.Deleted | Candle_event.Unobserved -> None
 ;;
 
 let decide_candidates ~goal_created_at ~confirmed_at ~is_keeper tasks =
-  let candidates =
-    List.filter (fun (_, lookup) -> is_candidate ~goal_created_at ~confirmed_at lookup) tasks
-  in
-  let candidate_task_keepers = List.map (fun (id, lookup) ->
-    id, keeper_name ~is_keeper lookup) candidates in
-  { candidate_task_ids = List.map fst candidates
-  ; candidate_keepers = List.filter_map snd candidate_task_keepers |> List.sort_uniq String.compare
-  ; candidate_task_keepers
-  }
+  match window_issues ~goal_created_at ~confirmed_at tasks with
+  | _ :: _ as issues -> Error issues
+  | [] ->
+    let candidates =
+      List.filter (fun (_, lookup) -> is_candidate ~goal_created_at ~confirmed_at lookup) tasks
+    in
+    let candidate_task_keepers = List.map (fun (id, lookup) ->
+      id, keeper_name ~is_keeper lookup) candidates in
+    Ok { candidate_task_ids = List.map fst candidates
+       ; candidate_keepers = List.filter_map snd candidate_task_keepers |> List.sort_uniq String.compare
+       ; candidate_task_keepers }
 ;;

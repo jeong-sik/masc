@@ -15,9 +15,9 @@
     name verifier commits. Only the application-owned typed verifier boundary
     can prove/refute completion, with non-blank
     evidence and fixed [verifier_exact] authority. A repeated
-    [request_complete] on Verifying answers [Already], wakes an existing
-    pending proof again, and re-arms the request when the ledger lost it (the
-    P0-2 wedge). The FSM is the only transition decider; the ledger records. *)
+    [request_complete] on Verifying wakes an existing pending proof or
+    reconciles its verdict. A missing or inconsistent proof does not prove
+    that an earlier review ended. The FSM decides phases; the ledger records. *)
 
 open Alcotest
 open Masc
@@ -259,7 +259,7 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
   (* The refusal is the store's typed Unavailable, never the B1 rejection:
      the create/update split is decided only on a state that was read. *)
   | Error (Goal_store.Store_unavailable { reason = Goal_store.Not_json _; _ }) -> ()
-  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _
           | Goal_store.Rejected _ | Goal_store.Persist_failed _ as other) ->
     fail ("expected Store_unavailable Not_json, got: " ^ Goal_store.write_error_to_string other)
 ;;
@@ -1321,54 +1321,349 @@ let test_proof_refuted_returns_to_executing_with_reason () =
     (json_state reentered [ "verification"; "completion"; "state" ])
 ;;
 
-(* (d) The P0-2 wedge — phase=Verifying with the ledger at Completion_idle —
-   is re-armed by the repeated request_complete: the FSM answers [Already]
-   and the handler re-writes the durable request before answering. *)
-let test_verifying_repeat_rearms_a_missing_proof_request () =
-  with_workspace
-  @@ fun config ->
+type inconsistent_verifying_fixture = Missing | Idle | Stale | Same_revision | Confirmed
+
+(* A missing or inconsistent row is not evidence that its original review
+   ended. Exercise every public and scan admission without creating another ID. *)
+let test_verifying_does_not_recreate_an_unknown_request () =
+  List.iter (fun fixture ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Uncertain proof" in
+    (match fixture with
+     | Missing -> ()
+     | Same_revision ->
+       let Goal_store.Criterion criterion = current_criterion config goal_id in
+       let old = Goal_store.Criterion {criterion with title=criterion.title ^ " changed"} in
+       (match Goal_verification.mark_proof_pending config ~goal_id ~criterion:old with
+        | Ok _ -> () | Error detail -> fail detail)
+     | Idle | Stale | Confirmed ->
+       ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+       (match fixture with
+        | Idle ->
+          (match Goal_verification.reopen_goal config ~goal_id ~actor:"operator" ~note:None with
+           | Ok _ -> () | Error detail -> fail detail)
+        | Stale ->
+          (match Goal_store.upsert_goal config ~id:goal_id ~target_value:"4" () with
+           | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error))
+        | Confirmed ->
+          let request_id, criterion = proof_identity config goal_id in
+          let proof = verdict ~request_id ~criterion Goal_verification.Proven in
+          (match Goal_verification.record_proof_verdict config ~goal_id proof with
+           | Ok _ -> () | Error detail -> fail detail);
+          (match Goal_verification.record_human_confirmation config ~goal_id proof ~operator_id:"operator" with
+           | Ok _ -> () | Error detail -> fail detail)
+        | Missing | Same_revision -> ()));
+    (match fixture with
+     | Confirmed -> ()
+     | Missing | Idle | Stale | Same_revision ->
+       (match Goal_store.update_goal_if_phase config ~goal_id ~expected_phase:Goal_phase.Executing
+                (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying }) with
+        | Ok (Goal_store.Goal_updated _) -> ()
+        | Ok (Goal_store.Goal_phase_mismatch phase) -> fail (Goal_phase.to_string phase)
+        | Error error -> fail (Goal_store.write_error_to_string error)));
+    let read_file path = if Sys.file_exists path then Some (Fs_compat.load_file path) else None in
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = read_file goal_path and before_ledger = read_file ledger_path in
+    let before_mirror = read_file (ledger_path ^ ".last-good") in
+    let before_events = goal_events_text config in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        List.iter (fun evidence_refs ->
+          let args = ["goal_id", `String goal_id; "action", `String "request_complete"]
+            @ (match evidence_refs with None -> [] | Some refs -> ["evidence_refs", `List (List.map (fun s -> `String s) refs)]) in
+          let error = must_fail "uncertain verification" (dispatch ctx ~name:"masc_goal_transition" args) in
+          check string "the inconsistency is a conflict" "conflict" (json_state error ["error_code"]);
+          match Workspace_goals.request_current_proof ?evidence_refs config ~goal_id with
+          | Error (Workspace_goals.Refused {code=Tool_args.Conflict; _}) -> ()
+          | Error (Workspace_goals.Refused _ | Workspace_goals.Store _) | Ok _ ->
+            fail "public proof request did not preserve the uncertain record")
+          [None; Some ["board:missing-proof-source"]];
+        (match Workspace_goals.recover_current_proof config ~goal_id with
+         | Error (Goal_store.Rejected _) -> ()
+         | Error _ | Ok _ -> fail "scan recovery did not report the inconsistency");
+        (match Goal_verification.bind_review config ~goal_id with
+         | Error (Goal_verification.Binding_unavailable _) -> ()
+         | Error (Goal_verification.No_current_review _) | Ok _ ->
+           fail "uncertainty must retain any existing retry");
+        check (option string) "Goal stays unchanged" before_goal (read_file goal_path);
+        check (option string) "primary proof stays unchanged" before_ledger (read_file ledger_path);
+        check (option string) "mirror stays unchanged" before_mirror (read_file (ledger_path ^ ".last-good"));
+        check string "no Goal event is added" before_events (goal_events_text config);
+        check int "no verification is woken" 0 !wakes))
+    [Missing; Idle; Stale; Same_revision; Confirmed]
+;;
+
+let test_verifying_retry_preserves_its_evidence_snapshot () =
+  with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
-  let goal_id = create_goal ctx "Wedged goal" in
-  (* Simulate the crash window: the phase is Verifying but the ledger never
-     recorded the proof request. *)
-  (match
-     Goal_store.update_goal_if_phase config ~goal_id
-       ~expected_phase:Goal_phase.Executing
-       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
-   with
-   | Ok (Goal_store.Goal_updated _) -> ()
-   | Ok (Goal_store.Goal_phase_mismatch phase) ->
-     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
-   | Error error -> fail (Goal_store.write_error_to_string error));
-  (* Creation writes no ledger row, so the wedge starts with none at all —
-     the same hole the handler re-arms, reached without a row to empty. *)
-  (match Goal_verification.get_record config ~goal_id with
-   | Ok None -> ()
-   | Ok (Some _) -> fail "test setup: the wedge needs no durable request"
-   | Error msg -> fail msg);
-  let answered =
-    must_succeed "repeated request_complete"
-      (transition ctx goal_id "request_complete")
-  in
-  check bool "answered as Already (noop)" true
-    (json_bool answered [ "noop" ]);
-  check string "still verifying" "verifying" (json_state answered [ "phase" ]);
-  check string "the proof request is re-armed" "proof_pending"
-    (json_state answered [ "verification"; "completion"; "state" ]);
-  (match (ledger_record config goal_id).completion with
-   | Goal_verification.Proof_pending _ -> ()
-   | _ -> fail "the re-arm must be durable, not just reported");
-  (* And the gate drains from there. *)
-  let completed =
-    must_succeed "typed proof proven"
-      (verifier_transition
-         config
-         goal_id
-         Workspace_goals.Proof_proven
-         "verified after re-arm")
-  in
-  check string "the re-armed gate completes" "awaiting_confirmation"
-    (json_state completed [ "goal"; "phase" ])
+  let goal_id = create_goal ctx "Pending evidence" in
+  let criterion = current_criterion config goal_id in
+  let content = {|{"source":"original submitted evidence"}|} in
+  let item = Workspace_verification_store.Evidence_collaboration {
+    reference="board:original"; content;
+    sha256=Agent_core_sha256.(to_hex (digest_string content)) } in
+  (match Goal_verification.mark_proof_pending ~submitted_evidence:[item] config ~goal_id ~criterion with
+   | Ok _ -> () | Error detail -> fail detail);
+  ignore (must_succeed "start proof" (transition ctx goal_id "request_complete"));
+  let original_id, _ = proof_identity config goal_id in
+  let ledger_path = Goal_verification.verifications_path config in
+  let before = Fs_compat.load_file ledger_path in
+  let response = dispatch ctx ~name:"masc_goal_transition"
+    ["goal_id", `String goal_id; "action", `String "request_complete"; "evidence_refs", `List []] in
+  let error = must_fail "different evidence during an active proof" response in
+  check string "changed evidence conflicts" "conflict" (json_state error ["error_code"]);
+  (match Workspace_goals.request_current_proof ~evidence_refs:[] config ~goal_id with
+   | Error (Workspace_goals.Refused {code=Tool_args.Conflict; _}) -> ()
+   | Error (Workspace_goals.Refused _ | Workspace_goals.Store _) | Ok _ ->
+     fail "public proof request replaced active evidence");
+  check string "the original proof bytes are unchanged" before (Fs_compat.load_file ledger_path);
+  let retained_id, _ = proof_identity config goal_id in
+  check string "the original request remains current" original_id retained_id;
+  (match Workspace_goals.request_current_proof config ~goal_id with
+   | Ok (_, record) -> check bool "omitted evidence retains the snapshot" true (record.submitted_evidence = [item])
+   | Error _ -> fail "the existing request refused an ordinary retry");
+  let empty_goal = create_goal ctx "Empty pending evidence" in
+  ignore (must_succeed "start empty proof" (transition ctx empty_goal "request_complete"));
+  let empty_id, _ = proof_identity config empty_goal in
+  ignore (must_succeed "retry the same explicit evidence" (dispatch ctx ~name:"masc_goal_transition"
+    ["goal_id", `String empty_goal; "action", `String "request_complete"; "evidence_refs", `List []]));
+  let repeated_id, _ = proof_identity config empty_goal in
+  check string "the same evidence keeps its request" empty_id repeated_id
+;;
+
+let test_bound_retry_does_not_create_or_replace_a_request () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Bound retry" in
+  let Goal_store.Criterion {revision=initial_revision; _} = current_criterion config goal_id in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let request_id, Goal_store.Criterion {revision; _} = proof_identity config goal_id in
+  ignore (must_fail "a stale executing click must not retry another actor's request"
+    (dispatch ctx ~name:"masc_goal_transition"
+       ["goal_id", `String goal_id; "action", `String "request_complete";
+        "expected_verification", `Assoc ["phase", `String "executing";
+          "criterion_revision", `String initial_revision]]));
+  let still_original, _ = proof_identity config goal_id in
+  check string "the other actor's request is unchanged" request_id still_original;
+  let retry () = dispatch ctx ~name:"masc_goal_transition"
+      ["goal_id", `String goal_id; "action", `String "request_complete";
+       "expected_verification", `Assoc ["phase", `String "verifying"; "criterion_revision", `String revision;
+         "request_id", `String request_id]] in
+  ignore (must_succeed "current retry" (retry ()));
+  ignore (must_succeed "the verifier refutes the original"
+    (verifier_transition config goal_id
+       (Workspace_goals.Proof_refuted {reason="target not met"}) "target not met"));
+  ignore (must_fail "old retry must not start a new request after refutation" (retry ()));
+  check string "the old click leaves the Goal executing" "executing" (stored_phase config goal_id);
+  ignore (must_succeed "a new explicit completion request" (transition ctx goal_id "request_complete"));
+  let replacement, _ = proof_identity config goal_id in
+  check bool "the replacement request has its own identity" false (String.equal request_id replacement);
+  ignore (must_fail "old retry must not target the replacement" (retry ()));
+  let observed, _ = proof_identity config goal_id in
+  check string "the replacement remains untouched" replacement observed
+;;
+
+(* Enter the same retry function the public handler selects after seeing a
+   Verifying Goal, but first make the intervening transition. *)
+let test_verifying_repeat_refuses_changed_goal () =
+  List.iter (fun action ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx ("Retry races " ^ action) in
+    ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    ignore (must_succeed "intervening Goal transition" (transition ctx goal_id action));
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = Fs_compat.load_file goal_path in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        List.iter (fun evidence_refs ->
+          let answer = Workspace_goals.For_testing.answer_verifying_repeat
+            ?evidence_refs ctx ~goal_id in
+          let error = must_fail ("retry after " ^ action) answer in
+          check string "current phase is a conflict" "conflict" (json_state error ["error_code"]);
+          check string "rejected retry leaves Goal unchanged" before_goal (Fs_compat.load_file goal_path);
+          check string "rejected retry leaves proof unchanged" before_ledger (Fs_compat.load_file ledger_path);
+          check int "rejected retry does not wake verification" 0 !wakes)
+          [None; Some ["task:retry-evidence"]]))
+    ["reopen"; "drop"; "pause"; "block"]
+;;
+
+(* Model an initial request that observed Executing before another actor
+   created a proof request, including a verdict whose phase write is pending. *)
+let test_initial_request_refuses_a_new_verifying_goal () =
+  List.iter (fun outcome ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Initial request races verification" in
+    ignore (must_succeed "another actor requests completion"
+      (transition ctx goal_id "request_complete"));
+    (match outcome with
+     | None -> ()
+     | Some proof_outcome ->
+       let request_id, criterion = proof_identity config goal_id in
+       (match Goal_verification.record_proof_verdict config ~goal_id
+                (verdict ~request_id ~criterion proof_outcome) with
+        | Ok _ -> () | Error detail -> fail detail));
+    check string "the current Goal is verifying" "verifying" (stored_phase config goal_id);
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = Fs_compat.load_file goal_path in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    let before_events = goal_events_text config in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        List.iter (fun evidence_refs ->
+          let answer = Workspace_goals.For_testing.finish_goal_request_complete
+            ?evidence_refs ctx ~goal_id in
+          let error = must_fail "stale initial request" answer in
+          check string "current verifying phase is a conflict" "conflict" (json_state error ["error_code"]);
+          check string "Goal is unchanged" before_goal (Fs_compat.load_file goal_path);
+          check string "pending request or committed verdict is unchanged" before_ledger
+            (Fs_compat.load_file ledger_path);
+          check string "no new Goal event is emitted" before_events (goal_events_text config);
+          check int "verification is not woken" 0 !wakes)
+          [None; Some ["task:retry-evidence"]]))
+    [None; Some Goal_verification.Proven;
+     Some (Goal_verification.Refuted {reason="target not met"})]
+;;
+
+let test_verifying_repeat_preserves_terminal_evidence_contract () =
+  List.iter (fun confirmed ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Retry races a proven Goal" in
+    ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    ignore (must_succeed "intervening proof" (verifier_transition config goal_id
+      Workspace_goals.Proof_proven "actual proof"));
+    if confirmed then begin
+      let verdict = match (ledger_record config goal_id).completion with
+        | Goal_verification.Proof_proven verdict -> verdict
+        | Goal_verification.Completion_idle | Goal_verification.Proof_pending _
+        | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _ ->
+            fail "expected proven verdict" in
+      let Goal_store.Criterion { revision; _ } = verdict.criterion in
+      (match Workspace_goals.confirm_completion config ~goal_id ~operator_id:"operator"
+               ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id
+               ~criterion_revision:revision with
+       | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error))
+    end;
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = Fs_compat.load_file goal_path in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        let rejected = Workspace_goals.For_testing.answer_verifying_repeat
+            ~evidence_refs:["task:retry-evidence"] ctx ~goal_id
+          |> must_fail "terminal Goal rejects unconsumed evidence" in
+        check string "evidence cannot be silently dropped" "precondition_failed"
+          (json_state rejected ["error_code"]);
+        check string "evidence refusal preserves Goal" before_goal (Fs_compat.load_file goal_path);
+        check string "evidence refusal preserves proof" before_ledger (Fs_compat.load_file ledger_path);
+        let accepted = Workspace_goals.For_testing.answer_verifying_repeat ctx ~goal_id
+          |> must_succeed "terminal Goal remains a no-op" in
+        check bool "no evidence permits an already-complete response" true (json_bool accepted ["noop"]);
+        check string "response uses the current Goal phase"
+          (if confirmed then "completed" else "awaiting_confirmation") (json_state accepted ["phase"]);
+        check string "terminal no-op preserves proof" before_ledger (Fs_compat.load_file ledger_path);
+        check int "terminal no-op does not wake verification" 0 !wakes))
+    [false; true]
+;;
+
+(* The scan's first reconciliation and its recovery use separate Goal locks.
+   A verifier can commit a verdict between them while the phase write fails. *)
+let test_recovery_reconciles_a_verdict_committed_after_the_scan () =
+  List.iter (fun via_request ->
+  List.iter (fun outcome ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Verdict arrives before recovery" in
+    ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    (match Workspace_goals.reconcile_committed_proof config ~goal_id with
+     | Ok Workspace_goals.No_committed_proof -> ()
+     | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _)
+     | Error _ -> fail "the first scan must see no committed verdict");
+    let request_id, criterion = proof_identity config goal_id in
+    (match Goal_verification.record_proof_verdict config ~goal_id
+             (verdict ~request_id ~criterion outcome) with
+     | Ok _ -> () | Error detail -> fail detail);
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    (if via_request then
+       match Workspace_goals.request_current_proof config ~goal_id with
+       | Ok (_, record) ->
+         (match record.completion with
+          | Goal_verification.Proof_proven stored | Goal_verification.Proof_refuted stored ->
+            check string "request returns the existing verdict" request_id stored.request_id
+          | Goal_verification.Completion_idle | Goal_verification.Proof_pending _ | Goal_verification.Human_confirmed _ ->
+            fail "request replaced the committed verdict")
+       | Error _ -> fail "current committed verdict was not reconciled"
+     else
+       match Workspace_goals.recover_current_proof config ~goal_id with
+       | Ok false -> ()
+       | Ok true -> fail "a committed verdict must not enqueue another review"
+       | Error error -> fail (Goal_store.write_error_to_string error));
+    check string "the original verdict is not replaced" before_ledger (Fs_compat.load_file ledger_path);
+    check string "the Goal follows the committed verdict"
+      (match outcome with Goal_verification.Proven -> "awaiting_confirmation"
+       | Goal_verification.Refuted _ -> "executing") (stored_phase config goal_id);
+    let events = goal_events_text config in
+    check bool "the normal proof event names the committed request" true
+      (String_util.contains_substring events request_id);
+    (match Workspace_goals.recover_current_proof config ~goal_id with
+     | Ok false -> ()
+     | Ok true -> fail "a reconciled Goal must not enqueue review"
+     | Error error -> fail (Goal_store.write_error_to_string error));
+    check string "recovery does not duplicate the proof event" events (goal_events_text config);
+    check string "repeated recovery preserves the original verdict" before_ledger
+      (Fs_compat.load_file ledger_path))
+    [Goal_verification.Proven; Goal_verification.Refuted {reason="target not met"}])
+    [false; true]
+;;
+
+let test_transition_refuses_a_different_workspace () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Workspace-bound transition" in
+  ignore (must_fail "other workspace is refused"
+    (dispatch ctx ~name:"masc_goal_transition"
+       ["goal_id", `String goal_id; "action", `String "request_complete";
+        "expected_workspace", `Assoc ["base_path", `String "/different-workspace";
+          "masc_root", `String "/different-workspace/.masc"]]));
+  check string "the Goal has not changed" "executing" (stored_phase config goal_id)
+;;
+
+let test_goal_cache_scope_tracks_the_resolved_store () =
+  let base = temp_dir () in
+  let first = Filename.concat base "first" and second = Filename.concat base "second" in
+  let link = Filename.concat base ".masc" in
+  Fun.protect ~finally:(fun () -> (try Unix.unlink link with Unix.Unix_error _ -> ()); rm_rf base)
+    (fun () ->
+      Unix.mkdir first 0o755;
+      Unix.mkdir second 0o755;
+      Unix.symlink first link;
+      let config = Workspace.default_config base in
+      let old_scope = Server_dashboard_http.goal_cache_scope ~config in
+      Unix.unlink link;
+      Unix.symlink second link;
+      let new_scope = Server_dashboard_http.goal_cache_scope ~config in
+      check bool "changing the store root changes the cache scope" false (String.equal old_scope new_scope))
 ;;
 
 let test_verifying_repeat_wakes_an_existing_proof_request () =
@@ -1657,6 +1952,159 @@ let test_recovery_proof_cannot_authorize_mutation () =
       (verdict ~request_id ~criterion Goal_verification.Proven) with
    | Error _ -> () | Ok _ -> fail "mirror authorized a proof commit");
   check string "primary failure is not overwritten" "broken-primary" (ledger_bytes config)
+;;
+
+let proof_mirror_presence_scenario () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep an unresolved proof ledger" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let _, criterion = proof_identity config goal_id in
+  let primary = Goal_verification.verifications_path config in
+  let mirror = primary ^ ".last-good" in
+  let primary_saved = primary ^ ".saved-for-test" in
+  let mirror_saved = mirror ^ ".saved-for-test" in
+  let before_primary = Fs_compat.load_file primary in
+  let before_mirror = Fs_compat.load_file mirror in
+  Unix.rename primary primary_saved;
+  Unix.rename mirror mirror_saved;
+  let refuse label =
+    (match Goal_verification.get_record_authoritative config ~goal_id with
+     | Error _ -> () | Ok _ -> fail (label ^ ": mirror was treated as no prior proof"));
+    (match Goal_verification.bind_review config ~goal_id with
+     | Error (Goal_verification.Binding_unavailable _) -> ()
+     | Error (Goal_verification.No_current_review _) | Ok _ -> fail (label ^ ": verifier admission did not retain uncertainty"));
+    (match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
+     | Error _ -> () | Ok _ -> fail (label ^ ": missing primary was overwritten"));
+    check bool (label ^ ": no new primary") false (Sys.file_exists primary);
+    check string (label ^ ": original primary preserved") before_primary (Fs_compat.load_file primary_saved);
+    check string (label ^ ": original mirror preserved") before_mirror (Fs_compat.load_file mirror_saved) in
+  let with_entry make f =
+    make ();
+    Fun.protect ~finally:(fun () -> Unix.unlink mirror) f in
+  with_entry (fun () -> Unix.symlink "missing-test-target" mirror) (fun () -> refuse "dangling mirror");
+  with_entry (fun () -> Unix.symlink (Filename.basename mirror) mirror) (fun () -> refuse "cyclic mirror");
+  with_entry (fun () -> Unix.mkfifo mirror 0o600) (fun () -> refuse "FIFO mirror");
+  with_entry (fun () -> Unix.symlink (Filename.basename mirror_saved) mirror) (fun () -> refuse "regular mirror link");
+  let with_primary_link target f =
+    Unix.symlink target primary;
+    Fun.protect ~finally:(fun () -> Unix.unlink primary) (fun () ->
+      f ();
+      check bool "primary symlink is preserved" true ((Unix.lstat primary).Unix.st_kind = Unix.S_LNK);
+      check string "primary symlink target is preserved" target (Unix.readlink primary)) in
+  with_primary_link "missing-test-target" (fun () -> refuse "dangling primary");
+  with_primary_link (Filename.basename primary) (fun () -> refuse "cyclic primary");
+  let memory_backend = Backend.Memory.create () in
+  let memory = {config with Workspace_utils.backend = Workspace_utils.Memory memory_backend} in
+  let key = match Workspace_utils.key_of_path memory mirror with
+    | Some key -> key | None -> fail "memory mirror is outside the workspace" in
+  with_primary_link "missing-test-target" (fun () ->
+    match Goal_verification.get_record memory ~goal_id with
+    | Ok None -> () | Ok (Some _) | Error _ -> fail "local primary must not stand in for a historical memory read");
+  (match Backend.Memory.set memory_backend key before_mirror with
+   | Ok () -> () | Error error -> fail (Backend_types.show_error error));
+  (match Goal_verification.get_record_authoritative memory ~goal_id with
+   | Error _ -> () | Ok _ -> fail "memory mirror authorized an empty primary");
+  check string "memory check leaves the original primary alone" before_primary (Fs_compat.load_file primary_saved)
+;;
+
+let test_proof_mirror_presence_guarded () =
+  let program = "import os,signal,subprocess,sys\n" ^
+    "child=subprocess.Popen([sys.argv[1],'--proof-mirror-presence'],start_new_session=True)\n" ^
+    "try: code=child.wait(timeout=40)\n" ^
+    "except subprocess.TimeoutExpired:\n" ^
+    " os.killpg(child.pid,signal.SIGKILL); child.wait(); sys.exit(124)\n" ^
+    "sys.exit(code if code>=0 else 128-code)\n" in
+  let executable = Unix.realpath Sys.executable_name in
+  let pid = Unix.create_process "python3" [|"python3"; "-c"; program; executable|]
+      Unix.stdin Unix.stdout Unix.stderr in
+  match snd (Unix.waitpid [] pid) with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED 124 -> fail "Goal mirror presence check exceeded its process hang guard"
+  | Unix.WEXITED code -> fail (Printf.sprintf "Goal mirror presence check exited %d" code)
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    fail (Printf.sprintf "Goal mirror presence check ended with signal %d" signal)
+;;
+
+let test_memory_proof_cannot_supply_authority () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep the durable proof authority" in
+  let executing_goal_id = create_goal ctx "Do not capture evidence without proof authority" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let primary = Goal_verification.verifications_path config in
+  let mirror = primary ^ ".last-good" in
+  let primary_before = Fs_compat.load_file primary in
+  let mirror_before = Fs_compat.load_file mirror in
+  let events_before = goal_events_text config in
+  let backend = Backend.Memory.create () in
+  let memory = { config with Workspace_utils.backend = Workspace_utils.Memory backend } in
+  let key path = match Workspace_utils.key_of_path memory path with
+    | Some key -> key | None -> fail "proof path is outside the workspace" in
+  let primary_key = key primary and mirror_key = key mirror in
+  let expect_unavailable label = function
+    | Ok _ -> fail (label ^ ": Memory supplied proof authority")
+    | Error detail ->
+      check bool (label ^ ": diagnostic names the backend") true
+        (String_util.contains_substring detail "Memory backend cannot safely provide proof authority") in
+  let expect_missing key = match Backend.Memory.get backend key with
+    | Error (Backend_types.NotFound _) -> ()
+    | Error ((Backend_types.AlreadyExists _ | Backend_types.IOError _ | Backend_types.InvalidKey _) as error) ->
+      fail (Backend_types.show_error error)
+    | Ok _ -> fail "refused request changed the Memory backend" in
+  let expect_local_unchanged () =
+    check string "local primary is preserved" primary_before (Fs_compat.load_file primary);
+    check string "local recovery mirror is preserved" mirror_before (Fs_compat.load_file mirror);
+    check string "reopen audit is not appended" events_before (goal_events_text config);
+    check string "the Goal stays verifying" "verifying" (stored_phase config goal_id);
+    check string "the other Goal stays executing" "executing" (stored_phase config executing_goal_id) in
+  expect_unavailable "empty Memory authoritative read"
+    (Goal_verification.get_record_authoritative memory ~goal_id);
+  expect_unavailable "empty Memory pending request"
+    (Goal_verification.mark_proof_pending memory ~goal_id ~criterion);
+  (match Workspace_goals.request_current_proof ~evidence_refs:["board:missing-proof-source"]
+           memory ~goal_id:executing_goal_id with
+   | Error (Workspace_goals.Refused { code = Tool_args.Internal_error; message }) ->
+     check bool "backend refusal precedes evidence capture" true
+       (String_util.contains_substring message "Memory backend cannot safely provide proof authority")
+   | Error (Workspace_goals.Refused _) | Error (Workspace_goals.Store _) | Ok _ ->
+     fail "evidence capture ran before the Memory backend refusal");
+  (match Goal_verification.bind_review memory ~goal_id with
+   | Error (Goal_verification.Binding_unavailable _) -> ()
+   | Error (Goal_verification.No_current_review _) | Ok _ ->
+     fail "unavailable Memory proof did not retain the review binding");
+  (match Workspace_goals.recover_current_proof memory ~goal_id with
+   | Error _ -> () | Ok _ -> fail "Memory recovered a proof request");
+  expect_missing primary_key;
+  expect_missing mirror_key;
+  expect_local_unchanged ();
+  (match Backend.Memory.set backend primary_key primary_before with
+   | Ok () -> () | Error error -> fail (Backend_types.show_error error));
+  (match Backend.Memory.set backend mirror_key mirror_before with
+   | Ok () -> () | Error error -> fail (Backend_types.show_error error));
+  (match Goal_verification.get_record memory ~goal_id with
+   | Ok (Some { completion = Goal_verification.Proof_pending _; _ }) -> ()
+   | Ok (Some { completion = Goal_verification.Completion_idle | Goal_verification.Proof_proven _
+                            | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _; _ })
+   | Ok None | Error _ -> fail "historical Memory observation is unavailable");
+  let before_commit_called = ref false in
+  let before_commit () = before_commit_called := true; Ok () in
+  expect_unavailable "Memory verdict"
+    (Goal_verification.record_proof_verdict ~before_commit memory ~goal_id
+       (verdict ~request_id ~criterion Goal_verification.Proven));
+  expect_unavailable "Memory reopen"
+    (Goal_verification.reopen_goal memory ~goal_id ~actor:"operator" ~note:None);
+  check bool "Memory refusal precedes verdict effects" false !before_commit_called;
+  (match Backend.Memory.get backend primary_key, Backend.Memory.get backend mirror_key with
+   | Ok primary_after, Ok mirror_after ->
+     check string "Memory primary is preserved" primary_before primary_after;
+     check string "Memory mirror is preserved" mirror_before mirror_after
+   | Error _, _ | _, Error _ -> fail "Memory proof snapshot disappeared");
+  expect_local_unchanged ();
+  (match Goal_verification.record_proof_verdict config ~goal_id
+           (verdict ~request_id ~criterion Goal_verification.Proven) with
+   | Ok _ -> () | Error detail -> fail detail)
 ;;
 
 
@@ -2109,7 +2557,9 @@ let test_proof_request_follows_the_phase_machine () =
 ;;
 
 let () =
-  run
+  if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) "--proof-mirror-presence" then
+    proof_mirror_presence_scenario ()
+  else run
     "goal_verification_gate"
     [ ( "durable proof effects"
       , [ test_case "proof request follows the phase machine" `Quick
@@ -2149,6 +2599,10 @@ let () =
             test_recovered_goal_cannot_authorize_edits_or_deletion
         ; test_case "recovery proof cannot authorize mutation" `Quick
             test_recovery_proof_cannot_authorize_mutation
+        ; test_case "unknown proof mirror refuses admission without reading it" `Quick
+            test_proof_mirror_presence_guarded
+        ; test_case "Memory cannot authorize a durable Goal proof" `Quick
+            test_memory_proof_cannot_supply_authority
         ] )
     ; ( "store discipline"
       , [ test_case "undecodable ledger fails closed and loud" `Quick
@@ -2203,8 +2657,24 @@ let () =
             test_proof_proven_completes_with_authority_and_evidence
         ; test_case "proof refuted returns to executing with reason" `Quick
             test_proof_refuted_returns_to_executing_with_reason
-        ; test_case "verifying repeat re-arms a missing proof request" `Quick
-            test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "uncertain verifying proof cannot create a new request" `Quick
+            test_verifying_does_not_recreate_an_unknown_request
+        ; test_case "active verification retains its submitted evidence" `Quick
+            test_verifying_retry_preserves_its_evidence_snapshot
+        ; test_case "retry is bound to the observed proof request" `Quick
+            test_bound_retry_does_not_create_or_replace_a_request
+        ; test_case "unbound verifying retry rechecks a changed Goal" `Quick
+            test_verifying_repeat_refuses_changed_goal
+        ; test_case "initial request refuses a new verifying Goal" `Quick
+            test_initial_request_refuses_a_new_verifying_goal
+        ; test_case "terminal verifying retry does not discard evidence" `Quick
+            test_verifying_repeat_preserves_terminal_evidence_contract
+        ; test_case "recovery preserves a verdict committed after the scan" `Quick
+            test_recovery_reconciles_a_verdict_committed_after_the_scan
+        ; Alcotest.test_case "workspace binding refuses another workspace" `Quick
+            test_transition_refuses_a_different_workspace
+        ; Alcotest.test_case "Goal cache follows the resolved store root" `Quick
+            test_goal_cache_scope_tracks_the_resolved_store
         ; test_case "verifying repeat wakes an existing proof request" `Quick
             test_verifying_repeat_wakes_an_existing_proof_request
         ; test_case "verifying repeat reconciles a committed proof" `Quick

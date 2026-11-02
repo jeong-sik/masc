@@ -510,6 +510,8 @@ let test_file_read_rejects_lost_scope lost () =
           ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
           (fun () -> with_temp_dir (fun base_path ->
             let valid = function Ok value -> value | Error detail -> fail detail in
+            Masc.Board.reset_global_for_test ();
+            Masc.Board_dispatch.reset_for_test ();
             let state = Masc.Mcp_server.create_state_eio ~sw
               ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
               ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
@@ -774,6 +776,8 @@ let test_file_save_http_authority () =
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
         ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
         (fun () -> with_temp_dir (fun base_path ->
+          Masc.Board.reset_global_for_test ();
+          Masc.Board_dispatch.reset_for_test ();
           let state = Masc.Mcp_server.create_state_eio ~sw
               ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
               ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
@@ -822,10 +826,74 @@ let test_file_save_http_authority () =
           check string "file conflict has typed wire code" "workspace_file_changed"
             Yojson.Safe.Util.(body |> member "code" |> to_string)))))
 
+let test_server_startup_refuses_retained_board_workspace () =
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let original_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:"");
+      match original_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+        (fun () -> with_temp_dir (fun base_a -> with_temp_dir (fun base_b ->
+          Unix.putenv "MASC_BASE_PATH" base_a;
+          Masc.Board.reset_global_for_test ();
+          Masc.Board_dispatch.reset_for_test ();
+          let retained = Masc.Board.global () in
+          (* Use a real nested checkout request: the server must validate the
+             resolved workspace root, rather than blindly append .masc to argv. *)
+          mkdir_p (Filename.concat base_b ".git");
+          let raw_request = Filename.concat base_b "nested" in
+          mkdir_p raw_request;
+          Unix.putenv "MASC_BASE_PATH" base_b;
+          let requested = Masc.Workspace.default_config_uncached raw_request in
+          let expected = Fs_compat.realpath_lenient (Masc.Workspace.masc_dir requested) in
+          check string "fixture resolves nested request to B checkout"
+            (Unix.realpath base_b) requested.base_path;
+          (match Masc.Mcp_server.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path:raw_request with
+           | _ -> fail "mismatched Board startup must not return a server state"
+           | exception Masc.Mcp_server.Board_initialization_failed
+               (Masc.Board_dispatch.Workspace_mismatch
+                 {active_workspace_masc_dir; requested_workspace_masc_dir}) ->
+             check string "typed startup failure names retained A"
+               (Masc.Board.workspace_masc_dir retained) active_workspace_masc_dir;
+             check string "typed startup failure names resolved B"
+               expected requested_workspace_masc_dir
+           | exception Masc.Mcp_server.Board_initialization_failed
+               (Masc.Board_dispatch.Workspace_binding_refused rejection) ->
+             fail (Board_workspace_binding.rejection_to_string rejection));
+          check bool "startup failure preserves original store" true
+            (retained == Masc.Board.global ());
+          check string "startup failure installs no Board backend" "uninitialized"
+            (Masc.Board_dispatch.backend_name ());
+          check bool "startup failure starts no Board flusher" false
+            (Masc.Board_dispatch.flusher_started_for_test ());
+          let target = Masc.Board.create_store ~base_path:(requested.base_path) () in
+          List.iter (fun path -> check bool "startup failure creates no B Board file" false
+            (Sys.file_exists path))
+            [ Masc.Board.persist_path target; Masc.Board.comments_path target
+            ; Masc.Board.vote_log_path target; Masc.Board.reactions_path target
+            ; Masc.Board.sub_boards_path target ]))))
+;;
+
 let () =
   run
     "workspace_file_confidentiality"
-    [ ( "B1 secret denylist"
+    [ ( "Board startup workspace authority"
+      , [test_case "resolved config refuses retained foreign Board" `Quick
+           test_server_startup_refuses_retained_board_workspace] )
+    ; ( "B1 secret denylist"
       , [ test_case "confidential reads rejected" `Quick test_confidential_reads_rejected
         ; test_case
             "confidential match is case-insensitive"

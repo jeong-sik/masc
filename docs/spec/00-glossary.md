@@ -2354,7 +2354,9 @@ status: reference
   [Browser Addon lifecycle](../design/browser-addon-lifecycle.md)
 
 **Ego Task Space Connection (ego 작업 공간 연결)**
-: `[browser.live.ego]`의 `command`(ego-browser 절대 경로)와 `space`(작업 공간 이름)로 browser Lane Addon worker 가 여는 live 연결이다. 브라우저 프로세스를 소유하지 않으므로 설정은 정리 기록이 아니라 worker 인자(`--live-ego-command`, `--live-ego-space`)로 간다. 명령마다 고정 스크립트 하나를 `ego-browser nodejs`로 실행하고, detach 때 작업 공간을 끝낸다(`finish({keep: []})`). ego 공간은 운영자 ego 프로필의 쿠키를 같이 쓰므로 로그인된 사이트를 읽을 수 있다.
+: `[browser.live.ego]`의 `command`(ego-browser 절대 경로)와 `space`(생성·재개할 이름 또는 재개할 기존 숫자 ID)로 Browser Lane Addon worker가 여는 live 연결이다. 이름은 `--live-ego-space`, 숫자 ID는 `--live-ego-space-id`로 worker에 전달한다.
+  브라우저 프로세스를 소유하지 않으며, 명령마다 고정 스크립트를 연결이 유지하는 `ego-browser nodejs` 세션에 보낸다. 실패·취소로 세션이 교체될 수 있다. 연결을 해제하면 SDK 세션을 중단하고 끝내지 않은 Space와 탭, 브라우저 기반 파일을 보존한다. 성공한 작업의 완료는 `finish_space`로 명시하며, 남는 Page와 Space는 `keepPages` 정책과 native 완료 응답으로 확인한다.
+  ego 공간은 운영자 ego 프로필의 쿠키를 같이 쓰므로 로그인된 사이트를 읽을 수 있다.
   → [Browser_addon_live_ego](../../lib/browser_addon_live_ego.mli) ·
   [Browser_ego_peer](../../lib/browser_ego_peer.mli) ·
   [RFC-browser-live-ego](../rfc/RFC-browser-live-ego.md)

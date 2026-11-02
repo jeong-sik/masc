@@ -1,0 +1,24 @@
+group	index	case	baseline	candidate	classification
+selected inference	0	selected absence ignores later generic effort	FAIL	OK	fixed
+selected inference	1	selected generic effort remains refused after removal	FAIL	OK	fixed
+selected inference	2	runtime removal cannot clear selected generic effort	FAIL	OK	fixed
+selected inference	3	hook generic effort remains refused	OK	OK	maintained
+selected inference	4	hook may clear selected generic effort	OK	OK	maintained
+selected inference	5	selected unbounded idle survives positive replacement	FAIL	OK	fixed
+selected inference	6	selected positive idle survives unbounded replacement	FAIL	OK	fixed
+selected inference	7	selected idle absence ignores later positive declaration	FAIL	OK	fixed
+selected inference	8	selected positive idle survives runtime removal	FAIL	OK	fixed
+selected inference	9	unchanged absence retains provider native effort	OK	OK	maintained
+actual adapters	0	codex/effect-fenced.	not selected	OK	candidate-only control
+actual adapters	1	codex/bootstrap-floor.	not selected	OK	candidate-only control
+actual adapters	2	claude/effect-fenced.	not selected	OK	candidate-only control
+actual adapters	3	claude/bootstrap-floor.	not selected	OK	candidate-only control
+actual adapters	4	antigravity/effect-fenced.	not selected	OK	candidate-only control
+actual adapters	5	antigravity/bootstrap-floor.	not selected	OK	candidate-only control
+actual adapters	6	muse/effect-fenced.	not selected	OK	candidate-only control
+actual adapters	7	muse/bootstrap-floor.	not selected	OK	candidate-only control
+async result outbox	0	original result survives ven...	not selected	OK	candidate-only control
+typed contract	0	strict codec.	not selected	OK	candidate-only control
+typed contract	1	remote fence stays distinct.	not selected	OK	candidate-only control
+typed contract	2	resolved recovery is not restore...	not selected	OK	candidate-only control
+typed contract	3	unreadable store preserves the r...	not selected	OK	candidate-only control

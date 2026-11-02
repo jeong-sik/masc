@@ -55,6 +55,8 @@ let goal_ids events =
        | E.Snapshot { goal_id; _ }
        | E.Payout_owed { goal_id; _ }
        | E.Candidates { goal_id; _ }
+       | E.Candidates_fenced { goal_id; _ }
+       | E.Candidate_window_held { goal_id; _ }
        | E.Unattributed { goal_id; _ }
        | E.Payout_failed { goal_id; _ } -> Some goal_id
        | E.Paid p -> Some p.identity.goal_id
@@ -133,7 +135,7 @@ let stored_tied_payment =
 let payment_of_event (row : E.t) =
   match row.body with
   | E.Paid payment -> payment
-  | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
+  | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Unattributed _
   | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _
   | E.Granted _ | E.Gifted _ | E.Gifted_item _ ->
     Alcotest.fail "expected a Paid receipt"
@@ -148,7 +150,7 @@ let balance_of_view view =
 (* A receipt remains tied to the frozen contributing tasks, even when its
    historical arithmetic differs from the current append formula. *)
 let payment_prerequisites ?completed_at (row : E.t) =
-  let completed_at = Option.value completed_at ~default:row.at in
+  let completed_at = Option.value completed_at ~default:(at "2026-09-29T00:00:00Z") in
   let payment = payment_of_event row in
   let { Candle_appraisal.goal_id; request_id; verification_run_id } = payment.identity in
   let task_keepers = List.map2
@@ -274,6 +276,96 @@ let test_stored_settlement_replays_after_the_candidate_rule_changes () =
    | Error other -> Alcotest.fail (Candle_ledger.update_error_to_string Fun.id other)
    | Ok () -> Alcotest.fail "a new settlement was admitted under the old candidate rule");
   Alcotest.(check string) "the refused append leaves the history untouched" history (file_text base_path)
+;;
+
+let test_boundary_hold_cannot_be_bypassed_by_another_obligation () =
+  with_base_path @@ fun base_path ->
+  let stored = payment_of_event (ok_or_fail (E.of_line stored_rounded_payment)) in
+  let payment = current_payment ~goal_id:"held-goal" stored in
+  let paid : E.t = {at=at "2026-09-30T00:00:00Z"; body=E.Paid payment} in
+  let snapshot, owed, candidates = match
+      payment_prerequisites ~completed_at:(at "2026-09-28T00:00:00Z") paid with
+    | [snapshot;owed;candidates] -> snapshot,owed,candidates
+    | _ -> Alcotest.fail "invalid payout fixture" in
+  let hold : E.t = match owed.body, candidates.body with
+    | E.Payout_owed debt, E.Candidates c ->
+      {at=paid.at; body=E.Candidate_window_held
+        {goal_id=debt.goal_id;request_id=debt.request_id;
+         verification_run_id=debt.verification_run_id;passed_at=debt.passed_at;
+         confirmed_at=debt.confirmed_at;tasks=c.tasks;
+         task_keepers=List.map (fun (id, keeper) -> id,
+           match keeper with Some name -> E.Keeper_name name | None -> E.No_assignee)
+           c.candidate_task_keepers}}
+    | _ -> Alcotest.fail "invalid payout rows" in
+  update_ok base_path (fun _ -> Ok ([snapshot;owed], ()));
+  let refuse label row =
+    let before = file_text base_path in
+    (match Candle_ledger.update ~base_path (fun _ -> Ok ([row], ())) with
+     | Error (Candle_ledger.Event_unwritable _) -> ()
+     | Error other -> Alcotest.failf "%s: %s" label (Candle_ledger.update_error_to_string Fun.id other)
+     | Ok () -> Alcotest.failf "%s was admitted" label);
+    Alcotest.(check string) (label ^ " leaves the file unchanged") before (file_text base_path) in
+  (match hold.body with
+   | E.Candidate_window_held h ->
+     refuse "missing observations" {hold with body=E.Candidate_window_held {h with tasks=[]}};
+     refuse "missing Keeper classifications" {hold with body=E.Candidate_window_held {h with task_keepers=[]}};
+     refuse "wrong confirmation time" {hold with body=E.Candidate_window_held
+       {h with confirmed_at=at "2026-09-30T00:00:01Z"}}
+   | _ -> Alcotest.fail "not a hold");
+  update_ok base_path (fun _ -> Ok ([hold], ()));
+  let replacement = match owed.body with
+    | E.Payout_owed debt -> {owed with body=E.Payout_owed
+        {debt with request_id="another-request";verification_run_id="another-run"}}
+    | _ -> Alcotest.fail "not an obligation" in
+  let unattributed = match owed.body with
+    | E.Payout_owed debt -> {owed with body=E.Unattributed
+        {goal_id=debt.goal_id;request_id=debt.request_id;
+         verification_run_id=debt.verification_run_id;reason=E.No_candidates}}
+    | _ -> Alcotest.fail "not an obligation" in
+  let failed = match owed.body with
+    | E.Payout_owed debt -> {owed with body=E.Payout_failed
+        {goal_id=debt.goal_id;request_id=debt.request_id;
+         verification_run_id=debt.verification_run_id;due_date="2026-09-26"}}
+    | _ -> Alcotest.fail "not an obligation" in
+  List.iter (fun (label, row) ->
+    refuse label row;
+    let before = file_text base_path in
+    append_raw base_path (event_lines [row]);
+    (match Candle_ledger.read ~base_path with
+     | Error (Candle_ledger.Row_rejected _) -> ()
+     | Error other -> Alcotest.failf "%s replay: %s" label (Candle_ledger.read_error_to_string other)
+     | Ok _ -> Alcotest.failf "%s bypassed the hold during replay" label);
+    Out_channel.with_open_bin (Candle_ledger.path ~base_path) (fun oc -> Out_channel.output_string oc before))
+    ["duplicate hold",hold; "replacement obligation",replacement; "candidates",candidates;
+     "paid",paid; "unattributed",unattributed; "failed",failed];
+  let other = current_payment ~goal_id:"unrelated-goal" stored in
+  let other_paid : E.t = {at=paid.at;body=E.Paid other} in
+  update_ok base_path (fun _ -> Ok (payment_prerequisites other_paid @ [other_paid], ()));
+  let events = Candle_ledger.events (read_ok base_path) in
+  Alcotest.(check bool) "the held Goal remains open" true
+    (match Candle_payout.state ~goal_id:"held-goal" events with Candle_payout.Waiting _ -> true | _ -> false);
+  Alcotest.(check bool) "a different Goal can settle" true
+    (Candle_payout.state ~goal_id:"unrelated-goal" events = Candle_payout.Settled)
+;;
+
+let test_old_boundary_settlement_replays_but_new_one_waits () =
+  with_base_path @@ fun base_path ->
+  let stored = ok_or_fail (E.of_line stored_rounded_payment) in
+  let boundary = at "2026-09-28T00:00:00Z" in
+  append_raw base_path (event_lines (payment_prerequisites ~completed_at:boundary stored)
+                        ^ stored_rounded_payment ^ "\n");
+  let before = file_text base_path in
+  ignore (read_ok base_path : Candle_ledger.view);
+  let current = current_payment ~goal_id:"new-boundary" (payment_of_event stored) in
+  let paid : E.t = {at=at "2026-09-30T00:00:00Z";body=E.Paid current} in
+  (match Candle_ledger.update ~base_path (fun _ ->
+      Ok (payment_prerequisites ~completed_at:boundary paid @ [paid], ())) with
+   | Error (Candle_ledger.Event_unwritable detail) ->
+     Alcotest.(check string) "boundary is reported"
+       "task task-a completed in the same recorded second as Goal creation (2026-09-28T00:00:00Z)" detail
+   | Error other -> Alcotest.fail (Candle_ledger.update_error_to_string Fun.id other)
+   | Ok () -> Alcotest.fail "new boundary settlement was admitted");
+  Alcotest.(check string) "historical receipt remains unchanged" before (file_text base_path)
 ;;
 
 let test_malformed_paid_receipts_still_fail_the_whole_ledger_read () =
@@ -411,6 +503,21 @@ let test_a_writer_that_lost_the_race_reads_again () =
   Alcotest.(check (list string))
     "both rows are there, the interloper's first"
     [ "interloper"; "mine" ]
+    (goal_ids (Candle_ledger.events (read_ok base_path)))
+;;
+
+let test_single_attempt_releases_the_caller_on_a_changed_cursor () =
+  with_base_path @@ fun base_path ->
+  let calls = ref 0 in
+  (match Candle_ledger.update_once ~base_path (fun _ ->
+     incr calls;
+     update_ok base_path (fun _ -> Ok ([snapshot "interloper"], ()));
+     Ok ([snapshot "mine"], ())) with
+   | Ok Candle_ledger.Changed -> ()
+   | Ok (Candle_ledger.Updated ()) -> Alcotest.fail "a changed cursor appended the stale decision"
+   | Error error -> Alcotest.fail (Candle_ledger.update_error_to_string Fun.id error));
+  Alcotest.(check int) "decide is not retried under the caller's lock" 1 !calls;
+  Alcotest.(check (list string)) "only the other writer's row exists" ["interloper"]
     (goal_ids (Candle_ledger.events (read_ok base_path)))
 ;;
 
@@ -587,7 +694,7 @@ let test_item_http_seed_replays_current_contract () =
     | E.Paid payment ->
       Alcotest.(check int) "synthetic payout amount matches fixture policy"
         (Option.get (Candle_config.grade_amount_milli policy.payout payment.grade)) payment.total_milli
-    | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _
     | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Equipped _ -> ()) events;
   (match Candle_ledger.recover_at_start ~base_path with
    | Ok recovered -> Alcotest.(check bool) "restart retains synthetic provenance"
@@ -645,6 +752,8 @@ let () =
             test_stored_payments_replay_but_new_appends_require_current_arithmetic
         ; Alcotest.test_case "stored settlement replays after the candidate rule changes" `Quick
             test_stored_settlement_replays_after_the_candidate_rule_changes
+        ; Alcotest.test_case "old boundary settlement replays but new settlement waits" `Quick
+            test_old_boundary_settlement_replays_but_new_one_waits
         ; Alcotest.test_case "malformed Paid receipts fail the whole ledger read" `Quick
             test_malformed_paid_receipts_still_fail_the_whole_ledger_read
         ; Alcotest.test_case "a row that does not read fails the read" `Quick
@@ -655,12 +764,16 @@ let () =
     ; ( "update"
       , [ Alcotest.test_case "rows are appended in order" `Quick
             test_updates_append_rows_in_order
+        ; Alcotest.test_case "boundary hold blocks replacement and terminal rows" `Quick
+            test_boundary_hold_cannot_be_bypassed_by_another_obligation
         ; Alcotest.test_case "decide sees what is already there" `Quick
             test_decide_sees_what_is_already_there
         ; Alcotest.test_case "no events writes nothing" `Quick test_no_events_writes_nothing
         ; Alcotest.test_case "a refusal writes nothing" `Quick test_a_refusal_writes_nothing
         ; Alcotest.test_case "a writer that lost the race reads again" `Quick
             test_a_writer_that_lost_the_race_reads_again
+        ; Alcotest.test_case "single attempt returns on a changed cursor" `Quick
+            test_single_attempt_releases_the_caller_on_a_changed_cursor
         ; Alcotest.test_case "a lock another process holds is reported, not waited for" `Quick
             test_a_lock_another_process_holds_is_reported_not_waited_for
         ; Alcotest.test_case "a lock taken between the read and the append is reported" `Quick

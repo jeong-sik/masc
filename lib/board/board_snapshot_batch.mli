@@ -21,36 +21,56 @@ val for_flush :
     do not omit work: their writers refuse it, preserving a failed result for
     retry classification. *)
 
+type payload =
+  | Posts_payload of Board_core_persist.posts_snapshot
+  | Comments_payload of string
+  | Votes_payload of string
+  | Reactions_payload of string
+val kind_of_payload : payload -> kind
+
 type t
 (** Captured contents. Selected empty strings remain work; they are distinct
     from omitted snapshots. *)
 
-val capture : selection -> read:(kind -> string) -> t
-(** Invoke [read] once for each selected kind, in selection order. The caller
-    holds the state lock while [read] observes the store and updates row caches. *)
+val capture : selection ->
+  posts:(unit -> Board_core_persist.posts_snapshot) ->
+  comments:(unit -> string) -> votes:(unit -> string) -> reactions:(unit -> string) -> t
+(** Invoke the selected producer once for each selected kind, in selection order. The caller
+    holds the state lock while the producer observes the store and updates row caches. *)
 
-type 'error outcome
-(** A result for every attempted write, in the same order as the batch. *)
+type outcome
+(** Every selected obligation in batch order, distinguishing attempted writes
+    from work left pending after the first deferred reserved settlement. *)
 
 val persist :
   t ->
-  write:(kind -> string -> (unit, 'error) result) ->
-  'error outcome
-(** Invoke every selected [write] in batch order, including empty contents.
-    Returned errors do not stop later writes. Exceptions, including cancellation,
-    propagate to the caller.
+  write:(payload -> (unit, Board_types.board_error) result) ->
+  outcome
+(** Invoke selected [write] calls in batch order, including empty contents.
+    Returned errors do not stop later writes. The first private known-settlement
+    carrier stops further write calls; its result and original exception are
+    retained until {!finish_settlement}, and every remaining selected kind stays
+    pending for retry. Other exceptions propagate to the caller.
 
     The caller holds the protected persistence lock, outside the state lock,
     and retains it through retry marking. This module neither acquires locks
     nor clears dirty state. *)
 
+val finish_settlement : outcome -> unit
+(** After retry marking, propagate the first deferred reserved settlement with
+    its original backtrace, through the persistence lock's private carrier. *)
+
 type retry = Retry_posts | Retry_comments
 
 val retry_for_kind : kind -> retry
-(** Posts, votes and reactions retry through posts; comments retry themselves. *)
+(** Posts, votes and reactions retry through posts; comments retry themselves.
+    Pending auxiliary work can therefore make a separate retry flush rewrite
+    current posts through exact CAS, even when their earlier write succeeded. *)
 
-val retries : 'error outcome -> retry list
-(** Failed write obligations, deduplicated with posts before comments. *)
+val retries : outcome -> retry list
+(** Failed attempted and unattempted pending obligations, deduplicated with posts
+    before comments. A successful attempted write alone adds no retry obligation. *)
 
-val errors : 'error outcome -> 'error list
-(** All returned write errors in batch order. *)
+val errors : outcome -> Board_types.board_error list
+(** Actual attempted write errors in batch order. Pending work has no fabricated
+    error result. *)

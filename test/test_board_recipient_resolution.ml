@@ -1,5 +1,6 @@
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* A name written after [@] is a target only when the recipient lookup the
    server installed declares it (RFC-at-name-resolves-to-declared-recipient).
@@ -12,6 +13,7 @@ let fresh_test_base_path () =
       (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-board-recipient-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 ;;
@@ -29,7 +31,11 @@ let started ~lookup f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:lookup ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:lookup ());
   f ()
 ;;
 
@@ -175,7 +181,7 @@ let test_a_comment_resolves_the_same_way =
 (* Whether any file the Board keeps under its data directory holds [marker].
    A refused write leaves nothing in memory and nothing on disk. *)
 let persisted_text_contains marker =
-  let dir = Filename.dirname (Board.persist_path ()) in
+  let dir = Filename.dirname (Board.persist_path (Board.global ())) in
   Sys.file_exists dir
   && Array.exists
        (fun name ->
@@ -701,10 +707,12 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
       | `Assoc fields -> `Assoc (List.remove_assoc "audience" fields)
       | _ -> fail "post wire must be an object"
     in
-    Fs_compat.save_file (Board.persist_path ()) (Yojson.Safe.to_string legacy ^ "\n");
+    Fs_compat.save_file (Board.persist_path (Board.global ())) (Yojson.Safe.to_string legacy ^ "\n");
     Board.reset_global_for_test ();
     Board_dispatch.reset_for_test ();
-    Board_dispatch.init_jsonl ~recipient_lookup:lookup ();
+    Result.get_ok (Board_dispatch.init_jsonl
+      ~base_path:(Env_config_core.base_path ())
+      ~recipient_lookup:lookup ());
     let legacy_post = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check bool "the old row has no audience" true (Option.is_none legacy_post.audience);
     let signals = ref 0 in
@@ -722,7 +730,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
     let after_failure = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check bool "failure left the legacy audience absent" true (Option.is_none after_failure.audience);
     let after_failure_on_disk =
-      Fs_compat.load_file (Board.persist_path ()) |> Yojson.Safe.from_string
+      Fs_compat.load_file (Board.persist_path (Board.global ())) |> Yojson.Safe.from_string
     in
     (match after_failure_on_disk with
      | `Assoc fields -> check bool "failure did not add a disk audience" false (List.mem_assoc "audience" fields)
@@ -743,7 +751,9 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
     check int "the audience-only change emitted no edit signal" 0 !signals;
     Board.reset_global_for_test ();
     Board_dispatch.reset_for_test ();
-    Board_dispatch.init_jsonl ~recipient_lookup:lookup ();
+    Result.get_ok (Board_dispatch.init_jsonl
+      ~base_path:(Env_config_core.base_path ())
+      ~recipient_lookup:lookup ());
     let reloaded = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check (list string) "the new audience survives reload" [ "alice" ] (target_names reloaded.audience))
 ;;
@@ -804,19 +814,25 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   ignore (Board_dispatch.list_posts ());
   (match refused_before_publication (write "@alice hello") with
    | Board.Recipient_lookup_failed _ -> ()
    | error -> fail (Board.show_board_error error));
   ignore (creation (write "no address here"));
-  Board_dispatch.init_jsonl ~recipient_lookup:(declaring table) ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:(declaring table) ());
   let { Board.post; _ } = creation (write "@alice hello") in
   check (list string) "the installed lookup is used" [ "alice" ] (target_names post.audience)
 ;;
 
 let test_a_second_init_keeps_the_first_lookup =
   started ~lookup:(declaring table) (fun () ->
-    Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+    Result.get_ok (Board_dispatch.init_jsonl
+      ~base_path:(Env_config_core.base_path ())
+      ~recipient_lookup:Recipient_lookup.none_declared ());
     let { Board.post; _ } = creation (write "@alice hello") in
     check (list string) "the first lookup stays" [ "alice" ] (target_names post.audience))
 ;;

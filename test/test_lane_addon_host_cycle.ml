@@ -4,6 +4,7 @@
     replaced. *)
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 module Runtime = Lane_addon_runtime
 module Exact = Lane_addon_exact
 
@@ -185,7 +186,10 @@ let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup
                              ; on_deliver = ref ignore } in
                 Board.reset_global_for_test ();
                 Board_dispatch.reset_for_test ();
-                Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+                Preparation.prepare ~base_path:root ~action:Preparation.Bootstrap;
+                Result.get_ok (Board_dispatch.init_jsonl
+                  ~base_path:(Env_config_core.base_path ())
+                  ~recipient_lookup:Recipient_lookup.none_declared ());
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner ~authorize_request (make_runner state);
                 let config = Workspace.default_config root in

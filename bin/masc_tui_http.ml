@@ -107,7 +107,22 @@ let default_agent_name = Masc_tui_credential.agent_name
    to open -- not per request. This module is never handed a base path, and
    resolving one on its own would let the client present the credential of a
    workspace other than the one on screen. *)
-let operator_token_cell = ref None
+type operator_credential = { token : string option; owner : unit ref }
+let operator_credential_cell = Atomic.make {token=None; owner=ref ()}
+
+let operator_token () = (Atomic.get operator_credential_cell).token
+
+(* The opaque owner changes whenever the bearer changes, including A -> B -> A.
+   It can accompany a receipt without carrying the credential itself. *)
+let set_operator_token token =
+  let rec update () =
+    let previous = Atomic.get operator_credential_cell in
+    if not (Option.equal String.equal previous.token token) then
+      let next = {token; owner=ref ()} in
+      if not (Atomic.compare_and_set operator_credential_cell previous next) then update ()
+  in
+  update ()
+
 
 (* Where the held bearer came from, and the workspace it was read for. Kept so
    a refusal later in the run can be answered the way startup answers an
@@ -207,21 +222,21 @@ let install_operator_token ~base_path ~host ~port =
   in
   let act = function
     | Masc_tui_credential.Use token ->
-        operator_token_cell := Some token;
+        set_operator_token (Some token);
         Masc_tui_credential.Held
     | Masc_tui_credential.Go_without ->
-        operator_token_cell := None;
+        set_operator_token None;
         Masc_tui_credential.Not_required
     | Masc_tui_credential.No_workspace ->
-        operator_token_cell := None;
+        set_operator_token None;
         Masc_tui_credential.Workspace_pending
     | Masc_tui_credential.Mint reason -> (
         match mint_operator_token ~base_path ~host ~port with
         | Ok report ->
-            operator_token_cell := Some report.bearer_token;
+            set_operator_token (Some report.bearer_token);
             Masc_tui_credential.Minted reason
         | Error err ->
-            operator_token_cell := None;
+            set_operator_token None;
             Masc_tui_credential.Mint_failed (Masc_domain.masc_error_to_string err))
   in
   match decide () with
@@ -229,7 +244,7 @@ let install_operator_token ~base_path ~host ~port =
       match with_mint_lock ~base_path (fun () -> act (decide ())) with
       | Ok outcome -> outcome
       | Error lock_error ->
-          operator_token_cell := None;
+          set_operator_token None;
           Masc_tui_credential.Mint_failed
             ("the credential lock could not be taken: "
             ^ File_lock_eio.durable_lock_error_to_string lock_error))
@@ -255,14 +270,14 @@ let failed_refresh : (string * string) option ref = ref None
    client adopted, the old reason is about a bearer no longer sent, and a
    later refusal of the new one must not carry it. *)
 let refresh_failure () =
-  match !failed_refresh, !operator_token_cell with
+  match !failed_refresh, operator_token () with
   | Some (failed, why), Some held when String.equal failed held -> Some why
   | Some _, _ | None, _ -> None
 
 let refresh_operator_token ~sent =
   match !credential_workspace with
   | None -> false
-  | Some _ when not (Option.equal String.equal !operator_token_cell (Some sent)) ->
+  | Some _ when not (Option.equal String.equal (operator_token ()) (Some sent)) ->
       true
   | Some (base_path, host, port) -> (
       (* A config.json edited into something unreadable mid-run is the
@@ -280,7 +295,7 @@ let refresh_operator_token ~sent =
       in
       let act = function
         | Masc_tui_credential.Adopt token ->
-            operator_token_cell := Some token;
+            set_operator_token (Some token);
             true
         | Masc_tui_credential.Keep_held -> false
         | Masc_tui_credential.Remint _
@@ -290,7 +305,7 @@ let refresh_operator_token ~sent =
         | Masc_tui_credential.Remint _ -> (
             match mint_operator_token ~base_path ~host ~port with
             | Ok report ->
-                operator_token_cell := Some report.bearer_token;
+                set_operator_token (Some report.bearer_token);
                 true
             | Error err ->
                 failed_refresh :=
@@ -305,7 +320,7 @@ let refresh_operator_token ~sent =
             with_mint_lock ~base_path (fun () ->
                 (* Another request of this run may have refreshed while this
                    one waited for the lock. *)
-                if not (Option.equal String.equal !operator_token_cell (Some sent))
+                if not (Option.equal String.equal (operator_token ()) (Some sent))
                 then true
                 else act (decide ()))
           with
@@ -318,7 +333,6 @@ let refresh_operator_token ~sent =
                     ^ File_lock_eio.durable_lock_error_to_string lock_error );
               false)))
 
-let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
 
 (* Installed once by the session before it admits credential preparation.
@@ -328,13 +342,27 @@ let credential_preparation = Atomic.make None
 let install_credential_preparation preparation =
   Atomic.set credential_preparation (Some preparation)
 
-let auth_headers () =
-  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
+let headers_for_operator_token token =
   let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in
-  match operator_token () with
+  match token with
   | Some token ->
       ("Authorization", "Bearer " ^ sanitize_header_value token) :: agent_header
   | None -> agent_header
+
+let auth_headers () =
+  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
+  headers_for_operator_token (operator_token ())
+
+(* UI paths must not await credential preparation. A value read by a prior
+   credential cannot authorize display or a write while a new one is pending. *)
+let credential_owner_is_current owner =
+  let ready = match Atomic.get credential_preparation with
+    | None -> true
+    | Some preparation ->
+        (match Masc_tui_credential_preparation.status preparation with
+         | Preparing _ -> false
+         | Not_requested | Awaiting_ui _ | Settled -> true) in
+  ready && (Atomic.get operator_credential_cell).owner == owner
 
 let json_headers headers =
   ("Content-Type", "application/json") :: headers
@@ -728,10 +756,13 @@ let get_msx_json ~host ~port ~path = get_json_decoded ~timeout_sec:(Some (reques
 (* The query fields that bind a read to the workspace this terminal
    confirmed. The server compares both canonical paths with its own and
    answers 409 when another workspace answers on the same port. *)
-let expected_workspace_query (expected : Masc.Tui_decode.server_identity) =
+let expected_workspace_paths_query ~base_path ~masc_root =
   let encoded value = Uri.pct_encode ~component:`Query_value (Masc.Tui_decode.Canonical_path.to_string value) in
   Printf.sprintf "expected_base_path=%s&expected_masc_root=%s"
-    (encoded expected.sid_base_path) (encoded expected.sid_masc_root)
+    (encoded base_path) (encoded masc_root)
+
+let expected_workspace_query (expected : Masc.Tui_decode.server_identity) =
+  expected_workspace_paths_query ~base_path:expected.sid_base_path ~masc_root:expected.sid_masc_root
 
 let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
@@ -866,8 +897,11 @@ let post_msx_json ~(host : string) ~(port : int) ~(path : string) ~(body : strin
 
 (* A Broadcast keeps one captured bearer for principal proof and the write.
    A refused bearer is not silently refreshed into another actor's authority. *)
-type bound_credential = { bound_headers : (string * string) list }
-let bind_credential () = {bound_headers=auth_headers ()}
+type bound_credential = { bound_headers : (string * string) list; bound_owner : unit ref }
+let bind_credential () =
+  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
+  let credential = Atomic.get operator_credential_cell in
+  {bound_headers=headers_for_operator_token credential.token; bound_owner=credential.owner}
 let get_json_bound ~credential ~host ~port ~path =
   let url = url_of ~host ~port ~path in
   let response = timed ~verb:"GET" ~path (fun () ->
@@ -1249,11 +1283,11 @@ let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
   let ( let* ) = Result.bind in
   let path =
     Printf.sprintf "/api/v1/dashboard/goals/detail?goal_id=%s"
-      (percent_encode_path_segment goal_id)
+      (percent_encode_query_value goal_id)
   in
   let* json = get_json ~host ~port ~path
     |> Result.map_error (fun detail -> "goal detail: " ^ detail) in
-  Masc.Tui_decode.decode_goal_detail_timeline json
+  Masc.Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id json
 
 (** Read one exact continuation page. The response demand comes from the
     caller's viewport; older pages carry their captured prefix on the CPU path. *)
@@ -1666,29 +1700,127 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
 type observer_error =
   | Transport_failed of string
   | Http_refused of { status : int; detail : string }
+  | Invalid_handshake of string
+  | Retry_without_cursor of Sse_wire.observer_cursor * string
+
+let observer_workspace_refused ~status ~detail =
+  if status <> 409 then false
+  else
+    match Yojson.Safe.from_string detail with
+    | `Assoc fields ->
+      List.assoc_opt "code" fields =
+      Some (`String (Masc.Request_workspace_precondition.refusal_code
+        Masc.Request_workspace_precondition.Workspace_mismatch))
+    | _ -> false
+    | exception Yojson.Json_error _ -> false
+
+exception Invalid_sse_response of string
+exception Retry_observer_without_cursor of Sse_wire.observer_cursor * string
+
+(* A comma outside a quoted parameter makes the field ambiguous: an HTTP
+   intermediary may have combined multiple Content-Type fields. *)
+let unambiguous_content_type value =
+  let quoted = ref false and escaped = ref false and valid = ref true in
+  String.iter (fun ch ->
+    if !escaped then escaped := false
+    else if !quoted && Char.equal ch '\\' then escaped := true
+    else if Char.equal ch '"' then quoted := not !quoted
+    else if not !quoted && Char.equal ch ',' then valid := false) value;
+  !valid && not !quoted && not !escaped
+;;
+
+let validate_sse_response ~status ~headers =
+  if status = 200 then
+    match List.filter_map (fun (name, value) ->
+      if String.equal (String.lowercase_ascii name) "content-type"
+      then Some value else None) headers with
+    | [ value ] when unambiguous_content_type value ->
+        let essence =
+          match String.index_opt value ';' with
+          | None -> value
+          | Some index -> String.sub value 0 index
+        in
+        if String.equal (String.lowercase_ascii (String.trim essence)) "text/event-stream"
+        then Ok ()
+        else Error "response is not text/event-stream"
+    | [] -> Error "response has no Content-Type"
+    | _ -> Error "response has ambiguous Content-Type"
+  else if Masc.Tui_decode.is_success_http_status status then
+    Error (Printf.sprintf "unexpected stream status %d" status)
+  else Ok ()
+;;
+
+let check_sse_response ~status ~headers =
+  match validate_sse_response ~status ~headers with
+  | Ok () -> ()
+  | Error detail -> raise (Invalid_sse_response detail)
+;;
 
 type execute_output_stream_error =
   | Execute_transport_failed of string
   | Execute_http_refused of { status : int; detail : string }
   | Execute_unattested of { status : int; detail : string }
+  | Execute_invalid_response of { status : int; detail : string }
+
+(* The server compares the two query fields with its own workspace and says
+   so in [x-masc-workspace-read]. The receipt belongs to this response: a
+   server that ignores the fields cannot supply a bound reading. *)
+let workspace_read_attested headers =
+  let name, expected = Masc.Workspace.read_precondition_admission_header in
+  match
+    List.filter_map
+      (fun (key, value) ->
+        if String.equal (String.lowercase_ascii key) name then Some value else None)
+      headers
+  with
+  | [ value ] -> String.equal value expected
+  | [] | _ :: _ :: _ -> false
 
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events ~clock ~(host : string) ~(port : int)
+let observe_runtime_events ~on_identity ~clock ~expected_base_path ~expected_masc_root
+    ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
-    ~on_response ~(on_chunk : string -> unit) : (unit, observer_error) result =
-  let url = url_of ~host ~port ~path:observer_stream_path in
+    ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
+  let url =
+    url_of ~host ~port
+      ~path:(observer_stream_path ^ "&" ^ expected_workspace_paths_query
+               ~base_path:expected_base_path ~masc_root:expected_masc_root)
+  in
   let headers =
     ("Accept", "text/event-stream")
     :: ("Mcp-Session-Id", sanitize_header_value session_id)
     :: auth_headers ()
     @ Sse_wire.observer_cursor_headers cursor
   in
+  let checked_response ~status ~headers =
+    check_sse_response ~status ~headers;
+    if Masc.Tui_decode.is_success_http_status status then begin
+      if not (workspace_read_attested headers) then
+        raise (Invalid_sse_response "workspace admission receipt is missing or invalid");
+      (match Sse_wire.validate_observer_response ~cursor headers with
+       | Error (Sse_wire.Retry_without_cursor (requested, detail)) ->
+           raise (Retry_observer_without_cursor (requested, detail))
+       | Error (Sse_wire.Invalid_observer_response detail) ->
+           raise (Invalid_sse_response detail)
+       | Ok handshake ->
+           (match Sse_wire.decode_observer_identity headers, handshake with
+            | Error detail, _ -> raise (Invalid_sse_response detail)
+            | Ok (Some _), None ->
+                raise (Invalid_sse_response "observer identity has no scoped instance")
+            | Ok (Some identity), Some scoped -> on_identity (scoped, identity)
+            | Ok None, (Some _ | None) -> ());
+           on_open handshake)
+    end
+  in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url ~headers ~on_response ~on_chunk ()
+      ~url ~headers ~on_response:checked_response ~on_chunk ()
   with
+  | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
+  | exception Retry_observer_without_cursor (requested, detail) ->
+      Error (Retry_without_cursor (requested, detail))
   | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
@@ -1711,10 +1843,9 @@ let fleet_stream_idle_timeout_sec =
     the connection. A refusal comes back as [Http_refused] with [on_chunk]
     never called.
 
-    The server answers 409 unless it is [expected_workspace], so a stream
-    reopened after another workspace took the port cannot show that server's
-    fleet. The fleet read this replaced was bound to the confirmed workspace
-    the same way. *)
+    The server answers 409 unless it is [expected_workspace]. A 200 response
+    must carry the matching workspace receipt before its bytes are read. This
+    admission does not attest the stream after a later workspace replacement. *)
 let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~(host : string) ~(port : int) ~(on_chunk : string -> unit)
     : (unit, observer_error) result =
@@ -1723,29 +1854,21 @@ let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_id
       ~path:(Masc.Fleet_stream.stream_path ^ "?" ^ expected_workspace_query expected_workspace)
   in
   let headers = ("Accept", "text/event-stream") :: auth_headers () in
+  let checked_response ~status ~headers =
+    check_sse_response ~status ~headers;
+    if status = 200 && not (workspace_read_attested headers) then
+      raise (Invalid_sse_response "workspace admission receipt is missing or invalid")
+  in
   match
     Masc_http_client.get_stream ~clock
-      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers ~on_chunk ()
+      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers
+      ~on_response:checked_response ~on_chunk ()
   with
+  | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
   | Error detail -> Error (Transport_failed (report_err "fleet stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
-
-(* The server compares the two query fields with its own workspace and says so
-   in [x-masc-workspace-read]. A server that does not know the fields would
-   answer for whichever workspace it holds, so a stream that comes back without
-   the receipt is not read, as a bound read without it is not. *)
-let workspace_read_attested headers =
-  let name, expected = Masc.Workspace.read_precondition_admission_header in
-  match
-    List.filter_map
-      (fun (key, value) ->
-        if String.equal (String.lowercase_ascii key) name then Some value else None)
-      headers
-  with
-  | [ value ] -> String.equal value expected
-  | [] | _ :: _ :: _ -> false
 
 let execute_output_stream_idle_timeout_sec =
   stream_missed_keepalives
@@ -1769,6 +1892,7 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
     ~(port : int) ~(keeper : string) ~(on_chunk : string -> unit)
     : (unit, execute_output_stream_error) result =
   let exception Not_attested of int in
+  let exception Invalid_execute_response of int * string in
   let url =
     url_of ~host ~port
       ~path:
@@ -1786,6 +1910,9 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
   let refusal_received, signal_refusal = Eio.Promise.create () in
   let on_response ~status ~headers =
     if Masc.Tui_decode.is_success_http_status status then (
+      (match validate_sse_response ~status ~headers with
+       | Ok () -> ()
+       | Error detail -> raise (Invalid_execute_response (status, detail)));
       if not (workspace_read_attested headers) then raise (Not_attested status)
     ) else (
       refused_status := Some status;
@@ -1810,6 +1937,8 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
       Error
         (Execute_unattested
            { status; detail = "Server did not attest the requested workspace read" })
+  | exception Invalid_execute_response (status, detail) ->
+      Error (Execute_invalid_response { status; detail })
   | `Refusal_timeout status ->
       Error (Execute_http_refused
         { status
@@ -3043,12 +3172,134 @@ let upload_artifact ~(host : string) ~(port : int) ~(bytes : string)
       | Error _ as error -> error
       | Ok json -> Masc_tui_board_upload.uploaded_sha256 json)
 
-let fetch_goal_confirmation ~host ~port ~goal_id =
-  get_json ~host ~port
-    ~path:("/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id)
+type goal_confirmation_http_error = Confirmation_server_changed | Confirmation_status of int | Confirmation_read_failed of string
+
+let goal_confirmation_header_failure ~expected_instance ~status ~headers =
+  if status < 200 || status >= 300 then Some (Confirmation_status status)
+  else if not (workspace_read_attested headers) then
+    Some (Confirmation_read_failed "Server did not attest the requested workspace read")
+  else
+    let instances = List.filter_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
+    match instances with
+    | [instance] when String.equal instance expected_instance -> None
+    | [instance] when String.trim instance <> "" -> Some Confirmation_server_changed
+    | [] | [_] | _ :: _ :: _ -> Some (Confirmation_read_failed "Goal confirmation server instance was not uniquely attested")
+
+let decode_goal_confirmation_response ~expected_instance { Masc_http_client.status; body; headers } =
+  let decode () = decode_json ~allow_empty:false ~status_code:status ~body
+    |> Result.map_error (fun detail -> Confirmation_read_failed detail) in
+  match goal_confirmation_header_failure ~expected_instance ~status ~headers with
+  | None -> decode ()
+  | Some error -> Error error
+
+exception Goal_confirmation_header_refused of goal_confirmation_http_error
+
+let fetch_goal_confirmation ~credential ~expected_instance ~host ~port ~goal_id =
+  let path = "/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id in
+  let send ~path =
+    let url = url_of ~host ~port ~path in
+    match request_clock () with
+    | None -> Error "Goal confirmation request clock is unavailable"
+    | Some clock ->
+      let result = on_io_domain (fun () ->
+        let body = Buffer.create 1024 in
+        let on_response ~status ~headers =
+          match goal_confirmation_header_failure ~expected_instance ~status ~headers with
+          | None -> ()
+          | Some failure -> raise (Goal_confirmation_header_refused failure) in
+        match Eio.Time.with_timeout clock (request_timeout_sec ()) (fun () ->
+          Ok (Masc_http_client.get_stream ~clock ~idle_timeout_sec:(request_timeout_sec ())
+            ~url ~headers:credential.bound_headers ~on_response ~on_chunk:(Buffer.add_string body) ())) with
+        | Error `Timeout -> Error "Goal confirmation response timed out"
+        | Ok (Error detail) -> Error detail
+        | Ok (Ok (Masc_http_client.Pool.Buffered {status; headers; body})) ->
+          Ok Masc_http_client.{status; headers; body}
+        | Ok (Ok (Masc_http_client.Pool.Streamed {status; headers; _})) ->
+          Ok Masc_http_client.{status; headers; body=Buffer.contents body}) in
+      Result.map_error (fun detail -> Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) result in
+  let convert = function
+    | Confirmation_server_changed -> Masc_tui_planning_detail.Server_changed credential.bound_owner
+    | Confirmation_status status -> Masc_tui_planning_detail.Read_http_error (credential.bound_owner, status)
+    | Confirmation_read_failed detail -> Masc_tui_planning_detail.Read_failed (Some credential.bound_owner, detail) in
+  try
+    match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
+    | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) ->
+      Error (Masc_tui_planning_detail.Read_failed (Some credential.bound_owner, detail))
+    | Ok response -> decode_goal_confirmation_response ~expected_instance response |> Result.map_error convert
+  with Goal_confirmation_header_refused failure -> Error (convert failure)
+
+let decode_goal_candle_response = function
+  | { Masc_http_client.status=((401 | 403) as status); _ } -> Error (Masc_tui_types.Goal_candle_access_denied status)
+  | { Masc_http_client.status=409; _ } -> Error (Masc_tui_types.Goal_candle_authority_changed (Some 409))
+  | { Masc_http_client.status; _ } when status < 200 || status >= 300 ->
+    Error (Masc_tui_types.Goal_candle_http_status status)
+  | { Masc_http_client.status; body; headers } ->
+    let instances = List.filter_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
+    (match instances with
+     | [instance] when String.trim instance <> "" ->
+       decode_json ~allow_empty:false ~status_code:status ~body
+       |> Result.map (fun json -> instance, json)
+       |> Result.map_error (fun detail -> Masc_tui_types.Goal_candle_read_failed detail)
+     | [] | [_] | _ :: _ :: _ ->
+       Error (Masc_tui_types.Goal_candle_read_failed "Candle response has no unique server instance identity"))
+
+let goal_candle_header_failure ~expected_instance ~status ~headers =
+  let open Masc_tui_types in
+  if status = 401 || status = 403 then Some (Goal_candle_access_denied status)
+  else if status = 409 then Some (Goal_candle_authority_changed (Some status))
+  else if status < 200 || status >= 300 then Some (Goal_candle_http_status status)
+  else if not (workspace_read_attested headers) then
+    Some (Goal_candle_read_failed "Server did not attest the requested workspace read")
+  else
+    let instances = List.filter_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
+    match instances with
+    | [instance] when String.trim instance <> "" ->
+      if String.equal instance expected_instance then None else Some (Goal_candle_authority_changed None)
+    | [] | [_] | _ :: _ :: _ ->
+      Some (Goal_candle_read_failed "Candle response has no unique server instance identity")
+
+exception Goal_candle_header_refused of Masc_tui_types.goal_candle_failure
+
+let fetch_goal_candle ~credential ~expected_instance ~host ~port ~goal_id =
+  let path = "/api/v1/dashboard/goals/candle?goal_id=" ^ percent_encode_query_value goal_id in
+  let send ~path =
+    let url = url_of ~host ~port ~path in
+    match request_clock () with
+    | None -> Error "Candle request clock is unavailable"
+    | Some clock ->
+      (* [get_stream] exposes headers before a body that may never finish.
+         Run the short read on the request domain with the same total deadline
+         as other GETs, and close the connection when a header refuses it. *)
+      let result = on_io_domain (fun () ->
+        let body = Buffer.create 1024 in
+        let on_response ~status ~headers =
+          match goal_candle_header_failure ~expected_instance ~status ~headers with
+          | None -> ()
+          | Some failure -> raise (Goal_candle_header_refused failure) in
+        match Eio.Time.with_timeout clock (request_timeout_sec ()) (fun () ->
+          Ok (Masc_http_client.get_stream ~clock ~idle_timeout_sec:(request_timeout_sec ())
+            ~url ~headers:credential.bound_headers ~on_response ~on_chunk:(Buffer.add_string body) ())) with
+        | Error `Timeout -> Error "Candle response timed out"
+        | Ok (Error detail) -> Error detail
+        | Ok (Ok (Masc_http_client.Pool.Buffered {status; headers; body})) ->
+          Ok Masc_http_client.{status; headers; body}
+        | Ok (Ok (Masc_http_client.Pool.Streamed {status; headers; _})) ->
+          Ok Masc_http_client.{status; headers; body=Buffer.contents body}) in
+      Result.map_error (fun detail -> Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) result in
+  try
+    match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
+    | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) ->
+      Error (Masc_tui_types.Goal_candle_read_failed detail)
+    | Ok response -> decode_goal_candle_response response
+  with Goal_candle_header_refused failure -> Error failure
 
 let post_goal_confirmation ~host ~port confirmation =
-  post_json ~host ~port ~path:"/api/v1/goals/confirmation"
+  post_json_bound ~credential:{bound_headers=confirmation.Masc_tui_planning_detail.credential_headers;
+                               bound_owner=confirmation.credential_owner}
+    ~host ~port ~path:"/api/v1/goals/confirmation"
     ~body:(Yojson.Safe.to_string
       (Masc_tui_planning_detail.confirmation_body confirmation))
 
@@ -3059,17 +3310,25 @@ let post_goal_confirmation ~host ~port confirmation =
     its rejection to return, not the TUI's to pre-guess. *)
 let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
     ~(goal_id : string) ~(action : Goal_phase.Public_action.t)
-    ~(note : string option) : (Yojson.Safe.t, string) result =
+    ~(note : string option) ~(retry_binding : Masc.Tui_decode.goal_retry_binding option)
+    : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
       ([ expected_workspace_field expected_workspace
        ; ("goal_id", `String goal_id)
        ; ("action", `String (Goal_phase.Public_action.to_string action))
        ]
-      @
-      match note with
-      | Some text -> [ ("note", `String text) ]
-      | None -> [])
+      @ (match note with Some text -> [ ("note", `String text) ] | None -> [])
+      @ (match retry_binding with
+         | None -> []
+         | Some binding ->
+           ["expected_verification", `Assoc
+             (["phase", `String (match binding.grb_phase with
+                 | Masc.Tui_decode.Completion_executing -> "executing"
+                 | Completion_verifying -> "verifying");
+               "criterion_revision", `String binding.grb_criterion_revision]
+              @ (match binding.grb_request_id with
+                 | None -> [] | Some id -> ["request_id", `String id]))]))
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
     ~body:(Yojson.Safe.to_string payload)

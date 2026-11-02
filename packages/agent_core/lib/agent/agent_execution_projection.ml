@@ -70,6 +70,7 @@ type node =
   }
 
 type node_update =
+  | Turn_ready of string list
   | Checkpoint_snapshot of Checkpoint_snapshot.t
   | Provider_event of Yojson.Safe.t
   | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
@@ -398,6 +399,7 @@ let node value =
 ;;
 
 let node_update = function
+  | Event.Turn_ready names -> Turn_ready names
   | Event.Checkpoint_snapshot value -> Checkpoint_snapshot value
   | Event.Provider_event value -> Provider_event value
   | Event.Provider_request_snapshot value -> Provider_request_snapshot value
@@ -700,6 +702,7 @@ let provider_requests t ?(after : cursor option) () =
                List.exists (fun (update:Event.node_update Journal.event_record) ->
                  match update.value with
                  | Event.Provider_request_snapshot _ -> Event.seq update.event > after_seq
+                 | Event.Turn_ready _
                  | Event.Checkpoint_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
                  | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
                  | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> false)
@@ -731,6 +734,7 @@ let latest_checkpoint t =
     | Event.Checkpoint_snapshot snapshot -> Some
       {snapshot;event_id=Event.event_id record.event;run_id=Event.run_id record.event;
        through={scope_id=t.scope_id;seq=Event.seq record.event}}
+    | Event.Turn_ready _
     | Event.Provider_event _ | Event.Provider_request_snapshot _ | Event.Provider_response_snapshot _
     | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
     | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> latest)
@@ -756,6 +760,7 @@ let settled_tool_invocations t =
         (fun (update : Event.node_update Journal.event_record) ->
            match update.value with
            | Event.Tool_result _ -> Some (Event.seq update.event)
+           | Event.Turn_ready _
            | Event.Checkpoint_snapshot _ | Event.Provider_request_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
            | Event.Output_delta _ | Event.Output_snapshot _
            | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
@@ -955,11 +960,13 @@ let read_page t ~after ?through ~limit () =
   ; has_more=page.source_more
   }
 
-type tool_observation = {run_id:Run_id.t;event:Event_bus.event;through:cursor}
-type tool_observation_page =
-  {observations:tool_observation list;next_cursor:cursor;high_watermark:cursor;has_more:bool}
+type bus_observation = {run_id:Run_id.t;event:Event_bus.event;through:cursor}
+type bus_observation_page =
+  {observations:bus_observation list;next_cursor:cursor;high_watermark:cursor;has_more:bool}
+type tool_observation = bus_observation
+type tool_observation_page = bus_observation_page
 
-let read_tool_observations t ?run ~after ?through ~limit () =
+let read_bus_observations t ?run ~after ?through ~limit () =
   let* page=read_source_page t ~after ?through ~limit () in
   let* ()=match run with
     | None -> Ok ()
@@ -971,12 +978,23 @@ let read_tool_observations t ?run ~after ?through ~limit () =
       if Option.fold ~none:false ~some:(fun run -> not (Event.Run_id.equal run (Event.run_id source))) run
       then project acc rest
       else
-        let* observation=Execution_tool_observation.project
+        let* observation=Execution_bus_observation.project
             ~find_node:(Journal.Reducer.find_node page.source_snapshot.reducer) source
             |> Result.map_error (fun error -> Semantic_failure
-              {seq=Event.seq source;detail=Execution_tool_observation.error_to_string error}) in
+              {seq=Event.seq source;detail=Execution_bus_observation.error_to_string error}) in
         match observation with
         | None -> project acc rest
         | Some event -> project ({run_id=Event.run_id source;event;through={scope_id=t.scope_id;seq=Event.seq source}}::acc) rest in
   let+ observations=project [] page.source_events in
   { observations;next_cursor=page.source_next;high_watermark=page.source_high;has_more=page.source_more }
+
+let read_tool_observations t ?run ~after ?through ~limit () =
+  let+ page = read_bus_observations t ?run ~after ?through ~limit () in
+  let observations = List.filter (fun (observation:bus_observation) ->
+    match observation.event.payload with
+    | ToolCalled _ | ToolCompleted _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ -> false)
+    page.observations in
+  {page with observations}

@@ -37,14 +37,12 @@ let with_fixture f = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     |> Result.map_error Runtime_agent_execution_runtime.initialization_error_to_string |> get;
   let base_path = Filename.temp_dir "verifier-journal-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path;Fs_compat.clear_fs ());
-  let previous = Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous);
   let source = Printf.sprintf
     "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"review-journal-test" source
-    |> get |> Llm_provider.Model_catalog.set_global;
+    |> get |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let masc_root = Common.masc_dir_from_base_path ~base_path in
   (* Original retention requires an existing owned parent as its authority
      anchor; the store creates only its own descendants. *)

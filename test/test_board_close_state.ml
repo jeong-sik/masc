@@ -11,6 +11,8 @@
 
 open Masc
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
@@ -19,6 +21,7 @@ let fresh_test_base_path () =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-board-close-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
@@ -28,7 +31,11 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 let create_post_exn ~author ~content =
@@ -45,7 +52,9 @@ let store () =
 let restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ())
 
 let get_post_exn post_id =
   match Board_dispatch.get_post ~post_id with
@@ -127,7 +136,7 @@ let test_reopen_clears_closed_state_across_restart () =
            match Yojson.Safe.Util.member "id" row with
            | `String id -> String.equal id post_id
            | _ -> false)
-         (Fs_compat.load_jsonl (Board.persist_path ())))
+         (Fs_compat.load_jsonl (Board.persist_path (Board.global ()))))
   in
   (match Board_votes.reopen (store ()) ~post_id with
    | Ok () -> ()
@@ -144,7 +153,7 @@ let test_reopen_clears_closed_state_across_restart () =
            match Yojson.Safe.Util.member "id" row with
            | `String id -> String.equal id post_id
            | _ -> false)
-         (Fs_compat.load_jsonl (Board.persist_path ())))
+         (Fs_compat.load_jsonl (Board.persist_path (Board.global ()))))
   in
   Alcotest.(check int) "no-op reopen appends no new posts.jsonl row"
     rows_before rows_after

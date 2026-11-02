@@ -412,7 +412,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; model
-      ; account_home
+      ; account_home = Runtime_official_account.Current account_home
       ; isolated_home
       ; context_window
       ; native
@@ -2692,7 +2692,7 @@ let test_background_read_outlives_the_turn () =
           let clock = Eio.Stdenv.clock env in
           let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
           let codex =
-            ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+            ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
           in
           let recorded =
             Eio.Switch.run (fun root_sw ->
@@ -2762,7 +2762,7 @@ let read_after_spent_usage_refusal ~provider_id read_result =
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
         let codex =
-          ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+          ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
         in
         Runtime_quota_window.note_observed_exhausted ~scope;
         Eio.Switch.run (fun root_sw ->
@@ -2828,7 +2828,7 @@ let test_start_read_of_a_spent_account_rests_nothing () =
   with_fixture [init_result; account_chatgpt; codex_spent_window ~resets_at:(reset_a_week_ahead ()) ()] (fun path ->
     Eio_main.run (fun env ->
       let codex =
-        ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+        ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
       in
       match
         Runtime_provider_usage_read.read_codex ~mgr:(Eio.Stdenv.process_mgr env)
@@ -5001,11 +5001,9 @@ let test_production_runtime_walk_receipt ~recover () =
   let module Fault=Llm_provider.Candidate_fault in
   let base_path=temp_workspace "masc-production-runtime-walk-" in
   let trace_id="production-runtime-walk" in
-  let catalog_snapshot=Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     cleanup_tree base_path) (fun () ->
     let catalog_path=Filename.concat base_path "walk-models.toml" in
     let model prefix=Printf.sprintf {|
@@ -5021,7 +5019,7 @@ supports_native_streaming = false
     write_fixture_file catalog_path
       (model "projection-http-fixture" ^ model "projection-last-fixture");
     (match Llm_provider.Model_catalog.load_file catalog_path with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
      | Error detail -> fail detail);
     let requests=ref [] in
     let receipt_seen=ref false in
@@ -5160,11 +5158,9 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
 let test_production_last_projection ~http_predecessor ~reject_codex () =
   let base_path = temp_workspace "masc-last-projection-" in
   let capture_path = Filename.concat base_path "codex-requests.jsonl" in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     cleanup_tree base_path) (fun () ->
     let catalog_path = Filename.concat base_path "models.toml" in
     write_fixture_file catalog_path {|
@@ -5178,7 +5174,7 @@ supports_tools = true
 supports_native_streaming = false
 |};
     (match Llm_provider.Model_catalog.load_file catalog_path with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
      | Error detail -> fail detail);
     let keeper_name = "codex-production-fixture" in
     let trace_id = "last-projection-trace" in
@@ -7283,7 +7279,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     let acknowledged_blocks = List.filter_map (fun (held : Store.held_context) ->
       match held.context with
       | Store.Context_block block -> Some (Prompt_block_id.to_string block, held.sha256)
-      | Store.Librarian_unread -> None
+      | Store.Librarian_unread | Store.Codex_system_prompt -> None
       | Store.Context_section _ | Store.Context_section_row _ | Store.Context_carrier
       | Store.Librarian_working_state | Store.Historical_task_reference | Store.Tool_result_receipts ->
         fail "unexpected non-issuer context in the fixture") frontier.held_context in
@@ -8325,10 +8321,12 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check (list string) "the confirmed tool result was settled before Resume" [] pending;
        with_fixture
          ~capture_path:resume_capture
+         ~inject_items:true
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; resumed_turn_result
+         ; {|{"id":4,"result":{}}|}
+         ; {|{"id":5,"result":{"turn":{"id":"turn-2"}}}|}
          ; resumed_item_completed
          ; resumed_turn_completed
          ]
@@ -8373,9 +8371,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          (String.concat "\n\n"
             [ system_prompt; posture_note; empty_unread_envelope; envelope dynamic_context ])
          start_instructions;
-       (* The thread holds the conversation, so the resumed instructions name
-          only the current system prompt; the per-turn context rides in front
-          of the goal (checked below). *)
+       (* Resume config is also used by a later native compaction. The
+          changed standing prompt must separately enter model-visible history
+          through an acknowledged Developer injection before this turn. *)
        check string "resume sends the current instructions and no conversation"
          ("UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note)
          resume_instructions;
@@ -8385,18 +8383,72 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
           check bool "frontier records that the thread holds the conversation" true
             (frontier.delivery = Keeper_official_client_session_store.Held_by_vendor_session);
           check bool "only settled vendor turn acknowledges context" true
-            (frontier.acknowledged_turn = Some {session_id="thread-1";turn_id="turn-2"})
+            (frontier.acknowledged_turn = Some {session_id="thread-1";turn_id="turn-2"});
+          let receipt = List.find
+            (fun (held : Keeper_official_client_session_store.held_context) ->
+               held.context = Codex_system_prompt) frontier.held_context in
+          check string "settled receipt names the exact current standing prompt"
+            Agent_core_sha256.(digest_string resume_instructions |> to_hex) receipt.sha256
         | Ok _ -> fail "missing durable context frontier"
         | Error detail -> fail detail);
        check string "resume retains vendor thread"
          "thread-1" (request resume_capture "thread/resume" |> request_param_string "threadId");
-       List.iter (fun capture ->
-         let requests = In_channel.with_open_bin capture In_channel.input_lines
-           |> List.map Yojson.Safe.from_string in
-         check bool "current context never accumulates in persistent history" false
-           (List.exists (fun json ->
-             Yojson.Safe.Util.member "method" json = `String "thread/inject_items") requests))
-         [start_capture; resume_capture];
+       let requests capture = In_channel.with_open_bin capture In_channel.input_lines
+         |> List.map Yojson.Safe.from_string in
+       let injections capture = requests capture |> List.filter (fun json ->
+         Yojson.Safe.Util.member "method" json = `String "thread/inject_items") in
+       check int "Start does not duplicate its standing prompt" 0
+         (List.length (injections start_capture));
+       let open Yojson.Safe.Util in
+       let injection = request resume_capture "thread/inject_items" |> member "params" in
+       check string "refresh targets the original vendor thread" "thread-1"
+         (injection |> member "threadId" |> to_string);
+       let injected = injection |> member "items" |> to_list in
+       check int "refresh does not replay the conversation" 1 (List.length injected);
+       let current = List.hd injected in
+       check string "standing prompt keeps Developer authority" "developer"
+         (current |> member "role" |> to_string);
+       check string "exact new standing prompt is model-visible before turn/start"
+         resume_instructions
+         (current |> member "content" |> index 0 |> member "text" |> to_string);
+       let stable_capture = Filename.concat base_path "stable-resume.jsonl" in
+       let rec third_turn = function
+         | `String "turn-2" -> `String "turn-3"
+         | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,third_turn value) fields)
+         | `List values -> `List (List.map third_turn values)
+         | value -> value in
+       let stable_frames = [init_result;account_chatgpt;thread_result;resumed_turn_result;
+         resumed_item_completed;resumed_turn_completed]
+         |> List.map (fun row -> Yojson.Safe.from_string row |> third_turn |> Yojson.Safe.to_string) in
+       with_fixture ~capture_path:stable_capture stable_frames (fun cli_path ->
+         match run_keeper_turn ~tools:[tool] ~base_path ~initial_messages:native_history
+           ~session_id:fixture_trace_with_no_completed_turn ~hooks:(hooks "UPDATED_CONTEXT")
+           ~goal ~system_prompt:"UPDATED_SYSTEM_PROMPT" ~cli_path ~model:"gpt-fixture" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok result -> check int "unchanged standing prompt continues the same session" 3 result.turns);
+       check int "acknowledged unchanged standing prompt is not appended again" 0
+         (List.length (injections stable_capture));
+       check int "standing refresh never repeats the completed effect" 1 !effect_count;
+       let refused_capture = Filename.concat base_path "refused-refresh.jsonl" in
+       with_fixture ~capture_path:refused_capture ~inject_items:true
+         [init_result;account_chatgpt;thread_result;
+          {|{"id":4,"error":{"code":-32000,"message":"injection refused"}}|}]
+         (fun cli_path ->
+           check bool "refused Developer refresh fails before model dispatch" true
+             (Result.is_error (run_keeper_turn ~tools:[tool] ~base_path
+               ~initial_messages:native_history
+               ~session_id:fixture_trace_with_no_completed_turn ~hooks:(hooks "UPDATED_CONTEXT")
+               ~goal ~system_prompt:"REFUSED_SYSTEM_PROMPT" ~cli_path ~model:"gpt-fixture" ())));
+       check bool "refused injection never starts a model turn" false
+         (List.exists (fun json -> member "method" json = `String "turn/start")
+            (requests refused_capture));
+       (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture"
+          |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
+        | Ok (Some {context_frontier=Some frontier;_}) ->
+          check bool "failed refresh has no completed-turn acknowledgement" true
+            (Option.is_none frontier.acknowledged_turn)
+        | Ok _ -> fail "failed refresh must retain its session provenance"
+        | Error detail -> fail detail);
        let context_envelope_text = envelope dynamic_context in
        let context_envelope = Yojson.Safe.from_string context_envelope_text in
        let open Yojson.Safe.Util in
@@ -10330,10 +10382,6 @@ let () =
             `Quick
             test_keeper_resume_sends_changed_working_state_once
         ; test_case
-            "Keeper dynamic context stays on Codex instruction wire"
-            `Quick
-            test_keeper_dynamic_context_stays_on_codex_instruction_wire
-        ; test_case
             "Keeper starts fresh on a changed Codex tool surface"
             `Quick
             test_keeper_starts_fresh_on_changed_tool_surface
@@ -10410,6 +10458,9 @@ let () =
             `Quick
             test_official_client_host_text_projection_is_hard_cut
         ] )
+    ; ( "standing instructions"
+      , [test_case "Keeper refreshes the current System on its existing Codex thread"
+           `Quick test_keeper_dynamic_context_stays_on_codex_instruction_wire] )
     ; ( "production runtime walk receipt"
       , [ test_case "Unknown400 then429 keeps both candidate failures" `Quick
             (test_production_runtime_walk_receipt ~recover:false)

@@ -61,6 +61,8 @@ module FileSystem : sig
   val lock_info_to_json : lock_info -> string
   val lock_info_of_json : string -> lock_info option
   val acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
+  val try_acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
+  (** One attempt at the fence and lease; [Ok false] means no lease was acquired. *)
   val release_lock : t -> key:string -> owner:string -> bool result
   val extend_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   (** [acquire_lock], [release_lock], [extend_lock] and [commit_under_lease]

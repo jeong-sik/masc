@@ -1074,7 +1074,7 @@ let execute_scheduled_tool
       Execution_agent_scope.execute_phased
         durable_invocation
         ~invoke:(fun ~start_child ~tool_name ~input ->
-          Execution_context.flush_tool_observations ();
+          Execution_context.flush_bus_observations ();
           observe_before_completion (fun () -> observe_started ~tool_name ~input);
           Execution_context.with_child_scope_factory start_child (fun () ->
             let pending = begin_effect ~publish_event_bus:false ~tool_name ~input in
@@ -1097,7 +1097,7 @@ let execute_scheduled_tool
     | Ok (Execution_agent_scope.Executed (result, _, _))
     | Ok (Execution_agent_scope.Replayed result) ->
       Execution_context.settle_tool_observers invocation;
-      Execution_context.flush_tool_observations ();
+      Execution_context.flush_bus_observations ();
       let dispatch =
         match !completed_dispatch with
         | Some dispatch -> dispatch

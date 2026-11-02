@@ -1,0 +1,65 @@
+{
+  "baseline": "6b8c71081af784c48e84db28aba46d945c15e4c6",
+  "interrupted_candidate": "842685433e1142e9458a0f38674a31e283bf8965",
+  "tested_recheck": "d2c96d510d21fa393191e10611f66ef92637513c",
+  "identical_selected_fixture_functions": {
+    "fixture_script": {
+      "bytes": 4695,
+      "sha256": "bba81525b381fdd7a3a8a2887335013c7d2cad209178d6a36c0ea65653d84524"
+    },
+    "with_fixture": {
+      "bytes": 638,
+      "sha256": "4966cb1e2e420417a29c514b0bcdb971b80fcb0c4bd0a9a34f0460f2b09ab3f9"
+    },
+    "runtime_toml": {
+      "bytes": 899,
+      "sha256": "739df48f5976346ae002b1b30186cedd5457f6f6b3bb6585eb6ee36ec9be7f08"
+    },
+    "with_runtime_config": {
+      "bytes": 386,
+      "sha256": "a28b5a7c2f210cbf607b514c95786d2abce33521161e8631356ebdef01d80b4c"
+    },
+    "run_keeper_turn": {
+      "bytes": 4484,
+      "sha256": "fc8d67eb5c019a850514707196c1bba4211ce5a158d721ea7418afaff6e5c3ed"
+    },
+    "test_selected_claude_inference_survives_catalog_reload": {
+      "bytes": 5092,
+      "sha256": "673f2e8688a1070c14796f41a7cc259d3bc8465d2c3ba653fa305af7a6e1393e"
+    }
+  },
+  "identical_alias_file": "test/stanzas/test_keeper_claude_code_runtime.inc",
+  "root_test_tree_changed_files": [
+    "test/test_keeper_claude_code_runtime.ml",
+    "test/test_official_client_claim_cause.ml"
+  ],
+  "fixture_delta": "fixture-delta.json",
+  "production_changed_files_baseline_to_recheck": [
+    "lib/keeper/keeper_claude_code_runtime.ml",
+    "lib/keeper/keeper_claude_code_runtime.mli",
+    "lib/keeper/keeper_turn_driver.ml",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.ml",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli"
+  ],
+  "lower_pipeline_change": "A separate reason-authority recovery repair changed pipeline_execution_resume.ml/.mli between the baseline and completed recheck. It is disclosed instead of claiming whole-production isolation.",
+  "known_separate_fixture_failure": "The ancestor Pipeline test fixture had an Agent.t/Internal_agent.t compile mismatch. It was outside this selected native workflow and was repaired separately using public Agent.run. This native SUCCESS is not a full package or whole-stack verdict.",
+  "publication_binding": {
+    "source_parent_before_evidence": "e2e6a259a3196440775a18c056d8b6d9129381d2",
+    "tested_recheck_source": "d2c96d510d21fa393191e10611f66ef92637513c",
+    "named_inputs_preserved": 20,
+    "preserved_runtime_and_target_trees": {
+      "lib": "cfc4d00c72305985a0909d187d90b327e1aaba69",
+      "test": "37b1602362d862520d31af5bd4aa78b7caefa1fb",
+      "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b",
+      "packages/agent_core/lib": "dac7c7cc3d3c655845dfa45dcdf80d45ea40d941"
+    },
+    "whole_agent_core_tree_identical": false,
+    "whole_agent_core_delta": [
+      "packages/agent_core/test/test_pipeline.ml"
+    ],
+    "complete_delta_paths": [
+      "packages/agent_core/test/test_pipeline.ml"
+    ],
+    "carried_execution_scope": "Production, build configuration and complete selected test inputs are identical. The unselected package Pipeline fixture was corrected to public Agent.run. The final evidence descendant is checked separately; its SHA was not the CI checkout."
+  }
+}

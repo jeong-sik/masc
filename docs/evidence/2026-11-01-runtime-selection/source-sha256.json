@@ -1,0 +1,26 @@
+{
+  "source_head": "1b4b399005ada1427cdf1bfe27a8087ed17f2b35",
+  "files": {
+    "lib/runtime/runtime_adapter.ml": "da8c81f5939e452bdb42eb8429276844fb9e031289f0132ca2aa9206b0bb943c",
+    "lib/runtime/runtime_adapter.mli": "27e1f5536338caa4ac5f80d4ce40c29947dca6fd166df36f7141155199fd0d81",
+    "lib/runtime/runtime_instance.ml": "2e09c23ded693d51b12c05fcf54cb856a27777fbde34e781a3cda27a2e6c05af",
+    "lib/runtime/runtime_instance.mli": "0954503b97a47ccdb2f45799abdf898d9bc8b40987a9af3cf142ae3dfad6cdd9",
+    "lib/runtime/runtime_execution.ml": "3c05b16ed9babe02b70790d3331cc602e79578e1db9219318f7b40c63df063da",
+    "lib/runtime/runtime_execution.mli": "00fc35380cdd9f1db9d54d2fa3edbe756aaeaaf6922d1249933cff054cbdeaa5",
+    "test/test_runtime_config_validity.ml": "3f939949e0dc70240a7e84a428dad17a37f1cd72f71955d03fec0092004922cf",
+    "test/test_runtime_provider_auth_headers.ml": "a5cdf694f14ab20e529d4cecab9389458f743217dc40a57421f9d3ef572069e5",
+    "test/dune": "a24ea53fdbee08ac26b85d21750a4a798bb91531c99175637bb2b19a42e86b7d",
+    "config/runtime.toml": "e01f6996b9837eba4fca3bd0ddf360725ee03c9d291af2d048378443b87f9da1",
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "1237ca5c758be1c5578e980f5233b8c9da4bcf7063751746387e6a032b9979ab",
+    "packages/agent_core/lib/llm_provider/provider_config.mli": "428a764fadea44e2dd5c2a3fb3a2661d0375adfe1603610cbedbc14778cf288d",
+    "packages/agent_core/lib/llm_provider/capabilities.ml": "08d4795befd39161134101c771d23b6ac390ec0ca08a8a181880ef5a155b8879",
+    "packages/agent_core/lib/llm_provider/capabilities.mli": "efdfd72de39ec7f283aab31b8bc52eb1c4b7502456c9cca4747241313fa70a3f",
+    "packages/agent_core/lib/llm_provider/pricing.ml": "fab973947718825f6120552f7bedd4724c94e976aeb6883e533ef19247437f2b",
+    "packages/agent_core/lib/llm_provider/pricing.mli": "0adc09046029be4d178cf26baed7fcc5493e1a7e8d2ef8757c3d0999cf479883",
+    "packages/agent_core/test/test_request_pricing_snapshot.ml": "c5939d774e0f7ff6962ca9efe59e93e6b3b14e3488742346041275088396ac06",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d"
+  },
+  "git_tree_inputs": {
+    "scripts/fixtures": "1e690612142a7b5cac9fe52c18198106b5039867"
+  }
+}

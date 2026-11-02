@@ -1,0 +1,229 @@
+open Agent_core
+open Llm_provider
+
+let get = function Ok value -> value | Error detail -> Alcotest.fail detail
+
+let catalog ?(priced = true) ?(bare = false) ?cache multiplier =
+  let row model input output =
+    Printf.sprintf
+      "[[models]]\nmodel_id = %S\n%sbase = \"openai_chat\"\nmax_context_tokens = 4096\n%s"
+      model
+      (if bare then "" else "provider_name = \"pricing-provider\"\n")
+      ((if priced then Printf.sprintf "input_per_million = %.1f\noutput_per_million = %.1f\n"
+          (input *. multiplier) (output *. multiplier) else "")
+       ^ (match cache with None -> "" | Some (write, read) ->
+           Printf.sprintf "cache_write_multiplier = %.2f\ncache_read_multiplier = %.2f\n" write read))
+  in
+  let source = {|
+[[providers]]
+id = "pricing-provider"
+kind = "openai_compat"
+base_url = "https://pricing.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+default_model = "request-model"
+serves_bare_models = ["request-model", "returned-model"]
+|} ^ row "request-model" 1.0 2.0 ^ row "returned-model" 4.0 8.0 in
+  Model_catalog.of_toml_string ~source:"request pricing fixture" source |> get
+
+let with_catalog catalog run =
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))); run ())
+
+let binding ?providers catalog =
+  let declarations = Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers
+    |> Result.map_error Catalog_snapshot.error_to_string |> get in
+  match Provider_runtime_binding.find_in_declarations declarations "pricing-provider" with
+  | Some binding -> binding
+  | None -> Alcotest.fail "declared pricing provider missing"
+
+let config binding = Provider_runtime_binding.to_provider_config binding
+  |> Result.map_error Agent_core.Error.to_string |> get
+
+let raw_config () = Provider_config.make ~kind:OpenAI_compat
+    ~provider_id:"pricing-provider" ~model_id:"request-model"
+    ~base_url:"https://pricing.invalid" ()
+
+let response ?(model = "request-model") ?cost () : Llm_provider.Types.api_response =
+  { id = "pricing-response"; model; stop_reason = EndTurn; content = [Text "ok"]
+  ; usage = Some {input_tokens = 1_000_000; output_tokens = 1_000_000;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = cost}
+  ; telemetry = Some (Llm_provider.Types.with_reported_model ~model None) }
+
+let transport ~before_response response = Llm_transport.custom
+  { complete_sync = (fun _ -> before_response (); {response = Ok response; latency_ms = Some 0})
+  ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> before_response (); Ok response) }
+
+let complete ~stream ~config ~before_response response =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let transport = transport ~before_response response in
+    let result = if stream then
+        Complete.complete_stream ~sw ~net:env#net ~transport ~config
+          ~messages:[Llm_provider.Types.user_msg "answer"] ~on_event:(fun _ -> ()) ()
+      else Complete.complete ~sw ~net:env#net ~transport ~config
+          ~messages:[Llm_provider.Types.user_msg "answer"] () in
+    match result.Completion_outcome.result with
+    | Ok response -> response
+    | Error _ -> Alcotest.fail "injected completion failed before its pricing observation"))
+
+let check_cost expected response =
+  Alcotest.(check (option (float 1e-9))) "cost uses the request-owned price authority"
+    expected (Option.bind response.Llm_provider.Types.usage (fun usage -> usage.cost_usd))
+
+let test_selected_before_config () =
+  let original = catalog 1.0 and replacement = catalog 10.0 in
+  with_catalog original (fun () ->
+    let selected = binding original in
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
+    let selected = config selected in
+    check_cost (Some 3.0) (complete ~stream:false ~config:selected
+      ~before_response:(fun () -> ()) (response ())))
+
+let test_frozen_before_call () =
+  with_catalog (catalog 1.0) (fun () ->
+    let frozen = Provider_config.freeze_for_request (raw_config ()) in
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)));
+    check_cost (Some 3.0) (complete ~stream:false ~config:frozen
+      ~before_response:(fun () -> ()) (response ())))
+
+let test_during_call stream () =
+  with_catalog (catalog 1.0) (fun () ->
+    check_cost (Some 3.0) (complete ~stream ~config:(raw_config ())
+      ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)))) (response ())))
+
+let test_returned_model () =
+  with_catalog (catalog 1.0) (fun () ->
+    check_cost (Some 12.0) (complete ~stream:false ~config:(raw_config ())
+      ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None))))
+      (response ~model:"returned-model" ())))
+
+let test_absence_and_agent_usage () =
+  let original = catalog ~priced:false 1.0 in
+  with_catalog original (fun () ->
+    let selected = config (binding original) in
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)));
+    let result = complete ~stream:false ~config:selected ~before_response:(fun () -> ()) (response ()) in
+    check_cost None result;
+    let usage = Agent_turn.accumulate_usage ~current_usage:Agent_core.Types.empty_usage
+      ~response_model:(Some result.model) ~response_usage:result.usage in
+    Alcotest.(check (float 1e-9)) "Agent does not acquire a late price" 0.0 usage.estimated_cost_usd;
+    Alcotest.(check bool) "missing selected price remains an explicit gap" true
+      (usage.pricing_gap = Some (Agent_core.Types.Pricing_unavailable "request-model")))
+
+let test_agent_retains_unknown_cost () =
+  with_catalog (catalog 10.0) (fun () ->
+    let response = response () in
+    let usage = Agent_turn.accumulate_usage ~current_usage:Agent_core.Types.empty_usage
+      ~response_model:(Some response.model) ~response_usage:response.usage in
+    Alcotest.(check (float 1e-9)) "Agent does not estimate an unannotated cost" 0.0 usage.estimated_cost_usd;
+    Alcotest.(check bool) "available rates do not erase the pricing gap" true
+      (usage.pricing_gap = Some (Agent_core.Types.Pricing_unavailable "request-model")))
+
+let test_provider_reported_cost () =
+  with_catalog (catalog 1.0) (fun () ->
+    List.iter (fun cost ->
+      check_cost (Some cost) (complete ~stream:false ~config:(raw_config ())
+        ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)))) (response ~cost ())))
+      [0.0; 0.25])
+
+let test_overlay_permission () =
+  let original = catalog ~bare:true 1.0 in
+  let providers = Provider_catalog.of_json (Yojson.Safe.from_string {|
+{"schema_version":1,"providers":[{"id":"pricing-provider","kind":"openai_compat",
+"base_url":"https://pricing.invalid","request_path":"/v1/chat/completions",
+"auth":{"type":"none"},"capabilities_base":"openai_chat","default_model":"request-model"}]}
+|}) |> get in
+  with_catalog original (fun () ->
+    let selected = config (binding ~providers original) in
+    check_cost None (complete ~stream:false ~config:selected ~before_response:(fun () -> ()) (response ())))
+
+let test_fresh_selection () =
+  let original = catalog 1.0 and replacement = catalog 10.0 in
+  with_catalog original (fun () ->
+    let selected = config (binding original) in
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
+    check_cost (Some 30.0) (complete ~stream:false ~config:(config (binding replacement))
+      ~before_response:(fun () -> ()) (response ()));
+    check_cost (Some 3.0) (complete ~stream:false
+      ~config:{selected with Provider_config.base_url = "https://rotated.invalid"}
+      ~before_response:(fun () -> ()) (response ())))
+
+let test_missing_cache_price () =
+  with_catalog (catalog 1.0) (fun () ->
+    let response = response () in
+    let usage = match response.usage with
+      | Some usage -> {usage with cache_read_input_tokens = 10}
+      | None -> Alcotest.fail "fixture usage missing" in
+    check_cost None (complete ~stream:false ~config:(raw_config ())
+      ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog ~cache:(1.25, 0.1) 10.0))) ~providers:(None))))
+      {response with usage = Some usage}))
+
+let test_agent_run_price ?cost ~priced ~model expected () =
+  let original = catalog ~priced 1.0 in
+  with_catalog original (fun () ->
+    let provider_config = config (binding original) in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let transport = transport ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None))))
+          (response ?cost ~model ()) in
+      let options = {Agent.default_options with provider_config = Some provider_config;
+        transport = Some transport} in
+      let agent = Agent.create ~net:env#net ~media_store:(History.Memory_store.create ())
+          ~config:(Agent_core.Types.default_config ~model:"request-model") ~options () in
+      let response = match Agent.run ~sw agent "answer" with
+        | Ok response -> response
+        | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+      check_cost expected response;
+      let usage = (Agent.state agent).usage in
+      Alcotest.(check int) "actual Agent counts the completed request" 1 usage.api_calls;
+      let subtotal, gap = match expected with
+        | Some cost -> cost, None
+        | None -> 0.0, Some (Agent_core.Types.Pricing_unavailable response.model) in
+      Alcotest.(check (float 1e-9)) "actual Agent accumulates only the annotated cost"
+        subtotal usage.estimated_cost_usd;
+      Alcotest.(check bool) "actual Agent preserves pricing coverage" true (usage.pricing_gap = gap))))
+
+let test_reported_observation observation expected () =
+  with_catalog (catalog 1.0) (fun () ->
+    let original = response () in
+    let observed = {original with telemetry = Some
+      {Llm_provider.Types.default_inference_telemetry with reported_model = observation}} in
+    List.iter (fun cost ->
+      let usage = match observed.usage with
+        | Some usage -> {usage with cost_usd = cost}
+        | None -> Alcotest.fail "fixture usage missing" in
+      let actual = complete ~stream:false ~config:(raw_config ()) ~before_response:(fun () -> ())
+          {observed with usage = Some usage} in
+      check_cost (match cost with Some _ -> cost | None -> expected) actual)
+      [None; Some 0.0; Some 0.25])
+
+let () = Alcotest.run "request pricing snapshot"
+  ["price authority", List.map (fun (name, run) -> Alcotest.test_case name `Quick run)
+    ["selection before config conversion", test_selected_before_config;
+     "frozen config before dispatch", test_frozen_before_call;
+     "sync catalog replacement during call", test_during_call false;
+     "stream catalog replacement during call", test_during_call true;
+     "exact returned model in captured catalog", test_returned_model;
+     "absent rates remain absent in response and Agent", test_absence_and_agent_usage;
+     "Agent retains unknown cost despite available rates", test_agent_retains_unknown_cost;
+     "provider charge and zero retain precedence", test_provider_reported_cost;
+     "provider overlay cannot regain seed bare permission", test_overlay_permission;
+     "fresh selection and endpoint rotation", test_fresh_selection;
+     "cache rate absence remains unknown", test_missing_cache_price;
+     "actual Agent preserves missing selected pricing",
+       test_agent_run_price ~priced:false ~model:"request-model" None;
+     "actual Agent sums captured producer price",
+       test_agent_run_price ~priced:true ~model:"request-model" (Some 3.0);
+     "actual Agent does not price missing reported model",
+       test_agent_run_price ~priced:true ~model:"" None;
+     "actual Agent does not trim a reported ID into a price",
+       test_agent_run_price ~priced:true ~model:" returned-model " None;
+     "actual Agent keeps reported zero with missing model",
+       test_agent_run_price ~cost:0.0 ~priced:true ~model:"" (Some 0.0);
+     "typed reported ID owns pricing instead of display ID",
+       test_reported_observation (Some (Llm_provider.Types.Provider_reported_model "returned-model")) (Some 12.0);
+     "typed reported-model absence grants no estimate",
+       test_reported_observation (Some Llm_provider.Types.Provider_model_not_reported) None;
+     "unobserved model grants no estimate",
+       test_reported_observation None None]]

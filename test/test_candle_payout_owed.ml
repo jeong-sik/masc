@@ -178,16 +178,19 @@ let test_no_candle_toml_writes_nothing () =
   no_ledger "off" config
 ;;
 
-let test_a_candle_toml_that_does_not_read_writes_nothing_and_does_not_refuse () =
+let test_invalid_candle_config_refuses_until_repaired () =
   with_workspace
   @@ fun config ->
   write_file (candle_toml config) "half_life_hours = 72\n";
-  is_ok "confirm" (confirm config);
-  no_ledger "disabled" config
+  is_refused "invalid config" (confirm config);
+  no_ledger "invalid config" config;
+  enable_candle config;
+  is_ok "confirm after config repair" (confirm config);
+  no_ledger "no snapshot" config
 ;;
 
 (* Candle was on when the Goal passed, so there is a Snapshot, and it is not on
-   when the operator confirms. Off and disabled write nothing, and the
+   when the operator confirms. Off writes nothing, and the
    confirmation still goes through, so the pass is not paid. RFC-goal-candle-ledger
    6 says a confirmation can be made again with Candle off; this is what that
    costs. *)
@@ -201,14 +204,50 @@ let test_candle_turned_off_between_the_pass_and_the_confirmation_owes_nothing ()
   check (list string) "only the Snapshot" [ "snapshot" ] (kinds config)
 ;;
 
-let test_candle_disabled_between_the_pass_and_the_confirmation_owes_nothing () =
+let test_invalid_config_after_pass_preserves_owed_on_repair () =
   with_workspace
   @@ fun config ->
   enable_candle config;
   pass config;
   write_file (candle_toml config) "half_life_hours = 72\n";
-  is_ok "confirm with a candle.toml that does not read" (confirm config);
-  check (list string) "only the Snapshot" [ "snapshot" ] (kinds config)
+  is_refused "invalid config after pass" (confirm config);
+  check (list string) "only the Snapshot" [ "snapshot" ] (kinds config);
+  enable_candle config;
+  is_ok "confirm after config repair" (confirm config);
+  is_ok "repeat confirmation" (confirm config);
+  check (list string) "one owed fact" [ "snapshot"; "payout_owed" ] (kinds config)
+;;
+
+(* Install a valid Snapshot without calling [Candle_status], as if another
+   process had left it before this process attempted its first recovery. *)
+let test_first_recovery_failure_preserves_owed_on_repair () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let time text = Result.get_ok (Candle_time.of_rfc3339 text) in
+  let snapshot : Candle_event.t =
+    { at = time "2026-09-28T06:32:00Z"
+    ; body = Candle_event.Snapshot
+        { goal_id = "goal-1"; request_id = "req-1"; verification_run_id = "run-1"
+        ; criterion_revision = "rev-1"; passed_at = time "2026-09-28T06:32:00Z"
+        ; goal_created_at = time "2026-09-20T01:00:00Z"; due_date = None
+        ; title = "Ship the ledger"; metric = Some "tests"; target_value = Some "10"
+        ; linked_task_ids = [] }
+    }
+  in
+  (match Candle_ledger.update ~base_path:(base_path_of config) (fun _ -> Ok ([ snapshot ], ())) with
+   | Ok () -> ()
+   | Error error -> failf "%s" (Candle_ledger.update_error_to_string Fun.id error));
+  let original = In_channel.with_open_bin (ledger_path config) In_channel.input_all in
+  let damaged = original ^ "not a row\n" in
+  write_file (ledger_path config) damaged;
+  is_refused "first ledger recovery" (confirm config);
+  check string "refusal leaves ledger unchanged" damaged
+    (In_channel.with_open_bin (ledger_path config) In_channel.input_all);
+  write_file (ledger_path config) original;
+  is_ok "confirm after ledger repair" (confirm config);
+  is_ok "repeat confirmation" (confirm config);
+  check (list string) "one owed fact" [ "snapshot"; "payout_owed" ] (kinds config)
 ;;
 
 let test_a_confirmed_pass_with_a_snapshot_is_owed () =
@@ -247,6 +286,20 @@ let test_confirming_again_writes_no_second_row () =
   is_ok "again" (confirm config);
   is_ok "again with a later confirmation time" (confirm ~confirmation:(make_confirmation ~confirmed_at:"2026-09-30T05:00:00Z" ()) config);
   check (list string) "one PayoutOwed" [ "snapshot"; "payout_owed" ] (kinds config)
+;;
+
+let test_invalid_config_after_owed_never_duplicates_it () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  pass config;
+  is_ok "first confirmation" (confirm config);
+  write_file (candle_toml config) "half_life_hours = 72\n";
+  is_refused "invalid config on retry" (confirm config);
+  check (list string) "existing debt remains" [ "snapshot"; "payout_owed" ] (kinds config);
+  enable_candle config;
+  is_ok "confirmation after repair" (confirm config);
+  check (list string) "existing debt is not duplicated" [ "snapshot"; "payout_owed" ] (kinds config)
 ;;
 
 let test_a_pass_without_a_snapshot_owes_nothing () =
@@ -336,17 +389,21 @@ let () =
     [ ( "when candle is not on"
       , [ test_case "no candle.toml writes nothing" `Quick test_no_candle_toml_writes_nothing
         ; test_case
-            "a candle.toml that does not read writes nothing and does not refuse"
+            "invalid candle config refuses until repaired"
             `Quick
-            test_a_candle_toml_that_does_not_read_writes_nothing_and_does_not_refuse
+            test_invalid_candle_config_refuses_until_repaired
         ; test_case
             "candle turned off between the pass and the confirmation owes nothing"
             `Quick
             test_candle_turned_off_between_the_pass_and_the_confirmation_owes_nothing
         ; test_case
-            "candle disabled between the pass and the confirmation owes nothing"
+            "invalid config after pass preserves owed on repair"
             `Quick
-            test_candle_disabled_between_the_pass_and_the_confirmation_owes_nothing
+            test_invalid_config_after_pass_preserves_owed_on_repair
+        ; test_case
+            "first recovery failure preserves owed on repair"
+            `Quick
+            test_first_recovery_failure_preserves_owed_on_repair
         ] )
     ; ( "when candle is on"
       , [ test_case
@@ -357,6 +414,10 @@ let () =
             "confirming again writes no second row"
             `Quick
             test_confirming_again_writes_no_second_row
+        ; test_case
+            "invalid config after owed never duplicates it"
+            `Quick
+            test_invalid_config_after_owed_never_duplicates_it
         ; test_case
             "a pass without a snapshot owes nothing"
             `Quick

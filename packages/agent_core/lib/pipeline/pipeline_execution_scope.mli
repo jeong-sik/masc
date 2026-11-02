@@ -2,10 +2,9 @@
 
 type t
 
-(** A [Closed Succeeded] turn found at the resume frontier under a still-[Running]
-    run: an idempotent completed boundary left by a crash between the provider
-    close, the turn close, and the root finish. Opaque to the driver, which only
-    threads it back through {!finalize_settled}. *)
+(** A successful provider attempt found at the resume frontier under a
+    still-[Running] root. Its owning turn can still be open, or already closed
+    successfully. The boundary retains its canonical turn identity. *)
 type settled_boundary
 
 (** Total classification of what a resume found at the durable turn frontier.
@@ -28,7 +27,11 @@ val resume_current : Execution_agent_scope.t option -> (resumed, Error.t) result
     close. A fully-closed turn boundary needs no further journal write. *)
 val finalize_settled : settled_boundary -> (unit, Error.t) result
 
+(** The ordinal of the owning journal turn, independent of restored counters. *)
+val settled_turn_ordinal : settled_boundary -> int
+
 val turn_ordinal : t -> int
+val record_turn_ready : t -> tool_names:string list -> (unit, Error.t) result
 val before_provider_attempt : t -> Binding_identity.t -> (unit, Error.t) result
 val provider : t -> Execution_agent_scope.provider_attempt option
 
@@ -40,6 +43,10 @@ val record_provider_request_provenance
   -> Llm_provider.Completion_outcome.request_provenance
   -> (unit, Error.t) result
 
+(** Persist the canonical response after tool-name admission and before
+    AfterTurn or checkpoint publication. History and recovery consume this
+    same immutable response; recovery never repeats admission with new tools.
+    Optional raw tracing owns the original provider blocks separately. *)
 val record_provider_response
   :  t
   -> Llm_provider.Types.api_response

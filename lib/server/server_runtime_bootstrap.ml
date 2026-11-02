@@ -36,22 +36,28 @@ let existing_file path =
     with
     | Sys_error _ -> None
 
-let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
+let install_runtime_model_catalog_override ~load_catalog ~publish_catalog path =
+  let refuse detail =
+    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail)) in
   match load_catalog path with
-  | Ok catalog -> set_catalog catalog
-  | Error detail ->
-    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
+  | Error detail -> refuse detail
+  | Ok catalog ->
+    (match Llm_provider.Catalog_snapshot.of_catalogs
+        ~models:(Some catalog) ~providers:None with
+     | Ok snapshot -> publish_catalog snapshot
+     | Error error -> refuse (Llm_provider.Catalog_snapshot.error_to_string error))
 
 let configure_agent_core_model_catalog_env
       ?env
-      ?(agent_core_catalog = Llm_provider.Model_catalog.global)
+      ?(agent_core_catalog = fun () ->
+        Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
-      ?(set_catalog = Llm_provider.Model_catalog.set_global)
+      ?(publish_catalog = Llm_provider.Catalog_snapshot.publish)
       ()
   =
   match replacement_catalog_path ?env () with
   | Some path ->
-    install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
+    install_runtime_model_catalog_override ~load_catalog ~publish_catalog path;
     Log.Misc.info
       "model_catalog: AGENT_CORE_MODEL_CATALOG=%s already configured and loaded"
       path;
@@ -531,7 +537,13 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Server_routes_http_runtime.invalidate_full_health_snapshot
     ();
   Keeper_registry.install_state_change_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot;
+    Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
+  Keeper_waiting_inventory_broadcast.install_health_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
+  Schedule_store.install_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
+  Operator_pending_confirm.install_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Keeper_owner.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Keeper_reaction_ledger.install_state_change_observer
@@ -1128,6 +1140,7 @@ let initialize_owner_state_blocking
     Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool domain_mgr
   in
   install_domain_pool_references ~read:read_pool domain_pool;
+  Server_pending_confirm_expiry.start ~sw ~clock ~state;
   Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
       ~domain_count:budget.Domain_budget.execution_codec with

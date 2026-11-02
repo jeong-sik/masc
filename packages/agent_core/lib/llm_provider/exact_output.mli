@@ -643,7 +643,18 @@ val receipt_phase : receipt -> effect_phase
 val receipt_dispatch_count : receipt -> int
 val receipt_http_status : receipt -> int option
 val receipt_provider_trace : receipt -> provider_trace option
+(** The Responses status/error-envelope observation produced while parsing this
+    receipt's own body. [None] means it was not captured; it can also describe
+    another codec, an incomplete body, or an unexpected parser failure. Receipt
+    publication can expose a terminal phase before the trace is published, so
+    [None] may also be a temporary observation. This does not establish that the
+    remote execution terminated. *)
+val receipt_responses_lifecycle
+  :  receipt
+  -> Backend_openai_responses.lifecycle_observation option
 val provider_trace_fingerprint : provider_trace -> string
+(** The existing v1 transport/body fingerprint does not directly encode the
+    separate lifecycle observation. *)
 val receipt_plan_fingerprint : receipt -> string
 val receipt_request_body_sha256 : receipt -> string
 val receipt_catalog_generation : receipt -> catalog_generation
@@ -652,12 +663,43 @@ val receipt_target_identity : receipt -> target_identity
 
 (** Immutable generation-receipt fact captured from one atomic state read. *)
 type generation_receipt_snapshot
+type response_family = Openai_responses_codec | Other_http_codec
+
+val receipt_snapshot : receipt -> generation_receipt_snapshot
+(** Capture phase, status and any published lifecycle observation together. *)
 
 val generation_receipt_snapshot_phase : generation_receipt_snapshot -> effect_phase
 val generation_receipt_snapshot_dispatch_count : generation_receipt_snapshot -> int
 val generation_receipt_snapshot_generation_dispatched : generation_receipt_snapshot -> bool
 (** Immutable actual generation-dispatch fact; never inferred from measurement
     activity, phase labels or billing assumptions. *)
+
+val generation_receipt_snapshot_http_status : generation_receipt_snapshot -> int option
+(** Actual HTTP response-header status observed for this visit, captured with
+    the snapshot's phase in one state read. [None] means no status was
+    captured; it does not establish whether a response or an execution
+    occurred. A status does not prove that the body completed or that the
+    provider's model turn has terminated. This in-memory snapshot alone is
+    not a durable execution proof. *)
+
+val generation_receipt_snapshot_response_family
+  :  generation_receipt_snapshot -> response_family
+(** The frozen plan's wire family, retained even if no response arrived. *)
+
+val generation_receipt_snapshot_response_body_sha256
+  :  generation_receipt_snapshot
+  -> string option
+(** Digest of the complete response body captured for this attempt, copied
+    with status and lifecycle from one receipt state. [None] can mean the body
+    was incomplete or its trace had not yet been published; it is not evidence
+    that the provider did not respond. This is not the request body digest. *)
+
+val generation_receipt_snapshot_responses_lifecycle
+  :  generation_receipt_snapshot
+  -> Backend_openai_responses.lifecycle_observation option
+(** The same observation as {!receipt_responses_lifecycle}, copied with the
+    phase and status from the same immutable snapshot. *)
+
 val generation_receipt_snapshot_call_id : generation_receipt_snapshot -> call_id
 val generation_receipt_snapshot_plan_fingerprint : generation_receipt_snapshot -> string
 
@@ -914,10 +956,12 @@ val flow_execution_binding_standing
     exhaustively, so a new constructor is a compile error in AGENT_CORE rather
     than a payload a consumer drops behind [_]. Numeric fields (token counts,
     unix seconds, HTTP status) are always printed: they are what separates a
-    local capacity refusal from a provider failure. Transport errors are
-    rendered by their typed kind, never by their message, because a message
-    can echo request material. A raw provider body is rendered by the
-    caller-supplied [raw_response_to_string]: {!raw_response_sha256_to_string}
+    local capacity refusal from a provider failure. Execution-failure
+    transport errors are rendered by their typed kind, never by their message
+    or free-form string fields in the kind, because those can echo request
+    material. Known stop-reason labels and numeric diagnostic fields are
+    retained. A raw provider body is rendered by the caller-supplied
+    [raw_response_to_string]: {!raw_response_sha256_to_string}
     prints only its sha256, and a consumer that owns a redactor may print a
     redacted excerpt instead. *)
 
@@ -1004,3 +1048,64 @@ val execute_flow_once
   -> ( ('accepted, 'rejection) validated_flow_success
        , ('callback_error, 'rejection) validated_flow_error )
        result
+
+type responses_uncertainty =
+  | Response_headers_unobserved
+  | Response_informational
+  | Response_non_success_status
+  | Response_accepted_for_processing
+  | Response_partial_content
+  | Response_lifecycle_unobserved
+  | Response_queued
+  | Response_in_progress
+  | Response_status_unrecognized
+  | Response_envelope_ambiguous
+  | Response_json_unreadable
+  | Response_refusal_on_success_status
+
+type 'rejection unresolved_responses = private
+  { candidate : flow_attempt_receipt
+  ; observation : generation_receipt_snapshot
+  ; reason : responses_uncertainty
+  ; execution_error : execution_error option
+      (** The execution failure returned by the candidate, when one was
+          returned. [None] is not evidence of remote completion. *)
+  ; evidence : flow_evidence
+  ; prior_rejections : 'rejection semantic_rejection_receipt list
+  }
+
+type ('accepted, 'rejection, 'callback_error) guarded_flow_result =
+  | Guarded_finished of
+      ( ('accepted, 'rejection) validated_flow_success
+      , ('callback_error, 'rejection) validated_flow_error ) result
+  | Guarded_unresolved of 'rejection unresolved_responses
+
+val execute_flow_once_guarded
+  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> clock:_ Eio.Time.clock
+  -> before_measurement_dispatch:
+       (flow_measurement_receipt -> (unit, 'callback_error) result)
+  -> on_measurement_terminal:(flow_measurement_receipt -> (unit, 'callback_error) result)
+  -> before_dispatch:(flow_attempt_receipt -> (unit, 'callback_error) result)
+  -> before_advance:
+       (failed:flow_candidate_failure
+        -> next:flow_candidate_visit
+        -> (unit, 'callback_error) result)
+  -> validate:(flow_success -> ('accepted, 'rejection) semantic_verdict)
+  -> flow_attempt
+  -> ('accepted, 'rejection, 'callback_error) guarded_flow_result
+(** On a dispatched Responses attempt, stop before semantic validation or a
+    successor when headers are absent, informational, non-2xx, 202 Accepted,
+    or 206 Partial Content; when another 2xx response has no usable lifecycle
+    observation, is queued/in progress, has
+    an unrecognized status, or has an ambiguous/unreadable envelope; or when
+    its execution error describes a refusal despite the observed 2xx status.
+    A non-2xx status alone does not prove that an intermediary did not forward
+    the request. Even an actual 429 is held here until a caller has a trusted
+    refusal contract or other sufficient proof. Other codecs retain
+    [execute_flow_once] behavior. Classification binds one immutable snapshot
+    to the execution result of that same attempt after admission finishes.
+    The result is in memory only: the caller must durably bind an unresolved
+    result to the original request before it can safely suppress later wakes.
+    No lifecycle observation alone proves remote termination. Cancellation
+    still propagates. *)

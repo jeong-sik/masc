@@ -43,7 +43,12 @@ let with_temp_workspace f =
    backend gets its recipient lookup before the first write. *)
 let with_board_workspace f =
   with_temp_workspace (fun config ->
-    Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+    Masc_test_deps.Board_test_preparation.prepare
+      ~base_path:config.Workspace.base_path
+      ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
+    Result.get_ok (Board_dispatch.init_jsonl
+      ~base_path:(Env_config_core.base_path ())
+      ~recipient_lookup:every_name_declared ());
     f config)
 
 let make_keepalive_meta ~name =

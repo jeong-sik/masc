@@ -152,7 +152,8 @@ type context_delivery =
     World State section of its [Dynamic_context] block when the renderer's
     partition of that block is known, one row of such a section, the whole
     carrier when its blocks are not known, the Librarian working state, the
-    independent unread observation, or the historical task reference. *)
+    independent unread observation, the historical task reference, or the
+    standing Keeper System prompt sent to Codex as Developer context. *)
 type carried_context =
   | Context_block of Prompt_block_id.t
   | Context_section of Keeper_context_layers.source
@@ -168,6 +169,10 @@ type carried_context =
   | Librarian_unread
   | Tool_result_receipts
   | Historical_task_reference
+  | Codex_system_prompt
+      (** Exact Keeper System prompt plus the resolved native posture note.
+          Start includes it in [developerInstructions]; Resume injects a
+          changed or unacknowledged value before starting the next turn. *)
 
 (** A carried context the vendor session holds, and the sha256 of the exact
     text it was sent. *)

@@ -1,0 +1,146 @@
+{
+  "issue": 27890,
+  "base": "ee98517f7125e764b711151cf049041bdec33116",
+  "source_candidate": "ae3c58687d560382a2facc13930a86e841519ee4",
+  "capture": "Complete raw Actions job logs downloaded via gh api --allow-escape-sequences; retained derivatives strip ANSI, select checkout/suite/error/assertion/summary lines, trim per-line trailing whitespace and keep one final newline.",
+  "source_hashes": {
+    "packages/agent_core/lib/agent/agent.mli": "680f2023abbaa4cd071ed635bfebbdae674e9e0ffa0ad99e3562432c695d4388",
+    "packages/agent_core/lib/base/hooks.mli": "81e23949256f102c6c08f88c265ba22289afe687792718defc46f20ac6a8ed7a",
+    "packages/agent_core/lib/pipeline/pipeline.ml": "e18434a2a5783eb06fde498629d515f789da00d6f94257467639be1e4920af7b",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.ml": "09d83f235f2c42697ca0c15ba5f63ba31f80d998b5031277d5d58eea087cda4e",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli": "f825994ab498452e03a08c8a33050a145eea3ee0f7f4bfe4ab668e2d854e8d47",
+    "packages/agent_core/lib/pipeline/pipeline_execution_scope.ml": "9b951f91854557e9881b3ea7cedc2613a46b4c309f7860758d58415a220ad9db",
+    "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli": "f6d1c362329ca6626b2141f06f05eee549f4eb169a0661a46171106a4063908d",
+    "packages/agent_core/test/test_pipeline.ml": "d39632fd8122e496eb3c1d42b7e1d4401f3055278fd5d6a461edc44ee491bf2b"
+  },
+  "runs": [
+    {
+      "label": "baseline-compile",
+      "workflow": "Test",
+      "run_id": 41263934742,
+      "job_id": 124722672494,
+      "head": "4e6ed25221ec8068ca10df7533b613d3b5cc2ace",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "conclusion": "failure",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41263934742",
+      "raw_log_path": "artifacts/issues-oldest-20261101/terminal-resume-27890/baseline-compile.log",
+      "raw_log_bytes": 79596,
+      "raw_log_sha256": "4efcff6b26c70fb5f3df944af164819724772008277748a16093ff8b57a55285",
+      "retained_file": "baseline-compile.txt",
+      "retained_bytes": 6959,
+      "retained_sha256": "7194e3be336d69e19fc63c72953e00b18ba5a32a75d7078976e1ecdad190ca6e",
+      "result_rows_pass": 0,
+      "result_rows_fail": 0,
+      "workflow_metadata": {
+        "id": 41263934742,
+        "name": "Test",
+        "path": ".github/workflows/test.yml",
+        "head_branch": "fix/terminal-resume-frontier-20261101",
+        "head_sha": "4e6ed25221ec8068ca10df7533b613d3b5cc2ace",
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-11-01T02:08:22Z",
+        "updated_at": "2026-11-01T02:10:36Z",
+        "run_started_at": "2026-11-01T02:08:22Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/41263934742"
+      },
+      "target_suites": [
+        "packages/agent_core/test/test_pipeline"
+      ],
+      "minimal": true
+    },
+    {
+      "label": "baseline-regression",
+      "workflow": "Test",
+      "run_id": 41264217427,
+      "job_id": 124723518656,
+      "head": "fcf39f9b0aa68995d1673505a061b22241644901",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "conclusion": "failure",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41264217427",
+      "raw_log_path": "artifacts/issues-oldest-20261101/terminal-resume-27890/baseline-regression.log",
+      "raw_log_bytes": 166954,
+      "raw_log_sha256": "22c71c45c75d0f896b1fdcba334bc41caa178b76f456844e10f6518d0f35e0f1",
+      "retained_file": "baseline-regression.txt",
+      "retained_bytes": 55759,
+      "retained_sha256": "eb5c168248ff9e818b67333fc33a5ca534b28840be361025118f825a531a5996",
+      "result_rows_pass": 87,
+      "result_rows_fail": 3,
+      "workflow_metadata": {
+        "id": 41264217427,
+        "name": "Test",
+        "path": ".github/workflows/test.yml",
+        "head_branch": "fix/terminal-resume-frontier-20261101",
+        "head_sha": "fcf39f9b0aa68995d1673505a061b22241644901",
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-11-01T02:12:27Z",
+        "updated_at": "2026-11-01T02:14:43Z",
+        "run_started_at": "2026-11-01T02:12:27Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/41264217427"
+      },
+      "target_suites": [
+        "packages/agent_core/test/test_pipeline"
+      ],
+      "minimal": true
+    },
+    {
+      "label": "candidate",
+      "workflow": "Test",
+      "run_id": 41264800274,
+      "job_id": 124725254412,
+      "head": "ae3c58687d560382a2facc13930a86e841519ee4",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "conclusion": "success",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41264800274",
+      "raw_log_path": "artifacts/issues-oldest-20261101/terminal-resume-27890/candidate.log",
+      "raw_log_bytes": 182990,
+      "raw_log_sha256": "02dc1dc2e49c5c032a9c90c7890fdce0f0e0dc13dbaf06dbad1332ed14e8654d",
+      "retained_file": "candidate.txt",
+      "retained_bytes": 77556,
+      "retained_sha256": "b59dc7c81ad2359406856c57d4fb8034dd99acba57ac97d76e7d14fb1a11ded8",
+      "result_rows_pass": 123,
+      "result_rows_fail": 0,
+      "suite_results": {
+        "test_pipeline": 101,
+        "test_pipeline_illegal_hook": 1,
+        "test_execution_journal": 21
+      },
+      "workflow_metadata": {
+        "id": 41264800274,
+        "name": "Test",
+        "path": ".github/workflows/test.yml",
+        "head_branch": "fix/terminal-resume-frontier-20261101",
+        "head_sha": "ae3c58687d560382a2facc13930a86e841519ee4",
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-01T02:20:40Z",
+        "updated_at": "2026-11-01T02:23:00Z",
+        "run_started_at": "2026-11-01T02:20:40Z",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/41264800274"
+      },
+      "target_suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_pipeline_illegal_hook",
+        "packages/agent_core/test/test_execution_journal"
+      ],
+      "minimal": true
+    }
+  ],
+  "limits": [
+    "No local Dune build",
+    "No full regression",
+    "Persisted interruption topology and fresh Agent/projection instances in one process; not an OS crash/restart",
+    "No real provider HTTP, installed runtime, deployment or Dashboard QA"
+  ],
+  "baseline_regression_production_matches_base": true,
+  "source_review": {
+    "base": "ee98517f7125e764b711151cf049041bdec33116",
+    "head": "ae3c58687d560382a2facc13930a86e841519ee4",
+    "reviewed_diff_sha256": "c34884a705a2afb4d65fef0af65798bb76a350d54934eca0ea4b5c1395f565b2",
+    "verdict": "No P0-P2 source findings after response review; not a formal non-author GitHub approval"
+  }
+}

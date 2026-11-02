@@ -136,10 +136,12 @@ let test_unknown_runtime_is_not_claimed_by_the_spawn_path () =
 
 let test_official_client_panel_honors_no_deadline () =
   with_classification_runtime (fun () ->
+    let runtime = match Runtime.get_runtime_by_id official_client_runtime with
+      | Some runtime -> runtime | None -> fail "fixture runtime must resolve" in
     check bool "turn-timeout-s = 0 removes the panel turn deadline" true
       (Option.is_none
          (Masc.Fusion_official_client.For_testing.resolved_timeout_s
-            ~runtime_id:official_client_runtime
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ~override_s:None
             ~default_timeout_s:300.0)))
 ;;
@@ -604,7 +606,10 @@ if control.get("fail_model") == opened["params"]["modelId"]:
     control["error"] = {"kind": "modelError", "message": "paid candidate failure", "retryable": False}
 turn = read()
 assert turn["method"] == "turn/start", turn
-assert turn["params"]["reasoningEffort"] == "high", turn
+with open(os.path.join(HERE, "turn-params.json"), "w") as handle:
+    json.dump(turn["params"], handle)
+if not control.get("record_effort_only", False):
+    assert turn["params"]["reasoningEffort"] == "high", turn
 turn_id = turn["params"]["commandId"]
 text = [part["text"] for part in turn["params"]["input"] if part["type"] == "text"][0]
 with open(os.path.join(HERE, "panel-prompt.txt"), "w") as handle:
@@ -669,6 +674,80 @@ let in_eio_context f =
         ~mono_clock:(Eio.Stdenv.mono_clock env)
         ~sw
         f))
+;;
+
+let claude_effort_panel_fixture = {|#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+args = sys.argv[1:]
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+if "auth" in args and "status" in args:
+    emit({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"})
+    sys.exit(0)
+Path(sys.argv[0]).with_suffix(".argv.json").write_text(json.dumps(args))
+session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
+model = args[args.index("--model") + 1]
+request = json.loads(sys.stdin.readline())
+assert request["type"] == "control_request" and request["request"]["subtype"] == "initialize"
+emit({"type": "control_response", "response": {"subtype": "success", "request_id": request["request_id"], "response": {}}})
+assert json.loads(sys.stdin.readline())["type"] == "user"
+emit({"type": "system", "subtype": "init", "session_id": session})
+emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session, "uuid": "authority-assistant", "message": {
+    "role": "assistant", "model": model, "content": [{"type": "text", "text": "CLAUDE_PANEL_AUTHORITY"}]}})
+emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
+    "uuid": "authority-result", "result": "CLAUDE_PANEL_AUTHORITY", "api_error_status": None})
+for line in sys.stdin:
+    pass
+|}
+;;
+
+let test_claude_panel_effort_ignores_http_catalog requested expected_effort expected_thinking () =
+  let base_dir = Filename.temp_dir "claude-panel-effort-" "" |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  let catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore snapshot;
+    Eio_context.restore_state eio_state;
+    (Llm_provider.Catalog_snapshot.publish catalog);
+    Fs_compat.remove_tree base_dir) @@ fun () ->
+  let cli_path = Filename.concat base_dir "claude-effort-fixture" in
+  write_file ~path:cli_path ~perm:0o700 claude_effort_panel_fixture;
+  with_initialized_runtime ~claude_cli:cli_path (fun () ->
+    let selected = match Runtime.get_runtime_by_id official_client_runtime with
+      | Some runtime -> {runtime with Runtime_instance.model =
+          {runtime.model with reasoning_effort=requested}}
+      | None -> fail "Claude panel fixture must resolve" in
+    let source = {|[[models]]
+model_id = "claude-sonnet-5"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} in
+    (match Llm_provider.Model_catalog.of_toml_string ~source:"Claude Fusion effort collision" source with
+     | Error detail -> fail detail
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
+    (match Llm_provider.Capabilities.for_model_id "claude-sonnet-5" with
+     | Some caps -> check bool "the conflicting HTTP ladder is loaded" true
+         (caps.accepted_reasoning_efforts=Some [Llm_provider.Reasoning_effort.Low])
+     | None -> fail "colliding HTTP model row missing");
+    (match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+       ~images:[] ~base_dir ~runtime:selected ~system_prompt:"Reply with the fixture marker."
+       ~prompt:"Return the fixture marker." ()) with
+     | Ok response -> check string "the actual native panel turn completed"
+         "CLAUDE_PANEL_AUTHORITY" response.text
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail
+         ~runtime_id:official_client_runtime failure));
+    let argv = Yojson.Safe.from_file (cli_path ^ ".argv.json")
+      |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
+    let rec flag key = function
+      | name :: value :: _ when String.equal name key -> Some value
+      | _ :: rest -> flag key rest
+      | [] -> None in
+    check (option string) "Fusion carries the selected effort through native admission"
+      expected_effort (flag "--effort" argv);
+    check (option string) "Fusion distinguishes explicit disabled thinking from omission"
+      expected_thinking (flag "--thinking" argv))
 ;;
 
 (* A host that records where it runs, reads the initialize request and exits
@@ -821,6 +900,40 @@ default = "reloaded.reloaded"
     check bool "Fusion provider reset expires" false
       (Runtime_quota_window.is_exhausted ~scope:selected.quota_scope ~now:500.);
     Runtime_quota_window.reset_for_testing ())
+;;
+
+let test_muse_panel_effort_ignores_http_catalog requested () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+    let selected = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> { runtime with Runtime_instance.model =
+          {runtime.model with reasoning_effort=requested} }
+      | None -> fail "Muse fixture missing" in
+    write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+      {|{"record_effort_only":true}|};
+    let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
+    let source = {|[[models]]
+model_id = "muse-spark-1.3"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} in
+    (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse Fusion effort collision" source with
+     | Error detail -> fail detail
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
+    (match Llm_provider.Capabilities.for_model_id "muse-spark-1.3" with
+     | Some caps -> check bool "conflicting HTTP ladder is actually loaded" true
+         (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+     | None -> fail "the colliding bare catalog row is missing");
+    (match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+       ~images:[] ~base_dir ~runtime:selected ~system_prompt:"" ~prompt:"ping" ()) with
+     | Ok response -> check string "the actual panel turn completed" "MUSE_PANEL_ANSWER" response.text
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure));
+    let params = Yojson.Safe.from_file (Filename.concat base_dir "turn-params.json") in
+    let fields = match params with `Assoc fields -> fields | _ -> fail "turn params are not an object" in
+    check (option string) "MSP receives the selected tier, or no member"
+      (Option.map (fun effort -> Yojson.Safe.to_string
+        (`String (Llm_provider.Reasoning_effort.to_string effort))) requested)
+      (Option.map Yojson.Safe.to_string (List.assoc_opt "reasoningEffort" fields)))
 ;;
 
 (* A Muse Code panelist's session works in a fresh empty directory, not in
@@ -2019,7 +2132,28 @@ let test_sweep_retains_orphaned_antigravity_process_group () =
 let () =
   run
     "fusion official-client panel"
-    [ ( "panelist routing"
+    [ ( "Claude native effort authority",
+        List.map (fun (name, requested, expected_effort, expected_thinking) ->
+          test_case name `Quick
+            (test_claude_panel_effort_ignores_http_catalog requested expected_effort expected_thinking))
+          ["panel omission keeps native defaults", None, None, None;
+           "panel explicit none disables native thinking", Some Llm_provider.Reasoning_effort.None_, None, Some "disabled";
+           "panel minimal keeps native low admission", Some Minimal, Some "low", None;
+           "panel low ignores a colliding HTTP ladder", Some Low, Some "low", None;
+           "panel medium ignores a colliding HTTP ladder", Some Medium, Some "medium", None;
+           "panel high ignores a colliding HTTP ladder", Some High, Some "high", None;
+           "panel xhigh ignores a colliding HTTP ladder", Some XHigh, Some "xhigh", None;
+           "panel max ignores a colliding HTTP ladder", Some Max, Some "max", None;
+           "panel ultra keeps native max admission", Some Ultra, Some "max", None])
+    ; ( "MSP reasoning authority"
+      , List.map (fun requested ->
+          let label = match requested with
+            | None -> "omission"
+            | Some effort -> Llm_provider.Reasoning_effort.to_string effort in
+          test_case ("panel " ^ label ^ " ignores a colliding HTTP ladder") `Quick
+            (test_muse_panel_effort_ignores_http_catalog requested))
+          [None; Some Llm_provider.Reasoning_effort.None_; Some Low; Some Max] )
+    ; ( "panelist routing"
       , [ test_case "vendor token usage conventions" `Quick
             test_official_client_usage_preserves_vendor_cache_conventions
         ; test_case

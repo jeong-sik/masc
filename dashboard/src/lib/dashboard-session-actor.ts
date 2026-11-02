@@ -1,9 +1,16 @@
 import { resolveDashboardActorName, sanitizeDashboardActorName } from './dashboard-actor'
+import { signal, type ReadonlySignal } from '@preact/signals'
 
 let canonicalDashboardActor: string | null = null
+const actorRevision = signal(0)
+export const dashboardActorRevision: ReadonlySignal<number> = actorRevision
 
 export function setCanonicalDashboardActor(value: string | null | undefined): string | null {
-  canonicalDashboardActor = sanitizeDashboardActorName(value) ?? null
+  const next = sanitizeDashboardActorName(value) ?? null
+  if (next !== canonicalDashboardActor) {
+    canonicalDashboardActor = next
+    actorRevision.value++
+  }
   return canonicalDashboardActor
 }
 
@@ -20,5 +27,5 @@ export function currentDashboardActorName(): string {
 }
 
 export function resetDashboardSessionActorForTests(): void {
-  canonicalDashboardActor = null
+  setCanonicalDashboardActor(null)
 }

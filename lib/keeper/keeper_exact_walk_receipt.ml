@@ -1,4 +1,6 @@
 module Exact = Agent_core.Exact_output
+module Responses = Agent_core.Llm_provider.Backend_openai_responses
+module Responses_status = Agent_core.Llm_provider.Responses_stop_reason
 module Failure = Keeper_exact_walk_failure
 open Result.Syntax
 
@@ -22,15 +24,27 @@ type local_stop = Already_started | Attempt_start | Measurement_start | Before_m
 type terminal = Not_started of string | Accepted of visit | Execution_exhausted of failed
   | Candidates_exhausted of failed | Execution_stopped of failed | Semantic_exhausted | Locally_stopped of local_stop
 [@@deriving yojson]
-type http = { flow_id:string option; declared:binding list; visited:int;
+type http_v1 = { flow_id:string option; declared:binding list; visited:int;
   admissions:visit list; attempts:attempt list; measurements:string list;
   advances:advance list; semantic:semantic list; terminal:terminal; generation_sent:bool }
 [@@deriving yojson]
+type response_family = Responses_codec | Other_codec [@@deriving yojson]
+type observed_status = Queued | In_progress | Completed | Failed | Incomplete | Cancelled
+  | Other_digest of string [@@deriving yojson]
+type lifecycle = Observed_status of observed_status | Ambiguous_envelope | Unreadable_json
+[@@deriving yojson]
+type response_observation = { visit:visit; call_id:string; family:response_family;
+  http_status:int option; body_sha256:string option; lifecycle:lifecycle option }
+[@@deriving yojson]
+type response_observations = response_observation list [@@deriving yojson]
+type http = { legacy:http_v1; response_observations:response_observations }
 type cli_result = Not_reached | Prompt_unavailable | Answered of string | Exhausted [@@deriving yojson]
 type cli = { visited:string list; dispatched:string list; failures:Failure.cli_observation list; result:cli_result }
 [@@deriving yojson]
-type t = { version:int; declared_http:string list; excluded_http:string list;
-  declared_cli:string list; http:http; cli:cli } [@@deriving yojson]
+type walk = { version:int; declared_http:string list; excluded_http:string list;
+  declared_cli:string list; http:http_v1; cli:cli } [@@deriving yojson]
+type t = { walk:walk; observations:response_observations option }
+let response_observations receipt = receipt.observations
 
 let cli ~visited ~dispatched ~failures ~result =
   {visited;dispatched;failures=List.map Failure.cli_observation failures;result}
@@ -61,8 +75,18 @@ let semantic ~rejection_to_string (receipt : 'a Exact.semantic_rejection_receipt
   {visit=visit (Exact.flow_success_candidate receipt.transport_success).visit;
    raw_sha=(Exact.flow_success_output receipt.transport_success).raw_response.body_sha256;
    detail=rejection_to_string receipt.rejection}
+let response_family = function
+  | Exact.Openai_responses_codec -> Responses_codec | Other_http_codec -> Other_codec
+let lifecycle = function
+  | Responses.Ambiguous_envelope -> Ambiguous_envelope
+  | Responses.Unreadable_json -> Unreadable_json
+  | Responses.Observed_status status ->
+    Observed_status (match status with
+      | Responses_status.Queued -> Queued | In_progress -> In_progress | Completed -> Completed
+      | Failed -> Failed | Incomplete -> Incomplete | Cancelled -> Cancelled
+      | Other value -> Other_digest Agent_core_sha256.(to_hex (digest_string value)))
 let capture evidence ~semantic ~terminal =
-  {flow_id=Some (Exact.flow_id_to_string evidence.Exact.flow_id);
+  let walk={flow_id=Some (Exact.flow_id_to_string evidence.Exact.flow_id);
    declared=List.map binding evidence.declared_candidate_snapshot;
    visited=Exact.candidate_visit_count_to_int evidence.candidate_visit_count;
    admissions=List.map (function
@@ -77,10 +101,17 @@ let capture evidence ~semantic ~terminal =
       body=Exact.generation_receipt_snapshot_request_body_sha256 a.receipt}) evidence.attempts;
    measurements=List.map Exact.measurement_receipt_snapshot_to_string evidence.measurements;
    advances=List.map (fun (a : Exact.flow_advance_receipt) -> {failed=failed_snapshot a.failed;next=visit a.next}) evidence.advances;
-   semantic;terminal;generation_sent=(Exact.flow_evidence_generation_dispatch evidence=Exact.Generation_dispatch_started)}
+   semantic;terminal;generation_sent=(Exact.flow_evidence_generation_dispatch evidence=Exact.Generation_dispatch_started)} in
+  let observations=List.map (fun (a : Exact.flow_attempt_snapshot) ->
+    {visit=visit a.visit;call_id=Exact.call_id_to_string (Exact.generation_receipt_snapshot_call_id a.receipt);
+     family=response_family (Exact.generation_receipt_snapshot_response_family a.receipt);
+     http_status=Exact.generation_receipt_snapshot_http_status a.receipt;
+     body_sha256=Exact.generation_receipt_snapshot_response_body_sha256 a.receipt;
+     lifecycle=Option.map lifecycle (Exact.generation_receipt_snapshot_responses_lifecycle a.receipt)}) evidence.attempts in
+  {legacy=walk;response_observations=observations}
 let http_not_started ~detail =
-  {flow_id=None;declared=[];visited=0;admissions=[];attempts=[];measurements=[];
-   advances=[];semantic=[];terminal=Not_started detail;generation_sent=false}
+  {legacy={flow_id=None;declared=[];visited=0;admissions=[];attempts=[];measurements=[];
+   advances=[];semantic=[];terminal=Not_started detail;generation_sent=false};response_observations=[]}
 let http_success (success : ('a,'b) Exact.validated_flow_success) ~rejection_to_string =
   capture (Exact.flow_success_evidence success.transport_success)
     ~semantic:(List.map (semantic ~rejection_to_string) success.prior_rejections)
@@ -117,6 +148,7 @@ let terminal_failure = function
   | Execution_exhausted failed | Candidates_exhausted failed | Execution_stopped failed -> Some failed
   | Not_started _ | Accepted _ | Semantic_exhausted | Locally_stopped _ -> None
 let failure_evidence receipt =
+  let receipt=receipt.walk in
   let prior = List.fold_left (fun acc (advance : advance) -> Failure.combine acc (failure advance.failed))
     Failure.empty receipt.http.advances in
   let prior = Option.fold ~none:prior ~some:(fun last -> Failure.combine prior (failure last))
@@ -127,8 +159,9 @@ let failure_evidence receipt =
     | Prompt_unavailable | Answered _ | Exhausted -> Failure.without_measured_cli_capacity prior in
   List.fold_left (fun acc observed -> Failure.combine acc (Failure.of_cli_observation observed)) prior receipt.cli.failures
 let generation_dispatch receipt =
+  let receipt=receipt.walk in
   if receipt.http.generation_sent then Exact.Generation_dispatch_started else Exact.No_generation_dispatch
-let answered_slot receipt = match receipt.cli.result,receipt.http.terminal with
+let answered_slot receipt = let receipt=receipt.walk in match receipt.cli.result,receipt.http.terminal with
   | Answered slot,_ -> Some slot
   | (Not_reached | Prompt_unavailable | Exhausted),Accepted visit -> Some visit.candidate_id
   | (Not_reached | Prompt_unavailable | Exhausted),(Not_started _ | Execution_exhausted _
@@ -138,6 +171,7 @@ let dispatched_failure = function
   | Execution_failed {cause;_} -> Failure.dispatched_valid_output_failure cause
 let exhausted_input_refusals receipt =
   let evidence=failure_evidence receipt in
+  let receipt=receipt.walk in
   match receipt.http.terminal,evidence.provider_input_refusals with
   | Execution_exhausted last,(_::_ as causes)
     when receipt.declared_cli=[] && receipt.excluded_http=[] && receipt.http.semantic=[]
@@ -273,13 +307,105 @@ let validate receipt =
     | (Not_started _|Execution_exhausted _|Candidates_exhausted _|Semantic_exhausted),
       (Not_reached|Prompt_unavailable|Answered _|Exhausted) -> true) "CLI ran after a stopped HTTP flow"
 
+let validate_observations walk observations =
+  let h=walk.http in
+  let* ()=check (List.length h.attempts=List.length observations)
+    "response observations differ from the original attempts" in
+  let* ()=check (unique (List.map (fun (observation : response_observation) -> observation.call_id) observations))
+    "response observations repeat an attempt identity" in
+  let failures=List.map (fun (advance : advance) -> advance.failed) h.advances
+    @ (match h.terminal with
+      | Execution_exhausted f | Candidates_exhausted f | Execution_stopped f
+      | Locally_stopped (Before_advance f) -> [f]
+      | Not_started _ | Accepted _ | Semantic_exhausted
+      | Locally_stopped (Already_started | Attempt_start | Measurement_start | Before_measurement
+                        | Measurement_terminal | Before_dispatch) -> []) in
+  let original_raw = List.filter_map (function
+    | Execution_failed {visit;raw_sha=Some raw;_} -> Some (visit,raw)
+    | Execution_failed {raw_sha=None;_} | Rejected _ -> None) failures
+    @ List.map (fun (semantic : semantic) -> semantic.visit,semantic.raw_sha) h.semantic in
+  List.fold_left (fun state ((attempt : attempt),(observation : response_observation)) ->
+    let* ()=state in
+    let* ()=check (attempt.visit=observation.visit && String.equal attempt.call_id observation.call_id)
+      "response observation belongs to another attempt" in
+    let has_headers=match attempt.phase with Response_received | Terminal -> true
+      | Fresh | Before_wire | Wire_started -> false in
+    let* ()=check (has_headers || observation.http_status=None)
+      "response status before response observation" in
+    let* ()=check (attempt.phase<>Terminal || observation.http_status<>None)
+      "terminal response has no observed status" in
+    let* ()=check (Option.fold ~none:true ~some:valid_digest observation.body_sha256
+      && (observation.body_sha256=None || observation.http_status<>None))
+      "invalid response body digest or missing response status" in
+    let* ()=check (match observation.lifecycle,observation.family,observation.http_status,observation.body_sha256 with
+      | None,_,_,_ -> true
+      | Some lifecycle,Responses_codec,Some status,Some _ when status>=200 && status<300 ->
+        (match lifecycle with Observed_status (Other_digest digest) -> valid_digest digest
+         | Observed_status (Queued | In_progress | Completed | Failed | Incomplete | Cancelled)
+         | Ambiguous_envelope | Unreadable_json -> true)
+      | Some _,(Responses_codec | Other_codec),_,_ -> false)
+      "invalid Responses lifecycle observation" in
+    let body_deadline=List.exists (function
+      | Execution_failed {visit;cause;_} -> visit=observation.visit && Failure.api_observation_is_body_deadline cause
+      | Rejected _ -> false) failures in
+    let* ()=check (not body_deadline || (attempt.phase=Response_received && Option.fold ~none:false
+      ~some:(fun status -> status>=200 && status<300) observation.http_status
+      && observation.body_sha256=None && observation.lifecycle=None))
+      "body deadline differs from its response observation" in
+    let successful = List.exists (fun (semantic : semantic) -> semantic.visit=observation.visit) h.semantic
+      || (match h.terminal with Accepted visit -> visit=observation.visit
+          | Not_started _ | Execution_exhausted _ | Candidates_exhausted _ | Execution_stopped _
+          | Semantic_exhausted | Locally_stopped _ -> false) in
+    let successful_lifecycle=match observation.family,observation.lifecycle with
+      | Other_codec,None -> true
+      | Responses_codec,Some (Observed_status Completed | Ambiguous_envelope) -> true
+      | Other_codec,Some _ | Responses_codec,(None | Some (Unreadable_json
+          | Observed_status (Queued | In_progress | Failed | Incomplete | Cancelled | Other_digest _))) -> false in
+    let* ()=check (not successful || (attempt.phase=Terminal
+      && Option.fold ~none:false ~some:(fun status -> status>=200 && status<300) observation.http_status
+      && observation.body_sha256<>None
+      && successful_lifecycle))
+      "successful visit lacks its complete response observation" in
+    check (List.for_all (fun (visit,original) -> visit<>observation.visit
+      || observation.body_sha256=Some original) original_raw)
+      "response digest differs from the original outcome") (Ok ()) (List.combine h.attempts observations)
+
+let make_internal ~version ~declared_http ~excluded_http ~declared_cli ~(http : http) ~cli =
+  let walk={version=1;declared_http;excluded_http;declared_cli;http=http.legacy;cli} in
+  let* ()=validate walk in
+  let* observations=match version with
+    | `V1 -> Ok None
+    | `V2 -> let* ()=validate_observations walk http.response_observations in
+      Ok (Some http.response_observations) in
+  Ok {walk;observations}
 let make ~declared_http ~excluded_http ~declared_cli ~http ~cli =
-  let value={version=1;declared_http;excluded_http;declared_cli;http;cli} in
-  let* ()=validate value in Ok value
-let to_json = to_yojson
+  make_internal ~version:`V1 ~declared_http ~excluded_http ~declared_cli ~http ~cli
+let make_v2 ~declared_http ~excluded_http ~declared_cli ~http ~cli =
+  make_internal ~version:`V2 ~declared_http ~excluded_http ~declared_cli ~http ~cli
+let to_json receipt =
+  match walk_to_yojson receipt.walk,receipt.observations with
+  | json,None -> json
+  | `Assoc fields,Some observations -> `Assoc
+      (("response_observations",response_observations_to_yojson observations)
+       :: List.map (fun (key,value) -> key,if key="version" then `Int 2 else value) fields)
+  | _,Some _ -> invalid_arg "original walk encoding must be an object"
 let of_json json =
-  let* value=of_yojson json in
+  let* walk,observations=match json with
+    | `Assoc fields -> (match List.assoc_opt "version" fields with
+      | Some (`Int 1) -> let* walk=walk_of_yojson json in Ok (walk,None)
+      | Some (`Int 2) ->
+        let* encoded=Option.to_result ~none:"missing response observations" (List.assoc_opt "response_observations" fields) in
+        let* observations=response_observations_of_yojson encoded in
+        let v1=`Assoc (List.filter_map (fun (key,value) ->
+          if key="response_observations" then None
+          else Some (key,if key="version" then `Int 1 else value)) fields) in
+        let* walk=walk_of_yojson v1 in Ok (walk,Some observations)
+      | Some _ | None -> Error "unknown original walk version")
+    | _ -> Error "original walk evidence must be an object" in
+  let value={walk;observations} in
   let* original=Lane_addon_action.canonical json in
   let* encoded=Lane_addon_action.canonical (to_json value) in
   let* ()=check (original=encoded) "unknown or noncanonical original walk evidence" in
-  let* ()=validate value in Ok value
+  let* ()=validate walk in
+  let* ()=match observations with None -> Ok () | Some observations -> validate_observations walk observations in
+  Ok value

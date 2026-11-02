@@ -2,16 +2,6 @@
 
 open Agent_core
 
-(* PR #33593 retuned deepseek prices without touching this suite; the
-   hardcoded 1.305 from af9a7190 was a copy of the pre-retune catalog.
-   Read the catalog instead, the way test_provider declared_pricing does. *)
-let declared_deepseek_price_sum () =
-  Model_catalog_test_support.install_embedded_model_catalog ~suite:"agent_turn";
-  match Llm_provider.Pricing.pricing_for_model_opt
-    ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek") "deepseek-v4-pro" with
-  | Some pricing -> pricing.input_per_million +. pricing.output_per_million
-  | None -> Alcotest.failf "expected catalog pricing for deepseek/deepseek-v4-pro"
-
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -323,21 +313,12 @@ let test_accumulate_usage_with_response () =
     ; output_tokens = 50
     ; cache_creation_input_tokens = 0
     ; cache_read_input_tokens = 0
-    ; cost_usd = None
+    ; cost_usd = Some 0.25
     }
-  in
-  let provider_config =
-    Llm_provider.Provider_config.make
-      ~kind:Anthropic
-      ~provider_id:"claude"
-      ~model_id:"claude-sonnet-5"
-      ~base_url:"https://api.anthropic.com"
-      ()
   in
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:(Some provider_config)
       ~response_model:(Some "claude-sonnet-5")
       ~response_usage:(Some response_usage)
   in
@@ -345,8 +326,8 @@ let test_accumulate_usage_with_response () =
   Alcotest.(check int) "output tokens" 50 result.total_output_tokens;
   Alcotest.(check int) "reported response counted" 1 result.api_calls;
   Alcotest.(check int) "payload is present" 0 result.missing_usage_responses;
-  Alcotest.(check (option reject)) "declared provider has pricing" None result.pricing_gap;
-  Alcotest.(check bool) "cost > 0" true (result.estimated_cost_usd > 0.0)
+  Alcotest.(check (option reject)) "observed cost has no pricing gap" None result.pricing_gap;
+  Alcotest.(check (float 1e-9)) "observed cost is accumulated" 0.25 result.estimated_cost_usd
 ;;
 
 let test_accumulate_usage_none_response () =
@@ -354,7 +335,6 @@ let test_accumulate_usage_none_response () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:None
   in
@@ -370,7 +350,7 @@ let test_usage_payload_gaps_preserve_known_subtotals () =
       cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
       cost_usd = Some 0.0 } in
   let accumulate current response_usage =
-    Agent_turn.accumulate_usage ~current_usage:current ~provider_config:None
+    Agent_turn.accumulate_usage ~current_usage:current
       ~response_model:None ~response_usage in
   let zero = accumulate Types.empty_usage (Some (observed 0)) in
   Alcotest.(check int) "measured zero has a payload" 0 zero.missing_usage_responses;
@@ -393,7 +373,7 @@ let test_usage_payload_gaps_preserve_known_subtotals () =
     true (restored = missing_again)
 ;;
 
-let test_accumulate_usage_unknown_provider () =
+let test_accumulate_usage_unknown_cost () =
   let current = Types.empty_usage in
   let response_usage : Types.api_usage =
     { input_tokens = 1000
@@ -403,23 +383,14 @@ let test_accumulate_usage_unknown_provider () =
     ; cost_usd = None
     }
   in
-  let provider_config =
-    Llm_provider.Provider_config.make
-      ~kind:OpenAI_compat
-      ~provider_id:"local"
-      ~model_id:"qwen3.5"
-      ~base_url:"http://localhost:8085"
-      ()
-  in
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:(Some provider_config)
       ~response_model:(Some "qwen3.5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check (float 0.001)) "unknown price adds no invented cost" 0.0 result.estimated_cost_usd;
-  Alcotest.(check bool) "a local URL does not establish a free price" true
+  Alcotest.(check bool) "unknown cost is not a free price" true
     (result.pricing_gap = Some (Types.Pricing_unavailable "qwen3.5"));
   Alcotest.(check int) "unknown pricing is not missing usage" 0 result.missing_usage_responses
 ;;
@@ -434,33 +405,20 @@ let test_accumulate_usage_prefers_response_cost () =
     ; cost_usd = Some 0.4321
     }
   in
-  let provider_config =
-    Llm_provider.Provider_config.make
-      ~kind:Anthropic
-      ~provider_id:"anthropic"
-      ~model_id:"claude-sonnet-5"
-      ~base_url:"https://api.anthropic.com"
-      ()
-  in
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:(Some provider_config)
       ~response_model:(Some "claude-sonnet-5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check (float 0.0001)) "uses response cost" 0.4321 result.estimated_cost_usd
 ;;
 
-let test_accumulate_usage_uses_typed_provider_and_response_model () =
-  let provider_config =
-    Llm_provider.Provider_config.make
-      ~kind:OpenAI_compat
-      ~provider_id:"deepseek"
-      ~model_id:"configured-model-before-provider-rotation"
-      ~base_url:"https://api.deepseek.com"
-      ()
-  in
+let test_accumulate_usage_does_not_reprice_known_model () =
+  Model_catalog_test_support.install_embedded_model_catalog ~suite:"agent_turn";
+  Alcotest.(check bool) "fixture model has declared rates" true
+    (Option.is_some (Llm_provider.Pricing.pricing_for_model_opt
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek") "deepseek-v4-pro"));
   let response_usage : Types.api_usage =
     { input_tokens = 1_000_000
     ; output_tokens = 1_000_000
@@ -472,25 +430,16 @@ let test_accumulate_usage_uses_typed_provider_and_response_model () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:Types.empty_usage
-      ~provider_config:(Some provider_config)
       ~response_model:(Some "deepseek-v4-pro")
       ~response_usage:(Some response_usage)
   in
-  Alcotest.(check (float 0.0001))
-    "exact provider and returned model price"
-    (declared_deepseek_price_sum ())
-    result.estimated_cost_usd;
-  Alcotest.(check (option reject)) "no pricing gap" None result.pricing_gap
+  Alcotest.(check (float 0.0001)) "model identity does not authorize an estimate"
+    0.0 result.estimated_cost_usd;
+  Alcotest.(check bool) "unannotated cost remains a gap" true
+    (result.pricing_gap = Some (Types.Pricing_unavailable "deepseek-v4-pro"))
 ;;
 
-let test_accumulate_usage_records_incomplete_cache_pricing () =
-  let provider_config =
-    Llm_provider.Provider_config.make
-      ~kind:OpenAI_compat
-      ~model_id:"qwen3.5"
-      ~base_url:"https://example.invalid"
-      ()
-  in
+let test_accumulate_usage_unknown_cost_preserves_cache_counts () =
   let response_usage : Types.api_usage =
     { input_tokens = 100
     ; output_tokens = 10
@@ -502,11 +451,12 @@ let test_accumulate_usage_records_incomplete_cache_pricing () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:Types.empty_usage
-      ~provider_config:(Some provider_config)
       ~response_model:(Some "qwen3.5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check (float 0.0001)) "no invented cost" 0.0 result.estimated_cost_usd;
+  Alcotest.(check int) "observed cache usage survives the price gap" 50
+    result.total_cache_read_input_tokens;
   match result.pricing_gap with
   | Some (Types.Pricing_unavailable "qwen3.5") -> ()
   | Some gap -> Alcotest.failf "unexpected pricing gap: %s" (Types.show_pricing_gap gap)
@@ -640,7 +590,6 @@ let test_accumulate_usage_no_provider () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:(Some response_usage)
   in
@@ -671,7 +620,6 @@ let test_accumulate_usage_cumulative () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:(Some response_usage)
   in
@@ -966,19 +914,19 @@ let () =
         ; Alcotest.test_case "none response" `Quick test_accumulate_usage_none_response
         ; Alcotest.test_case "payload gaps preserve known subtotals" `Quick
             test_usage_payload_gaps_preserve_known_subtotals
-        ; Alcotest.test_case "unknown provider" `Quick test_accumulate_usage_unknown_provider
+        ; Alcotest.test_case "unknown cost" `Quick test_accumulate_usage_unknown_cost
         ; Alcotest.test_case
             "prefers response cost"
             `Quick
             test_accumulate_usage_prefers_response_cost
         ; Alcotest.test_case
-            "typed provider and response model"
+            "known model does not reprice unknown cost"
             `Quick
-            test_accumulate_usage_uses_typed_provider_and_response_model
+            test_accumulate_usage_does_not_reprice_known_model
         ; Alcotest.test_case
-            "incomplete cache pricing"
+            "unknown cost preserves cache counts"
             `Quick
-            test_accumulate_usage_records_incomplete_cache_pricing
+            test_accumulate_usage_unknown_cost_preserves_cache_counts
         ; Alcotest.test_case "no provider" `Quick test_accumulate_usage_no_provider
         ; Alcotest.test_case "cumulative" `Quick test_accumulate_usage_cumulative
         ] )

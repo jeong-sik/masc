@@ -75,17 +75,15 @@ let eio_context () =
    panelist runs the same client the keeper would, minus the parts a panelist
    has no business using. *)
 
-(* 데드라인 우선순위: preset 그룹의 [panel_timeout_s]([override_s]) > 런타임이 추론한
-   turn timeout > 어댑터 admission timeout. preset 이 가장 강한 이유는 그것이 이
-   요청에 대한 소비자의 명시 선언이기 때문이다 — 런타임 값은 모든 소비자가 공유하는
-   기본값이라, preset 이 그것을 이기지 못하면 "이 심의는 240s 까지 기다린다" 를
-   표현할 방법이 없다. [override_s] 는 [Fusion_policy.valid_timeout_s] 를 통과한
-   값만 들어온다(config 로드에서 판정). *)
-let resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s =
+(* The preset's explicit declaration wins over the selected model default.
+   Otherwise use that model's captured declaration, including absence and an
+   explicit unbounded value. Native admission remains independently bounded.
+   [override_s] has passed [Fusion_policy.valid_timeout_s] at config load. *)
+let resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s =
   match override_s with
   | Some _ as declared -> declared
   | None ->
-    Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:default_timeout_s
+    Runtime_inference.turn_timeout_s_of_declared ~default:default_timeout_s turn_timeout_s
 ;;
 
 let bounded_claude_probe_config ~fallback_timeout_s
@@ -96,29 +94,29 @@ let bounded_claude_probe_config ~fallback_timeout_s
   | None -> { config with timeout_s = Some fallback_timeout_s }
 ;;
 
-let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schema
+let claude_config ~base_dir ~turn_timeout_s ~system_prompt ~override_s ~output_schema
   (execution : Runtime_execution.claude_code)
   : Runtime_claude_code.config
   =
   { cli_path = execution.cli_path
-  ; account_home = execution.account_home
+  ; account_home = Runtime_official_account.Captured execution.account_home
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
   ; system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
-      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
+      resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
   ; output_schema
   }
 ;;
 
-let codex_config ~runtime ~runtime_id ~system_prompt ~override_s ~output_schema
+let codex_config ~runtime ~system_prompt ~override_s ~output_schema
   (execution : Runtime_execution.codex_app_server)
   : Runtime_codex_app_server.config
   =
   { cli_path = execution.cli_path
-  ; account_home = execution.account_home
+  ; account_home = Runtime_official_account.Captured execution.account_home
   ; isolated_home = None
   ; model = execution.model
   ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
@@ -126,12 +124,13 @@ let codex_config ~runtime ~runtime_id ~system_prompt ~override_s ~output_schema
   ; developer_instructions = system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
-      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
+      resolved_timeout_s ~turn_timeout_s:runtime.model.turn_timeout_s ~override_s
+        ~default_timeout_s:execution.timeout_s
   ; output_schema
   }
 ;;
 
-let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
+let antigravity_config ~base_dir ~turn_timeout_s ~override_s ~output_schema
   (execution : Runtime_execution.antigravity_cli)
   : Runtime_antigravity.config
   =
@@ -149,12 +148,12 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   ; disable_slash_commands = true
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
-      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
+      resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
   ; output_schema
   }
 ;;
 
-let muse_config ~(model_settings : Runtime_schema.model_spec) ~override_s (execution : Runtime_execution.muse_serve)
+let muse_config ~turn_timeout_s ~override_s (execution : Runtime_execution.muse_serve)
   : Runtime_muse_serve.config
   =
   { (Runtime_muse_serve.default_config ()) with
@@ -166,11 +165,7 @@ let muse_config ~(model_settings : Runtime_schema.model_spec) ~override_s (execu
     native = Runtime_native_tools.muse_default
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
-      (match override_s, model_settings.turn_timeout_s with
-       | Some seconds, _ -> Some seconds
-       | None, None -> Some execution.timeout_s
-       | None, Some seconds when seconds <= 0. -> None
-       | None, Some seconds -> Some seconds)
+      resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
   }
 ;;
 
@@ -209,16 +204,6 @@ let muse_usage (usage : Runtime_muse_msp.token_usage) : Fusion_types.usage =
 let optional_usage convert = function
   | Some usage -> convert usage
   | None -> Fusion_types.zero_usage
-
-let muse_reasoning_effort ~requested ~model =
-  Runtime_inference.clamp_reasoning_effort_to_catalog ~model_id:(Some model)
-    ~requested
-  |> Option.map (function
-    | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
-    | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
-    | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
-    | Ultra -> Effort_ultra)
-;;
 
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string; usage : Fusion_types.usage }
@@ -540,7 +525,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
   let system_prompt =
     match String.trim system_prompt with "" -> None | text -> Some text
   in
-  let runtime_id = runtime.id in
   (* Capture ownership with the execution before any subprocess yields. A
      runtime catalog reload may change the credential alias under this id. *)
   let execution = runtime.Runtime_instance.execution in
@@ -613,7 +597,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       "runtime is Agent_core-owned; it belongs on the Async_agent path")
   | Runtime_execution.Claude_code execution ->
     let config =
-      claude_config ~base_dir ~runtime_id ~system_prompt ~override_s:timeout_s
+      claude_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s
+        ~system_prompt ~override_s:timeout_s
         ~output_schema execution
     in
     let probe_config =
@@ -632,6 +617,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Ok admitted_subscription ->
        (match
           Runtime_claude_code.run_turn
+            ?reasoning_effort:(Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+              runtime.model.reasoning_effort)
             ~on_stream_event:(function
               | Runtime_claude_code.Usage_reported {usage; _} -> on_usage (claude_usage usage)
               | Runtime_claude_code.Conversation_compacted | Runtime_claude_code.Turn_started _
@@ -660,7 +647,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         | Error error -> claude_failed ~admission:false error))
   | Runtime_execution.Codex_app_server execution ->
     let config =
-      codex_config ~runtime ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
+      codex_config ~runtime ~system_prompt ~override_s:timeout_s ~output_schema execution
     in
     (* Fresh-thread totals are snapshots. A window fill replaces the vendor
        counter, so retain the last observed spend and ignore later reset totals. *)
@@ -698,7 +685,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     Error (Setup_failure "Antigravity transport does not support image input")
   | Runtime_execution.Antigravity_cli execution ->
     let config =
-      antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
+      antigravity_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s
+        ~override_s:timeout_s ~output_schema execution
     in
     let* prompt =
       framed_prompt ~system_prompt ~prompt
@@ -746,7 +734,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          "Muse Code's session protocol has no output-schema channel, so a \
           schema-held answer cannot be asked of it")
   | Runtime_execution.Muse_serve execution ->
-    let config = muse_config ~model_settings:runtime.model ~override_s:timeout_s execution in
+    let config = muse_config ~turn_timeout_s:runtime.model.turn_timeout_s ~override_s:timeout_s execution in
     let* prompt =
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
@@ -778,8 +766,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     (match
        Runtime_muse_serve.run_turn
          ~storage_root
-         ?reasoning_effort:(muse_reasoning_effort
-           ~requested:runtime.model.reasoning_effort ~model:execution.model)
+         ?reasoning_effort:(Option.map Runtime_muse_msp.reasoning_effort_of_requested
+           runtime.model.reasoning_effort)
          ~on_stream_event:(function
            | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
            | Runtime_muse_serve.Subscription_usage_observed usage ->

@@ -252,6 +252,39 @@ let test_delete_goal_prunes_goal_task_links () =
           String.equal goal_id "g-2" && List.mem "task-c" task_ids)
        links)
 
+let test_delete_refuses_duplicate_goal_identity () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "duplicate" "First Goal" in
+  let duplicate = { goal with title = "Different Goal"; phase = Goal_phase.Verifying;
+                              criterion_revision = "other-revision" } in
+  let independent = make_goal "independent" "Independent Goal" in
+  (match Goal_store.write_state_result config
+      { pending_events = []; pending_notifications = []; version = 3; updated_at = iso_now ();
+        goals = [goal; duplicate; independent] } with
+   | Ok () -> () | Error detail -> fail detail);
+  Workspace_goal_index.write_goal_task_links config
+    [goal.id, ["task-a"]; independent.id, ["task-b"]];
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let links = Workspace_goal_index.goal_task_links_path config in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror, Fs_compat.load_file links in
+  (match Goal_store.delete_goal config ~goal_id:goal.id with
+   | Error (Goal_store.Ambiguous_goal id) -> check string "ambiguous Goal ID" goal.id id
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error)
+   | Ok _ -> fail "ambiguous Goal was deleted");
+  let goals_before, mirror_before, links_before = before in
+  check string "primary unchanged" goals_before (Fs_compat.load_file primary);
+  check string "mirror unchanged" mirror_before (Fs_compat.load_file mirror);
+  check string "links not pruned" links_before (Fs_compat.load_file links);
+  (match Goal_store.delete_goal config ~goal_id:independent.id with
+   | Ok Goal_store.Deleted -> ()
+   | Ok (Goal_store.Deleted_with_orphaned_links detail) -> fail detail
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  check bool "independent delete keeps both decoded Goal rows" true ((available config).goals = [goal; duplicate]);
+  let remaining_links = Workspace_goal_index.read_goal_task_links config in
+  check bool "ambiguous Goal link remains" true
+    (List.exists (fun (id, tasks) -> String.equal id goal.id && List.mem "task-a" tasks) remaining_links)
+
 let test_delete_goal_wraps_prune_failure_after_goal_delete () =
   with_workspace
   @@ fun config ->
@@ -329,7 +362,7 @@ let test_status_field_no_longer_decodes () =
    | Ok _ -> fail "upsert_goal wrote over an undecodable store"
    | Error (Goal_store.Store_unavailable u) ->
        check string "refusal names the store path" (Goal_store.goals_path config) u.file
-   | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
+   | Error (Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _
            | Goal_store.Persist_failed _ as other) ->
        fail ("refusal was not Store_unavailable: " ^ write_error_msg other));
   let on_disk_after = In_channel.with_open_bin (Goal_store.goals_path config)
@@ -395,6 +428,124 @@ let test_other_unknown_goal_field_still_fails () =
   | Error (Goal_store.Store_unavailable
              { reason = Goal_store.Schema_rejected { field = "unexpected_assignment"; _ }; _ }) -> ()
   | Error other -> fail ("unknown field write was not Store_unavailable: " ^ write_error_msg other)
+
+let test_duplicate_document_members_refuse_writes () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "goal-duplicate-member" "original title" in
+  let independent = make_goal "independent-goal" "another title" in
+  (match Goal_store.write_state_result config
+      { version = 1; updated_at = iso_now (); goals = [goal; independent];
+        pending_events = []; pending_notifications = [] } with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let valid = Fs_compat.load_file primary in
+  let mirror_before = Fs_compat.load_file mirror in
+  let root_fields, goal_fields, independent_row =
+    match Yojson.Safe.from_string valid with
+    | `Assoc fields ->
+        (match List.assoc_opt "goals" fields with
+         | Some (`List [`Assoc row; other]) -> fields, row, other
+         | _ -> fail "fixture does not contain two Goals")
+    | _ -> fail "fixture is not a document object" in
+  let duplicate field value before fields =
+    let fields = if List.mem_assoc field fields then fields else (field, `Null) :: fields in
+    if before then (field, value) :: fields else fields @ [field, value] in
+  let cases = [
+    `Root, "goals", "goals", `List [];
+    `Root, "version", "version", `Int 42;
+    `Root, "pending_events", "pending_events", `List [];
+    `Root, "pending_notifications", "pending_notifications", `List [];
+    `Root, "", "$", `Int 1;
+    `Root, " ", "$", `Int 1;
+    `Root, "name with spaces", "$", `Int 1;
+    `Root, "\t", "$", `Int 1;
+    `Root, "\n", "$", `Int 1;
+    `Root, "bad\027name", "$", `Int 1;
+    `Root, "비가시", "$", `Int 1;
+    `Goal, "id", "id", `String "other-goal";
+    `Goal, "id", "id", `String goal.id;
+    `Goal, "title", "title", `String "different criterion";
+    `Goal, "criterion_revision", "criterion_revision", `String "other-revision";
+    `Goal, "phase", "phase", `String "dropped";
+    `Goal, "priority", "priority", `Int 1;
+    `Goal, "metric", "metric", `Null;
+    `Goal, "", "goals", `Int 1;
+    `Goal, " ", "goals", `Int 1;
+    `Goal, "name with spaces", "goals", `Int 1;
+    `Goal, "\t", "goals", `Int 1;
+    `Goal, "\n", "goals", `Int 1;
+    `Goal, "bad\027name", "goals", `Int 1;
+    `Goal, "비가시", "goals", `Int 1;
+    `Goal, "$", "$", `Int 1;
+    `Single_goal, "", "goals", `Int 1;
+    `Single_goal, " ", "goals", `Int 1;
+    `Single_goal, "\n", "goals", `Int 1;
+    `Single_goal, "$", "$", `Int 1;
+  ] in
+  List.iter (fun (level, field, expected_location, value) ->
+    List.iter (fun before ->
+      let with_row fields =
+        let row = `Assoc fields in
+        `Assoc (List.map (fun (key, old) ->
+          if String.equal key "goals" then key, `List [row; independent_row] else key, old) root_fields) in
+      let json = match level with
+        | `Root -> `Assoc (duplicate field value before root_fields)
+        | `Goal -> with_row (duplicate field value before goal_fields)
+        | `Single_goal -> with_row
+            (if before then (field, value) :: goal_fields else goal_fields @ [field, value]) in
+      (match Goal_store.validate_state_json json with
+       | Error detail ->
+         check bool "setup validator retains the safe location" true
+           (String_util.contains_substring detail (Printf.sprintf "(location %S)" expected_location))
+       | Ok () -> fail ("validation admitted duplicate " ^ field));
+      let bytes = Yojson.Safe.to_string json in
+      write_raw primary bytes;
+      let failure = match Goal_store.load_source config with
+       | Goal_store.Unavailable
+           ({ reason = Goal_store.Schema_rejected { field = actual; detail };
+              mirror = Goal_store.Mirror_decodes { goal_count = 2; _ }; _ } as failure) ->
+           check string "rejection names member or location" expected_location actual;
+           check bool "internal detail preserves the quoted name" true
+             (String_util.contains_substring detail (Printf.sprintf "%S" field));
+           failure
+       | Goal_store.Unavailable failure -> fail (Goal_store.unavailable_to_string failure)
+       | Goal_store.Available _ | Goal_store.Uninitialized -> fail "duplicate document was readable" in
+      (match Goal_unavailable_envelope.to_yojson failure with
+       | `Assoc fields ->
+           check (list string) "wire keeps its exact member set"
+             ["error_code"; "field"; "file"; "mirror"; "ok"; "reason"; "reset_step"]
+             (List.sort String.compare (List.map fst fields));
+           check bool "wire carries the nonempty location" true
+             (List.assoc_opt "field" fields = Some (`String expected_location));
+           check bool "wire names the repair step" true
+             (List.assoc_opt "reset_step" fields = Some (`String "repair_field"))
+       | _ -> fail "unavailable envelope was not an object");
+      let called = ref false and projected = ref false in
+      let effects _ _ : Goal_store.transition_effects =
+        projected := true; { events = []; notifications = [] } in
+      (match Goal_store.transact_goal ~effects config ~goal_id:independent.id
+          (fun current -> called := true; Ok ({ current with title = "changed" }, ())) with
+       | Error (Goal_store.Store_unavailable
+           { reason = Goal_store.Schema_rejected { field = actual; _ }; _ }) ->
+           check string "write refusal names duplicate" expected_location actual
+       | Error other -> fail ("wrong write refusal: " ^ write_error_msg other)
+       | Ok _ -> fail "duplicate document licensed a write");
+      check bool "writer callback not entered" false !called;
+      check bool "writer effects not projected" false !projected;
+      (match Goal_store.upsert_goal config ~title:"new goal" ~metric:"m" ~target_value:"1" () with
+       | Error (Goal_store.Store_unavailable _) -> ()
+       | Error other -> fail ("wrong upsert refusal: " ^ write_error_msg other)
+       | Ok _ -> fail "duplicate document licensed an upsert");
+      check string "primary bytes preserved" bytes (Fs_compat.load_file primary);
+      check string "mirror bytes preserved" mirror_before (Fs_compat.load_file mirror)
+    ) [true; false]
+  ) cases;
+  write_raw primary valid;
+  (match Goal_store.transact_goal config ~goal_id:goal.id
+      (fun current -> Ok ({ current with title = "valid update" }, ())) with
+   | Ok (updated, ()) -> check string "valid document remains writable" "valid update" updated.title
+   | Error error -> fail ("valid document was refused: " ^ write_error_msg error))
 
 let test_undecodable_store_read_error_names_path () =
   with_workspace @@ fun config ->
@@ -1064,6 +1215,65 @@ let test_transact_goal_authoritative_and_noop () =
   check string "recovery evidence untouched" mirror
     (In_channel.with_open_bin (goals_recovery_path config) In_channel.input_all)
 
+let test_duplicate_identity_refuses_goal_writers () =
+  with_workspace @@ fun config ->
+  let first = make_goal "duplicate-goal" "First criterion" in
+  let duplicate = { first with title = "Different criterion"; phase = Goal_phase.Verifying;
+                               criterion_revision = "other-revision" } in
+  let other = make_goal "independent-goal" "Independent" in
+  (match Goal_store.write_state_result config
+      { version = 7; updated_at = iso_now (); goals = [first; duplicate; other];
+        pending_events = []; pending_notifications = [] } with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+  let unchanged () =
+    check string "refusal keeps primary bytes" (fst before) (Fs_compat.load_file primary);
+    check string "refusal keeps recovery bytes" (snd before) (Fs_compat.load_file mirror) in
+  let expect_ambiguous label = function
+    | Error (Goal_store.Goal_identity_ambiguous id) -> check string label first.id id
+    | Error error -> fail (label ^ ": " ^ write_error_msg error)
+    | Ok _ -> fail (label ^ ": duplicate Goal was accepted") in
+  let entered = ref false in
+  let projected = ref false in
+  let effects _ _ : Goal_store.transition_effects =
+    projected := true; { events = []; notifications = [] } in
+  expect_ambiguous "no-op transaction rejects duplicate" (Goal_store.transact_goal ~effects config ~goal_id:first.id
+    (fun goal -> entered := true; Ok (goal, ())));
+  expect_ambiguous "changing transaction rejects duplicate" (Goal_store.transact_goal ~effects config ~goal_id:first.id
+    (fun goal -> entered := true; Ok ({ goal with phase = Goal_phase.Dropped }, ())));
+  check bool "transaction callbacks not entered" false !entered;
+  check bool "transaction effects not projected" false !projected;
+  expect_ambiguous "duplicate beats phase mismatch" (Goal_store.update_goal_if_phase config ~goal_id:first.id
+    ~expected_phase:Goal_phase.Completed (fun goal -> entered := true; goal));
+  check bool "conditional callback not entered" false !entered;
+  expect_ambiguous "ordinary upsert rejects duplicate" (Goal_store.upsert_goal config ~id:first.id ~priority:1 ());
+  expect_ambiguous "revision upsert rejects duplicate" (Goal_store.upsert_goal_with_revision config ~id:first.id ~priority:1 ());
+  expect_ambiguous "audited upsert rejects duplicate" (Goal_store.upsert_goal_with_events config ~actor:"tester" ~id:first.id ~priority:1 ());
+  (match Goal_verification.bind_review config ~goal_id:first.id with
+   | Error (Goal_verification.Binding_unavailable _) -> ()
+   | Error (Goal_verification.No_current_review _) -> fail "ambiguous binding was called ended"
+   | Ok _ -> fail "ambiguous Goal admitted a review");
+  unchanged ();
+  List.iter (fun target ->
+    match Goal_store.update_goal_if_phase config ~goal_id:other.id ~expected_phase:Goal_phase.Executing
+            (fun goal -> { goal with id = target }) with
+    | Error (Goal_store.Rejected _) -> unchanged ()
+    | Error error -> fail ("identity replacement returned wrong error: " ^ write_error_msg error)
+    | Ok _ -> fail "conditional update replaced Goal identity") [first.id; "missing-goal"];
+  let events = match Goal_store.upsert_goal_with_events config ~actor:"tester" ~id:other.id ~priority:1 () with
+    | Ok (_, `updated _, events) -> events
+    | Ok (_, `created, _) -> fail "independent Goal was recreated"
+    | Error error -> fail (write_error_msg error) in
+  check bool "independent update records audit intents" true (events <> []);
+  let state = available config in
+  check int "only independent update advances version" 8 state.version;
+  check bool "independent update leaves both decoded duplicate rows" true
+    (List.filter (fun (goal : Goal_store.goal) -> String.equal goal.id first.id) state.goals = [first; duplicate]);
+  (match Goal_store.flush_pending_events config with Ok () -> () | Error detail -> fail detail);
+  check int "independent audit intents are acknowledged" 0 (List.length (available config).pending_events)
+
 let test_missing_criterion_revision_refuses_bound_mutation () =
   with_workspace @@ fun config ->
   let goal = make_goal "revision-required" "Old-looking goal" in
@@ -1242,7 +1452,7 @@ let test_document_rejection_order_through_public_consumers () =
     (match Goal_store.validate_state_json (Yojson.Safe.from_string before) with
      | Error detail ->
        check string "setup validator renders the same canonical rejection"
-         (expected_detail ^ " (field " ^ expected_field ^ ")") detail
+         (Printf.sprintf "%s (location %S)" expected_detail expected_field) detail
      | Ok () -> fail "setup validator accepted a malformed document");
     expect_unavailable expected_field expected_detail (unavailable config);
     let entered = ref false in
@@ -1786,6 +1996,7 @@ let () =
           test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
           test_case "upsert revision witness survives later commits" `Quick test_upsert_revision_witness_survives_later_commits;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
+          test_case "duplicate identity refuses Goal writers and preserves independent work" `Quick test_duplicate_identity_refuses_goal_writers;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );
       ( "due date",
         [ test_case "a value that is not a calendar day is refused" `Quick
@@ -1806,6 +2017,8 @@ let () =
             test_multiple_deletes_each_bump;
           test_case "missing goal: no bump" `Quick
             test_delete_nonexistent_does_not_bump;
+          test_case "duplicate Goal identity refuses deletion and link cleanup" `Quick
+            test_delete_refuses_duplicate_goal_identity;
           test_case "updated_at also refreshed" `Quick
             test_updated_at_also_refreshed;
           test_case "delete prunes goal_task_links" `Quick
@@ -1818,6 +2031,8 @@ let () =
             test_serializer_omits_status;
           test_case "other unknown goal field still fails" `Quick
             test_other_unknown_goal_field_still_fails;
+          test_case "duplicate document members refuse writes" `Quick
+            test_duplicate_document_members_refuse_writes;
           test_case "undecodable store read error names the path" `Quick
             test_undecodable_store_read_error_names_path;
           test_case "phase-less row no longer decodes" `Quick

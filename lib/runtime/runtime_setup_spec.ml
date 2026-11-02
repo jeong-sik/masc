@@ -290,8 +290,12 @@ let provider_id spec =
     choice_name spec.choice ^ "_" ^ answers_hash identity
 let account_home_matches choice left right =
   let effective = match choice with
-    | Claude_code -> Runtime_claude_code.effective_account_home
-    | Codex -> Runtime_codex_app_server.effective_account_home
+    | Claude_code -> (fun declaration ->
+      Runtime_official_account.resolve_home ~client:Claude_code ~declaration
+      |> Result.to_option)
+    | Codex -> (fun declaration ->
+      Runtime_official_account.resolve_home ~client:Codex ~declaration
+      |> Result.to_option)
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
   effective left = effective right
 let same_connection left right =
@@ -379,7 +383,10 @@ let resolve_provider spec providers =
   let* () = match spec.named_provider with
     | None -> Ok ()
     | Some named ->
-      (match Llm_provider.Model_catalog.global (),Llm_provider.Model_identifiers.Model_id.of_string spec.model with
+      (match Llm_provider.Catalog_snapshot.model_catalog_for_provider
+               (Llm_provider.Catalog_snapshot.current ())
+               (Llm_provider.Model_catalog.Declared_provider named.id),
+             Llm_provider.Model_identifiers.Model_id.of_string spec.model with
        | Some catalog,Ok model_id ->
          (match Llm_provider.Model_catalog.lookup_model_for_provider catalog
              ~provider:(Llm_provider.Model_catalog.Declared_provider named.id) ~model_id with
@@ -504,7 +511,9 @@ let matches_existing_selection spec (config:Runtime_schema.config) =
         | None -> false
         | Some model ->
           let catalog_context =
-            match Llm_provider.Model_catalog.global (),
+            match Llm_provider.Catalog_snapshot.model_catalog_for_provider
+                    (Llm_provider.Catalog_snapshot.current ())
+                    (Llm_provider.Model_catalog.Declared_provider binding.provider_id),
                   Llm_provider.Model_identifiers.Model_id.of_string model.api_name with
             | Some catalog, Ok model_id ->
               (match Llm_provider.Model_catalog.lookup_model_for_provider catalog

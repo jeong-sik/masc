@@ -17,6 +17,17 @@ val post_close_state_to_yojson : post_close_state -> Yojson.Safe.t
     {!post_origin_to_yojson} -- one encoding, so a dashboard/TUI reader and
     {!post_to_yojson} agree on what a closed post looks like. *)
 val comment_to_yojson : comment -> Yojson.Safe.t
+
+val audience_to_yojson : audience -> Yojson.Safe.t
+val audience_of_yojson : Yojson.Safe.t -> audience option
+(** Exact persisted audience shape, with the current Agent ID rejection
+    diagnostic emitted once for the first invalid target. *)
+
+val post_of_yojson : Yojson.Safe.t -> post option
+val comment_of_yojson : Yojson.Safe.t -> comment option
+(** Exact current persisted row decoders. Nested field diagnostics are retained
+    on rejected outer rows and emitted once at this boundary. *)
+
 val reaction_to_yojson : reaction -> Yojson.Safe.t
 val reaction_of_yojson : Yojson.Safe.t -> reaction option
 (** Accepts only the exact current {!reaction_to_yojson} persistence shape. *)

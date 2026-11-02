@@ -319,6 +319,13 @@ type verifier_unreconciled = {
   vu_detail : string;
 }
 
+type goal_completion_phase = Completion_executing | Completion_verifying
+type goal_retry_binding = {
+  grb_phase : goal_completion_phase;
+  grb_criterion_revision : string;
+  grb_request_id : string option;
+}
+
 type planning_goal = {
   pg_id : string;
   pg_criterion_revision : string option;
@@ -329,6 +336,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_retry_binding : goal_retry_binding option;
   pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
   (* RFC 3339 server timestamps. Optional because an older server build may
@@ -1057,11 +1065,24 @@ let is_success_http_status status_code = status_code >= 200 && status_code < 300
    JSON to read when the server already wrote the sentence, so the sentence
    wins and the envelope is the fallback. *)
 let json_error_sentence body =
+  let non_blank = function
+    | `String message when String.trim message <> "" -> Some (String.trim message)
+    | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None in
+  let tool_message message =
+    match Yojson.Safe.from_string message with
+    | `Assoc fields when List.assoc_opt "status" fields = Some (`String "error") ->
+      (match List.assoc_opt "message" fields with Some value -> non_blank value | None -> None)
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+    | exception Yojson.Json_error _ -> None in
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
     match List.assoc_opt "error" fields with
     | Some (`String message) when String.trim message <> "" -> Some (String.trim message)
-    | Some _ | None -> None)
+    | Some _ | None ->
+      (match List.assoc_opt "ok" fields, List.assoc_opt "message" fields with
+       | Some (`Bool false), Some (`String message) ->
+         (match tool_message message with Some _ as detail -> detail | None -> non_blank (`String message))
+       | _ -> None))
   | _ -> None
   | exception Yojson.Json_error _ -> None
 ;;
@@ -1210,58 +1231,104 @@ let required_body_field json =
   | `Null -> required_string_field json "content"
   | bad -> field_type_error "body" "a string" bad
 
-(* The ledger row the server joins onto each goal. Two shapes reach here: the
-   record, whose [completion] names the state, and [ledger_error_to_yojson],
-   which puts ["ledger_error"] at the top with a [detail]. Read leniently — this
-   is a projection for a pane and a shape it cannot read must not cost the
-   operator the goal list — but every branch says something different, so an
-   unreadable ledger never renders as an unreviewed goal.
+(* A decoded projection is shared by the proof display and retry binding.
+   It is an observation, not authority to mutate the Goal or evidence of
+   provider execution. A malformed proof leaves an otherwise readable Goal
+   visible but unreadable. *)
+type goal_verification_projection =
+  | Verification_current of Goal_verification.completion_state
+  | Verification_stale of Goal_verification.completion_state
+  | Verification_unreadable of string option
 
-   The text comes from [evidence] before [reason]: an approval carries its text
-   in [evidence] and leaves [reason] null, while a refusal fills both with the
-   same string. *)
-let decode_goal_proof json =
-  let string_at container key =
-    match member key container with
-    | `String value when String.trim value <> "" -> Some (String.trim value)
-    | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
-    | `Null ->
-      None
-  in
-  let verdict_text completion =
-    let verdict = member "verdict" completion in
-    match string_at verdict "evidence" with
-    | Some _ as text -> text
-    | None -> string_at verdict "reason"
-  in
-  match json with
-  | `Assoc _ ->
-    (match string_at json "state" with
-     | Some "ledger_error" -> Proof_unreadable (string_at json "detail")
-     | Some other -> Proof_unreadable (Some other)
-     | None ->
-       let completion = member "completion" json in
-       (match string_at completion "state" with
-        | Some "stale_criterion" ->
-          Proof_stale (verdict_text (member "historical_completion" completion))
-        | Some ("proof_proven" | "human_confirmed") -> Proof_proven (verdict_text completion)
-        | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
-        | Some "proof_pending" -> Proof_pending
-        | Some "idle" -> Proof_idle
-        | Some other -> Proof_unreadable (Some other)
-        (* The server never leaves this out: a goal with no ledger row gets
-           the default record and a store that will not decode gets the
-           ledger_error marker, precisely so corruption is not dressed up as
-           "not verified yet". Reading an absent state as idle would put that
-           disguise back on this side of the wire. *)
-        | None -> Proof_unreadable (Some "no completion state on the goal")))
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-    Proof_unreadable (Some "no verification block on the goal")
+let goal_completion_criterion = function
+  | Goal_verification.Completion_idle -> None
+  | Proof_pending pending -> Some pending.criterion
+  | Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _) ->
+    Some verdict.criterion
+
+let decode_goal_verification ~goal_id ~criterion json =
+  let open Result.Syntax in
+  let unique_fields label = function
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names = List.length (List.sort_uniq String.compare names)
+      then Ok fields else Error (label ^ ": duplicate field")
+    | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+      Error (label ^ ": expected object") in
+  let bind_completion ~stale completion =
+    match goal_completion_criterion completion, criterion with
+    | _, None -> Error "current Goal criterion is unavailable"
+    | None, Some _ when not stale -> Ok (Verification_current completion)
+    | None, Some _ -> Error "historical proof cannot be idle"
+    | Some observed, Some current ->
+      let matches = Goal_store.criterion_equal observed current in
+      if stale && not matches then Ok (Verification_stale completion)
+      else if not stale && matches then Ok (Verification_current completion)
+      else Error "proof criterion does not match its current or historical projection" in
+  let decode () =
+    let* () = Goal_store.validate_goal_id goal_id
+      |> Result.map_error (fun _ -> "Goal ID is blank or would change during request validation") in
+    let* fields = unique_fields "goal verification" json in
+    match List.assoc_opt "state" fields with
+    | Some (`String "ledger_error") ->
+      let detail = match List.assoc_opt "detail" fields with
+        | Some (`String value) when String.trim value <> "" -> Some value
+        | Some (`String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+        | None -> None in
+      Ok (Verification_unreadable detail)
+    | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Assoc _ | `String _) ->
+      Error "unexpected goal verification envelope"
+    | None ->
+      let* () = match List.assoc_opt "goal_id" fields with
+        | Some (`String observed) when String.equal observed goal_id -> Ok ()
+        | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Assoc _ | `String _)
+        | None -> Error "proof Goal identity is missing or mismatched" in
+      let* completion = match List.assoc_opt "completion" fields with
+        | Some value -> Ok value | None -> Error "proof completion is missing" in
+      let* completion_fields = unique_fields "proof completion" completion in
+      (match List.assoc_opt "state" completion_fields with
+       | Some (`String "stale_criterion") ->
+         let* () =
+           if List.for_all (fun (key, _) -> key = "state" || key = "historical_completion") completion_fields
+           then Ok () else Error "historical proof has unexpected fields" in
+         let* historical = match List.assoc_opt "historical_completion" completion_fields with
+           | Some value -> Ok value | None -> Error "historical proof is missing" in
+         let* parsed = Goal_verification.completion_state_of_yojson historical in
+         bind_completion ~stale:true parsed
+       | Some (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Assoc _ | `String _)
+       | None ->
+         let* parsed = Goal_verification.completion_state_of_yojson completion in
+         bind_completion ~stale:false parsed) in
+  match decode () with
+  | Ok projection -> projection
+  | Error detail -> Verification_unreadable (Some detail)
 ;;
 
-(* Required and nullable: the server writes [null] for every goal the latest
-   verifier scan settled, so a missing key is a wire mismatch, not a goal the
-   verifier is fine with. *)
+let goal_proof_of_projection = function
+  | Verification_unreadable detail -> Proof_unreadable detail
+  | Verification_current Goal_verification.Completion_idle -> Proof_idle
+  | Verification_current (Proof_pending _) -> Proof_pending
+  | Verification_current (Proof_proven verdict | Human_confirmed (verdict, _)) ->
+    Proof_proven (Some verdict.evidence)
+  | Verification_current (Proof_refuted verdict) -> Proof_refuted (Some verdict.evidence)
+  | Verification_stale (Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _)) ->
+    Proof_stale (Some verdict.evidence)
+  | Verification_stale (Completion_idle | Proof_pending _) -> Proof_stale None
+;;
+
+(* The Goal row remains visible if its proof binding fields are ambiguous.
+   In particular, absent metric/target are not observed null values. *)
+let goal_binding_fields_present_once = function
+  | `Assoc fields ->
+    let count name = List.length (List.filter (fun (key, _) -> String.equal name key) fields) in
+    count "resume_phase" <= 1 && List.for_all (fun name -> count name = 1)
+      ["id"; "phase"; "title"; "criterion_revision"; "metric"; "target_value"; "verification"]
+  | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> false
+;;
+
+(* Required and nullable: [null] reports no failure for this row, and can
+   also mean that no scan has reported yet. It does not prove that the verifier
+   ran or settled the goal. A missing key is a wire mismatch. *)
 let decode_verifier_unreconciled json =
   match Json_util.assoc_member_opt "verifier_unreconciled" json with
   | None -> Error "missing required field 'verifier_unreconciled'"
@@ -1277,6 +1344,35 @@ let decode_verifier_unreconciled json =
       (Printf.sprintf "field 'verifier_unreconciled' must be an object or null (received %s)"
          (Json_util.kind_name other))
 
+let decode_goal_retry_binding ~phase ~criterion_revision projection =
+  let expected_phase = match phase with
+    | Goal_phase.Executing -> Some Completion_executing
+    | Verifying -> Some Completion_verifying
+    | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _ -> None in
+  match expected_phase, criterion_revision with
+  | Some grb_phase, Some revision when String.trim revision <> "" ->
+    let completion = match grb_phase, projection with
+      | Completion_executing, Verification_current
+          ((Goal_verification.Completion_idle | Proof_pending _ | Proof_refuted _) as completion) -> Some completion
+      | Completion_executing, Verification_current (Proof_proven _ | Human_confirmed _) -> None
+      | Completion_executing, Verification_stale completion ->
+        (match goal_completion_criterion completion with
+         | Some (Goal_store.Criterion {revision=observed; _}) ->
+           if String.equal observed revision then None else Some completion
+         | None -> None)
+      | Completion_verifying, Verification_current
+          ((Goal_verification.Proof_pending _ | Proof_proven _ | Proof_refuted _) as completion) -> Some completion
+      | Completion_verifying, (Verification_current (Completion_idle | Human_confirmed _) | Verification_stale _)
+      | (Completion_executing | Completion_verifying), Verification_unreadable _ -> None in
+    let request = match completion with
+      | Some Goal_verification.Completion_idle when grb_phase = Completion_executing -> Some None
+      | Some (Proof_pending {request_id; _}) -> Some (Some request_id)
+      | Some (Proof_proven {request_id; _} | Proof_refuted {request_id; _}
+             | Human_confirmed ({request_id; _}, _)) -> Some (Some request_id)
+      | Some Completion_idle | None -> None in
+    Option.map (fun grb_request_id -> {grb_phase; grb_criterion_revision=revision; grb_request_id}) request
+  | (Some _ | None), (Some _ | None) -> None
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
@@ -1290,7 +1386,18 @@ let decode_planning_goal json =
   let* pg_last_review_at = optional_string_field json "last_review_at" in
   let* pg_created_at = optional_string_field json "created_at" in
   let* pg_updated_at = optional_string_field json "updated_at" in
-  let pg_proof = decode_goal_proof (member "verification" json) in
+  let verification = member "verification" json in
+  let criterion = match pg_criterion_revision with
+    | Some revision when String.trim revision <> "" ->
+      Some (Goal_store.Criterion {revision; title=pg_title; metric=pg_metric; target_value=pg_target_value})
+    | Some _ | None -> None in
+  let projection =
+    if goal_binding_fields_present_once json then
+      decode_goal_verification ~goal_id:pg_id ~criterion verification
+    else Verification_unreadable (Some "Goal proof binding fields are missing or duplicated") in
+  let pg_proof = goal_proof_of_projection projection in
+  let pg_retry_binding = decode_goal_retry_binding ~phase:pg_phase
+      ~criterion_revision:pg_criterion_revision projection in
   let* pg_verifier_unreconciled = decode_verifier_unreconciled json in
   Ok
     {
@@ -1303,6 +1410,7 @@ let decode_planning_goal json =
       pg_metric;
       pg_target_value;
       pg_proof;
+      pg_retry_binding;
       pg_verifier_unreconciled;
       pg_last_review_note;
       pg_last_review_at;
@@ -2700,7 +2808,7 @@ let goal_store_unavailable_reason_view_to_string = function
   | Missing_after_init_view -> "missing_after_init"
   | Unreadable_view -> "unreadable"
   | Not_json_view -> "not_json"
-  | Schema_rejected_view refused -> "schema_rejected field=" ^ refused
+  | Schema_rejected_view refused -> Printf.sprintf "schema_rejected location=%S" refused
 
 let goal_store_mirror_view_to_string = function
   | Mirror_absent_view -> "absent"
@@ -2739,8 +2847,28 @@ let decode_planning_snapshot json =
     | Ok None -> Ok ()
     | Error message -> Error message
   in
+  let* () = match json with
+    | `Assoc fields when List.length (List.filter (fun (key, _) -> key = "goals") fields) > 1 ->
+      Error "planning snapshot contains duplicate goals fields"
+    | `Assoc _ | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> Ok () in
   let* goals_json = required_list_field json "goals" in
   let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
+  (* Count all declared string IDs by row, including extra ID fields on an
+     ambiguous row. Otherwise a second ID on that row could silently collide
+     with another row whose own proof would still appear to be current. *)
+  let _, duplicate_ids = List.fold_left (fun (seen, duplicates) row ->
+      let ids = match row with
+        | `Assoc fields -> List.fold_left (fun ids -> function
+            | "id", `String id -> String_set.add id ids
+            | _ -> ids) String_set.empty fields
+        | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+          String_set.empty in
+      (String_set.union seen ids, String_set.union duplicates (String_set.inter seen ids)))
+      (String_set.empty, String_set.empty) goals_json in
+  let pl_goals = List.map (fun goal ->
+      if String_set.mem goal.pg_id duplicate_ids then
+        {goal with pg_proof=Proof_unreadable (Some "Goal ID has multiple rows"); pg_retry_binding=None}
+      else goal) pl_goals in
   let* rollup_json = required_object_field json "rollup" in
   let* pl_rollup = decode_planning_rollup rollup_json in
   let* backlog_json = required_object_field json "task_backlog" in
@@ -5040,6 +5168,7 @@ type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
   sid_binary_commit_age_s : float option;
+  sid_runtime_instance_id : string option;
   sid_base_path : Canonical_path.t;
   sid_masc_root : Canonical_path.t;
   sid_executable_in_worktree : bool option;
@@ -5090,6 +5219,11 @@ let decode_server_identity json =
     match Option.map (member "binary_commit_age_seconds") build with
     | Some (`Float value) -> Some value
     | Some (`Int value) -> Some (float_of_int value)
+    | Some _ | None -> None
+  in
+  let sid_runtime_instance_id =
+    match Option.map (member "runtime_instance_id") build with
+    | Some (`String value) when String.trim value <> "" -> Some value
     | Some _ | None -> None
   in
   let sid_executable_in_worktree =
@@ -5163,6 +5297,7 @@ let decode_server_identity json =
          | _ -> "")
     ; sid_binary_commit = string_in build "binary_commit"
     ; sid_binary_commit_age_s
+    ; sid_runtime_instance_id
     (* The two paths are resolved here, once per reading, so every later
        workspace check on this identity compares strings without a lookup.
        The TUI runs this decode on its CPU pool, off the frame loop. *)
@@ -7574,10 +7709,21 @@ and goal_timeline_unavailability =
   | Goal_source_failure of goal_source_failure
   | Approval_queue_failure of string
 
+let unique_goal_timeline_member field json =
+  match json with
+  | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name field) fields with
+       | [] -> Ok None
+       | [ _, value ] -> Ok (Some value)
+       | _ :: _ :: _ -> Error (Printf.sprintf "goal timeline contains duplicate %s" field))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "goal timeline value is not an object"
+
 let decode_goal_timeline_event json =
   let required field =
-    match member field json with
-    | `String value -> Ok value
+    let* value = unique_goal_timeline_member field json in
+    match value with
+    | Some (`String value) -> Ok value
     | _ -> Error (Printf.sprintf "timeline event %s must be a string" field)
   in
   let* gt_ts = required "ts" in
@@ -7589,18 +7735,46 @@ let decode_goal_timeline_event json =
   Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
+  let* status = unique_goal_timeline_member "ok" json in
+  let* _ = unique_goal_timeline_member "error_code" json in
   match decode_goal_source_failure json with
   | Ok (Some failure) -> Ok (Goal_timeline_unavailable (Goal_source_failure failure))
   | Error message -> Error message
   | Ok None ->
-  match Json_util.assoc_member_opt "timeline" json with
+  let* () = match status with
+    | None | Some (`Bool true) -> Ok ()
+    | Some (`Bool false) -> Error "goal detail reports a failed request"
+    | Some _ -> Error "goal detail has an invalid request status"
+  in
+  let* timeline = unique_goal_timeline_member "timeline" json in
+  match timeline with
   | Some `Null ->
-      let state = member "approval_queue_state" json in
-      (match member "state" state, member "operator_detail" state with
-       | `String "unavailable", `String detail when String.trim detail <> "" ->
+      let* state = unique_goal_timeline_member "approval_queue_state" json in
+      let* state, detail =
+        match state with
+        | Some (`Assoc _ as state) ->
+            let* name = unique_goal_timeline_member "state" state in
+            let* detail = unique_goal_timeline_member "operator_detail" state in
+            Ok (name, detail)
+        | _ -> Ok (None, None)
+      in
+      (match state, detail with
+       | Some (`String "unavailable"), Some (`String detail) when String.trim detail <> "" ->
            Ok (Goal_timeline_unavailable (Approval_queue_failure detail))
        | _ -> Error "goal detail has a null timeline without an unavailable source state")
   | Some (`List items) ->
+      (* Older servers did not send this field. When present, do not treat an
+         unavailable or ambiguous queue as a complete timeline. *)
+      let* queue = unique_goal_timeline_member "approval_queue_state" json in
+      let* () = match queue with
+        | None -> Ok ()
+        | Some (`Assoc _ as queue) ->
+            let* state = unique_goal_timeline_member "state" queue in
+            (match state with
+             | Some (`String "ready") -> Ok ()
+             | _ -> Error "goal detail timeline conflicts with approval queue state")
+        | Some _ -> Error "goal detail approval queue state is not an object"
+      in
       let rec loop acc = function
         | [] -> Ok (Goal_timeline_ready (List.rev acc))
         | item :: rest ->
@@ -7610,6 +7784,25 @@ let decode_goal_detail_timeline json =
       loop [] items
   | None -> Error "goal detail response has no timeline"
   | Some _ -> Error "goal detail timeline is neither a list nor null"
+
+(* Unavailable source envelopes do not identify a Goal. A ready timeline must
+   name exactly the requested Goal before its events can be attached to it. *)
+let decode_goal_detail_timeline_for_goal ~goal_id json =
+  let* timeline = decode_goal_detail_timeline json in
+  match timeline with
+  | Goal_timeline_unavailable _ -> Ok timeline
+  | Goal_timeline_ready _ ->
+    let members key fields = List.filter (fun (name, _) -> String.equal name key) fields in
+    (match json with
+     | `Assoc fields ->
+       (match members "goal" fields with
+        | [_, `Assoc goal] ->
+          (match members "id" goal with
+           | [_, `String actual] when String.equal actual goal_id -> Ok timeline
+           | [] | [_] | _ :: _ :: _ -> Error "goal detail identity does not match the request")
+        | [] | [_] | _ :: _ :: _ -> Error "goal detail has no unique Goal identity")
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+       Error "goal detail is not an object")
 
 (* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
    raw event-stream lines, not a uniform projection, so every field except

@@ -20,6 +20,7 @@
 open Alcotest
 
 module Http = Masc.Http_server_eio
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* Fixture tick for create and modify: the runner's floor tick, below every
    interval these fixtures declare, so the runner-tick check never refuses one
@@ -580,7 +581,9 @@ let with_board_store ~base_path f =
   @@ fun () ->
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+  Result.get_ok (Masc.Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
   f ()
 ;;
 
@@ -588,6 +591,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   with_authenticated_activity_router
     ~prefix:"board-delete-persistence-" ~agent_name:"board-delete-operator"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let router = Server_dashboard_http_delete_actions.add_delete_action_routes router in
   let create content =
@@ -606,7 +610,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   let post_id = create "delete with a failed snapshot" in
   let writes = ref 0 in
   Masc.Board_dispatch.set_board_write_hook (fun () -> incr writes);
-  let path = Masc.Board.reactions_path () in
+  let path = Masc.Board.reactions_path (Masc.Board.global ()) in
   let had_snapshot = Sys.file_exists path in
   let backup = path ^ ".before-delete" in
   if had_snapshot then Unix.rename path backup;
@@ -642,7 +646,11 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
     Yojson.Safe.Util.(receipt |> member "persistence" |> to_string);
   let refused_id = create "do not delete with an unreadable source" in
   let writes_before_refusal = !writes in
-  store.Masc.Board.posts_load_result <- Error "snapshot read failed";
+  let path = Masc.Board.persist_path store in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+    (fun out -> output_string out "{invalid-post-source\n");
+  Alcotest.(check bool) "actual malformed posts source fails reload" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   let status, _ = delete refused_id in
   check int "storage refusal is not a lookup miss" 503 status;
   check bool "refused deletion leaves the post readable" true
@@ -654,6 +662,7 @@ let test_board_write_routes_reject_foreign_workspace () =
   with_authenticated_activity_router
     ~prefix:"board-write-workspace-" ~agent_name:"workspace-writer"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let expected root = `Assoc
       [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
@@ -713,6 +722,7 @@ let test_board_post_route_preserves_publication_evidence () =
   with_authenticated_activity_router
     ~prefix:"board-post-publication-" ~agent_name:"publication-operator"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let open Yojson.Safe.Util in
   let workspace masc_root = `Assoc
@@ -760,7 +770,7 @@ let test_board_post_route_preserves_publication_evidence () =
   check string "publication uses the authenticated actor" "publication-operator"
     (Masc.Board.Agent_id.to_string committed.author);
   check int "the failed response still has one actual WAL row" 1
-    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path ())));
+    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))));
   (* Keep this store alive: a reset would conceal persistence-mutex poison. *)
   let status, completed = post ~expected_workspace:current "later HTTP publication" in
   check int "the same real route accepts a later write" 201 status;
@@ -796,7 +806,7 @@ let test_board_post_route_preserves_publication_evidence () =
   check int "the refused request leaves exactly the two real posts" 2
     (List.length (Masc.Board_dispatch.list_posts ()));
   check int "the refused request appends no additional WAL row" 2
-    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path ())))
+    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))))
 ;;
 
 let test_board_write_routes_use_authenticated_actor () =
@@ -804,6 +814,7 @@ let test_board_write_routes_use_authenticated_actor () =
     ~prefix:"board-write-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post_json path fields =
@@ -959,6 +970,7 @@ let test_board_list_route_and_projection_share_the_kept_page () =
     ~prefix:"board-list-kept-"
     ~agent_name:"list-reader"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post title =
@@ -1021,6 +1033,7 @@ let test_board_list_timeout_cannot_be_not_modified () =
   with_authenticated_activity_router
     ~prefix:"board-list-timeout-" ~agent_name:"timeout-reader"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   (* Publish a builder-produced result through the real cache API. This
      exact route entry includes both the workspace and authenticated actor;
@@ -1064,6 +1077,7 @@ let test_board_http_typed_attachments () =
     ~prefix:"board-http-attachments-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post title extra =
@@ -1135,6 +1149,7 @@ let test_sub_board_routes_use_authenticated_owner () =
     ~prefix:"sub-board-http-owner-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -1199,6 +1214,7 @@ let test_sub_board_routes_reject_unknown_access () =
     ~prefix:"sub-board-http-access-"
     ~agent_name:"access-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -1264,6 +1280,7 @@ let test_sub_board_reads_require_auth_in_strict_mode () =
     ~prefix:"sub-board-http-strict-read-"
     ~agent_name:"strict-reader"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
@@ -1292,6 +1309,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
     ~prefix:"board-context-inference-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let keeper_name = "context-inference-target" in
@@ -1525,13 +1543,13 @@ let parsed_targets ids =
 let test_board_reaction_batch_answers_every_id_asked_about () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Unix.putenv
-    "MASC_BASE_PATH"
-    (Filename.concat
+  let base_path =
+    Filename.concat
        (Filename.get_temp_dir_name ())
-       (Printf.sprintf "masc-test-reaction-batch-%06x" (Random.bits ())));
-  Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+       (Printf.sprintf "masc-test-reaction-batch-%06x" (Random.bits ()))
+  in
+  Fs_compat.mkdir_p base_path;
+  with_board_store ~base_path (fun () ->
   let json =
     Server_board_reaction_http.list_batch_json
       ~actor:"tester"
@@ -1549,7 +1567,7 @@ let test_board_reaction_batch_answers_every_id_asked_about () =
       "the emoji catalog rides along so a caller needs no second request"
       true
       (List.mem_assoc "supported_reaction_emojis" fields)
-  | _ -> fail "batch answer must be a JSON object"
+  | _ -> fail "batch answer must be a JSON object")
 
 let test_board_reaction_batch_rejects_an_empty_or_oversized_list () =
   let rejected ids =
@@ -1675,6 +1693,7 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
     ~prefix:"board-detail-pages-"
     ~agent_name:"page-reader"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post =

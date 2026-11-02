@@ -13,6 +13,7 @@ type trouble =
 
 type failure =
   | Refused of { status : int; detail : string }
+  | Invalid_response of string
   | Schema_mismatch of { expected : int; received : int }
   | Frame_rejected of string
 
@@ -65,6 +66,10 @@ let reject t failure =
 
 let refused t ~status ~detail =
   ignore (reject t (Refused { status; detail }) : step)
+;;
+
+let invalid_response t detail =
+  ignore (reject t (Invalid_response detail) : step)
 ;;
 
 let lost t ~now =

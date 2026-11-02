@@ -13,22 +13,28 @@ generic provider/runtime facts.
 
 ## Loading
 
-Load a JSON file and install the parsed catalog explicitly during application
-bootstrap:
+Load both explicit input catalogs, admit the complete pair, then publish it
+once during application bootstrap:
 
 ```ocaml
-let catalog =
-  match Provider_catalog.load_file "/home/app/.config/agent_core/providers.json" with
-  | Ok catalog -> catalog
-  | Error message -> failwith message
-in
-Provider_catalog.set_global catalog
+let ( let* ) = Result.bind
+
+let install_provider_catalog path =
+  let* models = Model_catalog.load_default () in
+  let* providers = Provider_catalog.load_file path in
+  let* snapshot =
+    Catalog_snapshot.of_catalogs ~models:(Some models) ~providers:(Some providers)
+    |> Result.map_error Catalog_snapshot.error_to_string
+  in
+  Catalog_snapshot.publish snapshot;
+  Ok ()
 ```
 
-Resolution order:
-
-1. Explicit overlay installed with `Provider_catalog.set_global`
-2. Embedded agent_core `models.toml` provider rows
+The JSON overlay replaces a whole same canonical seed id, including its old
+aliases. Other id/alias collisions reject admission. Failed parsing or admission
+leaves the previous publication intact. Provider and model catalogs have no
+individual global setters. Captured selections retain their complete old value;
+new selections read one complete current publication.
 
 The agent_core-owned `models.toml` also carries shareable provider identity rows under
 `[[providers]]`. Those rows are data, not OCaml vendor branches: agent_core embeds that
@@ -40,9 +46,14 @@ Linked applications need no catalog file beside their executable.
 agent_core never discovers a provider or model catalog from the process environment.
 File selection, reload policy, and parse-error handling belong to the embedding
 application. A caller that needs a custom file loads it explicitly with
-`Provider_catalog.load_file` and installs it with `Provider_catalog.set_global`.
+`Provider_catalog.load_file`, supplies its chosen model catalog explicitly to
+`Catalog_snapshot.of_catalogs`, then publishes that successfully admitted value.
+Use `providers=None` to select no JSON overlay and `models=None` to capture
+explicitly absent model facts. `Catalog_snapshot.reset ()` selects the immutable
+embedded default; explicit absence does not select a fallback.
 
-Catalog entries overwrite embedded provider ids when exact ids collide.
+Admission replaces embedded providers only for the same canonical id under
+ASCII case equality; it does not merge the replaced provider's fields.
 `Provider_registry` registers only the declared `id`; aliases remain selector
 names at the catalog/runtime-binding boundary.
 
@@ -51,7 +62,8 @@ names at the catalog/runtime-binding boundary.
 | Surface | Collision rule |
 |---|---|
 | `Provider_catalog.of_entries` / `of_json` | **Reject the whole catalog.** Ids and aliases share one case-insensitive identity namespace. |
-| `Provider_registry` overlay (catalog vs. embedded) | **Catalog overwrites embedded data** by id when registered (`Hashtbl.replace`). The catalog overlay is applied last in `Provider_registry.default ()`. |
+| `Catalog_snapshot.of_catalogs` (JSON vs. model seeds) | Replace the same canonical provider completely, then reject every remaining id/alias collision. |
+| `Provider_registry.default ()` | Project one already admitted complete publication. Aliases remain selection names, not registry keys. |
 
 `Provider_catalog.lookup` remains a catalog-local, case-insensitive id/alias
 query. `Provider_registry.find` is deliberately different: it accepts a
@@ -79,6 +91,25 @@ auth = "api-key"
 default_model = "mimo-v2.5-pro"
 capabilities_base = "mimo"
 ```
+
+Each TOML provider row requires `id`, `kind`, `base_url`, `request_path`, `auth`
+and `capabilities_base`. Capability policy is an explicit preset or
+`capabilities_base = "models_only"`. A missing field is rejected even when the
+provider id happens to name a known preset. Preset spellings decode into the
+closed `Capability_preset` type; wire kind and provider identity are separate.
+
+`models_only` gives unknown models no provider-wide policy. Exact admitted
+model rows still supply their own capabilities and prices. The packaged OpenAI
+Chat provider makes this choice explicitly. A model-only provider cannot also
+declare `capabilities_base_by_identity_kind` overrides. Registry and runtime
+binding metadata retain absent provider capabilities as `None`; capability
+predicates do not turn that absence into a preset.
+
+JSON overlay rows require the same explicit connection and capability decisions.
+An admitted JSON overlay retains its explicitly resolved selected policy, while
+raw id lookup does not acquire a JSON provider-wide preset. Both paths retain
+exact admitted model facts. A JSON `models_only` replacement revokes the seed's
+provider-wide preset rather than inheriting it.
 
 `auth` states whether the endpoint takes an API key (`"api-key"` or `"none"`,
 exactly); the row never names where the key lives. Selection uses the row's
@@ -116,20 +147,25 @@ Required fields:
 |---|---|---|
 | `schema_version` | integer | Must be `1`. |
 | `providers[].id` | string | Opaque provider id. This is config identity, not a vendor branch in code. |
+| `providers[].kind` | string | Explicit HTTP wire kind. |
+| `providers[].base_url` | string | Exact, nonempty endpoint base URL. |
+| `providers[].request_path` | string | Explicit request path; only Gemini permits an empty path. |
+| `providers[].auth` | object | Explicit credential decision; `type` is required. |
+| `providers[].capabilities_base` | string | Named preset or `models_only`. |
 
 Important provider fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `kind` | string | Existing HTTP wire/runtime kind, for example `openai_compat`, `anthropic`, or `gemini`. Defaults to `openai_compat`. |
+| `kind` | string | Existing HTTP wire/runtime kind, for example `openai_compat`, `anthropic`, or `gemini`. |
 | `base_url` | string | HTTP endpoint base URL. |
-| `request_path` | string | Completion request path. Defaults from `kind`. |
+| `request_path` | string | Explicit completion request path. |
 | `auth` | object | Credential mode. See below. |
 | `default_model` | string | Used when a caller selects the provider without a model. |
 | `discovery_timeout_s` | number | Optional positive finite total deadline for one discovery HTTP request, including its response body. No value is inferred from provider kind, URL, or connect timeout. |
 | `aliases` | string array | Catalog-local lookup names. They are not provider registry ids. |
-| `capabilities_base` | string | Provider preset from `Capabilities.capabilities_for_provider_label`. |
-| `capabilities` | object | Optional capability overrides. |
+| `capabilities_base` | string | Closed `Capability_preset` spelling or explicit `models_only`. |
+| `capabilities` | object | Optional overrides for a named preset. `models_only` permits only absent, null or empty overrides. |
 | `credential_scope` | string | Human-readable credential scope label. |
 
 Auth modes:
@@ -144,11 +180,17 @@ Catalog entries describe HTTP execution only. A caller that owns a managed,
 OAuth, or subprocess transport must inject that typed transport explicitly;
 the catalog does not claim an execution mode that agent_core cannot perform.
 
+Required provider fields and `auth.type` cannot be absent or null. No wire kind,
+request path, no-auth decision or provider preset is inferred. `auth` is also
+the sole credential carrier in the typed `Provider_catalog.entry`; keyed modes
+carry their exact environment name in their constructor. A typed models-only
+entry uses `capabilities=None` and preserves that absence through admission.
+
 The JSON parser is fail-closed: root, provider, `auth`, and `capabilities`
 objects reject duplicate or unknown fields; scalar and list values must have
 their declared types; lists declared as non-empty must contain exact item
 types; and positive integer fields must fit the OCaml native integer range.
-JSON `null` is accepted only where the schema defines it as an omitted/default
+JSON `null` is accepted only where the schema defines it as an omitted optional
 value. A malformed provider entry rejects the catalog instead of being skipped.
 
 ## Cloud API Example
@@ -186,6 +228,7 @@ The `capabilities` object accepts the same capability field names used by
 - `max_context_tokens`, `max_output_tokens`
 - `supports_tools`, `supports_tool_choice`, `supports_parallel_tool_calls`
 - `assistant_tool_content_format`
+- `chat_output_budget_field`, `tool_schema_conformance`, `content_inline_reasoning`
 - `supports_reasoning`
 - `accepted_reasoning_efforts`
 - `thinking_control_format`, `preserve_thinking_control_format`
@@ -198,7 +241,7 @@ The `capabilities` object accepts the same capability field names used by
 - `emits_usage_tokens`, `supported_models`
 
 Model-specific facts should live in the embedded/explicit model catalog or an
-explicitly installed `Capability_manifest`. Provider catalog capabilities
+`Capability_manifest` composed into that immutable model catalog. Provider catalog capabilities
 should describe runtime/provider defaults.
 
 Accepted `thinking_control_format` values are:

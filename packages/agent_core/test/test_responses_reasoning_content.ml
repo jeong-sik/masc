@@ -25,9 +25,12 @@ let call = `Assoc ["type",`String "function_call";"call_id",`String "call-weathe
   ;"name",`String "weather";"arguments",`String {|{"city":"Seoul"}|}]
 let answer = `Assoc ["type",`String "message";"role",`String "assistant"
   ;"content",`List [text_part "output_text" "visible answer"]]
-let parse items = Codec.parse_response_result (Yojson.Safe.to_string (`Assoc
-  ["id",`String "reasoning-fixture";"model",`String "fixture";"status",`String "completed"
-  ;"output",`List items])) |> get
+let parse items =
+  match Codec.parse_response_result (Yojson.Safe.to_string (`Assoc
+    ["id",`String "reasoning-fixture";"model",`String "fixture";"status",`String "completed"
+    ;"output",`List items])) with
+  | Ok {response;_} -> response
+  | Error {detail;_} -> Alcotest.fail detail
 let restored_assistant ?(config=config) response =
   let response = Complete_common.patch_telemetry response ~config None in
   let response = Cache.response_to_json response |> Yojson.Safe.to_string
@@ -126,14 +129,14 @@ let malformed_content () =
   let json = `Assoc ["id",`String "malformed";"status",`String "completed"
     ;"output",`List [reasoning "r" ~content:[malformed];answer]] in
   match Codec.parse_response_result (Yojson.Safe.to_string json) with
-  | Error error -> Alcotest.(check string) "malformed recognized text fails closed"
+  | Error {detail=error;_} -> Alcotest.(check string) "malformed recognized text fails closed"
       "malformed_responses_reasoning:text" error
   | Ok _ -> Alcotest.fail "malformed recognized text silently disappeared"
 let malformed_carrier () =
   let json=`Assoc ["id",`String "malformed";"status",`String "completed"
     ;"output",`List [`Assoc["type",`String "reasoning";"content",`Int 7];answer]] in
   match Codec.parse_response_result (Yojson.Safe.to_string json) with
-  | Error error -> Alcotest.(check string) "malformed content carrier fails closed"
+  | Error {detail=error;_} -> Alcotest.(check string) "malformed content carrier fails closed"
       "malformed_responses_reasoning:content" error
   | Ok _ -> Alcotest.fail "malformed content carrier silently disappeared"
 
@@ -174,9 +177,9 @@ let chat_override_does_not_activate_responses () =
 let manifest_declaration () =
   let manifest=get(Capability_manifest.of_json (Yojson.Safe.from_string
     {|{"schema_version":2,"models":[{"model_id":"declared-responses","reasoning_replay":"preserve_responses_text"}]}|})) in
-  match Capability_manifest.entries manifest with
+  match Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty manifest) with
   | [entry] -> Alcotest.(check bool) "public manifest parses dedicated typed policy" true
-      ((Capabilities.apply_manifest_entry entry).reasoning_replay_override=Force_preserve_responses_text)
+      ((Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).reasoning_replay_override=Force_preserve_responses_text)
   | [] | _::_ -> Alcotest.fail "one manifest entry expected"
 
 let opaque_endpoint_control () =

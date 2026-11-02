@@ -435,7 +435,7 @@ let test_transport_health_json () =
   Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "turn_started") ] ~delta:2.0 ();
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
-  Masc.Sse.sync_transport_snapshot ~force:true ();
+  Masc.Sse.sync_transport_snapshot ();
   with_env "MASC_USE_H2" (Some "h1_only") (fun () ->
     ignore (Env_config.Transport.configure_h2_from_env ()););
   let json =

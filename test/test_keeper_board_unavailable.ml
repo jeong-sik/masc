@@ -22,6 +22,7 @@
 
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* These tests check how the Board routes a text, not who is declared: every
    name with the shape of a Keeper name stands for itself. *)
@@ -43,6 +44,7 @@ let fresh_test_base_path () =
       (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-board-unavailable-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 ;;
@@ -54,7 +56,11 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   f ()
 ;;
 
@@ -186,7 +192,10 @@ let test_poison_durable_source_is_retired_during_intake () =
   let base_path = fresh_test_base_path () in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.clear ())
@@ -250,7 +259,10 @@ let with_intake_sources ~max_events f =
   let base_path = fresh_test_base_path () in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.clear ())

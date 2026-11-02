@@ -129,6 +129,11 @@ let backend_acquire_lock config ~key ~ttl_seconds ~owner =
   | Memory _ -> Ok true  (* In-memory is single-process *)
   | FileSystem t -> Backend.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
 
+let backend_try_acquire_lock config ~key ~ttl_seconds ~owner =
+  match config.backend with
+  | Memory _ -> Ok true
+  | FileSystem t -> Backend.FileSystem.try_acquire_lock t ~key ~owner ~ttl_seconds
+
 let backend_release_lock config ~key ~owner =
   match config.backend with
   | Memory _ -> Ok true

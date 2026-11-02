@@ -245,6 +245,25 @@ let incomplete_inventory_not_absence () =
   check bool "partial source failure remains observable" true
     (Option.is_some state.resources_error)
 
+let displayed_report_inventory_evidence () =
+  let module Types = Masc_tui_types in
+  let selected = entry (revision markdown) in
+  let state = state () in
+  state.view <- Types.Resources;
+  state.resources_list <- Some [selected];
+  state.resource_content <- Some (Catalog.key selected, []);
+  let workspace = state.workspace_authority in
+  let origin : Types.sent_image_read = {
+    sir_generation=state.image_request_generation; sir_view=Resources; sir_keeper=None;
+    sir_name="report"; sir_owner=Peer_image_read state.workspace_read_authority;
+    sir_resource=state.resource_content; sir_skill_reference=None; sir_purpose=Open_image } in
+  let retained () = Option.is_some (Types.image_cell_origin_for_redraw state ~workspace origin) in
+  listed state (Ok {Catalog.entries=[];notes=["reports could not be read"];reports_complete=false});
+  check bool "partial report inventory retains the captured image" true (retained ());
+  check bool "lost source reading is visibly unconfirmed" true (Types.image_cell_source_unconfirmed state origin);
+  listed state (Ok {Catalog.entries=[];notes=[];reports_complete=true});
+  check bool "later confirmed report absence retires the captured image" false (retained ())
+
 let superseded_same_key () =
   let _, _, _, current, reading = history () in
   let state = state () in
@@ -423,6 +442,7 @@ let () = run "published report resources" ["report reading",[
   test_case "pinned refresh and withdrawal" `Quick pinned_refresh;
   test_case "missing report keeps inventory and read evidence" `Quick missing_report_observation;
   test_case "incomplete inventory cannot prove report absence" `Quick incomplete_inventory_not_absence;
+  test_case "displayed report uses explicit inventory absence" `Quick displayed_report_inventory_evidence;
   test_case "same key new request ownership" `Quick superseded_same_key;
   test_case "navigation after a refused revision" `Quick failed_revision_navigation;
   test_case "filtered selection and detached reads" `Quick filtered_selection;

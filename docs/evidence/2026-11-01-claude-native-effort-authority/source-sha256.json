@@ -1,0 +1,35 @@
+{
+  "source_head": "0446daea23c42f5f944a7e2f810fec99abfd8cb6",
+  "files": {
+    "lib/fusion/fusion_official_client.ml": "e3c6578b5e51a10825272226e3f1262f50e8e279eb2397e4f902d7d29ecb4983",
+    "lib/keeper/keeper_capability_probe.ml": "62a86fbbed81d356bbcad1f2b3c44dc72568a9a53309bc09bc9761c44ece64de",
+    "lib/keeper/keeper_claude_code_runtime.ml": "c55fc61fa0f58f430a98ef14a706ad8fbf0276c145ccc855f841a2edb4f8c86c",
+    "lib/keeper/keeper_official_client_host.ml": "6e3aa4b3e451adfefcbdac525aa597498ebf7e68d28386718a5904ba06436112",
+    "lib/keeper/keeper_official_client_host.mli": "2449a0d64a489e3079512bd6d4e4f5b06f465da0938ae2ad5ba52dad65925fba",
+    "lib/runtime/runtime_inference.ml": "fd1826b5d78c6ac299bfaf224214d6212b39c685449a6c636dee700007a59f0e",
+    "lib/runtime/runtime_inference.mli": "80c4cc3dca3a28f1f8bfa26209d9b2b6d753f26a4926b1e6b47f9f8cf4a36e75",
+    "lib/runtime/runtime_verification.ml": "1cb1c6164a3a33de45033bdfaf7fd7f4200d2269d7e799dc3f4382ba74fbb3f8",
+    "lib/server/server_dashboard_runtime_resolved_json.ml": "b0a279eef1ab9be78cf20ed99f4f9475bbd7f355535039695b63c708ea7d5466",
+    "packages/agent_core/test/test_model_catalog_default.ml": "a66c2cc1dfa2ab8e60fa2fcc96c8521adba8cdf8fd8f112cfa84e205aa609336",
+    "test/stanzas/test_keeper_claude_code_runtime.inc": "c2b94bb4e99fe85470c54a0a86bd2d8a125ba3282f87c0e96b3d7a6a6b191e39",
+    "test/test_fusion_official_client_panel.ml": "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd",
+    "test/test_keeper_claude_code_runtime.ml": "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4",
+    "test/test_runtime_claude_effort_admission.ml": "9f4cc1b3efedb5abd28146ffae37be5914bc8318c8c646e016e90efd7de5be80",
+    "test/test_runtime_verification.ml": "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4",
+    "test/dune": "cf41b4441dbc488eb460df30bec795cc77d17ab6c595f3ff7eeb7b8b5c3ec0a2",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b",
+    "lib/runtime/runtime_claude_code.ml": "0c4b491e51fd11b25bfe6ae13a0d16461721a7e856af16c930f47f04a91e6ebe",
+    "lib/runtime/runtime_claude_code.mli": "26cd12a4ebd641cdee58a9a70596949428424f2dae605de7f2cca31be752e60a",
+    "lib/keeper/keeper_turn_driver.ml": "a2b84859ae43193eb1fc5a80fb4d6ec6bd82289e316241e14cee6989868f637a",
+    "lib/keeper/keeper_turn_driver.mli": "28ebc72ef13869cc4f7db050c72bbb04c0be10ad3a82c30d9396deb6ddc1c7e5",
+    "packages/agent_core/models.toml": "98715a31795637c7736809e419d0075f5620d0d7f44db93a15d6bdaaad7d6145"
+  },
+  "trees": {
+    "lib": "0ceb646fdae1f9d52a96763c5414781d1bae333c",
+    "test": "6c352703466d0d8e2e30073fbdafca304616da51",
+    "packages/agent_core": "4c11588b93ba9c239f5675a57d501908eb5af238",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b"
+  }
+}

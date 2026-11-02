@@ -24,7 +24,7 @@ let rec remove_tree path =
 
 let identity base_path : Masc.Tui_decode.server_identity =
   let canonical = Masc.Tui_decode.Canonical_path.of_path in
-  { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None
+  { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
   ; sid_base_path = canonical base_path; sid_masc_root = canonical (base_path ^ "/.masc")
   ; sid_executable_in_worktree = None; sid_state_ready = Some true
   ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
@@ -74,6 +74,8 @@ let with_fixture run =
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+      Masc_test_deps.Board_test_preparation.prepare ~base_path
+        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       let server = Masc.Mcp_server.For_testing.create_state ~base_path in
       let config = Masc.Mcp_server.workspace_config server in
       ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));
@@ -82,7 +84,9 @@ let with_fixture run =
       Server_auth.For_testing.restore_server_state (Some server);
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
-      Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+      Result.get_ok (Masc.Board_dispatch.init_jsonl
+        ~base_path:(Env_config_core.base_path ())
+        ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
       let router = Server_routes_http_routes_activity.add_routes ~sw
           ~clock:(Eio.Stdenv.clock env) (Http.Router.create ())
         |> Server_routes_http_routes_artifacts.add_routes in
@@ -138,7 +142,7 @@ let check_committed response =
   | Some id -> Masc.Board.Post_id.to_string id
   | None -> fail "the actual publication response lost its committed post ID"
 
-let rows () = Fs_compat.load_jsonl (Masc.Board.persist_path ())
+let rows () = Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))
 
 let apply state outcome =
   Updates.apply_publication state ~report:(fun _ _ -> ()) ~refresh:(fun () -> ()) outcome
@@ -220,7 +224,7 @@ let check_unanswered outcome =
 
 let test_real_committed_error_keeps_payload_and_late_input () = with_fixture
   (fun ~env ~sw ~base_path ~port:upstream_port ~posts -> with_results @@ fun results ->
-    let port, _, _, actual_body, actual_status, parsed_posts =
+    let port, observed, _, actual_body, actual_status, parsed_posts =
       proxy env ~sw ~upstream_port ~mode:Forward_ack in
     let state = state base_path port in
     let path = Filename.concat base_path "original.txt" in
@@ -233,6 +237,7 @@ let test_real_committed_error_keeps_payload_and_late_input () = with_fixture
           incr observer_calls;
           if !observer_calls = 1 then failwith "held publication observer") };
     start state results;
+    Eio.Promise.await observed;
     let outcome = take_outcome results in
     Masc.Board_metrics_hooks.set_observer noop;
     let prepared, response = returned outcome in
@@ -531,6 +536,35 @@ let test_old_comment_result_cannot_settle_same_draft_retry () =
      check int "the current result is reported" 1 !reports
    | _ -> fail "expected both original and retry completions")
 
+let test_detail_read_binds_the_original_workspace () = with_fixture
+  (fun ~env:_ ~sw:_ ~base_path ~port ~posts:_ -> with_results @@ fun results ->
+    let publisher = state base_path port in
+    start publisher results;
+    let _, response = returned (take_outcome results) in
+    let post_id = check_committed response in
+    let read ~expected_base ~full_history =
+      let reader = state base_path port in
+      reader.server_identity <- Some (identity expected_base);
+      reader.board_mode <- Types.Board_read post_id;
+      reader.board_history_post_id <- if full_history then Some post_id else None;
+      let launch ~deliver read =
+        Results.launch ~observation:true reader ~results ~boundary_error:Fun.id
+          ~deliver read in
+      Requests.start_board_post_refresh reader ~host:"127.0.0.1" ~port ~post_id ~launch;
+      let rec take_detail () = match Results.take_ready results with
+        | [] -> Eio.Fiber.yield (); take_detail ()
+        | [{ Results.message = Masc_tui_async_protocol.Board_post_refresh_done (_, result); _ }] -> result
+        | _ -> fail "expected one Board detail completion" in
+      take_detail () in
+    List.iter (fun full_history ->
+      (match read ~expected_base:base_path ~full_history with
+       | Ok (post, _, _) ->
+         check string "the admitted post retains its real body" "original body" post.bp_body
+       | Error error -> fail ("same-workspace detail failed: " ^ error));
+      check bool "another workspace cannot supply the same post" true
+        (Result.is_error (read ~expected_base:(base_path ^ "/foreign") ~full_history)))
+      [false; true])
+
 let () = run "TUI Board request outcomes" ["actual request and registered routes", [
   test_case "committed HTTP400 preserves payload and late input" `Quick
     test_real_committed_error_keeps_payload_and_late_input;
@@ -549,5 +583,7 @@ let () = run "TUI Board request outcomes" ["actual request and registered routes
   test_case "a failed comment launch does not announce sending" `Quick
     test_comment_launch_failure_does_not_announce_sending;
   test_case "an old comment result cannot settle a same-draft retry" `Quick
-    test_old_comment_result_cannot_settle_same_draft_retry
+    test_old_comment_result_cannot_settle_same_draft_retry;
+  test_case "detail requests bind normal and full-history reads to the original workspace" `Quick
+    test_detail_read_binds_the_original_workspace
 ]]

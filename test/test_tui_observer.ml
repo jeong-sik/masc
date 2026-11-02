@@ -79,6 +79,8 @@ let summary = function
          | Observer.Agent_input_required _ -> "agent_input_required"
          | Observer.Tool_approval_completed -> "tool_approval_completed"
          | Observer.Telemetry -> "telemetry"
+         | Observer.Relay_subscription_loss { dropped_count; _ } ->
+             Printf.sprintf "relay-loss:%d" dropped_count
          | Observer.Agent_core_other name -> "other:" ^ name)
         (Option.value ~default:"-" e.Observer.tool)
         (match e.Observer.turn with Some t -> string_of_int t | None -> "-")
@@ -603,6 +605,36 @@ let test_streaming_telemetry_names_no_agent () =
              \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n\n"
           ]))
 
+let test_relay_subscription_loss_is_typed () =
+  let frame source_id sequence count =
+    let event_type = Masc.Keeper_event_bridge.subscription_loss_event_type in
+    let json = `Assoc
+      [ "type", `String ("agent_core:" ^ event_type)
+      ; "event_type", `String event_type
+      ; "ts_unix", `Float 1.
+      ; "payload", `Assoc [ "source_id", source_id; "sequence", sequence;
+                             "dropped_count", count ]
+      ] in
+    "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
+  in
+  (match decode_all [ frame (`String "bridge-a") (`Int 2) (`Int 44) ] with
+   | [ Observer.Event (Observer.Agent_core
+         { kind = Observer.Relay_subscription_loss
+             { source_id = "bridge-a"; sequence = 2; dropped_count = 44 }; _ }) ] -> ()
+   | _ -> fail "expected a typed loss notice");
+  List.iter (fun (source_id, sequence, count) ->
+    match decode_all [ frame source_id sequence count ] with
+    | [ Observer.Undecodable _ ] -> ()
+    | _ -> fail "invalid loss identity or count was accepted")
+    [ `String "a", `Int 1, `Int 0
+    ; `String "a", `Int 1, `Int (-1)
+    ; `String "a", `Int 1, `String "44"
+    ; `String "a", `Int 1, `Null
+    ; `String "", `Int 1, `Int 1
+    ; `String "a", `Int 0, `Int 1
+    ; `Null, `Int 1, `Int 1 ]
+;;
+
 let test_a_frame_this_cannot_read_says_why () =
   let reasons =
     decode_all
@@ -792,6 +824,8 @@ let () =
             test_what_this_build_was_not_taught_keeps_its_name
         ; test_case "streaming telemetry names no agent" `Quick
             test_streaming_telemetry_names_no_agent
+        ; test_case "relay subscription loss is typed" `Quick
+            test_relay_subscription_loss_is_typed
         ; test_case "a frame this cannot read says why" `Quick
             test_a_frame_this_cannot_read_says_why
         ; test_case "a turn observation names the call and the completed count"

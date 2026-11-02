@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- Require explicit JSON provider connection, auth and capability declarations.
+  Preserve `models_only` without a provider preset, keep credentials in one
+  typed auth value, and apply the chat budget, tool schema and inline reasoning
+  overrides previously ignored by the parser (#27898).
+
+- Require an explicit typed capability policy on TOML provider rows. The
+  `models_only` choice preserves exact model policy and prices while unknown
+  models receive no provider preset; provider identity no longer fills a
+  missing declaration (#27898).
+
+- Repair three startup catalog fixtures to reach model admission and check HTTP
+  health/settings, optional-model exclusion and refusal to replace a rejected
+  default. A child startup failure now fails these cases instead of skipping
+  them (#27898).
+
 ## [0.66.0] - 2026-10-29
 
 ### Upgrade notes

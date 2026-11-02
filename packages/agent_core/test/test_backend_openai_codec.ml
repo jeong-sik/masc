@@ -1766,7 +1766,9 @@ let test_reported_openai_cost_reaches_sync_and_stream_usage () =
     (match expected with
      | None -> ()
      | Some _ ->
-       let priced = Pricing.annotate_usage_cost ~model_id:"gpt-4o-mini" streamed in
+       let source = Pricing.of_catalog ~catalog:None
+           ~provider:(Model_catalog.Anonymous_wire OpenAI_compat) in
+       let priced = Pricing.annotate_usage_cost ~source ~model_id:"gpt-4o-mini" streamed in
        Alcotest.(check (option (float 1e-9))) "catalog pricing cannot overwrite reported cost or zero"
          expected priced.cost_usd)) cases;
   List.iter (fun cost ->
@@ -2205,13 +2207,13 @@ let responses_with_output output =
 
 let expect_responses_parse_error label expected json =
   match Responses.parse_response_result (Yojson.Safe.to_string json) with
-  | Error msg -> check_string label expected msg
+  | Error { detail; _ } -> check_string label expected detail
   | Ok _ -> Alcotest.fail (label ^ " should fail closed")
 ;;
 
 let expect_responses_parse_error_prefix label prefix json =
   match Responses.parse_response_result (Yojson.Safe.to_string json) with
-  | Error msg -> check_bool label true (String.starts_with ~prefix msg)
+  | Error { detail; _ } -> check_bool label true (String.starts_with ~prefix detail)
   | Ok _ -> Alcotest.fail (label ^ " should fail closed")
 ;;
 
@@ -2219,8 +2221,8 @@ let test_responses_parse_reasoning_and_function_call () =
   match
     Responses.parse_response_result (responses_response_json () |> Yojson.Safe.to_string)
   with
-  | Error msg -> Alcotest.fail ("unexpected responses parse error: " ^ msg)
-  | Ok response ->
+  | Error { detail; _ } -> Alcotest.fail ("unexpected responses parse error: " ^ detail)
+  | Ok { response; _ } ->
     check_string "id" "resp_123" response.id;
     check_string "model" "gpt-5.5" response.model;
     check_bool "stop tool use" true (response.stop_reason = StopToolUse);
@@ -2269,8 +2271,8 @@ let test_responses_ignores_hosted_tool_item_and_preserves_message () =
       ]
   in
   match Responses.parse_response_result (Yojson.Safe.to_string json) with
-  | Error msg -> Alcotest.fail ("unexpected responses parse error: " ^ msg)
-  | Ok response ->
+  | Error { detail; _ } -> Alcotest.fail ("unexpected responses parse error: " ^ detail)
+  | Ok { response; _ } ->
     check_bool "stop end turn" true (response.stop_reason = EndTurn);
     (match response.content with
      | [ Text text ] -> check_string "message text" "It is sunny in Paris." text
@@ -2353,8 +2355,8 @@ let test_responses_incomplete_status_wins_over_function_call () =
     Responses.parse_response_result
       (responses_incomplete_with_function_call_json () |> Yojson.Safe.to_string)
   with
-  | Error msg -> Alcotest.fail ("unexpected responses parse error: " ^ msg)
-  | Ok response ->
+  | Error { detail; _ } -> Alcotest.fail ("unexpected responses parse error: " ^ detail)
+  | Ok { response; _ } ->
     check_bool
       "incomplete max_output_tokens maps to MaxTokens, not StopToolUse"
       true
@@ -2373,6 +2375,19 @@ let test_responses_incomplete_status_wins_over_function_call () =
 ;;
 
 let test_responses_stop_reason_ssot_status_table () =
+  List.iter
+    (fun (wire, expected) ->
+       check_bool ("typed Responses status " ^ wire) true
+         (Responses_stop_reason.status_of_wire wire = expected))
+    [ "queued", Responses_stop_reason.Queued
+    ; "in_progress", Responses_stop_reason.In_progress
+    ; "completed", Responses_stop_reason.Completed
+    ; "failed", Responses_stop_reason.Failed
+    ; "incomplete", Responses_stop_reason.Incomplete
+    ; "cancelled", Responses_stop_reason.Cancelled
+    ; "future_status", Responses_stop_reason.Other "future_status"
+    ; "COMPLETED", Responses_stop_reason.Completed
+    ];
   check_bool
     "failed message wins over tool calls"
     true
@@ -2413,9 +2428,57 @@ let test_responses_stop_reason_ssot_status_table () =
     Backend_openai_responses.parse_response_result
       {|{"id":"resp-missing-status","model":"m","output":[]}|}
   with
-  | Error "malformed_openai_responses:missing_status" -> ()
-  | Error message -> Alcotest.fail ("unexpected missing-status error: " ^ message)
+  | Error { detail = "malformed_openai_responses:missing_status"; _ } -> ()
+  | Error { detail; _ } -> Alcotest.fail ("unexpected missing-status error: " ^ detail)
   | Ok _ -> Alcotest.fail "missing Responses status must fail closed"
+;;
+
+let test_responses_lifecycle_is_distinct_from_stop_reason () =
+  let parse body =
+    match Responses.parse_response_result body with
+    | Ok parsed -> parsed
+    | Error { detail; _ } -> Alcotest.fail ("unexpected Responses parse error: " ^ detail)
+  in
+  let partial = parse
+    {|{"status":"queued","error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"not yet"}]}]}|} in
+  check_bool "partial refusal does not erase queued status" true
+    (partial.lifecycle = Responses.Observed_status Responses_stop_reason.Queued);
+  check_bool "canonical stop still carries the refusal" true
+    (partial.response.stop_reason = Refusal);
+  List.iter (fun (body, expected) ->
+    let parsed = parse body in
+    check_bool "same-parse Responses lifecycle" true (parsed.lifecycle = expected))
+    [ {|{"status":"in_progress","output":[]}|},
+        Responses.Observed_status Responses_stop_reason.In_progress
+    ; {|{"status":"completed","error":null,"output":[]}|},
+        Responses.Observed_status Responses_stop_reason.Completed
+    ; {|{"status":"new_status","output":[]}|},
+        Responses.Observed_status (Responses_stop_reason.Other "new_status")
+    ; {|{"status":"completed","status":"queued","output":[]}|},
+        Responses.Ambiguous_envelope
+    ; {|{"status":"completed","error":null,"error":null,"output":[]}|},
+        Responses.Ambiguous_envelope
+    ; {|{"status":"completed","error":42,"output":[]}|},
+        Responses.Ambiguous_envelope
+    ; {|{"status":"completed","error":false,"output":[]}|},
+        Responses.Ambiguous_envelope
+    ; {|{"status":"completed","error":[],"output":[]}|},
+        Responses.Ambiguous_envelope
+    ];
+  List.iter (fun (body, expected) ->
+    match Responses.parse_response_result body with
+    | Error { lifecycle; _ } -> check_bool "parse failure retains lifecycle" true
+        (lifecycle = expected)
+    | Ok _ -> Alcotest.fail "expected an unreadable Responses payload")
+    [ {|{"status":"in_progress","output":[{"type":"function_call"}]}|},
+        Responses.Observed_status Responses_stop_reason.In_progress
+    ; {|{"status":"failed","error":{"message":"unavailable"}}|},
+        Responses.Ambiguous_envelope
+    ; {|{"output":[]}|}, Responses.Ambiguous_envelope
+    ; {|{"status":"completed","status":"queued","output":[{}]}|},
+        Responses.Ambiguous_envelope
+    ; {|{"status":|}, Responses.Unreadable_json
+    ]
 ;;
 
 let test_responses_preserves_encrypted_reasoning_item_for_replay () =
@@ -2453,8 +2516,8 @@ let test_responses_preserves_encrypted_reasoning_item_for_replay () =
       ]
   in
   match Responses.parse_response_result (Yojson.Safe.to_string json) with
-  | Error msg -> Alcotest.fail ("unexpected responses parse error: " ^ msg)
-  | Ok response ->
+  | Error { detail; _ } -> Alcotest.fail ("unexpected responses parse error: " ^ detail)
+  | Ok { response; _ } ->
     (match response.content with
      | [ RedactedThinking raw; ToolUse { id; name; input } ] ->
        let raw_json = Yojson.Safe.from_string raw in
@@ -3755,6 +3818,10 @@ let () =
             "stop reason status table SSOT"
             `Quick
             test_responses_stop_reason_ssot_status_table
+        ; Alcotest.test_case
+            "original lifecycle survives stop reason projection"
+            `Quick
+            test_responses_lifecycle_is_distinct_from_stop_reason
         ; Alcotest.test_case
             "preserve encrypted reasoning item for replay"
             `Quick

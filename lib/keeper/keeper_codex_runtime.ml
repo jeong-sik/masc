@@ -859,7 +859,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -951,7 +951,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
-        ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
+        ?account_home:(Some (Runtime_official_account.home config.account_home))
         ~native_posture
         tools
     in
@@ -983,8 +983,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* prepared =
       Host.prepare_turn
         ~composed_context
-        ~configured_reasoning_effort:
-          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~configured_reasoning_effort
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -1031,19 +1030,20 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        compacts it itself. What changes per turn or per operation -- the
        context carrier, the Librarian working state and the historical task
        reference ({!Host.is_carried_on_resume}) -- goes in front of the goal,
-       as the Claude Code lane sends it. Codex applies the [developerInstructions]
-       a [thread/resume] names only when it next compacts the thread (codex-cli
-       0.156.1, 2026-09-25: a resumed thread's requests carried none of them
-       until its compaction wrote them into the replacement history), so the
-       carried messages stay out of them and the compacted thread never holds a
-       stale copy of what the prompt carries.
+       as the Claude Code lane sends it. A resumed Codex 0.166.0 thread with
+       a restored context reference stores new [developerInstructions] in
+       its configuration without appending them to the next model request.
+       The standing System prompt therefore also uses the acknowledged
+       Developer injection path below when its exact bytes change. Carried
+       observations keep their existing current-turn placement.
 
        History can contain large tool results. Projecting and encoding it for
        a new session is CPU work over immutable messages; keeping it on the
        owner domain stalls HTTP, SSE and every other Keeper sharing that
        scheduler. Vendor-session frontier provenance needs only its message
        count, not an encoding or digest of the canonical conversation. *)
-    let* history, context_frontier, composed_developer_instructions =
+    let* history, context_frontier, composed_developer_instructions,
+        (system_projection, system_receipt) =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let* developer_messages, history =
           project_messages ~assembly:composed_context
@@ -1082,8 +1082,20 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         let composed_developer_instructions =
           compose_developer_instructions developer_messages
         in
-        Ok (history, context_frontier, composed_developer_instructions))
+        let system_projection = compose_developer_instructions [] in
+        let system_receipt : Keeper_official_client_session_store.held_context =
+          { context = Codex_system_prompt
+          ; sha256 = Agent_core_sha256.(
+              digest_string (Keeper_context_submission_link.text system_projection) |> to_hex)
+          } in
+        Ok (history, context_frontier, composed_developer_instructions,
+            (system_projection, system_receipt)))
     in
+    let previously_held = Keeper_official_client_session_store.held_context_for_resume
+      claim_plan ~expected:stored_session in
+    let refresh_system = match thread_mode with
+      | Runtime_codex_app_server.Start -> false
+      | Runtime_codex_app_server.Resume _ -> not (List.mem system_receipt previously_held) in
     let prompt, held_context, prompt_projection =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
@@ -1092,10 +1104,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         Host.start_held_context ?composed_context prepared.messages, projection
       | Runtime_codex_app_server.Resume _ ->
         let delivery = Host.resume_prompt ~goal:prompt ?composed_context
-          ~held:(Keeper_official_client_session_store.held_context_for_resume
-            claim_plan ~expected:stored_session) prepared.messages in
+          ~held:previously_held prepared.messages in
         delivery.prompt, delivery.held_context, delivery.context_projection
     in
+    let held_context = system_receipt :: List.filter
+      (fun (held : Keeper_official_client_session_store.held_context) ->
+         held.context <> Codex_system_prompt) held_context in
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
     let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
@@ -1107,7 +1121,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        developer items, independently of the previous session's survival. *)
     let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
       |> Result.map_error internal_error in
-    let developer_context = Keeper_client_tool_outbox.developer_context tool_outbox in
+    (* Resume configuration alone does not update the model-visible history.
+       The runtime waits for this injection's ACK before [turn/start]. The
+       existing frontier acknowledges it only after a completed vendor turn;
+       compaction invalidates the receipt along with other held context. *)
+    let developer_context =
+      (if refresh_system then [Keeper_context_submission_link.text system_projection] else [])
+      @ Keeper_client_tool_outbox.developer_context tool_outbox in
     let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)
@@ -1128,14 +1148,15 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; account_home = config.account_home
+      ; account_home = Runtime_official_account.Captured config.account_home
       ; isolated_home = None
       ; model = config.model
       ; context_window
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
-      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
+      ; timeout_s = Runtime_inference.turn_timeout_s_of_declared
+          ~default:config.timeout_s turn_timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1548,7 +1569,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                  ~slot:Developer_instructions composed_developer_instructions observation.write
              | Turn_start -> Keeper_context_submission_link.binding_to_json
                  ~slot:(Turn_text (List.length images)) prompt_projection observation.write
-             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
+             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_injected_context"]
              | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
              | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
            Host.record_context_submission ~keeper_name ~raw_trace_run
@@ -1855,7 +1876,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1875,7 +1896,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
   let quota_scope =
     Runtime_quota_window.scope_of_codex_home
-      (Runtime_codex_app_server.effective_account_home config.account_home)
+      (Some (Runtime_official_account.home config.account_home))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in
@@ -1943,6 +1964,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
         run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
+          ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
           ~runtime_id
           ~quota_scope

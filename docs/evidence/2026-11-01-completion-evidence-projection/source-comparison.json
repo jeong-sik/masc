@@ -1,0 +1,21 @@
+{
+  "baseline_head": "95fc86deba4db4c1bc2d17f5d3c3253f7626475a",
+  "candidate_head": "a636084c8a77b989ba7b6d115965fbd935bf7207",
+  "input_count": 20,
+  "identical_inputs": 15,
+  "changed_inputs": [
+    "lib/keeper/keeper_official_client_host.ml",
+    "lib/keeper/keeper_official_client_host.mli",
+    "lib/keeper/keeper_codex_runtime.ml",
+    "lib/keeper/keeper_claude_code_runtime.ml",
+    "test/test_keeper_librarian_request_unread.ml"
+  ],
+  "focused_codex_fixture_identical": true,
+  "dune_target_identical": true,
+  "whole_test_tree_identical": false,
+  "original_assertion_preserved_parent_baseline_candidate": {
+    "bytes": 1210,
+    "sha256": "10c7756ef9fa7c5546bd97a07fc412e91934a9759a767ab9df2494ceb064bb25"
+  },
+  "completed_case_comparison": "case-comparison.json"
+}

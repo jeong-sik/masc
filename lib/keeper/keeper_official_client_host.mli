@@ -470,14 +470,12 @@ val project_source :
   input_source:Keeper_request_source.t ->
   unread:Keeper_librarian_request_unread.t ->
   Keeper_history_projection.t option -> Keeper_history_projection.t
-(** A Keeper history retains the same frozen unread evidence after a custom
-    source projection. It may change the history view, but cannot remove or
-    replace this evidence. Native requests explicitly carry known empty
-    observations too, allowing a resumed session to supersede older unread
-    evidence. The same carrier is pinned before capacity measurement.
-    A program-owned completion review has no Keeper unread observation: its
-    supplied messages are not rewritten by this step, and a custom projection
-    is returned unchanged. *)
+(** Apply the caller's explicit source projection, preserving its errors.
+    [Completion_review] returns that view without adding or replacing Keeper
+    unread observations; without a projection the supplied evidence is exact.
+    [Keeper_history] preserves its frozen unread evidence after a custom view,
+    including known empty observations that supersede a resumed session's older
+    evidence. That Keeper carrier is also pinned before capacity measurement. *)
 
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
@@ -846,26 +844,6 @@ val with_run_lifecycle_events :
 (** Publish the same typed start and terminal lifecycle owned by Agent Core.
     Official clients own their internal model loop, so this host boundary is
     the single MASC owner for those events. *)
-
-val clamp_reasoning_effort_to_catalog :
-  model_id:string option ->
-  requested:Llm_provider.Reasoning_effort.t option ->
-  Llm_provider.Reasoning_effort.t option
-(** Snap a requested reasoning effort into the catalog's accepted set for
-    [model_id]: the requested effort when it is accepted, otherwise the
-    nearest accepted effort (highest below; lowest when every accepted effort
-    is higher). Pure; pinned by [test_keeper_codex_effort_clamp]. *)
-
-val effective_reasoning_effort :
-  runtime_label:string ->
-  keeper_name:string ->
-  runtime_id:string ->
-  model_id:string option ->
-  requested:Llm_provider.Reasoning_effort.t option ->
-  Llm_provider.Reasoning_effort.t option
-(** {!clamp_reasoning_effort_to_catalog} plus the operator-visible info log
-    when the effort was snapped. One call site per official-client lane, so
-    Codex and Claude Code treat the same declared effort identically. *)
 
 val host_stop_result :
   runtime_id:string ->

@@ -34,18 +34,45 @@ let test_format_event_preserves_multiline_data () =
   | Error Sse.Missing_data_payload ->
       Alcotest.fail "format_event emitted a frame without a data field"
 
-let register_exn ~auth ?kind session_id ~last_event_id =
+let register_exn ~auth ?kind ?on_disconnect session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
   let (_ : Session.McpSessionStore.mcp_session) =
     Session.McpSessionStore.get_or_create ~id:session_id ()
   in
-  match Sse.register ?kind ~auth session_id ~last_event_id with
+  match Sse.register ?kind ?on_disconnect ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->
       Alcotest.fail
         (Printf.sprintf "Sse.register failed: %s"
            (Sse.registration_error_to_string e))
+
+(* Both old mailboxes overflow in one broadcast. Removing the first wakes its
+   transport, which reconnects the second session before its old failure is
+   handled. That old failure must not remove the new client. *)
+let test_failed_broadcast_keeps_reconnected_successor ~auth () =
+  reset ();
+  let successor_session = "overflow-race-a" in
+  let first_session = "overflow-race-z" in
+  let reconnected = ref false in
+  Fun.protect
+    ~finally:(fun () -> List.iter Sse.unregister [first_session; successor_session])
+    (fun () ->
+      ignore (register_exn ~auth ~kind:Observer successor_session ~last_event_id:0);
+      ignore (register_exn ~auth ~kind:Observer first_session ~last_event_id:0
+        ~on_disconnect:(fun () ->
+          ignore (register_exn ~auth ~kind:Observer successor_session ~last_event_id:0);
+          reconnected := true));
+      (* The configured stream capacity is clamped to at most 1024. *)
+      for _ = 0 to 1024 do
+        if not !reconnected then Sse.broadcast_to Observers (`Assoc ["type", `String "fill"])
+      done;
+      Alcotest.(check bool) "old transport reconnected its peer" true !reconnected;
+      Alcotest.(check bool) "the replacement remains registered" true (Sse.exists successor_session);
+      Sse.broadcast_to Observers (`Assoc ["type", `String "after-reconnect"]);
+      Alcotest.(check bool) "the replacement receives later events" true
+        (Option.is_some (Sse.try_pop successor_session)))
+;;
 
 (* ============================================================
    pop / try_pop
@@ -353,7 +380,7 @@ let test_idle_session_is_not_hot ~auth () =
   Fun.protect
     ~finally:(fun () -> Sse.unregister "s-idle-hot-probe")
     (fun () ->
-      Sse.sync_transport_snapshot ~force:true ();
+      Sse.sync_transport_snapshot ();
       let hot_sessions =
         Transport_metrics.transport_health_json ()
         |> U.member "sse"
@@ -361,6 +388,220 @@ let test_idle_session_is_not_hot ~auth () =
         |> U.to_list
       in
       Alcotest.(check int) "idle sessions are not hot" 0 (List.length hot_sessions))
+
+let queue_snapshot () =
+  Transport_metrics.transport_health_json () |> U.member "sse"
+
+let check_queue ~label ~max_depth ~hot_count =
+  let sse = queue_snapshot () in
+  Alcotest.(check int) (label ^ " max depth") max_depth
+    (sse |> U.member "queue_max_depth" |> U.to_int);
+  Alcotest.(check int) (label ^ " hot count") hot_count
+    (sse |> U.member "hot_sessions" |> U.to_list |> List.length)
+
+let test_queue_metrics_follow_delivery ~auth () =
+  reset ();
+  let _, stream, _ =
+    register_exn ~auth ~kind:Observer "queue-metrics-drain" ~last_event_id:0 in
+  Fun.protect ~finally:(fun () -> Sse.unregister "queue-metrics-drain") (fun () ->
+    Sse.broadcast_to Observers (`Assoc ["type", `String "queued"]);
+    check_queue ~label:"enqueued" ~max_depth:1 ~hot_count:1;
+    Alcotest.(check bool) "nonblocking take received the event" true
+      (Option.is_some (Sse.take_delivery_nonblocking stream));
+    check_queue ~label:"after nonblocking take" ~max_depth:0 ~hot_count:0;
+    Sse.broadcast_to Observers (`Assoc ["type", `String "queued again"]);
+    ignore (Sse.take_delivery stream);
+    check_queue ~label:"after blocking take" ~max_depth:0 ~hot_count:0)
+
+let test_retired_stream_cannot_change_successor_metrics ~auth () =
+  reset ();
+  let session_id = "queue-metrics-reconnect" in
+  let old_id, old_stream, _ =
+    register_exn ~auth ~kind:Observer session_id ~last_event_id:0 in
+  Fun.protect ~finally:(fun () -> Sse.unregister session_id) (fun () ->
+    Sse.broadcast_to Observers (`Assoc ["type", `String "old"]);
+    let new_id, new_stream, _ =
+      register_exn ~auth ~kind:Observer session_id ~last_event_id:0 in
+    Alcotest.(check bool) "replacement has a new owner" true (old_id <> new_id);
+    Sse.broadcast_to Observers (`Assoc ["type", `String "new"]);
+    check_queue ~label:"successor queued" ~max_depth:1 ~hot_count:1;
+    ignore (Sse.take_delivery old_stream);
+    check_queue ~label:"after retired stream drains" ~max_depth:1 ~hot_count:1;
+    ignore (Sse.take_delivery new_stream);
+    check_queue ~label:"after successor drains" ~max_depth:0 ~hot_count:0)
+
+let test_concurrent_enqueue_and_drain_metrics ~auth () =
+  reset ();
+  let session_id = "queue-metrics-domains" in
+  let _, stream, _ =
+    register_exn ~auth ~kind:Observer session_id ~last_event_id:0 in
+  let produced = Atomic.make 0 and acknowledged = Atomic.make 0 in
+  let stop = Atomic.make false and failure = Atomic.make None in
+  let worker = Domain.spawn (fun () ->
+    try
+      for n = 1 to 200 do
+        if not (Atomic.get stop) then begin
+          Sse.broadcast_to Observers (`Assoc ["type", `String "domain-race"]);
+          Atomic.set produced n;
+          while Atomic.get acknowledged < n && not (Atomic.get stop) do
+            Domain.cpu_relax ()
+          done
+        end
+      done
+    with exn -> Atomic.set failure (Some exn)) in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set stop true; Domain.join worker; Sse.unregister session_id)
+    (fun () ->
+      let deadline = Unix.gettimeofday () +. 30.0 in
+      let check_worker () =
+        (match Atomic.get failure with None -> () | Some exn -> raise exn);
+        if Unix.gettimeofday () > deadline then Alcotest.fail "domain race timed out";
+        Domain.cpu_relax () in
+      for n = 1 to 200 do
+        let rec take () =
+          match Sse.take_delivery_nonblocking stream with
+          | Some _ -> ()
+          | None -> check_worker (); take () in
+        take ();
+        while Atomic.get produced < n do check_worker () done;
+        check_queue ~label:"concurrent drain" ~max_depth:0 ~hot_count:0;
+        Atomic.set acknowledged n
+      done)
+
+let test_waiting_inventory_observer_authority ~auth () =
+  reset ();
+  let base_a = auth.Sse.config in
+  let base_b = Filename.concat base_a "waiting-inventory-beta" in
+  Fs_compat.mkdir_p (Filename.concat base_b Common.masc_dirname);
+  let auth_b = Masc_test_deps.make_sse_auth base_b "waiting-inventory-agent" in
+  let authority_a = Sse.runtime_authority_exn ~base_path:base_a in
+  let authority_b = Sse.runtime_authority_exn ~base_path:base_b in
+  let before = Sse.current_id () in
+  ignore (register_exn ~auth ~kind:Sse.Observer "waiting-observer-a" ~last_event_id:before);
+  ignore (register_exn ~auth:auth_b ~kind:Sse.Observer "waiting-observer-b" ~last_event_id:before);
+  Fun.protect
+    ~finally:(fun () -> List.iter Sse.unregister [ "waiting-observer-a"; "waiting-observer-b" ])
+    (fun () ->
+      Keeper_waiting_inventory_broadcast.changed ~base_path:base_a
+        ~keeper_name:"alpha" ~source:Event_queue;
+      Alcotest.(check bool) "matching observer receives the event" true
+        (Option.is_some (Sse.try_pop "waiting-observer-a"));
+      Alcotest.(check bool) "other workspace receives no event" true
+        (Option.is_none (Sse.try_pop "waiting-observer-b"));
+      let replay authority session_id =
+        (Sse.replay_after_for_session ~runtime_authority:authority
+          ~session_id ~kind:Sse.Observer before).deliveries in
+      Alcotest.(check int) "matching observer can replay" 1
+        (List.length (replay authority_a "waiting-observer-a"));
+      Alcotest.(check int) "other observer cannot replay" 0
+        (List.length (replay authority_b "waiting-observer-b"));
+      Alcotest.(check int) "unbound observer cannot replay" 0
+        (List.length
+          (Sse.replay_after_for_session ~session_id:"waiting-unbound"
+             ~kind:Sse.Observer before).deliveries))
+;;
+
+let test_keeper_composite_authority ~auth () =
+  reset ();
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  let base_a = auth.Sse.config in
+  let base_b = Filename.concat base_a "composite-beta" in
+  Fs_compat.mkdir_p (Filename.concat base_b Common.masc_dirname);
+  let auth_b = Masc_test_deps.make_sse_auth base_b "composite-agent" in
+  let authority_a = Sse.runtime_authority_exn ~base_path:base_a in
+  let authority_b = Sse.runtime_authority_exn ~base_path:base_b in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "alpha"; "trace_id", `String "trace-alpha" ]) with
+    | Ok meta -> meta
+    | Error error -> Alcotest.fail error in
+  ignore (Keeper_registry.register_offline ~base_path:base_a "alpha" meta);
+  ignore (Keeper_registry.register_offline ~base_path:base_b "alpha" meta);
+  let before = Sse.current_id () in
+  let sessions = [ "composite-observer-a"; "composite-observer-b";
+                   "composite-presence-a"; "composite-presence-b" ] in
+  let subscribers = [ "composite-external-a"; "composite-external-b";
+                      "composite-external-unscoped" ] in
+  let external_a = ref [] and external_b = ref [] and unscoped = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Sse.unsubscribe_external subscribers;
+      List.iter Sse.unregister sessions;
+      Keeper_registry.For_testing.unregister ~base_path:base_a "alpha";
+      Keeper_registry.For_testing.unregister ~base_path:base_b "alpha";
+      Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      ignore (register_exn ~auth ~kind:Observer "composite-observer-a" ~last_event_id:before);
+      ignore (register_exn ~auth:auth_b ~kind:Observer "composite-observer-b" ~last_event_id:before);
+      ignore (register_exn ~auth ~kind:Presence "composite-presence-a" ~last_event_id:before);
+      ignore (register_exn ~auth:auth_b ~kind:Presence "composite-presence-b" ~last_event_id:before);
+      Sse.subscribe_external ~runtime_authority:authority_a ~id:"composite-external-a"
+        ~callback:(fun event -> external_a := event :: !external_a) ();
+      Sse.subscribe_external ~runtime_authority:authority_b ~id:"composite-external-b"
+        ~callback:(fun event -> external_b := event :: !external_b) ();
+      Sse.subscribe_external ~id:"composite-external-unscoped"
+        ~callback:(fun event -> unscoped := event :: !unscoped) ();
+      let start base_path =
+        Keeper_registry.mark_turn_started
+          ~observation_token:(Keeper_turn_observation_token.fresh ())
+          ~base_path ~wake:Keeper_registry.Proactive_tick "alpha" in
+      let check_composite session ~presence =
+        let frame = match Sse.try_pop session with
+          | Some frame -> frame
+          | None -> Alcotest.failf "%s received no event" session in
+        let payload = match Sse.data_payload_of_frame frame with
+          | Ok data -> Yojson.Safe.from_string data
+          | Error Sse.Missing_data_payload -> Alcotest.failf "%s has no payload" session in
+        Alcotest.(check bool) (session ^ " event type") true
+          (U.member "type" payload = `String "keeper_composite_changed");
+        Alcotest.(check bool) (session ^ " keeper") true
+          (U.member "name" payload = `String "alpha");
+        Alcotest.(check bool) (session ^ " presence framing") presence
+          (List.exists (String.equal "event: presence") (String.split_on_char '\n' frame)) in
+      start (Filename.concat base_a Common.masc_dirname);
+      check_composite "composite-observer-a" ~presence:false;
+      check_composite "composite-presence-a" ~presence:true;
+      Alcotest.(check bool) "B observer excludes A" true
+        (Option.is_none (Sse.try_pop "composite-observer-b"));
+      Alcotest.(check bool) "B presence excludes A" true
+        (Option.is_none (Sse.try_pop "composite-presence-b"));
+      Alcotest.(check int) "A external receives the durable event once" 1 (List.length !external_a);
+      Alcotest.(check int) "B external excludes A" 0 (List.length !external_b);
+      Alcotest.(check int) "unscoped external excludes A" 0 (List.length !unscoped);
+      start base_b;
+      check_composite "composite-observer-b" ~presence:false;
+      check_composite "composite-presence-b" ~presence:true;
+      Alcotest.(check bool) "A observer excludes B" true
+        (Option.is_none (Sse.try_pop "composite-observer-a"));
+      Alcotest.(check bool) "A presence excludes B" true
+        (Option.is_none (Sse.try_pop "composite-presence-a"));
+      Alcotest.(check int) "B external receives the durable event once" 1 (List.length !external_b);
+      Alcotest.(check int) "A external excludes B" 1 (List.length !external_a);
+      Alcotest.(check int) "unscoped external excludes both" 0 (List.length !unscoped);
+      let replay authority kind =
+        (Sse.replay_after_for_session ~runtime_authority:authority
+          ~session_id:"composite-replay" ~kind before).deliveries in
+      Alcotest.(check int) "A observer replays only A" 1 (List.length (replay authority_a Observer));
+      Alcotest.(check int) "B observer replays only B" 1 (List.length (replay authority_b Observer));
+      Alcotest.(check int) "presence events are not replayed" 0 (List.length (replay authority_a Presence));
+      Alcotest.(check int) "only durable events are buffered" 2
+        (List.length (Sse.get_events_after_for_test before));
+      Alcotest.(check int) "unbound observer cannot replay" 0
+        (List.length (Sse.replay_after_for_session ~session_id:"composite-unbound"
+          ~kind:Observer before).deliveries);
+      Sse.unregister "composite-presence-a";
+      let last_id = Sse.current_id () in
+      Sse.broadcast_presence_to_runtime authority_a (`Assoc [ "type", `String "probe" ]);
+      Alcotest.(check int) "foreign presence alone does not make A observable" last_id
+        (Sse.current_id ());
+      Alcotest.(check bool) "foreign presence receives no A probe" true
+        (Option.is_none (Sse.try_pop "composite-presence-b"));
+      Alcotest.(check bool) "generic broadcast cannot make scoped presence durable" true
+        (match Sse.broadcast_to (Sse.Runtime_presence authority_a) (`Assoc []) with
+         | () -> false
+         | exception Invalid_argument _ -> true))
+;;
 
 let test_runtime_observer_authority ~auth () =
   reset ();
@@ -452,6 +693,8 @@ let () =
               Alcotest.test_case "a cursor from an earlier process does not hold back events" `Quick
                 (test_a_cursor_from_an_earlier_process_does_not_hold_back_events ~auth);
               Alcotest.test_case "event contains data" `Quick (test_broadcast_event_contains_data ~auth);
+              Alcotest.test_case "stale failure leaves a reconnected client" `Quick
+                (test_failed_broadcast_keeps_reconnected_successor ~auth);
             ] );
           ( "send_to_stream",
             [
@@ -467,6 +710,10 @@ let () =
             [
               Alcotest.test_case "runtime authority live, replay and external" `Quick
                 (test_runtime_observer_authority ~auth);
+              Alcotest.test_case "waiting inventory authority live and replay" `Quick
+                (test_waiting_inventory_observer_authority ~auth);
+              Alcotest.test_case "keeper composite authority live and replay" `Quick
+                (test_keeper_composite_authority ~auth);
               Alcotest.test_case "observers only" `Quick (test_broadcast_to_observers_only ~auth);
               Alcotest.test_case "all targets" `Quick (test_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast = broadcast_to All" `Quick (test_broadcast_equals_broadcast_to_all ~auth);
@@ -484,5 +731,11 @@ let () =
             [
               Alcotest.test_case "idle session is not hot" `Quick
                 (test_idle_session_is_not_hot ~auth);
+              Alcotest.test_case "queue metrics follow delivery" `Quick
+                (test_queue_metrics_follow_delivery ~auth);
+              Alcotest.test_case "retired stream cannot alter successor metrics" `Quick
+                (test_retired_stream_cannot_change_successor_metrics ~auth);
+              Alcotest.test_case "concurrent enqueue and drain metrics" `Quick
+                (test_concurrent_enqueue_and_drain_metrics ~auth);
             ] );
         ])

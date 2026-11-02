@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name sse_queue_inventory)
+ (public_name masc.sse_queue_inventory)
+ (wrapped false)
+ (flags :standard -w +4))

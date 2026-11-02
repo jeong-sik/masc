@@ -1,0 +1,15 @@
+{
+  "executed_head": "d6ce437549da7cbe303922879b2468c65820fbfd",
+  "evidence_parent": "d6ce437549da7cbe303922879b2468c65820fbfd",
+  "identical_named_inputs": 38,
+  "identical_trees": [
+    "lib",
+    "test",
+    "config",
+    "packages/agent_core"
+  ],
+  "case_key_sha256": "cb51a43a423a033e4f0d9c4fd56b3f1850317c6e24366cb1e560f3ef836c541b",
+  "same_fixture_before_after_pair": false,
+  "atomic_publication_executed": false,
+  "limits": "One focused four-suite execution only. No baseline, full regression, exact printer-string assertion, installed runtime, real provider/account, OS restart or whole-stack integration. Unpublished Catalog_snapshot work is excluded."
+}

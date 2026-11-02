@@ -118,7 +118,7 @@ let decide_transition ~phase ~(action : action) =
      and the proof is judged out-of-band. The verifier's proof actions leave
      the phase with a verdict; a repeated [Request_complete] is the explicit
      retry the RFC substitutes for wall-clock expiry, so it answers [Already]
-     and the handler reports (and re-arms) the pending proof.
+     and the handler retries a matching pending proof or reconciles its verdict.
 
      The operator can also leave without a verdict: [Drop] abandons the goal
      and [Reopen] returns it to [Executing], clearing the pending request.
@@ -179,4 +179,12 @@ let moves_goal ~phase ~action =
   | Ok (Move_to _) -> true
   | Ok (Already _) -> false
   | Error _ -> false
+;;
+
+let offers_public_action ~phase ~(action : Public_action.t) =
+  match phase, action with
+  | Verifying, Request_complete -> true
+  | (Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _),
+    (Request_complete | Drop | Reopen | Pause | Resume | Block | Unblock) ->
+      moves_goal ~phase ~action:(Public_action.to_action action)
 ;;

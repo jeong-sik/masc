@@ -830,6 +830,7 @@ let clear_keeper_history_projection state =
   state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
     (* These readings belong to one conversation. Clear them at the shared
        target boundary before its replacement request can finish. *)
@@ -923,6 +924,7 @@ let leave_keeper_message state ~drain_queue =
   state.keeper_navigation_open <- false;
   save_message_draft state;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   let target_registered =
     match state.msg_target_keeper_name with
     | Some keeper_name -> keeper_available_for_new_message state keeper_name
@@ -3482,12 +3484,32 @@ let launch_keeper_preparation_load state ~mailbox =
   current != previous
 ;;
 
+let launch_keeper_waiting_load ?change ?(exclusive = false) state ~mailbox =
+  Option.iter (note_keeper_waiting_change state) change;
+  if exclusive then
+    state.keeper_waiting_read <- Keeper_waiting_read.exclusive state.keeper_waiting_read;
+  if server_authority_ready state then begin
+    let enqueue_async = workspace_enqueue state in
+    let reading, request = Keeper_waiting_read.start state.keeper_waiting_read in
+    state.keeper_waiting_read <- reading;
+    Option.iter (fun request ->
+      let host = server_peer_host and port = state.port in
+      let snapshot = capture_keeper_waiting_snapshot state in
+      Masc_tui_async_read.launch ~source:Masc_tui_async_read.Keeper_turns
+        ~deliver:(fun result -> enqueue_async mailbox (Keeper_waiting_loaded (request, snapshot, result)))
+        (capture_workspace_json_read state (fun () ->
+          Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for:None))
+    ) request
+  end
+
 let launch_keeper_turns_load state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.keeper_turns_inflight then ()
   else begin
     state.keeper_turns_inflight <- true;
+    let waiting_receipt = Keeper_waiting_read.poll_receipt state.keeper_waiting_read in
+    let waiting_snapshot = capture_keeper_waiting_snapshot state in
     let generation = state.keeper_chat_control_generations in
     let host = server_peer_host in
     let port = state.port in
@@ -3498,7 +3520,7 @@ let launch_keeper_turns_load state ~mailbox =
       ~source:Masc_tui_async_read.Keeper_turns
       ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
+        enqueue_async mailbox (Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result)))
       (capture_workspace_json_read state (fun () ->
         Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for))
   end
@@ -4298,8 +4320,32 @@ let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
    log: the answer names the row it is for, so a load that returns after the
    operator moved on is discarded, not drawn under another item. *)
 
+let launch_goal_candle_load state ~mailbox goal_id =
+  if server_authority_ready state then
+    match begin_goal_candle_read state ~goal_id with
+    | None -> ()
+    | Some request ->
+      let host = server_peer_host and port = state.port in
+      let expected_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
+      launch_workspace_json_read state ~mailbox
+        ~deliver:(fun result -> Goal_candle_loaded (request, result))
+        (fun () ->
+          let credential = Masc_tui_http.bind_credential () in
+          let result = match expected_instance with
+            | None -> Error (Goal_candle_read_failed "Server process identity is unavailable; refresh health")
+            | Some expected ->
+              (match Masc_tui_http.fetch_goal_candle ~credential ~expected_instance:expected ~host ~port ~goal_id with
+               | Error _ as error -> error
+               | Ok (instance, _) when not (String.equal instance expected) ->
+                 Error (Goal_candle_authority_changed None)
+               | Ok (instance, json) -> Candle_goal_observation.of_yojson ~goal_id json
+                 |> Result.map (fun observation -> instance, observation)
+                 |> Result.map_error (fun detail -> Goal_candle_read_failed detail)) in
+          Ok (credential.bound_owner, result))
+
 let launch_goal_timeline_load state ~mailbox goal_id =
   if server_authority_ready state then begin
+  launch_goal_candle_load state ~mailbox goal_id;
   match begin_goal_timeline_read state ~goal_id with
   | None -> ()
   | Some request ->
@@ -6602,22 +6648,25 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
    the fetch helper, so a request already in flight is not repeated and an
    answer for another keeper is dropped on arrival. *)
 
-let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
+let launch_acting_pane_changes_load ?(force = false) state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let key = { apk_keeper = keeper_name
             ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
   let start =
-    match Masc_tui_fetched.current_key state.acting_pane_changes with
-    | Some current when Masc_tui_fetched.in_flight state.acting_pane_changes
+    match force, Masc_tui_fetched.current_key state.acting_pane_changes with
+    | true, _ -> Masc_tui_fetched.refresh
+    | false, Some current when Masc_tui_fetched.in_flight state.acting_pane_changes
                         && not (same_acting_pane_key current key) -> Masc_tui_fetched.refresh
-    | Some _ | None -> Masc_tui_fetched.start
+    | false, (Some _ | None) -> Masc_tui_fetched.start
   in
   match
-    start ~equal:same_acting_pane_keeper state.acting_pane_changes ~key
+    start ~equal:(if force then same_acting_pane_key else same_acting_pane_keeper)
+      state.acting_pane_changes ~key
   with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) -> (
+      state.acting_pane_changes_loss_followup <- None;
       state.acting_pane_changes <- next;
       let host = server_peer_host in
       let port = state.port in
@@ -6652,10 +6701,10 @@ let acting_pane_changes_keeper (state : state) =
     | Masc_tui_acting_pane.Tab_changes ->
         Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
 
-let refresh_acting_pane_changes state ~mailbox =
+let refresh_acting_pane_changes ?(force = false) state ~mailbox =
   match acting_pane_changes_keeper state with
   | None -> ()
-  | Some keeper_name -> launch_acting_pane_changes_load state ~mailbox ~keeper_name
+  | Some keeper_name -> launch_acting_pane_changes_load ~force state ~mailbox ~keeper_name
 
 let ensure_acting_pane_changes state ~mailbox =
   match acting_pane_changes_keeper state with
@@ -6801,18 +6850,19 @@ let launch_harness_load state ~mailbox =
   end
   end
 
-let launch_fusion_runs_load state ~mailbox =
+let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox =
   let enqueue_async = workspace_enqueue state in
   if server_authority_ready state then
-  match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (fusion_runs, request) ->
-      state.fusion_runs <- fusion_runs;
+  match Masc_tui_fusion_updates.begin_runs state ~demand with
+  | None -> ()
+  | Some request ->
       let host = server_peer_host in
       let port = state.port in
+      let read = capture_workspace_json_read state (fun () ->
+        Masc_tui_loader.load_fusion_runs ~host ~port) in
       let run () =
         let result =
-          try Masc_tui_loader.load_fusion_runs ~host ~port with
+          try read () with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
@@ -6828,52 +6878,52 @@ let launch_fusion_runs_load state ~mailbox =
              (Fusion_runs_loaded
                 (request, Error "Eio switch is unavailable")))
 
-let launch_fusion_detail_load state ~mailbox ~run_id =
+let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~run_id =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
-  let already_loading =
-    match state.fusion_detail_inflight with
-    | Some (generation, loading_run_id) ->
-        generation = state.fusion_detail_generation
-        && String.equal loading_run_id run_id
-    | None -> false
-  in
-  if not already_loading then begin
-    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
-    let generation = state.fusion_detail_generation in
-    state.fusion_detail_inflight <- Some (generation, run_id);
+  match Masc_tui_fusion_updates.begin_detail state ~demand ~run_id with
+  | None -> ()
+  | Some generation ->
     let host = server_peer_host in
     let port = state.port in
+    let read = capture_workspace_json_read state (fun () ->
+      Masc_tui_loader.load_fusion_detail ~host ~port ~run_id) in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
         enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
-      (fun () -> Masc_tui_loader.load_fusion_detail ~host ~port ~run_id)
-  end
+      read
   end
 
-let launch_fusion_historical_detail_load state ~mailbox ~reference =
+let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~reference =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
-  let already_loading =
-    match state.fusion_historical_inflight with
-    | Some (generation, loading_reference) ->
-        generation = state.fusion_detail_generation
-        && loading_reference = reference
-    | None -> false
-  in
-  if not already_loading then begin
-    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
-    let generation = state.fusion_detail_generation in
-    state.fusion_historical_inflight <- Some (generation, reference);
+  match Masc_tui_fusion_updates.begin_historical state ~demand ~reference with
+  | None -> ()
+  | Some generation ->
     let host = server_peer_host in
     let port = state.port in
+    let read = capture_workspace_json_read state (fun () ->
+      Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference) in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
         enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result)))
-      (fun () -> Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference)
+      read
   end
 
-  end
+let revalidate_visible_fusion state ~mailbox =
+  let demand = Masc_tui_fusion_updates.After_change in
+  Masc_tui_fusion_updates.revalidate_visible state
+    ~runs:(fun () -> launch_fusion_runs_load ~demand state ~mailbox)
+    ~detail:(fun run_id -> launch_fusion_detail_load ~demand state ~mailbox ~run_id)
+    ~historical:(fun reference ->
+      launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
+
+let resume_fusion_after_observer_failure state ~mailbox =
+  Masc_tui_fusion_updates.observer_failed state
+    ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
+    ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
+    ~historical:(fun reference ->
+      launch_fusion_historical_detail_load state ~mailbox ~reference)
 
 (* The server's reading of which Keepers the memory recall judgment reaches,
    asked when the [m] form opens and drawn in it. Each open takes a new
@@ -7874,13 +7924,14 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Verification | Planning -> launch_verification_load state ~mailbox
   | Harness -> launch_harness_load state ~mailbox
   | Fusion ->
-      launch_fusion_runs_load state ~mailbox;
+      let demand = Masc_tui_fusion_updates.After_change in
+      launch_fusion_runs_load ~demand state ~mailbox;
       (match state.fusion_mode with
        | Fusion_list -> ()
        | Fusion_detail run_id ->
-           launch_fusion_detail_load state ~mailbox ~run_id
+           launch_fusion_detail_load ~demand state ~mailbox ~run_id
        | Fusion_historical_detail reference ->
-           launch_fusion_historical_detail_load state ~mailbox ~reference)
+           launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
   | Memory -> launch_memory_health_load state ~mailbox
   | Repositories -> launch_repositories_load state ~mailbox
   | Changes -> (
@@ -8172,6 +8223,12 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   in
   if already_inflight && not force then ()
   else begin
+    (match state.msg_history_loss_followup with
+     | Some (name, pending_authority, reading)
+       when String.equal name keeper_name && pending_authority = authority
+            && reading == state.workspace_read_authority ->
+         state.msg_history_loss_followup <- None
+     | Some _ | None -> ());
     let host = server_peer_host in
     let port = state.port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -8246,6 +8303,20 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   end
   end
   end
+
+let launch_pending_loss_history state ~mailbox =
+  match state.msg_history_loss_followup with
+  | None -> ()
+  | Some (keeper_name, authority, reading) ->
+      if authority <> state.workspace_authority || reading != state.workspace_read_authority
+         || state.msg_target_keeper_name <> Some keeper_name then
+        state.msg_history_loss_followup <- None
+      else if state.view = Keepers Keeper_message && state.msg_scroll = 0
+              && server_authority_ready state && keeper_available_for_new_message state keeper_name
+              && Option.is_none state.msg_history_inflight then begin
+        state.msg_history_loss_followup <- None;
+        launch_keeper_history_load ~load_file_changes:false ~force:true state ~mailbox ~keeper_name
+      end
 
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
@@ -9528,7 +9599,7 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
     | Keeper_chat.Interactive _ ->
       state.keeper_observed_interrupts <- List.filter (fun item ->
         item.oi_keeper <> request.Keeper_chat.keeper_name) state.keeper_observed_interrupts;
-      advance_keeper_chat_control state request.Keeper_chat.keeper_name
+      advance_keeper_interactive_control state request.Keeper_chat.keeper_name
     | Keeper_chat.Queue_only -> keeper_chat_control_generation state request.Keeper_chat.keeper_name in
   let submitted_at = promoted.submitted_at in
   let log =
@@ -11143,7 +11214,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
   observe_msx_carts state ~mailbox;
@@ -11165,7 +11237,8 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Msx;
   state.msx_open <- true;
@@ -11191,7 +11264,8 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Dos;
   state.msx_open <- true;
@@ -11430,6 +11504,7 @@ let draw_inspected_image ?(fresh=true) state inspected =
       ^ "\027[2;1H" ^ image
       ^ Printf.sprintf "\027[%d;1H\027[2K%s" rows
           (Message_layout.fit_width footer (max 1 (columns-1))));
+    state.image_cell_view <- None;
     state.image_inspection <- Some {inspected with ii_frame=frame};
     state.image_open <- true
   | (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
@@ -11519,6 +11594,7 @@ let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = 
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width footer (max 1 (columns - 1))));
+      state.image_cell_view <- None;
       state.image_open <- true)
   end
 
@@ -11528,37 +11604,88 @@ let character_images_available () =
      | Masc_tui_terminal_palette.True_color | Ansi256 -> true
      | Ansi16 | Unknown -> false
 
-let draw_prepared_image ?scene ?origin state ~refuse ~title = function
-  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ?origin ~refuse ~title png
+(* Use the actual size even when another asynchronous completion has already
+   refreshed the shared cache. Its normalized width can exceed a tiny tty. *)
+let cell_image_terminal_size () =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some (rows, columns) when rows > 0 && columns > 0 -> Some (rows, columns)
+  | Some _ | None -> None
+
+let cell_image_fits (view : image_cell_frame) (rows, columns) =
+  view.ic_columns <= columns - 2
+  && List.length view.ic_lines + List.length view.ic_caption <= rows - 3
+
+let cell_image_notice ~columns ~short ~long =
+  let notice = if columns <= 4 then "!" else if columns <= 9 then "key"
+    else if columns <= 20 then short else long in
+  "\x1b[1;1H" ^ Message_layout.fit_width notice (columns - 1)
+
+let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_frame) =
+  let contents =
+    if cell_image_fits view (rows, columns) then
+      let header_rows = 1 + List.length view.ic_caption in
+      let header = List.mapi (fun index line ->
+        Printf.sprintf "\x1b[%d;1H%s" (index + 1)
+          (Message_layout.fit_width line (columns - 1))) (view.ic_title :: view.ic_caption)
+        |> String.concat "" in
+      let body = List.mapi (fun index line ->
+        Printf.sprintf "\x1b[%d;1H%s" (index + 1 + header_rows) line) view.ic_lines
+        |> String.concat "" in
+      let footer = if view.ic_unconfirmed then "! source unconfirmed · any key: back"
+        else "  colour-cell preview · any key: back" in
+      header ^ body
+      ^ Printf.sprintf "\x1b[%d;1H%s" rows
+          (Message_layout.fit_width footer (columns - 1))
+    else cell_image_notice ~columns ~short:"key:close"
+      ~long:"Window too small · resize larger or press any key to close"
+  in
+  let retire_pixels = match !active_graphics_protocol, state.image_open, state.image_cell_view with
+    | Masc_tui_graphics.Kitty_protocol, true, None -> Masc_tui_graphics.delete_all
+    | (Kitty_protocol | ITerm2_protocol | Unsupported_protocol), (true | false), (Some _ | None) -> "" in
+  Masc_tui_msx.invalidate ();
+  write_to_terminal (Ansi.clear ^ retire_pixels ^ contents);
+  state.browser_viewport <- None;
+  state.image_inspection <- None;
+  browser_image_region := None;
+  browser_pointer_press := None;
+  state.image_cell_view <- Some (Image_cells {view with ic_terminal_size=(rows, columns)});
+  state.image_open <- true
+
+let draw_withdrawn_cell_image state ~terminal_size:(_, columns as terminal_size) =
+  let notice = cell_image_notice ~columns ~short:"key:close"
+    ~long:"Image preview no longer available · press any key to close" in
+  write_to_terminal (Ansi.clear ^ notice);
+  state.image_cell_view <- Some (Image_cells_withdrawn (Some terminal_size))
+
+let draw_prepared_image ?scene ?(caption=[]) ~origin state ~refuse ~title = function
+  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ~origin ~caption ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
     withdraw_resource_diagram_pending state;
-    let rows, columns = Masc_tui_ansi.get_terminal_size () in
     if state.msx_open then
       refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
     else if not (character_images_available ()) then
       refuse "this terminal has no colour image presentation"
-    else if image_columns > columns - 2 || pixel_rows / 2 > rows - 3 then
-      refuse "terminal size changed; reopen the image preview"
-    else
+    else match cell_image_terminal_size () with
+    | None -> refuse "terminal size is unavailable; reopen the image preview"
+    | Some (rows, columns) when image_columns > columns - 2
+        || pixel_rows / 2 + List.length caption > rows - 3 ->
+        refuse "terminal size changed; reopen the image preview"
+    | Some _ ->
       let lines = Masc_tui_image_mosaic.render_rgba
         ~project:Masc_tui_terminal_palette.best_color
         ~cols:image_columns ~rows:pixel_rows bytes in
       match lines with
       | [] -> refuse "image preview has no character frame"
       | _ :: _ ->
-        state.browser_viewport <- None;
-        browser_image_region := None;
-        browser_pointer_press := None;
         let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
-        let body = List.mapi (fun index line ->
-          Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) lines
-          |> String.concat "" in
-        Masc_tui_msx.invalidate ();
-        write_to_terminal (Ansi.clear ^ "\x1b[1;1H"
-          ^ Message_layout.fit_width title (max 1 (columns - 1)) ^ body
-          ^ Printf.sprintf "\x1b[%d;1H%s" rows
-              (Message_layout.fit_width "  colour-cell preview · any key: back" (max 1 (columns - 1))));
-        state.image_open <- true
+        let caption = List.map (Keeper_chat.terminal_safe_text ~preserve_newlines:false) caption in
+        match cell_image_terminal_size () with
+        | None -> refuse "terminal size is unavailable; reopen the image preview"
+        | Some (rows, columns) ->
+            draw_cell_image state ~terminal_size:(rows, columns)
+              {ic_title=title;ic_caption=caption;ic_lines=lines;ic_columns=image_columns;
+               ic_terminal_size=(rows, columns);ic_workspace=state.workspace_authority;
+               ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin}
 
 let download_remote_image ?(force_fetch = false) url =
   Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
@@ -11653,17 +11780,71 @@ let retry_image_mosaic img =
    why they could not be produced. Pure of the render loop: no terminal writes,
    so it is safe to run on a systhread. *)
 let prepare_remote_image_bytes url =
-  Masc_tui_image_cache.prepare_png ~run:Unix.system
+  Masc_tui_image_cache.prepare_png
+    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
     ~cache_dir:(ensure_img_cache_dir ()) url
 
-(* [v] on a link preview, and /image with an HTTP(S) URL: download and
-   convert the image OFF the render loop, then hand the PNG bytes back through
-   the mailbox so [draw_image] runs on the render fiber, not here. The
-   blocking curl/sips live inside run_in_systhread so the domain keeps
-   rendering; the loading line is shown at once so the keypress is not silent.
-   terminal_draws_images = false skips the download and opens the page in a
-   browser instead. *)
-let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_url =
+let remote_fetch_worker = Masc_tui_board_preview_work.create ()
+let remote_cell_worker = Masc_tui_board_preview_work.create ()
+
+let withdraw_remote_image_reservations () =
+  ignore (Masc_tui_board_preview_work.withdraw_pending remote_fetch_worker);
+  ignore (Masc_tui_board_preview_work.withdraw_pending remote_cell_worker)
+
+let launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url work =
+  Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
+    ~boundary_error:Fun.id
+    ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
+    work
+
+let launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+    ~worker ~label ~busy ~on_exception work =
+  launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url (fun () ->
+    let current = Option.exists (fun pending -> pending == request) state.sent_image_read
+      && request.sir_generation=state.image_request_generation && request.sir_view=state.view
+      && not state.msx_open && image_request_keeper_is_current state request
+      && image_reading_is_current state request in
+    if not current then Ok (Masc_tui_image_cache.Remote_busy busy)
+    else match Masc_tui_board_preview_work.reserve worker with
+      | None -> Ok (Masc_tui_image_cache.Remote_busy busy)
+      | Some admission ->
+          (match Fun.protect
+            ~finally:(fun () -> Masc_tui_board_preview_work.withdraw worker admission)
+            (fun () -> Eio_guard.run_in_systhread ~label (fun () ->
+              match Masc_tui_board_preview_work.run_reserved worker admission work with
+              | Some result -> result
+              | None -> Ok (Masc_tui_image_cache.Remote_busy busy))) with
+           | result -> result
+           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+           | exception exn -> on_exception exn))
+
+let launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url =
+  launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+    ~worker:remote_fetch_worker ~label:"tui-remote-image-bytes" ~busy:None
+    ~on_exception:(fun exn -> Error (Printexc.to_string exn)) (fun () ->
+      Result.map (fun png -> Masc_tui_image_cache.Remote_png png) (prepare_remote_image_bytes image_url))
+
+let launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display png =
+  match display with
+  | Error detail ->
+      launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+        (fun () -> Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error detail}))
+  | Ok display ->
+      launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+        ~worker:remote_cell_worker ~label:"tui-remote-image-cells" ~busy:(Some png)
+        ~on_exception:(fun exn ->
+          Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error (Printexc.to_string exn)}))
+        (fun () ->
+          let cells = Masc_tui_image_cache.prepare_presentation
+            ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
+            ~cache_dir:(ensure_img_cache_dir ()) display png in
+          Ok (Masc_tui_image_cache.Remote_cells {png;cells}))
+
+(* A remote preview retains one input-cancellable owner across download and,
+   when needed, colour-cell conversion.  Each blocking stage runs off the
+   render loop; the completion chooses with the latest terminal capability. *)
+let launch_image_render state ~mailbox ~notice:_ ~title ~caption ~page_url image_url =
+  withdraw_remote_image_reservations ();
   state.image_request_generation <- state.image_request_generation + 1;
   let view = state.view in
   let request = {sir_generation=state.image_request_generation; sir_view=view;
@@ -11672,17 +11853,11 @@ let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_u
     sir_resource=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
   state.sent_image_read <- Some request;
-  let unsupported = !terminal_draws_images = Some false in
-  if not unsupported then
-    notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
-  Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
-    ~boundary_error:Fun.id
-    ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
-    (fun () ->
-      if unsupported then Error "terminal does not support inline images"
-      else
-        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
-            prepare_remote_image_bytes image_url))
+  (* Classify already-buffered input and signals before starting a download.
+     This first completion has no external side effects and goes through the
+     same input barrier as the later download and conversion completions. *)
+  launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+    (fun () -> Ok Masc_tui_image_cache.Remote_unfetched)
 
 let image_request_is_active state entry =
   let matches request =
@@ -11760,11 +11935,15 @@ let board_preview_worker = Masc_tui_board_preview_work.create ()
 let vector_inspection_worker = Masc_tui_board_preview_work.create ()
 
 let () = at_exit (fun () ->
+  Masc_tui_board_preview_work.stop remote_fetch_worker;
+  Masc_tui_board_preview_work.stop remote_cell_worker;
   Masc_tui_board_preview_work.stop board_preview_worker;
   Masc_tui_board_preview_work.stop vector_inspection_worker;
   Masc_tui_board_preview_work.stop resource_diagram_worker;
   Masc_tui_board_preview_work.stop board_image_prepare_worker;
   Masc_tui_image_cache.stop_subprocesses ();
+  Masc_tui_board_preview_work.await_stopped remote_fetch_worker;
+  Masc_tui_board_preview_work.await_stopped remote_cell_worker;
   Masc_tui_board_preview_work.await_stopped board_preview_worker;
   Masc_tui_board_preview_work.await_stopped vector_inspection_worker;
   Masc_tui_board_preview_work.await_stopped resource_diagram_worker;
@@ -11809,23 +11988,48 @@ let withdraw_pending_image_open state =
   match Masc_tui_types.withdraw_image_open state with
   | Some {sir_owner=Board_image_read (_,_,job);_} ->
       Masc_tui_workspace_job.cancel_observation state ~key:job
-  | Some {sir_owner=(Local_file_image_read _ | Remote_url_image_read _
+  | Some {sir_owner=Remote_url_image_read _;_} -> withdraw_remote_image_reservations ()
+  | Some {sir_owner=(Local_file_image_read _
                     | Draft_image_read _ | Peer_image_read _);_}
+  | None -> ()
+
+(* Retire the owner as well as its unstarted physical reservations before an
+   asynchronous navigation. Returning to the old view must not re-admit its
+   delayed result. *)
+let retire_remote_image_for_navigation state =
+  match state.sent_image_read with
+  | Some {sir_owner=Remote_url_image_read _;_} -> withdraw_pending_image_open state
+  | Some {sir_owner=(Local_file_image_read _ | Draft_image_read _
+                    | Peer_image_read _ | Board_image_read _);_}
   | None -> ()
 
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
   match state.sent_image_read with
   | Some pending when not (image_reading_is_current state pending) ->
+    if Option.is_none (retired_skill_image_notice state) then begin
+      (match pending.sir_owner with
+       | Remote_url_image_read _ -> withdraw_remote_image_reservations ()
+       | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ | Board_image_read _ -> ());
       cancel_board_image_read state;
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
-         && image_keeper_is_current state ~view:pending.sir_view ~keeper_name:pending.sir_keeper then
+         && image_request_keeper_is_current state pending then
         image_notice state ~view:pending.sir_view ~keeper_name:pending.sir_keeper ~kind:Notice_failure
           (Printf.sprintf "Image %s: source changed; reopen its preview"
              pending.sir_name)
+    end
   | Some _ | None -> ()
+
+let announce_retired_skill_image state =
+  match retired_skill_image_notice state with
+  | Some pending ->
+      state.sent_image_read <- None;
+      image_notice state ~view:Tools ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+        "Skill image preview interrupted after the workspace reading changed; reopen it";
+      true
+  | None -> false
 
 (* Draft payloads are local even while disconnected. Peer readings retain
    their original authority envelope; both paths capture the UI generation
@@ -11851,6 +12055,7 @@ let board_image_source_matches subject source =
            | Local_file _ | Draft _ | Retained _ | Generated _ -> false)
 
 let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~name source =
+  withdraw_remote_image_reservations ();
   cancel_board_image_read state;
   state.image_request_generation <- state.image_request_generation + 1;
   state.sent_image_read <- None;
@@ -11892,7 +12097,13 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       | Board_image_read _ -> Some board_preview_worker
       | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let port = state.port in
-    let keeper_name = if state.view = Resources || state.view = Board then None else state.msg_target_keeper_name in
+    let keeper_name = match state.view, skill_reference with
+      | Tools, Some _ -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+      | (Resources | Board), (Some _ | None) -> None
+      | Tools, None
+      | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+        | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+        | Connectors | Runtime | Config | System_logs), (Some _ | None) -> state.msg_target_keeper_name in
     let generation = state.image_request_generation in
     let view = state.view in
     let request = {sir_generation=generation; sir_view=view;
@@ -11904,11 +12115,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let admit_vector () =
       let exact_request = Option.exists (fun pending -> pending == request) state.sent_image_read in
       if not exact_request || state.msx_open || generation <> state.image_request_generation
-         || view <> state.view || not (image_keeper_is_current state ~view ~keeper_name)
-         || not (image_reading_is_current state request) then begin
-        ignore (Masc_tui_types.take_image_read state request);
+         || view <> state.view || not (image_request_keeper_is_current state request)
+         || not (image_reading_is_current state request) then
         Error "vector image request is no longer current"
-      end
       else match Masc_tui_board_preview_work.reserve vector_inspection_worker with
         | None -> Error "Previous vector image is still rendering; retry when it finishes"
         | Some admission -> Ok (vector_inspection_worker,admission) in
@@ -11973,7 +12182,7 @@ let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
         Masc.Keeper_image_dimensions.image_dimensions inspected.ii_data with
      | Some scene, Some origin, Some (width,height)
          when origin.sir_view=state.view
-           && image_keeper_is_current state ~view:state.view ~keeper_name:origin.sir_keeper
+           && image_request_keeper_is_current state origin
            && image_reading_is_current state origin ->
        let geometry = Masc_tui_ansi.get_terminal_size () in
        let window = inspection_window ~cell_pixels inspected.ii_viewport in
@@ -12008,7 +12217,7 @@ let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
               Once admitted, a later close withdraws the result, not the work. *)
            let current = Option.exists (fun request -> request == pending) state.sent_image_read
              && state.image_open && not state.msx_open && pending.sir_view=state.view
-             && image_keeper_is_current state ~view:pending.sir_view ~keeper_name:pending.sir_keeper
+             && image_request_keeper_is_current state pending
              && image_reading_is_current state pending
              && (match state.image_inspection, !image_cell_pixels with
                  | Some current, Some pixels -> current.ii_identity == inspected.ii_identity
@@ -12082,7 +12291,9 @@ let resource_surface_visible state =
   if state.image_open || state.msx_open then false
   else
     let terminal_rows,_ = get_terminal_size () in
-    match Masc_tui_render.frame_choice state ~terminal_rows with
+    match Masc_tui_render.frame_choice state ~terminal_rows
+      ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
+      ~now:(Unix.gettimeofday ()) with
     | `Surface -> true
     | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
     | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
@@ -12378,17 +12589,20 @@ let withdraw_pending_music_editor state =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  let cell_was_open = Option.is_some state.image_cell_view in
+  withdraw_remote_image_reservations ();
   state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
   state.browser_viewport <- None;
   state.image_inspection <- None;
+  state.image_cell_view <- None;
   match state.image_open with
   | false -> ()
   | true ->
       state.image_open <- false;
       Masc_tui_msx.invalidate ();
-      write_to_terminal Masc_tui_graphics.delete_all
+      if not cell_was_open then write_to_terminal Masc_tui_graphics.delete_all
 
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   let failed = ref false in
@@ -14061,7 +14275,8 @@ let apply_remote_keeper_rows state =
             k_paused = false; k_identity = Error reason; k_activity = None }) errors,
         Some (String.concat "; " (List.map (fun (name, reason) -> name ^ ": " ^ reason) errors))
     in
-    replace_keeper_rows ~preserve_on_error:false state
+    replace_keeper_rows ~before_view_change:(fun () -> retire_remote_image_for_navigation state)
+      ~preserve_on_error:false state
       ~keepers ~error;
     clear_keeper_logs state
 
@@ -14139,6 +14354,13 @@ let apply_planning_load state = function
       in
       if Option.is_none state.planning_baseline then
         state.planning_baseline <- Some planning;
+      (match state.goal_action_pending with
+       | Some (Goal_action_armed armed) ->
+         let goal = List.find_opt (fun goal -> String.equal goal.pg_id armed.goal_id) planning.pl_goals in
+         if not (Option.exists (fun goal -> planning_goal_retains_arm goal ~action:armed.action
+             ~phase:armed.phase ~retry_binding:armed.retry_binding) goal) then
+           state.goal_action_pending <- None
+       | Some (Goal_drop_reason _) | None -> ());
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -14652,7 +14874,10 @@ let revoke_detail_readings state =
   state.keeper_schedules_error <- None;
   state.keeper_schedules_page <- None;
   state.keeper_schedules_pending <- None;
-  state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
+  state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None
 
 let same_currency_workspace source current =
   match source, current with
@@ -14771,12 +14996,15 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_mode <- Board_list;
   state.goal_action_pending <- None;
-  state.goal_action_error <- None;
+  state.goal_action_errors <- [];
+  state.goal_transition_latest <- [];
+  state.goal_action_inflight <- [];
   state.planning <- None;
   state.planning_baseline <- None;
   state.planning_error <- None;
   state.planning_mode <- Planning_list;
   state.goal_confirmation <- Goal_confirmation.Inspecting Goal_confirmation_read.initial;
+  state.goal_confirmation_identity_refresh <- None;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
   state.lane_inventory <- None;
@@ -14806,6 +15034,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   state.lane_nested_read_resume <- None;
+  withdraw_remote_image_reservations ();
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
@@ -14881,10 +15110,15 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.context_inspector_loading <- false;
   (* Withdraw owners as well as callbacks: a stale completion must neither
      retain an old pending slot nor release a successor workspace's slot. *)
+  state.keeper_waiting_read <- Keeper_waiting_read.clear state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
   state.keeper_turns <- [];
   state.keeper_waiting <- [];
   state.keeper_waiting_failure <- None;
+  state.keeper_waiting_unverified <- [];
+  state.keeper_waiting_error <- None;
+  state.keeper_waiting_epoch <- state.keeper_waiting_epoch + 1;
+  state.keeper_waiting_versions <- [];
   state.keeper_turns_error <- None;
   state.keeper_turn_finishes <- [];
   state.keeper_turns_observed_at <- None;
@@ -14992,6 +15226,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_param_edit <- None;
   state.runtime_params_notice <- None;
   state.observer <- Observer_off;
+  state.observer_retry_owner <- None;
+  state.observer_recovery_owner <- None;
+  state.observer_scope_binding <- Observer_scope_unbound;
   (* The withdrawal cancelled the fleet job with every other job. What it drew
      belongs to the workspace left, and the next refresh that confirms one
      starts another. *)
@@ -15020,6 +15257,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_text_cursor <- 0;
   state.observer_cursor <- None;
   state.observer_replay <- Observer_replay_unobserved;
+  state.observer_source_loss <- false;
+  state.observer_source_loss_sequences <- [];
   state.acting <- [];
   state.acting_dropped <- 0;
   state.acting_undecodable <- 0;
@@ -15087,6 +15326,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.github_token_save_status <- None;
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
   state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+  state.acting_pane_changes_loss_followup <- None;
   state.acting_pane_changes_at <- None;
   state.workspace_activity <- Masc_tui_fetched.clear state.workspace_activity;
   state.changes_keeper <- None;
@@ -15159,7 +15399,7 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
             (fun () ->
               let result = try
                   Ok (Local_read_observation.run request.lwr_observation
-                    ~read:(fun () -> read request.lwr_base_path) ~prepare:(prepare request))
+                    ~read:(fun () -> read request) ~prepare:(prepare request))
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Error (Printexc.to_string exn) in
@@ -15200,23 +15440,28 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
 
 let launch_local_keeper_read state ~mailbox ~intent base_path =
   launch_local_source state ~mailbox ~intent ~source:Local_keepers
-    ~read:Masc_tui_loader.read_local_keepers ~prepare:(fun _ reading -> reading)
+    ~read:(fun request -> Masc_tui_loader.read_local_keepers request.lwr_base_path)
+    ~prepare:(fun _ reading -> reading)
     ~message:(fun request result -> Local_keepers_read (request, result)) base_path
+
+let launch_local_work_read state ~mailbox ~intent base_path =
+  launch_local_source state ~mailbox ~intent ~source:Local_work
+    ~read:(fun request ->
+      Masc_tui_loader.read_local_workspace
+        ~fresh:(request.lwr_intent = Snapshot_read.Refresh) request.lwr_base_path)
+    ~prepare:Masc_tui_loader.prepare_local_workspace
+    ~message:(fun request result -> Local_workspace_read (request, result)) base_path
 
 let launch_local_workspace_read state ~mailbox ~intent base_path =
   launch_local_keeper_read state ~mailbox ~intent base_path;
-  launch_local_source state ~mailbox ~intent ~source:Local_work
-    ~read:Masc_tui_loader.read_local_workspace ~prepare:Masc_tui_loader.prepare_local_workspace
-    ~message:(fun request result -> Local_workspace_read (request, result)) base_path
+  launch_local_work_read state ~mailbox ~intent base_path
 
 let launch_local_source_followup state ~mailbox source =
   if Local_read_order.has_followup (local_source_order state source) then
     match source with
     | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
     | Local_work ->
-        launch_local_source state ~mailbox ~intent:Snapshot_read.Poll ~source:Local_work
-          ~read:Masc_tui_loader.read_local_workspace ~prepare:Masc_tui_loader.prepare_local_workspace
-          ~message:(fun request result -> Local_workspace_read (request, result)) state.local_base_path
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
 
 let observe_local_source state ~source request result =
   let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
@@ -15561,7 +15806,9 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
    matches again. Only a read that names a workspace goes on to compare it. *)
 let apply_server_identity_reading state ~mailbox reading =
   withdraw_resource_diagram_pending state;
-  match
+  let previous_identity = state.server_identity in
+  let previous_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
+  (match
     Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
       ~local_paths:state.local_workspace_paths reading
   with
@@ -15587,7 +15834,32 @@ let apply_server_identity_reading state ~mailbox reading =
        state.detail_read_authority <- ref ()
      | ( Workspace_identity_unread | Workspace_identity_match
        | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ), _ -> ());
-    apply_confirmed_server_identity_reading state ~mailbox reading
+    apply_confirmed_server_identity_reading state ~mailbox reading);
+  let current_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
+  if previous_instance <> current_instance then begin
+    state.goal_candle <- Masc_tui_fetched.clear state.goal_candle;
+    state.goal_confirmation_presented <- None;
+    let confirmation_key = (match state.goal_confirmation with
+     | Goal_confirmation.Inspecting read ->
+       state.goal_confirmation <- Goal_confirmation.Inspecting (Goal_confirmation.suspend_confirmation_read read);
+       Goal_confirmation_read.current_key read
+     | Goal_confirmation.Submitting _ -> None) in
+    state.goal_confirmation_identity_refresh <-
+      (match confirmation_key, previous_identity with
+       | Some goal_id, Some identity ->
+           Some (goal_id, Goal_confirmation.{
+             base_path = Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path;
+             masc_root = Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root })
+       | (None, _ | _, None) -> None);
+    match state.view, state.planning_mode with
+    | Planning, Planning_detail goal_id when server_authority_ready state ->
+      launch_goal_candle_load state ~mailbox goal_id
+    | Planning, (Planning_list | Planning_detail _)
+    | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+      | Approvals | Schedules | Verification | Harness | Fusion | Repositories
+      | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+      | System_logs), (Planning_list | Planning_detail _) -> ()
+  end
 
 let apply_refused_workspace_identity state ~mailbox ~detail latest =
   withdraw_resource_diagram_pending state;
@@ -15878,6 +16150,8 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
               Error (Masc_tui_execute_stream_job.Http_refusal { status; detail })
             | Error (Masc_tui_http.Execute_unattested { status; detail }) ->
               Error (Masc_tui_execute_stream_job.Unattested { status; detail })
+            | Error (Masc_tui_http.Execute_invalid_response { status; detail }) ->
+              Error (Masc_tui_execute_stream_job.Invalid_response { status; detail })
             | Error (Masc_tui_http.Execute_transport_failed detail) ->
               Error (Masc_tui_execute_stream_job.Transport_failure detail))
           ~on_view:(fun view ->
@@ -16034,7 +16308,8 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
        | Some _ | None -> state.keeper_schedules <- None);
       state.keeper_schedules_error <- None;
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
-  | Detail_runs -> launch_fusion_runs_load state ~mailbox
+  | Detail_runs ->
+      launch_fusion_runs_load ~demand:Masc_tui_fusion_updates.After_change state ~mailbox
   | Detail_terminal ->
       (* The tab follows the Keeper's output over a stream that
          [reconcile_keeper_logs] opens on the next pass of the loop. *)
@@ -16058,7 +16333,9 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
     | Keepers Keeper_detail, _, Some keeper ->
         launch_detail_tab_reading state ~mailbox keeper
     | Connectors, _, _ -> launch_connectors_load state ~mailbox
-    | Fusion, _, _ -> launch_fusion_runs_load state ~mailbox
+    (* Fusion's list and nested detail resume together with the surface read
+       below. A second change demand here would queue a duplicate reread. *)
+    | Fusion, _, _ -> ()
     | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | (Detail_runs | Detail_terminal))))))))), None)
     | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
     | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Repositories | (Code | (Changes | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))), _, _) -> ()
@@ -16517,13 +16794,103 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
       | Some _ -> keeper_list_select_name state name)
 ;;
 
+let stream_reconnect_s = 2.0
+
+(* A recovery connection owns no application observations. Its scoped
+   identity receipt may re-admit reads; an older peer instead triggers one
+   revalidation for an existing workspace. A cold unadvertised stream stays
+   unconfirmed without repeatedly probing health. *)
+let stop_observer_recovery state =
+  match state.observer_recovery_owner with
+  | None -> ()
+  | Some owner ->
+      state.observer_recovery_owner <- None;
+      Masc_tui_workspace_job.cancel state ~key:owner
+
+let launch_observer_recovery state ~origin ~host ~port ~mailbox =
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+      let authority = state.workspace_authority in
+      let owner = ref () in
+      let session = ref state.mcp_session in
+      let refusal_reported = ref false in
+      let expected_base_path, expected_masc_root = match origin with
+        | Observer_existing_workspace expected -> expected.sid_base_path, expected.sid_masc_root
+        | Observer_initial_workspace paths -> paths.lw_base_path, paths.lw_masc_root in
+      let report session_id =
+        enqueue_async mailbox (Observer_recovery_ready (authority, owner, session_id)) in
+      let report_existing session_id = match origin with
+        | Observer_existing_workspace _ -> report session_id
+        | Observer_initial_workspace _ -> () in
+      let rec follow () =
+        let outcome =
+          try
+            match (match !session with
+              | Some session_id -> Ok session_id
+              | None -> Masc_tui_http.open_mcp_session ~host ~port
+                  ~client_version:Runtime_build_version.current) with
+            | Error detail -> Error (Masc_tui_http.Transport_failed detail)
+            | Ok session_id ->
+                session := Some session_id;
+                let live = ref true in
+                Fun.protect ~finally:(fun () -> live := false) (fun () ->
+                  Masc_tui_http.observe_runtime_events ~clock ~expected_base_path ~expected_masc_root ~host ~port
+                    ~session_id ~cursor:None
+                    ~on_identity:(fun (handshake, identity) ->
+                      enqueue_async mailbox
+                        (Observer_recovery_identity
+                           (authority, owner, live, session_id, handshake.Sse_wire.instance_id,
+                            origin, identity)))
+                    ~on_open:(fun _ -> refusal_reported := false; report_existing (Some session_id))
+                    ~on_chunk:(fun _ -> ()))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn)) in
+        (match outcome with
+         | Error (Masc_tui_http.Http_refused {status; detail})
+           when Masc_tui_http.observer_workspace_refused ~status ~detail ->
+             if not !refusal_reported then begin
+               refusal_reported := true;
+               report_existing None
+             end
+         | Error (Masc_tui_http.Http_refused {status = (404 | 409); _}) -> session := None
+         | Ok () | Error (Masc_tui_http.Http_refused _ | Transport_failed _ | Invalid_handshake _ | Retry_without_cursor _) -> ());
+        Eio.Time.sleep clock stream_reconnect_s;
+        follow ()
+      in
+      state.observer_recovery_owner <- Some owner;
+      (try fork_workspace_job ~key:owner state ~sw follow with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+           state.observer_recovery_owner <- None;
+           Log.Transport.warn "tui_observer_recovery_unavailable: %s" (Printexc.to_string exn))
+  | None, _ | _, None -> ()
+
+let reconcile_observer_recovery state ~refresh_inflight ~mailbox =
+  match state.workspace_identity, state.server_identity, state.observer_recovery_owner with
+  | Workspace_identity_match_unconfirmed _, Some expected_workspace, None
+    when not !refresh_inflight ->
+      launch_observer_recovery state ~origin:(Observer_existing_workspace expected_workspace)
+        ~host:server_peer_host
+        ~port:state.port ~mailbox
+  | Workspace_identity_unread, None, None
+    when not !refresh_inflight
+         && (state.connection_status = Disconnected || state.connection_status = Degraded) ->
+      Option.iter (fun paths ->
+        launch_observer_recovery state ~origin:(Observer_initial_workspace paths)
+          ~host:server_peer_host ~port:state.port ~mailbox) state.local_workspace_paths
+  | Workspace_identity_match_unconfirmed _, Some _, _ -> ()
+  | Workspace_identity_unread, None, Some _ -> ()
+  | (Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _), _, _
+  | Workspace_identity_match_unconfirmed _, None, _ -> stop_observer_recovery state
+
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
    through the mailbox; the render fiber owns all state. The fiber ends with
    the stream, and whether to open another is the main loop's decision. *)
-let launch_observer state ~host ~port ~mailbox =
+let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~host ~port ~mailbox =
   let enqueue_async = workspace_enqueue state in
-  let exception Reconnect_without_cursor in
+  state.observer_retry_owner <- None;
   state.observer <- Observer_opening;
   let session = state.mcp_session in
   let cursor = state.observer_cursor in
@@ -16538,48 +16905,30 @@ let launch_observer state ~host ~port ~mailbox =
                 ~client_version:Runtime_build_version.current
         with
         | Error detail -> Error (Masc_tui_http.Transport_failed detail)
-        | Ok session_id -> (
+        | Ok session_id ->
+            (* The session is owned independently of the stream: a rejected
+               handshake must not cause another initialize on every retry. *)
+            enqueue_async mailbox (Observer_session_ready session_id);
+            (
             match Eio_context.get_clock_opt () with
             | None -> Error (Masc_tui_http.Transport_failed "Eio clock is unavailable")
             | Some clock ->
                 let reader = Masc_tui_observer.create () in
                 let instance_id = ref None in
-                let on_response ~status ~headers =
-                  if Masc.Tui_decode.is_success_http_status status then begin
-                    let handshake =
-                      match Sse_wire.decode_observer_response headers with
-                      | Ok (Some ({ replay = (Sse_wire.Resumed | Sse_wire.Resumed_after_gap _); _ } as handshake)) ->
-                          (match cursor with
-                           | Some requested when String.equal requested.instance_id handshake.instance_id ->
-                               Ok (Some handshake)
-                           | Some _ | None -> Error "Observer resumed without a matching requested instance")
-                      | (Ok (Some { replay = (Sse_wire.Fresh | Sse_wire.Reset _);_}) | Ok (None) | Error _) as other -> other
-                    in
-                    instance_id :=
-                      (match handshake with
-                       | Ok (Some handshake) -> Some handshake.instance_id
-                       | Ok None | Error _ -> None);
-                    enqueue_async mailbox (Observer_opened { session_id; handshake });
-                    (match handshake, cursor with
-                     | (Ok None | Error _), Some _ ->
-                         (* An older peer may have already registered our old
-                            numeric cursor without understanding its epoch.
-                            Close that stream and reconnect without authority. *)
-                         raise Reconnect_without_cursor
-                     | (Ok (Some _) | Ok None | Error _), None
-                     | Ok (Some _), Some _ -> ())
-                  end
+                let on_open handshake =
+                  instance_id := Option.map (fun handshake -> handshake.Sse_wire.instance_id) handshake;
+                  enqueue_async mailbox (Observer_opened { session_id; handshake })
                 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events ~clock ~host ~port
-                  ~session_id ~cursor ~on_response ~on_chunk)
+                Masc_tui_http.observe_runtime_events ~clock
+                  ~expected_base_path:expected_workspace.sid_base_path
+                  ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
+                  ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)
       with
-      | Reconnect_without_cursor ->
-          Error (Masc_tui_http.Transport_failed "Scoped replay unavailable; reconnecting without the previous cursor")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
@@ -16591,44 +16940,54 @@ let launch_observer state ~host ~port ~mailbox =
   | None -> enqueue_async mailbox
       (Observer_closed (Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
 
-(* The feed is opened only after a refresh has reached the server: opening
-   it blind would report a closed feed every cycle while the TUI runs without
-   one, and that row is meant to say the stream dropped, not that there was
-   never a server. Once closed it is reopened on the next refresh that
-   reaches the server, which is the cadence the operator already chose. *)
-(* [retry_closed] separates the first open from a retry. A feed that has never
-   run is opened as soon as the server answers, because the row is meant to say
-   the stream dropped and there is nothing to say yet. A feed that ran and
-   closed waits for the operator's cadence: retrying it once per finished
-   refresh made the retry rate whatever the refresh rate was, and a refresh
-   also goes out when the open surface needs something the last one did not
-   fetch -- so walking the surfaces retried a refused feed once per surface and
-   filled the eleven-entry event panel with its own refusals. *)
+(* Open only after server contact and workspace admission. Initial opens may
+   follow a refresh; closed streams also have their own delayed retry. *)
 let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
-  match state.workspace_identity with
-  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> ()
-  | Workspace_identity_match | Workspace_identity_mismatch _ ->
-  match (state.connection_status, state.observer) with
+  match state.workspace_identity, state.server_identity with
+  | (Workspace_identity_match | Workspace_identity_mismatch _), Some expected_workspace
+    when server_authority_ready state ->
+  (match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
-      launch_observer state ~host ~port ~mailbox
+      launch_observer state ~expected_workspace ~host ~port ~mailbox
   | (Connected | Degraded),
     (Observer_closed_before_answer _ | Observer_closed_after_live _)
     when retry_closed ->
-      launch_observer state ~host ~port ~mailbox
+      launch_observer state ~expected_workspace ~host ~port ~mailbox
   | (Connected | Degraded),
     ( Observer_closed_before_answer _ | Observer_closed_after_live _
     | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting), _ ->
-      ()
+      ())
+  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_match | Workspace_identity_mismatch _), _ -> ()
 
-(* The fleet stream reconnects at the default refresh cadence, so a server that
-   is down costs one failed connection per refresh, as the poll it replaces
-   did. *)
-let fleet_stream_reconnect_s = 2.0
+(* Every closure owns a fresh token. A later connection or workspace change
+   retires it, so an old timer cannot reopen the successor's stream. *)
+let schedule_observer_retry state ~mailbox owner =
+  let unavailable detail =
+    (match state.observer_retry_owner with
+     | Some current when current == owner -> state.observer_retry_owner <- None
+     | Some _ | None -> ());
+    Log.Transport.warn "tui_observer_retry_unavailable: %s" detail in
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+      let authority = state.workspace_authority in
+      (try
+         fork_workspace_job ~observation:true state ~sw (fun () ->
+           Eio.Time.sleep clock stream_reconnect_s;
+           (* This is a control tick, not a source reading. Deliver it even
+              while readiness is unconfirmed; its authority and token are
+              checked before it can start another connection. *)
+           enqueue_async mailbox (Observer_retry_due (authority, owner)))
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> unavailable (Printexc.to_string exn))
+  | (None, _) | (_, None) ->
+      unavailable "Eio switch or clock is unavailable"
 
 (* Follow the fleet stream (RFC-0477) on a daemon fiber. The job owns the
    connection and the reader: when a connection ends it opens the next one
-   after [fleet_stream_reconnect_s], and it posts the reader's view to the
+   after [stream_reconnect_s], and it posts the reader's view to the
    mailbox whenever that changes. The render fiber owns all state. The job
    ends only when the workspace withdraws it, and the withdrawal resets
    [state.fleet_stream_reader], so the next refresh starts another. *)
@@ -16668,13 +17027,17 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
                Masc_tui_fleet_stream.refused reader ~status ~detail
            | Error (Masc_tui_http.Transport_failed detail) ->
                Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
+           | Error (Masc_tui_http.Invalid_handshake detail) ->
+               Masc_tui_fleet_stream.invalid_response reader detail
+           | Error (Masc_tui_http.Retry_without_cursor (_, detail)) ->
+               Masc_tui_fleet_stream.invalid_response reader detail
            | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
           post ()
         in
         while true do
           read_one_connection ();
-          Eio.Time.sleep clock fleet_stream_reconnect_s
+          Eio.Time.sleep clock stream_reconnect_s
         done
   in
   match Eio_context.get_switch_opt () with
@@ -16730,6 +17093,7 @@ let resolve_opening_chat state ~base_path ~mailbox =
               ("Could not open chat with " ^ keeper_name
                ^ " (Keeper not found). Showing Dashboard.")
           else begin
+            retire_remote_image_for_navigation state;
             open_message_for_keeper ~remember_home_chat:false
               ~return_to:Keeper_chat_return_list state keeper_name
               ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
@@ -16959,6 +17323,7 @@ let resume_task_followups state ~mailbox ~refresh_inflight
                 that editor (which would retire its recalled draft). *)
              if task_handoff_may_focus state ~keeper editor then begin
                withdraw_resource_diagram_pending state;
+               retire_remote_image_for_navigation state;
                close_key_modals state;
                state.palette_open <- false;
                state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -16983,7 +17348,10 @@ let resume_task_followups state ~mailbox ~refresh_inflight
 (* A proof read is separate from the confirmation key: recovery must never
    replay the key's second-press mutation. *)
 let launch_goal_confirmation_read state ~mailbox ~goal_id =
-  if server_authority_ready state then
+  if Result.is_ok (Goal_store.validate_goal_id goal_id) && server_authority_ready state then
+    match state.server_identity with
+    | None -> ()
+    | Some expected_workspace ->
     match state.goal_confirmation with
     | Goal_confirmation.Submitting _ -> ()
     | Goal_confirmation.Inspecting read ->
@@ -16992,18 +17360,42 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
          | Started (loading, request) ->
              state.goal_confirmation <- Goal_confirmation.Inspecting loading;
              state.goal_confirmation_presented <- None;
-             state.goal_action_error <- None;
              let host = server_peer_host and port = state.port in
-             launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+             let workspace = Goal_confirmation.{
+               base_path = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path;
+               masc_root = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root } in
+             launch_workspace_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
                ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
                (fun () ->
                  let open Result.Syntax in
-                 let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
-                 let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
+                 let credential = Masc_tui_http.bind_credential () in
+                 let* runtime_instance_id = match expected_workspace.sid_runtime_instance_id with
+                   | Some instance when String.trim instance <> "" -> Ok instance
+                   | Some _ | None -> Error (Goal_confirmation.Read_failed (Some credential.bound_owner, "Server instance is unavailable; read the server identity again")) in
+                 let* json = Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+                   ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+                     Masc_tui_http.fetch_goal_confirmation ~credential ~expected_instance:runtime_instance_id ~host ~port ~goal_id) in
+                 let* confirmation = Goal_confirmation.decode_confirmation ~goal_id ~workspace
+                   ~runtime_instance_id ~credential_headers:credential.bound_headers ~credential_owner:credential.bound_owner json
+                   |> Result.map_error (fun detail -> Goal_confirmation.Read_failed (Some credential.bound_owner, detail)) in
                  match confirmation.phase with
-                 | Goal_phase.Awaiting_confirmation -> Ok confirmation
-                 | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed
-                 | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error "goal is not awaiting confirmation"))
+                 | Goal_phase.Awaiting_confirmation | Goal_phase.Completed -> Ok confirmation
+                 | Goal_phase.Executing | Goal_phase.Verifying
+                 | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error (Goal_confirmation.Read_failed (Some credential.bound_owner, "goal is not awaiting confirmation"))))
+
+let resume_goal_confirmation_identity_refresh state ~mailbox =
+  if server_authority_ready state then begin
+    let pending = state.goal_confirmation_identity_refresh in
+    state.goal_confirmation_identity_refresh <- None;
+    match pending, state.view, state.planning_mode, state.server_identity, state.goal_confirmation with
+    | Some (goal_id, workspace), Planning, Planning_detail selected, Some identity, Goal_confirmation.Inspecting read
+      when String.equal goal_id selected
+           && String.equal workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
+           && String.equal workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
+           && Goal_confirmation_read.current_key read = Some goal_id ->
+        launch_goal_confirmation_read state ~mailbox ~goal_id
+    | _, _, _, _, _ -> ()
+  end
 
 let launch_skill_evidence_read ?composition_run_id state ~mailbox reference =
   if server_authority_ready state then begin
@@ -17055,12 +17447,20 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
   let moved = workspace_moved || before.read_detail != state.detail_read_authority in
+  resume_goal_confirmation_identity_refresh state ~mailbox;
   (* The detail goes first: it restores the remembered Keeper focus and
      marks its identity read pending, so the side reads below neither poll
      the same login again nor ask about the Keeper the cursor fell on. *)
   refresh_visible_detail_after_authority_recovery state ~mailbox
     ~previous_authority:before.read_detail;
   if moved && server_authority_ready state then begin
+    (* Read withdrawal also stops the Observer and Fleet streams. A later
+       confirmed identity can arrive through a discarded bundle or a scoped
+       read, so restore both under that authority without a cadence tick. *)
+    stop_observer_recovery state;
+    open_observer_if_due state ~retry_closed:false
+      ~host:server_peer_host ~port:state.port ~mailbox;
+    open_fleet_stream_if_due state ~host:server_peer_host ~port:state.port ~mailbox;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -18344,7 +18744,7 @@ let split_board_draft (text : string) : string * string =
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
    like the other writes; the outcome lands in the shared mailbox and the
    server's phase rules decide, so the TUI never pre-guesses a transition. *)
-let start_goal_transition ?note state ~mailbox ~(goal_id : string)
+let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string)
     ~(action : Goal_phase.Public_action.t) =
   (* The transition carries the workspace this terminal confirmed, and the
      server refuses one without it, so a server replaced on the same port
@@ -18352,21 +18752,36 @@ let start_goal_transition ?note state ~mailbox ~(goal_id : string)
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some expected_workspace ->
       supersede_home_decision_receipt state;
-      state.goal_action_error <- None;
+      let ticket = Random_id.uuid_v7 () in
+      if not (note_goal_action_started state ~goal_id ~ticket) then
+        report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
+      else begin
+      let origin = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path
+        ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root ^ ")" in
+      let action_context = " (action " ^ Goal_phase.Public_action.to_string action in
+      let proof_context = match retry_binding with
+        | None -> action_context ^ ")"
+        | Some binding ->
+          action_context ^ "; criterion " ^ binding.Masc.Tui_decode.grb_criterion_revision
+          ^ "; proof request " ^ Option.value ~default:"none" binding.grb_request_id ^ ")" in
+      let annotate_error error =
+        "Goal request did not return a confirmed result; inspect the Goal before retrying: " ^ error ^ proof_context in
       report_action state "system"
         (Printf.sprintf "goal %s: %s" goal_id
            (Goal_phase.Public_action.to_string action));
       let host = server_peer_host in
       let port = state.port in
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Goal_transition_done result)
+      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:annotate_error
+        ~cancelled:(Goal_transition_done (goal_id, ticket, origin, Error (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying.")))
+        ~deliver:(fun result -> Goal_transition_done (goal_id, ticket, origin, Result.map (fun message -> message ^ proof_context) result))
         (fun () ->
           match
             Masc_tui_http.post_goal_transition ~expected_workspace
-              ~host ~port ~goal_id ~action ~note
+              ~host ~port ~goal_id ~action ~note ~retry_binding
           with
-          | Error err -> Error err
-          | Ok json -> Masc.Tui_decode.tool_envelope_outcome json)
+          | Error err -> Error (annotate_error err)
+          | Ok json -> Masc.Tui_decode.tool_envelope_outcome json |> Result.map_error annotate_error)
+      end
   | ( Workspace_identity_match | Workspace_identity_mismatch _
     | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
       report_action state "error" "Cannot change goal: workspace identity is unverified"
@@ -18379,13 +18794,32 @@ let handle_goal_confirmation_key state ~mailbox =
   else
   match state.planning_mode with
   | Planning_list -> ()
+  | Planning_detail goal_id when Result.is_error (Goal_store.validate_goal_id goal_id) ->
+      set_goal_action_error state ~goal_id "Cannot inspect confirmation for this Goal ID"
   | Planning_detail goal_id ->
       let host = server_peer_host and port = state.port in
       state.goal_action_pending <- None;
       (match state.goal_confirmation with
        | Goal_confirmation.Submitting _ -> ()
+       | Goal_confirmation.Inspecting read when Goal_confirmation_read.in_flight read ->
+           report_action state "system" "Goal proof is being refreshed; wait for the current result"
        | Goal_confirmation.Inspecting read ->
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
+       | Ready confirmation when not (Option.exists (fun identity ->
+           String.equal confirmation.workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
+           && String.equal confirmation.workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
+           && identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
+           state.goal_confirmation_presented <- None;
+           report_action state "error" "Goal confirmation workspace or server changed; read the proof again";
+           clear_goal_confirmation_revalidation state ~goal_id;
+           launch_goal_confirmation_read state ~mailbox ~goal_id
+       | Ready confirmation when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
+           state.goal_confirmation_presented <- None;
+           report_action state "error" "Goal confirmation credential changed; read the proof again";
+           clear_goal_confirmation_revalidation state ~goal_id;
+           launch_goal_confirmation_read state ~mailbox ~goal_id
+       | Ready confirmation when confirmation.phase = Goal_phase.Completed ->
+           report_action state "system" "Goal confirmation is already recorded; no additional request sent"
        | Ready confirmation when state.goal_confirmation_presented <> Some confirmation ->
            report_action state "system"
              (ui_text state
@@ -18393,28 +18827,79 @@ let handle_goal_confirmation_key state ~mailbox =
                 ~en:"Read through the proof binding before confirming")
        | Ready confirmation ->
            supersede_home_decision_receipt state;
+           let ticket = Random_id.uuid_v7 () in
+           if not (note_goal_action_started state ~goal_id ~ticket) then
+             report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
+           else begin
+           let origin = Option.fold ~none:"unconfirmed" ~some:(fun identity ->
+             Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
+             ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ^ ")") state.server_identity
+             ^ " (server instance " ^ confirmation.runtime_instance_id ^ ")" in
+           let verdict = confirmation.Goal_confirmation.verdict in
+           let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
+           let proof_context = " (criterion " ^ criterion.revision
+             ^ "; proof request " ^ verdict.Goal_verification.request_id
+             ^ "; verification run " ^ verdict.verification_run_id ^ ")" in
+           let annotate_error error =
+             "Goal confirmation did not return a confirmed result; inspect the Goal before retrying: " ^ error
+             ^ proof_context in
+           let receipt_authority = Goal_confirmation.confirmation_receipt_authority confirmation in
            state.goal_confirmation <- Goal_confirmation.Submitting
-               (goal_id, Goal_confirmation_read.clear read);
+               (goal_id, Goal_confirmation.suspend_confirmation_read read);
            state.planning_scroll <- 0;
-           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-             ~deliver:(fun result -> Goal_confirmation_submitted result)
+           let workspace_authority = state.workspace_authority in
+           let workspace_read_authority = state.workspace_read_authority in
+           let expected_workspace = state.server_identity in
+           launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
+             ~cancelled:(Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (annotate_error "request interrupted")))
+             ~deliver:(fun result -> Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority,
+               result |> Result.map (fun message -> message ^ proof_context) |> Result.map_error annotate_error))
              (fun () ->
                let open Result.Syntax in
+               let credential = Masc_tui_http.bind_credential () in
+               let* () = if credential.bound_owner == confirmation.credential_owner then Ok ()
+                 else Error "Goal confirmation credential changed; read the proof again" in
+               let authority_current () = workspace_authority = state.workspace_authority
+                 && workspace_read_authority == state.workspace_read_authority
+                 && server_authority_ready state && state.port = port
+                 && Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity
+                 && Masc_tui_http.credential_owner_is_current confirmation.credential_owner in
+               let* expected_workspace = match expected_workspace with
+                 | Some expected -> Ok expected
+                 | None -> Error "Goal confirmation workspace is unavailable" in
+               let* () = if authority_current () then Ok ()
+                 else Error "Goal confirmation authority changed; read the proof again" in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
-               let* confirmed = Goal_confirmation.decode_confirmation ~goal_id json in
-               match confirmed.phase with
-               | Goal_phase.Completed
-                 when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
-                   Ok "completion confirmed"
-               | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
-               | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ | Completed -> Error "goal confirmation: server did not confirm completion"
+               let* confirmed = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
+                 ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner json in
+               let* () = if confirmed.phase = Goal_phase.Completed
+                   && Goal_confirmation.same_confirmation_binding confirmation confirmed
+                 then Ok () else Error "goal confirmation: server did not confirm the inspected proof" in
+               let* () = if authority_current () then Ok ()
+                 else Error "Goal confirmation authority changed before readback" in
+               let* readback_json = Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+                 ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+                   Masc_tui_http.fetch_goal_confirmation ~credential ~expected_instance:confirmation.runtime_instance_id ~host ~port ~goal_id)
+                 |> Result.map_error (function
+                   | Goal_confirmation.Read_failed _ -> "Goal confirmation readback failed; inspect the current proof"
+                   | Goal_confirmation.Read_http_error (_, status) -> Printf.sprintf "Goal confirmation readback failed (HTTP %d)" status
+                   | Goal_confirmation.Server_changed _ -> "Goal confirmation server changed before readback") in
+               let* readback = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
+                 ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner readback_json in
+               if authority_current () && readback.phase = Goal_phase.Completed
+                  && Goal_confirmation.same_confirmation_binding confirmation readback
+                  && Goal_confirmation.same_recorded_confirmation confirmed readback
+               then Ok "completion confirmed by readback"
+               else Error "goal confirmation: readback did not match the confirmed proof and operator record"
              )
+           end
        | Loading -> ()
        (* A confirmation read before a failed re-read is not the goal's
           current state; confirming it would act on what the server no longer
           answered. Ask again. *)
        | Absent | Stale _ | Failed _ ->
            state.planning_scroll <- 0;
+           clear_goal_confirmation_revalidation state ~goal_id;
            launch_goal_confirmation_read state ~mailbox ~goal_id)
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
@@ -18425,7 +18910,6 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
   match state.planning_mode with
   | Planning_detail goal_id when action = Goal_phase.Public_action.Drop ->
       state.goal_action_pending <- Some (Goal_drop_reason { goal_id; reason = "" });
-      state.goal_action_error <- None;
       report_action state "system"
         (Printf.sprintf "type why goal %s is dropped" goal_id)
   | Planning_detail goal_id -> (
@@ -18434,10 +18918,15 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
         when String.equal armed.goal_id goal_id
              && armed.action = action ->
           state.goal_action_pending <- None;
-          start_goal_transition state ~mailbox ~goal_id ~action
+          start_goal_transition ?retry_binding:armed.retry_binding state ~mailbox ~goal_id ~action
       | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
-          state.goal_action_pending <- Some (Goal_action_armed { goal_id; action });
-          state.goal_action_error <- None;
+          (match goal_detail_on_screen state with
+          | None -> ()
+          | Some goal ->
+          let retry_binding = match action with
+            | Goal_phase.Public_action.Request_complete -> goal.pg_retry_binding
+            | Drop | Reopen | Pause | Resume | Block | Unblock -> None in
+          state.goal_action_pending <- Some (Goal_action_armed { goal_id; action; phase=goal.pg_phase; retry_binding });
           report_action state "system"
             (Printf.sprintf "press %s again to %s goal %s"
                (planning_action_key action)
@@ -18450,7 +18939,7 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
                 | Goal_phase.Public_action.Resume -> "resume"
                 | Goal_phase.Public_action.Block -> "block"
                 | Goal_phase.Public_action.Unblock -> "unblock")
-               goal_id))
+               goal_id)))
   | Planning_list -> ()
 
 
@@ -18746,14 +19235,18 @@ let open_fusion_detail state ~mailbox =
       state.fusion_mode <- Fusion_historical_detail evidence;
       state.fusion_scroll <- 0;
       state.fusion_historical_detail <- None;
+      state.fusion_historical_detail_stale <- false;
       state.fusion_detail_error <- None;
-      launch_fusion_historical_detail_load state ~mailbox ~reference:evidence
+      launch_fusion_historical_detail_load ~demand:Masc_tui_fusion_updates.After_change
+        state ~mailbox ~reference:evidence
   | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
+      state.fusion_detail_stale <- false;
       state.fusion_detail_error <- None;
-      launch_fusion_detail_load state ~mailbox ~run_id:run.fur_run_id
+      launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+        state ~mailbox ~run_id:run.fur_run_id
 
 let open_selected_system_log state =
   match
@@ -19642,7 +20135,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   fun message ->
     Masc_tui_types.preserve_keeper_list_selection state (fun () ->
       apply_async_message_body ~input_pending state ~base_path ~http_refresh_inflight
-        ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message)
+        ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message);
+    reconcile_observer_recovery state ~refresh_inflight:http_refresh_inflight ~mailbox
 and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
@@ -19671,6 +20165,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           ignore (Eio.Promise.try_resolve acknowledge false)
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
+        | Workspace_operation (Goal_transition_done (goal_id, ticket, workspace, result)) ->
+          record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
+          report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
+            ^ ": a request outcome arrived after workspace authority was withdrawn; inspect Work summary")
+        | Workspace_operation (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
+          record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
+          report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
+            ^ ": a confirmation outcome arrived after workspace authority was withdrawn; inspect Work summary")
         | Workspace_operation (Resource_share_changed (request, result)) ->
           if resource_share_is_owned state request then begin
             let read_key = finish_resource_share state request result in
@@ -19756,7 +20258,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
         | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)
-        | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded (_, _)
+        | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
         | Keeper_chat_control_received (_, _, _) | Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
         | Surface_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
@@ -19767,7 +20269,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
         | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
-        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
         | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
         | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
         | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -19791,8 +20293,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Identity_disconnected (_, _, _)
         | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
-        | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
+        | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -19860,6 +20362,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                 "Keeper is active; retained input released"));
         release_retained_keeper_input state keeper_name ~request_ids;
         launch_waiting_keeper_input state ~mailbox ~keeper_name;
+        launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox;
         dispatch_ready_run_next state ~mailbox keeper_name
       end
   | Keeper_queue_action_received (keeper_name, receipt) ->
@@ -19893,13 +20396,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         ~generation ~outcome:(match result with
           | Ok ([], _) when action = Masc_tui_queue_inspection.Resume -> Priority_unconfirmed
           | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
+      let control_current = Option.exists (fun generation ->
+        keeper_chat_control_result_current state keeper_name ~generation) control_generation in
       Option.iter (fun generation ->
-        ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
-        control_generation;
+        ignore (finish_keeper_chat_control state keeper_name ~generation : bool)) control_generation;
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
       state.keeper_queue_inspections <- List.filter
         (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
+      if control_current then
+        launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox;
       launch_keeper_turns_load state ~mailbox;
       (match state.queue_panel with
        | Some panel when String.equal panel.qp_keeper keeper_name ->
@@ -20494,24 +21000,35 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Approvals_listing_superseded -> launch_approvals_summary_load state ~mailbox
   | Approvals_summary_loaded (request, listing_ticket, expected_workspace, result) ->
       apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result
+  | Observer_session_ready session_id ->
+      state.mcp_session <- Some session_id
   | Observer_opened { session_id; handshake } ->
       state.mcp_session <- Some session_id;
+      (match state.workspace_identity with
+       | Workspace_identity_match ->
+           let scoped = handshake in
+           state.observer_scope_binding <- note_observer_scope state.observer_scope_binding scoped
+       | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+       | Workspace_identity_mismatch _ -> ());
       (match handshake with
-       | Ok (Some handshake) ->
+       | Some handshake ->
            (match handshake.replay with
             | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
             | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
            state.observer_replay <- Observer_replay_scoped handshake
-       | Ok None ->
+       | None ->
            state.observer_cursor <- None;
-           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay"
-       | Error detail ->
-           state.observer_cursor <- None;
-           state.observer_replay <- Observer_replay_unavailable detail);
+           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
-      add_event state "observer" (observer_replay_description state.observer_replay);
-      add_event state "observer" "runtime event feed open"
+      add_event state "observer"
+        (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
+      add_event state "observer" "runtime event feed open";
+      launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+      (* A change can land between the initial read and subscription, or
+         during a disconnected interval. Read under the current authority. *)
+      launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+      revalidate_visible_fusion state ~mailbox
   | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane
@@ -20534,11 +21051,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           open_chat_stream_frames := (source, highest) :: List.remove_assoc source !open_chat_stream_frames
         end
       in
-      (* Same shape as [open_chat_gained_turn]: remember that a fusion run
-         pushed a status, decide once per batch after the loop. The run id
-         rides along so an open detail only refetches when it is the run
-         that moved. *)
-      let fusion_status_seen = ref None in
+      (* Retain whether any run changed and whether the open one changed;
+         a later unrelated event in this batch must not erase the latter. *)
+      let fusion_open_run_id = match state.fusion_mode with
+        | Fusion_detail run_id -> Some run_id
+        | Fusion_historical_detail reference -> Some reference.fhe_run_id
+        | Fusion_list -> None in
+      let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
+      let observer_source_loss_seen = ref false in
+      let execution_snapshot_seen = ref false in
+      let waiting_inventory_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
          asks once per batch. Agent-core events name their lane; the
@@ -20599,7 +21121,23 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                    ());
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
-                   fusion_status_seen := Some run_id
+                   fusion_status_seen :=
+                     Masc_tui_fusion_updates.note_run_changed
+                       ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
+               | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
+                   waiting_inventory_changed := keeper :: !waiting_inventory_changed
+               | Masc_tui_observer.Snapshot name
+                 when String.equal name Masc.Dashboard_event_slices.execution_snapshot_type ->
+                   execution_snapshot_seen := true
+               | Masc_tui_observer.Agent_core
+                   { kind = Masc_tui_observer.Relay_subscription_loss
+                       { source_id; sequence; _ }; _ } ->
+                   let fresh, sequences =
+                     note_observer_source_loss ~source_id ~sequence
+                       state.observer_source_loss_sequences in
+                   state.observer_source_loss <- true;
+                   state.observer_source_loss_sequences <- sequences;
+                   if fresh then observer_source_loss_seen := true
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Agent_core { kind = Masc_tui_observer.Tool_completed; _ }
                  when acted_by_pane_keeper event ->
@@ -20626,7 +21164,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
-               | Masc_tui_observer.Keeper_waiting_inventory_changed _
                | Masc_tui_observer.Internal_agent_runs_changed
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
@@ -20657,6 +21194,49 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            | Masc_tui_observer.Undecodable _, _, _ -> ());
           end)
         decoded;
+      if !execution_snapshot_seen || !observer_source_loss_seen then
+        (* Both the compact invalidation and the complete snapshot use this
+           type. Work reads its own local source; it does not trust either
+           payload. A read already in flight queues one newer follow-up. *)
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+      if !observer_source_loss_seen then begin
+        revalidate_visible_fusion state ~mailbox;
+        (match acting_pane_changes_keeper state with
+         | Some keeper_name when server_authority_ready state ->
+             state.acting_pane_changes <-
+               Masc_tui_fetched.invalidate ~reason:"Observer events were lost"
+                 state.acting_pane_changes;
+             let key = { apk_keeper = keeper_name
+                       ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
+             (match Masc_tui_fetched.current_key state.acting_pane_changes with
+              | Some current when same_acting_pane_key current key
+                                  && Masc_tui_fetched.in_flight state.acting_pane_changes ->
+                  state.acting_pane_changes_loss_followup <- Some key
+              | Some _ | None ->
+                  launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name)
+         | Some _ | None ->
+             (* A hidden pane must owe a read when it is next shown. Clearing
+                also retires any response that was in flight before the loss. *)
+             state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+             state.acting_pane_changes_loss_followup <- None;
+             state.acting_pane_changes_at <- None);
+        (if state.view = Keepers Keeper_message then
+           match state.msg_target_keeper_name with
+           | Some keeper_name ->
+               state.msg_history_loss_followup <-
+                 Some (keeper_name, state.workspace_authority, state.workspace_read_authority);
+               launch_pending_loss_history state ~mailbox;
+               launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name
+           | None -> ());
+        (if state.view = Keepers Keeper_calls then
+           match selected_keeper state with
+           | Some keeper -> launch_keeper_calls_load ~force:true state ~mailbox keeper.k_name
+           | None -> ());
+        start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox
+      end;
       if
         List.length state.acting
         > Masc_tui_types.acting_retained_entries
@@ -20673,6 +21253,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
+      if !waiting_inventory_changed <> [] then
+        launch_keeper_waiting_load
+          ~change:(Waiting_keepers (List.sort_uniq String.compare !waiting_inventory_changed)) state ~mailbox;
       (* The pane otherwise reloads only on open and on its own sends — a
          turn appended from anywhere else (API chat, another operator, a
          connector) stayed invisible until the operator left and re-entered.
@@ -20710,27 +21293,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                      [ (source, started_at, since_seq) ])
              (List.rev !open_chat_stream_frames)
        | None -> ());
-      (* A fusion push reloads only the surface that shows it. The event
-         says a run moved; HTTP says what it is now -- the same
-         trigger/SSOT split the dashboard applies (sse-store). Both loaders
-         are inflight-guarded, so a run that pushes several stage frames
-         collapses to one fetch, and a missed frame is healed by the
-         cadence reload the Fusion view already runs. *)
-      (match !fusion_status_seen with
-       | None -> ()
-       | Some run_id -> (
-           match state.view with
-           | Fusion -> (
-               launch_fusion_runs_load state ~mailbox;
-               match state.fusion_mode with
-               | Fusion_detail open_id when String.equal run_id open_id ->
-                   launch_fusion_detail_load state ~mailbox ~run_id
-               | Fusion_detail _ | Fusion_historical_detail _ | Fusion_list -> ())
-           | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
-           | Approvals | Planning | Schedules | Verification | Harness
-           | Repositories | Code | Changes | Connectors | Runtime | Config
-           | Resources | Tools | System_logs ->
-               ()))
+      (* The notification is a change signal; the HTTP read remains the
+         source of the projection. A signal during a read queues one follow-up. *)
+      (if (!fusion_status_seen).any then
+         let demand = Masc_tui_fusion_updates.After_change in
+         match state.view with
+         | Fusion ->
+             launch_fusion_runs_load ~demand state ~mailbox;
+             if (!fusion_status_seen).open_run then
+               (match state.fusion_mode with
+                | Fusion_detail run_id ->
+                    launch_fusion_detail_load ~demand state ~mailbox ~run_id
+                | Fusion_historical_detail reference ->
+                    launch_fusion_historical_detail_load ~demand state ~mailbox ~reference
+                | Fusion_list -> ())
+         | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
+             launch_fusion_runs_load ~demand state ~mailbox
+         | Keepers (Keeper_detail | Keeper_list | Keeper_logs | Keeper_calls
+                   | Keeper_message | Keeper_runtime_pick)
+         | Overview | Acting | Metrics | Memory | Lanes | Clients | Board
+         | Approvals | Planning | Schedules | Verification | Harness
+         | Repositories | Code | Changes | Connectors | Runtime | Config
+         | Resources | Tools | System_logs -> ())
   | Original_task_history_done (request,result) ->
       ignore (complete_original_history_inspection state request result)
   | Original_task_evidence_done (request,result) ->
@@ -20764,27 +21348,108 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
   | Observer_closed outcome ->
+      let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
         | Error (Masc_tui_http.Transport_failed detail) -> detail
+        | Error (Masc_tui_http.Invalid_handshake detail) ->
+            state.observer_replay <- Observer_replay_rejected detail;
+            "observer stream handshake rejected: " ^ detail
+        | Error (Masc_tui_http.Retry_without_cursor (requested, detail)) ->
+            if state.observer_cursor = Some requested then begin
+              state.observer_cursor <- None;
+              let replay_detail = "cursor discarded; disconnected events were not replayed: " ^ detail in
+              state.observer_replay <- Observer_replay_unavailable replay_detail;
+              add_event state "observer" ("Replay unavailable: " ^ replay_detail)
+            end;
+            "observer replay cannot resume; reconnecting: " ^ detail
         | Error (Masc_tui_http.Http_refused { status; detail }) ->
-            (* Explicit missing/conflicting MCP sessions can be reinitialized.
-               EOF and transport errors never invalidate a session by count. *)
-            (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
+            (* A workspace refusal also uses 409, but it retires the reading,
+               not the MCP session. Only a session conflict reinitializes it. *)
+            if Masc_tui_http.observer_workspace_refused ~status ~detail then begin
+              apply_refused_workspace_identity state ~mailbox ~detail None;
+              (* A refused scope must be re-established without waiting for
+                 the periodic refresh that this reconnect will replace. *)
+              start_http_refresh state ~host:server_peer_host ~port:state.port
+                ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                ~scoped_refresh_followup ~mailbox
+            end
+            else
+              (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
       let at = Unix.gettimeofday () in
       (* Only a stream that went live answered; one that closed while opening
          has no count to keep, and the title must not read one. *)
-      state.observer <-
+      let closed =
         (match state.observer with
          | Observer_live { events; _ } ->
            Observer_closed_after_live { reason; at; events }
          | Observer_off | Observer_opening | Observer_closed_before_answer _
          | Observer_closed_after_live _ ->
-           Observer_closed_before_answer { reason; at });
-      add_event state "observer" ("runtime event feed closed: " ^ reason)
+           Observer_closed_before_answer { reason; at }) in
+      state.observer <- closed;
+      add_event state "observer" ("runtime event feed closed: " ^ reason);
+      let owner = ref () in
+      state.observer_retry_owner <- Some owner;
+      schedule_observer_retry state ~mailbox owner;
+      if was_opening then resume_fusion_after_observer_failure state ~mailbox
+  | Observer_retry_due (authority, expected) ->
+      if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
+           (match state.workspace_identity, state.connection_status with
+            | (Workspace_identity_match | Workspace_identity_mismatch _), (Connected | Degraded) ->
+                if server_authority_ready state then
+                  open_observer_if_due state ~retry_closed:true ~host:server_peer_host
+                    ~port:state.port ~mailbox
+                else schedule_observer_retry state ~mailbox expected
+            | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+              | Workspace_identity_match | Workspace_identity_mismatch _),
+              (Disconnected | Connecting | Booting)
+            | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _),
+              (Connected | Degraded) ->
+                schedule_observer_retry state ~mailbox expected)
+  | Observer_recovery_ready (authority, owner, session_id) ->
+      if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
+        Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
+        start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
+      end
+  | Observer_recovery_identity (authority, owner, live, session_id, instance, origin, attested) ->
+      if Masc_tui_async_protocol.observer_recovery_identity_owned state
+           ~authority ~owner ~live ~instance ~origin then begin
+        (* The response attests the exact requested workspace and readiness;
+           build fields come from that response. Unreported health telemetry is
+           unknown, not a fresh reading copied from the previous process. *)
+        let base_path, masc_root = match origin with
+          | Observer_existing_workspace expected -> expected.sid_base_path, expected.sid_masc_root
+          | Observer_initial_workspace paths -> paths.lw_base_path, paths.lw_masc_root in
+        let identity : Masc.Tui_decode.server_identity =
+          { sid_version = attested.Sse_wire.version;
+            sid_binary_commit = Option.value attested.binary_commit ~default:"";
+            sid_binary_commit_age_s = None;
+            sid_base_path = base_path;
+            sid_masc_root = masc_root;
+            sid_executable_in_worktree = None;
+            sid_state_ready = Some true;
+            sid_uptime = None;
+            sid_sse_clients = None;
+            sid_gc = None;
+            sid_scheduler = None } in
+        let before = read_authority state in
+        state.connection_status <- Masc_tui_types.Degraded;
+        apply_server_identity_reading state ~mailbox (Ok identity);
+        state.mcp_session <- Some session_id;
+        (match origin with
+         | Observer_initial_workspace _ -> state.observer_scope_binding <- Observer_scope_bound instance
+         | Observer_existing_workspace _ -> ());
+        resume_reads_after_authority_change state ~mailbox
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+          ~before
+      end
   | Fleet_stream_view view ->
       (* A view from a job that is no longer followed has no screen to go to. *)
       (match state.fleet_stream_reader with
@@ -21028,6 +21693,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                  wait_for_created_keeper_metadata state request.kcr_keeper;
                  if focus && cleared && not (input_pending ()) then begin
                    withdraw_resource_diagram_pending state;
+                   retire_remote_image_for_navigation state;
                    open_message_for_keeper ~return_to:request.kcr_return state
                      request.kcr_keeper ~drain_queue:(fun () -> ());
                    set_msg_scroll state 0;
@@ -21153,38 +21819,90 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
             ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id))
         target result
-  | (Goal_transition_done result | Goal_confirmation_submitted result) as message -> (
-      (match message, state.goal_confirmation with
-       | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
+  | Goal_transition_done (goal_id, ticket, workspace, result) ->
+      record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
+      let current = note_goal_action_result state ~goal_id ~ticket result in
+      let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
+      (match result with
+       | Ok message ->
+           report_action state "system" (label ^ message);
+           (* Even a superseded response may have changed the workspace. *)
+           start_http_refresh state ~host:(server_peer_host)
+             ~port:state.port ~intent:Revalidate
+             ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox
+       | Error err ->
+           report_action state "error" (label ^ err))
+  | Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result) ->
+      record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
+      (match state.goal_confirmation with
+       | Goal_confirmation.Submitting (submitted_goal, read) when String.equal submitted_goal goal_id ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
-       | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _
-       | Keeper_queue_action_received _, _ -> ()
-       | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_,_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( (Fusion_launch_options_loaded (_, _) | Memory_recall_standing_loaded (_, _)) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( (Board_publication_done _ | Board_comment_done _) | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
-      match result with
-      | Ok message ->
-          state.goal_action_pending <- None;
-          state.goal_action_error <- None;
-          report_action state "system" ("Goal: " ^ message);
-          (* The phase shown is the half the periodic refresh has not fetched
-             yet; without this the detail keeps the old phase after the
-             operator already changed it. *)
-          start_http_refresh state ~host:(server_peer_host)
-            ~port:state.port ~intent:Revalidate
-            ~refresh_inflight:http_refresh_inflight
-            ~scoped_refresh_inflight:http_scoped_refresh_inflight
-            ~scoped_refresh_followup ~mailbox
-      | Error err ->
-          state.goal_action_pending <- None;
-          state.goal_action_error <- Some err;
-          report_action state "error" ("Goal: " ^ err))
+       | Goal_confirmation.Submitting _ | Goal_confirmation.Inspecting _ -> ());
+      let owned = Masc_tui_http.credential_owner_is_current authority.ra_credential_owner
+        && Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some authority.ra_runtime_instance_id) state.server_identity in
+      let status = if owned then Result.map_error (fun _ -> "Confirmation result is in the request history") result
+        else Error "Confirmation outcome belongs to an earlier server or credential; inspect request history" in
+      let current = note_goal_action_result state ~goal_id ~ticket status in
+      let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
+      (match owned, result with
+       | false, _ ->
+           report_action state "system" (label ^ "confirmation result belongs to an earlier server or credential; inspect the original workspace")
+       | true, Ok _ ->
+           report_action state "system" (label ^ "confirmation response received; inspect the current proof and request history");
+           start_http_refresh state ~host:(server_peer_host)
+             ~port:state.port ~intent:Revalidate
+             ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox
+       | true, Error _ ->
+           report_action state "error" (label ^ "confirmation outcome unconfirmed; inspect the current proof and request history"));
+      (match state.view, state.planning_mode with
+       | Planning, Planning_detail selected when String.equal selected goal_id ->
+           state.goal_confirmation_identity_refresh <- Some (goal_id, authority.ra_workspace);
+           resume_goal_confirmation_identity_refresh state ~mailbox
+       | _, _ -> ())
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
-           if Goal_confirmation_read.is_current ~equal:String.equal read request
-           then state.planning_scroll <- 0;
+           let current = Goal_confirmation_read.is_current ~equal:String.equal read request in
+           if current then begin
+             state.planning_scroll <- 0;
+             state.goal_confirmation_presented <- None
+           end;
+           let changed_owner = match result with
+             | Error (Goal_confirmation.Server_changed owner)
+               when current && Masc_tui_http.credential_owner_is_current owner -> Some owner
+             | Ok _ | Error (Goal_confirmation.Read_failed _ | Goal_confirmation.Read_http_error _ | Goal_confirmation.Server_changed _) -> None in
+           let credential_changed = match result with
+             | Ok confirmation -> not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner)
+             | Error (Goal_confirmation.Read_failed (Some owner, _) | Goal_confirmation.Read_http_error (owner, _) | Goal_confirmation.Server_changed owner) ->
+                 not (Masc_tui_http.credential_owner_is_current owner)
+             | Error (Goal_confirmation.Read_failed (None, _)) -> false in
+           let result = match result with
+             | Ok confirmation when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
+                 Error (Goal_confirmation.Read_failed (Some confirmation.credential_owner, "Goal confirmation credential changed; read the proof again"))
+             | Ok confirmation when not (Option.exists (fun identity ->
+                 identity.Tui_decode.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
+                 Error (Goal_confirmation.Read_failed (Some confirmation.credential_owner, "Goal confirmation server changed; read the proof again"))
+             | Ok confirmation -> Ok confirmation
+             | Error failure -> Error failure in
+           let goal_id = Goal_confirmation_read.request_key request in
+           (match result with Ok _ when current -> clear_goal_confirmation_revalidation state ~goal_id | Ok _ | Error _ -> ());
            state.goal_confirmation <- Goal_confirmation.Inspecting
-             (Goal_confirmation_read.complete ~equal:String.equal read request result)
+             (Goal_confirmation_read.complete ~equal:String.equal read request result);
+           (match changed_owner, state.view, state.planning_mode with
+            | Some owner, Planning, Planning_detail selected when String.equal goal_id selected
+                && take_goal_confirmation_revalidation state ~goal_id ~owner ->
+              start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                ~scoped_refresh_followup ~mailbox
+            | (Some _ | None), _, _ -> ());
+           (match credential_changed, current, state.view, state.planning_mode with
+            | true, true, Planning, Planning_detail selected when String.equal goal_id selected ->
+                launch_goal_confirmation_read state ~mailbox ~goal_id
+            | _, _, _, _ -> ())
        | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_exported (request, result) ->
       let progress = Atomic.get request.vex_progress in
@@ -21226,6 +21944,26 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            refresh Cancellation_unconfirmed)
   | Goal_timeline_loaded (request, result) ->
       complete_goal_timeline_read state request result
+  | Goal_candle_loaded (request, result) ->
+      let current = Masc_tui_fetched.is_current ~equal:String.equal state.goal_candle request in
+      let goal_id = Masc_tui_fetched.request_key request in
+      let server_changed = match result with
+        | Ok (owner, Error (Goal_candle_authority_changed _))
+          when current && Masc_tui_http.credential_owner_is_current owner -> Some owner
+        | Ok (_, (Ok _ | Error (Goal_candle_access_denied _ | Goal_candle_authority_changed _ | Goal_candle_http_status _ | Goal_candle_read_failed _)))
+        | Error _ -> None in
+      let accepted = current && (match result with
+        | Ok (owner, Ok (instance, _)) when Masc_tui_http.credential_owner_is_current owner ->
+          Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity
+        | Ok (_, (Ok _ | Error _)) | Error _ -> false) in
+      complete_goal_candle_read state ~credential_is_current:Masc_tui_http.credential_owner_is_current request result;
+      if accepted then clear_goal_candle_revalidation state ~goal_id;
+      (match server_changed with
+       | Some owner when take_goal_candle_revalidation state ~goal_id ~owner ->
+         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+           ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+           ~scoped_refresh_followup ~mailbox
+       | Some _ | None -> ())
   | Task_history_loaded (request, result) ->
       let task_id=Masc_tui_fetched.request_key request.thr_ticket in
       let followup =
@@ -22509,7 +23247,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         launch_waiting_keeper_input state ~mailbox
           ~keeper_name:request.Keeper_chat.keeper_name;
         drain_queued_message state ~base_path ~mailbox
-      end
+      end;
+      launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
       (* Each Keeper can stream independently. Looking up the request keeps a
          background turn from replacing the selected Keeper's transcript and
@@ -22782,13 +23521,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Sent_image_ready { request; result } ->
       let {sir_generation=generation; sir_view=view; sir_keeper=keeper_name;
            sir_name=name;_} = request in
+      let request_was_pending = Option.exists (fun pending -> pending == request) state.sent_image_read in
       let pending = Masc_tui_types.take_image_read state request in
       (match result with
        | Image_worker_busy -> ()
        | Image_prepared result -> match pending with
        | Some {sir_purpose=Inspect_image {identity;window};_}
            when state.image_open && not state.msx_open && view=state.view
-             && image_keeper_is_current state ~view ~keeper_name ->
+             && image_request_keeper_is_current state request ->
          (match state.image_inspection, !image_cell_pixels with
           | Some inspected, Some cell_pixels
               when identity == inspected.ii_identity
@@ -22807,7 +23547,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           | (Some _ | None), (Some _ | None) -> ())
        | Some ({sir_purpose=Open_image;_} as origin)
            when not state.msx_open && generation = state.image_request_generation
-         && view = state.view && image_keeper_is_current state ~view ~keeper_name -> begin
+         && view = state.view && image_request_keeper_is_current state request -> begin
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
           let opened_original = match origin.sir_owner with
@@ -22821,23 +23561,23 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Error reason -> refuse reason
         | Ok (presentation,scene) -> draw_prepared_image ?scene ~origin state ~refuse ~title:name presentation
       end
+       | (Some {sir_purpose=Open_image;_} | None)
+           when request_was_pending && view=Tools && view=state.view && not state.msx_open
+             && generation=state.image_request_generation && Option.is_some request.sir_skill_reference
+             && (match request.sir_purpose with Open_image -> true | Inspect_image _ -> false) ->
+           image_notice state ~view ~keeper_name ~kind:Notice_failure
+             "Keeper or Skill source is unconfirmed or changed; reopen the image preview"
        | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
   | Image_render_ready { request; title; caption; page_url; image_url; result } ->
       let current = match Masc_tui_types.take_image_read state request with
         | Some _ ->
           not state.msx_open && request.sir_generation = state.image_request_generation
           && request.sir_view = state.view
-          && (request.sir_view = Resources || request.sir_keeper = state.msg_target_keeper_name)
+          && image_keeper_is_current state ~view:request.sir_view ~keeper_name:request.sir_keeper
         | None -> false in
       if current then begin
       let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
-      (match result with
-       | Ok data ->
-           let refuse reason =
-             notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason)
-           in
-           draw_image state ~caption ~refuse ~title data
-       | Error e -> (
+      let open_page e =
            let url =
              Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
            in
@@ -22848,7 +23588,36 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                     e opener url)
            | Error opener_err ->
                notice ~kind:Notice_failure
-                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
+                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err) in
+      let refuse reason =
+        notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason) in
+      let defer_page ~png reason =
+        (* A size change can refuse a cell frame after the worker completes.
+           Let pending terminal input withdraw the request before opening the
+           browser, just as it can for an ordinary worker failure. *)
+        state.sent_image_read <- Some request;
+        launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+          (fun () -> Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error reason})) in
+      (match result with
+       | Error e -> open_page e
+       | Ok prepared ->
+           match Masc_tui_image_cache.decide_remote ~graphics:!terminal_draws_images
+               ~colour:(character_images_available ()) prepared with
+           | Fetch_remote ->
+               state.sent_image_read <- Some request;
+               notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
+               launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url
+           | Prepare_remote_cells png ->
+               let display = match cell_image_terminal_size () with
+                 | None -> Error "terminal size is unavailable"
+                 | Some (rows, columns) -> Ok (Masc_tui_image_cache.Character_cells {
+                     columns=max 0 (columns - 2);rows=max 0 (rows - 3 - List.length caption)}) in
+               state.sent_image_read <- Some request;
+               launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display png
+           | Draw_remote_png png -> draw_image state ~caption ~refuse ~title png
+           | Draw_remote_cells {png;cells} ->
+               draw_prepared_image ~caption ~origin:request state ~refuse:(defer_page ~png) ~title cells
+           | Open_remote_page reason -> open_page reason)
       end
   | Msx_tick_withdrawn (request, detail) ->
       (match !msx_pending_poll with
@@ -23057,17 +23826,65 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            the function changed nothing; the token is recorded either way
            so the waiting interactive turn can pick it up. *)
         (* See finish_keeper_chat_control in masc_tui_types.ml. *)
-        ignore (finish_keeper_chat_control state keeper_name ~generation);
+        let control_finished = finish_keeper_chat_control state keeper_name ~generation in
         state.keeper_chat_control_tokens <- (keeper_name, token) ::
           List.remove_assoc keeper_name state.keeper_chat_control_tokens;
-        launch_waiting_keeper_input state ~mailbox ~keeper_name
+        launch_waiting_keeper_input state ~mailbox ~keeper_name;
+        if control_finished then
+          launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox
       end else launch_keeper_turns_load state ~mailbox
   | Keeper_preparation_loaded (request, result) ->
       state.msg_preparation_details <- Masc_tui_preparation_details.receive request result state.msg_preparation_details
-  | Keeper_turns_loaded (generation, result) ->
+  | Keeper_waiting_loaded (request, snapshot, result) ->
+      let usable = Keeper_waiting_read.accepts_event state.keeper_waiting_read request in
+      let reconcile = Keeper_waiting_read.event_needs_reconciliation state.keeper_waiting_read request in
+      let current = keeper_waiting_row_current state snapshot in
+      let current_name = keeper_waiting_name_current state snapshot in
+      let unverified = keeper_waiting_unverified_after state ~current ~current_name result in
+      let complete = not usable ||
+        (unverified = [] && keeper_turns_projection_complete ~current result) in
+      (match Keeper_waiting_read.finish state.keeper_waiting_read request
+               ~observed:(not usable || Result.is_ok result) ~success:complete with
+       | None -> ()
+       | Some (reading, follow_up) ->
+           state.keeper_waiting_read <-
+             Keeper_waiting_read.publish_event reading ~observed:(usable && Result.is_ok result);
+           if usable then (match result with
+             | Ok { rows; waiting } ->
+                 state.keeper_waiting_unverified <- unverified;
+                 state.keeper_waiting_error <- None;
+                 let fresh, stale = List.partition current rows in
+                 let waiting = select_keeper_waiting_observation ~fresh ~stale
+                   ~previous_failure:state.keeper_waiting_failure waiting in
+                 accept_keeper_waiting_observation state ~rows ~waiting
+             | Error detail -> state.keeper_waiting_error <- Some detail);
+           if follow_up then begin
+             if not usable && reconcile && Result.is_ok result then
+               launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox
+             else launch_keeper_waiting_load ~exclusive:(not usable && reconcile) state ~mailbox
+           end
+           else if not usable && reconcile && Result.is_ok result then
+             launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox)
+  | Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result) ->
       state.keeper_turns_inflight <- false;
       (match result with
        | Ok { rows; waiting } ->
+           let waiting_current = keeper_waiting_row_current state waiting_snapshot in
+           let waiting_name_current = keeper_waiting_name_current state waiting_snapshot in
+           let waiting_fresh, waiting_stale = List.partition waiting_current rows in
+           let accept_waiting =
+             Keeper_waiting_read.accepts_poll state.keeper_waiting_read waiting_receipt in
+           let reconcile_waiting = not accept_waiting &&
+             Keeper_waiting_read.poll_needs_reconciliation state.keeper_waiting_read waiting_receipt in
+           if accept_waiting then begin
+             let unverified = keeper_waiting_unverified_after state ~current:waiting_current
+               ~current_name:waiting_name_current result in
+             let complete = unverified = [] &&
+               keeper_turns_projection_complete ~current:waiting_current result in
+             state.keeper_waiting_read <- Keeper_waiting_read.settle_poll state.keeper_waiting_read ~success:complete;
+             state.keeper_waiting_unverified <- unverified;
+             state.keeper_waiting_error <- None
+           end;
            let current row =
              Option.value ~default:0 (List.assoc_opt row.Tui_decode.ktr_keeper_name generation)
              = keeper_chat_control_generation state row.Tui_decode.ktr_keeper_name
@@ -23084,7 +23901,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
              state.keeper_turns in
            let waiting =
              select_keeper_waiting_observation
-               ~fresh ~stale ~previous_failure:state.keeper_waiting_failure waiting
+               ~fresh:waiting_fresh ~stale:waiting_stale
+               ~previous_failure:state.keeper_waiting_failure waiting
            in
            if List.exists (fun row -> not (List.mem_assoc row.Tui_decode.ktr_keeper_name
              state.keeper_chat_control_pending)) stale then launch_keeper_turns_load state ~mailbox;
@@ -23098,7 +23916,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                ~now:observed_at
                ~previous_rows:state.keeper_turns ~current_rows:rows
                state.keeper_turn_finishes;
-           accept_keeper_turn_observation state ~rows ~waiting ~observed_at;
+           accept_keeper_turn_observation
+             ~accept_waiting
+             state ~rows ~waiting ~observed_at;
            (match state.view, state.msg_target_keeper_name with
             | Keepers Keeper_message, Some keeper_name ->
                 launch_current_autonomous_journals state ~mailbox ~keeper_name;
@@ -23107,7 +23927,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _)
             | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _) -> ());
            List.iter (fun row -> launch_waiting_keeper_input state ~mailbox
-             ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh
+             ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh;
+           if reconcile_waiting then
+             launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox
        | Error detail -> refuse_keeper_turn_observation state detail)
   | Gate_snapshot_loaded (request, expected_workspace, result) ->
       (match Snapshot_read.settle state.gate_snapshot_read request with
@@ -23318,7 +24140,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
         | Ok (Not_signalled _) | Error _ -> Priority_unconfirmed);
       let current = keeper_chat_control_result_current state keeper_name ~generation in
-      if finish_keeper_chat_control state keeper_name ~generation then launch_keeper_turns_load state ~mailbox;
+      if finish_keeper_chat_control state keeper_name ~generation then begin
+        launch_keeper_turns_load state ~mailbox
+      end;
+      if current then
+        launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox;
       if current then state.keeper_observed_interrupts <- List.map (fun item ->
         if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item
         else { item with oi_status = match result with
@@ -23333,8 +24159,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
         | Ok (Not_signalled _) | Error _ -> Priority_unconfirmed);
       let current = keeper_chat_control_result_current state keeper_name ~generation in
-      if finish_keeper_chat_control state keeper_name ~generation then
-        launch_keeper_turns_load state ~mailbox;
+      if finish_keeper_chat_control state keeper_name ~generation then begin
+        launch_keeper_turns_load state ~mailbox
+      end;
+      if current then
+        launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox;
       if current then (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
        with
@@ -23364,10 +24193,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (* The POST never left. Nothing durable was written for it, so there is
          nothing to reconcile: say what happened and let the operator send
          again if they want to. *)
-      if recover_failed_keeper_preflight state request then
+      if recover_failed_keeper_preflight state request then begin
         report_action state "error"
           (Printf.sprintf "Keeper request %s was not dispatched: %s"
-             request.request_id detail)
+             request.request_id detail);
+        launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
+      end
   | Context_inspector_loaded (generation, keeper_name, reading) ->
       if
         state.context_inspector_open
@@ -23754,13 +24585,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          && Option.equal String.equal keeper_name selected_name then (
       match result with
       | Ok snapshot ->
-          let selected = selected_tools_skill_profile state in
+          let selected = tools_skill_reference_for_refresh state ~keeper_name in
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None;
           (match selected with
            | None -> ()
-           | Some selected ->
-               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference selected.esp_reference)
+           | Some reference ->
+               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference reference)
                  (tools_skill_profiles state)
                |> Option.iter (fun index -> state.tools_skill_cursor <- index));
           normalize_tools_skill_cursor state
@@ -24165,10 +24996,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                 snapshot.fcs_keeper key.apk_keeper)
           | Ok _ | Error _ -> result
         in
-        let landed =
+        let current =
           Masc_tui_fetched.is_current ~equal:same_acting_pane_key state.acting_pane_changes
-            request
-          && Result.is_ok result
+            request in
+        let followup = current && Option.exists (same_acting_pane_key key)
+            state.acting_pane_changes_loss_followup in
+        let landed = current && Result.is_ok result
         in
         let result = Result.map (fun snapshot ->
           let snapshot =
@@ -24184,7 +25017,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         state.acting_pane_changes <-
           Masc_tui_fetched.complete ~equal:same_acting_pane_key state.acting_pane_changes
             request result;
-        if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ())
+        if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ());
+        if followup then begin
+          state.acting_pane_changes_loss_followup <- None;
+          match acting_pane_changes_keeper state with
+          | Some keeper_name when String.equal keeper_name key.apk_keeper
+                                  && server_authority_ready state ->
+              state.acting_pane_changes <-
+                Masc_tui_fetched.invalidate ~reason:"Observer events were lost"
+                  state.acting_pane_changes;
+              launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name
+          | Some _ | None ->
+              state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+              state.acting_pane_changes_at <- None
+        end
       end
   | File_changes_loaded (keeper_name, result) ->
       (* An answer for a keeper the surface has since left is not this
@@ -24380,18 +25226,29 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                end)
       | Error detail -> state.harness_error <- Some detail)
   | Fusion_runs_loaded (request, result) ->
-      Masc_tui_fusion_updates.runs_loaded state request result
+      (match Masc_tui_fusion_updates.runs_loaded state request result with
+       | Reread when state.view = Fusion
+                     || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
+           launch_fusion_runs_load state ~mailbox
+       | Reread | Applied | Await_observer | Obsolete -> ())
   | Fusion_detail_loaded (generation, run_id, result) ->
-      Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result
+      (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
+       | Reread when state.view = Fusion ->
+           launch_fusion_detail_load state ~mailbox ~run_id
+       | Reread | Applied | Await_observer | Obsolete -> ())
   | Fusion_historical_detail_loaded (generation, reference, result) ->
-      Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result
+      (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
+       | Reread when state.view = Fusion ->
+           launch_fusion_historical_detail_load state ~mailbox ~reference
+       | Reread | Applied | Await_observer | Obsolete -> ())
   | Fusion_launch_options_loaded (generation, result) ->
       Masc_tui_fusion_updates.launch_options_loaded state ~generation
         ~report:(report_action state "system") result
   | Fusion_launched (generation, result) ->
       Masc_tui_fusion_updates.launched state ~generation
         ~report:(report_action state "system")
-        ~refresh:(fun () -> launch_fusion_runs_load state ~mailbox) result
+        ~refresh:(fun () -> launch_fusion_runs_load
+          ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result
   | Memory_recall_standing_loaded (generation, result) ->
       Masc_tui_types.finish_memory_recall_standing_read state ~generation
         (match result with
@@ -24458,7 +25315,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             | Error detail -> report_action state "error" ("Keeper metadata read failed: " ^ detail)
             | Ok reading ->
                 Local_read_observation.apply request.lwr_observation
-                  (Masc_tui_loader.apply_local_keepers state) reading;
+                  (Masc_tui_loader.apply_local_keepers
+                     ~before_view_change:(fun () -> retire_remote_image_for_navigation state) state) reading;
                 refresh_visible_detail_after_authority_recovery state ~mailbox
                   ~previous_authority:state.detail_read_authority;
                 resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
@@ -24703,6 +25561,13 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
   in
   let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || credential_changed) in
   reset_input_sensitive_sweeps ();
+  (* One already-retired notice is bounded work.  Do not starve it behind a
+     busy mailbox, but let an operator gesture cancel its marker first. *)
+  let retired_image_changed =
+    if not (share_input_pending ()) then
+      announce_retired_skill_image state
+    else false in
+  let changed = changed || retired_image_changed in
   match state.resource_copy_ready with
   | Some copy when !copy_sweep_complete && not (over_budget ()) && not (share_input_pending ()) ->
     if not (resource_public_copy_is_current state copy) then begin
@@ -26863,7 +27728,12 @@ Use relative paths for resources already held in the package. -->
          launch_tools_async_detail state ~mailbox:async_messages)
   in
   let handle_skill_diagram () =
-    match selected_tools_skill_profile state with
+    if not (tools_keeper_observation_confirmed state) then
+      report_action state "error" "Keeper roster is unconfirmed; refresh before opening the Skill diagram"
+    else if not (tools_skill_inventory_matches_keeper state
+      (Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state))) then
+      report_action state "error" "Skill inventory is not confirmed for the selected Keeper; refresh before opening the diagram"
+    else match selected_tools_skill_profile state with
     | None -> report_action state "error" "No published Skill selected"
     | Some { esp_flow = None; _ } ->
         report_action state "system" "Normal Skill: the model orchestrates tools; no declared execution graph"
@@ -27350,8 +28220,10 @@ Use relative paths for resources already held in the package. -->
     let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
     reconcile_keeper_message_focus state ~cols
   in
+  let cell_image_redraw_pending = ref false in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then begin
+      cell_image_redraw_pending := true;
       withdraw_resource_diagram_pending state;
       state.resource_copy_pending <- None;
       state.resource_copy_ready <- None;
@@ -27641,6 +28513,7 @@ Use relative paths for resources already held in the package. -->
       (* Console writes damage whichever surface owns the terminal, including
          the spectator whose output bypasses the ordinary frame presenter. *)
       if Terminal_write_repair.consume_damage () then begin
+        cell_image_redraw_pending := true;
         Masc_tui_msx.invalidate ();
         Frame_presenter.invalidate frame_presenter;
         Render_schedule.request render_schedule Render_schedule.Force;
@@ -27704,7 +28577,7 @@ Use relative paths for resources already held in the package. -->
       (* One direct ioctl snapshot owns both this interaction's bounds and its
          eventual frame. This also observes resizes from terminals that omit
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
-      (match refresh_terminal_size () with
+      let resized = match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            withdraw_resource_diagram_pending state;
            ignore (Atomic.fetch_and_add resize_generation 1);
@@ -27728,8 +28601,47 @@ Use relative paths for resources already held in the package. -->
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ());
            if state.image_open && not state.msx_open then
-             Option.iter (draw_inspected_image state) state.image_inspection
-       | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+             Option.iter (draw_inspected_image state) state.image_inspection;
+           true
+       | Render_schedule.Terminal_size_cache.Unchanged _ -> false in
+      (match state.image_cell_view with
+       | Some (Image_cells view) when state.image_open && not state.msx_open ->
+           (match image_cell_origin_for_redraw state ~workspace:view.ic_workspace view.ic_origin with
+           | None ->
+             (match cell_image_terminal_size () with
+              | Some terminal_size ->
+                  draw_withdrawn_cell_image state ~terminal_size;
+                  cell_image_redraw_pending := false
+              | None ->
+                  write_to_terminal Ansi.clear;
+                  state.image_cell_view <- Some (Image_cells_withdrawn None);
+                  cell_image_redraw_pending := true)
+           | Some origin ->
+             let view = if origin == view.ic_origin then view else {view with ic_origin=origin} in
+             state.image_cell_view <- Some (Image_cells view);
+             let unconfirmed = image_cell_source_unconfirmed state origin in
+             (match cell_image_terminal_size () with
+              | Some terminal_size ->
+                  if !cell_image_redraw_pending || resized || terminal_size <> view.ic_terminal_size
+                     || unconfirmed <> view.ic_unconfirmed then
+                    draw_cell_image state ~terminal_size {view with ic_unconfirmed=unconfirmed};
+                  cell_image_redraw_pending := false
+              | None ->
+                  if unconfirmed && not view.ic_unconfirmed then begin
+                    (* Do not leave a confirmed-looking footer on screen when
+                       the source became uncertain and geometry is unknown. *)
+                    write_to_terminal Ansi.clear;
+                    state.image_cell_view <- Some (Image_cells {view with ic_unconfirmed=true});
+                    cell_image_redraw_pending := true
+                  end))
+       | Some (Image_cells_withdrawn last_size) when state.image_open && not state.msx_open ->
+           (match cell_image_terminal_size () with
+            | Some terminal_size ->
+                if !cell_image_redraw_pending || resized || last_size <> Some terminal_size then
+                  draw_withdrawn_cell_image state ~terminal_size;
+                cell_image_redraw_pending := false
+            | None -> ())
+       | Some (Image_cells _ | Image_cells_withdrawn _) | None -> cell_image_redraw_pending := false);
       (* Decide from the hold captured before reading: the final event is
          rejected even when reading it emptied the last input buffer. *)
       let rejected, rejected_paste, was_reported, paste_was_reported =
@@ -29192,6 +30104,7 @@ Use relative paths for resources already held in the package. -->
        last_loop_at_ns := now_ns);
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
+      launch_pending_loss_history state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration
@@ -29310,9 +30223,17 @@ Use relative paths for resources already held in the package. -->
               ends on the next key like any armed action. *)
            (match state.goal_action_pending with
             | Some (Goal_drop_reason _) when not compact_viewport -> ()
-            | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
-                if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
-                  state.goal_action_pending <- None);
+            | Some (Goal_action_armed armed) ->
+                let current = Option.exists (fun goal ->
+                  String.equal goal.pg_id armed.goal_id
+                  && planning_goal_retains_arm goal ~action:armed.action
+                       ~phase:armed.phase ~retry_binding:armed.retry_binding)
+                    (goal_detail_on_screen state) in
+                if not current || cancelled (planning_action_confirmation_keys armed.action) then
+                  state.goal_action_pending <- None
+            | Some (Goal_drop_reason _) ->
+                if input_seen then state.goal_action_pending <- None
+            | None -> ());
            (* Scrolling reads the exact proof; leaving it invalidates pending
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
@@ -30644,14 +31565,18 @@ Use relative paths for resources already held in the package. -->
               (match k with
                | "esc" ->
                  state.goal_action_pending <- None;
-                 state.goal_action_error <- None
+                 clear_goal_action_error state ~goal_id:entry.goal_id
                | "\r" | "\n" | "enter" ->
                  let reason = String.trim entry.reason in
                  if String.equal reason "" then
-                   state.goal_action_error <- Some "A drop needs a reason; type why, or Esc to cancel"
+                   set_goal_action_error state ~goal_id:entry.goal_id "A drop needs a reason; type why, or Esc to cancel"
+                 else if Result.is_error (Goal_store.validate_goal_id entry.goal_id) then
+                   set_goal_action_error state ~goal_id:entry.goal_id "Cannot send this Goal ID; the drop reason is retained"
+                 else if List.mem_assoc entry.goal_id state.goal_action_inflight then
+                   set_goal_action_error state ~goal_id:entry.goal_id "A request is still in progress; the drop reason is retained"
                  else begin
                    state.goal_action_pending <- None;
-                   state.goal_action_error <- None;
+                   clear_goal_action_error state ~goal_id:entry.goal_id;
                    start_goal_transition state ~mailbox:async_messages ~note:reason
                      ~goal_id:entry.goal_id ~action:Goal_phase.Public_action.Drop
                  end
@@ -32726,8 +33651,10 @@ Use relative paths for resources already held in the package. -->
                 state.fusion_mode <- Fusion_detail run.fur_run_id;
                 state.fusion_scroll <- 0;
                 state.fusion_detail <- None;
+                state.fusion_detail_stale <- false;
                 state.fusion_detail_error <- None;
-                launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+                launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+                  state ~mailbox:async_messages ~run_id:run.fur_run_id)
        | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
            launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
@@ -34410,7 +35337,10 @@ Use relative paths for resources already held in the package. -->
                      state.schedule_wake_history_error <- None;
                      launch_schedule_wake_history_load state
                        ~mailbox:async_messages ~schedule_id
-                 | Link.Fusion_run, Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
+                 | Link.Fusion_run, Fusion, Some run_id ->
+                     state.fusion_mode <- Fusion_detail run_id;
+                     launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+                       state ~mailbox:async_messages ~run_id
                  | Link.Keeper, Keepers _, Some keeper_name ->
                      (* The roster is a cursor, not an id, so this puts the
                         cursor on the named keeper and leaves it there. A name
@@ -34977,13 +35907,22 @@ Use relative paths for resources already held in the package. -->
                 report_action state "system"
                   (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
+       | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key
+           && (match state.planning_mode with Planning_detail _ -> true | Planning_list -> false) ->
+           start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+             ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages;
+           (match state.planning_mode with
+            | Planning_detail goal_id ->
+              clear_goal_candle_revalidation state ~goal_id;
+              launch_goal_candle_load state ~mailbox:async_messages goal_id
+            | Planning_list -> ())
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
            && Option.exists
                 (fun action ->
                    let goal = Option.get (goal_detail_on_screen state) in
-                   Goal_phase.moves_goal ~phase:goal.pg_phase
-                     ~action:(Goal_phase.Public_action.to_action action))
+                   planning_goal_offers_action goal action)
                 (planning_action_of_key key) ->
            (* Detail actions take precedence over global refresh/navigation.
               The displayed keys and parser share one owner. *)
@@ -35248,6 +36187,7 @@ Use relative paths for resources already held in the package. -->
                      state.fusion_mode <- Fusion_list;
                      state.fusion_scroll <- 0;
                      state.fusion_detail <- None;
+                     state.fusion_detail_stale <- false;
                      state.fusion_detail_error <- None;
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
@@ -35441,6 +36381,7 @@ Use relative paths for resources already held in the package. -->
                      state.fusion_mode <- Fusion_list;
                      state.fusion_scroll <- 0;
                      state.fusion_detail <- None;
+                     state.fusion_detail_stale <- false;
                      state.fusion_detail_error <- None;
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
@@ -37627,8 +38568,10 @@ Use relative paths for resources already held in the package. -->
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Poll base_path;
         let host = server_peer_host in
         let port = state.port in
-        (* The retry a closed feed waits for. *)
-        open_observer_if_due state ~retry_closed:true ~host ~port
+        (* Closed feeds normally retry on their own timer. The cadence can
+           recover one only when no retry owner could be installed. *)
+        open_observer_if_due state
+          ~retry_closed:(Option.is_none state.observer_retry_owner) ~host ~port
           ~mailbox:async_messages;
         open_fleet_stream_if_due state ~host ~port ~mailbox:async_messages;
         start_http_refresh state ~host ~port ~intent:Cadence

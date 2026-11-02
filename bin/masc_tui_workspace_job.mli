@@ -14,6 +14,9 @@ val fork :
     is requested even if that callback raises; release is observed only after
     unregistering the original key, including synchronous launch failure. *)
 
+val cancel : Masc_tui_types.state -> key:unit ref -> unit
+(** Request cancellation of the exact workspace job. *)
+
 val cancel_observation : Masc_tui_types.state -> key:unit ref -> unit
 (** Request cancellation of this exact observation only. A missing key means
     there is no registered observation to cancel; it is not worker completion

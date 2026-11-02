@@ -9,6 +9,17 @@ let board_masc_dir () =
   Common.masc_dir_from_base_path ~base_path:(board_base_path ())
 ;;
 
+let capture_workspace_masc_dir workspace_masc_dir =
+  if String.equal workspace_masc_dir "" then
+    invalid_arg "Board_paths.capture_workspace_masc_dir: workspace_masc_dir must not be empty";
+  let workspace_masc_dir =
+    if Filename.is_relative workspace_masc_dir then
+      Filename.concat (Sys.getcwd ()) workspace_masc_dir
+    else workspace_masc_dir
+  in
+  Fs_compat.realpath_lenient workspace_masc_dir
+;;
+
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
 let file_path ~workspace_masc_dir file =
   let filename = match file with
@@ -21,26 +32,52 @@ let file_path ~workspace_masc_dir file =
 
 let posts_file ~workspace_masc_dir = file_path ~workspace_masc_dir Posts
 
-let store_file_path (store : Board_types.store) file =
-  let workspace_masc_dir = match store.workspace_masc_dir with
-    | Some workspace -> workspace
-    | None -> board_masc_dir () in
-  file_path ~workspace_masc_dir file
+let posts_initialization_guard_file ~workspace_masc_dir =
+  Filename.concat workspace_masc_dir "board_posts.initialized.jsonl"
 
-let persist_path () = file_path ~workspace_masc_dir:(board_masc_dir ()) Posts
-let comments_path () = file_path ~workspace_masc_dir:(board_masc_dir ()) Comments
-let reactions_path () = file_path ~workspace_masc_dir:(board_masc_dir ()) Reactions
-let sub_boards_path () = file_path ~workspace_masc_dir:(board_masc_dir ()) Sub_boards
+let workspace_masc_dir (store : Board_types.store) =
+  Board_workspace_binding.workspace_masc_dir store.workspace_binding
+
+let observe_workspace (store : Board_types.store) =
+  let open Result.Syntax in
+  let binding = store.workspace_binding in
+  let workspace_of_guard (guard : Board_types.posts_guard_observation) =
+    guard.workspace_observation in
+  let workspace_of_history = function
+    | Board_types.No_initialization -> None
+    | Guard_observed guard -> Some (workspace_of_guard guard)
+    | Posts_observed observation -> Some (workspace_of_guard observation.initialization) in
+  let observed = match store.posts_source with
+    | Posts_unobserved -> None
+    | Posts_guard_observed { initialization; _ } -> Some (workspace_of_guard initialization)
+    | Posts_readable { observation; _ } -> Some (workspace_of_guard observation.initialization)
+    | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } ->
+      workspace_of_history last_observed
+  in
+  let* observation = match observed with
+  | None -> Board_workspace_binding.observe binding
+  | Some observation ->
+    Result.map (fun () -> observation)
+      (Board_workspace_binding.revalidate binding observation)
+  in
+  if Board_workspace_binding.workspace_directory_missing observation then Ok observation
+  else
+    let* retained = Board_workspace_binding.retain binding observation in
+    store.workspace_binding <- retained;
+    Ok observation
+
+let check_workspace store = Result.map (fun _ -> ()) (observe_workspace store)
+
+let store_file_path store file =
+  file_path ~workspace_masc_dir:(workspace_masc_dir store) file
+
+let persist_path store = store_file_path store Posts
+let comments_path store = store_file_path store Comments
+let reactions_path store = store_file_path store Reactions
+let sub_boards_path store = store_file_path store Sub_boards
 
 let ensure_dir path =
   if String.equal path "" || String.equal path "." || String.equal path "/"
   then ()
   else Fs_compat.mkdir_p path
-;;
-
-let ensure_masc_dir () =
-  let base = board_base_path () in
-  let dir = board_masc_dir () in
-  ensure_dir base;
-  ensure_dir dir
 ;;

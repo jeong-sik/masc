@@ -442,6 +442,80 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
       Alcotest.(check int) "full execution recomputed" 2 !full_counter;
       Alcotest.(check int) "unrelated cache preserved" 1 !unrelated_counter)
 
+let test_task_mutation_wakes_health_before_slow_subscriber ~clock () =
+  let previous_hook = Atomic.get Workspace_hooks.on_task_mutation_fn in
+  let previous_buffer = Masc.Sse.event_buffer_events_for_test () in
+  let subscriber = "task-health-slow-subscriber" in
+  let entered, mark_entered = Eio.Promise.create () in
+  let release, release_subscriber = Eio.Promise.create () in
+  let health_invalidations = ref 0 in
+  let generation_before =
+    Server_dashboard_http_execution_surfaces.For_testing.execution_publication_generation ()
+  in
+  let generation_at_health = ref None in
+  let observed = ref None in
+  Masc.Sse.subscribe_external ~id:subscriber
+    ~callback:(fun (event : Masc.Sse.external_event) ->
+      if Yojson.Safe.Util.member "type" event.ext_payload = `String "execution_snapshot" then (
+        Eio.Promise.resolve mark_entered ();
+        Eio.Promise.await release)) ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber;
+      Masc.Sse.set_event_buffer_for_test previous_buffer;
+      Atomic.set Workspace_hooks.on_task_mutation_fn previous_hook)
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
+        ~invalidate_full_health_snapshot:(fun () ->
+          incr health_invalidations;
+          generation_at_health := Some
+            (Server_dashboard_http_execution_surfaces.For_testing
+             .execution_publication_generation ())) ();
+      Eio.Fiber.both
+        (fun () -> (Atomic.get Workspace_hooks.on_task_mutation_fn) ())
+        (fun () ->
+          Fun.protect
+            ~finally:(fun () -> Eio.Promise.resolve release_subscriber ())
+            (fun () ->
+              Eio.Time.with_timeout_exn clock 5.0 (fun () -> Eio.Promise.await entered);
+              observed := Some !health_invalidations));
+      Alcotest.(check (option int))
+        "health was invalidated before subscriber delivery completed" (Some 1) !observed;
+      Alcotest.(check (option int))
+        "execution generation advanced before health invalidation"
+        (Some (generation_before + 1)) !generation_at_health)
+;;
+
+let test_task_mutation_preserves_health_cancellation () =
+  let previous_hook = Atomic.get Workspace_hooks.on_task_mutation_fn in
+  let previous_buffer = Masc.Sse.event_buffer_events_for_test () in
+  let subscriber = "task-health-cancel-subscriber" in
+  let deliveries = ref 0 in
+  let generation_before =
+    Server_dashboard_http_execution_surfaces.For_testing.execution_publication_generation ()
+  in
+  Masc.Sse.subscribe_external ~id:subscriber
+    ~callback:(fun (event : Masc.Sse.external_event) ->
+      if Yojson.Safe.Util.member "type" event.ext_payload = `String "execution_snapshot"
+      then incr deliveries) ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber;
+      Masc.Sse.set_event_buffer_for_test previous_buffer;
+      Atomic.set Workspace_hooks.on_task_mutation_fn previous_hook)
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
+        ~invalidate_full_health_snapshot:(fun () -> raise (Eio.Cancel.Cancelled Exit)) ();
+      (match (Atomic.get Workspace_hooks.on_task_mutation_fn) () with
+       | exception Eio.Cancel.Cancelled Exit -> ()
+       | exception exn -> raise exn
+       | () -> Alcotest.fail "health callback cancellation must propagate");
+      Alcotest.(check int) "execution invalidated" (generation_before + 1)
+        (Server_dashboard_http_execution_surfaces.For_testing
+         .execution_publication_generation ());
+      Alcotest.(check int) "execution invalidation delivered before cancellation" 1 !deliveries)
+;;
+
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
 module Execution_http = Server_dashboard_http_execution_surfaces.For_testing
@@ -1874,6 +1948,10 @@ let () =
             test_board_write_invalidates_every_board_projection;
           test_case "task mutation invalidates every execution variant" `Quick
             test_task_mutation_hook_invalidates_all_execution_variants;
+          test_case "task mutation wakes health before a slow subscriber" `Quick
+            (test_task_mutation_wakes_health_before_slow_subscriber ~clock);
+          test_case "task mutation preserves health cancellation" `Quick
+            test_task_mutation_preserves_health_cancellation;
           test_case "execution preparation reuse and request scope" `Quick
             test_execution_preparation_reuse_and_scope;
           test_case "execution preparation cannot undo invalidation" `Quick

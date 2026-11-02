@@ -218,24 +218,17 @@ let test_scope_kinds_do_not_collide () =
     None
     (Q.active_until ~scope:provider_row_scope ~now:100.0)
 
-(* A catalog row no longer names the environment variable that holds its key:
-   since agent-core catalog rows state the auth *fact* ([requires_api_key]),
-   not the env name, an undeclared credential resolves to no reference at all
-   ([effective_credential_reference] answers [None] for both [glm] and
-   [zai-image]). A shared window is therefore the declared case: two rows that
-   name the same credential env in runtime.toml. *)
+(* Catalog rows state whether auth is required, not which account owns it.
+   Two rows selecting the same declared credential share its quota scope. *)
 let test_declared_credential_is_shared_scope () =
-  let credential provider_id =
-    Runtime_adapter.effective_credential_reference
-      ~provider_id
-      (Some (Runtime_schema.Env "ZAI_API_KEY"))
+  let selected_scope provider_id =
+    match Runtime_adapter.materialize_credentials ~provider_id
+        ~credential:(Some (Runtime_schema.Env "ZAI_API_KEY")) with
+    | Error detail -> Alcotest.fail detail
+    | Ok selected -> Runtime_credential_selection.quota_scope selected.admission
   in
-  let glm_scope =
-    Q.scope_of_credential ~provider_id:"glm" (credential "glm")
-  in
-  let image_scope =
-    Q.scope_of_credential ~provider_id:"zai-image" (credential "zai-image")
-  in
+  let glm_scope = selected_scope "glm" in
+  let image_scope = selected_scope "zai-image" in
   reset ();
   Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
   Alcotest.(check bool)
@@ -278,13 +271,11 @@ let test_selected_environment_alias_owns_scope () =
   with_env_values
     [ "OLLAMA_CLOUD_API_KEY", ""; "OLLAMA_API_KEY", "legacy-test-key" ]
     (fun () ->
-       let selected =
-         Runtime_adapter.effective_credential_reference
-           ~provider_id:"ollama_cloud"
-           (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY"))
-       in
        let selected_scope =
-         Q.scope_of_credential ~provider_id:"ollama_cloud" selected
+         match Runtime_adapter.materialize_credentials ~provider_id:"ollama_cloud"
+             ~credential:(Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY")) with
+         | Error detail -> Alcotest.fail detail
+         | Ok selected -> Runtime_credential_selection.quota_scope selected.admission
        in
        let legacy_scope =
          Q.scope_of_credential

@@ -47,9 +47,8 @@ let done_earlier =
   row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "orrery" "정기 보드 스윕"
 ;;
 
-(* [kta_asked_at] and [kta_timeout_sec] as the registry reports them: asked a
-   minute before [now], with the five minutes a held call is given before it
-   is denied -- so four remain. *)
+(* Registered a minute before [now]. The registry's timeout starts only after
+   question publication, so these fields do not determine time remaining. *)
 let asked_at_1155 = 1787713140.0
 
 let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0)
@@ -308,17 +307,14 @@ let with_goals goals =
     ~stalled:(Agenda.Read [])
 ;;
 
-(* A Goal the verifier proved waits on the operator's confirmation, so it is
-   something to say on its own, it counts in the badge, and Enter leads to it. *)
+(* A Goal whose stored phase awaits confirmation counts in the badge, and
+   Enter leads to it without claiming that the proof was read. *)
 let test_a_goal_to_confirm_is_waiting_on_the_operator () =
   let t = with_goals [ goal ~goal_id:"goal-9" "v0.38.0 release" ] in
   check int "a goal to confirm is counted" 1 (Agenda.waiting t);
   check bool "and the badge has something to say" true
     (Agenda.waiting_label ~cells:80 t <> "");
   let lines = overlay_of t in
-  check bool "the row names the goal and says it was proved" true
-    (contains ~needle:"v0.38.0 release" (joined lines)
-     && contains ~needle:"the verifier proved it" (joined lines));
   match Agenda.target_indexes lines with
   | [ index ] -> (
       match List.nth_opt lines index with

@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-eight are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-nine are
 implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -151,7 +151,7 @@ evidence one immutable owner. R1 in
 [#47131](https://github.com/jeong-sik/masc/pull/47131) separates frozen credential-batch
 admission evidence from current immutable ownership. R2 in
 [#47133](https://github.com/jeong-sik/masc/pull/47133) gives validated Fusion decision
-events one typed owner while retaining original journal JSON. Two candidates remain unfinished. This ordering
+events one typed owner while retaining original journal JSON. One candidate remains unfinished. This ordering
 does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -172,7 +172,7 @@ does not waive their coverage.
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
 | [S2](#s2) | next | in review | Move lane edit decisions into a pure declared-configuration planner |
-| [S3](#s3) | later | implemented; execution unverified | Separate Antigravity protocol transitions from persistence and stream callbacks |
+| [S3](#s3) | later | implemented; selected execution passed | Separate Antigravity protocol transitions from persistence and stream callbacks |
 | [S4](#s4) | investigate | implemented; execution unverified | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
 | [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
 | [S6](#s6) | later | implemented; execution unverified | Give connector status a common typed projection before JSON aggregation |
@@ -1459,10 +1459,17 @@ remain in the shell with their existing policies.
 The public executable fixture now composes closed-response replay with actual tool
 silence and checks ordered stream/tool/usage completion. Admission refusal and
 ordinary callback exception both require zero start/terminal/usage observations,
-even with a buffered result. These are authored scenarios; syntax/whitespace checks
-are not typechecking or behavior execution. Exact-head source review and selected
-remote execution belong to the PR evidence, without a full-regression or runtime
-claim. The coding session runs no local Dune build/typecheck/tests.
+even with a buffered result. Targeted **Test**
+[41286784310](https://github.com/jeong-sik/masc/actions/runs/41286784310) completed
+with **success** at `e777cdf51a06e46a34add00490b780b9dfcf299d`, ref
+`refactor/antigravity-protocol-core-20261101`. Actual `TARGET_SUITES` selected
+`test_runtime_antigravity,test_keeper_antigravity_runtime`; the logs report 67 and
+23 tests respectively. The opt-in live official-client start/resume case was
+skipped. This supplies selected subprocess/Keeper execution evidence, without a
+live-provider, full-regression or installed-runtime claim. The coding session runs
+no local Dune build/typecheck/tests. External integration merged #47157 as
+`f4b4cd2197ce179d015c7e40c1ede616fe89de55` on 2026-11-01 at 09:12:16 UTC;
+the selected run remains bound to the original PR head.
 
 The source/peer audit found #47026 still open at
 `81f5d78578378deabf5447de961dae483b400312` over
@@ -2194,12 +2201,100 @@ through the request owner and TCP transport: a committed HTTP400, a committed wr
 whose acknowledgement is dropped, pre-POST file failure, cancellation after the
 actual upstream commit, and late/duplicate/foreign/A-to-B-to-A receipt admission.
 Peer EOF and receipt publication are separate observations; existing I/O-domain
-scenarios own physical pool cleanup evidence. These are authored scenarios, not an
-execution claim. Server prerequisite Test run
+scenarios own physical pool cleanup evidence. Targeted **Test**
+[41286782867](https://github.com/jeong-sik/masc/actions/runs/41286782867) completed
+with **success** at repaired head `b7b792e2360ff8143c065cdabba5c52eace55f69`,
+ref `refactor/board-request-outcome-20261101`. Actual `TARGET_SUITES` selected
+`test_tui_board_request_outcome,test_tui_board_attachments,test_tui_io_domain,test_tui_workspace_share_cancel`;
+the four suites report 6, 26, 7 and 4 tests, with no selected-case skips. The
+original Test run 41285529615 failed compiling the cancellation fixture before
+behavior execution; the repaired head removes its unreachable statement and
+retains the cancellation path and assertions. External integration merged #47153
+as `226402587b72c4a8df00a9482a07b5f7a7a43880` on 2026-11-01 at 09:12:15 UTC;
+this session performed neither that merge nor the S3 merge. Server prerequisite Test run
 [41283385935](https://github.com/jeong-sik/masc/actions/runs/41283385935) completed
 successfully at `3ac145916e09f7317ff61f2cf6a647ec971f49f0` on
 `fix/board-publication-proof-main-20261101`, with the six selected Board/Fusion suites.
 It does not validate this later TUI layer.
+
+The policy-admission prerequisite [#47178](https://github.com/jeong-sik/masc/pull/47178)
+moves sub-board CRUD into the private
+`Board_sub_boards` owner. Ordinary post creation checks current policy under the
+store's persistence mutex before attempting append; runtime sub-board creation,
+updates and deletion take that same mutex before the state mutex. A rejected
+policy therefore appends no post and needs no orphan cleanup. Same-slug creation
+also makes its final uniqueness decision before append. The unused post-cleanup
+rewrite helper and its obsolete tests are removed; real flush/pin/delete snapshot
+scenarios remain. A named hearth requires a fully readable sub-board source through
+the shared policy validator, including its existing comment callers; an unscoped
+post remains independent. Comment append/commit ordering is otherwise unchanged.
+This is one-store serialization, with startup loading completed before concurrent
+operations. It does not serialize other stores/processes, replace cached appends
+with fsynced commits, change sub-board snapshot-error reporting, or provide a
+durable operation receipt. Its focused producer scenarios and exact-head review
+and execution status belong to its PR evidence.
+
+The workspace-binding prerequisite [#47192](https://github.com/jeong-sik/masc/pull/47192)
+gives every Board store a required immutable
+canonical state directory, captured once by its constructor. All five persistence
+families use that store for loads, append, snapshots, rollback, flush and deletion
+cascades. Explicit relative paths are anchored at construction; empty input is a
+documented programmer error. There is no ambient-path fallback for a standalone
+store and no automatic rekey of the startup singleton. Server initialization
+returns a typed workspace mismatch before installing another workspace's lookup
+or starting a new flusher. The MCP composition retains the actual resolved
+configuration for both Board initialization and the Keeper recipient lookup;
+each write still reads fresh Keeper settings from that captured workspace.
+The collaboration-evidence workspace check remains in force. This captures a
+path, without claiming an inode/symlink lease or proving an empty source was
+loaded. Cached append behavior, row formats, write durability, snapshot failure
+policy and retry obligations are unchanged. The producer, startup and lookup
+scenarios and their execution status are recorded separately with the layer.
+
+The pure codec preparation [#47212](https://github.com/jeong-sik/masc/pull/47212)
+gives post, comment and persisted-audience JSON one
+private `Board_content_json` owner below Core. Its immutable decoded result keeps
+the optional value and typed diagnostics together, including nested rejections
+when an outer row fails. `Board_core_json` emits the existing warnings and Agent ID
+rejection effects once; `Board_votes_json` and `Board_audience` keep their public
+codec names as aliases. Shared field readers are not duplicated, and the lower
+codec imports neither Core nor the persistence/loader shell. Existing row policy,
+field order and validation stages remain. Four public-codec scenarios inspect
+rejected values and validation-count deltas; their execution evidence belongs to
+the layer PR. This prepares the stable posts source owner without changing any
+writer protocol, source authority, guard, receipt or client behavior.
+
+The posts writer foundation [#47224](https://github.com/jeong-sik/masc/pull/47224)
+replaces `posts_load_result` with one closed source
+state and a private `Board_posts_source` owner. A new store is unobserved; posts
+persistence requires an explicit stable load that publishes the matching model.
+Complete and rejected-row observations retain the captured path, bytes and cursor.
+Missing after observed presence or refusal cannot become fresh empty authority,
+and reading visible bytes cannot settle a previous unknown write.
+
+Creation, pin, close, reopen, edit, flush and deletion use the same stable sibling
+lock family. Both append and replacement compare the full expected source
+snapshot; captured replacement rows have an abstract type instead of an unrelated
+string/cursor pair. Exact append reads all previous bytes before writing, so this
+layer makes no append-performance improvement claim. Snapshot batching retains
+Posts, Comments, Votes, Reactions order, selected empty snapshots and independent
+retry obligations. Other file families retain their existing protocols; a Board
+deletion is still not a four-file atomic transaction.
+
+A definite prewrite nonregular-file obstruction retains the previous exact
+expectation so an applied deletion can retry after the original file is restored.
+The retry still compares full bytes and file identity; changed content, cursor,
+binding or tail remains a refusal, and an unknown write remains latched.
+
+A known fsynced primary write advances the source; the creation receipt becomes
+committed after the model and origin indexes are published. Descriptor diagnostics
+follow that publication. Reserved cleanup and observer exceptions leave state,
+persistence and Fusion origin mutexes before propagating. A model-publication
+exception still leaves an uncertain product outcome, and uncertain writes remain
+blocked instead of being replayed.
+Actual producer/CAS/cleanup/unknown-parent-sync scenarios and validation status
+belong to the layer PR. This supplies no Board initialization guard, original
+operation receipt, historical absence proof or client reconciliation.
 
 T1 remains open: ordinary Board creation still lacks a persisted client operation
 identity and authoritative unknown-acknowledgement reconciliation. Session history

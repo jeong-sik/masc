@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-01T05:42:03.697196+00:00",
+  "issue": 27898,
+  "pr": 47127,
+  "base": "71eab08bb9a8040371fd9927a7f9d211fbc813d3",
+  "candidate_source_head": "79a67ae11076e2dc7c493f3b77b565c9a0d2f3ec",
+  "selection": "UTF-8 BOM and ANSI removed; timestamped actual cases, failure expected/received details, summaries and targeted runner/input receipts retained in order; trailing whitespace removed; one final newline. Raw and selected hashes are distinct.",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41277170061,
+      "job_id": 124761605010,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41277170061",
+      "head": "b8ace335c2a3d6975598cdbe110a7f4d940cf8b8",
+      "ref": "fix/dashboard-selected-credential-probe-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "raw_capture": "artifacts/issues-oldest-20261101/dashboard-selected-probe/baseline-124761605010.raw.log",
+      "raw_bytes": 226338,
+      "raw_sha256": "22878a7d7c5f866a30c717ba751b57991b331e64872662bfdb9b21f74e752197",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 11865,
+      "selected_sha256": "fed9b385e22fb82a376236e6b113f9329a143f8ead0f0bdf2f2bf892cd3b56d9",
+      "actual_pass": 82,
+      "actual_fail": 7,
+      "summaries": [
+        "2026-11-01T05:34:06.2373511Z 7 failures! in 0.158s. 89 tests run."
+      ]
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41277380572,
+      "job_id": 124762204181,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41277380572",
+      "head": "79a67ae11076e2dc7c493f3b77b565c9a0d2f3ec",
+      "ref": "fix/dashboard-selected-credential-probe-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "raw_capture": "artifacts/issues-oldest-20261101/dashboard-selected-probe/candidate-124762204181.raw.log",
+      "raw_bytes": 243588,
+      "raw_sha256": "b5d442214be50a5db5af76eb4099ef8d936dbeec3ee6ec3baa9330fe4ce4b171",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 17750,
+      "selected_sha256": "e92fedd71d6b6656ef9ea68e07ee24dd4ec3a1e64eeb13a1e2946dbc1c65d21c",
+      "actual_pass": 151,
+      "actual_fail": 0,
+      "summaries": [
+        "2026-11-01T05:38:37.9843931Z Test Successful in 0.232s. 89 tests run.",
+        "2026-11-01T05:38:40.3904475Z Test Successful in 2.193s. 62 tests run."
+      ]
+    },
+    {
+      "name": "nonblocking",
+      "workflow": "Test",
+      "run_id": 41277488215,
+      "job_id": 124762509600,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41277488215",
+      "head": "79a67ae11076e2dc7c493f3b77b565c9a0d2f3ec",
+      "ref": "fix/dashboard-selected-credential-probe-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "raw_capture": "artifacts/issues-oldest-20261101/dashboard-selected-probe/nonblocking-124762509600.raw.log",
+      "raw_bytes": 76497,
+      "raw_sha256": "08d231f5a20c0aa5ff62d78c260f2124d933d9429befeb12e6e4a68993721971",
+      "selected_capture": "nonblocking.txt",
+      "selected_bytes": 1864,
+      "selected_sha256": "823d06e326f0853181a5c7e8c04b45d43b6966d1b0b62279e6f873e973f8caf9",
+      "actual_pass": 9,
+      "actual_fail": 0,
+      "summaries": [
+        "2026-11-01T05:40:06.0030044Z Test Successful in 0.033s. 9 tests run."
+      ]
+    }
+  ],
+  "suite_selection": {
+    "41277170061": [
+      "test/test_runtime_provider_auth_headers"
+    ],
+    "41277380572": [
+      "test/test_runtime_provider_auth_headers",
+      "test/test_dashboard_cache"
+    ],
+    "41277488215": [
+      "test/test_dashboard_runtime_probe_nonblocking"
+    ]
+  },
+  "test_source_bytes_identical_baseline_to_candidate": 172168,
+  "test_source_sha256": "03d4d7f23b6c72c75c9c3a1cf08943b9bd472dc5646cc2c8791dce5f719a6fb2",
+  "source_review": {
+    "head": "79a67ae11076e2dc7c493f3b77b565c9a0d2f3ec",
+    "base": "71eab08bb9a8040371fd9927a7f9d211fbc813d3",
+    "full_diff_sha256": "4256cf01e3f00df3917cef6d7e19ae046161b163e9503fa43daa0ee2ae94b719",
+    "adversarial": "bounded SOURCE PASS no P0-P2",
+    "response": "bounded SOURCE PASS no P0-P2",
+    "formal_non_author_approval": false
+  },
+  "scope": "Static selected admission/credentials/auth-scheme/non-auth headers for one representative per provider. Unchanged provider grouping and endpoint selection; no independent mixed-account validation, full regression, real upstream provider, installed runtime, integration or full issue acceptance."
+}

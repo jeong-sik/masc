@@ -24,7 +24,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_ids;
+          status=Candle_event.Done {completed_at=(match Candle_time.of_rfc3339 "2026-09-20T00:00:00Z" with
+            | Ok value -> value | Error detail -> Alcotest.fail detail)}}) task_ids;
        candidate_task_ids=task_ids;candidate_keepers=[keeper];
        candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}
@@ -492,6 +493,53 @@ let token_for config ~agent_name role =
   | Ok (token, _) -> token
   | Error error -> fail (Masc_domain.masc_error_to_string error)
 
+let test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") @@ fun () ->
+  with_router (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let worker = token_for config ~agent_name:"fresh-roster-reader" Masc_domain.Worker in
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    Fun.protect ~finally:Keeper_tool_surface.For_testing.reset_keeper_list_cache (fun () ->
+      let identity = Server_base_path_diagnostics.detect
+        ~effective_base_path:config.Workspace.base_path ~effective_masc_root:(Workspace.masc_dir config) () in
+      let url ~fresh ~base =
+        "/api/v1/gate/keepers?detailed=false&fresh=" ^ string_of_bool fresh
+        ^ "&expected_workspace=" ^ Uri.pct_encode ~component:`Query_value base
+        ^ "&expected_masc_root=" ^ Uri.pct_encode ~component:`Query_value identity.effective_masc_root in
+      let read ~fresh =
+        let response = get ~router ~token:worker (url ~fresh ~base:identity.effective_base_path) in
+        check int "authorized roster succeeds" 200 response.status;
+        Yojson.Safe.from_string response.body in
+      let total json = Yojson.Safe.Util.(json |> member "total" |> to_int) in
+      let before = total (read ~fresh:false) in
+      let added = "fresh-roster-new-keeper" in
+      let meta = require_ok Fun.id
+        (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String added ])) in
+      require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin (Filename.concat keepers_dir (added ^ ".toml")) (fun oc ->
+        output_string oc "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+      check int "ordinary HTTP read still uses its cached census" before (total (read ~fresh:false));
+      let fresh = read ~fresh:true in
+      check int "fresh HTTP read observes new persisted metadata" (before + 1) (total fresh);
+      check bool "fresh HTTP response certifies projection-cache bypass" true
+        (Json_util.assoc_member_opt "projection_cache_bypassed" fresh = Some (`Bool true));
+      let cached = read ~fresh:false in
+      check int "fresh HTTP read leaves ordinary cache untouched" before (total cached);
+      check bool "cached HTTP response does not claim bypass" true
+        (Json_util.assoc_member_opt "projection_cache_bypassed" cached = None);
+      check int "fresh roster still requires a read token" 401
+        (get ~router (url ~fresh:true ~base:identity.effective_base_path)).status;
+      check int "fresh roster still refuses another workspace" 409
+        (get ~router ~token:worker (url ~fresh:true ~base:(identity.effective_base_path ^ "/other"))).status;
+      List.iter (fun suffix ->
+        check int "malformed fresh request cannot silently use cached data" 400
+          (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
+        [ "fresh=tru"; "fresh="; "fresh=true&fresh=false"; "fresh" ]))
+
 (* Once HTTP auth is strict the portrait is a read like any other: no token is
    a 401, a token that may read state is a 200, a token that may only play a
    shared machine is refused. *)
@@ -501,13 +549,21 @@ let test_gate_account_revision_uses_current_candle_reading () =
       { Masc_domain.default_auth_config with enabled = true; require_token = true };
     let operator = token_for config ~agent_name:"gate-operator" Masc_domain.Admin in
     let worker = token_for config ~agent_name:"gate-worker" Masc_domain.Worker in
-    let read ?(token=operator) () =
-      let response = get ~router ~token "/api/v1/gate/keepers?detailed=true" in
+    let read ?(token=operator) ?(fresh=false) () =
+      let response = get ~router ~token
+        ("/api/v1/gate/keepers?detailed=true&fresh=" ^ string_of_bool fresh) in
       check int "authorized Gate discovery succeeds" 200 response.status;
       Yojson.Safe.from_string response.body in
     let compact = get ~router ~token:operator "/api/v1/gate/keepers?detailed=false" in
     check int "operator compact roster succeeds" 200 compact.status;
     let compact = Yojson.Safe.from_string compact.body in
+    let compact_fresh = get ~router ~token:operator "/api/v1/gate/keepers?detailed=false&fresh=true" in
+    check int "operator fresh compact roster succeeds" 200 compact_fresh.status;
+    check bool "operator compact projection retains cache-bypass proof" true
+      (Json_util.assoc_member_opt "projection_cache_bypassed"
+        (Yojson.Safe.from_string compact_fresh.body) = Some (`Bool true));
+    check bool "operator detailed projection retains cache-bypass proof" true
+      (Json_util.assoc_member_opt "projection_cache_bypassed" (read ~fresh:true ()) = Some (`Bool true));
     (match compact with
      | `Assoc fields ->
        List.iter (fun key -> check int (key ^ " appears once") 1
@@ -555,7 +611,7 @@ let test_gate_account_revision_uses_current_candle_reading () =
     let keeper_row = List.find (fun row -> Yojson.Safe.Util.member "name" row = `String keeper) rows in
     check bool "disabled Item and roster share account authority" true
       (item_revision = Yojson.Safe.Util.member "candle_account_revision" keeper_row);
-    let shared = read ~token:worker () in
+    let shared = read ~token:worker ~fresh:true () in
     check bool "Worker discovery omits currency" true (Json_util.assoc_member_opt "candle" shared = None);
     List.iter (fun row ->
       check bool "Worker discovery omits balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None);
@@ -1109,6 +1165,8 @@ let () =
       ; test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
+      ; test_case "fresh Gate roster keeps cache, auth and workspace boundaries" `Quick
+          test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
       ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
       ; test_case "directives bind full workspace before effects" `Quick test_directives_bind_full_workspace_before_effects ]

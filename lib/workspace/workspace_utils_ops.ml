@@ -580,15 +580,19 @@ let acquire_lease ?clock config key =
 let with_lease config lease f =
   Common.protect ~module_name:"workspace_utils" ~finally_label:"finalizer"
     ~finally:(fun () ->
-      backend_release_lock config ~key:lease.lease_key ~owner:lease.lease_owner
-      |> Result.iter_error (fun e ->
-           let msg =
-             match e with
-             | Backend_types.NotFound s | IOError s | InvalidKey s
-             | AlreadyExists s -> s
-           in
-           Log.Workspace.warn "lock release failed for %s: %s" lease.lease_key
-             msg))
+      let release () =
+        backend_release_lock config ~key:lease.lease_key ~owner:lease.lease_owner
+        |> Result.iter_error (fun e ->
+             let msg =
+               match e with
+               | Backend_types.NotFound s | IOError s | InvalidKey s
+               | AlreadyExists s -> s
+             in
+             Log.Workspace.warn "lock release failed for %s: %s" lease.lease_key
+               msg) in
+      match Eio_guard.execution_context () with
+      | Eio_guard.Eio_fiber -> Eio.Cancel.protect release
+      | Eio_guard.Non_eio -> release ())
     (fun () -> with_held_lease lease f)
 
 let with_distributed_lock ?clock config key f =
@@ -700,6 +704,30 @@ let with_file_lock_r_impl ?clock config path f : ('a, masc_error) result =
 
 let with_file_lock_r config path f : ('a, masc_error) result =
   with_file_lock_r_impl ?clock:(Eio_context.get_clock_opt ()) config path f
+
+type 'a try_file_lock = Lock_acquired of 'a | Lock_contended | Lock_unavailable of string
+
+let try_with_file_lock config path f =
+  match key_of_path config path with
+  | None -> Lock_unavailable "file lock path is outside the workspace backend"
+  | Some key ->
+    (match config.backend with
+     | Memory _ ->
+       (match File_lock_eio.try_with_mutex path f with
+        | Some result -> Lock_acquired result | None -> Lock_contended)
+     | FileSystem _ ->
+       (match Eio_guard.execution_context () with
+        | Eio_guard.Non_eio -> Lock_unavailable "a filesystem lease requires an Eio fiber for fencing"
+        | Eio_guard.Eio_fiber ->
+          (match lease_scope config with
+           | Error detail -> Lock_unavailable detail
+           | Ok scope ->
+             let lease = fresh_lease config key ~scope in
+             (match backend_try_acquire_lock config ~key ~ttl_seconds:lease.lease_ttl_seconds
+                      ~owner:lease.lease_owner with
+              | Ok true -> Lock_acquired (with_lease config lease f)
+              | Ok false -> Lock_contended
+              | Error error -> Lock_unavailable (Backend_types.show_error error)))))
 
 (* ============================================ *)
 (* Event logging                                *)

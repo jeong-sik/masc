@@ -20,17 +20,38 @@ let catalog_of_string text =
   | Error msg -> fail msg
 ;;
 
+(* A complete synthetic provider-default fixture; each negative control replaces
+   one field. Required-field omission tests build their raw document separately.
+   Explicit false flags preserve the former fixture's baseline rather than
+   acquiring extra capabilities from the now explicit named preset. *)
+let fixture_capabilities =
+  List.map (fun field -> field, `Bool false)
+    [ "supports_tools"; "supports_tool_choice"; "supports_required_tool_choice";
+      "supports_named_tool_choice"; "supports_parallel_tool_calls";
+      "supports_response_format_json"; "supports_structured_output";
+      "supports_multimodal_inputs"; "supports_image_input"; "supports_native_streaming" ]
+
 let provider_with_connection_defaults = function
   | `Assoc fields ->
-    let add_default name value fields =
-      if List.exists (fun (field, _) -> String.equal field name) fields
-      then fields
-      else (name, `String value) :: fields
-    in
-    fields
-    |> add_default "base_url" "https://provider.test/v1"
-    |> add_default "request_path" "/v1/chat/completions"
-    |> fun fields -> `Assoc fields
+    let add name value fields =
+      if List.mem_assoc name fields then fields else (name, value) :: fields in
+    let explicit_base = List.mem_assoc "capabilities_base" fields in
+    let fields = fields
+      |> add "kind" (`String "openai_compat")
+      |> add "base_url" (`String "https://provider.test/v1")
+      |> add "request_path" (`String "/v1/chat/completions")
+      |> add "auth" (`Assoc ["type", `String "none"])
+      |> add "capabilities_base" (`String "openai_chat") in
+    let fields = if explicit_base then fields else
+      match List.assoc_opt "capabilities" fields with
+      | None -> ("capabilities", `Assoc fixture_capabilities) :: fields
+      | Some (`Assoc caps) ->
+        let caps = List.fold_left (fun caps (key, value) -> add key value caps)
+          caps fixture_capabilities in
+        List.map (fun (key, value) -> key,
+          if String.equal key "capabilities" then `Assoc caps else value) fields
+      | Some _ -> fields in
+    `Assoc fields
   | other -> other
 ;;
 
@@ -51,13 +72,18 @@ let require_lookup catalog id =
   | None -> failf "expected catalog entry %S" id
 ;;
 
+let require_capabilities (entry : Provider_catalog.entry) =
+  match entry.capabilities with
+  | Some capabilities -> capabilities
+  | None -> fail "fixture requires explicit provider-wide capability policy"
+;;
+
 let valid_typed_entry
       ?(id = "typed-provider")
       ?(aliases = [])
       ?(kind = Provider_config.OpenAI_compat)
       ?(base_url = "https://provider.test/v1")
       ?(request_path = "/v1/chat/completions")
-      ?(api_key_env = "")
       ?(auth = Provider_catalog.No_auth)
       ?(default_model = None)
       ?(max_context = None)
@@ -70,12 +96,11 @@ let valid_typed_entry
   ; kind
   ; base_url
   ; request_path
-  ; api_key_env
   ; auth
   ; default_model
   ; discovery_timeout_s = None
   ; max_context
-  ; capabilities
+  ; capabilities = Some capabilities
   ; credential_scope
   }
 ;;
@@ -84,6 +109,117 @@ let require_typed_rejected ~needle label entries =
   match Provider_catalog.of_entries entries with
   | Error message -> check bool (label ^ " error") true (contains ~needle message)
   | Ok _ -> failf "%s must be rejected by Provider_catalog.of_entries" label
+;;
+
+let test_required_provider_declarations () =
+  let fields =
+    [ "id", `String "explicit-provider"
+    ; "kind", `String "openai_compat"
+    ; "base_url", `String "https://provider.test/v1"
+    ; "request_path", `String "/v1/chat/completions"
+    ; "auth", `Assoc ["type", `String "none"]
+    ; "capabilities_base", `String "models_only"
+    ] in
+  let raw fields =
+    `Assoc ["schema_version", `Int 1; "providers", `List [`Assoc fields]] in
+  (match Provider_catalog.of_json (raw fields) with
+   | Ok _ -> () | Error detail -> fail detail);
+  List.iter (fun (required, _) ->
+    let omitted = List.filter (fun (key, _) -> key <> required) fields in
+    require_rejected ~needle:required ("missing " ^ required) (raw omitted);
+    require_rejected ~needle:required ("null " ^ required)
+      (raw ((required, `Null) :: omitted))) fields;
+  let replace key value = raw (List.map (fun (field, prior) ->
+    field, if field = key then value else prior) fields) in
+  List.iter (fun value -> require_rejected ~needle:"capabilities_base"
+    "invalid explicit capability policy" (replace "capabilities_base" value))
+    [`String ""; `String "unknown-preset"; `String " models_only "; `Bool true];
+  List.iter (fun value -> require_rejected ~needle:"type" "invalid auth type"
+    (replace "auth" (`Assoc ["type", value])))
+    [`String ""; `String " none "; `Bool false; `Int 1];
+  let gemini = fields |> List.map (fun (key, value) -> key,
+    match key with
+    | "kind" -> `String "gemini"
+    | "request_path" -> `String ""
+    | _ -> value) in
+  (match Provider_catalog.of_json (raw gemini) with
+   | Ok _ -> () | Error detail -> fail detail);
+  require_rejected ~needle:"request_path" "empty non-Gemini path"
+    (replace "request_path" (`String ""))
+;;
+
+let test_models_only_override_boundary () =
+  let fields =
+    [ "id", `String "metadata-only"
+    ; "kind", `String "openai_compat"
+    ; "base_url", `String "https://provider.test/v1"
+    ; "request_path", `String "/v1/chat/completions"
+    ; "auth", `Assoc ["type", `String "none"]
+    ; "capabilities_base", `String "models_only"
+    ] in
+  let raw capabilities = `Assoc ["schema_version", `Int 1;
+    "providers", `List [`Assoc (fields @ capabilities)]] in
+  List.iter (fun capabilities ->
+    let catalog = match Provider_catalog.of_json (raw capabilities) with
+      | Ok catalog -> catalog | Error detail -> fail detail in
+    check bool "explicit models-only carries no provider capabilities" true
+      ((require_lookup catalog "metadata-only").capabilities = None))
+    [[]; ["capabilities", `Null]; ["capabilities", `Assoc []]];
+  List.iter (fun override -> require_rejected ~needle:"models_only"
+    "models-only rejects nonempty provider override"
+    (raw ["capabilities", `Assoc [override]]))
+    ["supports_reasoning", `Bool true; "supports_reasoning", `Null;
+     "max_context_tokens", `Int 4096]
+;;
+
+let test_capability_overrides_are_applied () =
+  let caps overrides =
+    let catalog = match Provider_catalog.of_json (catalog_with_provider
+      (`Assoc ["id", `String "override-policy";
+        "capabilities", `Assoc overrides])) with
+      | Ok catalog -> catalog | Error detail -> fail detail in
+    require_capabilities (require_lookup catalog "override-policy") in
+  let enums =
+    [ "chat_output_budget_field",
+      ["max_tokens", (fun c -> c.Capabilities.chat_output_budget_field = Capabilities.Chat_max_tokens);
+       "max_completion_tokens", (fun c -> c.Capabilities.chat_output_budget_field = Capabilities.Chat_max_completion_tokens)]
+    ; "tool_schema_conformance",
+      ["rich", (fun c -> c.Capabilities.tool_schema_conformance = Capabilities.Rich_json_schema);
+       "conformant", (fun c -> c.Capabilities.tool_schema_conformance = Capabilities.Conformant_subset_required)]
+    ; "content_inline_reasoning",
+      ["none", (fun c -> c.Capabilities.content_inline_reasoning = Capabilities.No_content_inline_reasoning);
+       "think_tags", (fun c -> c.Capabilities.content_inline_reasoning = Capabilities.Think_tags);
+       "think_tags_with_chat_replay", (fun c -> c.Capabilities.content_inline_reasoning = Capabilities.Think_tags_with_chat_replay)]
+    ] in
+  List.iter (fun (field, values) ->
+    List.iter (fun (value, matches) -> check bool (field ^ " applies " ^ value)
+      true (matches (caps [field, `String value]))) values;
+    List.iter (fun value -> require_rejected ~needle:field
+      ("invalid " ^ field) (catalog_with_provider
+        (`Assoc ["id", `String "invalid-enum";
+          "capabilities", `Assoc [field, value]])))
+      [`String ""; `String "unknown"; `Bool true; `Int 1]) enums;
+  List.iter (fun value -> check bool "assistant prefill override is applied" value
+    (caps ["supports_assistant_prefill", `Bool value]).supports_assistant_prefill)
+    [true; false];
+  List.iter (fun value -> require_rejected ~needle:"supports_assistant_prefill"
+    "assistant prefill requires a boolean" (catalog_with_provider
+      (`Assoc ["id", `String "invalid-prefill";
+        "capabilities", `Assoc ["supports_assistant_prefill", value]])))
+    [`String "true"; `Int 1]
+;;
+
+let test_typed_thinking_token_boundary () =
+  let entry token = valid_typed_entry ~capabilities:
+    {Capabilities.default_capabilities with
+      thinking_control_format = Capabilities.Chat_template_token token} () in
+  List.iter (fun token -> require_typed_rejected ~needle:"thinking_control_token"
+    "typed invalid thinking token" [entry token]) [""; " \t "; " <|think|> "];
+  let catalog = match Provider_catalog.of_entries [entry "<|exact token|>"] with
+    | Ok catalog -> catalog | Error detail -> fail detail in
+  check bool "typed valid token is preserved exactly" true
+    ((require_capabilities (require_lookup catalog "typed-provider")).thinking_control_format
+      = Capabilities.Chat_template_token "<|exact token|>")
 ;;
 
 let test_full_entry_parses_auth_and_capabilities () =
@@ -138,11 +274,10 @@ let test_full_entry_parses_auth_and_capabilities () =
   check string "id" "rich-http" rich.id;
   check (list string) "aliases" [ "Alias"; "second" ] rich.aliases;
   check bool "setup auth" true (rich.auth = Provider_catalog.Setup_token_env "SETUP_TOKEN");
-  check string "api key from setup auth" "SETUP_TOKEN" rich.api_key_env;
   check (option string) "default model" (Some "rich-model") rich.default_model;
   check (option int) "explicit max context" (Some 32000) rich.max_context;
   check (option string) "credential scope" (Some "workspace") rich.credential_scope;
-  let caps = rich.capabilities in
+  let caps = require_capabilities rich in
   check (option int) "cap max context" (Some 64000) caps.max_context_tokens;
   check (option int) "cap max output" (Some 4096) caps.max_output_tokens;
   check bool "supports tools" true caps.supports_tools;
@@ -238,26 +373,25 @@ let test_present_type_mismatches_are_rejected () =
 ;;
 
 let test_auth_shape_contract () =
-  let catalog_json =
-    `Assoc
-      [ "schema_version", `Int 1
-      ; ( "providers"
-        , `List
-            [ provider_with_connection_defaults (`Assoc [ "id", `String "absent-auth" ])
-            ; provider_with_connection_defaults
-                (`Assoc [ "id", `String "null-auth"; "auth", `Null ])
-            ] )
-      ]
-  in
-  let catalog =
-    match Provider_catalog.of_json catalog_json with
-    | Ok catalog -> catalog
-    | Error message -> fail message
-  in
-  let absent = require_lookup catalog "absent-auth" in
-  let null = require_lookup catalog "null-auth" in
-  check bool "absent auth is no_auth" true (absent.auth = Provider_catalog.No_auth);
-  check bool "null auth is no_auth" true (null.auth = Provider_catalog.No_auth);
+  let provider auth =
+    let complete = provider_with_connection_defaults
+      (`Assoc ["id", `String "auth-boundary"]) in
+    match complete with
+    | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> key <> "auth") fields
+        @ (match auth with None -> [] | Some auth -> ["auth", auth]))
+    | _ -> fail "fixture must be an object" in
+  let raw provider = `Assoc ["schema_version", `Int 1; "providers", `List [provider]] in
+  List.iter (fun auth -> require_rejected ~needle:"auth" "required auth object"
+    (raw (provider auth))) [None;Some `Null];
+  List.iter (fun auth -> require_rejected ~needle:"type" "required auth type"
+    (raw (provider (Some auth))))
+    [`Assoc []; `Assoc ["type", `Null]];
+  let explicit_none = match Provider_catalog.of_json
+    (raw (provider (Some (`Assoc ["type", `String "none"])))) with
+    | Ok catalog -> require_lookup catalog "auth-boundary"
+    | Error detail -> fail detail in
+  check bool "explicit no-auth remains a declared choice" true
+    (explicit_none.auth = Provider_catalog.No_auth);
   let malformed_shapes : (string * Yojson.Safe.t) list =
     [ "boolean", `Bool false
     ; "integer", `Int 17
@@ -437,7 +571,7 @@ let test_values_fail_closed_without_coercion () =
            ]))
 ;;
 
-let test_null_optional_fields_use_declared_defaults () =
+let test_null_optional_fields_preserve_explicit_policy () =
   let entry =
     catalog_of_string
       {|{
@@ -445,13 +579,13 @@ let test_null_optional_fields_use_declared_defaults () =
         "providers": [{
           "id": "null-defaults",
           "aliases": null,
-          "kind": null,
+          "kind": "openai_compat",
           "base_url": "https://provider.test/v1",
           "request_path": "/v1/chat/completions",
-          "auth": null,
+          "auth": {"type":"none"},
           "default_model": null,
           "max_context": null,
-          "capabilities_base": null,
+          "capabilities_base": "models_only",
           "capabilities": null,
           "credential_scope": null
         }]
@@ -461,7 +595,7 @@ let test_null_optional_fields_use_declared_defaults () =
   check bool "default kind" true (entry.kind = Provider_config.OpenAI_compat);
   check (list string) "default aliases" [] entry.aliases;
   check bool "default auth" true (entry.auth = Provider_catalog.No_auth);
-  check bool "default capabilities" false entry.capabilities.supports_tools
+  check bool "explicit models-only has no provider profile" true (entry.capabilities = None)
 ;;
 
 let test_auth_and_thinking_canonical_matrix () =
@@ -471,63 +605,83 @@ let test_auth_and_thinking_canonical_matrix () =
         "schema_version": 1,
         "providers": [
           {
+            "capabilities_base": "openai_chat",
             "id": "http-none",
             "kind": "openai_compat",
             "base_url": "https://provider.test/v1",
             "request_path": "/v1/chat/completions",
             "auth": {"type": "none"},
             "capabilities": {
+              "supports_tools": false,
+              "supports_tool_choice": false,
+              "supports_required_tool_choice": false,
+              "supports_named_tool_choice": false,
+              "supports_parallel_tool_calls": false,
+              "supports_response_format_json": false,
+              "supports_structured_output": false,
+              "supports_multimodal_inputs": false,
+              "supports_image_input": false,
+              "supports_native_streaming": false,
               "thinking_control_format": "none",
               "preserve_thinking_control_format": "always_preserved"
             }
           },
           {
+            "capabilities_base": "openai_chat",
             "id": "cli-env",
             "kind": "openai_compat",
             "base_url": "https://provider.test/v1",
             "request_path": "/v1/chat/completions",
             "auth": {"type": "api_key_env", "env": "ENV_KEY"},
-            "capabilities": {"thinking_control_format": "thinking_object"}
+            "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "thinking_object"}
           },
       {
+            "capabilities_base": "openai_chat",
             "id": "http-direct",
             "kind": "openai_compat",
             "base_url": "https://provider.test/v1",
             "request_path": "/v1/chat/completions",
             "auth": {"type": "api_key_env", "env": "SHORT_ENV"},
-            "capabilities": {"thinking_control_format": "thinking_object_only"}
+            "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "thinking_object_only"}
           },
           {
+            "capabilities_base": "openai_chat",
             "id": "reasoning",
             "kind": "openai_compat",
             "base_url": "https://provider.test/v1",
             "request_path": "/v1/chat/completions",
             "auth": {"type": "api_key_env", "env": "REASON_KEY"},
-            "capabilities": {"thinking_control_format": "reasoning_effort"}
+            "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "reasoning_effort"}
           },
           {
+            "auth": {"type": "none"},
+            "capabilities_base": "openai_chat",
             "id": "ollama-think",
             "kind": "ollama",
             "base_url": "http://127.0.0.1:11434",
             "request_path": "/api/chat",
-            "capabilities": {"thinking_control_format": "ollama_think"}
+            "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "ollama_think"}
           },
           {
+            "capabilities_base": "openai_chat",
             "id": "enable",
             "kind": "openai_compat",
             "base_url": "https://provider.test/v1",
             "request_path": "/v1/chat/completions",
             "auth": {"type": "api_key_env", "env": "ENABLE_KEY"},
-            "capabilities": {"thinking_control_format": "chat_template_kwargs"}
+            "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "chat_template_kwargs"}
           },
           {
+            "auth": {"type": "none"},
+            "capabilities_base": "openai_chat",
             "id": "template-token",
             "kind": "ollama",
             "base_url": "http://127.0.0.1:11434",
             "request_path": "/api/chat",
-            "capabilities": {"thinking_control_format": "chat_template_token", "thinking_control_token": "<|think|>"}
+            "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "chat_template_token", "thinking_control_token": "<|think|>"}
           },
           {
+            "auth": {"type": "none"},
             "id": "base-entry",
             "kind": "openai_compat",
             "base_url": "https://provider.test/v1",
@@ -546,12 +700,12 @@ let test_auth_and_thinking_canonical_matrix () =
     bool
     "none thinking format"
     true
-    (http_none.capabilities.thinking_control_format = Capabilities.No_thinking_control);
+    ((require_capabilities http_none).thinking_control_format = Capabilities.No_thinking_control);
   check
     bool
     "always preserved format"
     true
-    (http_none.capabilities.preserve_thinking_control_format
+    ((require_capabilities http_none).preserve_thinking_control_format
      = Capabilities.Always_preserved_thinking);
   let cli_env = require_lookup catalog "cli-env" in
   check bool "api key auth" true (cli_env.auth = Provider_catalog.Api_key_env "ENV_KEY");
@@ -559,42 +713,42 @@ let test_auth_and_thinking_canonical_matrix () =
     bool
     "thinking object"
     true
-    (cli_env.capabilities.thinking_control_format = Capabilities.Thinking_object);
+    ((require_capabilities cli_env).thinking_control_format = Capabilities.Thinking_object);
   let compat = require_lookup catalog "http-direct" in
   check bool "env auth" true (compat.auth = Provider_catalog.Api_key_env "SHORT_ENV");
   check
     bool
     "thinking object only"
     true
-    (compat.capabilities.thinking_control_format = Capabilities.Thinking_object_only);
+    ((require_capabilities compat).thinking_control_format = Capabilities.Thinking_object_only);
   let reasoning = require_lookup catalog "reasoning" in
   check
     bool
     "reasoning effort"
     true
-    (reasoning.capabilities.thinking_control_format = Capabilities.Reasoning_effort);
+    ((require_capabilities reasoning).thinking_control_format = Capabilities.Reasoning_effort);
   let ollama_think = require_lookup catalog "ollama-think" in
   check
     bool
     "ollama think"
     true
-    (ollama_think.capabilities.thinking_control_format = Capabilities.Ollama_think);
+    ((require_capabilities ollama_think).thinking_control_format = Capabilities.Ollama_think);
   let enable = require_lookup catalog "enable" in
   check bool "enable env" true (enable.auth = Provider_catalog.Api_key_env "ENABLE_KEY");
   check
     bool
     "enable chat_template_kwargs"
     true
-    (enable.capabilities.thinking_control_format = Capabilities.Chat_template_kwargs);
+    ((require_capabilities enable).thinking_control_format = Capabilities.Chat_template_kwargs);
   let template_token = require_lookup catalog "template-token" in
   check
     bool
     "template token thinking"
     true
-    (template_token.capabilities.thinking_control_format
+    ((require_capabilities template_token).thinking_control_format
      = Capabilities.Chat_template_token "<|think|>");
   let base = require_lookup catalog "base-entry" in
-  check bool "capabilities_base supports tools" true base.capabilities.supports_tools;
+  check bool "capabilities_base supports tools" true (require_capabilities base).supports_tools;
   check int "catalog size" 8 (Provider_catalog.entries catalog |> List.length)
 ;;
 
@@ -606,75 +760,75 @@ let test_removed_catalog_fields_and_aliases_are_rejected () =
   in
   assert_reject
     "transport field rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","transport":"http"}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","transport":"http"}]}|}
     "unknown field \"transport\"";
   assert_reject
     "command field rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","command":"tool-a"}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","command":"tool-a"}]}|}
     "unknown field \"command\"";
   assert_reject
     "top-level api_key_env rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","api_key_env":"LEGACY_KEY"}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","api_key_env":"LEGACY_KEY"}]}|}
     "removed provider catalog field";
   assert_reject
     "top-level api_key_env null rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","api_key_env":null}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","api_key_env":null}]}|}
     "removed provider catalog field";
   assert_reject
     "auth key rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","auth":{"type":"api_key_env","key":"LEGACY_KEY"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","auth":{"type":"api_key_env","key":"LEGACY_KEY"}}]}|}
     "removed provider catalog auth field";
   assert_reject
     "capability base alias rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","base":"openai_chat"}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","base":"openai_chat"}]}|}
     "removed provider catalog field \"base\"";
   assert_reject
     "auth alias rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","auth":{"type":"api-key-env","env":"K"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id":"p","auth":{"type":"api-key-env","env":"K"}}]}|}
     "unknown auth type";
   assert_reject
     "thinking alias rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"thinking_control_format":"thinking-object"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format":"thinking-object"}}]}|}
     "unknown thinking_control_format";
   assert_reject
     "chat template token without token rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"thinking_control_format":"chat_template_token"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format":"chat_template_token"}}]}|}
     "thinking_control_token";
   assert_reject
     "thinking token without chat template format rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"thinking_control_token":"<|think|>"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_token":"<|think|>"}}]}|}
     "thinking_control_token is only valid";
   assert_reject
     "padded thinking token rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"thinking_control_format":"chat_template_token","thinking_control_token":" <|think|> "}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format":"chat_template_token","thinking_control_token":" <|think|> "}}]}|}
     "leading or trailing whitespace";
   assert_reject
     "reasoning replay alias rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"reasoning_replay":"preserve-allways"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"reasoning_replay":"preserve-allways"}}]}|}
     "unknown reasoning_replay";
   assert_reject
     "reasoning replay type rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"reasoning_replay":true}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"reasoning_replay":true}}]}|}
     "expected string";
   assert_reject
     "accepted reasoning effort rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"accepted_reasoning_efforts":["low","turbo"]}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"accepted_reasoning_efforts":["low","turbo"]}}]}|}
     "unknown accepted_reasoning_efforts";
   assert_reject
     "ignored sampling parameter rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"ignored_sampling_parameters":["temp"]}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"ignored_sampling_parameters":["temp"]}}]}|}
     "unknown ignored_sampling_parameters";
   assert_reject
     "modality priority rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"modality_priority":"image_only"}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"modality_priority":"image_only"}}]}|}
     "unknown modality_priority";
   assert_reject
     "removed runtime MCP capability rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"supports_runtime_mcp_tools":true}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"supports_runtime_mcp_tools":true}}]}|}
     "removed provider catalog capability";
   assert_reject
     "removed runtime tool-event capability rejected"
-    {|{"schema_version":1,"providers":[{"id":"p","capabilities":{"supports_runtime_tool_events":true}}]}|}
+    {|{"schema_version":1,"providers":[{"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","id":"p","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"supports_runtime_tool_events":true}}]}|}
     "removed provider catalog capability"
 ;;
 
@@ -733,7 +887,6 @@ let test_typed_entries_accept_a_complete_valid_contract () =
     valid_typed_entry
       ~id:"typed-primary"
       ~aliases:[ "typed-alias" ]
-      ~api_key_env:"TYPED_PROVIDER_KEY"
       ~auth:(Provider_catalog.Api_key_env "TYPED_PROVIDER_KEY")
       ~default_model:(Some "typed-model")
       ~max_context:(Some 32_000)
@@ -796,20 +949,16 @@ let test_typed_entries_fail_closed () =
     ~needle:"field \"auth.env\" must not have leading or trailing whitespace"
     "typed padded auth env"
     (valid_typed_entry
-       ~api_key_env:" TYPED_PROVIDER_KEY "
        ~auth:(Provider_catalog.Api_key_env " TYPED_PROVIDER_KEY ")
        ());
   reject
-    ~needle:"api_key_env must equal the typed auth env"
-    "typed auth env mismatch"
-    (valid_typed_entry
-       ~api_key_env:"OTHER_PROVIDER_KEY"
-       ~auth:(Provider_catalog.Api_key_env "TYPED_PROVIDER_KEY")
-       ());
+    ~needle:"field \"auth.env\" must not be empty"
+    "typed empty setup token env"
+    (valid_typed_entry ~auth:(Provider_catalog.Setup_token_env "") ());
   reject
-    ~needle:"auth=none requires an empty api_key_env"
-    "typed no-auth env mismatch"
-    (valid_typed_entry ~api_key_env:"UNDECLARED_PROVIDER_KEY" ());
+    ~needle:"field \"auth.env\" must not have leading or trailing whitespace"
+    "typed padded setup token env"
+    (valid_typed_entry ~auth:(Provider_catalog.Setup_token_env " SETUP_KEY ") ());
   reject
     ~needle:"max_context must be positive"
     "typed zero max_context"
@@ -906,6 +1055,9 @@ let test_removed_auth_types_are_rejected () =
           {
             "id": "legacy-auth",
             "kind": "openai_compat",
+            "base_url": "https://provider.test/v1",
+            "request_path": "/v1/chat/completions",
+            "capabilities_base": "models_only",
             "auth": {"type": "%s"%s}
           }
         ]
@@ -942,9 +1094,9 @@ let test_rejects_schema_version_and_accumulates_entry_errors () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"kind": "openai_compat"},
-             {"id": "bad-kind", "kind": "missing_kind"},
-             {"id": "bad-auth", "auth": {"type": "unknown"}}
+             {"base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"kind": "openai_compat"},
+             {"base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id": "bad-kind", "kind": "missing_kind"},
+             {"kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id": "bad-auth", "auth": {"type": "unknown"}}
            ]
          }|})
   with
@@ -973,7 +1125,7 @@ let test_load_file_edges () =
        in
        write_file
          valid_path
-         {|{"schema_version":1,"providers":[{"id":"runtime","kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions"}]}|};
+         {|{"schema_version":1,"providers":[{"auth":{"type":"none"},"capabilities_base":"models_only","id":"runtime","kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions"}]}|};
        write_file invalid_path {|{"schema_version":|};
        (match Provider_catalog.load_file valid_path with
         | Ok catalog ->
@@ -993,23 +1145,25 @@ let test_load_file_edges () =
        | Ok _ -> fail "missing file should fail")
 ;;
 
-let test_global_override_lifecycle () =
-  Provider_catalog.clear_global ();
-  let catalog =
-    catalog_of_string
-      {|{"schema_version":1,"providers":[{"id":"override","kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions"}]}|}
-  in
-  Provider_catalog.set_global catalog;
-  (match Provider_catalog.global () with
-   | Some loaded ->
-     check
-       bool
-       "override visible"
-       true
-       (Option.is_some (Provider_catalog.lookup loaded "override"))
-   | None -> fail "expected global override");
-  Provider_catalog.clear_global ();
-  check (option reject) "clear removes overlay" None (Provider_catalog.global ())
+let test_snapshot_overlay_lifecycle () =
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () ->
+      let catalog = catalog_of_string
+        {|{"schema_version":1,"providers":[{"auth":{"type":"none"},"capabilities_base":"models_only","id":"override","kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions"}]}|} in
+      let selected = Agent_core_test_deps.admit_catalogs
+          ~models:None ~providers:(Some catalog) in
+      Llm_provider.Catalog_snapshot.publish selected;
+      check bool "admitted overlay visible" true
+        (Option.is_some (Llm_provider.Catalog_snapshot.find
+           (Llm_provider.Catalog_snapshot.current ()) "override"));
+      let absent = Agent_core_test_deps.admit_catalogs ~models:None ~providers:None in
+      Llm_provider.Catalog_snapshot.publish absent;
+      check bool "explicit absence removes overlay" true
+        (Option.is_none (Llm_provider.Catalog_snapshot.find
+           (Llm_provider.Catalog_snapshot.current ()) "override"));
+      check bool "captured selection retains overlay" true
+        (Option.is_some (Llm_provider.Catalog_snapshot.find selected "override")))
 ;;
 
 let () =
@@ -1024,6 +1178,10 @@ let () =
             "present type mismatches fail closed"
             `Quick
             test_present_type_mismatches_are_rejected
+        ; test_case "required provider declarations" `Quick test_required_provider_declarations
+        ; test_case "models-only override boundary" `Quick test_models_only_override_boundary
+        ; test_case "capability overrides are applied" `Quick test_capability_overrides_are_applied
+        ; test_case "typed thinking token boundary" `Quick test_typed_thinking_token_boundary
         ; test_case "auth shape contract" `Quick test_auth_shape_contract
         ; test_case "closed object contract" `Quick test_closed_object_contract
         ; test_case
@@ -1031,9 +1189,9 @@ let () =
             `Quick
             test_values_fail_closed_without_coercion
         ; test_case
-            "null optional fields use defaults"
+            "null optional fields preserve explicit policy"
             `Quick
-            test_null_optional_fields_use_declared_defaults
+            test_null_optional_fields_preserve_explicit_policy
         ; test_case
             "auth thinking canonical"
             `Quick
@@ -1070,7 +1228,7 @@ let () =
         ] )
     ; ( "load"
       , [ test_case "load_file edges" `Quick test_load_file_edges
-        ; test_case "global override lifecycle" `Quick test_global_override_lifecycle
+        ; test_case "global override lifecycle" `Quick test_snapshot_overlay_lifecycle
         ] )
     ]
 ;;

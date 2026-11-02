@@ -143,7 +143,8 @@ let sources
 ;;
 
 let drain ?(sources = sources ()) base_path =
-  Candle_candidates.drain_with ~sources ~now:(fun () -> clock) ~base_path
+  let config = Workspace_utils_backend_setup.default_config base_path in
+  Candle_candidates.drain_with ~sources ~now:(fun () -> clock) ~config
 ;;
 
 let outcome_testable =
@@ -156,6 +157,10 @@ let outcome_testable =
        | Candle_candidates.Already_prepared { goal_id } ->
          Format.fprintf ppf "Already_prepared %s" goal_id
        | Candle_candidates.Superseded { goal_id } -> Format.fprintf ppf "Superseded %s" goal_id
+       | Candle_candidates.Held_window {goal_id; issues; recorded} ->
+         Format.fprintf ppf "Held_window %s (%d issues, recorded=%b)" goal_id (List.length issues) recorded
+       | Candle_candidates.Waiting_task {goal_id; issues} ->
+         Format.fprintf ppf "Waiting_task %s (%d issues)" goal_id (List.length issues)
        | Candle_candidates.Retry_later { goal_id; detail } ->
          Format.fprintf ppf "Retry_later %s (%s)" goal_id detail)
     ( = )
@@ -189,7 +194,7 @@ let test_a_waiting_payout_gets_its_candidates () =
     (drained base_path);
   check (list string) "one Candidates row" [ "snapshot"; "payout_owed"; "candidates" ] (kinds base_path);
   match List.rev (events base_path) with
-  | { E.at = written_at; body = E.Candidates c } :: _ ->
+  | { E.at = written_at; body = E.Candidates_fenced c } :: _ ->
     check string "request" "req-1" c.request_id;
     check (list string) "the Tasks read, in the Snapshot's order" [ "task-1"; "task-2" ] (List.map fst c.tasks);
     check (list string) "candidate Tasks" [ "task-1"; "task-2" ] c.candidate_task_ids;
@@ -395,7 +400,7 @@ let test_a_payout_that_closed_while_the_tasks_were_read_is_left_alone () =
           base_path
           [ { E.at = at "2026-09-29T05:30:00Z"
             ; body = E.Candidates {goal_id;request_id="req-1";verification_run_id="run-1";
-                tasks=List.map (fun id -> id, E.Deleted) task_ids;
+                tasks=List.map (fun id -> id, E.Found {title="cancelled";assignee=None;status=E.Cancelled}) task_ids;
                 candidate_task_ids=[];candidate_keepers=[];candidate_task_keepers=[]} }
           ; { E.at = at "2026-09-29T05:30:00Z"
             ; body = E.Unattributed { goal_id; request_id = "req-1"; verification_run_id = "run-1"; reason = E.No_candidates }
@@ -489,7 +494,8 @@ let test_a_payout_closed_while_its_missing_unattributed_was_being_written_is_lef
     "superseded"
     [ Candle_candidates.Superseded { goal_id = "goal-1" } ]
     (ok_or_fail
-       (Candle_candidates.drain_with ~sources:(sources ()) ~now:other_writer_first ~base_path));
+       (Candle_candidates.drain_with ~sources:(sources ()) ~now:other_writer_first
+          ~config:(Workspace_utils_backend_setup.default_config base_path)));
   check
     (list string)
     "only the other writer's row was added"
@@ -549,7 +555,7 @@ let test_the_candidate_window_is_the_goals_creation_to_its_confirmation () =
   with_base_path
   @@ fun base_path ->
   enable base_path;
-  let task_ids = [ "before"; "inside"; "at-confirmation"; "after" ] in
+  let task_ids = [ "before"; "inside"; "before-confirmation"; "after" ] in
   seed base_path [ snapshot task_ids; owed () ];
   let done_at time =
     E.Found
@@ -561,7 +567,7 @@ let test_the_candidate_window_is_the_goals_creation_to_its_confirmation () =
   let by_id =
     [ "before", done_at "2026-09-19T00:00:00Z"
     ; "inside", done_at "2026-09-25T00:00:00Z"
-    ; "at-confirmation", done_at "2026-09-29T05:00:00Z"
+    ; "before-confirmation", done_at "2026-09-29T04:59:59Z"
     ; "after", done_at "2026-09-29T05:00:01Z"
     ]
   in
@@ -576,10 +582,130 @@ let test_the_candidate_window_is_the_goals_creation_to_its_confirmation () =
     [ Candle_candidates.Wrote_candidates { goal_id = "goal-1" } ]
     (drained ~sources:windowed base_path);
   match List.rev (events base_path) with
-  | { E.body = E.Candidates c; _ } :: _ ->
-    check (list string) "candidate Tasks" [ "inside"; "at-confirmation" ] c.candidate_task_ids;
+  | { E.body = E.Candidates_fenced c; _ } :: _ ->
+    check (list string) "candidate Tasks" [ "inside"; "before-confirmation" ] c.candidate_task_ids;
     check (list string) "every Task read is recorded" task_ids (List.map fst c.tasks)
   | _ -> fail "expected Candidates last"
+;;
+
+let test_ambiguous_observation_is_durable_and_other_goals_progress () =
+  with_base_path
+  @@ fun base_path ->
+  enable base_path;
+  seed base_path [ snapshot ~goal_id:"goal-1" ["task-1"]; owed ~goal_id:"goal-1" ();
+                   snapshot ~goal_id:"goal-2" ["task-2"]; owed ~goal_id:"goal-2" () ];
+  let keeper_reads = ref 0 in
+  let source = sources
+      ~lookups:(fun ~goal_id ids ->
+        Ok (List.map (fun id -> id,
+          if String.equal goal_id "goal-1" then
+            E.Found {title="boundary task";assignee=Some "keeper-a";
+              status=E.Done {completed_at=at "2026-09-20T01:00:00Z"}}
+          else done_by "keeper-a") ids))
+      ~keepers:(fun () -> incr keeper_reads;
+        if !keeper_reads = 1 then Error "directory unavailable"
+        else Ok (String.equal "keeper-a")) () in
+  (match drained ~sources:source base_path with
+   | [ Candle_candidates.Held_window {goal_id="goal-1"; issues; recorded=true}
+     ; Candle_candidates.Wrote_candidates {goal_id="goal-2"} ] ->
+     check bool "creation boundary explains the hold" true
+       (List.exists (function Candle_payout.Same_second {boundary=Goal_created;_} -> true | _ -> false) issues)
+   | _ -> fail "ambiguous Goal must be held while the other is prepared");
+  (match List.find_opt (fun (event:E.t) -> match event.body with
+    | E.Candidate_window_held _ -> true | _ -> false) (events base_path) with
+   | Some {body=E.Candidate_window_held held;_} ->
+     check bool "Keeper outage remains unknown" true
+       (held.task_keepers = ["task-1", E.Keeper_unknown]);
+     check bool "full Task observation is retained" true
+       (match held.tasks with ["task-1", E.Found {status=E.Done _;_}] -> true | _ -> false)
+   | _ -> fail "the hold was not retained in the ledger");
+  let before = In_channel.with_open_bin (Candle_ledger.path ~base_path) In_channel.input_all in
+  let no_reread = sources ~lookups:(fun ~goal_id:_ _ -> fail "held Task was read again")
+      ~keepers:(fun () -> fail "held Keeper registry was read again") () in
+  (match drained ~sources:no_reread base_path with
+   | [ Candle_candidates.Held_window {goal_id="goal-1"; recorded=false;_}
+     ; Candle_candidates.Already_prepared {goal_id="goal-2"} ] -> ()
+   | _ -> fail "durable hold was not reused");
+  check string "repeated scan leaves ledger unchanged" before
+    (In_channel.with_open_bin (Candle_ledger.path ~base_path) In_channel.input_all)
+;;
+
+let test_missing_task_waits_and_can_recover () =
+  with_base_path
+  @@ fun base_path ->
+  enable base_path;
+  seed base_path [ snapshot ["task-1"]; owed () ];
+  let missing = sources ~lookups:(fun ~goal_id:_ ids -> Ok (List.map (fun id -> id, E.Deleted) ids)) () in
+  (match drained ~sources:missing base_path with
+   | [Candle_candidates.Waiting_task {goal_id="goal-1";_}] -> ()
+   | _ -> fail "missing Task must wait for source evidence");
+  check (list string) "no candidates or terminal row" ["snapshot";"payout_owed"] (kinds base_path);
+  check (list outcome_testable) "source recovery prepares candidates"
+    [Candle_candidates.Wrote_candidates {goal_id="goal-1"}] (drained base_path)
+;;
+
+let test_existing_ambiguous_candidates_cannot_close () =
+  with_base_path
+  @@ fun base_path ->
+  enable base_path;
+  let task = E.Found {title="boundary";assignee=Some "keeper-a";
+    status=E.Done {completed_at=at "2026-09-20T01:00:00Z"}} in
+  seed base_path [snapshot ["task-1"]; owed ();
+    {E.at=at "2026-09-29T05:10:00Z"; body=E.Candidates
+      {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1";
+       tasks=["task-1", task]; candidate_task_ids=[]; candidate_keepers=[]; candidate_task_keepers=[]}}];
+  let no_reread = sources ~lookups:(fun ~goal_id:_ _ -> fail "old Candidates must not reread Tasks") () in
+  (match drained ~sources:no_reread base_path with
+   | [Candle_candidates.Held_window {goal_id="goal-1";recorded=false;_}] -> ()
+   | _ -> fail "old ambiguous Candidates must remain held");
+  check (list string) "old Candidates were not terminally closed"
+    ["snapshot";"payout_owed";"candidates"] (kinds base_path)
+;;
+
+let test_unfenced_nonterminal_candidates_wait_without_appraisal () =
+  with_base_path @@ fun base_path ->
+  enable base_path;
+  seed base_path [snapshot ["done";"pending"]; owed ();
+    {E.at=at "2026-09-29T05:10:00Z";body=E.Candidates
+      {goal_id="goal-1";request_id="req-1";verification_run_id="run-1";
+       tasks=["done",done_by "keeper-a";"pending",E.Found {title="pending";assignee=None;status=E.Todo}];
+       candidate_task_ids=["done"];candidate_keepers=["keeper-a"];candidate_task_keepers=["done",Some "keeper-a"]}}];
+  let no_reread = sources ~lookups:(fun ~goal_id:_ _ -> fail "legacy observation must not be replaced") () in
+  (match drained ~sources:no_reread base_path with
+   | [Candle_candidates.Held_window {issues;recorded=false;_}] ->
+     check bool "unfenced Task is named" true
+       (List.exists (function Candle_payout.Unfenced_nonterminal {task_id="pending"} -> true | _ -> false) issues)
+   | _ -> fail "legacy nonterminal observation must wait");
+  let waiting = match Candle_payout.waiting (events base_path) with
+    | [waiting] -> waiting | _ -> fail "missing open obligation" in
+  check bool "direct appraisal validation also rejects unfenced evidence" true
+    (Result.is_error (Candle_payout.validate_durable_candidates waiting (events base_path)));
+  check (list string) "no terminal row was appended" ["snapshot";"payout_owed";"candidates"] (kinds base_path)
+;;
+
+let test_conflicting_same_run_snapshots_are_never_selected () =
+  List.iter (fun conflict_during_read ->
+    with_base_path @@ fun base_path ->
+    enable base_path;
+    let first = snapshot ["task-1"] in
+    let conflicting = snapshot ["task-2"] in
+    seed base_path (if conflict_during_read then [first;owed ()]
+                    else [first;conflicting;owed ()]);
+    let reads = ref 0 in
+    let source = sources ~lookups:(fun ~goal_id:_ ids ->
+      incr reads;
+      if conflict_during_read then seed base_path [conflicting];
+      Ok (List.map (fun id -> id, done_by "keeper-a") ids)) () in
+    (match drained ~sources:source base_path with
+     | [Candle_candidates.Superseded _] when conflict_during_read -> ()
+     | [Candle_candidates.Retry_later {detail;_}] when not conflict_during_read ->
+       check bool "the conflicting evidence is reported" true
+         (String_util.contains_substring detail "conflicting Snapshots")
+     | _ -> fail "a conflicting same-run Snapshot was selected");
+    check int "Tasks are read only before a concurrent conflict" (if conflict_during_read then 1 else 0) !reads;
+    check bool "no candidate or terminal fact was written" false
+      (List.exists (fun kind -> List.mem kind ["candidates";"unattributed";"paid"])
+         (kinds base_path))) [false;true]
 ;;
 
 (* Recovery runs once per process. A row that stops reading afterwards, from a
@@ -627,6 +753,15 @@ let () =
             "the candidate window is the goal's creation to its confirmation"
             `Quick
             test_the_candidate_window_is_the_goals_creation_to_its_confirmation
+        ; test_case "ambiguous observation is durable while other goals progress" `Quick
+            test_ambiguous_observation_is_durable_and_other_goals_progress
+        ; test_case "missing task waits and can recover" `Quick test_missing_task_waits_and_can_recover
+        ; test_case "existing ambiguous candidates cannot close" `Quick
+            test_existing_ambiguous_candidates_cannot_close
+        ; test_case "unfenced nonterminal candidates wait" `Quick
+            test_unfenced_nonterminal_candidates_wait_without_appraisal
+        ; test_case "conflicting same-run Snapshots are never selected" `Quick
+            test_conflicting_same_run_snapshots_are_never_selected
         ; test_case
             "a ledger that stops reading after recovery is an error"
             `Quick

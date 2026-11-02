@@ -1,10 +1,9 @@
-(** External provider catalog overlay.
+(** Pure decoder and immutable external provider catalog.
 
     Provider entries describe connection and runtime metadata without teaching
-    AGENT_CORE about any downstream coordinator. The catalog augments
-    {!Provider_registry.default}: built-in entries remain as seed data, while
-    file/runtime catalog entries overwrite or add provider ids at process
-    startup.
+    AGENT_CORE about any downstream coordinator. {!Catalog_snapshot.of_catalogs}
+    admits this explicit overlay with model seeds before the whole selection
+    can be published. This decoder owns no process-wide publication state.
 
     @since 0.194.0 *)
 
@@ -17,16 +16,17 @@ type auth_mode =
 type entry =
   { id : string
   ; aliases : string list
-  ; kind : Provider_config.provider_kind
+  ; kind : Provider_kind.t
   ; base_url : string
   ; request_path : string
-  ; api_key_env : string
   ; auth : auth_mode
   ; default_model : string option
   ; discovery_timeout_s : float option
     (** Positive finite total deadline for one discovery HTTP request. *)
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capability_profile.capabilities option
+    (** [None] explicitly declares models-only policy. An unknown model obtains
+        no provider-wide profile; this never represents an omitted JSON field. *)
   ; credential_scope : string option
   }
 
@@ -34,8 +34,9 @@ type t
 
 (** Build a catalog from typed entries while enforcing the same closed
     invariants as the JSON boundary: unique provider ids/aliases, exact
-    endpoint/default-model/auth strings, positive limits, auth/env consistency,
-    and tool-choice capability dependencies. *)
+    endpoint/default-model/auth strings, positive limits, typed auth environments,
+    and tool-choice capability dependencies. The [auth] sum is the sole
+    credential carrier; there is no duplicate environment-key field. *)
 val of_entries : entry list -> (t, string) result
 
 (** Return catalog entries in declaration order. *)
@@ -62,6 +63,10 @@ val entries : t -> entry list
       }
     ]}
 
+    Provider id, kind, base_url, request_path, auth object/type and
+    capabilities_base are required and cannot be [null]. The explicit
+    [capabilities_base="models_only"] choice accepts no provider-wide
+    capability overrides. Named presets are resolved from the closed vocabulary.
     Catalog, provider, auth, and capability objects are closed: duplicate and
     unknown fields are rejected. Optional fields may be absent or [null]; a
     present value must have its declared type. Integer limits must be positive
@@ -81,14 +86,3 @@ val lookup : t -> string -> entry option
 
 (** Return an entry's explicit default model by id or alias. *)
 val default_model_for_provider : t -> string -> string option
-
-(** Process-wide catalog overlay.
-
-    Returns only the runtime override installed explicitly with {!set_global};
-    [None] means no overlay. AGENT_CORE never discovers a provider catalog from the
-    process environment. Callers that need a JSON overlay must call
-    {!load_file} and {!set_global}. *)
-val global : unit -> t option
-
-val set_global : t -> unit
-val clear_global : unit -> unit

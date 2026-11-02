@@ -213,7 +213,7 @@ let read_archived_tasks path : (Masc_domain.task list * int, string) result =
     Overview list, plus the full domain rows the detail view reads. Terminal
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
-let load_active_tasks (base_path : string) :
+let load_active_tasks ~fresh (base_path : string) :
     Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
@@ -221,6 +221,7 @@ let load_active_tasks (base_path : string) :
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
     * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
+  if fresh then Workspace_backlog.invalidate_backlog_cache config;
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
@@ -297,8 +298,8 @@ let load_active_tasks (base_path : string) :
                      })))
       , goal_task_links )
 
-(* The Goals the verifier proved, each waiting on the operator's confirmation.
-   Read from the goal store the way the tasks above are read from the backlog,
+(* Goals whose stored phase awaits the operator's confirmation. This query does
+   not read their proof ledger. Read the goal store as the tasks above read the backlog,
    so the agenda has the answer on every surface and not only on Planning. A
    store that does not read is said as such rather than as an empty list.
    Titles and the failure are made one printable row here, as every other
@@ -354,8 +355,13 @@ let report_input_rejection (state : state) kind content =
 
 (* Local metadata and the public remote roster share identity-based navigation.
    Replacing rows never reads a local directory. *)
-let replace_keeper_rows ~preserve_on_error (state : state)
+let replace_keeper_rows ?(before_view_change = fun () -> ()) ~preserve_on_error (state : state)
     ~keepers:loaded_keepers ~error:keepers_error =
+  let set_view view =
+    if state.view <> view then begin
+      before_view_change ();
+      state.view <- view
+    end in
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
   let current_keeper_ids =
@@ -468,7 +474,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
        (match current_keeper_mode with
         | Some Keeper_message when hold_created_chat -> ()
         | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
-            state.view <- Keepers Keeper_list;
+            set_view (Keepers Keeper_list);
             state.detail_scroll <- 0;
             state.log_scroll <- 0;
             state.keeper_calls_scroll <- 0
@@ -477,17 +483,25 @@ let replace_keeper_rows ~preserve_on_error (state : state)
         | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_detail
+       set_view (Keepers Keeper_detail)
    | Keeper_selection.Logs_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_logs
+       set_view (Keepers Keeper_logs)
    | Keeper_selection.Calls_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_calls
+       set_view (Keepers Keeper_calls)
    | Keeper_selection.Message_keeper { cursor; return_keeper; _ } ->
        state.keeper_cursor <- cursor;
        state.keeper_message_return <- return_keeper;
-       state.view <- Keepers Keeper_message);
+       set_view (Keepers Keeper_message));
+
+  (* A partial roster may have clamped the cursor to another Keeper while a
+     Skill image owned the terminal. Restore its captured owner on recovery. *)
+  if Option.is_none keepers_error && state.workspace_identity=Workspace_identity_match then
+    Option.iter (fun (keeper_name, _) ->
+      List.find_index (String.equal keeper_name) next_keeper_ids
+      |> Option.iter (fun cursor -> state.keeper_cursor <- cursor))
+      (tools_skill_cell_image_owner state);
 
   let selected_keeper_name_after_refresh =
     Option.map (fun keeper -> keeper.k_name) (selected_keeper state)
@@ -545,7 +559,7 @@ let with_local_read_mutex mutex read =
   | Ok reading -> reading
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
-let read_local_work_unlocked (base_path : string) : local_reading =
+let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in
@@ -573,7 +587,7 @@ let read_local_work_unlocked (base_path : string) : local_reading =
     else []
   in
   let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
-    load_active_tasks base_path
+    load_active_tasks ~fresh base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
   { lr_agents = agents; lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
@@ -581,9 +595,11 @@ let read_local_work_unlocked (base_path : string) : local_reading =
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm }
 
-let read_local_workspace base_path =
+let read_local_workspace ?(fresh = false) base_path =
   with_local_read_mutex local_work_read_mutex
-    (fun () -> read_local_work_unlocked base_path)
+    (fun () ->
+      if fresh then archive_seen := None;
+      read_local_work_unlocked ~fresh base_path)
 
 let read_local_keepers base_path =
   with_local_read_mutex local_keeper_read_mutex (fun () ->
@@ -627,8 +643,8 @@ let apply_local_workspace (state : state) (reading : local_reading) =
   state.goals_to_confirm <- reading.lr_goals_to_confirm;
   state.local_workspace <- Local_workspace_read
 
-let apply_local_keepers (state : state) (reading : local_keeper_reading) =
-  replace_keeper_rows ~preserve_on_error:true state ~keepers:reading.lkr_keepers
+let apply_local_keepers ?before_view_change (state : state) (reading : local_keeper_reading) =
+  replace_keeper_rows ?before_view_change ~preserve_on_error:true state ~keepers:reading.lkr_keepers
     ~error:reading.lkr_error;
   state.local_keepers <- Local_workspace_read
 

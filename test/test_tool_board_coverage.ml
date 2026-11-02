@@ -1,6 +1,7 @@
 module Types = Masc_domain
 
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (** {1 Test helpers} *)
 
@@ -40,7 +41,11 @@ let cleanup () =
   Fs_compat.reset_fd_cache_for_testing ();
   Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+  Fs_compat.mkdir_p _test_base_path;
+  Preparation.prepare ~base_path:_test_base_path ~action:Preparation.Bootstrap;
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Recipient_lookup.none_declared ())
 
 (* The MCP route: MASC hands the result over whole. *)
 let dispatch name args =

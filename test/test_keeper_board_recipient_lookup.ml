@@ -77,7 +77,7 @@ let register_keeper config ?(mention_targets = []) name =
   | Error detail -> fail detail
 ;;
 
-let lookup config = Keeper_board_recipient_lookup.make ~base_path:config.Workspace.base_path
+let lookup config = Keeper_board_recipient_lookup.make ~config
 
 let contains ~sub text =
   let sub_length = String.length sub in
@@ -581,11 +581,42 @@ let test_an_alias_too_long_for_a_board_identity_fails_the_lookup config =
     aliases
 ;;
 
+let test_lookup_retains_workspace_and_refreshes_settings config_a =
+  register_keeper config_a "alice";
+  let retained = lookup config_a in
+  let resolve name =
+    let candidate = match Recipient_lookup.Candidate.of_string name with
+      | Some candidate -> candidate
+      | None -> fail "invalid fixture candidate" in
+    Recipient_lookup.resolve retained [candidate]
+    |> Result.map (fun (resolution : Board.Agent_id.t Recipient_lookup.resolution) ->
+      List.map Board.Agent_id.to_string resolution.recipients, resolution.unresolved)
+  in
+  let base_b = Filename.temp_dir "keeper-recipient-workspace-b" "" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_b)
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" base_b;
+      let config_b = Workspace.default_config base_b in
+      ignore (Workspace.init config_b ~agent_name:None : string);
+      register_keeper config_b "bob";
+      expect_ok "retained A lookup still resolves A after EnvB" (["alice"], [])
+        (resolve "alice");
+      expect_ok "retained A lookup cannot acquire B authority" ([], ["bob"])
+        (resolve "bob");
+      register_keeper config_a ~mention_targets:["alice"; "new-a-team"] "alice";
+      expect_ok "the same lookup reads newly written A settings"
+        (["new-a-team"], []) (resolve "new-a-team");
+      expect_ok "fresh A settings do not introduce B" ([], ["bob"]) (resolve "bob"))
+;;
+
 let () =
   run
     "Keeper Board recipient lookup"
     [ ( "lookup"
-      , [ test_case "a Keeper's own name in any case" `Quick
+      , [ test_case "lookup retains workspace while settings remain fresh" `Quick
+            (with_workspace test_lookup_retains_workspace_and_refreshes_settings)
+        ; test_case "a Keeper's own name in any case" `Quick
             (with_workspace test_a_keepers_own_name_in_any_case)
         ; test_case "a mixed-case Keeper is declared without an unrelated scan" `Quick
             (with_workspace test_a_mixed_case_keeper_is_declared_without_an_unrelated_scan)

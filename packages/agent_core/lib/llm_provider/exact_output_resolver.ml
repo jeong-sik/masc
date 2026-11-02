@@ -483,6 +483,16 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
     Model_catalog.provider_entries catalog
     |> List.sort (fun (a : Model_catalog.provider_entry) b -> String.compare a.id b.id)
     |> List.concat_map (fun (provider : Model_catalog.provider_entry) ->
+      let capability_policy = match provider.capability_policy with
+        | Model_provider_catalog.Models_only -> "models_only"
+        | Provider_defaults {base;by_identity_kind} ->
+          let wires = by_identity_kind
+            |> List.map (fun (wire, preset) ->
+              Provider_kind.to_string wire, `String (Capability_preset.to_string preset))
+            |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
+          Yojson.Safe.to_string (`Assoc [
+            "base", `String (Capability_preset.to_string base);
+            "by_identity_kind", `Assoc wires ]) in
       [ "provider"
       ; provider.id
       ; String.concat "," (List.sort_uniq String.compare provider.aliases)
@@ -496,7 +506,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; provider.request_path
       ; if provider.requires_api_key then "api-key" else "none"
       ; option_string provider.default_model
-      ; option_string provider.capabilities_base
+      ; capability_policy
       ])
   in
   let models =
@@ -506,7 +516,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       [ "model"
       ; option_string model.provider_name
       ; Model_identifiers.Model_id.to_string model.model_id
-      ; option_string model.base_label
+      ; option_string (Option.map Capability_preset.to_string model.base_label)
       ; Binding.option_int model.max_context_tokens
       ; Binding.option_int model.max_output_tokens
       ; option_bool model.supports_response_format_json

@@ -1081,11 +1081,9 @@ let with_response_cache_server ?(response_body = anthropic_response "cached") f 
 ;;
 
 let with_response_cache_catalog f =
-  let previous = Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()) f
+    Llm_provider.Catalog_snapshot.publish previous) f
 ;;
 
 let response_cache_catalog ~ceiling ~replay =
@@ -1108,13 +1106,13 @@ let require_cached_response = function
 
 let test_response_cache_tracks_catalog_defaults () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" () in
   let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   ignore (run ());
-  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:16 ~replay:"preserve_always"))) ~providers:(None)));
   ignore (run ());
   ignore (run ());
   check int "changed resolved body misses; identical body hits" 2 (List.length !bodies);
@@ -1125,7 +1123,7 @@ let test_response_cache_tracks_catalog_defaults () =
 
 let test_response_cache_tracks_reasoning_source_projection () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
@@ -1170,14 +1168,14 @@ let test_response_cache_tracks_reasoning_source_projection () =
 
 let test_response_cache_does_not_restamp_cached_reasoning () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   let response_body = {|{"id":"cached-reasoning","type":"message","role":"assistant","model":"response-cache-model","content":[{"type":"thinking","thinking":"original reasoning","signature":"original-signature"},{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}|} in
   with_response_cache_server ~response_body @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
   let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   let original = run () in
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"no_replay");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"no_replay"))) ~providers:(None)));
   let current_source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
   let cached = run () in
   check int "unchanged effective body reuses the stored response" 1 (List.length !bodies);
@@ -1212,13 +1210,13 @@ let test_response_cache_does_not_restamp_cached_reasoning () =
 
 let test_response_cache_reuses_admitted_body_without_dispatch_on_hit () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" () in
   let serialized = Complete.prepare_request ~config ~messages ()
       |> Complete.admit_request_body ~stream:false |> Result.get_ok in
-  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"no_replay");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:16 ~replay:"no_replay"))) ~providers:(None)));
   let observations = ref [] in
   let observer observation = observations := observation :: !observations; Ok () in
   let run () = (Complete.complete_serialized ~sw ~net serialized ~cache
@@ -1853,6 +1851,7 @@ let start_sse_server
       ~net
       ?capture_body
       ?capture_path
+      ?on_request
       ?(content_type = "text/event-stream")
       response_body
   =
@@ -1865,6 +1864,7 @@ let start_sse_server
     (match capture_path with
      | Some seen -> seen := Some (Cohttp.Request.uri req |> Uri.path)
      | None -> ());
+    Option.iter (fun on_request -> on_request ()) on_request;
     let headers = Cohttp.Header.of_list [ "content-type", content_type ] in
     Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:response_body ()
   in
@@ -4466,7 +4466,9 @@ let test_anthropic_image_sources_on_http ~stream () =
     in
     let open Yojson.Safe.Util in
     let messages = body |> member "messages" |> to_list in
-    check int "history and merged tool followup retained" 5 (List.length messages);
+    check (list string) "history, tool result and caller followup retain their boundaries"
+      [ "user"; "assistant"; "user"; "assistant"; "user"; "user" ]
+      (List.map (fun message -> message |> member "role" |> to_string) messages);
     let check_json label expected actual =
       check bool label true (Yojson.Safe.equal expected actual)
     in
@@ -4475,17 +4477,19 @@ let test_anthropic_image_sources_on_http ~stream () =
     let tool_followup = List.nth messages 4 in
     check string "tool result becomes an Anthropic user message" "user"
       (tool_followup |> member "role" |> to_string);
-    check_json "tool images stay native and the followup remains after them"
+    check_json "tool images stay native without absorbing caller followup"
       (`List
         [ `Assoc
             [ "type", `String "tool_result"; "tool_use_id", `String "inspect-1"
             ; "content", `List
                 (`Assoc [ "type", `String "text"; "text", `String "image result" ]
                  :: expected_images)
-            ; "is_error", `Bool false ]
-        ; `Assoc [ "type", `String "text"
-                 ; "text", `String "Compare these with the earlier images." ] ])
+            ; "is_error", `Bool false ] ])
       (tool_followup |> member "content");
+    check_json "caller followup remains a separate user message after the tool result"
+      (`List [ `Assoc [ "type", `String "text"
+                     ; "text", `String "Compare these with the earlier images." ] ])
+      (List.nth messages 5 |> member "content");
     Eio.Switch.fail sw Exit
   with Exit -> ()
 ;;
@@ -4807,10 +4811,87 @@ let test_prepared_work_timeout_retains_serialization () =
   with Exit -> ()
 ;;
 
+let test_native_http_pricing ~stream ~via_transport ~reported () =
+  let catalog scale =
+    let source = Printf.sprintf {|
+[[providers]]
+id = "http-price"
+kind = "openai_compat"
+base_url = "https://pricing.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+[[models]]
+model_id = "priced-http-model"
+provider_name = "http-price"
+base = "openai_chat"
+input_per_million = %.1f
+output_per_million = %.1f
+|} scale (2.0 *. scale) in
+    match Model_catalog.of_toml_string ~source:"native HTTP pricing fixture" source with
+    | Ok catalog -> catalog | Error detail -> fail detail in
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () ->
+      (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 1.0))) ~providers:(None)));
+      let model = if reported then ["model", `String "priced-http-model"] else [] in
+      let usage = `Assoc ["prompt_tokens", `Int 1_000_000; "completion_tokens", `Int 1_000_000] in
+      let body = if stream then
+          let chunk choices extra = Yojson.Safe.to_string (`Assoc
+            (["id", `String "priced-http"; "object", `String "chat.completion.chunk";
+              "choices", `List choices] @ model @ extra)) in
+          "data: " ^ chunk [`Assoc ["index", `Int 0; "delta", `Assoc ["content", `String "ok"];
+            "finish_reason", `Null]] [] ^ "\n\ndata: " ^
+          chunk [`Assoc ["index", `Int 0; "delta", `Assoc []; "finish_reason", `String "stop"]]
+            ["usage", usage] ^ "\n\ndata: [DONE]\n\n"
+        else Yojson.Safe.to_string (`Assoc
+          (["id", `String "priced-http"; "object", `String "chat.completion";
+            "choices", `List [`Assoc ["index", `Int 0; "message", `Assoc
+              ["role", `String "assistant"; "content", `String "ok"];
+              "finish_reason", `String "stop"]]; "usage", usage] @ model)) in
+      Eio_main.run (fun env -> try Eio.Switch.run (fun sw ->
+        let on_request () = (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None))) in
+        let base_url = if stream then start_sse_server ~sw ~net:env#net ~on_request body
+          else start_mock_server ~sw ~net:env#net ~on_request body in
+        let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"http-price"
+            ~model_id:"priced-http-model" ~base_url () in
+        let transport = if via_transport then Some (Complete.make_http_transport ~sw ~net:env#net ())
+          else None in
+        let result = if stream then Complete.complete_stream ~sw ~net:env#net ?transport
+            ~config ~messages:[Types.user_msg "answer"] ~on_event:(fun _ -> ()) ()
+          else Complete.complete ~sw ~net:env#net ?transport ~config
+            ~messages:[Types.user_msg "answer"] () in
+        (match result.Completion_outcome.result with
+         | Error _ -> fail "native pricing completion failed"
+         | Ok response ->
+           check (option (float 1e-9)) "native response uses captured rates only for a reported ID"
+             (if reported then Some 3.0 else None)
+             (Option.bind response.usage (fun usage -> usage.cost_usd));
+           check bool "raw model observation survives lower display patches" true
+             (Option.bind response.telemetry (fun telemetry -> telemetry.Types.reported_model)
+              = Some (if reported then Types.Provider_reported_model "priced-http-model"
+                else Types.Provider_model_not_reported)));
+        Eio.Switch.fail sw Exit)
+      with Exit -> ()))
+;;
+
 let () =
   run
     "complete_http"
-    [ ( "native_request_provenance"
+    [ ( "native pricing authority"
+      , [ test_case "sync captures original rates" `Quick
+            (test_native_http_pricing ~stream:false ~via_transport:false ~reported:true)
+        ; test_case "sync omitted model remains unknown" `Quick
+            (test_native_http_pricing ~stream:false ~via_transport:false ~reported:false)
+        ; test_case "stream captures original rates" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:false ~reported:true)
+        ; test_case "stream omitted model remains unknown" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:false ~reported:false)
+        ; test_case "factory stream captures original rates" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:true ~reported:true)
+        ; test_case "factory stream omitted model remains unknown" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:true ~reported:false) ] )
+    ; ( "native_request_provenance"
       , [ test_case "success/error retain receipt without observer delivery"
             `Quick (test_native_completion_outcome ~via_transport:false)
         ; test_case "native transport factory preserves the received wire evidence"

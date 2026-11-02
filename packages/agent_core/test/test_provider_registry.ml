@@ -16,6 +16,18 @@ let with_env key value f =
 
 (* ── Registry CRUD ──────────────────────────────────── *)
 
+let provider_capabilities (entry : Provider_registry.entry) =
+  match entry.capabilities with
+  | Some capabilities -> capabilities
+  | None -> Alcotest.fail "fixture requires an explicit provider-wide capability declaration"
+;;
+
+let catalog_capabilities (entry : Provider_catalog.entry) =
+  match entry.capabilities with
+  | Some capabilities -> capabilities
+  | None -> Alcotest.fail "fixture requires explicit provider-wide policy"
+;;
+
 let test_empty_registry () =
   let reg = Provider_registry.create () in
   check int "empty has 0 entries" 0 (List.length (Provider_registry.all reg));
@@ -33,7 +45,7 @@ let test_register_and_find () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> true)
     }
   in
@@ -55,7 +67,7 @@ let test_overwrite () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> true)
     }
   in
@@ -78,7 +90,7 @@ let test_unregister () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> true)
     }
   in
@@ -101,7 +113,7 @@ let test_concurrent_register_keeps_every_snapshot_update () =
           ; requires_api_key = false
           }
       ; max_context = Some 128_000
-      ; capabilities = Capabilities.default_capabilities
+      ; capabilities = Some Capabilities.default_capabilities
       ; is_available = (fun () -> true)
       }
     in
@@ -153,7 +165,7 @@ let test_available_filter () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> avail)
     }
   in
@@ -216,7 +228,7 @@ let test_find_capable_tools () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = caps
+    ; capabilities = Some caps
     ; is_available = (fun () -> true)
     }
   in
@@ -242,7 +254,7 @@ let test_find_capable_composite () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = caps
+    ; capabilities = Some caps
     ; is_available = (fun () -> true)
     }
   in
@@ -270,13 +282,13 @@ let test_default_capabilities () =
   let reg = Provider_registry.default () in
   (match Provider_registry.find reg "claude" with
    | Some e ->
-     check bool "claude has tools" true e.capabilities.supports_tools;
-     check bool "claude has reasoning" true e.capabilities.supports_reasoning
+     check bool "claude has tools" true (provider_capabilities e).supports_tools;
+     check bool "claude has reasoning" true (provider_capabilities e).supports_reasoning
    | None -> fail "claude should exist");
   match Provider_registry.find reg "nous" with
   | Some e ->
-    check bool "llama has tools" true e.capabilities.supports_tools;
-    check bool "llama has top_k" true e.capabilities.supports_top_k
+    check bool "llama has tools" true (provider_capabilities e).supports_tools;
+    check bool "llama has top_k" true (provider_capabilities e).supports_top_k
   | None -> fail "llama should exist"
 ;;
 
@@ -292,17 +304,17 @@ let test_default_ollama_cloud_entry () =
       bool
       "ollama_cloud uses ollama_cloud_capabilities"
       true
-      (e.capabilities.thinking_control_format = Capabilities.Ollama_think);
+      ((provider_capabilities e).thinking_control_format = Capabilities.Ollama_think);
     check
       bool
       "ollama_cloud does not support JSON mode"
       false
-      e.capabilities.supports_response_format_json;
+      (provider_capabilities e).supports_response_format_json;
     check
       bool
       "ollama_cloud does not support provider schema"
       false
-      e.capabilities.supports_structured_output
+      (provider_capabilities e).supports_structured_output
   | None -> fail "ollama_cloud should exist"
 ;;
 
@@ -340,13 +352,13 @@ let test_default_mimo_entry () =
       check bool "requires_api_key" true e.defaults.requires_api_key;
       check string "request_path" "/chat/completions" e.defaults.request_path;
       check (option int) "max_context" (Some 1_000_000) e.max_context;
-      check bool "has reasoning" true e.capabilities.supports_reasoning;
-      check bool "has JSON mode" true e.capabilities.supports_response_format_json;
+      check bool "has reasoning" true (provider_capabilities e).supports_reasoning;
+      check bool "has JSON mode" true (provider_capabilities e).supports_response_format_json;
       check
         bool
         "no native structured output"
         false
-        e.capabilities.supports_structured_output
+        (provider_capabilities e).supports_structured_output
     | None -> fail "mimo should exist")
 ;;
 
@@ -489,7 +501,7 @@ let test_default_max_context_matches_capabilities () =
     check
       (option int)
       (Printf.sprintf "%s registry context is capability declaration" entry.name)
-      entry.capabilities.max_context_tokens
+      (Option.bind entry.capabilities (fun capabilities -> capabilities.Capabilities.max_context_tokens))
       entry.max_context)
 ;;
 
@@ -519,8 +531,8 @@ let with_provider_catalog json f =
   match Provider_catalog.of_json (Yojson.Safe.from_string json) with
   | Error msg -> fail msg
   | Ok catalog ->
-    Provider_catalog.set_global catalog;
-    Fun.protect ~finally:Provider_catalog.clear_global f
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))));
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))) f
 ;;
 
 let test_catalog_overlay_registers_exact_provider_id_only () =
@@ -551,8 +563,8 @@ let test_catalog_overlay_registers_exact_provider_id_only () =
         | Some e ->
           check string "base url" "http://127.0.0.1:8000" e.defaults.base_url;
           check (option int) "max context" (Some 131_072) e.max_context;
-          check bool "tools" true e.capabilities.supports_tools;
-          check bool "tool choice" true e.capabilities.supports_tool_choice
+          check bool "tools" true (provider_capabilities e).supports_tools;
+          check bool "tool choice" true (provider_capabilities e).supports_tool_choice
         | None -> fail "catalog provider should be registered");
        check
          bool
@@ -590,6 +602,7 @@ let test_catalog_overlay_preserves_exact_provider_id () =
       "schema_version": 1,
       "providers": [
         {
+          "request_path": "/v1/chat/completions",
           "id": "Acme-Cloud",
           "kind": "openai_compat",
           "base_url": "https://acme.example/v1",
@@ -616,6 +629,8 @@ let test_catalog_overlay_without_context_keeps_none () =
       "schema_version": 1,
       "providers": [
         {
+          "request_path": "/v1/chat/completions",
+          "capabilities_base": "models_only",
           "id": "unknown-context",
           "kind": "openai_compat",
           "base_url": "https://unknown-context.example/v1",
@@ -637,7 +652,7 @@ let test_catalog_rejects_empty_provider_id () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "  ", "kind": "openai_compat"}
+             {"base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id": "  ", "kind": "openai_compat"}
            ]
          }|})
   with
@@ -652,7 +667,7 @@ let test_catalog_rejects_removed_transport_field () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "x", "kind": "openai_compat", "transport": "ftp"}
+             {"base_url":"https://provider.test/v1","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat","capabilities":{"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false},"id": "x", "kind": "openai_compat", "transport": "ftp"}
            ]
          }|})
   with
@@ -667,7 +682,11 @@ let test_catalog_rejects_unknown_auth_type () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "x", "kind": "openai_compat",
+             {
+              "base_url": "https://provider.test/v1",
+              "request_path": "/v1/chat/completions",
+              "capabilities_base": "openai_chat",
+              "capabilities": {"supports_tools": false, "supports_tool_choice": false, "supports_required_tool_choice": false, "supports_named_tool_choice": false, "supports_parallel_tool_calls": false, "supports_response_format_json": false, "supports_structured_output": false, "supports_multimodal_inputs": false, "supports_image_input": false, "supports_native_streaming": false},"id": "x", "kind": "openai_compat",
               "auth": {"type": "magick"}}
            ]
          }|})
@@ -683,7 +702,10 @@ let test_catalog_rejects_unknown_capabilities_base () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "x", "kind": "openai_compat",
+             {
+              "base_url": "https://provider.test/v1",
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},"id": "x", "kind": "openai_compat",
               "capabilities_base": "nonexistent_preset"}
            ]
          }|})
@@ -700,8 +722,12 @@ let test_catalog_rejects_unknown_thinking_control_format () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "x", "kind": "openai_compat",
-              "capabilities": {"thinking_control_format": "telepathy"}}
+             {
+              "base_url": "https://provider.test/v1",
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "x", "kind": "openai_compat",
+              "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "telepathy"}}
            ]
          }|})
   with
@@ -717,8 +743,12 @@ let test_catalog_rejects_unknown_preserve_thinking_control_format () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "x", "kind": "openai_compat",
-              "capabilities": {"preserve_thinking_control_format": "memory_palace"}}
+             {
+              "base_url": "https://provider.test/v1",
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "x", "kind": "openai_compat",
+              "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"preserve_thinking_control_format": "memory_palace"}}
            ]
          }|})
   with
@@ -735,22 +765,47 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "kimi-k2", "kind": "openai_compat",
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "kimi-k2", "kind": "openai_compat",
               "base_url": "https://kimi-k2.example",
-              "capabilities": {"thinking_control_format": "thinking_object_only"}},
-             {"id": "thinking-object", "kind": "openai_compat",
+              "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "thinking_object_only"}},
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "thinking-object", "kind": "openai_compat",
               "base_url": "https://thinking-object.example",
-              "capabilities": {"thinking_control_format": "thinking_object"}},
-             {"id": "ollama-cloud", "kind": "ollama",
+              "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "thinking_object"}},
+             {
+              "request_path": "/api/chat",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "ollama-cloud", "kind": "ollama",
               "base_url": "https://ollama-cloud.example",
-              "capabilities": {"thinking_control_format": "ollama_think"}},
-             {"id": "openai-reasoning", "kind": "openai_compat",
+              "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "ollama_think"}},
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "openai-reasoning", "kind": "openai_compat",
               "base_url": "https://openai-reasoning.example",
-              "capabilities": {"thinking_control_format": "reasoning_effort"}}
+              "capabilities": {"supports_tools":false,"supports_tool_choice":false,"supports_required_tool_choice":false,"supports_named_tool_choice":false,"supports_parallel_tool_calls":false,"supports_response_format_json":false,"supports_structured_output":false,"supports_multimodal_inputs":false,"supports_image_input":false,"supports_native_streaming":false,"thinking_control_format": "reasoning_effort"}}
              ,
-             {"id": "kimi-latest", "kind": "openai_compat",
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "openai_chat","id": "kimi-latest", "kind": "openai_compat",
               "base_url": "https://kimi-latest.example",
-              "capabilities": {"thinking_control_format": "none",
+              "capabilities": {
+                               "supports_tools": false,
+                               "supports_tool_choice": false,
+                               "supports_required_tool_choice": false,
+                               "supports_named_tool_choice": false,
+                               "supports_parallel_tool_calls": false,
+                               "supports_response_format_json": false,
+                               "supports_structured_output": false,
+                               "supports_multimodal_inputs": false,
+                               "supports_image_input": false,
+                               "supports_native_streaming": false,"thinking_control_format": "none",
                                "preserve_thinking_control_format": "always_preserved"}}
            ]
          }|})
@@ -764,7 +819,7 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
           bool
           (id ^ " thinking_control_format")
           true
-          (entry.capabilities.thinking_control_format = expected)
+          ((catalog_capabilities entry).thinking_control_format = expected)
       | None -> fail (id ^ " should exist")
     in
     check_format "kimi-k2" Capabilities.Thinking_object_only;
@@ -777,7 +832,7 @@ let test_catalog_accepts_explicit_thinking_control_formats () =
          bool
          "kimi-latest always preserved"
          true
-         (entry.capabilities.preserve_thinking_control_format
+         ((catalog_capabilities entry).preserve_thinking_control_format
           = Capabilities.Always_preserved_thinking)
      | None -> fail "kimi-latest should exist")
 ;;
@@ -789,9 +844,15 @@ let test_catalog_rejects_duplicate_provider_id () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "dup", "kind": "openai_compat",
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "models_only","id": "dup", "kind": "openai_compat",
               "base_url": "http://first.example"},
-             {"id": "dup", "kind": "openai_compat",
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "models_only","id": "dup", "kind": "openai_compat",
               "base_url": "http://second.example"}
            ]
          }|})
@@ -807,7 +868,10 @@ let test_catalog_lookup_case_insensitive () =
          {|{
            "schema_version": 1,
            "providers": [
-             {"id": "mixed-Case",
+             {
+              "request_path": "/v1/chat/completions",
+              "auth": {"type": "none"},
+              "capabilities_base": "models_only","id": "mixed-Case",
               "aliases": ["AlsoMixed"],
               "kind": "openai_compat",
               "base_url": "http://x.example"}
@@ -844,12 +908,11 @@ let provider_catalog_entry ?(aliases = []) id : Provider_catalog.entry =
   ; kind = OpenAI_compat
   ; base_url = "http://host.example"
   ; request_path = "/v1/chat/completions"
-  ; api_key_env = ""
   ; auth = No_auth
   ; default_model = None
   ; discovery_timeout_s = None
   ; max_context = None
-  ; capabilities = Capabilities.default_capabilities
+  ; capabilities = Some Capabilities.default_capabilities
   ; credential_scope = None
   }
 ;;
@@ -874,8 +937,8 @@ let test_catalog_aliases_are_not_registry_keys () =
   match Provider_catalog.of_entries [ entry ] with
   | Error msg -> fail msg
   | Ok catalog ->
-    Provider_catalog.set_global catalog;
-    Fun.protect ~finally:Provider_catalog.clear_global (fun () ->
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))));
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))) (fun () ->
       let reg = Provider_registry.default () in
       check bool "id registered" true (Option.is_some (Provider_registry.find reg "host"));
       check
@@ -902,6 +965,8 @@ let test_catalog_load_file_and_lookup_alias () =
                 "schema_version": 1,
                 "providers": [
                   {
+                    "request_path": "/v1/chat/completions",
+                    "capabilities_base": "models_only",
                     "id": "file-cloud",
                     "aliases": ["file-cloud-alias"],
                     "kind": "openai_compat",
@@ -929,6 +994,7 @@ let test_catalog_api_key_env_availability () =
         "schema_version": 1,
         "providers": [
           {
+            "request_path": "/v1/chat/completions",
             "id": "cloud-api",
             "kind": "openai_compat",
             "base_url": "https://cloud-api.example/v1",

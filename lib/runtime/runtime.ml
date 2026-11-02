@@ -785,6 +785,7 @@ let preserve_candidate previous (runtime : t) =
       && Runtime_schema.equal_provider old.provider runtime.provider
       && Runtime_schema.equal_model_spec old.model runtime.model
       && Runtime_schema.equal_binding old.binding runtime.binding
+      && Runtime_execution.same_account_selection old.execution runtime.execution
       && Runtime_candidate_backpressure.same_candidate_binding
            old.candidate_backpressure runtime.candidate_backpressure) previous with
     | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }

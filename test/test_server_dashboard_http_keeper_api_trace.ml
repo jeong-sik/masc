@@ -1,5 +1,6 @@
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 module Trace = Server_dashboard_http_keeper_api_trace
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
 module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
@@ -1104,6 +1105,9 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let ok = function Ok value -> value | Error detail -> fail detail in
   let module Journal=Keeper_chat_operation_store in
   let module Native=Keeper_native_call in
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
   let state=Mcp_server.create_state_eio ~sw
       ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
@@ -1305,6 +1309,9 @@ let test_input_response_http_requires_explicit_exact_proof () =
   with_temp_dir @@ fun dir -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
   let state=Mcp_server.create_state_eio ~sw
       ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)

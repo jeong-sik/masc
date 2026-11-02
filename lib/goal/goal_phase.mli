@@ -136,6 +136,10 @@ val decide_transition :
 val moves_goal : phase:t -> action:action -> bool
 (** Whether [action] changes the phase of a goal in [phase]: a [Move_to].
     [Already] is accepted and writes nothing, and [Error] is refused, so
-    neither is a step the goal can take from where it is. The dashboard's next
-    actions and the TUI goal detail's lit keys both ask this, so the two cannot
-    offer different steps for the same goal. *)
+    neither is a phase change. *)
+
+val offers_public_action : phase:t -> action:Public_action.t -> bool
+(** Whether the operator can use an action from this phase. In addition to
+    phase changes, a completion request while [Verifying] can retry a matching
+    pending request or reconcile its committed proof. This predicate owns both UI projections;
+    it does not claim that a verifier has started or finished. *)

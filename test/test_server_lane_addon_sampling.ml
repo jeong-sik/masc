@@ -103,12 +103,11 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(
   let root = Filename.temp_dir "server-lane-sampling-" "" |> Unix.realpath in
   let old_runtime = Runtime.For_testing.snapshot () in
   let old_startup = Runtime_startup_state.get () in
-  let old_catalog = Llm_provider.Model_catalog.global () in
+  let old_catalog = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore old_runtime;
     Runtime_startup_state.set old_startup;
-    (match old_catalog with None -> Llm_provider.Model_catalog.clear_global ()
-      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish old_catalog);
     Fs_compat.remove_tree root);
   let config = Workspace.default_config root in
   let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
@@ -173,7 +172,7 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(
     "[[models]]\nmodel_id=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=%b\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider (primary_images || provider <> "primary"))
     ["primary";"secondary"]));
   let catalog = require (Llm_provider.Model_catalog.load_file catalog_path) in
-  Llm_provider.Model_catalog.set_global catalog;
+  (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
   let runtime_path = Filename.concat root "runtime.toml" in
   write runtime_path (Printf.sprintf {|[runtime]
 default="primary.sample"
@@ -346,13 +345,12 @@ let test_invalid_sampling_route_is_stable_until_runtime_update () =
   let root = Filename.temp_dir "sampling-preflight-" "" |> Unix.realpath in
   let old_runtime = Runtime.For_testing.snapshot () in
   let old_startup = Runtime_startup_state.get () in
-  let old_catalog = Llm_provider.Model_catalog.global () in
+  let old_catalog = Llm_provider.Catalog_snapshot.current () in
   Lane_addon_runtime.For_testing.reset ();
   Eio.Switch.on_release sw (fun () ->
     Lane_addon_runtime.For_testing.reset ();
     Runtime.For_testing.restore old_runtime; Runtime_startup_state.set old_startup;
-    (match old_catalog with None -> Llm_provider.Model_catalog.clear_global ()
-      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish old_catalog);
     Fs_compat.remove_tree root);
   let config = Workspace.default_config root in
   let masc = Workspace.masc_dir config in
@@ -373,7 +371,7 @@ supports_system_prompt=true
 supports_native_streaming=false
 ignored_sampling_parameters=[]
 |};
-  Llm_provider.Model_catalog.set_global (require (Llm_provider.Model_catalog.load_file catalog_path));
+  (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((require (Llm_provider.Model_catalog.load_file catalog_path)))) ~providers:(None)));
   let runtime_path = Filename.concat root "runtime.toml" in
   let runtime_bytes = {|[runtime]
 default="primary.sample"

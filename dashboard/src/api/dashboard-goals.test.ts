@@ -3,10 +3,12 @@ import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
+const getWithResponseMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./core', async importOriginal => ({
   ...await importOriginal<typeof import('./core')>(),
   get: getMock,
+  getWithResponse: getWithResponseMock,
 }))
 
 import {
@@ -17,6 +19,7 @@ import {
   goalSourceUnavailable,
 } from './dashboard-goals'
 import { fetchDashboardPlanning } from './dashboard-mission'
+import { goalStoreReasonLabel, goalStoreResetStepLabel } from '../lib/goal-store-unavailable-labels'
 import {
   GOAL_STORE_MIRROR_STATUSES,
   GOAL_STORE_RESET_STEPS,
@@ -79,6 +82,25 @@ afterEach(() => {
 })
 
 describe('fetchDashboardGoalsTree decoding', () => {
+  it('requires a workspace attestation for a bound tree and detail', async () => {
+    const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
+    getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers: new Headers() })
+    await expect(fetchDashboardGoalsTree(workspace)).rejects.toThrow('작업 공간 확인')
+    const headers = new Headers({ 'x-masc-workspace-read': 'matched-v1' })
+    getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers })
+    const tree = await fetchDashboardGoalsTree(workspace)
+    expect(tree.tree[0]?.id).toBe('goal-measured')
+    expect(getWithResponseMock.mock.calls[1]![0]).toContain('expected_base_path=%2Fworkspace-a')
+    expect(getWithResponseMock.mock.calls[1]![1]).toEqual({ consumeWithinTimeout: true })
+    getWithResponseMock.mockResolvedValueOnce({
+      data: { approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
+        linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] }, headers,
+    })
+    expect((await fetchDashboardGoalDetail('goal-measured', workspace)).goal.id).toBe('goal-measured')
+    expect(getWithResponseMock.mock.calls[2]![0]).toContain('expected_masc_root=%2Fworkspace-a%2F.masc')
+    expect(getWithResponseMock.mock.calls[2]![1]).toEqual({ consumeWithinTimeout: true })
+  })
+
   it('preserves current criterion measurements through tree and detail fetches', async () => {
     getMock.mockResolvedValueOnce(measurementFixture)
     const tree = await fetchDashboardGoalsTree()
@@ -474,6 +496,18 @@ describe('Goal source unavailable across HTTP projections', () => {
     ['planning', () => fetchDashboardPlanning()],
     ['tree', () => fetchDashboardGoalsTree()],
     ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s preserves an older server’s empty member name', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ...schemaRejectedEnvelope, field: '' })
+    const thrown = await fetch().then(() => null, (error: unknown) => error)
+    expect(thrown).toBeInstanceOf(GoalSourceUnavailableError)
+    expect((thrown as GoalSourceUnavailableError).unavailable).toEqual({ ...schemaRejectedUnion, field: '' })
+    expect((thrown as GoalSourceUnavailableError).message).toContain('이름이 빈 필드 · 정확한 위치 미확인')
+  })
+
+  it.each([
+    ['planning', () => fetchDashboardPlanning()],
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
   ] as const)('%s refuses an envelope with an unknown reason instead of defaulting', async (_name, fetch) => {
     getMock.mockResolvedValue({ ...schemaRejectedEnvelope, reason: 'corrupt', field: null })
     await expect(fetch()).rejects.toBeInstanceOf(GoalStoreEnvelopeError)
@@ -485,6 +519,25 @@ describe('Goal source unavailable across HTTP projections', () => {
 describe('goalSourceUnavailable', () => {
   it('parses the full envelope into the closed union', () => {
     expect(goalSourceUnavailable(schemaRejectedEnvelope)).toEqual(schemaRejectedUnion)
+  })
+
+  it.each(['$', 'goals'])('accepts %s as a containing location for an empty member name', field => {
+    expect(goalSourceUnavailable({ ...schemaRejectedEnvelope, field })).toEqual({ ...schemaRejectedUnion, field })
+  })
+
+  it.each([
+    ['', '이름이 빈 필드 · 정확한 위치 미확인'],
+    ['$', '문서 최상위 또는 이름이 $인 필드'],
+    ['goals', 'goals'],
+    [' ', '"\\u{20}"'],
+    ['\n', '"\\u{a}"'],
+    ['\u200b', '"\\u{200b}"'],
+  ])('renders a readable, noncommittal location for %j', (field, rendered) => {
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, field })
+    expect(parsed?.kind).toBe('unavailable')
+    if (parsed?.kind !== 'unavailable') throw new Error('missing unavailable envelope')
+    expect(goalStoreReasonLabel(parsed.reason, parsed.field)).toContain(rendered)
+    expect(goalStoreResetStepLabel(parsed.resetStep, parsed.field)).toContain(rendered)
   })
 
   it('returns null for a snapshot and for an unrelated failure', () => {
@@ -515,6 +568,7 @@ describe('goalSourceUnavailable', () => {
     ['unknown mirror status', { mirror: { status: 'mirror_stale', goal_count: null } }, 'unknown mirror status "mirror_stale"'],
     ['unknown reset step', { reset_step: 'reboot' }, 'unknown reset_step "reboot"'],
     ['schema_rejected without a field', { field: null }, 'schema_rejected names no field'],
+    ['schema_rejected with a non-string field', { field: 3 }, 'schema_rejected names no field'],
     ['not_json carrying a field', { reason: 'not_json' }, 'not_json carries a field'],
     ['mirror_decodes without a count', { mirror: { status: 'mirror_decodes', goal_count: null } }, 'mirror_decodes carries no goal_count'],
     ['a rendered error line added to the envelope', { error: 'goals.json: criterion_revision is missing' }, 'expected 7 members, got 8'],
@@ -522,6 +576,11 @@ describe('goalSourceUnavailable', () => {
   ] as const)('refuses %s', (_name, patch, detail) => {
     expect(() => goalSourceUnavailable({ ...schemaRejectedEnvelope, ...patch })).toThrow(GoalStoreEnvelopeError)
     expect(() => goalSourceUnavailable({ ...schemaRejectedEnvelope, ...patch })).toThrow(detail)
+  })
+
+  it('refuses a schema envelope missing the field member', () => {
+    const { field: _field, ...withoutField } = schemaRejectedEnvelope
+    expect(() => goalSourceUnavailable(withoutField)).toThrow(GoalStoreEnvelopeError)
   })
 
   it('parses the Goal–Task link registry failure into its own constructor', () => {

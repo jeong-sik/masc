@@ -19,6 +19,28 @@ module Orphan_drops = Keeper_registry_orphan_drops
 module Error_tracking = Keeper_registry_error_tracking
 module Turn_failure_streak_store = Keeper_turn_failure_streak_store
 
+type state_change =
+  | Lifecycle_phase_changed
+  | Failure_reason_changed
+  | Membership_changed
+
+let state_change_observer : (base_path:string -> state_change -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ _ -> ())
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~base_path change =
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "registry state-change observer failed: %s"
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ~base_path change)
+;;
+
+let failure_reason_changed (before : registry_entry) (after : registry_entry) =
+  before.last_failure_reason <> after.last_failure_reason
+;;
+
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
   | Lifecycle_transaction_reserved _ -> "lifecycle_transaction_reserved"
@@ -190,7 +212,8 @@ let unsafe_put_entry ~base_path name entry =
     health reason, emits [RegistryInvalidEntry] with [operation="update"], and
     leaves the original entry untouched.  Only CAS conflicts retry. *)
 let update_entry_internal ?lifecycle_token ~base_path name f =
-  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  let failure_reason_changed_after_commit = ref None in
+  let result = Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
       ?token:lifecycle_token
@@ -242,11 +265,17 @@ let update_entry_internal ?lifecycle_token ~base_path name f =
          let updated = StringMap.add key new_entry current in
          if Atomic.compare_and_set registry current updated
          then (
+           if failure_reason_changed entry new_entry then
+             failure_reason_changed_after_commit := Some entry.base_path;
            Orphan_drops.clear ~base_path name;
            Ok ())
          else loop ())
   in
-  loop ())
+  loop ()) in
+  Option.iter
+    (fun base_path -> notify_state_change_observer ~base_path Failure_reason_changed)
+    !failure_reason_changed_after_commit;
+  result
 ;;
 
 let update_entry ~base_path name f = update_entry_internal ~base_path name f
@@ -260,7 +289,8 @@ type exact_update_result =
 let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
   let base_path = expected.base_path in
   let name = expected.name in
-  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  let failure_reason_changed_after_commit = ref None in
+  let result = Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
       ?token:lifecycle_token
@@ -289,11 +319,17 @@ let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
          let updated = StringMap.add key new_entry current in
          if Atomic.compare_and_set registry current updated
          then (
+           if failure_reason_changed entry new_entry then
+             failure_reason_changed_after_commit := Some entry.base_path;
            Orphan_drops.clear ~base_path name;
            Exact_updated)
          else loop ())
   in
-  loop ())
+  loop ()) in
+  Option.iter
+    (fun base_path -> notify_state_change_observer ~base_path Failure_reason_changed)
+    !failure_reason_changed_after_commit;
+  result
 ;;
 
 let update_entry_exact expected f = update_entry_exact_internal expected f
@@ -602,6 +638,7 @@ let register_with_state_result
       "registry: keeper registered name=%s running_count=%d"
       name
       (Atomic.get running_count_atomic);
+    notify_state_change_observer ~base_path Membership_changed;
     Ok entry
 ;;
 
@@ -858,6 +895,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
       name
       base_path
       (Keeper_state_machine.phase_to_string phase);
+    notify_state_change_observer ~base_path Membership_changed;
     Ok registered
 ;;
 
@@ -924,6 +962,30 @@ let remove_entry
   loop ())
 ;;
 
+(* Always announce the removal after cleanup has been attempted. Preserve a
+   cleanup cancellation if the observer also cancels; an observer cancellation
+   takes precedence over a non-cancellation cleanup error, which is logged. *)
+let finish_unregistration_cleanup ~base_path cleanup =
+  match cleanup () with
+  | () -> notify_state_change_observer ~base_path Membership_changed
+  | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match notify_state_change_observer ~base_path Membership_changed with
+     | () -> ()
+     | exception Eio.Cancel.Cancelled _ -> ());
+    Printexc.raise_with_backtrace cancelled backtrace
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match notify_state_change_observer ~base_path Membership_changed with
+     | () -> ()
+     | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+       let cancel_backtrace = Printexc.get_raw_backtrace () in
+       Log.Keeper.warn "registry unregistration cleanup failed before observer cancellation: %s"
+         (Printexc.to_string error);
+       Printexc.raise_with_backtrace cancelled cancel_backtrace);
+    Printexc.raise_with_backtrace error backtrace
+;;
+
 let finish_unregistration entry =
   (* The watchdog and heartbeat fibers retain [entry] in their closures.
      Removing the map binding therefore must also signal that exact lane. *)
@@ -934,9 +996,11 @@ let finish_unregistration entry =
      its next turn; unregistering drops it. A save still running keeps its
      value again afterwards: the decode of the bytes it wrote, handed out only
      while the file keeps that identity (#43575). *)
-  Keeper_checkpoint_store.forget_written_lineages
-    ~session_root:(Keeper_fs.session_store_path_for_base_path entry.base_path)
-    ~keeper_name:entry.name
+  finish_unregistration_cleanup ~base_path:entry.base_path
+    (fun () ->
+      Keeper_checkpoint_store.forget_written_lineages
+        ~session_root:(Keeper_fs.session_store_path_for_base_path entry.base_path)
+        ~keeper_name:entry.name)
 ;;
 
 let unregister ~base_path name =
@@ -998,7 +1062,7 @@ type restore_entry_result =
   | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
 let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
-  Keeper_lifecycle_reservation.with_key_lock
+  let result = Keeper_lifecycle_reservation.with_key_lock
     ~base_path:entry.base_path
     ~keeper_name:entry.name
     (fun () ->
@@ -1025,7 +1089,13 @@ let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
            then Entry_restored
            else loop ()
        in
-       loop ()))
+       loop ())) in
+  (match result with
+   | Entry_restored ->
+     notify_state_change_observer ~base_path:entry.base_path Membership_changed
+   | Entry_restore_occupied _ | Entry_restore_invalid _
+   | Entry_restore_lifecycle_reserved _ -> ());
+  result
 ;;
 
 let health_of_entry ~base_path name entry =
@@ -1168,7 +1238,7 @@ let mark_turn_started ~observation_token ~base_path ~wake name =
         current_turn_observation = Some obs
         }, true)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let record_turn_progress ~observation_token ~base_path name ~event_kind =
@@ -1215,7 +1285,7 @@ let mark_agent_core_turn_started ~observation_token ~base_path name =
           in
           { e with current_turn_observation = Some new_obs }, true))
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let mark_turn_measurement ~observation_token ~base_path name =
@@ -1237,7 +1307,7 @@ let mark_turn_measurement ~observation_token ~base_path name =
         }, true
       | _ -> e, false)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 (* FSM transition validators moved to Keeper_registry_fsm_validators. *)
@@ -1257,7 +1327,7 @@ let set_turn_decision_stage ~observation_token ~base_path name (decision_stage :
             decision_stage = target_packed
           })))
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_direct ~observation_token ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
@@ -1286,7 +1356,7 @@ let set_turn_phase_direct ~observation_token ~base_path name ~event_kind (turn_p
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_with ~observation_token ~base_path name ~event_kind ~target ~update_obs =
@@ -1325,7 +1395,7 @@ let set_turn_phase_with ~observation_token ~base_path name ~event_kind ~target ~
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let mark_turn_runtime_exhausted ~observation_token ~base_path name =

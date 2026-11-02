@@ -83,7 +83,7 @@ let test_pricing_gpt55 () =
    that was never the subject. 22 rows carry the shape today. *)
 let test_incomplete_cache_pricing_remains_declared () =
   let catalog =
-    match Llm_provider.Model_catalog.global () with
+    match (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) with
     | Some catalog -> catalog
     | None -> Alcotest.fail "no model catalog is installed"
   in

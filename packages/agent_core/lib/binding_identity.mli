@@ -16,7 +16,9 @@ type t
     injected transport is [Injected]; otherwise it is [Http]. *)
 val transport_for_call : injected:bool -> transport
 
-(** Construct an immutable identity from a resolved config. *)
+(** Construct an immutable identity from the config's selected provider facts,
+    actual endpoint and credential. Never reads the current catalog; an
+    unselected config has no catalog-owned authentication or credential scope. *)
 val of_provider_config
   :  transport:transport
   -> Llm_provider.Provider_config.t

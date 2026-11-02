@@ -2,6 +2,8 @@
 
 open Masc
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 (* These tests pin how the Board routes a text, not who is declared: every name
    with the shape of a Board identity stands for itself.  Which names are
    declared, and what the author is told about the others, is pinned in
@@ -33,28 +35,42 @@ let fresh_test_base_path () =
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  ignore (fresh_test_base_path ());
+  let base_path = fresh_test_base_path () in
+  Fs_compat.mkdir_p base_path;
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   f ()
 
-let block_board_masc_dir_with_file () =
-  let base =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-board-persist-blocked-%06x" (Random.bits ()))
-  in
-  Unix.putenv "MASC_BASE_PATH" base;
-  let masc_dir = Filename.dirname (Board.persist_path ()) in
+let with_blocked_board_masc_dir f =
+  let store = Board.global () in
+  let masc_dir = (Board.workspace_masc_dir store) in
+  let backup = masc_dir ^ ".fixture-backup" in
+  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
-  Fs_compat.save_file masc_dir "not a directory";
-  base
+  let paths =
+    [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
+    ; Board.reactions_path store; Board.sub_boards_path store ]
+  in
+  List.iter Fs_compat.invalidate_cached_writer paths;
+  let existed = Sys.file_exists masc_dir in
+  if existed then Unix.rename masc_dir backup;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Fs_compat.invalidate_cached_writer paths;
+      if Sys.file_exists masc_dir then Sys.remove masc_dir;
+      if existed then Unix.rename backup masc_dir)
+    (fun () ->
+      Fs_compat.save_file masc_dir "not a directory";
+      f ())
 
 let seed_post_without_kind () =
   let now = Time_compat.now () in
   let post_id = Printf.sprintf "missing-kind-%06x" (Random.bits ()) in
-  let path = Board.persist_path () in
+  let path = Board.persist_path (Board.global ()) in
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let json =
@@ -80,7 +96,9 @@ let seed_post_without_kind () =
   Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   post_id
 
 let keeper_meta name =
@@ -156,7 +174,9 @@ let test_content_update_time_survives_activity_and_reload () =
   Board_dispatch.flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   same transferred.content_updated_at;
   let fields = match Board.post_to_yojson (read ()) with
     | `Assoc fields -> fields | _ -> Alcotest.fail "post encoder did not emit an object" in
@@ -213,8 +233,7 @@ let test_edit_persistence_failure_emits_no_signal () =
     | Ok post -> post | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
   let signals = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
-  let original_base = Sys.getenv "MASC_BASE_PATH" in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   (match Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
       ~editor:"editor" ~content:"@reader failed persistence" () with
    | Error (Board.Io_error _) -> ()
@@ -225,8 +244,8 @@ let test_edit_persistence_failure_emits_no_signal () =
    | Ok unchanged ->
      Alcotest.(check string) "failed edit preserves in-memory body" post.body unchanged.body;
      Alcotest.(check (float 0.)) "failed edit preserves content clock" post.content_updated_at unchanged.content_updated_at
-   | Error error -> Alcotest.fail (Board.show_board_error error));
-  Unix.putenv "MASC_BASE_PATH" original_base;
+   | Error error -> Alcotest.fail (Board.show_board_error error))
+  );
   (match Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
       ~editor:"editor" ~content:"@reader failed persistence" () with
    | Ok _ -> () | Error error -> Alcotest.fail (Board.show_board_error error));
@@ -428,11 +447,34 @@ let check_io_error ~where = function
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 
-let check_publication_io_error ~where = function
+let check_posts_io_error = function
+  | Error (Board.Io_error _) -> ()
+  | Error error -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "expected posts persistence Io_error"
+
+let posts_observation store =
+  match store.Board.posts_source with
+  | Board.Posts_readable { observation; _ } ->
+    observation.source_path, observation.snapshot.bytes, observation.snapshot.cursor
+  | Board.Posts_unobserved | Board.Posts_guard_observed _ | Board.Posts_refused _ | Board.Posts_unsettled _ ->
+    Alcotest.fail "fixture must retain a readable posts source"
+
+let check_retained_posts_source (path, bytes, cursor) store =
+  let retained_path, retained_bytes, retained_cursor = posts_observation store in
+  Alcotest.(check string) "retained posts path" path retained_path;
+  Alcotest.(check string) "retained exact posts bytes" bytes retained_bytes;
+  Alcotest.(check bool) "retained posts cursor" true
+    (Fs_compat.Private_jsonl_cursor.equal cursor retained_cursor)
+
+let check_publication_io_error = function
   | Error failure ->
+    Alcotest.(check bool) "blocked path is proven before publication" true
+      (Board.Post_publication_failure.effect_disposition failure = Failure_effect.Proven_pre_effect);
+    Alcotest.(check bool) "refused append has no committed receipt" true
+      (Option.is_none (Board.Post_publication_failure.committed failure));
     (match Board.Post_publication_failure.cause failure with
      | Board.Post_publication_failure.Board_error error ->
-       check_io_error ~where (Error error)
+       check_posts_io_error (Error error)
      | Board.Post_publication_failure.Raised _ ->
        Alcotest.fail ("expected Io_error, got " ^
          Board.Post_publication_failure.to_string failure))
@@ -526,16 +568,17 @@ let test_identical_content_creates_two_posts () =
   Alcotest.(check int) "SSE post_created emitted per post" 2 !sse_post_created
 
 let test_create_post_persistence_failure_returns_error_without_fanout () =
+  let active = Board.global () in
+  let observed_source = posts_observation active in
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Post_created _ -> incr sse_post_created
     | _ -> ());
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   check_publication_io_error
-    ~where:"append_post"
     (Board_dispatch.create_post
        ~author:"persist-fail-agent"
        ~content:"this post must not survive a failed append"
@@ -545,12 +588,14 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
     "persist error counter incremented"
     true
     (Board.persist_error_count () > before_errors);
+  check_retained_posts_source observed_source active;
   Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
   Alcotest.(check int) "SSE post_created not emitted" 0 !sse_post_created;
   Alcotest.(check int)
     "failed create rolled back in-memory post"
     0
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
+  )
 
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
@@ -568,7 +613,9 @@ let test_structured_post_roundtrip () =
       Alcotest.(check bool) "metadata stored" true (meta_has_source post.meta_json);
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~base_path:(Env_config_core.base_path ())
+        ~recipient_lookup:every_name_declared ());
       match Board_dispatch.get_post ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
@@ -1085,7 +1132,7 @@ let test_comment_persists_post_reply_count () =
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
   let persisted_reply_count =
-    Board.persist_path ()
+    Board.persist_path (Board.global ())
     |> Fs_compat.load_jsonl
     |> List.find_map (fun json ->
       match Safe_ops.json_string_opt "id" json with
@@ -1099,7 +1146,9 @@ let test_comment_persists_post_reply_count () =
     persisted_reply_count;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   match Board_dispatch.get_post ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok fetched ->
@@ -1124,7 +1173,7 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Comment_added _ -> incr sse_comment_added
     | _ -> ());
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   check_io_error
     ~where:"append_comment"
@@ -1150,6 +1199,7 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
         "failed comment rolled back in-memory comment"
         0
         (List.length comments)
+  )
 
 let test_get_post_and_comments_atomic () =
   match
@@ -1312,14 +1362,18 @@ let test_failed_flusher_start_clears_the_flag () =
       ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~sw
       (fun () ->
-        ignore (fresh_test_base_path ());
+        let base_path = fresh_test_base_path () in
+        Fs_compat.mkdir_p base_path;
+        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         (* The flusher forks on whatever switch the context names; a finished
            one makes the fork raise, which is the failure under test. *)
         let finished = Eio.Switch.run (fun inner -> inner) in
         Eio_context.with_turn_switch finished (fun () ->
-          Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ());
+          Result.get_ok (Board_dispatch.init_jsonl
+            ~base_path:(Env_config_core.base_path ())
+            ~recipient_lookup:every_name_declared ()));
         Alcotest.(check bool) "a failed start leaves no started flag" false
           (Board_dispatch.flusher_started_for_test ());
         Eio.Switch.fail sw Exit)
@@ -1337,10 +1391,14 @@ let test_vote_persisted_by_flusher_actor () =
       ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~sw
       (fun () ->
-        ignore (fresh_test_base_path ());
+        let base_path = fresh_test_base_path () in
+        Fs_compat.mkdir_p base_path;
+        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
-        Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+        Result.get_ok (Board_dispatch.init_jsonl
+          ~base_path:(Env_config_core.base_path ())
+          ~recipient_lookup:every_name_declared ());
         let post_id =
           match
             Board_dispatch.create_post ~author:"persist-test" ~content:"persist my vote"
@@ -1363,7 +1421,9 @@ let test_vote_persisted_by_flusher_actor () =
         Eio.Time.sleep clock 0.1;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
-        Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+        Result.get_ok (Board_dispatch.init_jsonl
+          ~base_path:(Env_config_core.base_path ())
+          ~recipient_lookup:every_name_declared ());
         (match Board_dispatch.get_post ~post_id with
          | Error e -> Alcotest.fail (Board.show_board_error e)
          | Ok post ->
@@ -1434,7 +1494,7 @@ let test_reaction_persistence_failure_returns_error_without_publish () =
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Reaction_changed _ -> incr sse_reactions
     | _ -> ());
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   check_io_error
     ~where:"rewrite_reactions"
@@ -1459,6 +1519,7 @@ let test_reaction_persistence_failure_returns_error_without_publish () =
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok summaries ->
     Alcotest.(check int) "failed reaction stays absent in memory" 0 (List.length summaries)
+  )
 ;;
 
 let test_comment_reaction_survives_restart () =
@@ -1485,7 +1546,9 @@ let test_comment_reaction_survives_restart () =
        | Ok _ -> ());
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~base_path:(Env_config_core.base_path ())
+        ~recipient_lookup:every_name_declared ());
       match
         Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
           ~target_id:comment_id ~user_id:"reactor" ()
@@ -2001,7 +2064,9 @@ let test_set_pinned () =
          (unlike set_thread_id which is in-memory only). *)
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~base_path:(Env_config_core.base_path ())
+        ~recipient_lookup:every_name_declared ());
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p -> Alcotest.(check bool) "pinned survives restart" true p.pinned);
@@ -2031,11 +2096,12 @@ let test_set_pinned_persistence_failure_rolls_back () =
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
-  ignore (block_board_masc_dir_with_file ());
+  let active = Board.global () in
+  let observed_source = posts_observation active in
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
-  check_io_error
-    ~where:"append_post"
-    (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  check_posts_io_error (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  check_retained_posts_source observed_source active;
   Alcotest.(check bool)
     "persist error counter incremented"
     true
@@ -2049,6 +2115,8 @@ let test_set_pinned_persistence_failure_rolls_back () =
    a reopen, a delete -- still changes what a cached page of the board answers.
    The write hook is how the server drops those pages; it runs once per write
    the store took. *)
+  )
+
 let test_write_hook_runs_after_each_write_that_raises_no_event () =
   let writes = ref 0 in
   let events = ref 0 in
@@ -2136,7 +2204,9 @@ let test_set_closed_and_reopen_round_trip () =
          a restart the same way set_pinned does. *)
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~base_path:(Env_config_core.base_path ())
+        ~recipient_lookup:every_name_declared ());
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p ->
@@ -2469,26 +2539,48 @@ let test_fusion_creation_emits_the_recorded_audience () =
        (Option.bind post.origin (fun o -> o.Board.fusion_producer))
    | Ok (Board.Post_created _) -> Alcotest.fail "whitespace-padded producer replay created a second post"
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
+  let pre_effect_board_error label = function
+    | Ok _ -> Alcotest.failf "%s: expected a pre-effect refusal" label
+    | Error failure ->
+      Alcotest.(check bool) (label ^ ": refused before publication") true
+        (Board.Post_publication_failure.effect_disposition failure =
+         Failure_effect.Proven_pre_effect);
+      Alcotest.(check bool) (label ^ ": no committed receipt") true
+        (Option.is_none (Board.Post_publication_failure.committed failure));
+      (match Board.Post_publication_failure.cause failure with
+       | Board.Post_publication_failure.Board_error error -> error
+       | Board.Post_publication_failure.Raised _ ->
+         Alcotest.fail (label ^ ": " ^ Board.Post_publication_failure.to_string failure))
+  in
   (match
-     Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
-       ~author:"other-keeper" ~content:"fusion result headline @first-reader"
-       ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
-       ~origin:{ origin with fusion_producer = Some "other-keeper" } ()
+     pre_effect_board_error "another producer cannot replay the existing run"
+       (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
+          ~author:"other-keeper" ~content:"fusion result headline @first-reader"
+          ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+          ~origin:{ origin with fusion_producer = Some "other-keeper" } ())
    with
-   | Error failure when
-       (match Board.Post_publication_failure.cause failure with
-        | Board.Post_publication_failure.Board_error (Board.Already_exists _) -> true
-        | Board.Post_publication_failure.Board_error _
-        | Board.Post_publication_failure.Raised _ -> false) -> ()
-   | Ok _ -> Alcotest.fail "mismatched fusion_producer was treated as an exact replay"
-   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
-  List.iter
-    (fun fusion_producer ->
-      expect_validation_error "invalid Fusion producer origin"
-        (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+   | Board.Already_exists _ -> ()
+   | error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     pre_effect_board_error "producer must match the requesting author"
+       (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
           ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
           ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
-          ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer } ()))
+          ~origin:{ origin with fusion_producer = Some "other-keeper" } ())
+   with
+   | Board.Validation_error _ -> ()
+   | error -> Alcotest.fail (Board.show_board_error error));
+  List.iter
+    (fun fusion_producer ->
+      match
+        pre_effect_board_error "invalid Fusion producer origin"
+          (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+             ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+             ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+             ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer } ())
+      with
+      | Board.Validation_error _ -> ()
+      | error -> Alcotest.fail (Board.show_board_error error))
     [ None; Some "   "; Some "bad/producer" ];
   Alcotest.(check int) "an exact replay emits nothing" 1 (List.length !seen)
 
@@ -2514,7 +2606,9 @@ let test_post_audience_survives_edit_and_restart () =
     (targets edited);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   let reloaded = get (Board_dispatch.get_post ~post_id) in
   Alcotest.(check (list string)) "restart keeps exact edited audience" ["second-reader"]
     (targets reloaded);
@@ -2563,7 +2657,9 @@ let test_comment_audience_survives_restart () =
     (plain.audience = Some Board.Thread_participants);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   let reloaded id =
     match List.find_opt (fun (c : Board.comment) ->
             String.equal (Board.Comment_id.to_string c.id) (Board.Comment_id.to_string id))
@@ -2654,7 +2750,7 @@ let test_sub_board_delete () =
             | Error e -> Alcotest.fail (Board.show_board_error e))))
 
 let sub_board_slugs_from_disk () =
-  let path = Board.sub_boards_path () in
+  let path = Board.sub_boards_path (Board.global ()) in
   if not (Fs_compat.file_exists path) then []
   else
     Fs_compat.load_jsonl path
@@ -2895,7 +2991,9 @@ let test_sub_board_delete_clears_orphan_hearth () =
   Board_dispatch.flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:every_name_declared ());
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
@@ -2928,9 +3026,247 @@ let test_sub_board_post_count_projection () =
 
 (** {1 Test Runner} *)
 
+let test_initialization_preserves_captured_workspace_and_lookup () =
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
+    (fun () ->
+      try
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        (try
+           Eio.Switch.run (fun init_sw ->
+             Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw:init_sw (fun () ->
+                 let absent_base = fresh_test_base_path () in
+                 Board.reset_global_for_test ();
+                 Board_dispatch.reset_for_test ();
+                 let expected_root = Fs_compat.realpath_lenient
+                     (Common.masc_dir_from_base_path ~base_path:absent_base) in
+                 let original_cwd = Sys.getcwd () in
+                 let relative_root = Filename.basename absent_base in
+                 Fun.protect ~finally:(fun () -> Unix.chdir original_cwd) (fun () ->
+                   Unix.chdir (Filename.dirname absent_base);
+                   Alcotest.(check bool) "fresh initialization request is relative" true
+                     (Filename.is_relative relative_root);
+                   Alcotest.(check bool) "relative initialization target is absent at init" false
+                     (Sys.file_exists relative_root);
+                   (match Board_dispatch.init_jsonl ~base_path:relative_root
+                       ~recipient_lookup:every_name_declared () with
+                    | Error (Board_dispatch.Workspace_binding_refused
+                        (Board_workspace_binding.Base_path_missing _)) -> ()
+                    | Error (Board_dispatch.Workspace_mismatch _
+                        | Board_dispatch.Workspace_binding_refused _) | Ok () ->
+                      Alcotest.fail "absent BasePath must be refused before initialization");
+                   Alcotest.(check string) "missing root installs no backend" "uninitialized"
+                     (Board_dispatch.backend_name ());
+                   Alcotest.(check bool) "missing root starts no flusher" false
+                     (Board_dispatch.flusher_started_for_test ());
+                   Alcotest.(check bool) "missing root refusal creates nothing" false
+                     (Sys.file_exists absent_base);
+                   Fs_compat.mkdir_p absent_base;
+                   Preparation.prepare ~base_path:absent_base ~action:Preparation.Bootstrap;
+                   Result.get_ok (Board_dispatch.init_jsonl ~base_path:relative_root
+                     ~recipient_lookup:every_name_declared ()));
+                 Alcotest.(check string) "absent relative init captures the absolute workspace"
+                   expected_root (Board.workspace_masc_dir (Board.global ()));
+                 Alcotest.(check bool) "isolated initialization starts its scoped flusher" true
+                   (Board_dispatch.flusher_started_for_test ());
+                 Eio.Switch.fail init_sw Exit))
+         with Exit -> ());
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+          (fun () ->
+            (match Board_dispatch.init_jsonl ~base_path:""
+                ~recipient_lookup:every_name_declared () with
+             | _ -> Alcotest.fail "empty initialization workspace must raise Invalid_argument"
+             | exception Invalid_argument _ -> ());
+            let base_a = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_a;
+            Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
+            Board.reset_global_for_test ();
+            Board_dispatch.reset_for_test ();
+            let retained = Board.global () in
+            let root_a = (Board.workspace_masc_dir retained) in
+            let base_b = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_b;
+            let root_b = Fs_compat.realpath_lenient
+              (Common.masc_dir_from_base_path ~base_path:base_b) in
+            let rejected_calls = ref 0 in
+            let rejected_lookup = Recipient_lookup.make (fun _ ->
+              incr rejected_calls; Error "replacement lookup must not run") in
+            let check_mismatch label = function
+              | Error (Board_dispatch.Workspace_mismatch
+                  {active_workspace_masc_dir; requested_workspace_masc_dir}) ->
+                Alcotest.(check string) (label ^ ": active") root_a active_workspace_masc_dir;
+                Alcotest.(check string) (label ^ ": requested") root_b requested_workspace_masc_dir
+              | Error (Board_dispatch.Workspace_binding_refused rejection) ->
+                Alcotest.fail (Board_workspace_binding.rejection_to_string rejection)
+              | Ok () -> Alcotest.fail (label ^ ": expected typed workspace mismatch")
+            in
+            check_mismatch "early global A refuses init B"
+              (Board_dispatch.init_jsonl ~base_path:base_b
+                ~recipient_lookup:rejected_lookup ());
+            Alcotest.(check string) "failed init has no active backend" "uninitialized"
+              (Board_dispatch.backend_name ());
+            Alcotest.(check bool) "failed init has no flusher" false
+              (Board_dispatch.flusher_started_for_test ());
+            Alcotest.(check bool) "failed init retains actual store" true
+              (retained == Board.global ());
+            Alcotest.(check bool) "failed init creates no target directory" false
+              (Sys.file_exists root_b);
+            (match Board_dispatch.backend () with
+             | Board_dispatch.Jsonl active ->
+               Alcotest.(check bool) "read-started backend retains A" true (active == retained));
+            check_mismatch "read-started A refuses init B before lookup installation"
+              (Board_dispatch.init_jsonl ~base_path:base_b
+                ~recipient_lookup:rejected_lookup ());
+            Alcotest.(check bool) "read-started mismatch retains actual store" true
+              (retained == Board.global ());
+            let accepted_calls = ref 0 in
+            let original_lookup = Recipient_lookup.make (fun candidate ->
+              incr accepted_calls;
+              Ok (Result.to_option (Board.Agent_id.parse
+                (Recipient_lookup.Candidate.to_string candidate)))) in
+            let original_cwd = Sys.getcwd () in
+            let relative_root_a = Common.masc_dir_from_base_path
+                ~base_path:(Filename.basename base_a) in
+            Fun.protect ~finally:(fun () -> Unix.chdir original_cwd) (fun () ->
+              Unix.chdir (Filename.dirname base_a);
+              Alcotest.(check bool) "initialization request is relative" true
+                (Filename.is_relative relative_root_a);
+              Result.get_ok (Board_dispatch.init_jsonl ~base_path:(Filename.basename base_a)
+                ~recipient_lookup:original_lookup ()));
+            check_mismatch "active A refuses init B"
+              (Board_dispatch.init_jsonl ~base_path:base_b
+                ~recipient_lookup:rejected_lookup ());
+            Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_a
+              ~recipient_lookup:rejected_lookup ());
+            let post = get_created (Board_dispatch.create_post ~author:"writer"
+              ~content:"@alice retains the first lookup" ~post_kind:Board.Human_post ()) in
+            Alcotest.(check bool) "real addressed producer consults original lookup" true
+              (!accepted_calls > 0);
+            (match post.audience with
+             | Some (Board.Targets recipients) ->
+               Alcotest.(check (list string)) "producer records the original lookup's recipient"
+                 ["alice"] (List.map Board.Agent_id.to_string recipients)
+             | _ -> Alcotest.fail "addressed producer must record Alice as its target");
+            Alcotest.(check int) "mismatch and idempotence never install replacement lookup"
+              0 !rejected_calls;
+            Alcotest.(check bool) "producer under EnvB writes captured A" true
+              (Sys.file_exists (Board.persist_path retained));
+            Alcotest.(check bool) "producer leaves B untouched" false (Sys.file_exists root_b);
+            Alcotest.(check string) "ambient Env is still B" base_b (Env_config_core.base_path ());
+            Alcotest.(check bool) "accepted post remains in retained store" true
+              (Result.is_ok (Board.read_post retained ~post_id:(Board.Post_id.to_string post.id)));
+            Eio.Switch.fail sw Exit)
+      with Exit -> ())
+
+let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let alias_path = ref None in
+  let base_alias_path = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter Unix.unlink !alias_path;
+      Option.iter Unix.unlink !base_alias_path;
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
+    (fun () ->
+      try
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+          (fun () ->
+            let base_a = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_a;
+            Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
+            Board.reset_global_for_test ();
+            Board_dispatch.reset_for_test ();
+            let retained = Board.global () in
+            let root_a = (Board.workspace_masc_dir retained) in
+            Fs_compat.mkdir_p root_a;
+            ignore (Board_dispatch.backend ());
+            if lookup_installed then
+              Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_a
+                ~recipient_lookup:every_name_declared ());
+            let flusher_before = Board_dispatch.flusher_started_for_test () in
+            let base_b = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_b;
+            let root_b = Common.masc_dir_from_base_path ~base_path:base_b in
+            Unix.symlink root_a root_b;
+            alias_path := Some root_b;
+            let foreign_calls = ref 0 in
+            let foreign_lookup = Recipient_lookup.make (fun _ ->
+              incr foreign_calls;
+              Ok (Result.to_option (Board.Agent_id.parse "foreign-keeper"))) in
+            let initialization = Board_dispatch.init_jsonl ~base_path:base_b
+                ~recipient_lookup:foreign_lookup () in
+            let addressed = Board_dispatch.create_post ~author:"writer"
+                ~content:"@alice must stay in the captured workspace"
+                ~post_kind:Board.Human_post () in
+            Alcotest.(check int) "foreign lookup is never installed or invoked"
+              0 !foreign_calls;
+            Alcotest.(check bool) "foreign workspace alias is refused"
+              true (Result.is_error initialization);
+            Alcotest.(check bool) "refusal retains the original store"
+              true (retained == Board.global ());
+            Alcotest.(check bool) "refusal retains the scoped flusher"
+              flusher_before (Board_dispatch.flusher_started_for_test ());
+            if lookup_installed then
+              (match (get_created addressed).audience with
+               | Some (Board.Targets recipients) ->
+                 Alcotest.(check (list string)) "original lookup still resolves Alice"
+                   ["alice"] (List.map Board.Agent_id.to_string recipients)
+               | _ -> Alcotest.fail "original lookup must remain installed")
+            else (
+              (match addressed with
+               | Error failure ->
+                 (match Board.Post_publication_failure.cause failure with
+                  | Board.Post_publication_failure.Board_error
+                      (Board.Recipient_lookup_failed _) -> ()
+                  | Board.Post_publication_failure.Board_error error ->
+                    Alcotest.fail (Board.show_board_error error)
+                  | Board.Post_publication_failure.Raised exception_ ->
+                    Alcotest.fail (Printexc.to_string exception_))
+               | Ok _ -> Alcotest.fail "an uninstalled lookup must stay unavailable");
+              Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_a
+                ~recipient_lookup:every_name_declared ());
+              ignore (get_created (Board_dispatch.create_post ~author:"writer"
+                ~content:"@alice after the original workspace initializes"
+                ~post_kind:Board.Human_post ())));
+            Alcotest.(check string) "ambient B never rekeys the store"
+              base_b (Env_config_core.base_path ());
+            Alcotest.(check bool) "A remains the retained workspace"
+              true (String.equal root_a (Fs_compat.realpath_lenient
+                (Common.masc_dir_from_base_path ~base_path:base_a)));
+            let base_alias = base_a ^ ".root-alias" in
+            Unix.symlink base_a base_alias;
+            base_alias_path := Some base_alias;
+            Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_alias
+              ~recipient_lookup:foreign_lookup ());
+            Alcotest.(check int) "BasePath alias preserves the first installed lookup"
+              0 !foreign_calls;
+            Eio.Switch.fail sw Exit)
+      with Exit -> ())
+
 let () =
   Alcotest.run "Board_dispatch" [
     "backend", [
+      Alcotest.test_case "initialization preserves captured workspace and lookup" `Quick
+        test_initialization_preserves_captured_workspace_and_lookup;
+      Alcotest.test_case "read-started initialization refuses foreign workspace alias" `Quick
+        (test_initialization_refuses_foreign_workspace_alias ~lookup_installed:false);
+      Alcotest.test_case "active initialization refuses foreign workspace alias" `Quick
+        (test_initialization_refuses_foreign_workspace_alias ~lookup_installed:true);
       Alcotest.test_case "default backend" `Quick (with_eio test_default_backend);
       Alcotest.test_case "returns jsonl" `Quick (with_eio test_backend_returns_jsonl);
     ];

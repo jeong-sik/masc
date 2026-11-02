@@ -1,0 +1,248 @@
+{
+  "captured_at": "2026-11-02T08:42:53.015400+00:00",
+  "cli_version": "codex-cli 0.166.0",
+  "scope": "new text-only thread using external session own account; no Keeper thread changed",
+  "derivative": "Selected fields only; initialization metadata and unrelated notifications omitted. Original retained locally, not claimed byte-identical.",
+  "original_bytes": 77130,
+  "original_sha256": "34dfa55811dad39a9e17a1c36ec40025f7c0d5d8497bdf86a76e9eabd2e22204",
+  "phases": [
+    {
+      "mode": "start",
+      "injected": false,
+      "marker": "STANDING_A_47572",
+      "thread_id": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+      "model": "gpt-6.1-terra",
+      "turn_id": "01a19b6c-feb4-7880-832e-93a7a7577e9e",
+      "agent_texts": [
+        "STANDING_A_47572"
+      ],
+      "process_exit": 0,
+      "terminal_status": "completed",
+      "item_notification_types": {
+        "userMessage": 2,
+        "agentMessage": 2
+      },
+      "requests": [
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+              "clientInfo": {
+                "name": "masc-isolated-instruction-probe",
+                "version": "1"
+              },
+              "capabilities": {
+                "experimentalApi": true
+              }
+            }
+          },
+          "bytes": 167,
+          "sha256": "65f05180254f10cf4949342e92d0885a4cde35636e536e247794888a76a62025"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "thread/start",
+            "params": {
+              "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-47572-applied-review-instructions-20261102T081000Z/probe-work",
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "developerInstructions": "Current standing instructions: reply with exactly STANDING_A_47572. This replaces any earlier standing marker instruction. Do not use tools."
+            }
+          },
+          "bytes": 404,
+          "sha256": "05cf5c98c02eaf8381257a28bb0515f8f96f949146ced35498fac9d7cc10cced"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+              "threadId": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "Reply with the active standing marker only."
+                }
+              ]
+            }
+          },
+          "bytes": 186,
+          "sha256": "19ddc73a2ebf18b349a941d6133b56cb57edb26d338bae1c61537f50918c147e"
+        }
+      ]
+    },
+    {
+      "mode": "resume",
+      "injected": false,
+      "marker": "STANDING_B_47572",
+      "thread_id": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+      "model": "gpt-6.1-terra",
+      "turn_id": "01a19b6d-1161-73a3-8d1b-96f50956e733",
+      "agent_texts": [
+        "STANDING_A_47572"
+      ],
+      "process_exit": 0,
+      "terminal_status": "completed",
+      "item_notification_types": {
+        "userMessage": 2,
+        "agentMessage": 2
+      },
+      "requests": [
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+              "clientInfo": {
+                "name": "masc-isolated-instruction-probe",
+                "version": "1"
+              },
+              "capabilities": {
+                "experimentalApi": true
+              }
+            }
+          },
+          "bytes": 167,
+          "sha256": "65f05180254f10cf4949342e92d0885a4cde35636e536e247794888a76a62025"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "thread/resume",
+            "params": {
+              "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-47572-applied-review-instructions-20261102T081000Z/probe-work",
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "developerInstructions": "Current standing instructions: reply with exactly STANDING_B_47572. This replaces any earlier standing marker instruction. Do not use tools.",
+              "threadId": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+              "excludeTurns": true
+            }
+          },
+          "bytes": 475,
+          "sha256": "b86614fed75b0f7a0d50bb3ca72c180c9a2f0c1f7749e6a159e7509269ced6d6"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+              "threadId": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "Reply with the active standing marker only."
+                }
+              ]
+            }
+          },
+          "bytes": 186,
+          "sha256": "19ddc73a2ebf18b349a941d6133b56cb57edb26d338bae1c61537f50918c147e"
+        }
+      ]
+    },
+    {
+      "mode": "resume",
+      "injected": true,
+      "marker": "STANDING_B_47572",
+      "thread_id": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+      "model": "gpt-6.1-terra",
+      "turn_id": "01a19b6d-3217-7fb0-a81d-111ef79350fc",
+      "agent_texts": [
+        "STANDING_B_47572"
+      ],
+      "process_exit": 0,
+      "terminal_status": "completed",
+      "item_notification_types": {
+        "userMessage": 2,
+        "agentMessage": 2
+      },
+      "requests": [
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+              "clientInfo": {
+                "name": "masc-isolated-instruction-probe",
+                "version": "1"
+              },
+              "capabilities": {
+                "experimentalApi": true
+              }
+            }
+          },
+          "bytes": 167,
+          "sha256": "65f05180254f10cf4949342e92d0885a4cde35636e536e247794888a76a62025"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "thread/resume",
+            "params": {
+              "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-47572-applied-review-instructions-20261102T081000Z/probe-work",
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "developerInstructions": "Current standing instructions: reply with exactly STANDING_B_47572. This replaces any earlier standing marker instruction. Do not use tools.",
+              "threadId": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+              "excludeTurns": true
+            }
+          },
+          "bytes": 475,
+          "sha256": "b86614fed75b0f7a0d50bb3ca72c180c9a2f0c1f7749e6a159e7509269ced6d6"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "thread/inject_items",
+            "params": {
+              "threadId": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+              "items": [
+                {
+                  "type": "message",
+                  "role": "developer",
+                  "content": [
+                    {
+                      "type": "input_text",
+                      "text": "Current standing instructions: reply with exactly STANDING_B_47572. This replaces any earlier standing marker instruction. Do not use tools."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "bytes": 348,
+          "sha256": "4a9e279dcae667f142f4c62a07783237d106a4befb0aa8fbd96c88ad3434bde3"
+        },
+        {
+          "packet": {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "turn/start",
+            "params": {
+              "threadId": "01a19b6c-fcf4-75b2-9089-96cbc13d2597",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "Reply with the active standing marker only."
+                }
+              ]
+            }
+          },
+          "bytes": 186,
+          "sha256": "94ac00c09b9f14aa4d71bffb01e6309a04326910bda3375bf41c5d7783ff0524"
+        }
+      ]
+    }
+  ]
+}

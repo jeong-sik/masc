@@ -1,4 +1,5 @@
 module Cases = Test_mcp_tool_matrix_cases
+module Preparation = Masc_test_deps.Board_test_preparation
 module Keeper_publication_recovery_availability =
   Masc.Keeper_publication_recovery_availability
 
@@ -395,6 +396,10 @@ let seed_prepared_recovery ~fs ~base_path ~owner ~operation_id =
 let create_runtime env sw ~base_path =
   let fs = Eio.Stdenv.fs env in
   Fs_compat.set_fs fs;
+  (* Independent runtime fixtures must not inherit a prior process's Board. *)
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Mcp_eio.create_state_eio
     ~sw
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
@@ -486,6 +491,10 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
        | Keeper_publication_recovery_availability.Non_runtime ->
          Alcotest.fail "same live provider did not observe availability");
       let initialized_scope = Mcp_server.workspace_scope state in
+      Alcotest.(check bool)
+        "live runtime scope replacement advances its epoch"
+        false
+        (Mcp_server.Workspace_scope_epoch.equal initial_scope.epoch initialized_scope.epoch);
       Alcotest.(check bool)
         "config replacement preserves the live recovery handle"
         true
@@ -723,12 +732,152 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
            |> to_int))
 ;;
 
+let test_workspace_scope_epoch_follows_replacement () =
+  let base_path = Cases.temp_dir "mcp-workspace-epoch-" in
+  let other_base = Cases.temp_dir "mcp-workspace-epoch-other-" in
+  let saved_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      Cases.cleanup_dir base_path;
+      Cases.cleanup_dir other_base;
+      restore_env "MASC_BASE_PATH" saved_base_path)
+    (fun () ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      let initial = Mcp_server.workspace_scope state in
+      let epoch = Mcp_server.Workspace_scope_epoch.equal in
+      let scope () = Mcp_server.workspace_scope state in
+      let replace config =
+        match Mcp_server.set_workspace_config state config with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (Mcp_server.workspace_switch_error_to_string error)
+      in
+      Alcotest.(check bool) "epoch remains stable while the scope is unchanged" true
+        (epoch initial.epoch (scope ()).epoch);
+      Alcotest.(check bool) "current scope has not been replaced" true
+        (Option.is_none (Eio.Promise.peek (Mcp_server.workspace_scope_replaced initial)));
+      let other_state = Mcp_server.For_testing.create_state ~base_path in
+      Alcotest.(check bool) "another state has its own epoch" false
+        (epoch initial.epoch (Mcp_server.workspace_scope other_state).epoch);
+      let config_b = { initial.config with workspace_path = Filename.concat base_path "other" } in
+      replace config_b;
+      let after_b = scope () in
+      Alcotest.(check bool) "old scope replacement remains observable" true
+        (Option.is_some (Eio.Promise.peek (Mcp_server.workspace_scope_replaced initial)));
+      Alcotest.(check bool) "new scope is still active" true
+        (Option.is_none (Eio.Promise.peek (Mcp_server.workspace_scope_replaced after_b)));
+      Alcotest.(check bool) "a different workspace replaces the epoch" false
+        (epoch initial.epoch after_b.epoch);
+      replace initial.config;
+      let after_a = scope () in
+      Alcotest.(check bool) "intermediate scope is replaced" true
+        (Option.is_some (Eio.Promise.peek (Mcp_server.workspace_scope_replaced after_b)));
+      Alcotest.(check bool) "returning to the first path does not restore its epoch" false
+        (epoch initial.epoch after_a.epoch);
+      Alcotest.(check bool) "the intermediate epoch is not reused" false
+        (epoch after_b.epoch after_a.epoch);
+      replace initial.config;
+      let after_same = scope () in
+      Alcotest.(check bool) "a same-path replacement is a new scope" false
+        (epoch after_a.epoch after_same.epoch);
+      let other_config = Masc.Workspace.default_config other_base in
+      (match Mcp_server.set_workspace_config state other_config with
+       | Error (Mcp_server.Workspace_masc_root_mismatch _) -> ()
+       | Ok () -> Alcotest.fail "different MASC root was accepted");
+      Alcotest.(check bool) "a rejected replacement retains the current epoch" true
+        (epoch after_same.epoch (scope ()).epoch);
+      Alcotest.(check bool) "a rejected replacement does not revoke the current scope" true
+        (Option.is_none (Eio.Promise.peek (Mcp_server.workspace_scope_replaced after_same)));
+      Alcotest.(check bool) "an epoch can be represented on the wire" true
+        (String.length (Mcp_server.Workspace_scope_epoch.to_string after_same.epoch) > 0))
+;;
+
+let test_workspace_scope_replacement_waiters_and_racing_updates () =
+  let base_path = Cases.temp_dir "mcp-workspace-lifetime-" in
+  let saved_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      Cases.cleanup_dir base_path;
+      restore_env "MASC_BASE_PATH" saved_base_path)
+    (fun () ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      let initial = Mcp_server.workspace_scope state in
+      let replaced = Mcp_server.workspace_scope_replaced initial in
+      Eio_main.run (fun _env ->
+        Eio.Switch.run (fun sw ->
+          let waiter () =
+            let ready, signal_ready = Eio.Promise.create () in
+            let finished, signal_finished = Eio.Promise.create () in
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve signal_ready ();
+              Eio.Promise.await replaced;
+              Eio.Promise.resolve signal_finished ());
+            ready, finished
+          in
+          let ready_a, finished_a = waiter () in
+          let ready_b, finished_b = waiter () in
+          let cancel, signal_cancel = Eio.Promise.create () in
+          let cancel_ready, signal_cancel_ready = Eio.Promise.create () in
+          let cancelled, signal_cancelled = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () ->
+            let stopped = Eio.Fiber.first
+              (fun () -> Eio.Promise.resolve signal_cancel_ready ();
+                Eio.Promise.await replaced; false)
+              (fun () -> Eio.Promise.await cancel; true)
+            in
+            Eio.Promise.resolve signal_cancelled stopped);
+          Eio.Promise.await ready_a;
+          Eio.Promise.await ready_b;
+          Eio.Promise.await cancel_ready;
+          Eio.Promise.resolve signal_cancel ();
+          Alcotest.(check bool) "one subscriber can withdraw" true
+            (Eio.Promise.await cancelled);
+          (match Mcp_server.set_workspace_config state initial.config with
+           | Ok () -> ()
+           | Error error -> Alcotest.fail (Mcp_server.workspace_switch_error_to_string error));
+          Eio.Promise.await finished_a;
+          Eio.Promise.await finished_b));
+      let ready = Atomic.make 0 in
+      let start = Atomic.make false in
+      let seen_lock = Mutex.create () in
+      let seen = ref [] in
+      let worker () =
+        ignore (Atomic.fetch_and_add ready 1);
+        while not (Atomic.get start) do Domain.cpu_relax () done;
+        for _ = 1 to 25 do
+          let scope = Mcp_server.workspace_scope state in
+          Mutex.protect seen_lock (fun () -> seen := scope :: !seen);
+          match Mcp_server.set_workspace_config state initial.config with
+          | Ok () -> ()
+          | Error error -> failwith (Mcp_server.workspace_switch_error_to_string error)
+        done
+      in
+      let workers = List.init 4 (fun _ -> Domain.spawn worker) in
+      while Atomic.get ready < List.length workers do Domain.cpu_relax () done;
+      Atomic.set start true;
+      List.iter Domain.join workers;
+      Alcotest.(check int) "every racing worker captured its prior scope" 100 (List.length !seen);
+      List.iter (fun scope ->
+        Alcotest.(check bool) "every observed prior scope was notified" true
+          (Option.is_some (Eio.Promise.peek (Mcp_server.workspace_scope_replaced scope)))) !seen;
+      Alcotest.(check bool) "the final scope remains active" true
+        (Option.is_none (Eio.Promise.peek
+          (Mcp_server.workspace_scope_replaced (Mcp_server.workspace_scope state)))))
+;;
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   Alcotest.run
     "mcp_tool_runtime_workspace_path"
     [ ( "masc_start"
       , [ Alcotest.test_case
+            "workspace epochs distinguish replacement and ABA"
+            `Quick
+            test_workspace_scope_epoch_follows_replacement
+        ; Alcotest.test_case
+            "workspace replacement wakes waiters across racing updates"
+            `Quick
+            test_workspace_scope_replacement_waiters_and_racing_updates
+        ; Alcotest.test_case
             "rejects tilde expansion when initial HOME is empty"
             `Quick
             test_masc_start_tilde_rejects_empty_initial_home

@@ -118,7 +118,7 @@ let workspace_admission_preserves_selected_preparation () =
          foreign_snapshot.reports);
     let expected : Tui_decode.server_identity =
       { sid_version="0.24.0"; sid_binary_commit="preparation-source"
-      ; sid_binary_commit_age_s=None; sid_base_path=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path)
+      ; sid_binary_commit_age_s=None; sid_runtime_instance_id = None; sid_base_path=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path)
       ; sid_masc_root=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Workspace.masc_dir config))
       ; sid_executable_in_worktree=None; sid_state_ready=Some true
       ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
@@ -389,7 +389,7 @@ let failed_owner_to_saved_preparation () =
           detail="original preparation refusal"; outcome_ref=None} in
     let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
         "trace_id",`String "owner-meta-trace";"activation_mode",`String "manual"]) |> ok in
-    let owner = Keeper_owner.start ~sw
+    let owner = Keeper_owner.start ~base_path:config.Workspace.base_path ~sw
         ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
         ~operation_store_path:(Filename.concat config.Workspace.base_path "failure-owner.sqlite3") ~session_root:(Filename.concat (Filename.dirname (Filename.concat config.Workspace.base_path "failure-owner.sqlite3")) "traces")
         ~now:(fun () -> 10.) ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)

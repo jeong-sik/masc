@@ -828,7 +828,8 @@ let cors_allow_headers_value =
 let cors_expose_headers_value =
   String.concat ", "
     [ "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
-    ; fst Workspace.read_precondition_admission_header ]
+    ; fst Workspace.read_precondition_admission_header
+    ; "x-masc-runtime-instance-id, x-masc-execution-publication-epoch" ]
 
 let cors_headers origin =
   let base = [

@@ -87,6 +87,22 @@ let with_eio_temp_dir_and_clock f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
 
+(* Notification publishers own a fresh Board for the full test, including
+   asynchronous completion. Detach it before the caller removes its workspace. *)
+let with_prepared_board ~base_path f =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+  @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test ())
+    (fun () ->
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test ();
+      Masc_test_deps.Board_test_preparation.prepare ~base_path
+        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
+      f ())
+
 (* A fresh listing per call, so every scan reads every file. *)
 let scan_requests base_path = V.list_projected (V.listing ~project:Result.ok ()) base_path
 
@@ -400,7 +416,8 @@ let stalled_posts_for ~verification_id =
 ;;
 
 let test_the_same_stall_is_posted_once () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   for _ = 1 to 3 do
     VP.notify_stalled_verification ~authority:stall_authority
@@ -415,7 +432,8 @@ let test_the_same_stall_is_posted_once () =
 (* Pending journal observations share one notice despite different diagnostics
    or timer admissions. Operator repair is a distinct, non-replaying state. *)
 let test_original_observation_notice_is_posted_once_until_repair () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   let verification_id = "vrf-original-observation-stall" in
   let notify cause disposition detail =
@@ -455,6 +473,7 @@ let test_original_observation_notice_is_posted_once_until_repair () =
    posts a reader can tell apart. *)
 let test_verify_title_names_the_verification () =
   with_eio_temp_dir (fun base_path ->
+    with_prepared_board ~base_path @@ fun () ->
     let config = W.default_config base_path in
     ignore (W.init config ~agent_name:None);
     ignore
@@ -490,7 +509,8 @@ let test_verify_title_names_the_verification () =
    A new diagnostic under the same gate and the same disposition tells the
    reader nothing they have not been told, so it does not post again. *)
 let test_a_different_stall_still_reaches_the_board () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   VP.notify_stalled_verification ~authority:stall_authority
     ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-1"; disposition = VP.No_retry_armed })
@@ -513,7 +533,8 @@ let test_a_different_stall_still_reaches_the_board () =
    diagnostic each time is the same news — "a retry is armed" — and was the
    noise U2 set out to remove. *)
 let test_a_changed_detail_under_an_armed_retry_is_not_news () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   List.iter
     (fun detail ->
@@ -535,7 +556,8 @@ let test_a_changed_detail_under_an_armed_retry_is_not_news () =
    scheduled" has not yet been told the forward path. A repeat of the same
    disposition is still one post. *)
 let test_a_disposition_change_is_its_own_stall () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   let notify ~disposition =
     VP.notify_stalled_verification ~authority:stall_authority
@@ -560,7 +582,8 @@ let test_a_disposition_change_is_its_own_stall () =
    soon, not whether: an armed retry that later joins a shared timer is the
    same news. *)
 let test_returning_to_an_earlier_disposition_posts_again () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   let notify ~disposition =
     VP.notify_stalled_verification ~authority:stall_authority
@@ -577,9 +600,8 @@ let test_returning_to_an_earlier_disposition_posts_again () =
     (stalled_posts_for ~verification_id:"vrf-stall-4")
 ;;
 
-(* A Goal review that stops without a verdict uses the same notice as a
-   Task review. Its post names the Goal, the request it answers and the one
-   forward path a Goal has, and none of the Task's. *)
+(* A Goal notice must not promise that request_complete starts a new review:
+   the retained original can still be unresolved, or its state unreadable. *)
 let test_goal_stalled_projection_names_its_forward_path () =
   let content =
     VP.For_testing.stalled_board_content
@@ -592,10 +614,13 @@ let test_goal_stalled_projection_names_its_forward_path () =
     ; "request:req-201"
     ; "evaluator_unavailable"
     ; "requested runtime or lane not found"
-    ; "no retry armed"
+    ; "this observation armed no retry"
     ; "request_complete"
+    ; "retained review state"
+    ; "Whether a later request_complete starts a new review depends"
     ];
-  check_omits content [ "submit_for_verification"; "HITL"; "retry scheduled" ]
+  check_omits content
+    [ "submit_for_verification"; "HITL"; "retry scheduled"; "which starts the next review" ]
 ;;
 
 let test_goal_stalled_metadata_names_its_subject () =
@@ -642,7 +667,8 @@ let stalled_goal_posts_for ~goal_id =
    otherwise each post invites the next request_complete. A new request is
    a new subject and posts. *)
 let test_the_same_goal_stall_is_posted_once () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   let notify ~request_id =
     VP.notify_stalled_verification ~authority:stall_authority
@@ -662,7 +688,8 @@ let test_the_same_goal_stall_is_posted_once () =
    whose ids happen to share spellings are two subjects: neither silences
    the other. *)
 let test_a_task_stall_does_not_silence_a_goal_stall () =
-  Eio_main.run @@ fun _env ->
+  with_eio_temp_dir @@ fun base_path ->
+  with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   VP.notify_stalled_verification ~authority:stall_authority
     ~subject:(VP.Task_review { task_id = "shared-301"; verification_id = "shared-req-301"; disposition = VP.No_retry_armed })
@@ -1863,6 +1890,7 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
 
 let test_system_llm_agent_commits_without_a_keeper_verifier () =
   with_eio_temp_dir_and_clock (fun ~clock base_path ->
+    with_prepared_board ~base_path @@ fun () ->
     Masc.Workspace_metric_hooks.install ();
     let prompt_dir =
       match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -2173,6 +2201,8 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
         Unix.putenv "MASC_BASE_PATH" base_path;
         Masc.Board.reset_global_for_test ();
         Masc.Board_dispatch.reset_for_test ();
+        Masc_test_deps.Board_test_preparation.prepare ~base_path
+          ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Atomic.set

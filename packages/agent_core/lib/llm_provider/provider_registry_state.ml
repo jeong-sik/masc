@@ -13,7 +13,7 @@ type entry =
   { name : string
   ; defaults : provider_defaults
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capabilities.capabilities option
   ; is_available : unit -> bool
   }
 

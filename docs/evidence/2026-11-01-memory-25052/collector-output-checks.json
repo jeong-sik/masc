@@ -1,0 +1,12 @@
+{
+  "observed_at": "2026-11-01T01:57:45.662286+00:00",
+  "helper_sha256": "bfc53ce05eb1b00792cb06ba9561feae2ba1f565695227cba6a5d55caa49f7c4",
+  "fresh_output_created": true,
+  "repeat_existing_output_refused_before_health_read": true,
+  "created_output_path": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/memory-output-exclusive-g_jwz_h4/fresh.json",
+  "created_output_sha256": "63b49de47f32ba8e7a14b88dba1564f04e7af5a48a8f25256a8e343bc2816897",
+  "repeat_preserved_bytes": true,
+  "pre_collection_existing_output_and_resolved_parent_symlink_refusal": true,
+  "source_review_final_exclusive_create": "Path.open('x')",
+  "scope": "Collector output behavior only; this new probe does not replace the retained 01:47 Memory OS observation."
+}

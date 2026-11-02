@@ -24,9 +24,10 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
   match client_kind with
   | S.Codex ->
     let config : Runtime_execution.codex_app_server =
-      { cli_path; account_home = None; model = None; timeout_s = 1. } in
+      { cli_path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 1. } in
     let outcome = Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
         ~context_window:None
+        ~configured_reasoning_effort:None ~turn_timeout_s:None
         ~accepts_image_input:false ~runtime_id ~keeper_name
         ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
         ~pre_tool_rejects:(ref []) ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal:"synthetic claim probe"
@@ -38,8 +39,9 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
     outcome.result, outcome.settled_session, outcome.effect_disposition
   | S.Claude_code ->
     let config : Runtime_execution.claude_code =
-      { cli_path; account_home = None; model = None; timeout_s = 1. } in
+      { cli_path; account_home = Masc_test_deps.claude_account (); model = None; timeout_s = 1. } in
     let outcome = Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+        ~configured_reasoning_effort:None ~turn_timeout_s:None
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."
@@ -53,7 +55,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       { cli_path; model = "synthetic-model"; agent = None; effort = None
       ; oauth_source = Filename.concat base_path "absent-synthetic-oauth"
       ; timeout_s = 1.; add_dirs = [] } in
-    let outcome = Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    let outcome = Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."

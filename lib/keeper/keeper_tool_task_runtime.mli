@@ -1,8 +1,9 @@
 (** Agent task tool runtime — claim, transition, list. *)
 
 (** Which {!Tool_result.tool_failure_class} a {!Workspace_task.add_task_error}
-    routes to when [keeper_task_create] surfaces it. [Unknown_goal] / [Unknown_predecessor] /
-    [Predecessor_not_terminal] are caller-input workflow violations
+    routes to when [keeper_task_create] surfaces it. [Unknown_goal],
+    [Ambiguous_goal], [Goal_closed], [Unknown_predecessor] and
+    [Predecessor_not_terminal] are workflow violations
     ([Workflow_rejection]); Goal source and persistence errors are runtime failures
     ([Runtime_failure]) so they are not demoted to WARN by
     {!Tool_result.log_level_of_failure_class}. Exposed (like

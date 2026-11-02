@@ -24,6 +24,10 @@ type add_task_error =
   | Goal_lock_failed of string
       (** The goal file lock could not be taken; no goal was read. *)
   | Unknown_goal of string
+  | Ambiguous_goal of string
+      (** Duplicate rows or a whitespace alias prevent identifying the Goal. *)
+  | Goal_closed of string
+      (** A completed or dropped Goal cannot receive new work. *)
   | Backlog_read_failed of string
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
@@ -44,6 +48,8 @@ type batch_add_tasks_error =
   | Batch_goal_source_unavailable of Goal_store_unavailable.t
   | Batch_goal_lock_failed of string
   | Batch_unknown_goal of string
+  | Batch_ambiguous_goal of string
+  | Batch_goal_closed of string
   | Batch_backlog_read_failed of string
   | Batch_goal_link_write_failed of string
   | Batch_backlog_write_failed of string

@@ -541,6 +541,107 @@ let test_unknown_goal_batch_has_no_partial_write () =
     check (option string) "no partial links" links (file_bytes (Workspace_goal_index.goal_task_links_path config)))
 ;;
 
+let test_creation_rejects_ambiguous_goal_rows () =
+  let cases =
+    [ "duplicate", (fun (goal : Goal_store.goal) -> [ goal; goal ])
+    ; "canonical and padded", (fun goal -> [ goal; { goal with id = " goal-a " } ])
+    ; "padded only", (fun goal -> [ { goal with id = " goal-a " } ])
+    ] in
+  List.iter (fun (label, rows) ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      make_goal config ~id:"goal-b";
+      replace_goal_rows config (List.concat_map (fun (goal : Goal_store.goal) ->
+        if String.equal goal.id "goal-a" then rows goal else [goal]));
+      let backlog_path = Workspace.backlog_path config in
+      let links_path = Workspace_goal_index.goal_task_links_path config in
+      let before_backlog = file_bytes backlog_path in
+      let before_links = file_bytes links_path in
+      (match Goal_assignment.add_task_with_result ~goal_id:"goal-a" config
+        ~title:"single" ~priority:3 ~description:"" with
+       | Error (Workspace_task.Ambiguous_goal "goal-a") -> ()
+       | Error error -> failf "%s: %s" label (Workspace_task.add_task_error_to_string error)
+       | Ok _ -> failf "%s: created a Task for an ambiguous Goal" label);
+      (match Goal_assignment.batch_add_tasks_with_contracts_result config
+        ["valid",3,"",None,Some "goal-b"; "ambiguous",3,"",None,Some "goal-a"] with
+       | Error (Workspace_task.Batch_ambiguous_goal "goal-a") -> ()
+       | Error error -> failf "%s: %s" label (Workspace_task.batch_add_tasks_error_to_string error)
+       | Ok _ -> failf "%s: batch created a Task for an ambiguous Goal" label);
+      check (option string) (label ^ ": backlog unchanged") before_backlog (file_bytes backlog_path);
+      check (option string) (label ^ ": links unchanged") before_links (file_bytes links_path))) cases
+;;
+
+let test_creation_checks_goal_phase_at_link_write () =
+  List.iter (fun phase ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      make_goal config ~id:"goal-b";
+      replace_goal_rows config (List.map (fun (goal : Goal_store.goal) ->
+        if String.equal goal.id "goal-a" then { goal with phase } else goal));
+      let backlog_path = Workspace.backlog_path config in
+      let links_path = Workspace_goal_index.goal_task_links_path config in
+      let before_backlog = file_bytes backlog_path in
+      let before_links = file_bytes links_path in
+      let single = Goal_assignment.add_task_with_result ~goal_id:"goal-a" config
+        ~title:"single" ~priority:3 ~description:"" in
+      let batch = Goal_assignment.batch_add_tasks_with_contracts_result config
+        ["valid",3,"",None,Some "goal-b"; "phase",3,"",None,Some "goal-a"] in
+      match phase with
+      | Goal_phase.Completed | Goal_phase.Dropped ->
+        check bool "single creation reports the closed Goal" true
+          (single = Error (Workspace_task.Goal_closed "goal-a"));
+        check bool "batch creation reports the closed Goal" true
+          (batch = Error (Workspace_task.Batch_goal_closed "goal-a"));
+        check (option string) "closed Goal leaves backlog unchanged" before_backlog (file_bytes backlog_path);
+        check (option string) "closed Goal leaves links unchanged" before_links (file_bytes links_path)
+      | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+      | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
+        (match single, batch with
+         | Ok created, Ok created_batch ->
+           let links = Workspace_goal_index.read_goal_task_links config in
+           check bool "single Task links to the open Goal" true
+             (goal_has_task links ~goal_id:"goal-a" ~task_id:created.task_id);
+           (match created_batch.task_ids with
+            | [valid_id; phase_id] ->
+              check bool "first batch Task links to its Goal" true
+                (goal_has_task links ~goal_id:"goal-b" ~task_id:valid_id);
+              check bool "second batch Task links to the open Goal" true
+                (goal_has_task links ~goal_id:"goal-a" ~task_id:phase_id)
+            | [] | [_] | _ :: _ :: _ :: _ -> fail "batch did not return two Tasks")
+         | Error error, _ -> failf "phase %s: %s" (Goal_phase.to_string phase)
+             (Workspace_task.add_task_error_to_string error)
+         | Ok _, Error error -> failf "phase %s: %s" (Goal_phase.to_string phase)
+             (Workspace_task.batch_add_tasks_error_to_string error))))
+    Goal_phase.all
+;;
+
+let test_creation_tools_reject_closed_goal_without_writes () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    replace_goal_rows config (List.map (fun (goal : Goal_store.goal) ->
+      if String.equal goal.id "goal-a" then { goal with phase = Goal_phase.Completed } else goal));
+    let backlog_path = Workspace.backlog_path config in
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let before_backlog = file_bytes backlog_path in
+    let before_links = file_bytes links_path in
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    let single = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc ["title", `String "single"; "goal_id", `String "goal-a"]) in
+    let item title goal_id = `Assoc ["title", `String title; "goal_id", `String goal_id] in
+    let batch = Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc ["tasks", `List [item "valid" "goal-b"; item "closed" "goal-a"]]) in
+    List.iter (function
+      | Tool_result.Failed { class_ = Tool_result.Workflow_rejection; _ } -> ()
+      | Tool_result.Failed { class_; message; _ } ->
+        failf "expected workflow rejection, got %s: %s"
+          (Tool_result.tool_failure_class_to_string class_) message
+      | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "closed Goal accepted Task creation")
+      [single; batch];
+    check (option string) "tool refusals leave backlog unchanged" before_backlog (file_bytes backlog_path);
+    check (option string) "tool refusals leave links unchanged" before_links (file_bytes links_path))
+;;
+
 (* Exercise the authority primitive with a real dependent backlog/link write.
    The delete is submitted while membership is held; its completion must follow
    the dependent commit. Promises determine order without sleep-based races. *)
@@ -601,6 +702,9 @@ let () =
       , [ test_case "Goal source failure prevents every binding" `Quick test_goal_source_failure_blocks_all_bindings
         ; test_case "masc_add_task projects the Unavailable envelope" `Quick test_add_task_tool_projects_unavailable_envelope
         ; test_case "batch unknown Goal has no partial write" `Quick test_unknown_goal_batch_has_no_partial_write
+        ; test_case "ambiguous Goal prevents single and batch creation" `Quick test_creation_rejects_ambiguous_goal_rows
+        ; test_case "current Goal phase gates single and batch creation" `Quick test_creation_checks_goal_phase_at_link_write
+        ; test_case "Task creation tools reject closed Goals" `Quick test_creation_tools_reject_closed_goal_without_writes
         ; test_case "delete and binding share membership lock" `Quick test_delete_and_binding_share_membership_lock
         ; test_case "unknown task is rejected" `Quick test_unknown_task
         ; test_case "unknown goal is rejected" `Quick test_unknown_goal

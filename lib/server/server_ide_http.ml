@@ -653,6 +653,8 @@ let add_routes router =
                   reqd
               | Error
                   ((Workspace_task.Unknown_goal _
+                   | Workspace_task.Ambiguous_goal _
+                   | Workspace_task.Goal_closed _
                    | Workspace_task.Unknown_predecessor _
                    | Workspace_task.Predecessor_not_terminal _) as error) ->
                 (* Unreachable through this route -- asks carry no goal or

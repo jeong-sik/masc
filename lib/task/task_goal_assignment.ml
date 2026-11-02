@@ -84,7 +84,7 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
   | Ok result -> result
   | Error (Goal_store.Assignment_goal_missing id) -> Error (Unknown_goal id)
   | Error (Goal_store.Assignment_goal_ambiguous id) -> Error (Ambiguous_goal id)
-  | Error (Goal_store.Assignment_goal_closed phase) -> Error (Goal_closed { goal_id; phase })
+  | Error (Goal_store.Assignment_goal_closed { goal_id; phase }) -> Error (Goal_closed { goal_id; phase })
   | Error (Goal_store.Assignment_source_unavailable unavailable) ->
     Error (Goal_source_unavailable unavailable)
   | Error (Goal_store.Assignment_lock_failed error) -> Error (Goal_lock_failed error)
@@ -96,14 +96,16 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
 let add_task_with_result ?contract ?goal_id ?created_by ?creation_request_id ?predecessor_task_id
     ?skills config ~title ~priority ~description =
   let goal_id = Workspace_task_classify.trim_opt goal_id in
-  match Goal_store.with_existing_goals config ~goal_ids:(Option.to_list goal_id) (fun () ->
+  match Goal_store.with_assignable_goals config ~goal_ids:(Option.to_list goal_id) (fun () ->
     Workspace_task.add_task_with_result ?contract ?goal_id ?created_by ?creation_request_id
       ?predecessor_task_id ?skills config ~title ~priority ~description) with
   | Ok result -> result
-  | Error (Goal_store.Goal_missing id) -> Error (Workspace_task.Unknown_goal id)
-  | Error (Goal_store.Goal_source_unavailable unavailable) ->
+  | Error (Goal_store.Assignment_goal_missing id) -> Error (Workspace_task.Unknown_goal id)
+  | Error (Goal_store.Assignment_goal_ambiguous id) -> Error (Workspace_task.Ambiguous_goal id)
+  | Error (Goal_store.Assignment_goal_closed { goal_id; phase = _ }) -> Error (Workspace_task.Goal_closed goal_id)
+  | Error (Goal_store.Assignment_source_unavailable unavailable) ->
     Error (Workspace_task.Goal_source_unavailable unavailable)
-  | Error (Goal_store.Goal_lock_failed error) ->
+  | Error (Goal_store.Assignment_lock_failed error) ->
     Error (Workspace_task.Goal_lock_failed (Masc_domain.masc_error_to_string error))
 ;;
 
@@ -111,12 +113,14 @@ let batch_add_tasks_with_contracts_result ?created_by config tasks =
   let tasks = List.map (fun (title, priority, description, contract, goal_id) ->
     title, priority, description, contract, Workspace_task_classify.trim_opt goal_id) tasks in
   let goal_ids = List.filter_map (fun (_, _, _, _, goal_id) -> goal_id) tasks in
-  match Goal_store.with_existing_goals config ~goal_ids (fun () ->
+  match Goal_store.with_assignable_goals config ~goal_ids (fun () ->
     Workspace_task.batch_add_tasks_with_contracts_result ?created_by config tasks) with
   | Ok result -> result
-  | Error (Goal_store.Goal_missing id) -> Error (Workspace_task.Batch_unknown_goal id)
-  | Error (Goal_store.Goal_source_unavailable unavailable) ->
+  | Error (Goal_store.Assignment_goal_missing id) -> Error (Workspace_task.Batch_unknown_goal id)
+  | Error (Goal_store.Assignment_goal_ambiguous id) -> Error (Workspace_task.Batch_ambiguous_goal id)
+  | Error (Goal_store.Assignment_goal_closed { goal_id; phase = _ }) -> Error (Workspace_task.Batch_goal_closed goal_id)
+  | Error (Goal_store.Assignment_source_unavailable unavailable) ->
     Error (Workspace_task.Batch_goal_source_unavailable unavailable)
-  | Error (Goal_store.Goal_lock_failed error) ->
+  | Error (Goal_store.Assignment_lock_failed error) ->
     Error (Workspace_task.Batch_goal_lock_failed (Masc_domain.masc_error_to_string error))
 ;;

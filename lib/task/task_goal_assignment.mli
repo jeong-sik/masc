@@ -69,8 +69,10 @@ val set_task_goal :
     Neither an unknown task nor an unknown goal is silently tolerated: both
     are returned as typed errors rather than mapped to a permissive default. *)
 
-(** Goal-bound creation through the same Goal -> backlog -> links boundary.
-    Goalless creation never reads the Goal store. *)
+(** Goal-bound creation validates each Goal's identity and open phase under
+    the same Goal -> backlog -> links boundary as assignment. A batch checks
+    every referenced Goal before writing any Task. Goalless creation never
+    reads the Goal store. *)
 val add_task_with_result :
   ?contract:Masc_domain.task_contract -> ?goal_id:string -> ?created_by:string ->
   ?creation_request_id:Masc_domain.task_creation_request_id ->

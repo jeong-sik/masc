@@ -498,27 +498,42 @@ type assignable_goal_error =
   | Assignment_lock_failed of Masc_domain.masc_error
   | Assignment_goal_missing of string
   | Assignment_goal_ambiguous of string
-  | Assignment_goal_closed of Goal_phase.t
+  | Assignment_goal_closed of { goal_id : string; phase : Goal_phase.t }
 
-(* Assignment must recheck the row under the same lock held through the link
-   write. A map lookup loses duplicate rows and misses whitespace aliases. *)
+(* Assignment and Task creation must recheck every row under the same lock
+   held through the link write. A map lookup loses duplicate rows and misses
+   whitespace aliases. *)
+let with_assignable_goals config ~goal_ids f =
+  match goal_ids with
+  | [] -> Ok (f ())
+  | first_id :: _ ->
+    (match Workspace_utils.with_file_lock_r config (goals_path config) (fun () ->
+      match load_prepared_source config with
+      | `Unavailable u -> Error (Assignment_source_unavailable u)
+      | `Uninitialized -> Error (Assignment_goal_missing first_id)
+      | `Available prepared ->
+        let rec first_rejection = function
+          | [] -> None
+          | goal_id :: remaining ->
+            (match List.filter (fun (goal : goal) ->
+              String.equal (String.trim goal.id) goal_id) prepared.state.goals with
+             | [] -> Some (Assignment_goal_missing goal_id)
+             | [goal] when String.equal goal.id goal_id ->
+               (match goal.phase with
+                | Goal_phase.Completed | Goal_phase.Dropped ->
+                  Some (Assignment_goal_closed { goal_id; phase = goal.phase })
+                | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+                | Goal_phase.Paused _ | Goal_phase.Blocked _ -> first_rejection remaining)
+             | [_] | _ :: _ :: _ -> Some (Assignment_goal_ambiguous goal_id))
+        in
+        (match first_rejection goal_ids with
+         | Some error -> Error error
+         | None -> Ok (f ()))) with
+     | Ok result -> result
+     | Error error -> Error (Assignment_lock_failed error))
+
 let with_assignable_goal config ~goal_id f =
-  match Workspace_utils.with_file_lock_r config (goals_path config) (fun () ->
-    match load_prepared_source config with
-    | `Unavailable u -> Error (Assignment_source_unavailable u)
-    | `Uninitialized -> Error (Assignment_goal_missing goal_id)
-    | `Available prepared ->
-      match List.filter (fun (goal : goal) ->
-        String.equal (String.trim goal.id) goal_id) prepared.state.goals with
-      | [] -> Error (Assignment_goal_missing goal_id)
-      | [goal] when String.equal goal.id goal_id ->
-        (match goal.phase with
-         | Goal_phase.Completed | Goal_phase.Dropped -> Error (Assignment_goal_closed goal.phase)
-         | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
-         | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Ok (f ()))
-      | [_] | _ :: _ :: _ -> Error (Assignment_goal_ambiguous goal_id)) with
-  | Ok result -> result
-  | Error error -> Error (Assignment_lock_failed error)
+  with_assignable_goals config ~goal_ids:[goal_id] f
 
 type 'a state_commit = {
   next_state : state;

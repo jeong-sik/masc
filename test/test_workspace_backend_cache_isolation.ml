@@ -113,6 +113,8 @@ let filesystem_cache_cannot_promote_memory_recovery () =
      | Error ((Workspace_task_create.Goal_source_unavailable _
               | Workspace_task_create.Goal_lock_failed _
               | Workspace_task_create.Unknown_goal _
+              | Workspace_task_create.Ambiguous_goal _
+              | Workspace_task_create.Goal_closed _
               | Workspace_task_create.Goal_link_write_failed _
               | Workspace_task_create.Backlog_write_failed _
               | Workspace_task_create.Unexpected_error _

@@ -422,15 +422,22 @@ type assignable_goal_error =
   | Assignment_lock_failed of Masc_domain.masc_error
   | Assignment_goal_missing of string
   | Assignment_goal_ambiguous of string
-  | Assignment_goal_closed of Goal_phase.t
+  | Assignment_goal_closed of { goal_id : string; phase : Goal_phase.t }
+
+val with_assignable_goals :
+  Workspace_utils.config -> goal_ids:string list -> (unit -> 'a) ->
+  ('a, assignable_goal_error) result
+(** Validate every canonical Goal ID against one primary-store observation
+    and hold the Goal lock through the callback. Each ID must name exactly one
+    row with no whitespace alias, and the Goal must not be completed or
+    dropped. The first invalid ID is reported in input order. An empty list
+    performs no Goal store access. The callback follows the Goal -> backlog ->
+    links lock order and must not re-enter the Goal store. *)
 
 val with_assignable_goal :
   Workspace_utils.config -> goal_id:string -> (unit -> 'a) ->
   ('a, assignable_goal_error) result
-(** Hold the Goal lock across the callback only when the canonical ID names
-    exactly one row with no whitespace alias and that Goal is not completed or
-    dropped. The callback follows the Goal -> backlog -> links lock order and
-    must not re-enter the Goal store. *)
+(** Single-Goal form of {!with_assignable_goals}. *)
 
 val validate_state_json : Yojson.Safe.t -> (unit, string) result
 (** Pure current-schema validation for the setup CLI. Does not read, repair

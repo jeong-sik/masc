@@ -50,9 +50,12 @@ module Make (Capture : Capture) : sig
       parent/destination, root/predecessor and pending-publication binding
       checks. Null guidance requires unavailable authority or a validated empty
       absorption proposal. Non-null guidance always uses its strict decoder.
-      The supplied originals must already
-      pass their strict body decoders. Does not observe live ownership, read
-      host proofs, recover a chain or grant dispatch/commit authority. *)
+      The supplied originals must already pass their strict body decoders.
+      Parent judgments use the original host consumer shape when the strict
+      consumer decoder refuses an answer; the proposal must still match exactly.
+      Does not observe live ownership, read host proofs, recover a chain or grant
+      dispatch/commit authority. Runtime recovery independently requires the
+      retained host terminal and latest completed execution proof. *)
   val prepare_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t -> parent:Lane_addon_tool_request_owner.retained ->
     proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->

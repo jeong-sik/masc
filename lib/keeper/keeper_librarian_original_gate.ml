@@ -99,12 +99,19 @@ let parent_final_with ~decode ~capture ~proposal (parent:Owner.retained) =
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Gate requires the original answered proposal" in
   Ok final
-let parent_final ~capture ~proposal parent =
-  let decode judgment =
-    let* exact = Capture.request capture in
-    let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
-    Exact.final_of_json ~schema judgment in
-  parent_final_with ~decode ~capture ~proposal parent
+let parent_final ~capture ~proposal (parent:Owner.retained) =
+  let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
+  let* judgment = parent_judgment parent in
+  let* exact = Capture.request capture in
+  let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
+  let* output =
+    match Exact.final_of_json ~schema judgment with
+    | Ok (Exact.Call_final (Answered {output;_})) -> Ok (Exact.checked_json output)
+    | Ok (Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+         | Outcome_unknown | Not_allowed _ | Request_id_reused) ->
+      Error "Gate requires the original answered proposal"
+    | Error _ -> Exact.original_consumer_answer_payload exact judgment in
+  equal output proposal "Gate proposal differs from the original answered judgment"
 let load_parent_with ~read ~store ~owner ~capture ~proposal =
   let* parent = read.load ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture) in
   let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in

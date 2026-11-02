@@ -162,6 +162,12 @@ val final_of_json : schema:Yojson.Safe.t -> Yojson.Safe.t -> (final, string) res
 (** Strict host-result decoding, including the declared schema check for an
     answer. It never constructs a checked answer from unchecked wire JSON. *)
 
+val original_consumer_answer_payload : request -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Read an answered original's canonical envelope and its captured consumer
+    schema's partial shape, returning only raw JSON. This does not check the
+    package baseline, a host terminal or an execution proof and grants no
+    authority to deliver or use the answer. *)
+
 val not_final_to_json : not_final -> Yojson.Safe.t
 (** The reason an attempt did not end the request, as the host shows it. *)
 

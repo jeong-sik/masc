@@ -129,6 +129,12 @@ not observe or initialize
 today's Memory epoch, run parts discovery or publication recovery, replay a
 provider, save Memory, or acknowledge input.
 
+For a parent answer that fails its strict consumer schema, this payload scan
+checks the original host's consumer shape and requires the gate proposal to
+match the answer exactly. The scan does not read the host terminal or execution
+proof. Runtime recovery still requires both the matching retained terminal and
+the latest completed execution before using that answer.
+
 Reconcile the work under a compatible build before cutting state. Review the
 complete captured physical workspace/keepers/runtime roots, Keeper identity,
 Memory epoch and queue generation, rather than moving only the first refused

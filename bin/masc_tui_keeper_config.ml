@@ -146,38 +146,7 @@ let parse_editor ~format text =
        | json -> Ok json
        | exception Yojson.Json_error detail -> Error detail)
 
-(* Otoml 1.0.5 consumes hex digits following a [\uXXXX] escape as part of
-   that escape. Escape the immediately following hex run too, while leaving
-   literal backslashes alone, so its parser preserves the printer's value. *)
-let protect_unicode_escapes text =
-  let length = String.length text in
-  let output = Buffer.create length in
-  let is_hex = function
-    | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
-    | _ -> false in
-  let rec loop index after_unicode =
-    if index < length then
-      match text.[index] with
-      | '\\' when index + 1 < length ->
-          if text.[index + 1] = 'u' && index + 5 < length
-             && is_hex text.[index + 2] && is_hex text.[index + 3]
-             && is_hex text.[index + 4] && is_hex text.[index + 5]
-          then begin
-            Buffer.add_substring output text index 6;
-            loop (index + 6) true
-          end else begin
-            Buffer.add_substring output text index 2;
-            loop (index + 2) false
-          end
-      | char when after_unicode && is_hex char ->
-          Printf.bprintf output "\\u%04x" (Char.code char);
-          loop (index + 1) true
-      | char -> Buffer.add_char output char; loop (index + 1) false
-  in
-  loop 0 false;
-  Buffer.contents output
-
-let print_toml value = Otoml.Printer.to_string value |> protect_unicode_escapes
+let print_toml value = Otoml.Printer.to_string value
 
 (* Otoml owns escaping. Print each newline-free segment as a basic string,
    remove its outer quotes, then join them in a multiline basic string. This
@@ -203,7 +172,7 @@ let rec print_inline_toml = function
   | Otoml.TomlInlineTable fields ->
       let* fields = traverse (fun (key, value) ->
         let* value = print_inline_toml value in
-        Ok (protect_unicode_escapes (Otoml.string_of_path [key]) ^ " = " ^ value)) fields in
+        Ok (Otoml.string_of_path [key] ^ " = " ^ value)) fields in
       Ok ("{" ^ String.concat ", " fields ^ "}")
   | (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _) as value ->
       Ok (print_toml value)

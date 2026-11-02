@@ -41,6 +41,115 @@ let test_update_field_in_content_preserves_table () =
        && String.ends_with ~suffix:"[other]\nname = \"keep\"\n" updated)
 ;;
 
+let test_instruction_edit_preserves_string_bytes () =
+  let samples =
+    [ "first\nsecond"; "first\r\nsecond\r"; "control\000abcd and \027abcdef"
+    ; "quotes \"\"\" and slash \\u0000abcd\n마지막 줄\n" ] in
+  List.iter
+    (fun instructions ->
+      let content = "[keeper]\nname = \"probe\"\ninstructions = \"old\"\n" in
+      let updated =
+        match L.edit_keeper_fields_in_content content
+          [ "instructions", L.Set (L.Toml_string instructions)
+          ; "mention_targets", L.Set (L.Toml_string_array [ instructions ]) ] with
+        | Ok updated -> updated
+        | Error error -> fail error in
+      let parsed = match L.parse_toml updated with
+        | Ok parsed -> parsed
+        | Error error -> fail error in
+      check (option string) "saved instructions are read back exactly"
+        (Some instructions) (L.toml_string_opt parsed "keeper.instructions");
+      check (list string) "saved string arrays are read back exactly"
+        [ instructions ] (L.toml_string_list parsed "keeper.mention_targets"))
+    samples
+;;
+
+let test_unicode_escape_respects_toml_string_modes () =
+  let content = {|[keeper]
+instructions = """one\u0000abcd
+two"""
+literal = '\u0000abcd'
+escaped = "\\u0000abcd"
+multiline_literal = '''\u0000abcd'''
+literal_line = '''first\
+second'''
+initial_newline = """\nfirst"""
+initial_crlf = """\r\nfirst"""
+quoted = """"quoted""""
+# \u0000abcd is a comment, not a string
+after = "\u0041bcde"
+|} ^ "literal_quote = " ^ String.make 7 '\'' ^ "\n"
+   ^ "literal_two_quotes = " ^ String.make 8 '\'' ^ "\n"
+   ^ "basic_quote = " ^ String.make 7 '"' ^ "\n"
+   ^ "basic_two_quotes = " ^ String.make 8 '"' ^ "\n" in
+  let parsed = match L.parse_toml content with
+    | Ok parsed -> parsed
+    | Error error -> fail error in
+  List.iter
+    (fun (key, expected) ->
+      check (option string) key (Some expected) (L.toml_string_opt parsed key))
+    [ "keeper.instructions", "one\000abcd\ntwo"
+    ; "keeper.literal", "\\u0000abcd"
+    ; "keeper.escaped", "\\u0000abcd"
+    ; "keeper.multiline_literal", "\\u0000abcd"
+    ; "keeper.literal_line", "first\\\nsecond"
+    ; "keeper.initial_newline", "\nfirst"
+    ; "keeper.initial_crlf", "\r\nfirst"
+    ; "keeper.quoted", "\"quoted\""
+    ; "keeper.after", "Abcde"
+    ; "keeper.literal_quote", "'"
+    ; "keeper.literal_two_quotes", "''"
+    ; "keeper.basic_quote", "\""
+    ; "keeper.basic_two_quotes", "\"\"" ]
+;;
+
+let test_escaped_keys_keep_multiline_contents_out_of_the_editor () =
+  let fixtures =
+    [ {|[keeper.agent_core_env]
+"AGENT_CORE_\u0041BCDE_X" = """
+[keeper]
+instructions = "decoy"
+"""
+[keeper]
+instructions = "real"
+|}
+    ; {|[keeper."\u0061bcde"]
+value = """
+[keeper]
+instructions = "decoy"
+"""
+[keeper]
+instructions = "real"
+|} ] in
+  List.iter
+    (fun content ->
+      let parse text = match L.parse_toml text with
+        | Ok doc -> doc | Error error -> fail error in
+      let before = parse content in
+      let updated = match L.update_field_in_content
+          ~table:"keeper" ~key:"instructions" ~value:"NEW" content with
+        | Ok updated -> updated | Error error -> fail error in
+      let after = parse updated in
+      check (option string) "the real instructions are changed" (Some "NEW")
+        (L.toml_string_opt after "keeper.instructions");
+      List.iter
+        (fun (key, value) ->
+          if key <> "keeper.instructions" then
+            check bool "unrelated fields remain unchanged" true
+              (List.assoc_opt key after = Some value))
+        before)
+    fixtures
+;;
+
+let test_error_line_after_initial_escape () =
+  let source = "instructions = \"\"\"\\nkeep\"\"\"\nnetwork_mode = INVALID\n" in
+  match L.parse_toml source with
+  | Ok _ -> fail "invalid TOML was accepted"
+  | Error detail ->
+      check bool "error reports the original second line" true
+        (String.starts_with ~prefix:"Syntax error on line 2," detail)
+;;
+
 let with_temp_toml content f =
   let path = Filename.temp_file "keeper-toml-loader" ".toml" in
   Fun.protect
@@ -126,6 +235,22 @@ let () =
             "dotted assignments follow semantic paths"
             `Quick
             test_dotted_assignments_follow_semantic_path
+        ; test_case
+            "instructions survive saving"
+            `Quick
+            test_instruction_edit_preserves_string_bytes
+        ; test_case
+            "Unicode escapes respect TOML string modes"
+            `Quick
+            test_unicode_escape_respects_toml_string_modes
+        ; test_case
+            "escaped keys do not expose multiline contents as settings"
+            `Quick
+            test_escaped_keys_keep_multiline_contents_out_of_the_editor
+        ; test_case
+            "parse errors retain source line numbers"
+            `Quick
+            test_error_line_after_initial_escape
         ] )
     ]
 ;;

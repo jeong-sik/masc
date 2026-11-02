@@ -52,6 +52,22 @@ let reader_specific_newlines_keep_original_semantics () =
   check string "Runtime retains its original raw-source interpretation"
     (display (runtime (Runtime_toml.parse_string source))) (display (runtime prepared.runtime))
 
+let reader_specific_string_escapes_keep_original_semantics () =
+  let source = fixture ^ {|unicode_escape = "\u0000abcd"
+initial_newline = """\nfirst"""
+|} in
+  let prepared = Source.prepare source in
+  check bool "different escape inputs are not merged" true
+    (prepared.syntax_inputs=Source.Reader_specific_inputs);
+  check string "source bytes remain unchanged" source prepared.source_text;
+  let doc = keeper prepared.keeper in
+  check (option string) "Keeper keeps text after a Unicode escape" (Some "\000abcd")
+    (Keeper.toml_string_opt doc "keeper.unicode_escape");
+  check (option string) "Keeper keeps the escaped initial newline" (Some "\nfirst")
+    (Keeper.toml_string_opt doc "keeper.initial_newline");
+  check string "Runtime keeps its raw-source interpretation"
+    (display (runtime (Runtime_toml.parse_string source))) (display (runtime prepared.runtime))
+
 let semantic_failure_keeps_the_other_projection () =
   let source = {|[providers.api]
 protocol = "unknown-protocol"
@@ -106,6 +122,7 @@ max-context = 128000
 let () = run "server runtime source preparation" ["reader continuity",[
   test_case "shared syntax retains both reader results" `Quick shared_source_keeps_both_reader_results;
   test_case "distinct normalized input preserves newline semantics" `Quick reader_specific_newlines_keep_original_semantics;
+  test_case "distinct escape input preserves reader semantics" `Quick reader_specific_string_escapes_keep_original_semantics;
   test_case "semantic failure keeps the independent projection" `Quick semantic_failure_keeps_the_other_projection;
   test_case "malformed syntax and scalar roots are refused" `Quick syntax_failure_and_non_document_roots_are_refused;
   test_case "Runtime home expansion remains effectful" `Quick runtime_home_expansion_remains_an_environment_effect;

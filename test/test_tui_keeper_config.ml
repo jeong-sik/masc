@@ -122,6 +122,14 @@ let test_toml_reset_contract () =
     ; "reset_fields = [\"remote_endpoint\"]\nremote_endpoint = \"builder\"\n"
     ; {|reset_fields = [42]|} ]
 
+let test_toml_typed_unicode_escapes () =
+  let basic = parse Toml {|instructions = """line\u0000abcd
+next"""|} in
+  let literal = parse Toml {|instructions = '\u0000abcd'|} in
+  Alcotest.(check bool) "typed TOML escapes follow their string syntax" true
+    (Yojson.Safe.Util.member "instructions" basic = `String "line\000abcd\nnext"
+     && Yojson.Safe.Util.member "instructions" literal = `String "\\u0000abcd")
+
 let test_toml_other_field_roundtrip () =
   let before = observed
     |> replace_field "workspace" (`Assoc [
@@ -782,6 +790,7 @@ let () =
         ; Alcotest.test_case "multiline instructions survive editing" `Quick
             test_toml_instruction_roundtrip_and_edit
         ; Alcotest.test_case "TOML explicit resets" `Quick test_toml_reset_contract
+        ; Alcotest.test_case "TOML typed Unicode escapes" `Quick test_toml_typed_unicode_escapes
         ; Alcotest.test_case "TOML other fields preserve bytes" `Quick
             test_toml_other_field_roundtrip
         ; Alcotest.test_case "recovery across editor formats" `Quick

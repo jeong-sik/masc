@@ -73,7 +73,8 @@ let fragments_of_damaged_row = function
       | _ -> None) assignee_fields |> List.sort_uniq String.compare in
     let unassigned_statuses = List.for_all (function
       | Candle_event.Observed_status (Candle_event.Todo | Candle_event.Cancelled) -> true
-      | _ -> false) statuses in
+      | Candle_event.Observed_status (Candle_event.Claimed | In_progress | Awaiting_verification | Done _)
+      | Candle_event.Unreadable_status -> false) statuses in
     let assignee, separate_names = match assignee_fields with
       | [`String name] when String.trim name <> "" -> Candle_event.Assigned name, []
       | [] when unassigned_statuses -> Candle_event.Unassigned, []
@@ -321,7 +322,7 @@ let partial_observations config task_ids =
    | Ok _ -> ());
   match backlog, archive with
   | Error detail, Error _ -> Error detail
-  | _ ->
+  | (Ok _, (Ok _ | Error _)) | (Error _, Ok _) ->
     Ok (List.map (fun task_id ->
       let backlog_fragments = match backlog with
         | Ok observations ->

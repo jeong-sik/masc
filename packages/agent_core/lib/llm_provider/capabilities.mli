@@ -285,39 +285,25 @@ val effective_disable_parallel_tool_use
   -> tools_present:bool
   -> bool
 
-(** Resolve Anthropic thinking control from the model catalog, then the
-    capability manifest when the catalog has no matching row. [None] means
-    neither source declares an Anthropic thinking policy. Bare rows only: the
+(** Resolve Anthropic thinking control from the model catalog. [None] means
+    the catalog declares no Anthropic thinking policy. Bare rows only: the
     lookup skips provider-qualified rows. *)
 val anthropic_thinking_control_for_model_id : string -> anthropic_thinking_control option
 
 (** Resolve the request's authoritative row with the same provider policy as
     capabilities. A scoped row without a policy stays [None]. Declared
-    providers read bare catalog rows only when permitted and never a manifest;
-    anonymous native wires retain bare catalog/manifest lookup. *)
+    providers read bare catalog rows only when permitted; anonymous native
+    wires retain bare catalog lookup. *)
 val anthropic_thinking_control_for_provider_model_id
   :  provider:Model_catalog.provider_reference
   -> model_id:string
   -> anthropic_thinking_control option
 
-(** Look up capabilities for [model_id] in the loaded model catalog only
-    (no manifest consultation).
-
-    The catalog is resolved by {!Model_catalog.global}: an explicit runtime
-    override installed via {!Model_catalog.set_global}, otherwise the
-    build-time embedded AGENT_CORE [models.toml]. Embedding hosts and test harnesses
-    can install an explicit runtime override; AGENT_CORE performs no environment-based
-    catalog discovery.
-
-    Returns [None] when no catalog is available or when no catalog entry
-    prefix-matches [model_id]; there is no in-code fallback table. *)
-val for_model_id_catalog : string -> capabilities option
-
 (** Resolve an explicit provider/model pair while preserving whether the
     caller declared an identity or knows only a wire kind. Exact scoped rows
     win. A declared provider reads bare catalog rows only when its catalog
-    entry declares [serves_bare_models]; it never borrows capability-manifest
-    facts. Anonymous native wires retain model/manifest fallback; anonymous
+    entry declares [serves_bare_models]. Anonymous native wires retain bare
+    catalog lookup; anonymous
     OpenAI-compatible endpoints do not borrow bare model facts. Provider bases
     answer last. Anonymous wire labels never resolve catalog provider aliases.
 
@@ -357,20 +343,20 @@ val resolve_bound_request_policy :
   catalog:Model_catalog.t option -> provider:Model_catalog.provider_entry ->
   capabilities:capabilities -> model_id:string -> request_policy
 (** Pure resolution from the selection-owned catalog and provider declaration.
-    The selected wire base precedes the model base; explicit model fields then
-    override that base, with selected provider defaults when no base is declared. No global
-    catalog or manifest is read; absent thinking controls remain absent. *)
+    A scoped row uses the selected wire base before its model base, then applies
+    explicit model fields; an absent base inherits selected provider defaults.
+    A permitted bare row uses only its own preset/default and explicit fields.
+    No global catalog is read; absent thinking controls remain absent. *)
 
 val request_policy_capabilities : request_policy -> capabilities option
 val request_policy_anthropic_thinking_control :
   request_policy -> anthropic_thinking_control option
 
 
-(** Lookup capabilities for a known model_id.
-
-    Checks the globally loaded model catalog first, then the capability
-    manifest. Returns [None] when neither source has a matching entry;
-    there is no built-in fallback table. *)
+(** Exact bare-model lookup from the one loaded model catalog. Returns [None]
+    for malformed or undeclared identities. Explicit hosts compose JSON input
+    with [Model_catalog.with_model_overrides] before installing a catalog or
+    selecting bindings; there is no second manifest lookup or fallback table. *)
 val for_model_id : string -> capabilities option
 
 (** Lookup capabilities for a provider label string.
@@ -408,30 +394,15 @@ val capabilities_of_kind : Provider_kind.t -> capabilities
 (** Merge Discovery ctx_size into existing capabilities. *)
 val with_context_size : capabilities -> ctx_size:int -> capabilities
 
-(** {2 Capability Manifest} *)
-
-(** Apply a {!Capability_manifest.entry} on top of a provider-preset base.
-
-    [entry.base_label] (if present) is a parsed {!Capability_manifest.base_label}
-    and is resolved via {!capabilities_for_provider_label}; an absent label falls
-    back to {!default_capabilities}.  Each [Some] field in [entry] overrides the
-    corresponding field; [None] fields inherit from the base.
-
-    Capability manifests do not carry evidence-backed serving constraints.
-    Those constraints require provenance and validity fields and are therefore
-    accepted only through the model catalog declaration path.
-
-    @since 0.188.0 *)
-val apply_manifest_entry : Capability_manifest.entry -> capabilities
-
-(** Look up capabilities for [model_id] against an explicit manifest,
-    falling back to the catalog lookup ({!for_model_id_catalog}) on a
-    miss.
-
-    Useful when the caller does not want to install a process-wide manifest.
-
-    @since 0.188.0 *)
-val for_model_id_with_manifest : Capability_manifest.t -> string -> capabilities option
+(** Pure projection of one admitted catalog row. Bare rows use their own
+    declared preset/default. For a scoped row, [provider_entry] and [wire]
+    select its admitted provider/wire base. [base] supplies that selection's
+    effective provider capabilities when the row has no explicit base.
+    Lookup, request preparation and exact-output admission share this function;
+    it reads no process-global source. *)
+val apply_catalog_entry :
+  ?base:capabilities -> provider_entry:Model_catalog.provider_entry option ->
+  wire:Provider_kind.t option -> Model_catalog.model_entry -> capabilities
 
 (** {2 Capability Drift Detection} *)
 

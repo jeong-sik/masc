@@ -25,6 +25,7 @@ type model_entry =
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
+  ; emits_usage_tokens : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -124,6 +125,77 @@ let make ~models ~providers =
 let empty = make ~models:[] ~providers:[]
 let model_entries t = t.models
 let provider_entries t = t.providers
+
+let with_model_overrides catalog declarations =
+  let entries = Capability_manifest.entries declarations in
+  let overrides = List.fold_left (fun index (entry : Capability_manifest.entry) ->
+    Row_key_map.add (Model_identifiers.Model_id.equality_key entry.model_id) entry index)
+    Row_key_map.empty entries in
+  let replace previous (entry : Capability_manifest.entry) : model_entry =
+    { model_id = entry.model_id
+    ; suggested_clients = (match previous with Some row -> row.suggested_clients | None -> [])
+    ; base_label = Option.map Capability_manifest.base_label_to_string entry.base_label
+    ; provider_name = None
+    ; max_context_tokens = entry.max_context_tokens
+    ; serving_constraint = (match previous with Some row -> row.serving_constraint | None -> None)
+    ; max_output_tokens = entry.max_output_tokens
+    ; supports_tools = entry.supports_tools
+    ; supports_tool_choice = entry.supports_tool_choice
+    ; supports_required_tool_choice = entry.supports_required_tool_choice
+    ; supports_named_tool_choice = entry.supports_named_tool_choice
+    ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
+    ; assistant_tool_content_format = entry.assistant_tool_content_format
+    ; chat_output_budget_field = entry.chat_output_budget_field
+    ; tool_schema_conformance = entry.tool_schema_conformance
+    ; supports_reasoning = entry.supports_reasoning
+    ; emits_usage_tokens = entry.emits_usage_tokens
+    ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
+    ; supports_response_format_json = entry.supports_response_format_json
+    ; supports_structured_output = entry.supports_structured_output
+    ; json_schema_dialect = entry.json_schema_dialect
+    ; supports_multimodal_inputs = entry.supports_multimodal_inputs
+    ; supports_image_input = entry.supports_image_input
+    ; supports_audio_input = entry.supports_audio_input
+    ; supports_video_input = entry.supports_video_input
+    ; supports_document_input = entry.supports_document_input
+    ; modality_priority = entry.modality_priority
+    ; task = (match previous with Some row -> row.task | None -> None)
+    ; supported_models = entry.supported_models
+    ; supports_native_streaming = entry.supports_native_streaming
+    ; supports_system_prompt = entry.supports_system_prompt
+    ; supports_assistant_prefill = entry.supports_assistant_prefill
+    ; supports_prompt_caching = entry.supports_prompt_caching
+    ; supports_top_k = entry.supports_top_k
+    ; supports_min_p = entry.supports_min_p
+    ; supports_seed = entry.supports_seed
+    ; ignored_sampling_parameters = entry.ignored_sampling_parameters
+    ; thinking_control_format = entry.thinking_control_format
+    ; anthropic_thinking_control = entry.anthropic_thinking_control
+    ; preserve_thinking_control_format = entry.preserve_thinking_control_format
+    ; content_inline_reasoning = entry.content_inline_reasoning
+    ; reasoning_output_format = entry.reasoning_output_format
+    ; reasoning_streaming_format = entry.reasoning_streaming_format
+    ; reasoning_replay = entry.reasoning_replay
+    ; input_per_million = (match previous with Some row -> row.input_per_million | None -> None)
+    ; output_per_million = (match previous with Some row -> row.output_per_million | None -> None)
+    ; cache_write_multiplier = (match previous with Some row -> row.cache_write_multiplier | None -> None)
+    ; cache_read_multiplier = (match previous with Some row -> row.cache_read_multiplier | None -> None)
+    } in
+  let seen, models = List.fold_left (fun (seen, models) (row : model_entry) ->
+    match row.provider_name with
+    | Some _ -> seen, row :: models
+    | None ->
+      let key = Model_identifiers.Model_id.equality_key row.model_id in
+      match Row_key_map.find_opt key overrides with
+      | None -> seen, row :: models
+      | Some entry ->
+        Row_key_map.add key () seen, replace (Some row) entry :: models)
+    (Row_key_map.empty, []) catalog.models in
+  let added = List.filter_map (fun (entry : Capability_manifest.entry) ->
+    if Row_key_map.mem (Model_identifiers.Model_id.equality_key entry.model_id) seen
+    then None else Some (replace None entry)) entries in
+  make ~models:(List.rev_append models added) ~providers:catalog.providers
+;;
 
 let find_string_field ~entry_id key toml =
   match Otoml.find_opt toml Otoml.get_string [ key ] with
@@ -369,6 +441,7 @@ let known_entry_keys =
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
+  ; "emits_usage_tokens"
   ; "accepted_reasoning_efforts"
   ; "supports_response_format_json"
   ; "supports_structured_output"
@@ -465,6 +538,7 @@ let parse_entry entry_toml =
     Serving_constraint_catalog.parse ~entry_id entry_toml
   in
   let* max_output_tokens = int_field ~entry_id "max_output_tokens" entry_toml in
+  let* emits_usage_tokens = bool_field ~entry_id "emits_usage_tokens" entry_toml in
   let* supports_tools = bool_field ~entry_id "supports_tools" entry_toml in
   let* supports_tool_choice =
     bool_field ~entry_id "supports_tool_choice" entry_toml
@@ -654,6 +728,7 @@ let parse_entry entry_toml =
     ; chat_output_budget_field
     ; tool_schema_conformance
     ; supports_reasoning
+    ; emits_usage_tokens
     ; accepted_reasoning_efforts
     ; supports_response_format_json
     ; supports_structured_output

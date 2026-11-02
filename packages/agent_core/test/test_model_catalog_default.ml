@@ -115,7 +115,7 @@ let test_haiku_5_5_row_reaches_the_wire () =
     check (option bool) "top_k is not offered" (Some false)
       (Option.map
          (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
-         (Capabilities.for_model_id_catalog model_id));
+         (Capabilities.for_model_id model_id));
     check bool "default leaves adaptive choice to the provider" true
       (thinking (body (config ())) = `Null);
     check bool "thinking on asks for adaptive and binds its blocks" true
@@ -240,7 +240,7 @@ let test_documented_claude_prefill_exclusions () =
         model_id in
       check (option bool) (model_id ^ " catalog excludes prefill") (Some false)
         (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_assistant_prefill)
-           (Capabilities.for_model_id_catalog model_id));
+           (Capabilities.for_model_id model_id));
       List.iter (fun stream ->
         check bool (model_id ^ " refuses final assistant before dispatch") true
           (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
@@ -499,7 +499,7 @@ let test_claude_rows_keep_sampling_parameters_off_the_wire () =
            (Some false)
            (Option.map
               (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
-              (Capabilities.for_model_id_catalog model_id)))
+              (Capabilities.for_model_id model_id)))
       claude_rows_forced_tool_choice)
 ;;
 
@@ -511,7 +511,7 @@ let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
     Model_catalog.set_global catalog;
     List.iter
       (fun (model_id, accepted) ->
-         match Capabilities.for_model_id_catalog model_id with
+         match Capabilities.for_model_id model_id with
          | None -> failf "%s resolves to no capabilities" model_id
          | Some (caps : Capabilities.capabilities) ->
            check bool
@@ -678,11 +678,11 @@ let test_global_loads_default_catalog_for_capabilities () =
     first_model_id ~suite:"model catalog default production path" expected
   in
   with_clean_model_catalog_override (fun () ->
-    match Capabilities.for_model_id_catalog model_id with
+    match Capabilities.for_model_id model_id with
     | Some _ -> ()
     | None ->
       failf
-        "Capabilities.for_model_id_catalog should resolve %S through embedded/default \
+        "Capabilities.for_model_id should resolve %S through embedded/default \
          Model_catalog.global"
         model_id)
 ;;
@@ -931,13 +931,14 @@ let test_glm_vision_rows_agree () =
     rows
 ;;
 
-(* Every number here was read from OpenRouter's own GET /api/v1/models
-   metadata or measured on the wire on 2026-09-10
-   (evidence/task-openrouter-support/) or 2026-09-22
-   (evidence/task-openrouter-new-models/). The 2026-10-28 refresh is retained
-   in evidence/2026-10-28-openrouter-bindings/; its two ids, windows and output
-   ceilings also match GET /api/v1/models on 2026-11-01. Provider-scoped lookup
-   is an exact id match, so each row is asserted on its own. *)
+(* Expected declarations from the admitted OpenRouter rows. Historical wire
+   observations are retained in evidence/task-openrouter-support/ and
+   evidence/task-openrouter-new-models/. The October 28 bindings bundle
+   records the exact replacement ids and disabled-reasoning probes, but no
+   listing evidence for the 393216 output ceiling. The November 1 selected
+   listing in evidence/2026-11-01-official-client-audit/ records both ids,
+   windows and output ceilings; it is metadata, not a generation limit test.
+   Provider-scoped lookup is exact, so each row is checked on its own. *)
 let openrouter_rows =
   (* id, context, max output, input $/1M, output $/1M, image input *)
   [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None

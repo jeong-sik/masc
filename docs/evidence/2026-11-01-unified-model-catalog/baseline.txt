@@ -1,0 +1,42 @@
+2026-11-01T02:39:08.0095851Z   ref: 8c9dd5d3bac49c2230d78cf59486ba582187fd50
+2026-11-01T02:39:08.4929760Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 8c9dd5d3bac49c2230d78cf59486ba582187fd50
+2026-11-01T02:39:17.3087351Z  * branch              8c9dd5d3bac49c2230d78cf59486ba582187fd50 -> FETCH_HEAD
+2026-11-01T02:39:17.3096019Z [command]/usr/bin/git rev-parse --verify --quiet 8c9dd5d3bac49c2230d78cf59486ba582187fd50^{object}
+2026-11-01T02:39:17.3125172Z 8c9dd5d3bac49c2230d78cf59486ba582187fd50
+2026-11-01T02:39:17.3222751Z [command]/usr/bin/git checkout --progress --force 8c9dd5d3bac49c2230d78cf59486ba582187fd50
+2026-11-01T02:39:20.1892951Z Note: switching to '8c9dd5d3bac49c2230d78cf59486ba582187fd50'.
+2026-11-01T02:39:20.1897268Z HEAD is now at 8c9dd5d3 test(provider): expose divergent model policy projections before catalog unification
+2026-11-01T02:39:20.2047596Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T02:39:20.2074919Z 8c9dd5d3bac49c2230d78cf59486ba582187fd50
+2026-11-01T02:40:19.4388453Z   TARGET_SUITES: packages/agent_core/test/test_model_catalog_composition
+2026-11-01T02:40:19.4533452Z   TARGET_SUITES: packages/agent_core/test/test_model_catalog_composition
+2026-11-01T02:40:19.4963407Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T02:40:19.4990502Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_composition: start 2026-11-01T02:40:19Z (dune alias)
+2026-11-01T02:41:01.4747127Z Testing `Model catalog composition'.
+2026-11-01T02:41:01.5004608Z ASSERT catalog allow-list reaches the resolved policy
+2026-11-01T02:41:01.5005837Z   [FAIL]        resolution          0   bare catalog keeps model allow-list.
+2026-11-01T02:41:01.5007020Z ASSERT catalog allow-list reaches the resolved policy
+2026-11-01T02:41:01.5008557Z   [FAIL]        resolution          1   raw provider config keeps model allow...
+2026-11-01T02:41:01.5009725Z ASSERT catalog allow-list reaches the resolved policy
+2026-11-01T02:41:01.5010919Z   [FAIL]        resolution          2   selected provider keeps model allow-l...
+2026-11-01T02:41:01.5012706Z ASSERT provider-independent row has the same tools policy through selection
+2026-11-01T02:41:01.5013967Z   [FAIL]        resolution          3   selected and raw bare-row bases agree.
+2026-11-01T02:41:01.5016146Z │ [FAIL]        resolution          0   bare catalog keeps model allow-list.   │
+2026-11-01T02:41:01.5020068Z FAIL catalog allow-list reaches the resolved policy
+2026-11-01T02:41:01.5020720Z    Expected: `Some ["catalog-model"]'
+2026-11-01T02:41:01.5021233Z    Received: `None'
+2026-11-01T02:41:01.5026789Z │ [FAIL]        resolution          1   raw provider config keeps model al...  │
+2026-11-01T02:41:01.5029598Z FAIL catalog allow-list reaches the resolved policy
+2026-11-01T02:41:01.5030389Z    Expected: `Some ["catalog-model"]'
+2026-11-01T02:41:01.5030992Z    Received: `None'
+2026-11-01T02:41:01.5039176Z │ [FAIL]        resolution          2   selected provider keeps model allo...  │
+2026-11-01T02:41:01.5040995Z FAIL catalog allow-list reaches the resolved policy
+2026-11-01T02:41:01.5041414Z    Expected: `Some ["catalog-model"]'
+2026-11-01T02:41:01.5041747Z    Received: `None'
+2026-11-01T02:41:01.5046998Z │ [FAIL]        resolution          3   selected and raw bare-row bases ag...  │
+2026-11-01T02:41:01.5048819Z FAIL provider-independent row has the same tools policy through selection
+2026-11-01T02:41:01.5049445Z    Expected: `false'
+2026-11-01T02:41:01.5049721Z    Received: `true'
+2026-11-01T02:41:01.5055468Z 4 failures! in 0.026s. 4 tests run.
+2026-11-01T02:41:01.5297306Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_composition: FAIL exit 1 in 42s
+2026-11-01T02:41:01.5307308Z ##[error]Process completed with exit code 1.

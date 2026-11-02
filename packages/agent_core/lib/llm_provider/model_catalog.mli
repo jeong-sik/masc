@@ -29,6 +29,7 @@ type model_entry =
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
+  ; emits_usage_tokens : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -106,6 +107,15 @@ exception Invalid_embedded_catalog of string
 val empty : t
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
+
+val with_model_overrides : t -> Capability_manifest.t -> t
+(** Compose a parsed JSON capability declaration into a new immutable catalog.
+    Each exact bare model identity replaces its capability fields. Missing
+    capability fields inherit the declaration's own preset/default, never the
+    replaced row. Its pricing, cache multipliers, task, client suggestions and
+    serving evidence remain those of the exact previous bare row; new identities
+    have no such metadata. Scoped rows, provider declarations and bare-model
+    permissions remain unchanged. No process-global source is read or changed. *)
 
 type provider_reference =
   | Declared_provider of string

@@ -2,6 +2,14 @@
 
 open Llm_provider
 
+let with_catalog_overrides input run =
+  let previous = Model_catalog.global () in
+  let catalog = match previous with Some catalog -> catalog | None -> Model_catalog.empty in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Model_catalog.set_global catalog | None -> Model_catalog.clear_global ())
+    (fun () -> Model_catalog.set_global (Model_catalog.with_model_overrides catalog input); run ())
+;;
+
 let check_string = Alcotest.(check string)
 let check_int = Alcotest.(check int)
 let check_bool = Alcotest.(check bool)
@@ -1235,8 +1243,7 @@ let test_validate_reasoning_effort_subset_rejects_unsupported () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let declared_capabilities =
       match Capabilities.for_model_id "effort-subset-model" with
       | Some capabilities -> capabilities
@@ -1360,8 +1367,7 @@ let test_validate_reasoning_effort_checks_the_explicit_disable () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let cfg model_id =
       let declared_capabilities =
         match Capabilities.for_model_id model_id with
@@ -1424,8 +1430,7 @@ let test_thinking_admission_asks_the_effort_ladder_about_a_disable () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let cfg model_id =
       let declared_capabilities =
         match Capabilities.for_model_id model_id with
@@ -1485,8 +1490,7 @@ let test_the_router_base_answers_a_row_that_names_it () =
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    Capability_manifest.set_global manifest;
+  with_catalog_overrides manifest (fun () ->
     let cfg ?enable_thinking ?reasoning_effort () =
       let declared_capabilities =
         match Capabilities.for_model_id "router-row" with
@@ -2809,14 +2813,15 @@ let test_anonymous_verbatim_row_keeps_its_own_base ~row_base ~wire_base () =
 let test_manifest_authority_and_frozen_missing_policy () =
   with_model_catalog_toml (identity_catalog ~verbatim:false ~row_base:false ~wire_base:false)
     (fun () ->
-      let previous = Capability_manifest.global () in
+      let previous = Model_catalog.global () in
       Fun.protect ~finally:(fun () -> match previous with
-        | Some manifest -> Capability_manifest.set_global manifest
-        | None -> Capability_manifest.clear_global ()) (fun () ->
+        | Some catalog -> Model_catalog.set_global catalog
+        | None -> Model_catalog.clear_global ()) (fun () ->
         let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
           {|{"schema_version":2,"models":[{"model_id":"manifest-only","max_context_tokens":44444}]}|})
           |> Result.get_ok in
-        Capability_manifest.set_global manifest;
+        Model_catalog.set_global (Model_catalog.with_model_overrides
+          (match previous with Some catalog -> catalog | None -> Model_catalog.empty) manifest);
         Alcotest.(check (option int)) "anonymous native wire retains manifest facts"
           (Some 44444)
           (resolved_capabilities (identity_config "manifest-only")).max_context_tokens;
@@ -2951,14 +2956,15 @@ output_per_million = 2.0
 
 let test_thinking_manifest_is_anonymous_native_only () =
   with_repository_model_catalog (fun () ->
-    let previous = Capability_manifest.global () in
+    let previous = Model_catalog.global () in
     Fun.protect ~finally:(fun () -> match previous with
-      | Some manifest -> Capability_manifest.set_global manifest
-      | None -> Capability_manifest.clear_global ()) (fun () ->
+      | Some catalog -> Model_catalog.set_global catalog
+      | None -> Model_catalog.clear_global ()) (fun () ->
       let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
         {|{"schema_version":2,"models":[{"model_id":"manifest-only","anthropic_thinking_control":"adaptive_default"}]}|})
         |> Result.get_ok in
-      Capability_manifest.set_global manifest;
+      Model_catalog.set_global (Model_catalog.with_model_overrides
+          (match previous with Some catalog -> catalog | None -> Model_catalog.empty) manifest);
       let policy provider = Capabilities.anthropic_thinking_control_for_provider_model_id
         ~provider ~model_id:"manifest-only" in
       check_bool "anonymous native retains manifest policy" true

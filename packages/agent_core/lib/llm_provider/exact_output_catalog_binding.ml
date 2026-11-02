@@ -170,11 +170,6 @@ let compare_model_entries a b =
   String.compare (model_identity_key a) (model_identity_key b)
 ;;
 
-let first_some preferred fallback =
-  match preferred with
-  | Some _ -> preferred
-  | None -> fallback
-;;
 
 let option_int = function
   | None -> "none"
@@ -254,12 +249,6 @@ let catalog_anthropic_thinking_control =
   Option.map Caps.anthropic_thinking_control_of_vocab_value
 ;;
 
-let catalog_modality_priority fallback = function
-  | None -> fallback
-  | Some "preserve_input_order" -> Modality.Preserve_input_order
-  | Some "visual_first" -> Modality.Visual_first
-  | Some _ -> fallback
-;;
 
 (* [wire] is the provider wire this binding reaches, when its caller knows
    one. A provider row can serve more than one ([[providers]] identity_kinds)
@@ -268,185 +257,10 @@ let catalog_modality_priority fallback = function
    the same way ([Capabilities.apply_catalog_entry]). A caller without a
    binding passes none and gets the row's own base, as every caller did before
    the argument existed. *)
-let capabilities_of_catalog_binding
-      ?wire
-      (provider : Model_catalog.provider_entry)
-      (model : Model_catalog.model_entry)
-  =
-  let wire_base =
-    match model.provider_name with
-    | None -> None
-    | Some _ ->
-      Option.bind wire (fun kind ->
-        List.assoc_opt kind provider.Model_catalog.capabilities_base_by_identity_kind)
-  in
-  let base_label =
-    match wire_base with
-    | Some _ -> wire_base
-    | None ->
-      (match model.provider_name with
-       | None -> model.base_label
-       | Some _ -> first_some model.base_label provider.capabilities_base)
-  in
-  let base =
-    match Option.bind base_label Caps.capabilities_for_provider_label with
-    | Some capabilities -> capabilities
-    | None -> Caps.default_capabilities
-  in
-  let bool_or fallback = Option.value ~default:fallback in
-  let supports_tool_choice = bool_or base.supports_tool_choice model.supports_tool_choice in
-  let supports_required_tool_choice =
-    match model.supports_required_tool_choice with
-    | Some required -> required && supports_tool_choice
-    | None -> base.supports_required_tool_choice && supports_tool_choice
-  in
-  let supports_named_tool_choice =
-    match model.supports_named_tool_choice with
-    | Some named -> named && supports_tool_choice
-    | None -> base.supports_named_tool_choice && supports_tool_choice
-  in
-  let supports_reasoning = bool_or base.supports_reasoning model.supports_reasoning in
-  let accepted_reasoning_efforts =
-    if not supports_reasoning then None
-    else
-      match model.accepted_reasoning_efforts with
-      | Some values ->
-        let efforts = List.filter_map Reasoning_effort.of_string values in
-        Some efforts
-      | None -> base.accepted_reasoning_efforts
-  in
-  let thinking_control_format =
-    match model.thinking_control_format with
-    | Some format -> (format : Caps.thinking_control_format)
-    | None -> base.thinking_control_format
-  in
-  let assistant_tool_content_format =
-    match
-      Option.bind
-        model.assistant_tool_content_format
-        Capability_vocab.assistant_tool_content_format_of_string
-    with
-    | Some format -> format
-    | None -> base.assistant_tool_content_format
-  in
-  let chat_output_budget_field =
-    match
-      Option.bind
-        model.chat_output_budget_field
-        Capability_vocab.chat_output_budget_field_of_string
-    with
-    | Some field -> field
-    | None -> base.chat_output_budget_field
-  in
-  let tool_schema_conformance =
-    match
-      Option.bind
-        model.tool_schema_conformance
-        Capability_vocab.tool_schema_conformance_of_string
-    with
-    | Some conformance -> conformance
-    | None -> base.tool_schema_conformance
-  in
-  let preserve_thinking_control_format =
-    match
-      Option.bind
-        model.preserve_thinking_control_format
-        Capability_vocab.preserve_thinking_control_format_of_string
-    with
-    | Some format -> format
-    | None -> base.preserve_thinking_control_format
-  in
-  let content_inline_reasoning =
-    match
-      Option.bind
-        model.content_inline_reasoning
-        Capability_vocab.content_inline_reasoning_of_string
-    with
-    | Some format -> format
-    | None -> base.content_inline_reasoning
-  in
-  let reasoning_output_format =
-    match
-      Option.bind
-        model.reasoning_output_format
-        Capability_vocab.reasoning_output_format_of_string
-    with
-    | Some format -> format
-    | None -> base.reasoning_output_format
-  in
-  let reasoning_streaming_format =
-    match
-      Option.bind
-        model.reasoning_streaming_format
-        Capability_vocab.reasoning_streaming_format_of_string
-    with
-    | Some format -> format
-    | None -> base.reasoning_streaming_format
-  in
-  let reasoning_replay_override =
-    match
-      Option.bind
-        model.reasoning_replay
-        Capability_vocab.reasoning_replay_override_of_string
-    with
-    | Some replay -> replay
-    | None -> base.reasoning_replay_override
-  in
-  let ignored_sampling_parameters =
-    match model.ignored_sampling_parameters with
-    | Some params -> params
-    | None -> base.ignored_sampling_parameters
-  in
-  { base with
-    max_context_tokens = first_some model.max_context_tokens base.max_context_tokens
-  ; serving_constraint = first_some model.serving_constraint base.serving_constraint
-  ; max_output_tokens = first_some model.max_output_tokens base.max_output_tokens
-  ; supports_reasoning
-  ; accepted_reasoning_efforts
-  ; thinking_control_format
-  ; preserve_thinking_control_format
-  ; content_inline_reasoning
-  ; reasoning_output_format
-  ; reasoning_streaming_format
-  ; reasoning_replay_override
-  ; supports_tools = bool_or base.supports_tools model.supports_tools
-  ; supports_tool_choice
-  ; supports_required_tool_choice
-  ; supports_named_tool_choice
-  ; assistant_tool_content_format
-  ; chat_output_budget_field
-  ; tool_schema_conformance
-  ; supports_parallel_tool_calls =
-      bool_or base.supports_parallel_tool_calls model.supports_parallel_tool_calls
-  ; supports_response_format_json =
-      bool_or base.supports_response_format_json model.supports_response_format_json
-  ; supports_structured_output =
-      bool_or base.supports_structured_output model.supports_structured_output
-  ; json_schema_dialect = Option.value model.json_schema_dialect ~default:base.json_schema_dialect
-  ; supports_multimodal_inputs =
-      bool_or base.supports_multimodal_inputs model.supports_multimodal_inputs
-  ; supports_image_input = bool_or base.supports_image_input model.supports_image_input
-  ; supports_audio_input = bool_or base.supports_audio_input model.supports_audio_input
-  ; supports_video_input = bool_or base.supports_video_input model.supports_video_input
-  ; supports_document_input =
-      bool_or base.supports_document_input model.supports_document_input
-  ; modality_priority =
-      catalog_modality_priority base.modality_priority model.modality_priority
-  ; supports_system_prompt =
-      bool_or base.supports_system_prompt model.supports_system_prompt
-  ; supports_native_streaming =
-      bool_or base.supports_native_streaming model.supports_native_streaming
-  ; supports_assistant_prefill =
-      bool_or base.supports_assistant_prefill model.supports_assistant_prefill
-  ; supports_prompt_caching =
-      bool_or base.supports_prompt_caching model.supports_prompt_caching
-  ; supports_top_k = bool_or base.supports_top_k model.supports_top_k
-  ; supports_min_p = bool_or base.supports_min_p model.supports_min_p
-  ; supports_seed = bool_or base.supports_seed model.supports_seed
-  ; ignored_sampling_parameters
-  ; task = first_some model.task base.task
-  ; supported_models = first_some model.supported_models base.supported_models
-  }
+let capabilities_of_catalog_binding ?wire provider (model : Model_catalog.model_entry) =
+  let provider_entry = match model.provider_name with
+    | None -> None | Some _ -> Some provider in
+  Caps.apply_catalog_entry ~provider_entry ~wire model
 ;;
 
 let%test "exact catalog binding preserves reasoning efforts and thinking control" =

@@ -5,7 +5,7 @@ let clamp_reasoning_effort_to_catalog
   match requested, model_id with
   | None, _ | _, None -> requested
   | Some effort, Some model ->
-    (match Llm_provider.Capabilities.for_model_id_catalog model with
+    (match Llm_provider.Capabilities.for_model_id model with
      | None -> requested
      | Some caps ->
        (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with

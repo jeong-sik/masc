@@ -104,7 +104,24 @@ let rec publish_json_cache_entry cache_ref ~expected ~generation ~key ~entry =
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
       let current = Atomic.get cache_ref in
-      publish_json_cache_entry cache_ref ~expected:current ~generation ~key ~entry
+      if not (Int.equal current.generation generation) then false
+      else
+        let same_key_published =
+          match
+            Cache_map.find_opt key expected.entries,
+            Cache_map.find_opt key current.entries
+          with
+          | Some previous, Some published -> previous != published
+          | None, Some _ -> true
+          | (Some _ | None), None -> false
+        in
+        (* Entries are immutable: a changed identity means another reader won
+           this key. Return the completed reading without replacing that winner
+           or renewing its TTL, even if it has already expired. Other keys may
+           still be merged without repeating the completed computation. *)
+        if same_key_published then true
+        else
+          publish_json_cache_entry cache_ref ~expected:current ~generation ~key ~entry
     end
 let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in

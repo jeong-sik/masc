@@ -566,6 +566,37 @@ let test_another_list_query_does_not_repeat_completed_work () =
     check string "both query keys coexist in the same generation" "detailed"
       (Yojson.Safe.Util.to_string cached_detailed))
 
+let test_same_list_query_retains_the_winning_publication () =
+  List.iter
+    (fun seed_expired ->
+      with_empty_roster_cache (fun () ->
+        let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+        if seed_expired then
+          ignore (read ~key:"roster" ~ttl_s:0. (fun () -> `String "expired"));
+        let calls = ref 0 in
+        let result = read ~key:"roster" ~ttl_s:3600. (fun () ->
+          incr calls;
+          ignore (read ~key:"roster" ~ttl_s:3600. (fun () -> `String "new roster"));
+          `String "older roster") in
+        check int "completed roster computation is not repeated" 1 !calls;
+        check string "the in-flight read may return its captured roster" "older roster"
+          (Yojson.Safe.Util.to_string result);
+        let cached = read ~key:"roster" ~ttl_s:3600.
+            (fun () -> fail "the winning roster was not retained") in
+        check string "a later read retains the winning publication" "new roster"
+          (Yojson.Safe.Util.to_string cached)))
+    [false; true]
+
+let test_same_list_query_does_not_renew_an_expired_winner () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    ignore (read ~key:"roster" ~ttl_s:3600. (fun () ->
+      ignore (read ~key:"roster" ~ttl_s:0. (fun () -> `String "expired winner"));
+      `String "older roster"));
+    let current = read ~key:"roster" ~ttl_s:3600. (fun () -> `String "current roster") in
+    check string "an older computation cannot extend the winning roster's TTL"
+      "current roster" (Yojson.Safe.Util.to_string current))
+
 let test_expired_list_query_releases_payload_without_evicting_live_queries () =
   with_empty_roster_cache (fun () ->
     let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
@@ -776,6 +807,10 @@ let () =
     ; ( "cache publication"
       , [ test_case "a competing query does not repeat completed work" `Quick
             test_another_list_query_does_not_repeat_completed_work
+        ; test_case "the same query retains its winning publication" `Quick
+            test_same_list_query_retains_the_winning_publication
+        ; test_case "an older query cannot renew an expired winner" `Quick
+            test_same_list_query_does_not_renew_an_expired_winner
         ; test_case "expired queries release payloads without evicting live queries" `Quick
             test_expired_list_query_releases_payload_without_evicting_live_queries
         ; test_case "explicit invalidation rejects obsolete work" `Quick

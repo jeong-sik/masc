@@ -1,0 +1,7 @@
+left
+snapshot keeper-action-v3-narrow
+left
+snapshot keeper-action-v3-narrow-ready
+escape
+q
+q

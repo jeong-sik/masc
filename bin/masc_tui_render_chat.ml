@@ -743,7 +743,7 @@ let keeper_message_identity ~max_cells state keeper_name =
       let health = Keeper_control.health reading in
       (* Never clip a suggested action into another word or displace the
          existing identity, gate, runtime or stream facts. The Info pane and
-         selected roster row carry it when this header has no room. *)
+         selected-Keeper summary carry it when this header has no room. *)
       let with_suggested_action text =
         match Keeper_control.next_action reading with
         | None -> text

@@ -5,7 +5,7 @@ as ``merge_base_commit``. Patch text is not always valid JSON: a repository
 file containing ``Printf.sprintf "\\u00%02X"`` (task-2220, PR #41696) has been
 observed serialising with an odd backslash count, which breaks every
 ``--jq`` read of the whole response, including the merge-base lookup that
-``review-diff.py`` and ``review-scope.py`` depend on.
+``review-diff.py`` depends on.
 
 ``merge_base_commit`` precedes the ``files`` array in the response, so this
 helper slices the raw bytes down to that one object and decodes only those

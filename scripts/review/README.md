@@ -1,197 +1,103 @@
 # Stack review admission
 
-Review ordinary stacks from source. No automatic CI and no CI-run identifier
-is needed for approval. Review function, logic and code cleanliness; approve
-when P0/P1/P2 are resolved, retain P3 for later cleanup.
+Review ordinary stacks from source. Review function, logic and code cleanliness;
+approve when P0/P1/P2 are resolved and retain P3 for later. Source approval does
+not wait for an Actions run. Release/Tag merge and publication decisions separately
+require completed full verification for the candidate head.
 
-The reviewer writes a literal first line:
-
-```
-verdict: PASS head: <40-hex SHA> by: <reviewer>
-```
-
-Capture the base commit and complete change identity when reviewing, before
-writing the approval. Use exact PR `base.sha` and `head.sha` from GitHub:
+Read the PR's current head, base, full diff and relevant source context. If the
+reviewed change differs, review it again. The GitHub CLI can display the diff:
 
 ```sh
-python3 scripts/review/review-diff.py --repo O/R --base BASE_SHA --head HEAD_SHA
-bash scripts/review/approve-guard.sh --repo O/R --pr N --head HEAD_SHA \
-  --review-base BASE_SHA --review-diff CAPTURED_SHA256 --body FILE
+gh pr diff N --repo O/R
 ```
 
-The identity covers each changed path, old/new mode and complete old/new object
-ID against GitHub's three-dot merge base. It includes binary and submodule
-changes, independent of rename guesses, patch truncation and local diff order.
-It needs a Git checkout; `GUARD_REPO_ROOT` selects one when the script is
-executed outside that checkout. Missing exact objects are fetched from the
-named repository; unreadable evidence refuses admission.
+An independent reviewer can publish directly using the reviewed head:
 
-The reviewer supplies the captured identity explicitly. The guard does not
-stamp a current diff onto an old source review. Approval consumers accept the
-existing binding line as the last line, and also accept an exact
-`approve-guard: head <40-character SHA>` line when the preceding non-empty line
-is that binding.
-Both forms preserve the reviewed base and diff identity. Consumption compares the current complete
-change: a moved/renamed base with identical change keeps the approval; retarget
-or parent landing that changes the diff requires independent re-review.
-For a Release PR, `--print-footer` reads the selected successful exact-head
-release run and includes it in the binding; it refuses if that run is unavailable.
-Head-only approvals supply no evidence of the reviewed diff and are not
-backfilled. Use `--check` for a read-only admission probe. A source-reviewed child may be
-approved while its parent is still open. Inspect the REST PR's `stack` metadata
-and ordered stack membership before choosing the merge scope. **Merge a native
-stack whole, once, through its top PR; never merge it layer by layer from the
-bottom.** Do not require separate parent merges or manually retarget it. For a confirmed
-non-native branch chain, land the parent first and inspect the changed diff
-before landing the child. See the [Native GitHub Stacks guide](../../docs/guides/NATIVE-GITHUB-STACKS.md).
+```sh
+gh api --method POST repos/O/R/pulls/N/reviews \
+  -f event=APPROVE -f commit_id=HEAD_SHA
+```
 
-Approval publication records the reviewing account's independent conclusion.
-Existing change requests and structured decisions do not prevent a new,
-independently reviewed PASS from being recorded. They still apply when a merge
-or source receipt consumes review evidence. API-read failures, author exclusion,
-reviewed head/base/diff checks and Release CI requirements remain enforced.
-Ordinary source publication does not wait for a `leader-selected-ci` pin; merge
-admission still checks that pin.
+No prescribed review body, footer or helper is required. A reviewer must not
+approve their own change, and GitHub does not permit the PR author account to
+approve its own PR. A commit author or committer account can be shared by
+independent sessions; matching that account does not itself disqualify a review.
+Read back the submitted review ID, state and commit ID. If publication or readback
+is uncertain, inspect the existing effect before trying again.
 
-To replace your own open change request after rereview, pass
-`--replace-own-cr REVIEW_ID` alongside the reviewed base, diff and PASS body.
-The ID may name any of your open CRs on that PR; repeat the option to name
-several. Every ID is checked against the authenticated account, actual CR state,
-and matching claimed Keeper; a different or missing claim remains unresolved.
-Replacement flags cannot authorize merge or receipts by themselves.
-Review IDs do not establish publication order: the guard compares submission
-times when choosing the latest formal review and when validating a replacement.
-Missing times or ties for an account's latest formal review refuse ordering.
-An older tie is allowed, but an approval must be strictly later than the request
-it replaces; a same-time approval cannot clear it.
+A review's GitHub account, decision and commit ID do not establish which Keeper
+session performed the review, which base and complete diff it saw, or a Release
+CI run. Report the scope actually reviewed and distinguish unverified facts. Two Keepers
+sharing a GitHub account do not create two authenticated account reviews.
 
-`review-decisions.py` reduces structured review/comment decisions separately for
-each authenticated GitHub login and claimed Keeper name. A later trusted PASS
-can supersede only that account and claim's older decisions. A PR-author or
-unrelated account's PASS cannot clear another account's FAIL/HOLD; nor can a
-different claimed Keeper clear it through the same login. A missing or malformed
-claim stays blocked until the originating record is investigated and corrected.
-Keeper `by:` names are not authenticated, and Keepers sharing a GitHub login do
-not supply independent formal opinions.
-Unidentified decisions cannot grant PASS, and unpublished PENDING reviews do
-not participate. Positive comment edits cannot move an old PASS past a later
-refusal; negative edits and contradictory same-timestamp decisions still block.
+## Reading current reviews
 
-`merge-guard.sh --check --repo O/R --pr N --head SHA` checks each included
-PR's current head, independent trusted head-bound approval and latest blocking
-reviews or structured decision. It rechecks stack membership and included
-head/base identities before admission. Check output names the validated
-merge target: a native stack can land into another feature branch, whose PR
-is outside this stack scope. That is not main integration. For an ordinary head
-it additionally reads the merge-compile verdict — target freshness plus the
-commit status — as advisory `ADVISORY #N: ...` lines, and never dispatches CI
-itself. External coding agents use this read-only check before submitting a native
-stack via `PUT /repos/O/R/pulls/TOP_PR/merge-async`; for a non-native PR, use
-`gh pr merge --match-head-commit SHA`. The asynchronous receipt labels only the preflight target, since GitHub accepts
-only the selected head SHA as a precondition; its accepted destination remains
-unconfirmed until the result is read. The receipt is acceptance,
-not completion: confirm the result and each included PR's merged state before
-reporting success. The guide above documents the request and its SHA boundary.
+```sh
+python3 scripts/review/github-reviews.py --repo O/R --pr N --head HEAD_SHA --gh gh
+```
 
-For a `release/vX.Y.Z` head, execute the full Release Candidate Verification
-workflow explicitly. The release verdict also carries `run: <full run ID>`
-between head and reviewer. Release admission requires the current full run,
-including successful full-check, behavior, packaging and result jobs. A
-missing or skipped required job is not evidence of full verification.
+The command reads the PR and all review pages, then returns JSON with review IDs
+in `approval_ids`, remaining `change_requests`, earlier
+`superseded_change_requests`, `ambiguous_review_ids`, and provenance. It checks the PR identity before
+and after the review read. Approval does not depend on account association or
+review-body format. Exit 0 means at least one non-author approval on the requested
+current head and no remaining change requests; exit 2
+means those conditions or the requested head do not hold; exit 1 means the read
+or review history could not be evaluated. It does not establish the independent
+session, reviewed base/diff or Release run. A later formal approval replaces an
+earlier change request by the same GitHub account; requests from other accounts
+remain. COMMENTED and PENDING do not replace a formal decision, and a dismissed
+review is not an approval. Matching approvals submitted in the same second count;
+conflicting same-second decisions are shown as ambiguous for that account. A
+duplicate review ID leaves the result unavailable. Do not infer ordering from IDs.
+An unreadable or changed PR can be refused before an evaluation result exists;
+in that case the command reports the reason on stderr rather than producing JSON.
 
-`queue-ledger.sh --repo O/R --format tsv` reports source-review readiness and
-native stack scope admission or non-native parent waits. It reads full CI
-evidence only for release heads. Structured blockers name their authenticated
-account, record ID and decision timestamp. Other admission failures retain their
-concrete guard diagnostic instead of being collapsed to `review`.
+Before using a later approval to conclude the code is ready, examine the original
+concern and verify that it is actually addressed. A green CI result or approval
+from a different account does not resolve another account's change request.
+The native review state cannot automatically decide whether unstructured review
+comments or other recorded blocking findings have been resolved; inspect them
+before integration.
 
-## Assigning the next review
+## Assigning and integrating reviews
 
-`review-worklist.py` reads every open PR and every page of its reviews and issue
-comments. It collects PRs concurrently and validates the complete snapshot before
-planning or posting. It keeps
-GitHub's user/team requests and proposes missing requests across an explicit
-pool of GitHub logins:
+`review-worklist.py` reads open PRs and review history to plan missing requests
+across explicitly supplied GitHub logins. Its default is read-only; `--request`
+publishes missing requests and reads the resulting state back:
 
-```bash
+```sh
 python3 scripts/review/review-worklist.py --repo OWNER/REPO \
   --reviewer LOGIN_A --reviewer LOGIN_B
-# Publish missing requests and read them back:
 python3 scripts/review/review-worklist.py --repo OWNER/REPO \
   --reviewer LOGIN_A --reviewer LOGIN_B --request
 ```
 
-The default is read-only. Changed-head CRs first return to their GitHub account;
-Keeper handoff must identify the actual author. Other missing first reviews and
-rereviews are processed together oldest first, balanced by outstanding and
-proposed requests. Same-head CRs wait for author action unless an explicit
-rereview request exists.
-Shared logins count once. COMMENT/PENDING does not establish approval. Existing
-approval evidence uses the complete-diff/scope guard before being admitted.
-Formal review order uses submission time, with unknown times or an ambiguous
-latest decision refusing planning. Each unresolved CR remains owned until its
-explicit, strictly later replacement or dismissal; multiple CRs on one account
-are grouped into one request. A current-head CR waits for author action even
-when that account also has an older CR.
-Proposed reviewers must have a different GitHub user ID from the PR author. The
-tool resolves reviewer logins to IDs, repeats that lookup immediately before a
-request, and checks the returned request IDs. A linked commit author or
-committer account can be shared by independent sessions and does not disqualify
-the reviewer. Account checks alone do not prove session independence. Existing
-conflicting requests and CR ownership remain visible and untouched; when appropriate a separate
-independent reviewer is proposed. Existing team requests are preserved without
-assuming their membership. A separately validated current independent source
-approval avoids a redundant extra request even if another account's CR remains
-open; this does not clear the CR or grant merge admission. Release decisions
-still use their own CI policy.
+An assignment is not an active or completed review. Preserve existing requests,
+read the entire history and distinguish an unreadable snapshot from no work.
+Select the intended Keepers using [review routing](../../config/prompts/pr-review-routing.md).
+Repository prompt changes do not themselves update a running Keeper's instructions.
 
-Assignments mean requested, not running or reviewed. Each action retains its
-head/base/stack identity. Before posting, the tool rereads PR/evidence and skips
-changed snapshots. Receipt scope and policy must match the observed PR, and a
-source admission is rechecked against PR scope and review evidence. Requests
-and these observations cannot be made atomic with a SHA. After a POST
-it reads scope/requests back and reports races or uncertainty without blindly
-retrying. Existing requests are never removed; a transport/read failure stops
-further notifications and preserves earlier receipts. No timer, daemon, lease,
-CI dispatch or review approval is added.
+Inspect REST `stack` metadata and ordered stack membership before selecting merge
+scope. Every included PR requires its own reviewed current head and resolved
+blocking findings. Recheck each head, base, complete diff and current reviews;
+API failures are unknown.
+**Merge a native stack whole, once, through its top PR; never merge it layer by
+layer from the bottom.** Confirm the asynchronous result and all member PRs'
+merged states. A non-native branch chain is handled parent first. See the
+[Native GitHub Stacks guide](../../docs/guides/NATIVE-GITHUB-STACKS.md).
 
-Keeper selection follows [review routing](../../config/prompts/pr-review-routing.md).
-Repository defaults do not update running Keeper instructions; apply those
-separately through supported Keeper configuration and read them back. Offline
-feature checks: `test_review_routing.py` and `test_review_worklist.py`.
+Release/Tag merge and publication decisions verify the completed Full CI run and
+required jobs for that exact head. Record the run and review scope separately; a
+native approval by itself proves neither. Source review, CI, merge, deployment
+and observed runtime behavior are distinct evidence.
 
-## Reading a refusal
+`queue-ledger.sh` reports review readiness and stack scope. The approved-candidate
+preparation path combines explicitly selected heads without dispatching CI; it
+still requires current reviews and scope checks. Missing Git objects are fetched
+from the named repository. On a failed candidate publication, its incomplete
+receipt and only a candidate ref still pointing to its own commit are removed.
 
-When a non-author APPROVED review exists but is not admitted, the
-`no trusted non-author approval bound to this head and complete diff` refusal
-(from `approve-guard.sh --merge-check`, and so from `merge-guard.sh`) lists,
-per review, which test failed (author association, first-line verdict,
-footer prefix, `reviewed base`/`diff sha256` tail, a stale diff hash, or the
-`review-scope` stamp) and prints the expected footer for diagnosis. The guard
-adds these lines itself; do not copy them into the review body. `review-refusal.py`
-makes the admission decision and the reasons come from the same code, so the
-guard and the explanation cannot disagree.
-
-Offline checks: `python3 -I scripts/review/test_review_decisions.py`,
-`python3 -I scripts/review/test_review_refusal.py`,
-`python3 -I scripts/review/test_approve_guard_refusal.py`,
-`python3 -I scripts/review/test_queue_ledger.py` and
-`python3 -I scripts/review/test_stack_scope.py`.
-
-## Preparing an approved candidate
-
-`prepare-approved-batch.py` combines explicitly selected, directly main-based
-ordinary heads without dispatching CI. In addition to current-head source
-approval, it requires the approval's `review-scope` receipt stamped by
-`approve-guard.sh`: reviewed base ref/SHA and native stack identity/position.
-Retargeting or changing the diff boundary requires a fresh independent review;
-unrelated main advancement with the same merge-base does not. Older approvals
-without this receipt need reapproval before candidate composition. This does
-not add a CI requirement or change ordinary merge admission.
-
-Missing Git objects are fetched from the API-resolved `--repo` repository,
-independently of the checkout's origin. Receipt publication includes flush and
-close in its rollback boundary. On failure it removes the incomplete receipt
-and deletes only a candidate ref still pointing to the commit it created.
-
-Ordinary merge admission and candidate preparation share `review-scope.py`: approvals require the same base ref and native stack position, and either the exact reviewed base SHA or the same merge-base with the reviewed head. Missing or changed diff scope requires a fresh independent approval; unrelated base advancement remains admissible.
+Offline focused checks include `python3 -m unittest -v scripts/review/test_github_reviews.py`,
+`test_review_worklist.py`, `test_queue_ledger.py` and `test_stack_scope.py`.

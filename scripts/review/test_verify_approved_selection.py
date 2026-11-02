@@ -69,9 +69,9 @@ class UnavailableCarriesCause(unittest.TestCase):
     # the cause rides beside it.
     def test_source_unavailable_keeps_reason_and_carries_cause(self):
         error = P.SourceUnavailable("source_approval_read_failed",
-                                    cause="approve-guard exit=1 stderr=boom")
+                                    cause="github-reviews exit=1 stderr=boom")
         self.assertEqual(error.reason, "source_approval_read_failed")
-        self.assertEqual(str(error), "source_approval_read_failed: approve-guard exit=1 stderr=boom")
+        self.assertEqual(str(error), "source_approval_read_failed: github-reviews exit=1 stderr=boom")
 
     def test_source_unavailable_without_cause_keeps_pinned_vocabulary(self):
         error = P.SourceUnavailable("tree_merge_failed")
@@ -80,10 +80,10 @@ class UnavailableCarriesCause(unittest.TestCase):
 
     def test_unavailable_payload_names_the_cause(self):
         payload = P.unavailable_payload(P.SourceUnavailable(
-            "source_approval_read_failed", cause="approve-guard exit=1 stderr=gh: boom"))
+            "source_approval_read_failed", cause="github-reviews exit=1 stderr=gh: boom"))
         self.assertEqual(payload["status"], "unavailable")
         self.assertEqual(payload["reason"],
-                         "source_approval_read_failed: approve-guard exit=1 stderr=gh: boom")
+                         "source_approval_read_failed: github-reviews exit=1 stderr=gh: boom")
 
     def test_unavailable_payload_keeps_plain_reasons_stable(self):
         self.assertEqual(P.unavailable_payload(P.SourceUnavailable("tree_merge_failed")),

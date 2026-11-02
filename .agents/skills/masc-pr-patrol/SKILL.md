@@ -30,44 +30,29 @@ Draft는 작업 중이라는 뜻이다. CI가 없다는 이유로 일반 PR을 D
 ## 여러 관점에서 리뷰
 
 기능과 사용자 흐름, 상태 전이·실패 처리 논리, 코드 청결도를 독립적으로 확인한다.
-P0·P1·P2가 남으면 구체적인 위치·트리거·영향·수정 방향을 기록한다. 최종 판정을 맡은 리뷰어는 필요한 범위, PR 작성자와 다른 인증 계정, 실제 리뷰 세션의 독립성과 게시 권한을 확인한 뒤 자신의 판단에 따라 변경 요청이나 승인을 낸다. COMMENT 전담자는 자신의 렌즈 근거를 COMMENT로 남기며 승인이나 변경 요청을 대신하지 않는다.
+P0·P1·P2가 남으면 구체적인 위치·트리거·영향·수정 방향을 기록한다. 리뷰 내용과 수정 사항이 맞으면 GitHub에 바로 승인한다. COMMENT 전담자는 자신의 렌즈 근거를 COMMENT로 남기며 승인이나 변경 요청을 대신하지 않는다.
 P3는 모아서 후속 청소로 처리한다. 자기 변경은 자기가 승인하지 않는다.
 
-일반 스택의 공식 최종 판정 첫 줄(COMMENT 전용 서명과는 별개):
-
-```
-verdict: PASS head: <40-hex SHA> by: <reviewer>
-```
-
-아래 승인 예제는 독립성과 게시 권한을 확인한 최종 판정자 전용이다. COMMENT 전담자는 이 승인 명령을 실행하지 않고 자신의 서명과 근거를 담은 COMMENT 리뷰를 게시한다.
-
-최종 판정자는 리뷰 시작 전에 저장소 checkout 에서 인증된 `gh`, Git, Python 3, `jq` 로 head·base·전체 diff 식별자를 캡처한다.
+리뷰어는 현재 head·base와 전체 diff를 확인한 뒤 아래처럼 승인할 수 있다.
 
 ```sh
 # repo 와 pr 을 리뷰할 저장소와 PR 번호로 지정한다.
 snapshot=$(gh api "repos/$repo/pulls/$pr")
 head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
-review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
-review_diff=$(python3 scripts/review/review-diff.py \
-  --repo "$repo" --base "$review_base" --head "$head")
-# 전체 diff 와 소스 문맥을 읽고 review-body.md 에 판정과 증거를 기록한다.
-bash scripts/review/approve-guard.sh --check --repo "$repo" --pr "$pr" --head "$head"
-bash scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
-  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+gh pr diff "$pr" --repo "$repo"
+# 전체 diff 와 소스 문맥을 읽고 검토한 head 를 지정한다.
+gh api --method POST "repos/$repo/pulls/$pr/reviews" \
+  -f event=APPROVE -f commit_id="$head"
 ```
 
-게시에는 `--body`, `--review-base`, `--review-diff` 가 모두 필요하다. 변경 범위가 달라지면 다시 리뷰하고
-증거를 캡처한다. 읽지 않은 변경을 승인하려고 diff 식별자만 갱신하지 않는다.
-가드는 `review-scope:`와 `approve-guard:` 줄을 자동으로 붙인다. `--body`에 이 줄이나
-`--print-footer` 출력을 넣지 않는다. 게시 뒤 결과가 불명확하면 리뷰를 조회한 뒤에만 후속 처리한다.
+본문 형식이나 footer는 필수가 아니다. 변경 범위가 달라지면 다시 리뷰한다. 소스 검토가 끝나면
+CI를 기다리지 않고 승인한다. 게시 뒤 리뷰 ID·상태·commit_id를
+재조회하고 결과가 불명확하면 기존 효과를 확인한 뒤에만 후속 처리한다.
 
-`approve-guard.sh`의 게시 경로는 PR 작성자와 다른 인증 계정, 검토한 head/base/diff와 본문을 검사한다.
-커밋 author·committer 계정은 여러 Keeper 세션이 공유할 수 있다. 가드는 실제 작성·push 세션과
-리뷰 세션의 독립성을 증명하지 못하므로 판정자가 별도로 확인한다. 확인할 수 없다면 그 사실을
-명시한 COMMENT로 남기고 독립 승인으로 기록하지 않는다.
-기존 CR이나 FAIL/HOLD는 새 판정 게시를 막지 않으며, 본인 CR은 `--replace-own-cr ID`로 명시한다(여러 ID는 옵션 반복).
-병합·source receipt 경로는 계정별 미해결 FAIL/HOLD와 변경 요청을 검사한다. 다른 계정의 PASS 댓글로 해제하지 않는다.
-Keeper `by` 이름은 표시 정보이며 같은 GitHub 로그인을 공유하면 독립된 정식 리뷰어로 세지 않는다.
+커밋 author·committer 계정은 여러 Keeper 세션이 공유할 수 있다. GitHub 리뷰의 계정·commit_id는
+실제 작성·push 세션과 리뷰 세션의 독립성, 검토한 base·전체 diff를 증명하지 않는다.
+같은 계정의 이후 정식 승인은 그 계정의 이전 변경 요청을 대체하며 다른 계정의 요청은 남는다.
+같은 GitHub 계정의 Keeper는 별도 공식 계정으로 세지 않는다. 원래 지적이 실제 해결됐는지도 확인한다.
 일반 head에는 Actions API를 읽지 않는다. GitHub 계정 제한 때문에 자기 PR에 공식 APPROVE를 쓸 수 없으면
 독립 리뷰의 결과와 제약을 명시하며 자기 승인을 만들지 않는다.
 
@@ -80,11 +65,11 @@ non-main base만으로 부모 선행 병합이나 수동 retarget을 요구하�
 브랜치 체인은 부모부터 처리한다. API 오류는 미확인이다. 구성·base·head 변경 뒤에는 다시 검토한다.
 
 ```sh
-bash scripts/review/queue-ledger.sh --repo jeong-sik/masc --format tsv
-bash scripts/review/merge-guard.sh --check --repo jeong-sik/masc --pr <N> --head <SHA>
+gh api repos/OWNER/REPO/pulls/TOP_PR_NUMBER
+gh api repos/OWNER/REPO/stacks/STACK_NUMBER
 ```
 
-외부 코딩 에이전트는 guard를 `--check`로 쓴다. **Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에
+**Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에
 병합한다. 아래부터 한 층씩 병합하지 않는다.** 스택 전체가 승인된 경우
 `PUT repos/{owner}/{repo}/pulls/{맨 위 PR 번호}/merge-async`에 맨 위 PR의 head를 `sha`로 전달한다.
 스택이 main과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올려 한 번에 push하고, 아래층만 고쳐 push하지 않는다.
@@ -94,16 +79,8 @@ bash scripts/review/merge-guard.sh --check --repo jeong-sik/masc --pr <N> --head
 ## Release/Tag 검증
 
 `release/vX.Y.Z`에서 명시적으로 `release-candidate.yml` Full CI Cycle을 실행한다.
-현재 head·branch의 최신 `release-candidate.yml` run이 완료·성공하고 필수 빌드·타입·기능·설치 검증도 성공해야 PASS할 수 있다. Release 판정에는 현재 head의 완료된 Full CI run을 기록한다. 완료된 run이 아직 없더라도 발견한 결함은 `verdict:` 줄 없이 head와 근거를 담은 변경 요청으로 남기고 run을 지어내지 않는다.
+소스 리뷰 승인은 CI가 끝나기 전에 낼 수 있다. Release 병합·게시 판정에는 현재 head·branch의 최신 `release-candidate.yml` run이 완료·성공하고 필수 빌드·타입·기능·설치 검증도 성공해야 한다. 완료된 Full CI run은 별도로 기록한다. 발견한 결함은 head와 근거를 담아 남기고 run을 지어내지 않는다.
 필수 작업이 실패·대기·skip·미등록이면 릴리스 성공 증거가 아니다. 일반 스택에 이 조건을 확대하지 않는다.
-
-```
-verdict: PASS head: <40-hex SHA> run: <full CI run ID> by: <reviewer>
-```
-
-```sh
-bash scripts/review/merge-guard.sh --check --repo jeong-sik/masc --pr <N> --head <SHA> --run <ID>
-```
 
 로그를 읽을 때 source review, 실행 결과, 병합, 배포, 실제 동작을 구분한다.
 CI를 확인하는 동안 피처 개발을 멈추지 않는다. CI 자체 개선은 별도 스택에서 진행한다.

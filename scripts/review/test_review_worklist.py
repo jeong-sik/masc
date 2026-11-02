@@ -110,6 +110,8 @@ if len(parts) == 2:
         pr.update(s.get('preflight_changes_by_number', {}).get(number, s.get('preflight_change', {})))
     done(pr)
 if parts[2] == 'reviews':
+    if number == s.get('fail_preflight_number') and s.get('detail_reads',{}).get(number,0) >= 2:
+        done(error='late preflight failure')
     if number == s.get('invalid_review_number') and s.get('detail_reads',{}).get(number,0) >= 2:
         done([[None]])
     pages = s.get('review_pages', {}).get(number, [[]])
@@ -205,7 +207,19 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
 
-    def test_multiple_owned_crs_request_once_and_keep_all_ids(self):
+    def test_reused_review_login_requests_verified_current_account_id(self):
+        cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+              'user':{'login':'reviewer-a', 'id':uid('reviewer-b')},
+              'body':'Please fix the finding.', 'submitted_at':'2026-10-26T09:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
+        [action] = out['actions']
+        self.assertEqual(action['review_authors'],
+                         [{'account_id':uid('reviewer-b'), 'observed_login':'reviewer-a'}])
+
+    def test_multiple_crs_on_one_account_route_only_latest(self):
         def cr(rid, when):
             return {'id':rid, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
                     'user':user('reviewer-b'), 'body':'Please fix the finding.',
@@ -217,32 +231,86 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
         [action] = [a for a in out['actions'] if a['reason'] == 'changed_head_cr']
-        self.assertEqual(action['review_ids'], [12, 13, 14])
+        self.assertEqual(action['review_ids'], [14])
 
-    def test_ambiguous_latest_cr_time_never_posts(self):
+    def test_ambiguous_review_does_not_stop_other_prs(self):
         cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
               'user':user('reviewer-b'), 'body':'Please fix the finding.',
               'submitted_at':'2026-10-26T09:00:00Z'}
-        self.state['review_pages'] = {'1':[[cr, cr | {'id':13}]]}
+        approved = cr | {'id':13, 'state':'APPROVED', 'commit_id':HEAD}
+        self.state['pulls']['2'] = pull(2)
+        self.state['review_pages'] = {'1':[[cr, approved]]}
         result, out, state = self.run_cli(request=True)
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertEqual(out['status'], 'unavailable')
-        self.assertIn('ambiguous submission times', out['reason'])
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(out['status'], 'requests_processed')
+        [uncertain] = [a for a in out['actions'] if a['number'] == 1]
+        self.assertEqual(uncertain['reason'], 'ambiguous_review')
+        self.assertEqual(uncertain['ambiguous_review_ids'], [12, 13])
+        self.assertEqual([r['state'] for r in uncertain['ambiguous_reviews']],
+                         ['CHANGES_REQUESTED', 'APPROVED'])
+        self.assertEqual(state['posts'], [{'number':2, 'reviewers':['reviewer-a']}])
+
+    def test_identical_tied_native_approvals_do_not_abort_or_trigger_request(self):
+        approved = {'id':12, 'state':'APPROVED', 'commit_id':HEAD,
+                    'user':user('reviewer-b'), 'body':'Looks good.',
+                    'submitted_at':'2026-10-26T09:00:00Z'}
+        self.state['review_pages'] = {'1':[[approved, approved | {'id':13}]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        [action] = out['actions']
+        self.assertEqual((action['reason'], action['approval_ids'], action['ambiguous_review_ids']),
+                         ('approved', [12, 13], []))
+        self.assertEqual(out['requests'], [])
         self.assertNotIn('posts', state)
 
-    def test_pending_comment_and_other_dismissal_leave_original_cr_owned(self):
+    def test_ambiguous_account_keeps_another_accounts_cr_actionable(self):
+        cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+              'user':user('reviewer-a'), 'body':'Please fix the finding.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        approved = cr | {'id':13, 'state':'APPROVED', 'commit_id':HEAD}
+        other_cr = cr | {'id':14, 'user':user('reviewer-b'),
+                         'submitted_at':'2026-10-26T10:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr, approved, other_cr]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual({(a['reason'], a['account']) for a in out['actions']}, {
+            ('ambiguous_review', None), ('changed_head_cr', 'reviewer-b')})
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
+
+    def test_other_accounts_approval_is_visible_beside_ambiguous_history(self):
+        first = {'id':12, 'state':'APPROVED', 'commit_id':HEAD,
+                 'user':user('reviewer-a'), 'body':'Reviewed.',
+                 'submitted_at':'2026-10-26T09:00:00Z'}
+        dismissed = first | {'id':13, 'state':'DISMISSED'}
+        approved = first | {'id':14, 'user':user('reviewer-b')}
+        self.state['review_pages'] = {'1':[[first, dismissed, approved]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual({a['reason'] for a in out['actions']}, {'ambiguous_review', 'approved'})
+        self.assertTrue(all(a['approval_ids'] == [14] for a in out['actions']))
+        self.assertTrue(all(a['ambiguous_review_ids'] == [12, 13] for a in out['actions']))
+        self.assertEqual(out['requests'], [])
+        self.assertNotIn('posts', state)
+
+    def test_pending_and_comment_leave_cr_owned_but_dismissal_clears_it(self):
         cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
               'user':user('reviewer-b'), 'body':'Please fix the finding.',
               'submitted_at':'2026-10-26T09:00:00Z'}
         pending = cr | {'id':13, 'state':'PENDING', 'commit_id':None, 'submitted_at':None}
         comment = cr | {'id':14, 'state':'COMMENTED', 'submitted_at':'2026-10-26T10:00:00Z'}
         dismissed = cr | {'id':15, 'state':'DISMISSED', 'submitted_at':'2026-10-26T11:00:00Z'}
-        self.state['review_pages'] = {'1':[[cr, pending], [comment, dismissed]]}
+        self.state['review_pages'] = {'1':[[cr, pending], [comment]]}
         result, out, state = self.run_cli(request=True)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
         [action] = [a for a in out['actions'] if a['reason'] == 'changed_head_cr']
         self.assertEqual(action['review_ids'], [12])
+        self.state = {'pulls':{'1':pull()}, 'review_pages':{'1':[[cr, pending], [comment, dismissed]]}}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        [action] = out['actions']
+        self.assertEqual(action['reason'], 'review_needed')
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-a']}])
 
     def test_changed_review_body_or_time_before_post_is_not_requested(self):
         original = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
@@ -274,7 +342,7 @@ class WorklistFlow(unittest.TestCase):
 
     def test_read_failure_aborts_before_any_post(self):
         self.state['pulls']['2'] = pull(2)
-        self.state['fail_get'] = 'issues/2/comments'
+        self.state['fail_get'] = 'pulls/2/reviews'
         result, out, state = self.run_cli(request=True)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(out['status'], 'unavailable')
@@ -415,8 +483,8 @@ class WorklistFlow(unittest.TestCase):
                          ['requested', 'unavailable', 'not_attempted'])
         self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-a']}])
 
-    def test_later_invalid_review_or_comment_preserves_earlier_receipt(self):
-        for key in ('invalid_review_number', 'invalid_comment_number'):
+    def test_later_invalid_review_preserves_earlier_receipt(self):
+        for key in ('invalid_review_number',):
             with self.subTest(kind=key):
                 self.state = {'pulls':{'1':pull(), '2':pull(2), '3':pull(3)}, key:'2'}
                 result, out, state = self.run_cli(request=True)
@@ -432,165 +500,129 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual(out['requests'][0]['state'], 'requested_scope_changed')
         self.assertEqual(len(state['posts']), 1)
 
-    def test_approved_path_uses_selected_gh_and_requires_independent_receipt(self):
-        review = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a'), 'commit_id':HEAD}
-        receipt = json.dumps({'pr':1, 'head':HEAD, 'approval_ids':[7],
-                              'scope':M.review_scope(pull()), 'policy':'source'})
-        for code in (0, 2):
-            with self.subTest(code=code):
-                with patch.object(M, 'command', side_effect=[
-                        M.CommandResult(code, receipt, 'admission result')]) as run:
-                    result = M.GitHub('o/r', '/fake/gh').admission(pull(), [review])
-                    self.assertEqual(result, code == 0)
-                    for call in run.call_args_list:
-                        self.assertEqual(call.kwargs['env']['GUARD_GH'], '/fake/gh')
-        with patch.object(M, 'command', return_value=M.CommandResult(0, receipt, '')):
-            self.assertTrue(M.GitHub('o/r').admission(pull(), [review]))
-            self.assertFalse(M.GitHub('o/r').admission(pull() | {'user':user('reviewer-a')}, [review]))
-            self.assertFalse(M.GitHub('o/r').admission(pull(), [review | {'commit_id':'e'*40}]))
-            missing_commit = {k:v for k,v in review.items() if k != 'commit_id'}
-            self.assertFalse(M.GitHub('o/r').admission(pull(), [missing_commit]))
-            with self.assertRaises(M.Unavailable):
-                M.GitHub('o/r').admission(pull(), [review | {'id':8}])
-        stale = json.dumps({'pr':1, 'head':HEAD, 'approval_ids':[7],
-                            'scope':{'base_ref':'main', 'base_sha':'c'*40, 'stack':None}, 'policy':'source'})
-        with patch.object(M, 'command', return_value=M.CommandResult(0, stale, '')):
-            with self.assertRaises(M.Unavailable):
-                M.GitHub('o/r').admission(pull(), [review])
-        wrong_policy = json.dumps({'pr':1, 'head':HEAD, 'approval_ids':[7],
-                                   'scope':M.review_scope(pull()), 'policy':'release'})
-        with patch.object(M, 'command', return_value=M.CommandResult(0, wrong_policy, '')):
-            with self.assertRaises(M.Unavailable):
-                M.GitHub('o/r').admission(pull(), [review])
+    def test_native_approval_on_source_and_release(self):
+        for branch in ('fix/1', 'release/v1'):
+            for body in ('', None, 'Looks good.', 'Reviewed the changes.'):
+                with self.subTest(branch=branch, body=body):
+                    pr = pull()
+                    pr['head']['ref'] = branch
+                    approved = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a'),
+                                'author_association':'MEMBER',
+                                'commit_id':HEAD, 'body':body,
+                                'submitted_at':'2026-10-26T09:00:00Z'}
+                    self.state = {'pulls':{'1':pr}, 'review_pages':{'1':[[approved]]},
+                                  'fail_get':'issues/1/comments'}
+                    result, out, state = self.run_cli(request=True)
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    [action] = out['actions']
+                    self.assertEqual(action['reason'], 'approved')
+                    self.assertEqual(action['approval_ids'], [7])
+                    self.assertNotIn('independent_source_review', action)
+                    self.assertEqual(out['requests'], [])
+                    self.assertNotIn('posts', state)
+                    self.assertFalse(any('compare/' in c or 'issues/' in c for c in state['calls']))
 
-    def test_independent_source_approval_preserves_separate_conflicting_cr(self):
-        digest = 'd' * 64
-        body = (f'verdict: PASS head: {HEAD} by: reviewer-b\n\n'
-                f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
-                f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
-        approved = {'id':10, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body, 'commit_id':HEAD,
-                    'author_association':'MEMBER', 'submitted_at':'2026-10-26T09:00:00Z'}
-        cr = {'id':11, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-a'),
-              'commit_id':HEAD, 'body':'source finding', 'submitted_at':'2026-10-26T09:00:00Z'}
-        pr = pull()
-        pr['requested_reviewers'] = [user('reviewer-a')]
-        pr['user'] = user('reviewer-a')
-        with patch.object(M, 'command', return_value=M.CommandResult(0, digest, '')) as run:
-            self.assertTrue(M.GitHub('o/r', '/fake/gh').independent_source_review(pr, [cr, approved], []))
-            self.assertEqual(run.call_args.kwargs['env']['GUARD_GH'], '/fake/gh')
-            stale = approved | {'body':body.replace(HEAD, 'e'*40)}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, stale], []))
-            old_commit = approved | {'commit_id':'e'*40}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, old_commit], []))
-            missing_commit = {k:v for k,v in approved.items() if k != 'commit_id'}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, missing_commit], []))
-            superseded = approved | {'id':12, 'state':'CHANGES_REQUESTED', 'submitted_at':'2026-10-26T10:00:00Z'}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved, superseded], []))
-            release = pr | {'head':{'sha':HEAD, 'ref':'release/v1'}}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(release, [cr, approved], []))
-            later_fail = {'id':13, 'user':user('reviewer-b'), 'body':f'verdict: FAIL head: {HEAD} by: reviewer-b',
-                          'created_at':'2026-10-26T10:00:00Z', 'updated_at':'2026-10-26T10:00:00Z'}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [later_fail]))
-            other_keeper_fail = later_fail | {
-                'body': f'verdict: FAIL head: {HEAD} by: another-keeper',
-                'created_at': '2026-10-26T08:00:00Z', 'updated_at': '2026-10-26T08:00:00Z'}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(
-                pr, [cr, approved], [other_keeper_fail]))
-            other_fail = later_fail | {'user':user('reviewer-a')}
-            self.assertTrue(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [other_fail]))
-            unknown_fail = later_fail | {'user':None}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [unknown_fail]))
-            invalid_id = later_fail | {'user':{'login':'unknown','id':0}}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [invalid_id]))
-            invalid_known_login = later_fail | {'user':{'login':'reviewer-a','id':0}}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [invalid_known_login]))
-            later_pass = later_fail | {'id':14, 'user':user('reviewer-a'),
-                                       'body':f'verdict: PASS head: {HEAD} by: reviewer-a',
-                                       'author_association':'MEMBER', 'created_at':'2026-10-26T11:00:00Z',
-                                       'updated_at':'2026-10-26T11:00:00Z'}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(
-                pr, [cr, approved], [invalid_known_login, later_pass]))
-            valid_fail = later_fail | {'user':user('reviewer-a')}
-            invalid_pass = later_pass | {'user':{'login':'reviewer-a','id':0}}
-            self.assertFalse(M.GitHub('o/r').independent_source_review(
-                pr, [cr, approved], [valid_fail, invalid_pass]))
+    def test_latest_plain_approval_replaces_shared_account_cr(self):
+        cr = {'id':10, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-b'),
+              'commit_id':'c'*40, 'body':'Please fix this issue.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        approved = cr | {'id':11, 'state':'APPROVED', 'commit_id':HEAD, 'author_association':'MEMBER',
+                         'body':'Reviewed and approved.',
+                         'submitted_at':'2026-10-26T10:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr], [approved]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(out['actions'][0]['reason'], 'approved')
+        self.assertEqual(out['actions'][0]['approval_ids'], [11])
+        self.assertEqual(out['actions'][0]['superseded_change_requests'], [{
+            'review_id':10, 'account_id':uid('reviewer-b'), 'observed_login':'reviewer-b',
+            'finding_resolution':'unverified'}])
+        self.assertEqual(out['requests'], [])
+        self.assertNotIn('posts', state)
 
-    def test_independent_source_approval_requires_unique_latest_submission(self):
-        digest = 'd' * 64
-        body = (f'verdict: PASS head: {HEAD} by: reviewer-b\n\n'
-                f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
-                f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
-        approved = {'id':90, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body,
-                    'commit_id':HEAD, 'author_association':'MEMBER',
+    def test_approval_without_author_association_needs_no_new_review(self):
+        approved = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a'),
+                    'commit_id':HEAD, 'body':'Looks good.',
                     'submitted_at':'2026-10-26T09:00:00Z'}
-        dismissed = approved | {'id':77, 'state':'DISMISSED', 'body':'',
-                                'submitted_at':'2026-10-26T10:00:00Z'}
-        pr = pull()
-        pr['requested_reviewers'] = [user('reviewer-a')]
-        pr['user'] = user('reviewer-a')
-        github = M.GitHub('o/r', '/fake/gh')
-        with patch.object(M, 'command', return_value=M.CommandResult(0, digest, '')):
-            self.assertFalse(github.independent_source_review(pr, [approved, dismissed], []))
-            newer_approval = approved | {'id':77, 'submitted_at':'2026-10-26T10:00:00Z'}
-            older_dismissed = dismissed | {'id':90, 'submitted_at':'2026-10-26T09:00:00Z'}
-            self.assertTrue(github.independent_source_review(pr, [newer_approval, older_dismissed], []))
-            older_tie = older_dismissed | {'id':88}
-            self.assertTrue(github.independent_source_review(pr, [older_tie, older_dismissed, newer_approval], []))
-            for at in ('2026-10-26T09:00:00Z', None, 'invalid'):
-                with self.subTest(at=at), self.assertRaises(M.Unavailable):
-                    github.independent_source_review(pr, [approved, dismissed | {'submitted_at':at}], [])
+        for record in (approved, approved | {'author_association':'NONE'}):
+            with self.subTest(record=record):
+                self.state = {'pulls':{'1':pull()}, 'review_pages':{'1':[[record]]}}
+                result, out, state = self.run_cli(request=True)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(out['actions'][0]['reason'], 'approved')
+                self.assertEqual(out['actions'][0]['approval_ids'], [7])
+                self.assertEqual(out['requests'], [])
+                self.assertNotIn('posts', state)
 
-    def test_unreplaced_cr_remains_a_conflict_after_another_approval(self):
-        digest = 'd' * 64
-        body = (f'verdict: PASS head: {HEAD} by: reviewer-b\n\n'
-                f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
-                f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
-        approved = {'id':90, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body,
-                    'commit_id':HEAD, 'author_association':'MEMBER',
-                    'submitted_at':'2026-10-26T11:00:00Z'}
-        old_cr = {'id':11, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-a'),
-                  'body':f'verdict: FAIL head: {HEAD} by: keeper-one', 'commit_id':HEAD,
-                  'submitted_at':'2026-10-26T09:00:00Z'}
-        other_approval = approved | {'id':12, 'user':user('reviewer-a'),
-                                     'body':'unrelated approval', 'submitted_at':'2026-10-26T10:00:00Z'}
-        with patch.object(M, 'command', return_value=M.CommandResult(0, digest, '')):
-            self.assertTrue(M.GitHub('o/r', '/fake/gh').independent_source_review(
-                pull() | {'user':user('reviewer-a')}, [old_cr, other_approval, approved], []))
+    def test_approval_does_not_clear_another_accounts_cr(self):
+        cr = {'id':10, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-b'),
+              'commit_id':'c'*40, 'body':'Please fix.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        approved = cr | {'id':11, 'state':'APPROVED', 'user':user('reviewer-a'), 'author_association':'MEMBER',
+                         'commit_id':HEAD, 'body':'Approved.',
+                         'submitted_at':'2026-10-26T10:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr], [approved]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        [action] = out['actions']
+        self.assertEqual((action['reason'], action['review_ids'], action['approval_ids']),
+                         ('changed_head_cr', [10], [11]))
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
 
-    def test_unreadable_diff_or_admission_never_means_unreviewed(self):
-        for results in ([M.CommandResult(1, '', 'diff unavailable')],
-                        [M.CommandResult(1, '', 'API unavailable')]):
-            with self.subTest(results=results):
-                with patch.object(M, 'command', side_effect=results):
-                    with self.assertRaises(M.Unavailable):
-                        M.GitHub('o/r', '/fake/gh').admission(pull(), [{'state':'APPROVED'}])
+    def test_new_cr_routes_after_approval_and_keeps_previous_cr_history(self):
+        cr = {'id':10, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-b'),
+              'commit_id':'c'*40, 'body':'First finding.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        approved = cr | {'id':11, 'state':'APPROVED', 'commit_id':HEAD,
+                         'body':'Approved.', 'submitted_at':'2026-10-26T10:00:00Z'}
+        later = cr | {'id':12, 'body':'New finding.', 'submitted_at':'2026-10-26T11:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr, approved], [later]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        [action] = out['actions']
+        self.assertEqual((action['reason'], action['review_ids'], action['approval_ids']),
+                         ('changed_head_cr', [12], []))
+        self.assertEqual(action['superseded_change_requests'], [{
+            'review_id':10, 'account_id':uid('reviewer-b'), 'observed_login':'reviewer-b',
+            'finding_resolution':'unverified'}])
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
 
-    def test_admitted_scope_and_review_evidence_must_remain_stable_after_guard(self):
+    def test_stale_or_malformed_native_approval_does_not_count(self):
+        approved = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a'), 'author_association':'MEMBER',
+                    'commit_id':'c'*40, 'body':'ok',
+                    'submitted_at':'2026-10-26T09:00:00Z'}
+        self.state['review_pages'] = {'1':[[approved]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(out['actions'][0]['reason'], 'review_needed')
+        self.assertEqual(len(state['posts']), 1)
+        self.state = {'pulls':{'1':pull()}, 'review_pages':{'1':[[approved | {'commit_id':None}]]}}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(out['status'], 'unavailable')
+        self.assertNotIn('posts', state)
+
+    def test_approved_scope_and_review_evidence_must_remain_stable(self):
         review = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a'), 'commit_id':HEAD,
+                  'author_association':'MEMBER',
                   'body':'', 'submitted_at':'2026-10-26T09:00:00Z'}
         for after_pr in (pull() | {'head':{'sha':HEAD, 'ref':'release/v1'}},
                          pull() | {'base':{'sha':'c'*40, 'ref':'main'}}):
             with self.subTest(after_pr=after_pr):
                 github = M.GitHub('o/r')
-                with patch.object(github, 'collection', side_effect=[[review], [], [review], []]), \
-                     patch.object(github, 'admission', return_value=True), \
+                with patch.object(github, 'collection', side_effect=[[review], [review]]), \
                      patch.object(github, 'api', return_value=after_pr):
                     with self.assertRaises(M.Unavailable):
                         github.collect_pr(pull())
-
         github = M.GitHub('o/r')
-        changed_final = pull() | {'head':{'sha':'c'*40, 'ref':'fix/1'}}
-        with patch.object(github, 'collection', side_effect=[[review], [], [review], []]), \
-             patch.object(github, 'admission', return_value=True), \
-             patch.object(github, 'api', side_effect=[pull(), changed_final]):
+        with patch.object(github, 'collection', side_effect=[[review], [review | {'body':'changed'}]]), \
+             patch.object(github, 'api', return_value=pull()):
             with self.assertRaises(M.Unavailable):
                 github.collect_pr(pull())
-
         github = M.GitHub('o/r')
-        with patch.object(github, 'collection', side_effect=[[review], [], [review], [{'id':99}]]), \
-             patch.object(github, 'admission', return_value=False), \
-             patch.object(github, 'independent_source_review', return_value=True), \
-             patch.object(github, 'api', return_value=pull()):
+        changed_final = pull() | {'head':{'sha':'c'*40, 'ref':'fix/1'}}
+        with patch.object(github, 'collection', side_effect=[[review], [review]]), \
+             patch.object(github, 'api', side_effect=[pull(), changed_final]):
             with self.assertRaises(M.Unavailable):
                 github.collect_pr(pull())
 

@@ -254,8 +254,8 @@ Broadcast는 구조화된 응답의 `request_id`, `seq`, `mention`, `mention_del
 GitHub 사용자·팀 리뷰 요청도 계정 배정 기록으로 쓰지만 Keeper 내부 전달이나 실행·리뷰·승인
 완료를 대신하지 않습니다. `scripts/review/review-worklist.py`에 `--reviewer LOGIN`을
 반복해 누락된 계정 요청을 계획하고 `--request`를 명시한 실행만 게시합니다. 직접 메시지로
-받은 PR도 아직 열려 있는지 먼저 확인합니다. head가 바뀐 CR은 계정을 공유하더라도 실제
-작성 Keeper에게 재검토를 요청합니다.
+받은 PR도 아직 열려 있는지 먼저 확인합니다. head가 바뀐 CR은 실제 작성 Keeper가 확인되면
+그 Keeper에게 재검토를 요청합니다. 공유 계정에서 작성 세션을 확인하지 못하면 미확인으로 남깁니다.
 
 리뷰어는 계약과 현재 head의 diff를 기능·논리·코드 청결도 관점에서 독립적으로 검토합니다.
 P0/P1/P2가 없으면 승인하고 P3는 모아서 나중에 처리합니다. 일반 리뷰에는 CI run이 필요하지
@@ -263,64 +263,46 @@ P0/P1/P2가 없으면 승인하고 P3는 모아서 나중에 처리합니다. �
 수정하거나 소스로 설명하고 문제가 해결된 스레드만 닫습니다. 범위·증거·남은 위험이 바뀌면
 PR 본문도 갱신합니다.
 
-Push하면 head가 바뀌므로 이전 리뷰가 새 변경을 증명하지 않습니다. REQUEST_CHANGES를
-남긴 리뷰어는 수정된 코드가 자신의 지적을 해결했으면 변경 요청을 해제합니다. CI 통과만으로
-리뷰 지적이 해결되지는 않습니다.
-재검토 후 `approve-guard.sh --replace-own-cr REVIEW_ID`로 자기 계정의 열린 변경
-요청을 현재 head의 승인으로 바꿉니다. 여러 요청을 명시하려면 옵션을 반복합니다. 각 ID는
-같은 PR에서 인증된 자기 계정이 남긴 CR이어야 합니다. 기존 CR·댓글 판정이 있어도 새 독립
-승인을 기록할 수 있습니다. 병합·source receipt에서는 계정별 미해결 FAIL/HOLD를 유지하며,
-PR 작성자를 포함한 다른 계정의 PASS가 이를 지우지 못합니다. Keeper 이름은 표시 정보이고
-GitHub 계정을 공유해도 독립된 정식 리뷰어가 늘어나지는 않습니다. 가드는 다른 계정의 요청을
-dismiss하지 않습니다. head·diff·신원·Release CI 검사는 유지합니다. 일반 소스 승인 게시는
-선택 CI를 기다리지 않고, 병합에서는 CI pin을 계속 검사합니다.
+Push하면 head가 바뀌므로 이전 리뷰가 새 변경을 증명하지 않습니다. 재검토 후 같은 GitHub
+계정이 이후에 정식 승인을 제출하면 그 계정의 이전 변경 요청은 대체됩니다. 다른 계정의
+변경 요청은 남으며, 다른 계정의 승인이나 CI 통과만으로 지적이 해결되지는 않습니다.
+제출 순서는 리뷰 ID가 아닌 제출 시각으로 확인합니다. 최신 시각이 같거나 누락되면 순서는
+미확인입니다. 같은 계정의 이후 승인은 원래 지적이 실제로 해결됐다는 증거가 아닙니다.
+병합 담당자는 변경 요청과 댓글 원문, 수정 내용과 해결 근거를 다시 확인합니다.
 
-일반 소스 리뷰 판정에는 실제 값을 적습니다.
+GitHub는 PR 작성자 계정의 자기 승인을 허용하지 않습니다.
+커밋의 author·committer 계정은 독립된 Keeper 세션들이 공유할 수 있으므로 계정 일치만으로
+리뷰어를 배제하지 않습니다. 계정 일치 여부만으로 실제 리뷰 세션의 독립성을 증명할 수도 없습니다.
 
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
-```
-
-APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
-`--check`는 리뷰 가능 여부를 검사합니다.
-가드는 PR 작성자의 GitHub 계정을 거부합니다. 커밋의 author·committer 계정은 독립된
-Keeper 세션들이 공유할 수 있으므로 계정 일치만으로 리뷰어를 배제하지 않습니다. 계정
-일치 여부만으로 실제 리뷰 세션이 변경에 독립적이라는 사실도 증명할 수 없습니다.
-
-소스 리뷰를 시작하기 **전에** base SHA와 전체 diff 식별자를 캡처하고, 리뷰한 head와
-증거에 함께 보관하세요. 인증된 `gh`, Git, Python 3, `jq`가 있는 저장소 checkout에서
-아래 명령을 실행합니다. diff 도구는 없는 객체를 `gh` 인증으로 가져오며 대화형 입력을
-요구하지 않습니다.
+소스 리뷰 전에 현재 head와 base, 전체 diff를 읽습니다. 인증된 `gh`와 `jq`가 있으면
+리뷰 결과를 GitHub에 바로 게시할 수 있습니다.
 
 ```bash
 # Set repo and pr to the pull request being reviewed.
 snapshot=$(gh api "repos/$repo/pulls/$pr")
 head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
-review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
-review_diff=$(python3 scripts/review/review-diff.py \
-  --repo "$repo" --base "$review_base" --head "$head")
-# Read the complete diff and its source context, then write review-body.md.
-scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
-  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+gh pr diff "$pr" --repo "$repo"
+# diff와 소스 문맥을 검토한 뒤 검토한 head를 지정합니다.
+gh api --method POST "repos/$repo/pulls/$pr/reviews" \
+  -f event=APPROVE -f commit_id="$head"
 ```
 
-게시에는 `--body`, `--review-base`, `--review-diff`가 모두 필요합니다. guard는 검사 중
-변경된 범위를 거부합니다. 변경 내용이 달라지면 다시 리뷰하고 증거를 캡처하세요.
-읽지 않은 변경을 승인하기 위해 digest만 갱신하지 마세요.
-가드가 `review-scope:`와 `approve-guard:` 줄을 직접 붙이므로 `--body`에 넣지 마세요.
-`--print-footer` 출력도 본문에 복사하지 않습니다. 게시 후 재조회가 실패하면 재시도 전에
-게시된 리뷰를 확인하세요. 계정 불일치는 게시 후에 보고되며 게시된 리뷰를 취소하지 않습니다.
+승인에 정해진 본문 형식이나 footer는 필요하지 않습니다. 변경 내용이 달라지면 다시 리뷰하세요.
+소스 검토를 마치면 CI 완료를 기다리지 않고 승인합니다. Release 병합·게시 때 전체 CI를 따로
+확인합니다. 게시 후 리뷰 ID,
+상태와 commit ID를 다시 확인합니다. 게시나 재조회 결과가 불확실하면 재시도 전에 기존 효과를
+확인하세요. GitHub 승인만으로 실제 검토 세션, 당시 base·전체 diff 또는 Release run을 증명할 수
+없으므로 실제로 검토한 범위와 미확인 사실을 구분해 설명합니다.
 
-작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
-검증을 가리키는 `run: <full-CI-run-id>`를 추가합니다. 위는 형식이며 판정이 아닙니다.
-선택지와 placeholder를 실제 값으로 바꾸세요.
+작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release에는 같은 head의 완료된
+전체 검증 run을 별도로 기록합니다.
 
 병합 전에 현재 리뷰와 댓글을 다시 읽습니다. 미해결 차단 리뷰나 이후의 FAIL/HOLD 판정이
-있으면 통합하지 않습니다. Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합하며
+있으면 통합하지 않습니다. GitHub 승인 상태만으로 비정형 댓글의 지적이 해결됐는지 자동으로
+알 수 없으므로 원문과 해결 근거를 직접 확인합니다. Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합하며
 아래부터 한 층씩 넣지 않습니다. base와 head의 변경을 검토한 뒤 진행합니다.
 Native Stack이 아님이 확인된 일반 브랜치 체인만 부모부터 처리합니다.
-통합 조건은 [merge-guard](../../scripts/review/merge-guard.sh)와 현재
-[CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다. 일반 스택은 소스 리뷰와 정확한 병합 대상 head에 대한 merge-compile 권고 기록(최신 base 기준 뒤처짐 없음 + 성공 상태; 거절 강제는 규약 채택 전까지 보류)을 확인하고,
+통합할 때는 현재 [CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 참고합니다. 일반 스택은 소스 리뷰를 기준으로 하며 merge-compile 기록은 참고 사항입니다.
 Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 maintainer에게 통합을 맡깁니다.
 소스 승인을 관측하지 않은 빌드·런타임 동작의 성공으로 기록하지 않습니다.
 

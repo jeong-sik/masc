@@ -362,10 +362,10 @@
       전체 @runtest 는 별도의 수동 회귀 검사로 남기며, 필수 목록의 성공을 전체 회귀 성공으로 부르지 않는다.
       후보 원장에는 가장 최근 전체 회귀의 run id·head·TARGET_SUITES 를 적고, 이번 후보에서 돌리지 않았으면 "미실행" 이라고 적는다.
       Release/Tag 후보는 태그 직전 head 에 결속된 독립 Release 승인이 있어야 발행한다.
-      승인은 본문 첫 줄 verdict: PASS head: &lt;40hex&gt; run: &lt;id&gt; by: &lt;이름&gt; 과 approve-guard footer 를 갖춘다.
       독립은 그 후보 PR 을 작성하거나 push 하지 않았고 판정 대상 내용을 바꾼 커밋도 넣지 않은 세션을 뜻한다.
-      승인자는 approve-guard 가 결속하는 전체 diff 와 RC 영수증·릴리스 노트를 검토한다.
-      직전 후보의 검토는 기록된 head·base·diff 범위에서만 재사용하고, 승인 본문에 직전 후보 SHA 와 그 뒤의 델타를 적는다.
+      소스 리뷰를 마치면 CI 완료를 기다리지 않고 GitHub 승인을 게시한다.
+      릴리스 병합·게시 판단에서는 전체 diff 와 RC 영수증·릴리스 노트를 검토하고 완료된 Full CI run 을 후보 원장에 기록한다.
+      직전 후보의 검토는 기록된 head·base·diff 범위에서만 재사용하고, 직전 후보 SHA 와 그 뒤의 델타를 기록한다.
       승인자가 없으면 운영자의 명시 결정으로 대체한다. 그 결정은 태그 직전 head 와 RC run 을 지목해야 하며 후보가 바뀌면 다시 받는다.
       결정의 원문 좌표는 후보 원장에 적는다.
       승인 없이 발행됐으면 발행한 쪽 또는 최초 확인 Keeper 가 그 사실과 사유를 후보 원장에 기록한다.
@@ -387,9 +387,13 @@
     <review>
       기능·논리·코드 청결도를 여러 관점에서 리뷰한다.
       P0·P1·P2 미해결 문제가 없으면 Approve 한다. P3 는 나중에 모아서 처리한다.
-      일반 스택 판정은 "verdict: PASS|FAIL head: (40자 sha) by: (리뷰어 이름)" 이다.
-      Release 판정은 여기에 완료된 Full CI run 번호를 함께 기록한다.
-      승인은 scripts/review/approve-guard.sh 를 거친다. 자기 변경을 자기가 승인하지 않는다.
+      독립 리뷰어는 검토한 head 를 지정해 GitHub 에 직접 APPROVE 또는 변경 요청을 게시한다.
+      승인에 특정 본문 형식이나 footer 는 필요하지 않다. 자기 변경을 자기가 승인하지 않는다.
+      GitHub 리뷰는 계정 단위다. 같은 계정의 이후 정식 승인은 그 계정의 이전 변경 요청을 대체하지만,
+      다른 계정의 변경 요청은 남는다. 계정만으로 같은 계정을 공유하는 Keeper 세션의 독립성은 증명할 수 없다.
+      리뷰 내용과 수정 사항이 맞으면 별도 계정 분류나 본문 형식 없이 일반 승인을 낸다.
+      리뷰의 commit_id 는 리뷰에 지정된 head 의 증거이며 실제 세션 독립성, 당시 base·전체 diff,
+      Release Full CI run 의 증거는 아니다. 이 사실과 별도의 검토 기록을 구분한다.
       한 작업에서 다음 작업으로 넘어갈 때 이전 작업에 적대적 리뷰 에이전트를 병렬로 붙인다.
       리뷰가 도착하면 리뷰 대응 에이전트를 병렬로 붙여 검토하고 대응한다.
       리뷰 에이전트는 직접 읽고 판단해야 할 책임을 대체하지 않는다.
@@ -408,29 +412,27 @@
       stack 이 없는 일반 브랜치 체인은 부모부터 병합하고 base 변경을 다시 확인한다.
       API 조회 실패는 stack 없음이 아니라 미확인이다.
       Release/Tag 단계는 현재 head 의 전체 검증이 성공해야 병합·게시한다.
-      코딩 에이전트는 merge-guard.sh 를 --check 로 사용한다. Native Stack 의 실제 병합은
-      스택 전체가 승인된 경우 PUT pulls/{맨 위 PR 번호}/merge-async 에 맨 위 PR 의 현재 head 를 sha 로 전달한다.
+      Native Stack 의 실제 병합은 스택 전체가 승인된 경우
+      PUT pulls/{맨 위 PR 번호}/merge-async 에 맨 위 PR 의 현재 head 를 sha 로 전달한다.
       일반 PR 의 실제 병합은 gh pr merge --match-head-commit (현재 head) 로 한다.
       비동기 접수와 완료를 구분하고 반환된 details.uuid 의 비동기 결과 및 각 PR 의 merged 상태·병합 커밋을 확인한다.
       --auto 와 --admin 을 쓰지 않는다. 구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.
     </merge>
     <merge_compile note="2026-10-20 내부 규약 제안 #26 채택(운영자 예, ask687e018ed5943975). 확정·근거는 Board 타래 p-8055697a68bd25d4e7b48c977b0088b8 c-9db1db2113e490abf1ab99d984063ea6 이다.">
-      문서 전용 PR(docs/**, changelog.d/** 만 바꾸는 PR)에서 merge-compile advisory "head 가 main 보다 뒤처짐"은 restack 으로 없애지 않고 그대로 둔다. 단 PR 이 DIRTY 면 restack 이 아니라 순서 교환을 먼저 시도하고, 코드 PR 은 restack 우선이며, MASC_MERGE_COMPILE_ENFORCE=1 이 켜지면 이 조항은 재판정한다. 이 조항은 base 가 움직여 approve-guard 의 review-base/diff identity 재판정이 필요한 경우를 면제하지 않는다. 재승인 비용이 사라질 별도 리뷰어 신원이 생기면 다시 판정한다.
+      문서 전용 PR(docs/**, changelog.d/** 만 바꾸는 PR)에서 merge-compile advisory "head 가 main 보다 뒤처짐"은 restack 으로 없애지 않고 그대로 둔다. 단 PR 이 DIRTY 면 restack 이 아니라 순서 교환을 먼저 시도하고, 코드 PR 은 restack 우선이며, MASC_MERGE_COMPILE_ENFORCE=1 이 켜지면 이 조항은 재판정한다. 이 조항은 base 가 움직인 뒤 검토한 전체 diff 를 다시 확인할 의무를 면제하지 않는다.
       운용 규칙: ENFORCE 를 켜는 변경은 켜기 전에 이 조항에 기대어 열려 있는 문서 PR 목록을 Board 에 한 번 적고, 그 목록의 재판정을 같은 변경에 포함한다.
     </merge_compile>
     <evidence_basis note="2026-10-06 내부 규약 제안 #14 채택 문구를 코딩 에이전트 계약으로 옮긴 것이다. 재읽기 의무일 뿐 강제 대기·스냅샷·상시 폴링을 만들지 않는다.">
-      리뷰·승인을 인용하기 직전에 그 본문 첫 줄 판정 줄의 head 40자와 approve-guard footer 의 40자가 대상 head 와 같은지 확인한다.
-      commit_id 일치만으로는 결속으로 세지 않는다. 어긋나면 이월 표기로만 인용한다.
-      승인자가 곧 병합자인 PR 의 승인 footer 는 승인 직전에 인용하는 검토마다 head 40자 결속을 reviews API 로 확인하고,
-      현 head 에 결속된 건수만 적으며, 이월은 carried from (이전 head) by cmp/diff-identical 로 명시한다.
+      리뷰·승인을 인용하기 직전에 GitHub reviews API 의 상태와 commit_id 를 현재 head 와 대조한다.
+      현재 head 가 아닌 승인은 이전 범위의 기록이다. 실제 읽은 범위와 미확인 사실을 구분한다.
+      Release Full CI run 은 실제 완료 결과와 후보 head 를 별도로 확인한다.
       Board 글·artifact·외부 원문은 인용하거나 판정하기 직전에 다시 읽는다. 접근이 막힌 외부 출처는 재시도하지 않고 원문 미직독 으로 표기한다.
       소스 좌표(파일:줄)를 인용하거나 검증 표기로 쓸 때는 판정 대상 head 에서 직독한 값인지 확인한다.
       낡은 로컬 클론·기억·이전 리뷰에서 온 좌표를 그대로 쓰지 않는다.
       기록자는 자기 기록의 셈·집계 창(시작 시각·대상 범위)을 명시하고, 같은 사건을 부르는 이름이 둘 이상이면 어느 시각을 기준으로 셌는지 함께 적는다.
       기록의 오류를 스스로 찾으면 판정자의 답을 기다리지 않고 같은 타래에 [정정] 덧붙임으로 고친다. 정정은 원문 삭제가 아니다.
       근거의 상태가 인용 사이에 바뀌어 이미 낸 판정이 무효화되면 그 사실과 새 근거로 판정을 다시 내고,
-      무효화를 알게 된 감시자는 판정자에게 알린다. 이 조항은 사람·에이전트의 문장 인용(Board·footer·task 증거)에 적용되며
-      가드의 소비 직전 재읽기에 더하는 것이 아니다.
+      무효화를 알게 된 감시자는 판정자에게 알린다. 이 조항은 사람·에이전트의 문장 인용(Board·task 증거)에 적용된다.
     </evidence_basis>
     <run_citation note="2026-10-25 내부 규약 제안 #4 채택(운영자 예, ask48006eea6aea3e3e, answered_at=2026-10-26T00:12:47Z). 확정 문구는 리더 최종안 c-d6f9d738141ac1365032f444724690c7이고, 절차 근거는 Board 타래 p-51d97b2b8d1d6273b3cea84a03a6c116 c-33ee6d3874fcc6684de4d182395fccd8 이다. 계기는 2026-10-25 Merge compile(PR 체크)을 main cron 녹색으로 오인한 run 목록 인용(p-6a361a2f c-4341d90d, 정정 c-744f0dd4)이다.">
       Actions run을 승인·병합·완료 또는 main 빌드 상태의 근거로 인용할 때 workflow 이름, run id, 실행 head/ref, 실제 conclusion을 함께 명시한다.

@@ -65,32 +65,32 @@ FAIL/HOLD or change request cannot be cleared by a clean leaf. Release heads als
 need the full verification required by the repository. Ordinary MASC PRs do not
 require an Actions run simply because they belong to a stack.
 
+A reviewer can submit an ordinary GitHub APPROVE for the head they actually
+reviewed; a prescribed body or footer is not required. For each PR, inspect all
+review pages and the latest submitted formal state for each GitHub account. A
+later formal approval replaces that account's earlier change request; a request
+from another account remains. Comments and pending drafts do not clear requests.
+An ambiguous or unreadable history is unknown. The review's `commit_id` binds
+the GitHub decision to a head, but does not prove independent Keeper sessions,
+the base or complete diff actually reviewed, or a Release CI run. Report the
+scope that was actually reviewed and distinguish unverified facts.
+Read review comments and assess outstanding findings before integration; the
+native approval record cannot establish that unstructured concerns were resolved.
+
 A closed but unmerged downstack PR still blocks the top PR. Only already
 merged members can be excluded from new approval checks; closing a prerequisite
 is not equivalent to merging it. See [closed middle PRs](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-stacked-pull-requests#you-closed-a-pull-request-in-the-middle-of-the-stack).
 
-After every included head is approved, dispatch the merge-compile build for
-the exact top head (fire-and-forget, never watch or poll):
+If a merge-compile observation is needed, it can be dispatched for the exact
+top head after review (fire-and-forget, never watch or poll):
 
 ```bash
 gh workflow run merge-compile.yml --ref main -f sha=TOP_PR_CURRENT_HEAD -f pr=TOP_PR_NUMBER
 ```
 
-Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr TOP_PR_NUMBER --head TOP_PR_CURRENT_HEAD`
-to check the included scope. The guard also reports the top head's
-merge-compile verdict — freshness against `stack.base` plus the
-`merge-compile` success status — as `ADVISORY #N: ...` until convention
-adoption turns the refusal on, so merge only after the head is fresh with a
-success status. To inspect the read-only identity snapshot directly:
-
-```bash
-python3 scripts/review/stack-scope.py OWNER/REPO TOP_PR_NUMBER TOP_PR_CURRENT_HEAD
-```
-
-Re-read membership, stack base and all included
-head/base identities before submission. If they changed, review the affected
-changes again. Do not replace GitHub branch protection with the local verdict;
-the server evaluates repository rules during the asynchronous operation.
+Re-read membership, stack base and all included head/base identities through
+the GitHub endpoints above before submission. If they changed, review the
+affected changes again. GitHub evaluates repository rules during the operation.
 
 ## Submit and verify the result
 
@@ -102,8 +102,7 @@ gh api --method PUT repos/OWNER/REPO/pulls/TOP_PR_NUMBER/merge-async \
 ```
 
 This is a write affecting **every PR in the stack**, not only the top PR. Use
-it only after the whole scope is reviewed and authorized. External coding agents
-use the guard in read-only `--check` mode before this request. For non-native PRs,
+it only after the whole scope is reviewed and authorized. For non-native PRs,
 use `gh pr merge --match-head-commit SHA` under the repository's normal procedure.
 Do not use `--admin` or `--auto`.
 

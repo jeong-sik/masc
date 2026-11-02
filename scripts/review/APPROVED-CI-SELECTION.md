@@ -4,8 +4,9 @@ Code review and source approval happen first. The MASC leader chooses which
 approved PR heads belong in a combined candidate. A PR push, Ready transition
 or approval does not start CI.
 
-Source review uses `approve-guard.sh` independently of CI. The preparation
-command reads its source-only `--source-receipt` JSON, combines only the leader's explicit
+The independent source reviewer can submit a GitHub APPROVE for the reviewed
+head directly, without a prescribed review body or footer. The preparation
+command reads current GitHub review records, combines only the leader's explicit
 selection, then rechecks approvals and main. This initial path selects open,
 Ready PRs targeting main. This preparation tool does not compose non-main bases;
 that local selection limit is not a GitHub Native Stack restriction. Follow the
@@ -31,10 +32,17 @@ SHA between preparation and runner reconstruction.
 It changes no checkout and publishes nothing. Conflicts, unapproved members,
 head changes, revoked approvals, change requests or a moving main prevent
 preparation. No Actions/check-run API reads, build or CI dispatch occur here.
-Source receipt reads retain head, diff, scope, independent approval and blocking
-verdict checks, without consulting the selected run's pending or failed CI pin.
-They are read-only, reject release heads and cannot grant merge permission.
-The merge guard still checks that pin separately.
+Review reads require an approval for the current head from a non-author account
+and reject the latest formal change request from any account. A later formal
+approval replaces an earlier change request from the same account, but does not
+prove that its original finding was resolved. The integrator must read the review
+and comment text and check the change or explanation addressing the finding.
+The GitHub review alone does not prove independence of Keeper sessions, the base
+or complete diff that the reviewer inspected. The
+preparation rechecks PR identity and approval without consulting the selected
+run's pending or failed CI pin. Those review reads are read-only; preparation
+creates the local candidate branch and receipt, rejects release heads and cannot
+grant merge permission.
 
 After these workflow changes are integrated into main, publish the prepared
 candidate branch explicitly and dispatch `leader-ci.yml` on main. Set its
@@ -52,7 +60,8 @@ tag. TLA model checks are explicitly dispatched through `model-check.yml` when
 state-machine specifications change. There is no changed-file heuristic choosing
 work for the leader.
 
-The runner rechecks current source approvals using the integrated main guard,
+Once this review reader is integrated into main, the runner rechecks current
+GitHub review records using the integrated main code,
 reconstructs the combined Git commit, and requires it to equal the explicit candidate
 SHA. Moved main/heads, revoked approvals and a different candidate prevent
 build jobs from starting. The trusted workflow definition comes from main; every selected job checks
@@ -76,20 +85,18 @@ reenabling an old automatic definition would violate this policy.
 While a dispatch runs, its selection job pins each selected member head with a
 pending `leader-selected-ci` commit status, and the final evidence job settles
 that status to success or failure with `if: always()` — including recheck,
-cancelled and crashed attempts, so a finished run never leaves a pending pin
-behind. `merge-guard.sh` reads the same status through `ci-checks.sh` and
-refuses to merge a member whose head is pinned pending or settled failed; a
-missing status means no leader-selected run is pinning the head.
+cancelled and crashed attempts. A missing status means no leader-selected run
+is pinning the head; a pending or failed status is not a successful run.
 
 If the selection evidence artifact is lost, the settle job fails on purpose and
-the pending pin stays in place, which keeps merge-guard holding the merge. A
+the pending pin stays in place. A
 human re-dispatches the selection run (the same recheck path used for a failed
 recheck); the new run pins and then settles the same heads, replacing the
 orphaned pending status.
 
 The result describes the combined candidate and the selected coverage. It is
 not an individual member's check and does not authorize merge. Ordinary
-review guards require current independent source approval; Release admission
-requires its own current-head full verification. A combined result cannot
+integration considers current source review; Release admission requires its
+own current-head full verification. A combined result cannot
 replace either authority. Source approval remains independent of compilation
 and test results. No daily schedule is introduced.

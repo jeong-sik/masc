@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Prepare the leader's explicitly selected, source-approved combined commit.
 
-No build, CI dispatch, push or merge is performed. The existing source-review
-guard supplies approval authority independently of CI.
+No build, CI dispatch, push or merge is performed. GitHub review state supplies
+the current-head approval records independently of CI. It does not attest which
+Keeper session reviewed the change or which base and diff it inspected.
 """
 import argparse
 from dataclasses import dataclass
@@ -11,19 +12,15 @@ import json
 import os
 from pathlib import Path
 import re
-import runpy
 import subprocess
 import sys
 
-
-scope_matches = runpy.run_path(str(Path(__file__).with_name("review-scope.py")))["scope_matches"]
 
 class Reason(Enum):
     INVALID_SELECTION = "invalid_selection"
     APPROVAL_UNAVAILABLE = "approval_unavailable"
     MAIN_MOVED = "main_moved"
     APPROVAL_CHANGED = "approval_changed"
-    REVIEW_SCOPE_CHANGED = "review_scope_changed"
     UNSELECTED_BASE = "unselected_base"
     NO_CHANGES = "no_changes"
     MERGE_CONFLICT = "merge_conflict"
@@ -166,19 +163,25 @@ def member(value):
 
 
 def source_approval(repo, selected, *, gh):
-    guard = Path(__file__).with_name("approve-guard.sh")
+    reader = Path(__file__).with_name("github-reviews.py")
     result = subprocess.run(
-        ["bash", str(guard), "--source-receipt",
-         "--repo", repo, "--pr", str(selected.pr), "--head", selected.head],
-        text=True, capture_output=True, env=os.environ | {"GUARD_GH": gh})
+        [sys.executable, str(reader), "--repo", repo, "--pr", str(selected.pr),
+         "--head", selected.head, "--gh", gh], text=True, capture_output=True)
     if result.returncode == 2:
-        raise Rejected(Reason.APPROVAL_UNAVAILABLE)
+        details = []
+        if result.stdout.strip():
+            value = json.loads(result.stdout)
+            details.extend(f"open change request {r['id']} from {r['login']}"
+                           for r in value.get("change_requests", []))
+        elif result.stderr.strip():
+            details.append(result.stderr.strip()[:300])
+        raise Rejected(Reason.APPROVAL_UNAVAILABLE, details=tuple(details))
     if result.returncode:
-        # exit 1 is the guard dying on a read, not the PR being refused.
+        # exit 1 is a failed or ambiguous read, not a review refusal.
         # Named so the operator sees which call died, not only that evidence
         # was unavailable (run 39404586810 hid this line entirely).
         raise SourceUnavailable("source_approval_read_failed", cause=(
-            f"approve-guard exit={result.returncode} "
+            f"github-reviews exit={result.returncode} "
             f"stderr={result.stderr.strip()[:300]}"))
     value = json.loads(result.stdout)
     ids = value.get("approval_ids")
@@ -198,24 +201,6 @@ def stack_scope(pull):
             "base_ref": stack["base"]["ref"]}
 
 
-def scoped_approval(f, trees, repo, selected, pull, *, gh, approve):
-    approval = approve(repo, selected, gh=gh)
-    accepted = []
-    for review_id in approval.ids:
-        review = f.api(gh, f"repos/{repo}/pulls/{selected.pr}/reviews/{review_id}")
-        def merge_base(base, head):
-            trees.ensure(base)
-            return trees.merge_base(base, head)
-        if not scope_matches(review["body"], base_ref=pull["base"]["ref"],
-                base_sha=pull["base"]["sha"], stack=stack_scope(pull),
-                head=selected.head, merge_base=merge_base):
-            continue
-        accepted.append(review_id)
-    if not accepted:
-        raise Rejected(Reason.REVIEW_SCOPE_CHANGED)
-    return Approval(selected, tuple(accepted))
-
-
 def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
     if (not selected or len({m.pr for m in selected}) != len(selected)
             or not leader.strip()
@@ -229,7 +214,6 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
     trees.ensure(base)
     pulls = []
     identities = {}
-    snapshots = {}
     for m in selected:
         pull = f.api(gh, prefix + f"/pulls/{m.pr}")
         if (pull["state"] != "open" or pull["draft"] is not False
@@ -246,9 +230,7 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
         pulls.append(m)
         identities[m.pr] = (pull["base"]["ref"], pull["base"]["sha"],
                             pull["head"]["ref"], pull["head"]["sha"], stack_scope(pull))
-        snapshots[m.pr] = pull
-    approvals = tuple(scoped_approval(f, trees, repo, m, snapshots[m.pr],
-                                     gh=gh, approve=approve) for m in pulls)
+    approvals = tuple(approve(repo, m, gh=gh) for m in pulls)
     combined = base
     for m in pulls:
         combined = trees.merge(combined, m.head)
@@ -262,7 +244,7 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
                 or (pull["base"]["ref"], pull["base"]["sha"],
                     pull["head"]["ref"], pull["head"]["sha"], stack_scope(pull)) != identities[initial.member.pr]):
             raise Rejected(Reason.SELECTION_CHANGED)
-        current = scoped_approval(f, trees, repo, initial.member, pull, gh=gh, approve=approve)
+        current = approve(repo, initial.member, gh=gh)
         if not set(initial.ids).issubset(current.ids):
             raise Rejected(Reason.APPROVAL_CHANGED)
         # The authority reader can yield while the PR is being retargeted.
@@ -278,7 +260,8 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
         "leader": leader, "base": base, "candidate": combined,
         "tree": trees.tree(combined),
         "members": [{"pr": a.member.pr, "head": a.member.head,
-                     "approval_ids": list(a.ids)} for a in approvals],
+                     "approval_ids": list(a.ids),
+                     "approval_provenance": "github_review_commit_id"} for a in approvals],
     }
 
 

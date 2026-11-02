@@ -6830,6 +6830,8 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   Lib.Board.reset_global_for_test ();
   Lib.Board_dispatch.reset_for_test ();
+  Masc_test_deps.Board_test_preparation.prepare ~base_path:config.base_path
+    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Result.get_ok (Lib.Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Lib.Recipient_lookup.none_declared ());

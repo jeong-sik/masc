@@ -1,4 +1,5 @@
 module Types = Masc_domain
+module Preparation = Masc_test_deps.Board_test_preparation
 
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
@@ -345,6 +346,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   (* Each matrix fixture models a separate server process and workspace. *)
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net
       ~base_path

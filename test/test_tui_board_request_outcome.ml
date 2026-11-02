@@ -74,6 +74,8 @@ let with_fixture run =
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+      Masc_test_deps.Board_test_preparation.prepare ~base_path
+        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       let server = Masc.Mcp_server.For_testing.create_state ~base_path in
       let config = Masc.Mcp_server.workspace_config server in
       ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));
@@ -222,7 +224,7 @@ let check_unanswered outcome =
 
 let test_real_committed_error_keeps_payload_and_late_input () = with_fixture
   (fun ~env ~sw ~base_path ~port:upstream_port ~posts -> with_results @@ fun results ->
-    let port, _, _, actual_body, actual_status, parsed_posts =
+    let port, observed, _, actual_body, actual_status, parsed_posts =
       proxy env ~sw ~upstream_port ~mode:Forward_ack in
     let state = state base_path port in
     let path = Filename.concat base_path "original.txt" in
@@ -235,6 +237,7 @@ let test_real_committed_error_keeps_payload_and_late_input () = with_fixture
           incr observer_calls;
           if !observer_calls = 1 then failwith "held publication observer") };
     start state results;
+    Eio.Promise.await observed;
     let outcome = take_outcome results in
     Masc.Board_metrics_hooks.set_observer noop;
     let prepared, response = returned outcome in

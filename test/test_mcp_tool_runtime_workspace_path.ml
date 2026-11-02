@@ -1,4 +1,5 @@
 module Cases = Test_mcp_tool_matrix_cases
+module Preparation = Masc_test_deps.Board_test_preparation
 module Keeper_publication_recovery_availability =
   Masc.Keeper_publication_recovery_availability
 
@@ -398,6 +399,7 @@ let create_runtime env sw ~base_path =
   (* Independent runtime fixtures must not inherit a prior process's Board. *)
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Mcp_eio.create_state_eio
     ~sw
     ~proc_mgr:(Eio.Stdenv.process_mgr env)

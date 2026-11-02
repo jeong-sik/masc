@@ -3,6 +3,7 @@
    transport fixture uses a minimal synthetic transformer; the optional run
    uses the actual masc-artifact-document executable. *)
 open Alcotest
+module Preparation = Masc_test_deps.Board_test_preparation
 module Http = Masc.Http_server_eio
 module Live = Masc.Artifact_draft_live
 module Draft = Masc.Artifact_draft
@@ -68,7 +69,8 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
               Fun.protect ~finally:(fun () -> if runtime then Process_eio.reset_for_testing ()) (fun () ->
                 if runtime then (
                   Masc.Board.reset_global_for_test ();
-                  Masc.Board_dispatch.reset_for_test ());
+                  Masc.Board_dispatch.reset_for_test ();
+                  Preparation.prepare ~base_path ~action:Preparation.Bootstrap);
                 let state = if runtime then Masc.Mcp_server.create_state_eio ~sw
                   ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
                   ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
@@ -513,7 +515,15 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
   pair_status "oversize body rejected by both transports" 413 rejected;
   let h1, h2 = both gateway ~token:admin doc in
   check string "oversize request did not mutate H1 readback" large_source (field_string "content" (json h1));
-  check string "oversize request did not mutate H2 readback" large_source (field_string "content" (json h2));
+  check string "oversize request did not mutate H2 readback" large_source (field_string "content" (json h2)))
+
+let test_app_input_transport_parity () = with_gateway (fun ~base_path ~worker ~player ~admin gateway ->
+  let expected = match Server_workspace_precondition.served_workspace () with
+    | Some value -> value | None -> fail "workspace unavailable" in
+  let h2_headers = ["x-masc-expected-base-path", expected.base_path; "x-masc-expected-masc-root", expected.masc_root] in
+  let foreign_headers = ["x-masc-expected-base-path", "/foreign-workspace"; "x-masc-expected-masc-root", expected.masc_root] in
+  let same_origin = "http://localhost:8935" in
+  let origin_headers = ["origin", same_origin] in
   let html = body ["title", `String "H2 HTML app"; "summary", `String "input fixture";
     "format", `String "html"; "content", `String "<form><input></form>"] in
   let created_app = request H2 gateway ~token:admin ~meth:`POST ~body:html list in
@@ -884,7 +894,8 @@ let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_s
       [|Sys.argv.(0)|]
     else [], Sys.argv in
   run ~argv "H2 artifact gateway"
-    ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions];
+    ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
+      "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity];
      "synthetic transformer transport", ["checkpoint and SSE reset", `Quick,
        (fun () -> with_synthetic_transformer test_live_checkpoint);
        "SSE response capacity exhaustion resets the stream", `Quick,

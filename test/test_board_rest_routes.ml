@@ -20,6 +20,7 @@
 open Alcotest
 
 module Http = Masc.Http_server_eio
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* Fixture tick for create and modify: the runner's floor tick, below every
    interval these fixtures declare, so the runner-tick check never refuses one
@@ -590,6 +591,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   with_authenticated_activity_router
     ~prefix:"board-delete-persistence-" ~agent_name:"board-delete-operator"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let router = Server_dashboard_http_delete_actions.add_delete_action_routes router in
   let create content =
@@ -660,6 +662,7 @@ let test_board_write_routes_reject_foreign_workspace () =
   with_authenticated_activity_router
     ~prefix:"board-write-workspace-" ~agent_name:"workspace-writer"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let expected root = `Assoc
       [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
@@ -719,6 +722,7 @@ let test_board_post_route_preserves_publication_evidence () =
   with_authenticated_activity_router
     ~prefix:"board-post-publication-" ~agent_name:"publication-operator"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let open Yojson.Safe.Util in
   let workspace masc_root = `Assoc
@@ -810,6 +814,7 @@ let test_board_write_routes_use_authenticated_actor () =
     ~prefix:"board-write-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post_json path fields =
@@ -965,6 +970,7 @@ let test_board_list_route_and_projection_share_the_kept_page () =
     ~prefix:"board-list-kept-"
     ~agent_name:"list-reader"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post title =
@@ -1027,6 +1033,7 @@ let test_board_list_timeout_cannot_be_not_modified () =
   with_authenticated_activity_router
     ~prefix:"board-list-timeout-" ~agent_name:"timeout-reader"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   (* Publish a builder-produced result through the real cache API. This
      exact route entry includes both the workspace and authenticated actor;
@@ -1070,6 +1077,7 @@ let test_board_http_typed_attachments () =
     ~prefix:"board-http-attachments-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post title extra =
@@ -1141,6 +1149,7 @@ let test_sub_board_routes_use_authenticated_owner () =
     ~prefix:"sub-board-http-owner-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -1205,6 +1214,7 @@ let test_sub_board_routes_reject_unknown_access () =
     ~prefix:"sub-board-http-access-"
     ~agent_name:"access-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -1270,6 +1280,7 @@ let test_sub_board_reads_require_auth_in_strict_mode () =
     ~prefix:"sub-board-http-strict-read-"
     ~agent_name:"strict-reader"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
@@ -1298,6 +1309,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
     ~prefix:"board-context-inference-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let keeper_name = "context-inference-target" in
@@ -1681,6 +1693,7 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
     ~prefix:"board-detail-pages-"
     ~agent_name:"page-reader"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post =

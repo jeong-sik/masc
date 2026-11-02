@@ -1,5 +1,6 @@
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 module Obligation = Fusion_delivery_obligation
 module Event_queue_persistence_source = Keeper_event_queue_persistence
@@ -189,6 +190,7 @@ let test_startup_recovery_projects_canonical_terminal () =
   with_temp_base (fun base_path registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
       Eio.Switch.run (fun background_sw ->
         let settled, resolve_settled = Eio.Promise.create () in
         let prompt = "recover this fusion result" in

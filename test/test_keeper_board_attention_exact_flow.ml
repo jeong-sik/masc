@@ -1,4 +1,5 @@
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 module Candidate = Keeper_board_attention_candidate
 module Exact_output = Agent_core.Exact_output
@@ -2076,6 +2077,8 @@ let admission_candidate config meta signal =
 let test_normal_discoverable_producer_batches_owner_cursor_catchup () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     with_board_admission_workspace (fun config ->
+      Preparation.prepare ~base_path:config.Workspace.base_path
+        ~action:Preparation.Bootstrap;
       let first = admission_meta config "normal-first" in
       let second = admission_meta config "normal-second" in
       let paused_initial = admission_meta ~paused:true config "paused-initial" in
@@ -2219,6 +2222,8 @@ let test_worker_rechecks_admission_after_prepare () =
 let test_cancelled_normal_batch_retains_owner_recovery () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     with_board_admission_workspace (fun config ->
+      Preparation.prepare ~base_path:config.Workspace.base_path
+        ~action:Preparation.Bootstrap;
       let meta = admission_meta config "cancelled-normal" in
       ignore (admission_post ~author:"baseline" ~title:"baseline");
       ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
@@ -2297,6 +2302,8 @@ let test_worker_skips_reserved_root_for_other_ready_work () =
 let test_normal_duplicate_payloads_use_persisted_signal_groups () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     with_board_admission_workspace (fun config ->
+      Preparation.prepare ~base_path:config.Workspace.base_path
+        ~action:Preparation.Bootstrap;
       let first = admission_meta config "persisted-first" in
       let second = admission_meta config "persisted-second" in
       ignore (admission_post ~author:"baseline" ~title:"baseline");
@@ -2341,6 +2348,8 @@ let test_normal_duplicate_payloads_use_persisted_signal_groups () =
 let test_detached_normal_admission_revalidates_owner () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     with_board_admission_workspace (fun config ->
+      Preparation.prepare ~base_path:config.Workspace.base_path
+        ~action:Preparation.Bootstrap;
       let active = admission_meta config "still-active" in
       let removed = admission_meta config "withdrawn-removed" in
       let stopped = admission_meta config "withdrawn-stopped" in

@@ -501,7 +501,7 @@ let invalidate_execution_cache_with ~before_broadcast () =
        try
          broadcast_cached_surface
            ~encoding:Encode_inline
-           ~event_type:"execution_snapshot"
+           ~event_type:Dashboard_event_slices.execution_snapshot_type
            (`Assoc
                [ execution_publication_epoch_field, `String execution_publication_epoch
                ; execution_publication_generation_field, `Int generation
@@ -1409,7 +1409,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       then (
         broadcast_cached_surface
           ~encoding:Encode_inline
-          ~event_type:"execution_snapshot"
+          ~event_type:Dashboard_event_slices.execution_snapshot_type
           (prepare_execution_snapshot_broadcast ~config:workspace_config ());
         !broadcast_namespace_truth_ref state))
 ;;

@@ -1385,6 +1385,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              | Remote_keeper, Keeper_control.Present _ ->
                  if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
                  else Ansi.dim ^ "no" ^ Ansi.reset)
+        @ row_lines ~width "Suggested action:"
+            (keeper_suggested_action (keeper_reading state k))
         @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
             | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
             | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in

@@ -1889,17 +1889,9 @@ let keeper_roster_pane_shown (state : state) ~cols =
    nothing observed -- and the word next to it is the exact published status,
    so the column stays legible at four shapes instead of needing a distinct
    glyph per label. *)
-(* One keeper is described by four separate readings, and the status cell draws
-   three of them in three separate channels rather than folding them into one
-   word:
-
-     colour  what to do about it   from next_action, which the runtime derives
-     glyph   whether it is paused  a person's decision, not a health reading
-     word    how it is reporting   from health
-
-   The lifecycle cell is the fourth and has its own column. The cell used to
-   show a single word from [surface_status], which restates health and hides
-   it entirely while a keeper is paused. *)
+(* The colour reinforces the runtime's suggested action; the selected Keeper
+   also names that action in text, including when colours are unavailable.
+   Pause, health and lifecycle remain separate readings. *)
 let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
@@ -1920,6 +1912,20 @@ let keeper_action_color
      0.027 for protanopia. Blue and white came out worse than green even for
      ordinary vision, because they close on [Probe]'s cyan. *)
   | Some Status.Direct_message -> Theme.action_message ()
+
+(* Preserve what was actually observed: a runtime that names no action is not
+   evidence that nothing needs doing, and an unread roster is not absence. *)
+let keeper_suggested_action reading =
+  match reading.Keeper_control.liveness with
+  | Keeper_control.Unobserved -> "not observed"
+  | Keeper_control.Invalid _ -> "config error"
+  | Keeper_control.Absent -> "not in roster"
+  | Keeper_control.Present runtime ->
+      match runtime.kr_next_action with
+      | None -> "not reported"
+      | Some Status.Recover -> "recover"
+      | Some Status.Probe -> "probe"
+      | Some Status.Direct_message -> "direct message"
 
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
@@ -1961,9 +1967,17 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let restore = Ansi.reset ^ ground in
   let draw ?style text = sidebar_line ?style buf ~cols text in
   let rule = sidebar_rule ~cols in
+  let selected = selected_keeper state in
+  let action =
+    Option.map
+      (fun keeper ->
+        "", "  Selected next: "
+          ^ keeper_suggested_action (keeper_reading state keeper))
+      selected
+  in
   let details =
     if not focused then []
-    else match selected_keeper state with
+    else match selected with
       | None -> []
       | Some keeper ->
           let reading = keeper_reading state keeper in
@@ -1993,6 +2007,10 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let header_rows = min 3 height in
   let available = height - header_rows in
   let count = List.length state.keepers in
+  (* Keep the selected action visible even when the viewport is too short for
+     the larger detail block. One row is reserved only if a list row can stay. *)
+  let action = if available >= 2 then Option.to_list action else [] in
+  let available = available - List.length action in
   (* Supplementary details get no more rows than the list keeps, unless the
      entire fleet already fits beside them. Short viewports favor the list. *)
   let detail_rows = List.length details in
@@ -2033,7 +2051,8 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
            | None -> "  No Keepers listed")
     | None -> draw ""
   done;
-  List.iter (fun (style, text) -> draw ~style text) details
+  List.iter (fun (style, text) -> draw ~style text) details;
+  List.iter (fun (style, text) -> draw ~style text) action
 
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether

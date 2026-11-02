@@ -22,6 +22,14 @@ six-digit RGB hex strings. Without an observed palette, the standalone preview
 uses Pele's light defaults. Failure writes diagnostics to stderr and exits
 nonzero without an image. The caller retains source and owns preview selection.
 
+The TUI requests `protocol: 1`. For that request the helper frames stdout as
+`masc-pele-protocol:1` and a newline, followed by PNG bytes on success. A
+rendering failure can still emit the receipt but no PNG; diagnostics remain on
+stderr and the exit status is nonzero. The TUI requires the receipt before
+using a successful image, so an older helper cannot silently ignore SVG,
+layout, or raster fields. Requests without `protocol` keep the ordinary
+command-line interface; other protocol versions are rejected.
+
 Optional `fontSize` is a positive safe integer (default `16`) describing the
 physical text density. Pele lays out at its logical default of 16 with available
 width `maxWidth / (fontSize / 16)`, then the complete SVG viewport scales by

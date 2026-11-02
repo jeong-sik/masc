@@ -24,5 +24,6 @@ val command_runner : run:(string -> Unix.process_status) -> runner
 val render :
   cache_dir:string -> ?raster:raster -> ?runner:runner -> scene -> (string, string) result
 (** Pass explicit source format, exact markup and captured geometry/palette over stdin to [masc-pele].
+    Accept PNG bytes only when the helper confirms the requested protocol.
     Returns PNG bytes or an explicit failure. Owns and removes all temporary
     files; never reads or writes the terminal. *)

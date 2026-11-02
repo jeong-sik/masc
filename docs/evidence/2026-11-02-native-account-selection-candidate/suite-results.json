@@ -1,0 +1,91 @@
+{
+  "observed_at": "2026-11-02T03:21:58.872909+00:00",
+  "workflow": "Test",
+  "run_id": 41379588690,
+  "head": "79158c71e1fcc250e0f7b55f1b4edfb6906753dd",
+  "checkout_head": "79158c71e1fcc250e0f7b55f1b4edfb6906753dd",
+  "conclusion": "failure",
+  "suites": [
+    {
+      "suite": "test/test_runtime_native_account_selection",
+      "pass": 27,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_runtime_claude_code",
+      "pass": 132,
+      "fail": 0,
+      "skip": 1
+    },
+    {
+      "suite": "test/test_runtime_codex_app_server",
+      "pass": 196,
+      "fail": 0,
+      "skip": 8
+    },
+    {
+      "suite": "test/test_runtime_verification",
+      "pass": 38,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_runtime_per_keeper_routing",
+      "pass": 100,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_provider_usage_windows",
+      "pass": 36,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_official_client_session_store",
+      "pass": 40,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_runtime_setup_login_client",
+      "pass": 5,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_server_runtime_setup_actions",
+      "pass": 20,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_fusion_official_client_panel",
+      "pass": 46,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_runtime_setup_spec",
+      "pass": 16,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test/test_runtime_setup_accounts",
+      "pass": 12,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "logged_callback_assertion_warnings": [
+    "2026-11-02T02:55:27.7017033Z [2026-11-02 02:55:27] [WARN] [runtime_agent] Codex app-server stream callback raised: Alcotest assertion failure\\x0AFile \"test/test_runtime_codex_app_server.ml\", line 494, character 10:\\x0AFAIL no successor has run before the first settles\\x0A\\x0A   Expected: `[]'\\x0A   Received: `[\"call-3\"; \"call-2\"; \"call-1\"]'\\x0A\\x0A"
+  ],
+  "totals": {
+    "pass": 668,
+    "fail": 1,
+    "skip": 9
+  },
+  "limits": "Actual case records scoped to this791 checkout. One logged callback assertion under an OK case needs separate source interpretation; overall run is failure. No transfer to rewritten remote head424."
+}

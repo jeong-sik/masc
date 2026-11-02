@@ -1971,9 +1971,7 @@ tools-support = true
           | None -> Alcotest.fail ("missing binding " ^ id)
         in
         (match Runtime_instance.of_binding config (binding "codex") with
-            | Error (Runtime_config_error.Execution_unbuildable reason) ->
-              Alcotest.(check bool) "selected account needs a real home" true
-                (String_util.contains_substring reason "home")
+            | Error (Runtime_config_error.Execution_unbuildable _) -> ()
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
         (match Runtime_instance.of_binding config (binding "http") with

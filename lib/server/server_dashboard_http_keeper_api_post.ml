@@ -583,6 +583,9 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
                   ] );
               ( "manifest_rows",
                 `List (List.map runtime_manifest_public_json manifest_rows) );
+              ( "source_outcomes",
+                Server_keeper_turn_source_outcomes.project ~config ~keeper_name:name
+                  ~trace_id ~turn_id manifest_scan );
               ("receipts", `List (List.map runtime_trace_public_json receipts));
             ] )
 

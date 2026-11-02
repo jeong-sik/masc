@@ -5,6 +5,7 @@ import asyncFixture from '../../../test/fixtures/skill-ledger-async-actions.json
 import type { ToolCallEntry } from '../api/dashboard'
 import { skillAsyncResultDeliverySha256 } from '../api/dashboard-tools-prompts'
 import { fetchTurnFlow } from '../api/keeper-turn-flow'
+import { parseKeeperRuntimeTrace } from '../api/keeper-runtime-trace'
 import { decodePhysicalSkillEvidence, fetchPhysicalSkillEvidence } from '../api/keeper-physical-skill-evidence'
 import { KeeperTurnFlow, turnToolEvidence } from './keeper-turn-flow'
 
@@ -41,6 +42,30 @@ describe('tool evidence identity', () => {
 })
 
 describe('turn flow evidence doors', () => {
+  it('shows exact queue receipts with partial coverage and does not invent current pending status', async () => {
+    const source = { stimulusId: 'source-one', snapshotRef: 'a'.repeat(64), admittedRevision: '55',
+      firstAdmittedAt: 100, sourceKind: 'keeper_delegate_completed' }
+    vi.mocked(fetchTurnFlow).mockResolvedValue({
+      intake: { state: 'observed', channel: 'reactive', sources: [source, { ...source, stimulusId: 'source-two' }] },
+      outcomes: { state: 'observed', observedAt: 110, coverage: { state: 'partial', rowsInspected: 5,
+        invalidJsonRows: 1, invalidLedgerRows: 0, storageError: true }, sources: [
+        { ...source, receipts: [{ transitionId: 'real-transition', eventId: 'real-event', appliedAt: 105,
+          kind: 'ack_turn_completed' }] },
+        { ...source, stimulusId: 'source-two', receipts: [] },
+      ] },
+      events: [], trace: parseKeeperRuntimeTrace({}),
+    })
+    vi.mocked(fetchPhysicalSkillEvidence).mockResolvedValue({ turnRef: record.turn_ref, origins: [],
+      coverage: { scope: 'complete_retained_trace_snapshot', sessionsInspected: 0, ledgersLoaded: 0, gaps: [] } })
+    const view = render(html`<${KeeperTurnFlow} record=${record} toolEntries=${[]}
+      toolCallError=${null} onMessages=${vi.fn()} onContext=${vi.fn()} />`)
+    await waitFor(() => expect(view.container.textContent).toContain('real-transition'))
+    expect(view.container.textContent).toContain('턴 완료 후 ACK')
+    expect(view.container.textContent).toContain('일부 기록만 확인')
+    expect(view.container.textContent).toContain('현재 대기 상태인지는 확정할 수 없습니다')
+    expect(view.container.textContent).toContain('ACK는 큐 처리 기록입니다')
+  })
+
   it('groups physical async actions while preserving each causal result link', async () => {
     const evidence = physicalEvidence()
     const origin = evidence.origins[0]!

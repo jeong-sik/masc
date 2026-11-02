@@ -1,6 +1,7 @@
 import { isRecord } from '../components/common/normalize'
 import type { GetOptions } from './core'
 import { fetchKeeperRuntimeTrace, type KeeperRuntimeTraceResponse } from './keeper-runtime-trace'
+import { decodeTurnSourceOutcomes, type TurnSourceOutcomes } from './keeper-turn-source-outcomes'
 
 export interface TurnFlowTarget {
   keeper: string
@@ -33,6 +34,7 @@ export interface TurnFlowEvent {
 
 export interface TurnFlow {
   intake: TurnIntake
+  outcomes: TurnSourceOutcomes
   events: TurnFlowEvent[]
   trace: KeeperRuntimeTraceResponse
 }
@@ -119,7 +121,10 @@ export function decodeTurnFlow(trace: KeeperRuntimeTraceResponse, target: TurnFl
       routingReason: optionalString(decision.routing_reason, 'routing_reason'),
     }
   })
-  return { intake, events, trace }
+  const outcomes: TurnSourceOutcomes = intake.state === 'observed'
+    ? decodeTurnSourceOutcomes(trace.source_outcomes, intake.sources)
+    : { state: 'unavailable', reason: '정확한 턴 입력이 확인돼야 처리 결과를 연결할 수 있습니다' }
+  return { intake, outcomes, events, trace }
 }
 
 export async function fetchTurnFlow(target: TurnFlowTarget, opts: GetOptions = {}): Promise<TurnFlow> {

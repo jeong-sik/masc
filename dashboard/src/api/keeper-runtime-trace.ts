@@ -262,6 +262,8 @@ export interface KeeperRuntimeTraceResponse {
   linked_artifacts: KeeperRuntimeTraceLinkedArtifacts
   manifest_rows: Record<string, unknown>[]
   receipts: Record<string, unknown>[]
+  /** Optional observation, decoded against the exact turn intake separately. */
+  source_outcomes?: unknown
   health: string
   stale_reason: string | null
 }
@@ -706,6 +708,7 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     linked_artifacts: parseRuntimeTraceLinkedArtifacts(raw.linked_artifacts),
     manifest_rows: recordListField(raw, 'manifest_rows'),
     receipts: recordListField(raw, 'receipts'),
+    source_outcomes: raw.source_outcomes,
     health: stringField(raw, 'health') || 'unknown',
     stale_reason: nullableStringField(raw, 'stale_reason'),
   }

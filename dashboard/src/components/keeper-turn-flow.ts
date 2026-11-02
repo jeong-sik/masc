@@ -8,6 +8,7 @@ import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { projectSkillAsyncEvidence } from '../lib/skill-async-evidence'
 import { skillAsyncOccurrenceIdentity, skillAsyncResultDeliverySha256 } from '../api/dashboard-tools-prompts'
 import { fetchPhysicalSkillEvidence, type PhysicalSkillEvidence } from '../api/keeper-physical-skill-evidence'
+import type { TurnSourceOutcomes, SourceOutcome, SourceReceiptKind } from '../api/keeper-turn-source-outcomes'
 
 type FlowRecord = Pick<TurnRecordEntry,
   'keeper' | 'trace_id' | 'absolute_turn' | 'turn_ref' | 'execution_ids' | 'blocks'>
@@ -28,7 +29,26 @@ export function turnToolEvidence(record: FlowRecord, entries: readonly ToolCallE
   })
 }
 
-function Intake({ intake }: { intake: TurnIntake }) {
+const receiptLabels: Record<SourceReceiptKind, string> = {
+  ack_turn_completed: '턴 완료 후 ACK',
+  ack_turn_attempt_terminal: '실패한 턴 종료 후 ACK',
+  ack_fusion_terminal: 'Fusion 종단 ACK', ack_hitl_terminal: 'HITL 종단 ACK',
+  cancelled: '취소', transferred: '이관',
+}
+
+function Receipts({ source }: { source: SourceOutcome | undefined }) {
+  if (!source) return html`처리 결과 미확인`
+  if (source.receipts.length === 0) return html`일치하는 처리 기록 관측 없음. 현재 대기 상태인지는 확정할 수 없습니다.`
+  return html`
+    ${source.receipts.length > 1 && html`<p>서로 다른 처리 영수증이 있어 최종 상태를 확정하지 않습니다.</p>`}
+    ${source.receipts.map((receipt, index) => html`<div key=${index}>
+      ${receiptLabels[receipt.kind]} · ${new Date(receipt.appliedAt * 1000).toLocaleString()}
+      <div class="font-mono">${receipt.transitionId} · ${receipt.eventId}</div>
+    </div>`)}
+  `
+}
+
+function Intake({ intake, outcomes }: { intake: TurnIntake; outcomes: TurnSourceOutcomes }) {
   switch (intake.state) {
     case 'not_recorded':
       return html`<p class="rt-note">${intake.reason}. 자극이 없었다는 뜻은 아닙니다.</p>`
@@ -39,6 +59,13 @@ function Intake({ intake }: { intake: TurnIntake }) {
     case 'observed':
       return html`
         <p class="rt-note">선택 채널: ${intake.channel ?? '기록 없음'} · ${intake.sources.length}개</p>
+        ${outcomes.state === 'unavailable'
+          ? html`<p class="rt-note">${outcomes.reason}</p>`
+          : html`<p class="rt-note">처리 원장 조회 ${new Date(outcomes.observedAt * 1000).toLocaleString()} · ${outcomes.coverage.rowsInspected}행 읽음
+              · 손상 ${outcomes.coverage.invalidJsonRows + outcomes.coverage.invalidLedgerRows}행
+              ${outcomes.coverage.storageError ? ' · 저장소 읽기 오류' : ''}
+              ${outcomes.coverage.state === 'partial' ? ' · 일부 기록만 확인' : ''}
+            </p>`}
         ${intake.sources.length === 0
           ? html`<p class="rt-note">턴 시작 시 관측한 큐 자극이 없습니다. 직접 입력은 메시지 탭에서 확인하세요.</p>`
           : html`<ol class="space-y-3">${intake.sources.map(source => html`
@@ -49,6 +76,10 @@ function Intake({ intake }: { intake: TurnIntake }) {
                 <span class="k">선택 버전</span><span class="v">${source.admittedRevision}</span>
                 <span class="k">최초 선택</span><span class="v">${source.firstAdmittedAt === null
                   ? '기록 없음' : new Date(source.firstAdmittedAt * 1000).toISOString()}</span>
+                <span class="k">큐 처리</span><span class="v"><${Receipts} source=${outcomes.state === 'observed'
+                  ? outcomes.sources.find(item => item.stimulusId === source.stimulusId
+                    && item.snapshotRef === source.snapshotRef && item.admittedRevision === source.admittedRevision)
+                  : undefined} /></span>
               </li>
             `)}</ol>`}
       `
@@ -134,9 +165,9 @@ export function KeeperTurnFlow({ record, toolEntries, toolCallError, onMessages,
       <section aria-label="입력 자극">
         <h4>입력 자극</h4>
         ${flowState.error ? html`<p class="rt-note">자극·선택 기록 조회 실패: ${flowState.error}</p>`
-          : flowState.data ? html`<${Intake} intake=${flowState.data.intake} />`
+          : flowState.data ? html`<${Intake} intake=${flowState.data.intake} outcomes=${flowState.data.outcomes} />`
             : html`<p class="rt-note">자극·선택 기록 조회 중…</p>`}
-        <p class="rt-note">시작 시 관측한 입력입니다. 실제 요청 전송·ACK·업무 완료는 별도 증거가 필요합니다.</p>
+        <p class="rt-note">ACK는 큐 처리 기록입니다. 실제 요청 전송과 PR 승인 같은 업무 결과는 해당 증거에서 확인하세요.</p>
       </section>
       <section aria-label="실제 입력 확인">
         <h4>프롬프트와 실제 입력</h4>

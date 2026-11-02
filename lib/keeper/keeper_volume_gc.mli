@@ -45,7 +45,8 @@ type keeper_outcome =
   | Kept of keep_reason
   | Reclaim_candidate
   | Reclaimed
-        (** Only after [~execute:true] and an absence check for the listed
+        (** Only after [~execute:true], a delete-time confirmation that the
+            keeper is still build-only, and an absence check for the listed
             build volume. *)
   | Reclaim_failed of string
 
@@ -78,13 +79,19 @@ val apple_keeper_volume_gc :
     the work volume's marker and a registration in this workspace. A work
     volume with a missing or empty marker is kept as [Unverified]. Unprotected
     build-only volumes without an observed reference are reclaim candidates.
-    The owner inventory does not fence concurrent boots, so a build-only
-    candidate is not proof that no other workspace can start using it.
-    With [~execute:true], only
-    the listed build volume is deleted and a new listing decides [Reclaimed]
-    versus [Reclaim_failed]. A work volume that appears after the initial
-    listing is never targeted. Without [execute] no volume is touched. A
-    failed volume listing is [Error] and nothing runs. *)
+    A candidate is judged from one listing, which a concurrent boot in
+    another workspace can already have outrun, so with [~execute:true] the
+    build-only shape is confirmed by a fresh listing immediately before the
+    delete: a keeper whose work volume has since appeared, whose listed
+    build volume is gone, or whose confirmation listing cannot be read is
+    kept as [Unverified] and nothing is deleted for it. Past that
+    confirmation the fence is the platform, which refuses to delete a volume
+    a container (running or stopped) references, and the absence check after
+    the delete: a volume that remains is [Reclaim_failed], never [Reclaimed].
+    A boot that lands between the confirmation and the delete can still fail
+    loudly at container creation; it cannot lose a held volume silently.
+    Without [execute] no volume is touched. A failed initial volume listing
+    is [Error] and nothing runs. *)
 
 val keep_reason_to_string : keep_reason -> string
 val keeper_outcome_to_string : keeper_outcome -> string

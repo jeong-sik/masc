@@ -2,9 +2,12 @@
     request. See the interface for the contract; the ordering of the checks
     below is the safety story: containers first (the strongest live
     evidence), then local registration and the claims marker. Only a
-    build-only volume with no observed reference becomes a candidate. The
-    inventory does not fence concurrent boots. All effects run through the
-    injected [run]. *)
+    build-only volume with no observed reference becomes a candidate, and a
+    candidate is deleted only after a fresh listing confirms the build-only
+    shape at delete time. Past that confirmation the fence is the platform,
+    which refuses to delete a volume a container references, plus the
+    absence check after the delete. All effects run through the injected
+    [run]. *)
 
 type volume_role =
   | Work_role
@@ -187,8 +190,53 @@ let keeper_outcome_to_string = function
   | Reclaim_failed detail -> "reclaim failed: " ^ detail
 ;;
 
-(* Do not delete a work volume that was absent from the original listing:
-   another workspace may create it after that listing. *)
+(* A candidate is judged from the initial listing, which can predate a
+   concurrent boot by the whole judging loop: a fresh boot ensures its work
+   volume before it touches the build volume, so a work volume that appears
+   after the verdict (or a build volume that disappears) means another
+   workspace is moving and the verdict is stale. Confirm the exact
+   build-only shape with a fresh listing immediately before the delete; any
+   change, or an unreadable confirmation, preserves the keeper. A boot that
+   starts after this listing is fenced by the platform instead, which
+   refuses to delete a volume a container references. *)
+let confirm_build_only_shape ~run ~timeout_sec ~keeper_name ~volume_name =
+  match run ~timeout_sec (Keeper_sandbox_microvm.apple_volume_list_argv ()) with
+  | Unix.WEXITED 0, listing, _ ->
+    (match Yojson.Safe.from_string listing with
+     | exception Yojson.Json_error detail ->
+       Error ("reclamation confirmation listing is invalid JSON: " ^ detail)
+     | json ->
+       (match Keeper_sandbox_microvm.volume_names_of_json json with
+        | Error _ as error -> error
+        | Ok names ->
+          let current =
+            List.find_opt
+              (fun (name, _, _) -> String.equal name keeper_name)
+              (group_keeper_volumes (List.map masc_keeper_volume_of_name names))
+          in
+          (match current with
+           | None ->
+             Error
+               (Printf.sprintf
+                  "keeper %s is absent from the delete-time listing; preserved without deleting"
+                  keeper_name)
+           | Some (_, Some work_now, _) ->
+             Error
+               (Printf.sprintf
+                  "work volume %s appeared after the verdict; preserved without deleting"
+                  work_now)
+           | Some (_, None, Some build_now) when String.equal build_now volume_name -> Ok ()
+           | Some (_, None, _) ->
+             Error
+               (Printf.sprintf
+                  "listed build volume %s changed before the delete; preserved without deleting"
+                  volume_name))))
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as confirmation_status, _, _ ->
+    Error
+      (Printf.sprintf "cannot confirm volume %s is still build-only (%s)" volume_name
+         (Keeper_sandbox_exec_failure.status_label confirmation_status))
+;;
+
 let remove_listed_build_volume ~run ~timeout_sec ~volume_name =
   let status, stdout, stderr =
     run ~timeout_sec (Keeper_sandbox_microvm.apple_volume_delete_argv ~volume_name)
@@ -247,16 +295,22 @@ let apple_keeper_volume_gc ~run ~timeout_sec ~registered_keeper ~claims_image ~e
                       && (match outcome with
                           | Reclaim_candidate -> true
                           | Kept _ | Reclaimed | Reclaim_failed _ -> false)
-                   then
-                     (match
-                        match work_volume, build_volume with
-                        | None, Some volume_name ->
-                          remove_listed_build_volume ~run ~timeout_sec ~volume_name
-                        | Some _, _ | None, None ->
-                          Error "reclaim candidate is not a listed build-only volume"
-                      with
-                      | Ok () -> Reclaimed
-                      | Error detail -> Reclaim_failed detail)
+                   then (
+                     match work_volume, build_volume with
+                     | None, Some volume_name ->
+                       (match
+                          confirm_build_only_shape ~run ~timeout_sec ~keeper_name
+                            ~volume_name
+                        with
+                        | Error detail -> Kept (Unverified detail)
+                        | Ok () ->
+                          (match
+                             remove_listed_build_volume ~run ~timeout_sec ~volume_name
+                           with
+                           | Ok () -> Reclaimed
+                           | Error detail -> Reclaim_failed detail))
+                     | Some _, _ | None, None ->
+                       Reclaim_failed "reclaim candidate is not a listed build-only volume")
                    else outcome
                  in
                  { keeper_name; work_volume; build_volume; outcome })

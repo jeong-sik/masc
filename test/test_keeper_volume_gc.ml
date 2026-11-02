@@ -266,20 +266,24 @@ let test_a_failed_deletion_is_reported () =
      Alcotest.failf "expected one reclaim failure, got %d keepers" (List.length keepers))
 ;;
 
-let test_build_only_cleanup_does_not_delete_a_new_work_volume () =
+let test_build_only_cleanup_preserves_a_keeper_whose_work_volume_appeared () =
   let sent = ref [] in
-  let remaining = ref [ "masc-keeper-build-racing" ] in
+  let listings = ref 0 in
   let run ~timeout_sec:_ argv =
     sent := argv :: !sent;
     if List.exists (String.equal "--all") argv
     then Unix.WEXITED 0, "[]", ""
     else if adjacent ~flag:"volume" ~value:"list" argv
-    then Unix.WEXITED 0, volume_listing !remaining, ""
-    else if adjacent ~flag:"volume" ~value:"delete" argv
     then (
-      (* A peer creates its work volume after the first listing. *)
-      remaining := [ "masc-keeper-work-racing" ];
-      Unix.WEXITED 0, "", "")
+      incr listings;
+      if !listings = 1
+      then Unix.WEXITED 0, volume_listing [ "masc-keeper-build-racing" ], ""
+      else
+        (* A peer boots after the verdict: its work volume is already there
+           when the delete-time confirmation runs. *)
+        Unix.WEXITED 0, volume_listing [ "masc-keeper-build-racing"; "masc-keeper-work-racing" ], "")
+    else if adjacent ~flag:"volume" ~value:"delete" argv
+    then Alcotest.fail "no delete may run once the shape has changed"
     else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
   in
   let report =
@@ -290,12 +294,76 @@ let test_build_only_cleanup_does_not_delete_a_new_work_volume () =
          ~execute:true)
   in
   (match report.Gc.keepers with
-   | [ { Gc.outcome = Gc.Reclaimed; _ } ] -> ()
-   | keepers -> Alcotest.failf "expected one reclaimed build volume, got %d" (List.length keepers));
-  Alcotest.(check (list string)) "only the observed build volume was deleted"
-    [ "masc-keeper-build-racing" ] (deleted_volume_names (List.rev !sent));
-  Alcotest.(check (list string)) "the newly created work volume remains"
-    [ "masc-keeper-work-racing" ] !remaining
+   | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
+     Alcotest.(check bool) "the appearing work volume is named" true
+       (Astring.String.is_infix ~affix:"masc-keeper-work-racing" detail)
+   | keepers -> Alcotest.failf "expected one preserved keeper, got %d" (List.length keepers));
+  Alcotest.(check (list string)) "nothing was deleted" [] (deleted_volume_names (List.rev !sent));
+  Alcotest.(check int) "verdict and confirmation listings were read" 2 !listings
+;;
+
+let test_build_only_cleanup_preserves_a_keeper_whose_build_volume_vanished () =
+  let sent = ref [] in
+  let listings = ref 0 in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if List.exists (String.equal "--all") argv
+    then Unix.WEXITED 0, "[]", ""
+    else if adjacent ~flag:"volume" ~value:"list" argv
+    then (
+      incr listings;
+      if !listings = 1
+      then Unix.WEXITED 0, volume_listing [ "masc-keeper-build-gone" ], ""
+      else Unix.WEXITED 0, volume_listing [], "")
+    else if adjacent ~flag:"volume" ~value:"delete" argv
+    then Alcotest.fail "no delete may run for a keeper the confirmation cannot see"
+    else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
+  in
+  let report =
+    ok_exn
+      (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
+         ~registered_keeper:(fun _ -> false)
+         ~claims_image:(Some "masc-test-minimal:image")
+         ~execute:true)
+  in
+  (match report.Gc.keepers with
+   | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
+     Alcotest.(check bool) "the absence is named" true
+       (Astring.String.is_infix ~affix:"absent from the delete-time listing" detail)
+   | keepers -> Alcotest.failf "expected one preserved keeper, got %d" (List.length keepers));
+  Alcotest.(check (list string)) "nothing was deleted" [] (deleted_volume_names (List.rev !sent))
+;;
+
+let test_build_only_cleanup_preserves_a_keeper_whose_confirmation_fails () =
+  let sent = ref [] in
+  let listings = ref 0 in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if List.exists (String.equal "--all") argv
+    then Unix.WEXITED 0, "[]", ""
+    else if adjacent ~flag:"volume" ~value:"list" argv
+    then (
+      incr listings;
+      if !listings = 1
+      then Unix.WEXITED 0, volume_listing [ "masc-keeper-build-unconfirmed" ], ""
+      else Unix.WEXITED 1, "", "container system is not running")
+    else if adjacent ~flag:"volume" ~value:"delete" argv
+    then Alcotest.fail "no delete may run without a confirmation"
+    else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
+  in
+  let report =
+    ok_exn
+      (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
+         ~registered_keeper:(fun _ -> false)
+         ~claims_image:(Some "masc-test-minimal:image")
+         ~execute:true)
+  in
+  (match report.Gc.keepers with
+   | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
+     Alcotest.(check bool) "the failed confirmation is named" true
+       (Astring.String.is_infix ~affix:"cannot confirm volume" detail)
+   | keepers -> Alcotest.failf "expected one preserved keeper, got %d" (List.length keepers));
+  Alcotest.(check (list string)) "nothing was deleted" [] (deleted_volume_names (List.rev !sent))
 ;;
 
 let test_without_an_image_there_is_no_claim_evidence () =
@@ -398,7 +466,7 @@ let test_a_malformed_settling_listing_does_not_prove_reclamation () =
     else if adjacent ~flag:"volume" ~value:"list" argv
     then (
       incr listings;
-      if !listings = 1
+      if !listings <= 2
       then Unix.WEXITED 0, volume_listing [ "masc-keeper-build-retired" ], ""
       else Unix.WEXITED 0, {|[{"id":42}]|}, "")
     else if adjacent ~flag:"volume" ~value:"delete" argv
@@ -418,7 +486,7 @@ let test_a_malformed_settling_listing_does_not_prove_reclamation () =
      Alcotest.failf "expected unconfirmed reclamation, got %d keepers" (List.length keepers));
   Alcotest.(check (list string)) "only the listed build volume was attempted"
     [ "masc-keeper-build-retired" ] (deleted_volume_names (List.rev !sent));
-  Alcotest.(check int) "both inventories were read" 2 !listings
+  Alcotest.(check int) "verdict, confirmation, and settling inventories were read" 3 !listings
 ;;
 
 let () =
@@ -433,8 +501,12 @@ let () =
             test_a_report_without_execute_touches_nothing
         ; Alcotest.test_case "a failed deletion is reported" `Quick
             test_a_failed_deletion_is_reported
-        ; Alcotest.test_case "build-only cleanup preserves a newly created work volume" `Quick
-            test_build_only_cleanup_does_not_delete_a_new_work_volume
+        ; Alcotest.test_case "a work volume that appears after the verdict preserves the keeper" `Quick
+            test_build_only_cleanup_preserves_a_keeper_whose_work_volume_appeared
+        ; Alcotest.test_case "a build volume that vanishes before the delete preserves the keeper" `Quick
+            test_build_only_cleanup_preserves_a_keeper_whose_build_volume_vanished
+        ; Alcotest.test_case "a failed delete-time confirmation preserves the keeper" `Quick
+            test_build_only_cleanup_preserves_a_keeper_whose_confirmation_fails
         ; Alcotest.test_case "without an image there is no claim evidence" `Quick
             test_without_an_image_there_is_no_claim_evidence
         ; Alcotest.test_case "an unreadable claims marker keeps the volumes" `Quick

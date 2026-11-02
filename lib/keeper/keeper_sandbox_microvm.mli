@@ -697,10 +697,11 @@ val remove_apple_keeper_volumes :
     Dissolution keeps a volume when the marker is missing or unreadable, but
     a present marker can still omit an owner. Reclamation
     ({!Keeper_volume_gc}) also keeps work volumes with missing or empty claims;
-    its inventory does not fence a concurrent boot, even for a build-only
-    candidate. [container list --all] includes stopped guests, while a paused
-    Keeper can have no guest container. Neither observation alone establishes
-    that a volume is safe to reclaim. *)
+    it deletes a build-only candidate only after a fresh listing confirms the
+    shape at delete time, and past that confirmation the platform refuses to
+    delete a volume a container references. [container list --all] includes
+    stopped guests, while a paused Keeper can have no guest container.
+    Neither observation alone establishes that a volume is safe to reclaim. *)
 
 val volume_claims_marker_name : string
 val claims_guest_root : string

@@ -122,6 +122,25 @@ it('keeps the ordinary scoped result when the Task credential stays current', as
 })
 
 it.each([
+  ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
+  ['duplicate error flag', (id: string) => responseBody(id).replace('"result":{', '"result":{"isError":true,"isError":false,')],
+  ['non-text content', (id: string) => JSON.stringify({ id, result: { content: [{ type: 'image', text: successText() }] } })],
+] as const)('does not accept a current %s response as Task success', async (_name, makeBody) => {
+  const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+    const request = JSON.parse(String(init.body))
+    return new Response(makeBody(request.id), { status: 200 })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const retained = vi.fn()
+  const error = await callMcpTaskCreationAtIdentity(args(), identity(), () => true, undefined, undefined, retained)
+    .catch((caught: unknown) => caught)
+  expect(error).toBeInstanceOf(Error)
+  expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
+  expect(retained).not.toHaveBeenCalled()
+  expect(fetchMock).toHaveBeenCalledOnce()
+})
+
+it.each([
   ['wrong RPC id', (id: string): string => responseBody(`${id}-other`)],
   ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
   ['wrong creation id', (id: string) => responseBody(id, successText({ creation_request_id: 'other' }))],

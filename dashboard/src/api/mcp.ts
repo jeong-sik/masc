@@ -522,7 +522,13 @@ async function callMcpToolInternal(
         noteManagedCredentialRefusalObservation(expectedIdentity.revision)
       }
     }, taskCapture ? text => { retainStaleTaskCreation(text, requestId, taskCapture) } : undefined)
-    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined)
+    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined, taskCapture !== undefined)
+    if (taskCapture && parsed.error === undefined && parsed.result?.isError !== true) {
+      const content = parsed.result?.content?.[0]
+      if (!content || content.type !== 'text' || typeof content.text !== 'string') {
+        throw new Error('Invalid MCP Task creation result')
+      }
+    }
     return extractMcpText(parsed)
   } catch (err) {
     const authErrorCode = err instanceof McpToolCallError

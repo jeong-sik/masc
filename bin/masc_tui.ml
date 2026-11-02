@@ -16635,7 +16635,7 @@ let launch_observer_recovery state ~expected_workspace ~host ~port ~mailbox =
                report None
              end
          | Error (Masc_tui_http.Http_refused {status = (404 | 409); _}) -> session := None
-         | Ok () | Error (Masc_tui_http.Http_refused _ | Transport_failed _ | Invalid_handshake _) -> ());
+         | Ok () | Error (Masc_tui_http.Http_refused _ | Transport_failed _ | Invalid_handshake _ | Retry_without_cursor _) -> ());
         Eio.Time.sleep clock stream_reconnect_s;
         follow ()
       in

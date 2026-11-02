@@ -436,9 +436,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     let with_h2_workspace_read state f =
       with_captured_read_workspace (Mcp_server.workspace_config state) f
     in
-    let with_artifact_read_workspace state f =
-      with_h2_workspace_read state f
-    in
     (* The artifact module names the permission each of its routes needs. The
        gateway does not take that as a kind: it runs the gate that goes with the
        kind the HTTP/1 router recorded for the path. A route on which the two

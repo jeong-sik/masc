@@ -21,6 +21,7 @@ let rec remove_tree path =
 let identity base : Masc.Tui_decode.server_identity =
   let canonical path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath path) in
   { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None
+  ; sid_runtime_instance_id = None
   ; sid_base_path = canonical base; sid_masc_root = canonical (Filename.concat base ".masc")
   ; sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None
   ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }

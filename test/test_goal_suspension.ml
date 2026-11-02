@@ -77,7 +77,7 @@ let test_transition_refuses_ids_that_would_be_retargeted () = with_workspace @@ 
   let read_optional path = if Sys.file_exists path then Some (Fs_compat.load_file path) else None in
   let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
   let proof_before = read_optional proof_path in
-  let refused_before_effect result =
+  let refused_before_effect (result : Tool_result.result) =
     (match result with
      | Tool_result.Failed { class_ = Tool_result.Policy_rejection;
                             effect_disposition = Tool_result.Proven_pre_effect; _ } -> ()

@@ -472,6 +472,42 @@ let test_schedule_publication_wakes_its_workspace () =
           (Runtime.For_testing.take_full_health_wakeup_nonblocking ())))
 ;;
 
+let test_pending_confirm_publication_wakes_its_workspace () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-confirm-workspace" in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Operator_pending_confirm.install_change_observer (fun ~base_path:_ -> ());
+      reset ();
+      Server_auth.For_testing.restore_server_state previous_state;
+      (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      Unix.mkdir other_path 0o755;
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let current = Masc.Mcp_server.workspace_config state in
+        let other = Workspace_core.default_config other_path in
+        ignore (Workspace_core.init current ~agent_name:(Some "test"));
+        ignore (Workspace_core.init other ~agent_name:(Some "test"));
+        Operator_pending_confirm.install_change_observer
+          Runtime.invalidate_full_health_snapshot_for_workspace;
+        reset ();
+        Operator_pending_confirm.write_pending_confirms other [] |> Result.get_ok;
+        check bool "foreign publication does not wake current health" false
+          (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+        Operator_pending_confirm.write_pending_confirms current [] |> Result.get_ok;
+        check bool "current publication wakes health" true
+          (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+        ignore (Operator_pending_confirm.read_pending_confirms_result current |> Result.get_ok);
+        check bool "read without cleanup does not wake health" false
+          (Runtime.For_testing.take_full_health_wakeup_nonblocking ())))
+;;
+
 let () =
   let _ = Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ ->
     prerr_endline "full health wakeup test watchdog expired";
@@ -498,5 +534,7 @@ let () =
             test_approval_health_callback_preserves_scope_cancellation
         ; test_case "schedule publication wakes its workspace" `Quick
             test_schedule_publication_wakes_its_workspace
+        ; test_case "pending confirm publication wakes its workspace" `Quick
+            test_pending_confirm_publication_wakes_its_workspace
         ]
       ])

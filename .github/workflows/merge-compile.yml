@@ -1,6 +1,6 @@
 name: Merge compile
 
-run-name: Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} [${{ github.ref_name }}] by ${{ github.actor }}
+run-name: "Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} [${{ github.ref_name }}] by ${{ github.actor }}"
 
 # Third-party actions float on major tags house-wide (every workflow does);
 # pinning four of them here while the rest of the repo floats would attest

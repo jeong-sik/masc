@@ -178,8 +178,8 @@ let non_immediate_urgency_of_witness (witness : projected_disposition_witness) =
   | Projected_cancel _ | Projected_transfer _ -> None
 ;;
 
-(* Reverse-chronological fallback when decoding a snapshot that predates an
-   explicit [last_non_immediate_served] field:
+(* Derive the last non-immediate urgency from retained transition evidence
+   when decoding a snapshot:
    1. [transition_outbox] holds the newest transition applied to the queue
       before outbox projection completes;
    2. [last_transition] holds the most recently projected full receipt;
@@ -629,13 +629,11 @@ let with_revision revision state = { state with revision }
 
 let transition_outbox_blocked state = state.transition_outbox <> []
 
-(* #31597: deterministic starvation-free [Normal]/[Low] alternation.
-   [Immediate] strictly preempts both [Normal] and [Low]. Between [Normal] and
-   [Low], selection alternates using [last_non_immediate_served] so a ready
-   [Low] entry waits at most one [Normal] turn without wall-clock aging
-   heuristics. Within the same urgency lane, the first ready entry in
-   [pending_entries] wins, preserving both FIFO arrival order and
-   [defer_pending] lane rotation. *)
+(* For this single-entry selection, rank [Immediate] first and use
+   [last_non_immediate_served] to prefer a [Normal] or [Low] lane without
+   wall-clock aging. Within a lane, the first ready entry in [pending_entries]
+   wins, preserving FIFO arrival order and [defer_pending] lane rotation.
+   The lane preference does not bound an individual entry's wait. *)
 let first_ready_entry ~last_non_immediate_served ~ready entries =
   entries
   |> List.filter (fun entry -> ready entry.source)

@@ -464,11 +464,11 @@ val sort_by_urgency : t -> t
 
 val preferred_non_immediate_urgency :
   last_non_immediate_served:urgency option -> urgency
-(** Deterministic non-immediate lane selector:
+(** Preference for a single selection between non-immediate lanes:
     - [Some Normal -> Low]
     - [None | Some (Low | Immediate) -> Normal]
-    Eliminates wall-clock aging thresholds while guaranteeing that a ready
-    [Low] stimulus cannot be starved for more than one [Normal] turn. *)
+    The preference uses the supplied state and no wall-clock aging threshold.
+    It does not bound an individual item's wait behind others in its lane. *)
 
 val selection_urgency_rank :
   last_non_immediate_served:urgency option -> urgency -> int

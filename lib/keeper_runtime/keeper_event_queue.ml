@@ -1056,13 +1056,10 @@ let sort_by_urgency (queue : t) : t =
        (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
   |> of_list
 
-(* Deterministic starvation-free [Normal]/[Low] alternation (#31597):
-   [Immediate] remains strictly highest priority (rank 0) because it is a
-   producer-declared contract ("this Keeper is waiting on an answer to
-   something it asked for"). Between [Normal] and [Low], selection alternates
-   based on the last non-immediate urgency served, bounding [Low] wait to at
-   most one [Normal] turn when both lanes have ready work without relying on
-   wall-clock aging thresholds. *)
+(* For a single selection, [Immediate] receives rank 0. Between [Normal]
+   and [Low], prefer the lane opposite the supplied last non-immediate urgency
+   without wall-clock aging thresholds. This preference does not bound an
+   individual item's wait behind other entries in the same lane. *)
 let preferred_non_immediate_urgency ~last_non_immediate_served =
   match last_non_immediate_served with
   | Some Normal -> Low

@@ -193,6 +193,16 @@ let composite_changed_keeper = function
   | Snapshot _ | Other _ ->
       None
 
+let tool_call_keeper = function
+  | Keeper_tool_call { kt_keeper; _ } -> Some kt_keeper
+  | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _
+  | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
+  | Keeper_turn_complete _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Snapshot _ | Other _ ->
+      None
+
 let memory_journal_appended_keeper = function
   | Keeper_memory_journal_appended { keeper; _ } -> Some keeper
   | Keeper_chat_appended _ | Keeper_turn_observation _

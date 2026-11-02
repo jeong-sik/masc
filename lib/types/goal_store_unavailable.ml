@@ -13,15 +13,25 @@ type t =
   ; reset_step : reset_step
   }
 
+and nonregular_kind =
+  | Nonregular_directory
+  | Nonregular_character_device
+  | Nonregular_block_device
+  | Nonregular_symbolic_link
+  | Nonregular_fifo
+  | Nonregular_socket
+
 and reason =
   | Missing_after_init
   | Unreadable of Unix.error
+  | Nonregular of nonregular_kind
   | Not_json of string
   | Schema_rejected of { field : string; detail : string }
 
 and mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
+  | Mirror_nonregular of nonregular_kind
   | Mirror_decodes of { goal_count : int; updated_at : string }
   | Mirror_rejected of reason
 
@@ -40,12 +50,14 @@ and reset_step =
 let reason_name = function
   | Missing_after_init -> "missing_after_init"
   | Unreadable _ -> "unreadable"
+  | Nonregular _ -> "nonregular"
   | Not_json _ -> "not_json"
   | Schema_rejected _ -> "schema_rejected"
 
 let mirror_status_name = function
   | Mirror_absent -> "mirror_absent"
   | Mirror_unreadable _ -> "mirror_unreadable"
+  | Mirror_nonregular _ -> "mirror_nonregular"
   | Mirror_decodes _ -> "mirror_decodes"
   | Mirror_rejected _ -> "mirror_rejected"
 
@@ -60,10 +72,28 @@ let reset_step_name = function
    One line for surfaces whose terminus is a string (prompt fragments, WARN
    lines). Render at the very end; never branch on the output. *)
 
+let nonregular_kind_name = function
+  | Nonregular_directory -> "directory"
+  | Nonregular_character_device -> "character_device"
+  | Nonregular_block_device -> "block_device"
+  | Nonregular_symbolic_link -> "symbolic_link"
+  | Nonregular_fifo -> "fifo"
+  | Nonregular_socket -> "socket"
+
+let nonregular_kind_of_name = function
+  | "directory" -> Ok Nonregular_directory
+  | "character_device" -> Ok Nonregular_character_device
+  | "block_device" -> Ok Nonregular_block_device
+  | "symbolic_link" -> Ok Nonregular_symbolic_link
+  | "fifo" -> Ok Nonregular_fifo
+  | "socket" -> Ok Nonregular_socket
+  | other -> Error (Printf.sprintf "unknown nonregular file kind %S" other)
+
 let reason_to_string = function
   | Missing_after_init ->
       "missing_after_init (goals.json is absent and its .last-good mirror is not confirmed absent)"
   | Unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
+  | Nonregular kind -> "nonregular (" ^ nonregular_kind_name kind ^ ")"
   | Not_json detail -> "not_json (" ^ detail ^ ")"
   | Schema_rejected { field; detail } ->
       Printf.sprintf "schema_rejected location=%S (%s)" field detail
@@ -71,6 +101,7 @@ let reason_to_string = function
 let mirror_status_to_string = function
   | Mirror_absent -> "absent"
   | Mirror_unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
+  | Mirror_nonregular kind -> "nonregular (" ^ nonregular_kind_name kind ^ ")"
   | Mirror_decodes { goal_count; updated_at } ->
       Printf.sprintf "decodes goal_count=%d updated_at=%s" goal_count updated_at
   | Mirror_rejected reason -> "rejected " ^ reason_to_string reason
@@ -325,6 +356,7 @@ let reason_to_yojson reason : Yojson.Safe.t =
   match reason with
   | Missing_after_init -> `Assoc [ kind ]
   | Unreadable error -> `Assoc [ kind; "error", unix_error_to_yojson error ]
+  | Nonregular file_kind -> `Assoc [ kind; "file_kind", `String (nonregular_kind_name file_kind) ]
   | Not_json detail -> `Assoc [ kind; "detail", `String detail ]
   | Schema_rejected { field; detail } ->
     `Assoc [ kind; "field", `String field; "detail", `String detail ]
@@ -341,6 +373,11 @@ let reason_of_yojson json =
     let* error_json = member "error" members in
     let* error = unix_error_of_yojson error_json in
     Ok (Unreadable error)
+  | "nonregular" ->
+    let* () = exact_members ~required:[ kind_member; "file_kind" ] members in
+    let* file_kind = string_member "file_kind" members in
+    let* file_kind = nonregular_kind_of_name file_kind in
+    Ok (Nonregular file_kind)
   | "not_json" ->
     let* () = exact_members ~required:[ kind_member; "detail" ] members in
     let* detail = string_member "detail" members in
@@ -357,6 +394,8 @@ let mirror_status_to_yojson mirror : Yojson.Safe.t =
   match mirror with
   | Mirror_absent -> `Assoc [ kind ]
   | Mirror_unreadable error -> `Assoc [ kind; "error", unix_error_to_yojson error ]
+  | Mirror_nonregular file_kind ->
+    `Assoc [ kind; "file_kind", `String (nonregular_kind_name file_kind) ]
   | Mirror_decodes { goal_count; updated_at } ->
     `Assoc [ kind; "goal_count", `Int goal_count; "updated_at", `String updated_at ]
   | Mirror_rejected reason -> `Assoc [ kind; "reason", reason_to_yojson reason ]
@@ -373,6 +412,11 @@ let mirror_status_of_yojson json =
     let* error_json = member "error" members in
     let* error = unix_error_of_yojson error_json in
     Ok (Mirror_unreadable error)
+  | "mirror_nonregular" ->
+    let* () = exact_members ~required:[ kind_member; "file_kind" ] members in
+    let* file_kind = string_member "file_kind" members in
+    let* file_kind = nonregular_kind_of_name file_kind in
+    Ok (Mirror_nonregular file_kind)
   | "mirror_decodes" ->
     let* () = exact_members ~required:[ kind_member; "goal_count"; "updated_at" ] members in
     let* goal_count = int_member "goal_count" members in

@@ -872,15 +872,23 @@ let test_path_inspection_survives_turn_boundary () =
   let unavailable : Goal_store.unavailable =
     { file = "/work/.masc/goals.json"; reason = Goal_store.Unreadable Unix.ENOENT;
       mirror = Goal_store.Mirror_absent; reset_step = Goal_store.Inspect_path } in
-  let task_context = Task_context.Task { task_id = id;
-    goals = Error (Task_context.Goal_source_unavailable unavailable) } in
-  let written = { Boundaries.recorded_at = 200.; event = Boundaries.Turn_ended
-    { turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1;
-      history_at_start = Boundaries.Fresh_history; position = Boundaries.No_atom_history; task_context } } in
-  (match Boundaries.append ~keepers_dir ~keeper_id written with
-   | Ok () -> () | Error e -> fail (Boundaries.append_error_to_string e));
+  let nonregular = { unavailable with reason = Goal_store.Nonregular Goal_store.Nonregular_fifo;
+    mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_directory } in
+  let record turn unavailable =
+    let task_context = Task_context.Task { task_id = id;
+      goals = Error (Task_context.Goal_source_unavailable unavailable) } in
+    { Boundaries.recorded_at = 200.; event = Boundaries.Turn_ended
+      { turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:turn;
+        history_at_start = Boundaries.Fresh_history; position = Boundaries.No_atom_history; task_context } }
+  in
+  let original = record 1 unavailable and observed_kind = record 2 nonregular in
+  List.iter (fun written ->
+    match Boundaries.append ~keepers_dir ~keeper_id written with
+    | Ok () -> () | Error e -> fail (Boundaries.append_error_to_string e)) [original; observed_kind];
   match read_lines ~keepers_dir with
-  | [_, decoded] -> check record_t "path inspection survives boundary replay" written decoded
+  | [_, decoded_original; _, decoded_kind] ->
+      check record_t "path inspection survives boundary replay" original decoded_original;
+      check record_t "nonregular observation survives boundary replay" observed_kind decoded_kind
   | _ -> fail "missing path-inspection boundary"
 ;;
 

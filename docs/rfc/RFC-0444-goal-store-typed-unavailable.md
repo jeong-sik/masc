@@ -57,15 +57,21 @@ and unavailable =
   ; mirror : mirror_status              (* 같은 시점의 .last-good 상태. 서빙하지 않고 보여만 준다 *)
   ; reset_step : reset_step }
 
+and nonregular_kind =
+  | Nonregular_directory | Nonregular_character_device | Nonregular_block_device
+  | Nonregular_symbolic_link | Nonregular_fifo | Nonregular_socket
+
 and reason =
   | Missing_after_init                  (* primary 없음, .last-good 있음 *)
-  | Unreadable of Unix.error            (* open/read 실패. EACCES·EISDIR·EIO 가 각각 남는다 *)
+  | Unreadable of Unix.error            (* 경로 검사·open/read 오류. 기존 EACCES·EISDIR·EIO 도 보존 *)
+  | Nonregular of nonregular_kind       (* primary 에서 관측한 일반 파일이 아닌 종류 *)
   | Not_json of string                  (* 바이트가 JSON 이 아니다 *)
   | Schema_rejected of { field : string; detail : string }   (* JSON 이지만 이 build 의 디코더가 거절 *)
 
 and mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
+  | Mirror_nonregular of nonregular_kind
   | Mirror_decodes of { goal_count : int; updated_at : string }  (* primary 와 어긋난 증거 *)
   | Mirror_rejected of reason
 
@@ -73,6 +79,7 @@ and reset_step =
   | Repair_field of string              (* Schema_rejected: 어느 필드를 채우면 다시 읽히는지 *)
   | Reset_goal_store                    (* masc goals reset --base-path <p> 를 부른다 *)
   | Restore_permission                  (* Unreadable EACCES *)
+  | Inspect_path                        (* 경로·링크·마운트와 서버 상태 확인 *)
 
 val load_source : Workspace.config -> source
 type lookup = Goal_found of goal | Goal_absent | Store_unavailable of unavailable
@@ -81,7 +88,9 @@ val find_goal : Workspace.config -> goal_id:string -> lookup
 
 Codex 가 요구한 여섯 조건은 이렇게 갈린다. 미초기화 = `Uninitialized`(두 파일 다 없음). 초기화 뒤 사라짐 = `Missing_after_init`. 스키마 불일치 = `Schema_rejected`(필드 이름 포함). 깨진 바이트 = `Not_json`. 권한 = `Unreadable EACCES`. primary·mirror 불일치 = `Unavailable` 안의 `Mirror_decodes`. 지금 `load_state` 가 하는 "primary 가 깨지면 mirror 로 읽는다" 는 없어진다. mirror 는 `authoritative_read_only` 대로 읽기도 쓰기도 허가하지 않는다.
 
-`load_source` 는 파일을 열고 읽기만 한다. rename·write·삭제를 하지 않고 로그도 찍지 않는다. 로그는 §2.3 의 두 곳만 찍는다.
+`load_source` 는 경로를 검사하고 일반 파일만 읽는다. 정상 symlink가 가리키는 일반 파일은
+읽는다. 일반 파일이 아닌 종류는 Unix errno와 별도로 기록하고 경로 확인을 안내한다.
+rename·write·삭제를 하지 않고 로그도 찍지 않는다. 로그는 §2.3 의 두 곳만 찍는다.
 
 ### 2.2 쓰기
 

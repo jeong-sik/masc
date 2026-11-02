@@ -183,17 +183,20 @@ type planning_snapshot = {
     [{ok:false, error_code:"goal_store_unavailable", reason, field, file,
     mirror:{status, goal_count}, reset_step}] as the TUI reads it. [reason]
     and [mirror] are views: the wire carries the constructor name, the refused
-    member and the mirror's row count, not the Unix error, parse detail or
-    mirror stamp the store keeps beside them. The reset step travels whole. *)
+    member and the mirror's row count, not the Unix error, observed file
+    kind, parse detail or mirror stamp the store keeps beside them. The reset
+    step travels whole. *)
 type goal_store_unavailable_reason_view =
   | Missing_after_init_view
   | Unreadable_view
+  | Nonregular_view
   | Not_json_view
   | Schema_rejected_view of string  (** The refused member (wire [field]). *)
 
 type goal_store_mirror_view =
   | Mirror_absent_view
   | Mirror_unreadable_view
+  | Mirror_nonregular_view
   | Mirror_decodes_view of int  (** The mirror's goal count. *)
   | Mirror_rejected_view
 

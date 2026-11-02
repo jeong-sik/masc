@@ -7,6 +7,7 @@
 export const GOAL_STORE_UNAVAILABLE_REASONS = [
   'missing_after_init',
   'unreadable',
+  'nonregular',
   'not_json',
   'schema_rejected',
 ] as const
@@ -15,6 +16,7 @@ export type GoalStoreUnavailableReason = (typeof GOAL_STORE_UNAVAILABLE_REASONS)
 export const GOAL_STORE_MIRROR_STATUSES = [
   'mirror_absent',
   'mirror_unreadable',
+  'mirror_nonregular',
   'mirror_decodes',
   'mirror_rejected',
 ] as const
@@ -30,7 +32,7 @@ export type GoalStoreResetStep = (typeof GOAL_STORE_RESET_STEPS)[number]
 
 export interface GoalStoreMirror {
   status: GoalStoreMirrorStatus
-  /** Row count of a mirror that decodes; null for the other three statuses. */
+  /** Row count of a mirror that decodes; null for the other statuses. */
   goalCount: number | null
 }
 

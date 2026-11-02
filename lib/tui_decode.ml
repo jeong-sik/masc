@@ -393,12 +393,14 @@ type planning_snapshot = {
 type goal_store_unavailable_reason_view =
   | Missing_after_init_view
   | Unreadable_view
+  | Nonregular_view
   | Not_json_view
   | Schema_rejected_view of string
 
 type goal_store_mirror_view =
   | Mirror_absent_view
   | Mirror_unreadable_view
+  | Mirror_nonregular_view
   | Mirror_decodes_view of int
   | Mirror_rejected_view
 
@@ -2739,10 +2741,11 @@ let goal_store_unavailable_reason_view_of_wire ~field token =
   match token, field with
   | "missing_after_init", None -> Ok Missing_after_init_view
   | "unreadable", None -> Ok Unreadable_view
+  | "nonregular", None -> Ok Nonregular_view
   | "not_json", None -> Ok Not_json_view
   | "schema_rejected", Some refused -> Ok (Schema_rejected_view refused)
   | "schema_rejected", None -> Error "goal store envelope reason schema_rejected names no field"
-  | ("missing_after_init" | "unreadable" | "not_json"), Some refused ->
+  | ("missing_after_init" | "unreadable" | "nonregular" | "not_json"), Some refused ->
       Error
         (Printf.sprintf "goal store envelope reason %s carries field %S" token refused)
   | other, _ -> Error (Printf.sprintf "unknown goal store envelope reason %S" other)
@@ -2751,10 +2754,11 @@ let goal_store_mirror_view_of_wire ~goal_count token =
   match token, goal_count with
   | "mirror_absent", None -> Ok Mirror_absent_view
   | "mirror_unreadable", None -> Ok Mirror_unreadable_view
+  | "mirror_nonregular", None -> Ok Mirror_nonregular_view
   | "mirror_decodes", Some count -> Ok (Mirror_decodes_view count)
   | "mirror_rejected", None -> Ok Mirror_rejected_view
   | "mirror_decodes", None -> Error "goal store envelope mirror_decodes carries no goal_count"
-  | ("mirror_absent" | "mirror_unreadable" | "mirror_rejected"), Some count ->
+  | ("mirror_absent" | "mirror_unreadable" | "mirror_nonregular" | "mirror_rejected"), Some count ->
       Error
         (Printf.sprintf "goal store envelope mirror %s carries goal_count %d" token count)
   | other, _ -> Error (Printf.sprintf "unknown goal store envelope mirror status %S" other)
@@ -2808,12 +2812,14 @@ let decode_goal_source_failure json =
 let goal_store_unavailable_reason_view_to_string = function
   | Missing_after_init_view -> "missing_after_init"
   | Unreadable_view -> "unreadable"
+  | Nonregular_view -> "nonregular"
   | Not_json_view -> "not_json"
   | Schema_rejected_view refused -> Printf.sprintf "schema_rejected location=%S" refused
 
 let goal_store_mirror_view_to_string = function
   | Mirror_absent_view -> "absent"
   | Mirror_unreadable_view -> "unreadable"
+  | Mirror_nonregular_view -> "nonregular"
   | Mirror_decodes_view goal_count -> Printf.sprintf "decodes goal_count=%d" goal_count
   | Mirror_rejected_view -> "rejected"
 

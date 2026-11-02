@@ -36,6 +36,8 @@ export function goalStoreReasonLabel(reason: GoalStoreUnavailableReason, field: 
       return 'goals.json을 찾지 못했습니다. 마지막 저장본의 상태를 확인하세요'
     case 'unreadable':
       return '파일을 열거나 읽을 수 없습니다'
+    case 'nonregular':
+      return 'Goal 경로가 일반 파일이 아닙니다'
     case 'not_json':
       return '파일 내용이 JSON 이 아닙니다'
     case 'schema_rejected':
@@ -55,6 +57,8 @@ export function goalStoreMirrorLabel(mirror: GoalStoreMirror): string {
       return '.last-good 미러 없음'
     case 'mirror_unreadable':
       return '.last-good 미러를 읽을 수 없음'
+    case 'mirror_nonregular':
+      return '.last-good 미러가 일반 파일이 아님'
     case 'mirror_decodes':
       return mirror.goalCount === null
         ? '.last-good 미러는 읽힘 (서빙하지 않음)'

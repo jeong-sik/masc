@@ -246,10 +246,17 @@ let test_skipped_scan_replays_path_inspection () =
     { file = "/work/.masc/goals.json"; reason = Goal_store.Unreadable Unix.ENOENT;
       mirror = Goal_store.Mirror_absent; reset_step = Goal_store.Inspect_path } in
   R.record_scan_skipped registry ~run_id:"scan-path" ~started_at:31.0 ~unavailable;
-  match R.get (R.replay path) ~run_id:"scan-path" with
-  | Some (R.Scan_skipped { unavailable = replayed; _ }) ->
-      check bool "path inspection survives scan replay" true (replayed = unavailable)
-  | Some (R.Review _) | None -> fail "path-inspection scan did not replay"
+  let nonregular = { unavailable with reason = Goal_store.Nonregular Goal_store.Nonregular_fifo;
+    mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_directory } in
+  R.record_scan_skipped registry ~run_id:"scan-nonregular" ~started_at:32.0 ~unavailable:nonregular;
+  let replayed = R.replay path in
+  let expect run_id expected = match R.get replayed ~run_id with
+    | Some (R.Scan_skipped { unavailable = actual; _ }) ->
+        check bool "typed unavailable survives scan replay" true (actual = expected)
+    | Some (R.Review _) | None -> fail "skipped scan did not replay"
+  in
+  expect "scan-path" unavailable;
+  expect "scan-nonregular" nonregular
 ;;
 
 let test_skipped_scans_do_not_evict_retained_reviews () =

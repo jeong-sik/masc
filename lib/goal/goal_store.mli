@@ -13,7 +13,7 @@
     and the only empty state is {!Uninitialized} (neither goals.json nor its
     mirror exists). The mirror is reported inside {!unavailable} as evidence
     of drift and is never served as the current state. {!load_source} only
-    opens and reads: it creates no directory, moves no file and logs nothing.
+    inspects and reads: it creates no directory, moves no file and logs nothing.
 
     Writing. Every read-modify-write holds the goals file lock, calls
     {!load_source} under it, and on {!Unavailable} returns a typed error
@@ -178,10 +178,21 @@ and unavailable = Goal_store_unavailable.t =
   ; reset_step : reset_step
   }
 
+and nonregular_kind = Goal_store_unavailable.nonregular_kind =
+  | Nonregular_directory
+  | Nonregular_character_device
+  | Nonregular_block_device
+  | Nonregular_symbolic_link
+  | Nonregular_fifo
+  | Nonregular_socket
+
 and reason = Goal_store_unavailable.reason =
   | Missing_after_init  (** goals.json is absent and the mirror is not confirmed absent. *)
   | Unreadable of Unix.error
-      (** open/read failed; EACCES, EISDIR and EIO each survive. *)
+      (** An inspection, open or read error. Following [ENOENT], an observed
+          non-directory ancestor can also be reported as [ENOTDIR]. *)
+  | Nonregular of nonregular_kind
+      (** The primary path or opened descriptor had this nonregular kind. *)
   | Not_json of string  (** The bytes are not JSON. *)
   | Schema_rejected of { field : string; detail : string }
       (** JSON, but this build's decoder refused member [field]. [field] is
@@ -193,6 +204,9 @@ and reason = Goal_store_unavailable.reason =
 and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
+      (** The same error and ancestor-inspection meanings as {!Unreadable}. *)
+  | Mirror_nonregular of nonregular_kind
+      (** The mirror path or opened descriptor had this nonregular kind. *)
   | Mirror_decodes of { goal_count : int; updated_at : string }
       (** Evidence of how far the primary drifted from the last commit. *)
   | Mirror_rejected of reason
@@ -204,9 +218,13 @@ and reset_step = Goal_store_unavailable.reset_step =
   | Inspect_path  (** Inspect file paths, links and mounts before recovery. *)
 
 val load_source : Workspace_utils.config -> source
-(** Opens and reads goals.json, and the mirror only when the primary did not
-    decode. Creates no directory, moves no file, writes nothing, logs
-    nothing. Two calls on the same bytes return the same value. *)
+(** Inspects and reads goals.json, and the mirror only when the primary did
+    not decode. Regular files reached through symlinks remain readable;
+    observed nonregular files are unavailable. Creates no directory, moves
+    no file, writes nothing, logs nothing. Path inspection and open are not
+    atomic against an unrelated process replacing the path: opening a FIFO
+    that replaced a regular path can wake a writer, and a replacement device
+    can run its open operation. *)
 
 type lookup =
   | Goal_found of goal

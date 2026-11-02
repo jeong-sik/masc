@@ -587,6 +587,51 @@ class ReportCliTest(unittest.TestCase):
                         result.returncode, 0 if accepted else 1, result.stderr
                     )
 
+    def test_historical_nonregular_goal_source_uses_exact_closed_kinds(self) -> None:
+        cases = [
+            ({"file_kind": kind}, True)
+            for kind in ("directory", "character_device", "block_device", "symbolic_link", "fifo", "socket")
+        ] + [
+            ({"file_kind": "unknown"}, False),
+            ({}, False),
+            ({"file_kind": "fifo", "extra": 1}, False),
+            ({"file_kind": None}, False),
+        ]
+        for fields, accepted in cases:
+            for location in ("reason", "mirror"):
+                with self.subTest(fields=fields, location=location):
+                    source = {
+                        "file": "goals.json",
+                        "reason": {"kind": "missing_after_init"},
+                        "mirror": {"kind": "mirror_absent"},
+                        "reset_step": {"kind": "inspect_path"},
+                    }
+                    source[location] = {
+                        "kind": "nonregular" if location == "reason" else "mirror_nonregular",
+                        **fields,
+                    }
+                    history = [{
+                        "source": {"kind": "boundary_only"},
+                        "attribution": {
+                            "kind": "observed", "turn_ref": "fixture-trace#1",
+                            "task_context": {
+                                "kind": "task", "task_id": "task-1",
+                                "goals": {"kind": "unavailable", "error": {
+                                    "kind": "goal_source_unavailable", "error": source,
+                                }},
+                            },
+                        },
+                        "first_message": 0, "after_message": 1,
+                        "first_tool_observation": 0, "after_tool_observation": 0,
+                    }]
+                    manifest = fixture()
+                    for arm in ("baseline", "preflight"):
+                        actual = manifest["pairs"][0][arm]["run"]["input"]["payload"]["actual_input"]
+                        actual["historical_task_contexts"] = history
+                        actual["rendered_prompt_variables"]["historical_task_contexts"] = json.dumps(history)
+                    result = self.execute(manifest)
+                    self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+
     def test_rendered_prompt_matches_producer_substitution(self) -> None:
         cases = (
             ("{{conversation_history}}", {}, "frozen source"),

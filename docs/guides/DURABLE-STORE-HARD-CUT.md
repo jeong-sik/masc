@@ -188,6 +188,24 @@ reconciliation; an older Keeper can fail to read the affected generation
 floor, and Librarian consumption may stop. Older Dashboard and TUI clients
 also reject the new response token. Update those clients with the server.
 
+Observed nonregular Goal paths add distinct `nonregular` and
+`mirror_nonregular` values. Their durable records preserve the observed file
+kind; existing `unreadable` Unix errors, including `eisdir` and `eopnotsupp`,
+stay Unix errors and must not be reinterpreted as a file kind. A target build
+without the new variants rejects records containing them. Dashboard and TUI
+readers without the new response tokens reject the corresponding envelope.
+
+The task context recorded in a turn boundary can also be frozen into
+Librarian original inputs and their related parent and gate work. Before a
+rollback, verify the target readers against the complete affected bundle,
+including the original, parent, gate, source and pending or completed ACK
+evidence described above. Reconcile unresolved work and verify backups before
+setting aside any reviewed scope. Do not remove a boundary or manufacture an
+ACK merely to make an older reader accept the remaining files. The
+`scripts/librarian/compare-preflight.py` analysis reader also validates frozen
+historical task contexts; its successful comparison is not an installation
+preflight or evidence that a target runtime can resume the bundle.
+
 The older `validate-stores` checks turn boundaries, not the Goal verification
 registry. With all writers stopped, identify the registry paths read by the
 rollback build's helper; file names can differ between builds. Before running

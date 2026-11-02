@@ -15,10 +15,23 @@ type t =
   ; reset_step : reset_step
   }
 
+and nonregular_kind =
+  | Nonregular_directory
+  | Nonregular_character_device
+  | Nonregular_block_device
+  | Nonregular_symbolic_link
+  | Nonregular_fifo
+  | Nonregular_socket
+(** A nonregular kind observed by the Goal reader. No open or read error is
+    inferred from this observation. *)
+
 and reason =
   | Missing_after_init  (** goals.json is absent and the mirror is not confirmed absent. *)
   | Unreadable of Unix.error
-      (** open/read failed; EACCES, EISDIR and EIO each survive. *)
+      (** An inspection, open or read error. Following [ENOENT], an observed
+          non-directory ancestor can also be reported as [ENOTDIR]. *)
+  | Nonregular of nonregular_kind
+      (** The primary path or opened descriptor had this nonregular kind. *)
   | Not_json of string  (** The bytes are not JSON. *)
   | Schema_rejected of { field : string; detail : string }
       (** JSON, but this build's decoder refused [field] or a member at this location. *)
@@ -26,6 +39,9 @@ and reason =
 and mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
+      (** The same error and ancestor-inspection meanings as {!Unreadable}. *)
+  | Mirror_nonregular of nonregular_kind
+      (** The mirror path or opened descriptor had this nonregular kind. *)
   | Mirror_decodes of { goal_count : int; updated_at : string }
       (** Evidence of how far the primary drifted from the last commit. *)
   | Mirror_rejected of reason
@@ -61,8 +77,8 @@ val to_string : t -> string
 (** {1 Durable codec}
 
     Lossless, for the store that keeps a skipped verifier scan (RFC-0444
-    PR-5). Every [Unix.error], detail string and the mirror's inner reason
-    round-trips; the wire envelope ({!Goal_unavailable_envelope} in
+    PR-5). Every [Unix.error], observed nonregular kind, detail string and
+    the mirror's inner reason round-trips; the wire envelope ({!Goal_unavailable_envelope} in
     masc_goal) is the lossy projection for tool results and HTTP bodies. The
     [kind] member of each nested object carries the wire name
     ({!reason_name} and siblings); a member this build does not know, or a

@@ -1902,6 +1902,10 @@ let test_goal_store_unavailable_parses_every_wire_token () =
     (Goal_store_unavailable.Mirror_unreadable Unix.EACCES)
     Goal_store_unavailable.Restore_permission Tui_decode.Unreadable_view
     Tui_decode.Mirror_unreadable_view;
+  plain (Goal_store_unavailable.Nonregular Goal_store_unavailable.Nonregular_fifo)
+    (Goal_store_unavailable.Mirror_nonregular Goal_store_unavailable.Nonregular_directory)
+    Goal_store_unavailable.Inspect_path Tui_decode.Nonregular_view
+    Tui_decode.Mirror_nonregular_view;
   plain (Goal_store_unavailable.Unreadable Unix.ENOENT)
     Goal_store_unavailable.Mirror_absent Goal_store_unavailable.Inspect_path
     Tui_decode.Unreadable_view Tui_decode.Mirror_absent_view;

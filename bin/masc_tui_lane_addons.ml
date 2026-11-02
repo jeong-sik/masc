@@ -1861,9 +1861,12 @@ let host_request_lines item = match item.host_requests with
   | None | Some (Ok { hr_cycles = 0; hr_waiting = []; hr_issue = None }) -> []
   | Some (Error detail) -> [""; "Host requests: unreadable · " ^ detail]
   | Some (Ok { hr_cycles; hr_waiting; hr_issue }) ->
-      [""; Printf.sprintf "Host requests · last cycle, %d %s" hr_cycles (if hr_cycles = 1 then "pass" else "passes")]
-      @ (if hr_waiting = [] then ["  nothing waiting"]
-         else List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) hr_waiting)
+      [""; Printf.sprintf "Host requests · last cycle (%d total)" hr_cycles]
+      @ (match hr_waiting, hr_issue with
+         | [], Some _ -> ["  waiting status incomplete"]
+         | [], None -> ["  nothing reported waiting"]
+         | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) waiting)
+      @ (if hr_waiting <> [] && Option.is_some hr_issue then ["  waiting status incomplete"] else [])
       @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue
 
 let connection_workers (snapshot : snapshot) (item : instance) =

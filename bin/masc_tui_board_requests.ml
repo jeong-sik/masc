@@ -67,7 +67,7 @@ let start_board_post state ~host ~results ~admit ~report
        state.board_compose_armed <- false;
        state.board_post_error <-
          Some "Board publication did not start: Board publication did not start"
-     | Board_posting _ | Board_idle | Board_commenting -> ())
+     | Board_posting _ | Board_idle | Board_commenting _ -> ())
   in
   Masc_tui_workspace_result.launch state ~results ~boundary_error
     ~on_not_run:settle_not_run
@@ -113,7 +113,7 @@ let start_board_post state ~host ~results ~admit ~report
   end
 
 
-let start_board_comment state ~host ~launch ~report ~(post_id : string)
+let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : string)
     ~(content : string) =
   if state.workspace_identity <> Workspace_identity_match then begin
     let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
@@ -121,13 +121,13 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
     report "error" detail
   end else begin
   state.board_post_error <- None;
-  state.board_write <- Board_commenting;
+  state.board_write <- Board_commenting request_id;
   report "system" "commenting on Board";
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_comment_done { post_id; sent_draft; result })
+    ~deliver:(fun result -> Board_comment_done { request_id; post_id; sent_draft; result })
     (fun () ->
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with

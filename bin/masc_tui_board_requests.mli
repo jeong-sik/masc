@@ -24,7 +24,8 @@ val start_board_post :
     before propagation. *)
 
 val start_board_comment :
-  Masc_tui_types.state -> host:string -> launch:string launch ->
+  Masc_tui_types.state -> host:string ->
+  request_id:Masc_tui_types.board_comment_request_id -> launch:string launch ->
   report:(string -> string -> unit) -> post_id:string -> content:string -> unit
 
 val start_board_vote :

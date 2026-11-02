@@ -1507,6 +1507,44 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertTrue(spec['tools'])
         self.assertEqual(spec['reasoning_effort'], 'high')
 
+    def test_saved_file_credential_survives_catalog_selection(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        source.update(api_key_env='', credential_kind='file',
+                      credential_file='/private/owned-api-key')
+        catalog = dict(id='vendor/selected-model', max_context=8192,
+                       supports_tools=True, supports_streaming=True)
+        _, selected = SETUP.resolve_model_spec(source, dict(id=catalog['id'], catalog=catalog), 1)
+        self.assertNotIn('api_key_env', selected)
+        _, runtime = SETUP.render(selected)
+        credential = tomllib.loads(runtime.decode())['providers']['openrouter']['credentials']
+        self.assertEqual(credential, dict(type='file', path='/private/owned-api-key'))
+
+    def test_catalog_selection_does_not_hide_invalid_file_references(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = dict(id='vendor/selected-model', max_context=8192,
+                       supports_tools=True, supports_streaming=True)
+        for invalid in ['', False, 0]:
+            with self.subTest(credential_file=invalid):
+                source['credential_file'] = invalid
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.resolve_model_spec(
+                        source, dict(id=catalog['id'], catalog=catalog), 1)
+
+    def test_named_render_validates_each_credential_reference(self):
+        base = named_spec('vendor/selected-model')
+        file_spec = dict(base, api_key_env='', credential_file='/private/owned-api-key')
+        _, runtime = SETUP.render(file_spec)
+        credential = tomllib.loads(runtime.decode())['providers']['openrouter']['credentials']
+        self.assertEqual(credential, dict(type='file', path='/private/owned-api-key'))
+        for invalid in [None, False, 0, ' ']:
+            with self.subTest(api_key_env=invalid), self.assertRaises(SETUP.SetupError):
+                SETUP.render(dict(file_spec, api_key_env=invalid))
+        for invalid in [None, False, '', 'relative/key']:
+            with self.subTest(credential_file=invalid), self.assertRaises(SETUP.SetupError):
+                SETUP.render(dict(file_spec, credential_file=invalid))
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.render(dict(base, credential_file='/private/owned-api-key'))
+
     def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
         source = self.catalog_sources(self.INVENTORY)[0]
         catalog_rows = [

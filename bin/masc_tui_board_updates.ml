@@ -108,17 +108,25 @@ let apply_publication state ~report ~refresh outcome =
       let request = Publication.outcome_request outcome in
       let current = match state.board_write with
         | Board_posting current -> Publication.same_request current request
-        | Board_idle | Board_commenting -> false in
+        | Board_idle | Board_commenting _ -> false in
       if current && workspace_reply_admitted state ~authority:request.authority
           ~reading:None ~kind:Workspace_operation_outcome then
         apply_current_publication state ~report ~refresh outcome request
 
-let comment_done state ~post_id ~sent_draft ~report ~refresh ~refresh_detail result =
+let comment_launch_failed state ~request_id =
   match state.board_write with
-  | Board_idle | Board_posting _ -> ()
-  | Board_commenting ->
+  | Board_commenting current when current == request_id ->
     state.board_write <- Board_idle;
-    match result with
+    state.board_compose_armed <- false;
+    state.board_post_error <-
+      Some "Board comment not confirmed; check the thread before retrying"
+  | Board_idle | Board_posting _ | Board_commenting _ -> ()
+
+let comment_done state ~request_id ~post_id ~sent_draft ~report ~refresh ~refresh_detail result =
+  match state.board_write with
+  | Board_commenting current when current == request_id ->
+    state.board_write <- Board_idle;
+    (match result with
     | Ok message ->
         if String.equal (Buffer.contents state.board_draft) sent_draft then begin
           Buffer.clear state.board_draft;
@@ -134,7 +142,8 @@ let comment_done state ~post_id ~sent_draft ~report ~refresh ~refresh_detail res
         refresh_detail post_id
     | Error err ->
         state.board_compose_armed <- false;
-        state.board_post_error <- Some err
+        state.board_post_error <- Some err)
+  | Board_idle | Board_posting _ | Board_commenting _ -> ()
 
 let vote_done state ~report ~refresh ~refresh_detail target result =
   match result with

@@ -376,7 +376,7 @@ let test_old_outcome_archives_without_settling_successor () = with_fixture
     check bool "the old receipt cannot release the exact successor request" true
       (match state.board_write with
        | Types.Board_posting held -> Publication.same_request held successor
-       | Types.Board_idle | Types.Board_commenting -> false);
+       | Types.Board_idle | Types.Board_commenting _ -> false);
     check string "the successor draft remains" "original draft" (Buffer.contents state.board_draft);
     check int "old-request delivery emits no current report" 0 !reports;
     check int "old-request delivery initiates no current refresh" 0 !refreshes;
@@ -424,7 +424,7 @@ let test_workspace_return_cannot_revive_original_request_authority () = with_fix
     check bool "old authority cannot settle even the same old request slot" true
       (match state.board_write with
        | Types.Board_posting held -> Publication.same_request held original
-       | Types.Board_idle | Types.Board_commenting -> false);
+       | Types.Board_idle | Types.Board_commenting _ -> false);
     check int "the old workspace result grants no refresh authority" 0 !refreshes;
     (match Publication.entries state.board_publications with
      | [Publication.Finished archived] ->
@@ -451,6 +451,67 @@ let test_closed_results_settle_board_post_without_hanging_inflight () = with_fix
      | [Publication.Finished (Publication.Not_attempted _)] -> ()
      | _ -> fail "expected unstarted publication to be recorded as Not_attempted"))
 
+let test_old_comment_result_cannot_settle_same_draft_retry () =
+  let state = Types.create_state ~workspace:"comment-owner" ~port:8935
+      ~refresh_interval:0. () in
+  state.workspace_identity <- Types.Workspace_identity_match;
+  Buffer.add_string state.board_draft "same draft";
+  let original = ref () and successor = ref () in
+  let completions = ref [] in
+  let start request_id result =
+    Requests.start_board_comment state ~host:"127.0.0.1" ~request_id
+      ~launch:(fun ~deliver _perform -> completions := deliver result :: !completions)
+      ~report:(fun _ _ -> ()) ~post_id:"same-post" ~content:"same draft"
+  in
+  start original (Error "first request did not start");
+  (* The first launch failure releases its slot before its queued result is
+     consumed; a retry with exactly the same input can then own the slot. *)
+  Updates.comment_launch_failed state ~request_id:original;
+  check bool "the first launch failure releases its request" true
+    (state.board_write = Types.Board_idle);
+  start successor (Ok "saved");
+  state.board_post_error <- Some "successor message";
+  state.board_compose_armed <- true;
+  Updates.comment_launch_failed state ~request_id:original;
+  check (option string) "old launch failure preserves successor message"
+    (Some "successor message") state.board_post_error;
+  check bool "old launch failure preserves successor arm" true state.board_compose_armed;
+  let refreshes = ref 0 and reports = ref 0 in
+  let apply = function
+    | Masc_tui_async_protocol.Board_comment_done { request_id; post_id; sent_draft; result } ->
+      Updates.comment_done state ~request_id ~post_id ~sent_draft
+        ~report:(fun _ _ -> incr reports) ~refresh:(fun () -> incr refreshes)
+        ~refresh_detail:(fun _ -> incr refreshes) result
+    | _ -> fail "expected a comment completion"
+  in
+  (match List.rev !completions with
+   | [old_result; current_result] ->
+     apply old_result;
+     (match old_result with
+      | Masc_tui_async_protocol.Board_comment_done { request_id; post_id; sent_draft; _ } ->
+        apply (Masc_tui_async_protocol.Board_comment_done
+          { request_id; post_id; sent_draft; result = Ok "late success" })
+      | _ -> fail "expected the old comment result");
+     check (option string) "old results preserve successor message"
+       (Some "successor message") state.board_post_error;
+     check bool "old results preserve successor arm" true state.board_compose_armed;
+     check bool "the old result cannot release the successor" true
+       (match state.board_write with
+        | Types.Board_commenting held -> held == successor
+        | Types.Board_idle | Types.Board_posting _ -> false);
+     check string "the retry draft survives the old result" "same draft"
+       (Buffer.contents state.board_draft);
+     check int "the old result causes no refresh" 0 !refreshes;
+     check int "the old result emits no report" 0 !reports;
+     apply current_result;
+     check bool "the current result releases its own request" true
+       (state.board_write = Types.Board_idle);
+     check string "the acknowledged retry clears its unchanged draft" ""
+       (Buffer.contents state.board_draft);
+     check int "the current result refreshes the list and detail" 2 !refreshes;
+     check int "the current result is reported" 1 !reports
+   | _ -> fail "expected both original and retry completions")
+
 let () = run "TUI Board request outcomes" ["actual request and registered routes", [
   test_case "committed HTTP400 preserves payload and late input" `Quick
     test_real_committed_error_keeps_payload_and_late_input;
@@ -465,5 +526,7 @@ let () = run "TUI Board request outcomes" ["actual request and registered routes
   test_case "returning to workspace A cannot revive old request authority" `Quick
     test_workspace_return_cannot_revive_original_request_authority;
   test_case "closed results settle board post without hanging in flight" `Quick
-    test_closed_results_settle_board_post_without_hanging_inflight
+    test_closed_results_settle_board_post_without_hanging_inflight;
+  test_case "an old comment result cannot settle a same-draft retry" `Quick
+    test_old_comment_result_cannot_settle_same_draft_retry
 ]]

@@ -1943,7 +1943,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_gate_actor
             h2_reqd
             (fun state _actor ->
-             with_artifact_read_workspace state (fun workspace_headers ->
+             with_h2_workspace_read state (fun workspace_headers ->
                let prefix = "/api/v1/artifact-bytes/" in
                let sha256 = String.sub path (String.length prefix)
                    (String.length path - String.length prefix) in

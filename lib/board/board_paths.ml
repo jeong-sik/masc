@@ -32,6 +32,9 @@ let file_path ~workspace_masc_dir file =
 
 let posts_file ~workspace_masc_dir = file_path ~workspace_masc_dir Posts
 
+let posts_initialization_guard_file ~workspace_masc_dir =
+  Filename.concat workspace_masc_dir "board_posts.initialized.jsonl"
+
 let store_file_path (store : Board_types.store) file =
   file_path ~workspace_masc_dir:store.workspace_masc_dir file
 

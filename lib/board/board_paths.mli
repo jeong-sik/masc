@@ -21,6 +21,9 @@ val posts_file : workspace_masc_dir:string -> string
     pass takes this to read every workspace's posts
     ([Tool_blob_maintenance.run ~board_posts_file]); that library sits below
     Board and does not repeat the name. *)
+val posts_initialization_guard_file : workspace_masc_dir:string -> string
+(** Separate posts initialization marker; not a persisted payload family.
+    This only derives a path and creates nothing. *)
 val store_file_path : Board_types.store -> persisted_file -> string
 (** Every read and write uses the store's captured workspace. *)
 val persist_path : Board_types.store -> string

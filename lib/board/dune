@@ -4,12 +4,16 @@
  (name masc_board_handlers)
  (public_name masc.board_handlers)
  (wrapped true)
- (private_modules board_content_json board_content_diagnostics board_posts_rows board_posts_inspection board_vote_transition board_snapshot_batch board_sub_boards board_posts_source)
+ (private_modules board_content_json board_content_diagnostics board_posts_rows board_posts_inspection board_posts_guard_json board_initialization_inspect board_initialization_protocol board_vote_transition board_snapshot_batch board_sub_boards board_posts_source)
  (modules
   board
   board_audience
   board_content_json
   board_content_diagnostics
+  board_initialization
+  board_initialization_inspect
+  board_initialization_protocol
+  board_posts_guard_json
   board_posts_rows
   board_posts_inspection
   board_core
@@ -44,6 +48,8 @@
   re.str
   re.pcre
   eio
+  eio.unix
+  masc.agent_core.digest
   time_compat
   fs_compat
   masc_random_id

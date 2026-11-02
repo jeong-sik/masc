@@ -63,8 +63,15 @@ val keeper_config_cache_key : Workspace.config -> string -> string
 (** Cache key for [/api/v1/keepers/<name>/config]. Used by both read and
     invalidation paths. *)
 
-val keeper_composite_cache_key : Workspace.config -> string -> string
+val keeper_composite_cache_key : base_path:string -> string -> string
 (** Cache key for [/api/v1/keepers/<name>/composite]. *)
+
+val fleet_composite_cache_key : base_path:string -> string
+(** Cache key for the fleet composite envelope of one workspace. *)
+
+val invalidate_keeper_composite_caches : base_path:string -> name:string -> unit
+(** Drop the Keeper's composite and its workspace's fleet composite, so the
+    next read computes both from the registry. *)
 
 val keeper_runtime_trace_cache_key :
   Workspace.config ->

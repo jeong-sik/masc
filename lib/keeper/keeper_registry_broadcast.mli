@@ -2,6 +2,13 @@
 
     Pure side-effect wrappers — no registry state read or written. *)
 
+(** Install the function {!composite_changed} calls before it broadcasts.
+    The server installs one that drops the Keeper's cached composite read
+    models, so a reader that fetches on the event computes them again. An
+    exception from it is logged and the event is still sent;
+    {!Eio.Cancel.Cancelled} propagates. *)
+val install_before_composite_changed : (base_path:string -> name:string -> unit) -> unit
+
 (** Broadcast a signal-only [keeper_composite_changed] SSE event to observers
     and presence sessions belonging to [base_path]. External subscribers must
     carry the same runtime authority to receive the observer event.

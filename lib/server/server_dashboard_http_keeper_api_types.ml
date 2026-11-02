@@ -57,11 +57,20 @@ let keeper_config_cache_key (config : Workspace.config) name =
     (cache_key_string_segment name)
 ;;
 
-let keeper_composite_cache_key (config : Workspace.config) name =
+let keeper_composite_cache_key ~base_path name =
   Printf.sprintf
     "keeper:composite:%s:%s"
-    (cache_key_string_segment (Workspace.masc_dir config))
+    (cache_key_string_segment (Common.masc_dir_from_base_path ~base_path))
     (cache_key_string_segment name)
+;;
+
+let fleet_composite_cache_key ~base_path =
+  Printf.sprintf "dashboard:fleet-composite:%s" base_path
+;;
+
+let invalidate_keeper_composite_caches ~base_path ~name =
+  Dashboard_cache.invalidate (keeper_composite_cache_key ~base_path name);
+  Dashboard_cache.invalidate (fleet_composite_cache_key ~base_path)
 ;;
 
 let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id

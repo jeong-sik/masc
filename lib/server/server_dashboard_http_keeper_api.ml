@@ -830,7 +830,7 @@ let keeper_composite_status_of_string_opt = function
 ;;
 
 let cached_keeper_composite_json config name =
-  let cache_key = keeper_composite_cache_key config name in
+  let cache_key = keeper_composite_cache_key ~base_path:config.Workspace.base_path name in
   let cached =
     Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s @@ Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       let status, body =

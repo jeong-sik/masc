@@ -3075,6 +3075,7 @@
 
 (include stanzas/test_keeper_execution_join.inc)
 (include stanzas/test_full_health_wakeup.inc)
+(include stanzas/test_pending_confirm_expiry.inc)
 
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 

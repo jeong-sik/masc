@@ -71,10 +71,12 @@ let canonical_row base =
   let seed = Filename.concat base "producer" in
   in_eio (fun () ->
     Fs_compat.mkdir_p seed;
+    let module Preparation = Masc_test_deps.Board_test_preparation in
+    Preparation.prepare ~base_path:seed ~action:Preparation.Bootstrap;
     let store = Board.create_store ~base_path:seed () in
     (match Rows.load_persisted_posts store with
      | Ok 0 -> ()
-     | Ok _ | Error _ -> Alcotest.fail "fresh producer source did not load Missing");
+     | Ok _ | Error _ -> Alcotest.fail "initialized producer did not load an empty source");
     match create store "actual preflight source" with
     | Ok post -> Board.post_to_yojson post
     | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure))

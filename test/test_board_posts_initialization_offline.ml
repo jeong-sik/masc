@@ -76,9 +76,11 @@ let producer_wire root =
     Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
       let producer_base = Filename.concat root "producer" in
       Fs_compat.mkdir_p producer_base;
+      let module Preparation = Masc_test_deps.Board_test_preparation in
+      Preparation.prepare ~base_path:producer_base ~action:Preparation.Bootstrap;
       let store = Masc.Board.create_store ~base_path:producer_base () in
       (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
-       | Ok 0 -> () | Ok _ | Error _ -> fail "actual producer did not load Missing");
+       | Ok 0 -> () | Ok _ | Error _ -> fail "initialized producer did not load an empty source");
       match Masc.Board.create_post store ~lookup:Masc_board_handlers.Recipient_lookup.none_declared
           ~author:"offline-producer" ~content:"retained raw source" ~post_kind:Masc.Board.Human_post
           ~ttl_hours:0 () with

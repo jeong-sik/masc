@@ -14749,6 +14749,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.preset_busy <- false;
   state.preset_save_copy_cursor <- 0;
   Masc_tui_types.withdraw_fusion_workspace state;
+  Masc_tui_render_fusion.clear_fusion_trace_projection ();
   state.dos_live <- Masc_tui_machine_live.Unread;
   state.dos_activity <- [];
   state.msx_live_in_flight <- None;

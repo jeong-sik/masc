@@ -559,7 +559,7 @@ let fusion_tool_event_lines ~width = function
       ]
       @ fusion_tool_preview_lines ~width ~label:"Output" output
 
-let fusion_tool_trace_lines ~width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
+let fusion_tool_trace_uncached ~width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
       let coverage =
         if trace.ftt_complete
         then
@@ -601,6 +601,38 @@ let fusion_tool_trace_lines ~width (trace : Masc.Tui_decode_fusion.fusion_tool_t
                    (Ansi.dim, "") :: fusion_tool_event_lines ~width event)
       in
       (coverage :: observed) @ gaps @ events
+
+(* Scrolling and refreshes redraw the same immutable trace. Reuse its one
+   retained projection when its full contents and display inputs match. *)
+type fusion_trace_projection =
+  { trace : Masc.Tui_decode_fusion.fusion_tool_trace
+  ; width : int
+  ; palette_generation : int
+  ; table_frame : bool
+  ; lines : (string * string) list
+  }
+
+let fusion_trace_projection = ref None
+
+let clear_fusion_trace_projection () = fusion_trace_projection := None
+
+let fusion_tool_trace_lines ~width trace =
+  let palette_generation =
+    Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  match !fusion_trace_projection with
+  | Some cached
+    when cached.width = width
+         && cached.palette_generation = palette_generation
+         && cached.table_frame = !table_frame_enabled
+         && (cached.trace == trace || cached.trace = trace) ->
+      if cached.trace != trace then
+        fusion_trace_projection := Some { cached with trace };
+      cached.lines
+  | Some _ | None ->
+    let lines = fusion_tool_trace_uncached ~width trace in
+    fusion_trace_projection := Some
+      { trace; width; palette_generation; table_frame = !table_frame_enabled; lines };
+    lines
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
   let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
@@ -925,8 +957,10 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let evidence_lines =
     match detail.fud_evidence_status, detail.fud_evidence with
     | Fusion_evidence_pending, None ->
+        clear_fusion_trace_projection ();
         [ (Theme.warn ()), "  Evidence: pending (run is still running)" ]
     | Fusion_evidence_absent, None ->
+        clear_fusion_trace_projection ();
         [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
@@ -937,6 +971,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         (* The strict decoder makes these states unreachable. Keeping the row
            explicit protects locally-constructed test state from looking like
            a legitimate empty reading. *)
+        clear_fusion_trace_projection ();
         [ (Theme.bad ()), "  Fusion evidence invariant violated" ]
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
@@ -963,7 +998,9 @@ let fusion_historical_lines ~width (detail : fusion_historical_detail) =
   ; Ansi.dim, "" ]
   @ (match detail.fhd_evidence with
      | Ok evidence -> fusion_evidence_lines ~width evidence
-     | Error error -> [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
+     | Error error ->
+         clear_fusion_trace_projection ();
+         [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
   @ [ Ansi.dim, ""; Ansi.bold, "  BOARD ORIGINAL" ]
   @ fusion_markdown_block ~width ~indent:"    " detail.fhd_body
 
@@ -999,11 +1036,17 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
              (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
              @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4)) original
-         | Some _ | None -> [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
+         | Some _ | None ->
+             clear_fusion_trace_projection ();
+             [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
-         | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-         | None, Some _ -> [ Ansi.dim, page_failed_note ]
+         | None, None ->
+             clear_fusion_trace_projection ();
+             [ Ansi.dim, "  (loading exact Fusion detail)" ]
+         | None, Some _ ->
+             clear_fusion_trace_projection ();
+             [ Ansi.dim, page_failed_note ]
          | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4)) detail)
   in
   let total = List.length lines in

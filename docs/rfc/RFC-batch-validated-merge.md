@@ -3,7 +3,7 @@ rfc: "batch-validated-merge"
 title: "병합 한 건마다 CI 한 주기를 돌리지 않는다 — 결합 트리 한 번의 검증과 멤버별 불변 증거"
 status: Draft
 created: 2026-09-28
-updated: 2026-09-28 (r3 제안: 검증한 ROLL을 한 번에 착지)
+updated: 2026-11-02 (r3 제안: 검증한 ROLL을 한 번에 착지)
 author: e-masc-the-leader
 supersedes: []
 superseded_by: null

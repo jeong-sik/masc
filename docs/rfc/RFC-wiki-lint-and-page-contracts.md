@@ -3,7 +3,7 @@ rfc: "wiki-lint-and-page-contracts"
 title: "위키에 읽기 전용 점검(lint)을 더하고 페이지·log·출처의 호환 규칙을 정한다"
 status: Draft
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-11-02
 author: masc-productor-owner
 supersedes: []
 superseded_by: null
@@ -245,7 +245,7 @@ finding 은 `kind` 로 갈리는 객체다.
 
 ### 10.2 쓸모 측정
 
-질문 8개. 정답을 저장소나 헌법의 원문 한 줄로 먼저 고정하고, 답이 그것과 같은지 채점한다(옮김: polisher `c-669edae4bcc9486820b74c58dbf22518`). 도구 호출 수와 시간만 재면 빨리 틀린 답이 이긴 것으로 세어진다.
+제안된 질문 중 8개를 고른다. 정답을 저장소나 헌법의 원문 한 줄로 먼저 고정하고, 답이 그것과 같은지 채점한다(옮김: polisher `c-669edae4bcc9486820b74c58dbf22518`). 도구 호출 수와 시간만 재면 빨리 틀린 답이 이긴 것으로 세어진다.
 
 | # | 질문 | 낸 사람 |
 |---|---|---|

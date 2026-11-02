@@ -488,7 +488,7 @@ let test_schema_rejected_store_renders_reason_and_file_not_zero_goals () =
    | Ok _ -> fail "rows without criterion_revision read as a Goal list");
   let world = rendered_world_state config in
   check bool "the layer names the refused member" true
-    (contains_in world "schema_rejected field=criterion_revision");
+    (contains_in world "schema_rejected location=\"criterion_revision\"");
   check bool "the layer names the file" true (contains_in world primary);
   check bool "the layer says the source is unavailable" true
     (contains_in world "Active Goals — source unavailable");

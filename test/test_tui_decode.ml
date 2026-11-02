@@ -1908,21 +1908,28 @@ let test_goal_store_unavailable_parses_every_wire_token () =
     Tui_decode.Mirror_rejected_view
 
 let test_goal_store_unavailable_preserves_source_detail () =
-  let json = schema_rejected_body () in
-  let rendered =
-    "goal_store: unavailable reason=schema_rejected field=criterion_revision \
-     file=/srv/masc/.masc/goals.json mirror=decodes goal_count=3 \
-     reset=repair field criterion_revision"
-  in
-  (match Tui_decode.decode_planning_snapshot json with
-   | Error message -> Alcotest.(check string) "planning source failure" rendered message
-   | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
-  match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable
-      (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
-      Alcotest.(check string) "detail source failure is not a Gate failure"
-        rendered (Tui_decode.goal_store_unavailable_view_to_string view)
-  | _ -> Alcotest.fail "Goal detail source failure was not preserved"
+  List.iter (fun field ->
+    let json =
+      goal_store_unavailable_body
+        (Goal_store_unavailable.Schema_rejected { field; detail = "rejected" })
+        (Goal_store_unavailable.Mirror_decodes { goal_count = 3; updated_at = "2026-09-08T16:20:13Z" })
+        (Goal_store_unavailable.Repair_field field)
+    in
+    (match Tui_decode.decode_planning_snapshot json with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
+    match Tui_decode.decode_goal_detail_timeline json with
+    | Ok (Tui_decode.Goal_timeline_unavailable
+        (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
+        Alcotest.(check string) "file" "/srv/masc/.masc/goals.json" view.gsu_file;
+        Alcotest.(check bool) "source reason and location" true
+          (view.gsu_reason = Tui_decode.Schema_rejected_view field);
+        Alcotest.(check bool) "mirror" true
+          (view.gsu_mirror = Tui_decode.Mirror_decodes_view 3);
+        Alcotest.(check bool) "reset location" true
+          (view.gsu_reset_step = Goal_store_unavailable.Repair_field field)
+    | _ -> Alcotest.fail "Goal detail source failure was not preserved")
+    [ "criterion_revision"; "$"; "goals"; ""; "bad\nmember" ]
 
 let test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens () =
   let with_member key value = function

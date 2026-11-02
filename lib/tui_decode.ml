@@ -2811,7 +2811,7 @@ let goal_store_unavailable_reason_view_to_string = function
   | Missing_after_init_view -> "missing_after_init"
   | Unreadable_view -> "unreadable"
   | Not_json_view -> "not_json"
-  | Schema_rejected_view refused -> "schema_rejected field=" ^ refused
+  | Schema_rejected_view refused -> Printf.sprintf "schema_rejected location=%S" refused
 
 let goal_store_mirror_view_to_string = function
   | Mirror_absent_view -> "absent"

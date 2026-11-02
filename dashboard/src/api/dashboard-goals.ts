@@ -117,7 +117,8 @@ function decodeGoalStoreUnavailable(raw: Record<string, unknown>): GoalStoreUnav
   let field: string | null
   switch (reason) {
     case 'schema_rejected':
-      if (typeof raw.field !== 'string' || raw.field.length === 0) {
+      // Older servers can report an unknown member whose name is empty.
+      if (typeof raw.field !== 'string') {
         throw new GoalStoreEnvelopeError('schema_rejected names no field')
       }
       field = raw.field

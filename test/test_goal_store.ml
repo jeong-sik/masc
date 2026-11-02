@@ -429,6 +429,124 @@ let test_other_unknown_goal_field_still_fails () =
              { reason = Goal_store.Schema_rejected { field = "unexpected_assignment"; _ }; _ }) -> ()
   | Error other -> fail ("unknown field write was not Store_unavailable: " ^ write_error_msg other)
 
+let test_duplicate_document_members_refuse_writes () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "goal-duplicate-member" "original title" in
+  let independent = make_goal "independent-goal" "another title" in
+  (match Goal_store.write_state_result config
+      { version = 1; updated_at = iso_now (); goals = [goal; independent];
+        pending_events = []; pending_notifications = [] } with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let valid = Fs_compat.load_file primary in
+  let mirror_before = Fs_compat.load_file mirror in
+  let root_fields, goal_fields, independent_row =
+    match Yojson.Safe.from_string valid with
+    | `Assoc fields ->
+        (match List.assoc_opt "goals" fields with
+         | Some (`List [`Assoc row; other]) -> fields, row, other
+         | _ -> fail "fixture does not contain two Goals")
+    | _ -> fail "fixture is not a document object" in
+  let duplicate field value before fields =
+    let fields = if List.mem_assoc field fields then fields else (field, `Null) :: fields in
+    if before then (field, value) :: fields else fields @ [field, value] in
+  let cases = [
+    `Root, "goals", "goals", `List [];
+    `Root, "version", "version", `Int 42;
+    `Root, "pending_events", "pending_events", `List [];
+    `Root, "pending_notifications", "pending_notifications", `List [];
+    `Root, "", "$", `Int 1;
+    `Root, " ", "$", `Int 1;
+    `Root, "name with spaces", "$", `Int 1;
+    `Root, "\t", "$", `Int 1;
+    `Root, "\n", "$", `Int 1;
+    `Root, "bad\027name", "$", `Int 1;
+    `Root, "비가시", "$", `Int 1;
+    `Goal, "id", "id", `String "other-goal";
+    `Goal, "id", "id", `String goal.id;
+    `Goal, "title", "title", `String "different criterion";
+    `Goal, "criterion_revision", "criterion_revision", `String "other-revision";
+    `Goal, "phase", "phase", `String "dropped";
+    `Goal, "priority", "priority", `Int 1;
+    `Goal, "metric", "metric", `Null;
+    `Goal, "", "goals", `Int 1;
+    `Goal, " ", "goals", `Int 1;
+    `Goal, "name with spaces", "goals", `Int 1;
+    `Goal, "\t", "goals", `Int 1;
+    `Goal, "\n", "goals", `Int 1;
+    `Goal, "bad\027name", "goals", `Int 1;
+    `Goal, "비가시", "goals", `Int 1;
+    `Goal, "$", "$", `Int 1;
+    `Single_goal, "", "goals", `Int 1;
+    `Single_goal, " ", "goals", `Int 1;
+    `Single_goal, "\n", "goals", `Int 1;
+    `Single_goal, "$", "$", `Int 1;
+  ] in
+  List.iter (fun (level, field, expected_location, value) ->
+    List.iter (fun before ->
+      let with_row fields =
+        let row = `Assoc fields in
+        `Assoc (List.map (fun (key, old) ->
+          if String.equal key "goals" then key, `List [row; independent_row] else key, old) root_fields) in
+      let json = match level with
+        | `Root -> `Assoc (duplicate field value before root_fields)
+        | `Goal -> with_row (duplicate field value before goal_fields)
+        | `Single_goal -> with_row
+            (if before then (field, value) :: goal_fields else goal_fields @ [field, value]) in
+      (match Goal_store.validate_state_json json with
+       | Error detail ->
+         check bool "setup validator retains the safe location" true
+           (String_util.contains_substring detail (Printf.sprintf "(location %S)" expected_location))
+       | Ok () -> fail ("validation admitted duplicate " ^ field));
+      let bytes = Yojson.Safe.to_string json in
+      write_raw primary bytes;
+      let failure = match Goal_store.load_source config with
+       | Goal_store.Unavailable
+           ({ reason = Goal_store.Schema_rejected { field = actual; detail };
+              mirror = Goal_store.Mirror_decodes { goal_count = 2; _ }; _ } as failure) ->
+           check string "rejection names member or location" expected_location actual;
+           check bool "internal detail preserves the quoted name" true
+             (String_util.contains_substring detail (Printf.sprintf "%S" field));
+           failure
+       | Goal_store.Unavailable failure -> fail (Goal_store.unavailable_to_string failure)
+       | Goal_store.Available _ | Goal_store.Uninitialized -> fail "duplicate document was readable" in
+      (match Goal_unavailable_envelope.to_yojson failure with
+       | `Assoc fields ->
+           check (list string) "wire keeps its exact member set"
+             ["error_code"; "field"; "file"; "mirror"; "ok"; "reason"; "reset_step"]
+             (List.sort String.compare (List.map fst fields));
+           check bool "wire carries the nonempty location" true
+             (List.assoc_opt "field" fields = Some (`String expected_location));
+           check bool "wire names the repair step" true
+             (List.assoc_opt "reset_step" fields = Some (`String "repair_field"))
+       | _ -> fail "unavailable envelope was not an object");
+      let called = ref false and projected = ref false in
+      let effects _ _ : Goal_store.transition_effects =
+        projected := true; { events = []; notifications = [] } in
+      (match Goal_store.transact_goal ~effects config ~goal_id:independent.id
+          (fun current -> called := true; Ok ({ current with title = "changed" }, ())) with
+       | Error (Goal_store.Store_unavailable
+           { reason = Goal_store.Schema_rejected { field = actual; _ }; _ }) ->
+           check string "write refusal names duplicate" expected_location actual
+       | Error other -> fail ("wrong write refusal: " ^ write_error_msg other)
+       | Ok _ -> fail "duplicate document licensed a write");
+      check bool "writer callback not entered" false !called;
+      check bool "writer effects not projected" false !projected;
+      (match Goal_store.upsert_goal config ~title:"new goal" ~metric:"m" ~target_value:"1" () with
+       | Error (Goal_store.Store_unavailable _) -> ()
+       | Error other -> fail ("wrong upsert refusal: " ^ write_error_msg other)
+       | Ok _ -> fail "duplicate document licensed an upsert");
+      check string "primary bytes preserved" bytes (Fs_compat.load_file primary);
+      check string "mirror bytes preserved" mirror_before (Fs_compat.load_file mirror)
+    ) [true; false]
+  ) cases;
+  write_raw primary valid;
+  (match Goal_store.transact_goal config ~goal_id:goal.id
+      (fun current -> Ok ({ current with title = "valid update" }, ())) with
+   | Ok (updated, ()) -> check string "valid document remains writable" "valid update" updated.title
+   | Error error -> fail ("valid document was refused: " ^ write_error_msg error))
+
 let test_undecodable_store_read_error_names_path () =
   with_workspace @@ fun config ->
   let goal = make_goal "read-error" "read error names the store path" in
@@ -1334,7 +1452,7 @@ let test_document_rejection_order_through_public_consumers () =
     (match Goal_store.validate_state_json (Yojson.Safe.from_string before) with
      | Error detail ->
        check string "setup validator renders the same canonical rejection"
-         (expected_detail ^ " (field " ^ expected_field ^ ")") detail
+         (Printf.sprintf "%s (location %S)" expected_detail expected_field) detail
      | Ok () -> fail "setup validator accepted a malformed document");
     expect_unavailable expected_field expected_detail (unavailable config);
     let entered = ref false in
@@ -1913,6 +2031,8 @@ let () =
             test_serializer_omits_status;
           test_case "other unknown goal field still fails" `Quick
             test_other_unknown_goal_field_still_fails;
+          test_case "duplicate document members refuse writes" `Quick
+            test_duplicate_document_members_refuse_writes;
           test_case "undecodable store read error names the path" `Quick
             test_undecodable_store_read_error_names_path;
           test_case "phase-less row no longer decodes" `Quick

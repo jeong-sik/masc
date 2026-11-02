@@ -382,8 +382,8 @@ let write_error_to_string = function
 
 type goal_row_match = No_goal_row | One_goal_row of goal | Multiple_goal_rows
 
-(* Callers use this classification on the decoded Goal rows. Decode still
-   follows the document's existing rules, including for duplicate JSON fields. *)
+(* Callers use this classification after the document decoder has rejected
+   duplicate JSON members, to detect multiple decoded rows with one ID. *)
 let classify_goal_rows goals goal_id =
   match List.filter (fun (goal : goal) -> String.equal goal.id goal_id) goals with
   | [] -> No_goal_row

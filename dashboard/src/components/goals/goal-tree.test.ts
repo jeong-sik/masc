@@ -1888,11 +1888,11 @@ describe('GoalTree', () => {
     expect(alert.textContent).toContain('Goal store 를 읽을 수 없습니다')
     expect(screen.getByTestId('goal-store-unavailable-file').textContent).toBe('/srv/masc/.masc/goals.json')
     expect(screen.getByTestId('goal-store-unavailable-reason').textContent)
-      .toBe('이 빌드의 goal 스키마가 파일을 거절했습니다 (필드: criterion_revision)')
+      .toBe('이 빌드의 goal 스키마가 파일을 거절했습니다 (위치: criterion_revision)')
     expect(screen.getByTestId('goal-store-unavailable-mirror').textContent)
       .toBe('.last-good 미러는 읽힘 · goal 97개 (서빙하지 않음)')
     expect(screen.getByTestId('goal-store-unavailable-reset-step').textContent)
-      .toBe('필드 criterion_revision 를 채우면 다시 읽힙니다')
+      .toBe('파일의 criterion_revision 위치를 확인하고 수정한 뒤 다시 조회하세요')
     // The generic ErrorState line is not drawn beside the structured block.
     expect(container_alerts()).toEqual(['goal-store-unavailable', 'goal-create-source-unavailable'])
 

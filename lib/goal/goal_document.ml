@@ -148,18 +148,36 @@ let state_to_yojson (state : state) =
 
 (* {1 Decoder}
 
-   A rejection names the member this build's decoder refused. The name is
-   data, so the store carries it in [Schema_rejected] without reading it back
-   out of a sentence. *)
+   A rejection names the member or containing location this decoder refused.
+   The store carries it in [Schema_rejected] without parsing a sentence. *)
 
 type schema_rejection = { field : string; detail : string }
 
-(* JSONPath spelling of the document root: the member to name when the whole
-   document is not an object and no member of it exists to point at. *)
+(* JSONPath spelling of the document root, also used when a root member name
+   cannot be safely displayed as a location. *)
 let document_root_field = "$"
 
 let rejected ~field detail : ('a, schema_rejection) result =
   Error { field; detail }
+
+(* Avoid invisible, control or ambiguous non-ASCII bytes in the wire location.
+   The quoted original remains in [detail] and the file is left unchanged. *)
+let rejected_member ~fallback_location ~field detail =
+  let displayable = String.length field > 0 && String.for_all (fun c -> c >= '!' && c <= '~') field in
+  rejected ~field:(if displayable then field else fallback_location) detail
+
+(* Association lists preserve repeated JSON member names. Do not choose one:
+   a subsequent write would otherwise discard the declarations not decoded. *)
+let reject_duplicate_members ~fallback_location fields =
+  let module String_set = Set.Make (String) in
+  let rec visit seen = function
+    | [] -> Ok ()
+    | (field, _) :: rest ->
+        if String_set.mem field seen then
+          rejected_member ~fallback_location ~field (Printf.sprintf "duplicate JSON member %S" field)
+        else visit (String_set.add field seen) rest
+  in
+  visit String_set.empty fields
 
 let accepted_goal_fields =
   [ "id"
@@ -179,6 +197,7 @@ let accepted_goal_fields =
 
 let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
   | `Assoc fields as json ->
+      let* () = reject_duplicate_members ~fallback_location:"goals" fields in
       let unknown_field =
         List.find_map
           (fun (field, _) ->
@@ -189,7 +208,7 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
       let title_opt = Json_util.assoc_member_opt "title" json in
       (match unknown_field, id_opt, title_opt with
       | Some field, _, _ ->
-          rejected ~field
+          rejected_member ~fallback_location:"goals" ~field
             (Printf.sprintf "unknown Goal field %S is not accepted" field)
       | None, Some (`String id), Some (`String title) ->
           let* criterion_revision =
@@ -315,7 +334,8 @@ let pending_notification_of_yojson = function
   | _ -> rejected ~field:"pending_notifications" "notification must be an object"
 
 let state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result = function
-  | `Assoc _ as json ->
+  | `Assoc fields as json ->
+      let* () = reject_duplicate_members ~fallback_location:document_root_field fields in
       let* version =
         match Json_util.assoc_member_opt "version" json with
         | Some (`Int version) -> Ok version
@@ -378,7 +398,7 @@ let state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result = functi
         ("state is not an object: " ^ Yojson.Safe.to_string json)
 
 let schema_rejection_to_string { field; detail } =
-  Printf.sprintf "%s (field %s)" detail field
+  Printf.sprintf "%s (location %S)" detail field
 
 let validate_state_json json =
   match state_of_yojson json with

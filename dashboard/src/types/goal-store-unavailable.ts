@@ -37,7 +37,7 @@ export interface GoalStoreMirror {
 export interface GoalStoreUnavailable {
   kind: 'unavailable'
   reason: GoalStoreUnavailableReason
-  /** The refused member for `schema_rejected`; null for the other reasons. */
+  /** Refused member or its containing location; null for other reasons. */
   field: string | null
   file: string
   mirror: GoalStoreMirror

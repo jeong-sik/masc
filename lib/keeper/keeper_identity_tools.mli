@@ -42,18 +42,25 @@ val load :
     and unreadable, which is not the same thing and must not be read as
     "no tools". *)
 
-val save : base_path:string -> keeper_name:string -> catalog -> (unit, string) result
-(** Write down what a provider offers this Keeper, beside the workspace. The
-    pair of [save] and [forget] is what attach and detach do to the catalog. *)
+val save :
+  publication:Keeper_oauth_pending.catalog_publication -> catalog ->
+  unit Keeper_oauth_pending.publication
+(** Publish through the ticket captured before discovery. Its scope supplies
+    the workspace and Keeper; the catalog must name the same provider. *)
 
-val forget :
+type local_detachment = private {
+  refresh_token : string option;
+  tools_removed : bool;
+}
+val detach_local :
   base_path:string ->
   keeper_name:string ->
-  provider_id:string ->
-  (bool, string) result
-(** Delete the catalog written down for this Keeper and provider, so the next
-    turn stops offering its tools. [Ok false] means there was nothing to
-    delete; [Error] means the file is there and could not be removed. *)
+  provider:Keeper_oauth_provider.t ->
+  (local_detachment, string) result
+(** Retire the scope before reading the refresh token and removing local
+    credential entries/catalog, under the existing publication owner. An error
+    can follow earlier deletions. The returned token is solely for the server's
+    best-effort revocation outside the lock; it must never be serialized. *)
 
 (** How the provider is reached: the MCP session, and the two OAuth hops a
     renewal makes. Every production call goes through {!http_transports};
@@ -84,6 +91,7 @@ val http_transports : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> trans
     answered held the keeper turn for as long as the socket stayed open. *)
 
 val refresh :
+  attachment:Keeper_oauth_pending.attachment ->
   mcp_post:Mcp_client.post ->
   config:Workspace.config ->
   keeper_name:string ->
@@ -237,7 +245,12 @@ type renewal_error =
 val renewal_error_message : renewal_error -> string
 (** The human-readable reason, without the transient/permanent distinction. *)
 
+type credential = private {
+  access_token : string;
+  attachment : Keeper_oauth_pending.attachment;
+}
 val renew_if_needed :
+  attachment:Keeper_oauth_pending.attachment ->
   token_post:Keeper_oauth_flow.post ->
   discover:
     (mcp_url:string ->
@@ -248,7 +261,7 @@ val renew_if_needed :
   now:float ->
   access_token:string ->
   unit ->
-  (string, renewal_error) result
+  (credential, renewal_error) result
 (** The access token to use right now, exchanged for a fresh one first if
     the stored expiry is inside the declaration's renewal window.
 

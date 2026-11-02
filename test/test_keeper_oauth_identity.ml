@@ -646,7 +646,7 @@ let remember_held table ~now ~ttl_sec held =
 
 let test_a_state_is_redeemed_once () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let held = in_flight_for provider in
   ignore (remember_held table ~now:0.0 ~ttl_sec:600.0 held);
   let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
@@ -668,7 +668,7 @@ let test_a_state_is_redeemed_once () =
 
 let test_an_abandoned_login_expires () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let held = in_flight_for provider in
   ignore (remember_held table ~now:0.0 ~ttl_sec:600.0 held);
   let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
@@ -682,7 +682,7 @@ let test_an_abandoned_login_expires () =
 
 let test_logins_do_not_collide () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let one = in_flight_for provider and two = in_flight_for ~keeper:"other-keeper" provider in
   ignore (remember_held table ~now:0.0 ~ttl_sec:600.0 one);
   ignore (remember_held table ~now:0.0 ~ttl_sec:600.0 two);
@@ -705,7 +705,7 @@ let test_logins_do_not_collide () =
 
 let test_admitted_exchange_status_outlives_deadline () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let held = in_flight_for provider in
   let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
   let state = held.pending.Keeper_oauth_flow.state in
@@ -723,11 +723,11 @@ let test_admitted_exchange_status_outlives_deadline () =
    | Ok _ -> ());
   check Alcotest.bool "exchange alone does not claim credential publication" true
     (status 602. = Some Keeper_oauth_pending.Callback_admitted);
-  Keeper_oauth_pending.finish table ~state
-    (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
+  ignore (Keeper_oauth_pending.finish table ~state
+    (Ok Keeper_oauth_pending.Credentials_published_discovery_failed));
   check Alcotest.bool "publication remains observable after consent deadline" true
     (status 603. = Some (Keeper_oauth_pending.Completed Keeper_oauth_pending.Credentials_published_discovery_failed));
-  Keeper_oauth_pending.finish table ~state (Error ());
+  ignore (Keeper_oauth_pending.finish table ~state (Error ()));
   check Alcotest.bool "replay cannot replace terminal completion" true
     (status 604. = Some (Keeper_oauth_pending.Completed Keeper_oauth_pending.Credentials_published_discovery_failed));
   check Alcotest.bool "other Keeper cannot read handle" true
@@ -735,7 +735,7 @@ let test_admitted_exchange_status_outlives_deadline () =
 
 let test_a_start_that_never_registers_still_refuses_an_earlier_one () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let earlier = admit_scope table provider in
   (* The later start consumed its admission and then died during discovery,
      so it never reaches this table. *)
@@ -748,7 +748,7 @@ let test_a_start_that_never_registers_still_refuses_an_earlier_one () =
 
 let test_a_newer_start_supersedes_an_admitted_publication () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let first = in_flight_for provider and second = in_flight_for provider in
   let first_id = remember_held table ~now:0. ~ttl_sec:600. first in
   let state = first.pending.Keeper_oauth_flow.state in
@@ -758,8 +758,8 @@ let test_a_newer_start_supersedes_an_admitted_publication () =
     | Ok _ -> ()
     | Error Keeper_oauth_pending.Newer_start_admitted ->
         Alcotest.fail "the newer start was refused" in
-  Keeper_oauth_pending.finish table ~state
-    (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
+  ignore (Keeper_oauth_pending.finish table ~state
+    (Ok Keeper_oauth_pending.Credentials_published_discovery_failed));
   check Alcotest.bool "a superseded publication cannot complete over the newer attempt" true
     (Keeper_oauth_pending.status table ~now:3. ~attempt_id:first_id
        ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id
@@ -767,7 +767,7 @@ let test_a_newer_start_supersedes_an_admitted_publication () =
 
 let test_a_start_for_another_scope_does_not_refuse_an_earlier_one () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let earlier = admit_scope table provider in
   (* Another Keeper logging in to the same provider is unrelated to this
      Keeper's start, however its admission compares. *)
@@ -786,7 +786,7 @@ let test_a_start_for_another_scope_does_not_refuse_an_earlier_one () =
 
 let test_a_superseded_publication_writes_nothing () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let first = in_flight_for provider and second = in_flight_for provider in
   let _first_id = remember_held table ~now:0. ~ttl_sec:600. first in
   let state = first.pending.Keeper_oauth_flow.state in
@@ -794,8 +794,10 @@ let test_a_superseded_publication_writes_nothing () =
     (Keeper_oauth_pending.take table ~now:1. ~state <> None);
   let writes = ref 0 in
   check Alcotest.bool "an admitted publication runs its writes" true
-    (Keeper_oauth_pending.publish_credentials table ~state
-       ~write:(fun _ -> incr writes; Ok ()) = Some (Ok ()));
+    (match Keeper_oauth_pending.publish_credentials table ~state
+       ~write:(fun _ -> incr writes; Ok ()) with
+     | Published _ -> true
+     | Publication_superseded | Publication_failed _ -> false);
   let () = match Keeper_oauth_pending.remember table (admit_scope table provider)
                    ~now:2. ~ttl_sec:600. second with
     | Ok _ -> ()
@@ -803,13 +805,13 @@ let test_a_superseded_publication_writes_nothing () =
         Alcotest.fail "the newer start was refused" in
   check Alcotest.bool "a superseded publication runs no write" true
     (Keeper_oauth_pending.publish_credentials table ~state ~write:(fun _ -> incr writes; Ok ())
-     = None);
+     = Keeper_oauth_pending.Publication_superseded);
   Alcotest.(check int) "only the admitted publication wrote its three entries" 3 !writes
 
 let test_incomplete_publication_preserves_progress () =
   let provider = load_or_fail atlassian_toml in
   List.iter (fun (interrupted, completed) ->
-    let table = Keeper_oauth_pending.create () in
+    let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
     let held = in_flight_for provider in
     let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
     let state = held.pending.Keeper_oauth_flow.state in
@@ -818,7 +820,8 @@ let test_incomplete_publication_preserves_progress () =
     let result = Keeper_oauth_pending.publish_credentials table ~state
       ~write:(fun stage -> writes := !writes @ [stage];
         if stage=interrupted then Error "fixture storage failure" else Ok ()) in
-    check Alcotest.bool "failure returned" true (result=Some (Error "fixture storage failure"));
+    check Alcotest.bool "failure returned" true
+      (result=Keeper_oauth_pending.Publication_failed "fixture storage failure");
     check Alcotest.bool "later writes did not run" true (!writes=completed @ [interrupted]);
     let status () = Keeper_oauth_pending.status table ~now:2. ~attempt_id
       ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id in
@@ -829,17 +832,18 @@ let test_incomplete_publication_preserves_progress () =
            progress.completed_writes=completed && progress.interrupted_write=interrupted
        | None | Some (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
          | Expired | Superseded) -> false);
-    Keeper_oauth_pending.finish table ~state (Error ());
+    ignore (Keeper_oauth_pending.finish table ~state (Error ()));
     check Alcotest.bool "outer failure cannot erase publication progress" true (status ()=before);
     check Alcotest.bool "a replay cannot start writes again" true
       (Keeper_oauth_pending.publish_credentials table ~state
-        ~write:(fun _ -> Alcotest.fail "a replay reached storage") = None))
+        ~write:(fun _ -> Alcotest.fail "a replay reached storage")
+       = Keeper_oauth_pending.Publication_superseded))
     Keeper_oauth_pending.[Refresh_token, []; Access_token, [Refresh_token];
       Expiry, [Refresh_token; Access_token]]
 
 let test_publication_exception_preserves_progress_and_unlocks () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let held = in_flight_for provider in
   let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
   let state = held.pending.Keeper_oauth_flow.state in
@@ -860,9 +864,81 @@ let test_publication_exception_preserves_progress_and_unlocks () =
      | None | Some (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
        | Expired | Superseded) -> false)
 
+let test_disconnect_retires_callback_and_slow_start_authority () =
+  List.iter (fun admitted ->
+    let provider = load_or_fail atlassian_toml in
+    let table = Keeper_oauth_pending.create ~base_path:"isolated-detach-test" () in
+    let held = in_flight_for provider in
+    let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
+    let state = held.pending.Keeper_oauth_flow.state in
+    let earlier_start = admit_scope table provider in
+    if admitted then ignore (Keeper_oauth_pending.take table ~now:1. ~state);
+    ignore (Keeper_oauth_pending.retire_scope table ~keeper:"oauth-fixture"
+      ~provider_id:provider.id ~local_delete:(fun () -> Ok ()));
+    check Alcotest.bool "detach retires both awaiting and admitted callbacks" true
+      (Keeper_oauth_pending.status table ~now:2. ~attempt_id
+         ~keeper:"oauth-fixture" ~provider_id:provider.id = Some Superseded);
+    check Alcotest.bool "the verifier cannot be redeemed after detach" true
+      (Keeper_oauth_pending.take table ~now:2. ~state = None);
+    check Alcotest.bool "late callback cannot write credentials" true
+      (Keeper_oauth_pending.publish_credentials table ~state
+        ~write:(fun _ -> Alcotest.fail "retired callback wrote credentials")
+       = Publication_superseded);
+    check Alcotest.bool "late success is not an attached result" true
+      (Keeper_oauth_pending.finish table ~state (Ok (Tools_discovered 1)) = Not_admitted);
+    check Alcotest.bool "slow start cannot restore consent after detach" true
+      (Keeper_oauth_pending.remember table earlier_start ~now:2. ~ttl_sec:600. held
+       = Error Newer_start_admitted)) [false; true]
+
+let test_failed_new_catalog_request_still_retires_older_result () =
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-catalog-test" () in
+  let attachment = Keeper_oauth_pending.capture_attachment table
+    ~keeper:"oauth-fixture" ~provider_id:"fixture" in
+  let begin_catalog () = match Keeper_oauth_pending.begin_catalog attachment with
+    | Some publication -> publication
+    | None -> Alcotest.fail "current attachment could not start discovery" in
+  let older = begin_catalog () in
+  let newer = begin_catalog () in
+  check Alcotest.bool "latest request reports its storage error" true
+    (Keeper_oauth_pending.publish_catalog newer ~write:(fun () -> Error "fixture refusal")
+     = Publication_failed "fixture refusal");
+  check Alcotest.bool "older discovery cannot replace it after the failure" true
+    (Keeper_oauth_pending.publish_catalog older
+      ~write:(fun () -> Alcotest.fail "old discovery overwrote the catalog")
+     = Publication_superseded)
+
+let test_failed_renewal_or_detach_invalidates_borrowed_results () =
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-renewal-test" () in
+  let capture provider_id = Keeper_oauth_pending.capture_attachment table
+    ~keeper:"oauth-fixture" ~provider_id in
+  let old = capture "fixture" and unrelated = capture "other-provider" in
+  let publication = match Keeper_oauth_pending.begin_catalog old with
+    | Some publication -> publication
+    | None -> Alcotest.fail "initial discovery was refused" in
+  check Alcotest.bool "partial renewal error is returned" true
+    (Keeper_oauth_pending.publish_renewal old ~write:(fun () -> Error "partial write")
+     = Publication_failed "partial write");
+  check Alcotest.bool "a partial credential write invalidates the old observation" false
+    (Keeper_oauth_pending.attachment_current old);
+  check Alcotest.bool "old discovery cannot publish against changed credentials" true
+    (Keeper_oauth_pending.publish_catalog publication
+      ~write:(fun () -> Alcotest.fail "old credential catalog was published")
+     = Publication_superseded);
+  let before_detach = capture "fixture" in
+  check (Alcotest.result Alcotest.unit str) "delete error remains an error"
+    (Error "delete refused")
+    (Keeper_oauth_pending.retire_scope table ~keeper:"oauth-fixture" ~provider_id:"fixture"
+       ~local_delete:(fun () -> Error "delete refused"));
+  check Alcotest.bool "delete failure does not readmit earlier work" false
+    (Keeper_oauth_pending.attachment_current before_detach);
+  check Alcotest.bool "fresh explicit work has its own authority" true
+    (Keeper_oauth_pending.attachment_current (capture "fixture"));
+  check Alcotest.bool "another provider remains independent" true
+    (Keeper_oauth_pending.attachment_current unrelated)
+
 let test_an_earlier_start_cannot_retire_a_later_one () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let earlier = admit_scope table provider in
   let later = admit_scope table provider in
   let first = in_flight_for provider and second = in_flight_for provider in
@@ -1450,7 +1526,7 @@ let start_login ?(configured = None) ?(now = 0.0) ~discover ~register provider t
 
 let test_a_restart_during_discovery_keeps_the_restarts_consent () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let configured = Some (credentials "operators-own-app") in
   let restart = ref None in
   (* The operator restarts while the first start is still discovering, and
@@ -1486,7 +1562,7 @@ let test_a_restart_during_discovery_keeps_the_restarts_consent () =
 
 let test_start_uses_a_configured_client_rather_than_registering () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
     start_login ~configured:(Some (credentials "operators-own-app")) ~discover:(stub_discover ())
       ~register:never_register provider table
@@ -1506,7 +1582,7 @@ let test_start_uses_a_configured_client_rather_than_registering () =
 
 let test_start_registers_when_nobody_configured_one () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let register ~registration_url ~client_name ~redirect_uri:_ =
     check str "registers where discovery said" "https://auth.example.com/dcr"
       registration_url;
@@ -1533,7 +1609,7 @@ let test_start_registers_when_nobody_configured_one () =
 
 let test_start_refuses_a_server_without_pkce () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
     start_login ~configured:(Some (credentials "id")) ~discover:(stub_discover ~supports_pkce:false ())
       ~register:never_register provider table
@@ -1548,7 +1624,7 @@ let test_start_refuses_a_server_without_pkce () =
 
 let test_start_says_when_there_is_no_way_to_get_a_client () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
     start_login ~discover:(stub_discover ~registration:None ())
       ~register:never_register provider table
@@ -1561,7 +1637,7 @@ let test_start_says_when_there_is_no_way_to_get_a_client () =
 
 let test_start_guides_operator_when_registration_fails () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let fail_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
     Error (Keeper_oauth_registration.Refused { status = 403; body = "Forbidden" })
   in
@@ -1585,7 +1661,7 @@ let test_a_registration_with_no_secret_is_a_public_client () =
      read is gone, so there is no longer a place to make that call. What a
      server accepts is in its registration answer, and this is that half. *)
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
     Ok
       { Keeper_oauth_registration.client_id = "public-anyway"
@@ -1635,7 +1711,7 @@ let started_client_id = function
 
 let test_a_lapsed_registration_is_replaced () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let fired, register = registers_as ~client_id:"replacement" in
   let configured =
     Some (credentials ~secret:"s3cret" ~secret_expires_at:100.0 "lapsed")
@@ -1648,7 +1724,7 @@ let test_a_registration_that_never_expires_is_kept () =
   (* Zero is the server saying the secret does not lapse. Reading it as a
      date in 1970 would register over a client that is still good. *)
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let configured =
     Some (credentials ~secret:"s3cret" ~secret_expires_at:0.0 "evergreen")
   in
@@ -1663,7 +1739,7 @@ let test_a_secret_with_no_recorded_deadline_is_replaced () =
      this install did not write it down. Its real value is unknown and may be
      behind us, and the only way to find out is the login that fails. *)
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let fired, register = registers_as ~client_id:"replacement" in
   let configured = Some (credentials ~secret:"s3cret" "undated") in
   let got = start_login ~configured ~now:1.7e9 ~discover:(stub_discover ()) ~register provider table in
@@ -1674,7 +1750,7 @@ let test_a_public_client_outlives_any_deadline () =
   (* No secret, nothing to lapse. This is why an install that registered a
      public client keeps working while a confidential one stops. *)
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let got =
     start_login ~configured:(Some (credentials "public")) ~now:1.7e9
       ~discover:(stub_discover ()) ~register:never_register provider table
@@ -1686,7 +1762,7 @@ let test_a_secret_from_registration_is_kept () =
      it saying its token endpoint wants one. Dropping it would leave the
      redemption to fail with the server's word for "who are you". *)
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   let register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
     Ok
       { Keeper_oauth_registration.client_id = "confidential"
@@ -1708,7 +1784,7 @@ let test_a_secret_from_registration_is_kept () =
 
 let test_the_callback_finishes_the_login_it_started () =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
     start_login ~configured:(Some (credentials "client-abc")) ~discover:(stub_discover ())
       ~register:never_register provider table
@@ -1758,7 +1834,7 @@ let test_the_callback_finishes_the_login_it_started () =
    the only one anybody has to be warned about. *)
 let finish_answering answer =
   let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
     start_login ~configured:(Some (credentials "client-abc")) ~discover:(stub_discover ())
       ~register:never_register provider table
@@ -1809,7 +1885,7 @@ let test_an_expiry_with_no_way_to_renew_is_warned_about () =
           Alcotest.fail "an answer carrying no refresh token read as renewable")
 
 let test_a_callback_nobody_is_waiting_on_says_so () =
-  let table = Keeper_oauth_pending.create () in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
     Keeper_oauth_session.finish
       ~post:(fun ~url:_ ~headers:_ ~body:_ ->
@@ -2145,6 +2221,12 @@ let () =
             test_incomplete_publication_preserves_progress;
           Alcotest.test_case "publication exception preserves progress and unlocks" `Quick
             test_publication_exception_preserves_progress_and_unlocks;
+          Alcotest.test_case "disconnect retires callback and slow-start authority" `Quick
+            test_disconnect_retires_callback_and_slow_start_authority;
+          Alcotest.test_case "failed new catalog request retires the older result" `Quick
+            test_failed_new_catalog_request_still_retires_older_result;
+          Alcotest.test_case "failed renewal and detach invalidate borrowed results" `Quick
+            test_failed_renewal_or_detach_invalidates_borrowed_results;
           Alcotest.test_case "an earlier start cannot retire a later one" `Quick
             test_an_earlier_start_cannot_retire_a_later_one;
           Alcotest.test_case "a restart during discovery keeps its consent" `Quick

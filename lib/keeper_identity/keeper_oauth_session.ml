@@ -176,13 +176,16 @@ let finish ~post ~pending ~state ~code ~now () =
     let flow_pending = in_flight.Pending.pending in
     let* tokens =
       Result.map_error
-        (fun err -> Pending.finish pending ~state (Error ()); Exchange_failed err)
+        (fun err -> ignore (Pending.finish pending ~state (Error ())); Exchange_failed err)
         (match Flow.complete ~post ~discovered:in_flight.Pending.discovered
            ~client_id:in_flight.Pending.client_id
            ?client_secret:in_flight.Pending.client_secret ~pending:flow_pending
            ~code ~state ~now () with
          | result -> result
-         | exception exn -> Pending.finish pending ~state (Error ()); raise exn)
+         | exception exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             ignore (Pending.finish pending ~state (Error ()));
+             Printexc.raise_with_backtrace exn backtrace)
     in
     (* The four pairings the answer can carry, read into the three that mean
        something different to whoever stores them. A token with no expiry

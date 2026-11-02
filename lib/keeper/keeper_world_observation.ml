@@ -1566,11 +1566,13 @@ let collect_board_events_with_cursor_policy
           | [] -> Ok (List.rev acc)
           | (classified, board_audience, signal) :: rest ->
             (match route_signal ~classified ~board_audience signal with
-             | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
-               Error (Source_unavailable unavailable)
              | Error (Source_unavailable unavailable) ->
-               log_and_count_unavailable ~context:"signal replay" unavailable;
-               collect acc rest
+               (match unavailable.error with
+                | Board.Read_source_unavailable _ -> Error (Source_unavailable unavailable)
+                | Board.Read_invalid_id _ | Board.Read_post_not_found _
+                | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _ ->
+                  log_and_count_unavailable ~context:"signal replay" unavailable;
+                  collect acc rest)
              | Error (Delivery_failed _ as error) -> Error error
              | Ok None -> collect acc rest
              | Ok (Some event) -> collect (event :: acc) rest)
@@ -1591,12 +1593,15 @@ let collect_board_events_with_cursor_policy
           Log.Keeper.warn "board catchup retained cursor: keeper=%s post=%s delivery=%s"
             meta.name (Board.Post_id.to_string p.id) detail;
           List.rev acc, last_cursor
-        | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
-          log_and_count_unavailable ~context:"source retained" unavailable;
-          List.rev acc, last_cursor
         | Error (Source_unavailable unavailable) ->
-          log_and_count_unavailable ~context:"signal replay" unavailable;
-          consume_posts (Some next_cursor) acc rest
+          (match unavailable.error with
+           | Board.Read_source_unavailable _ ->
+             log_and_count_unavailable ~context:"source retained" unavailable;
+             List.rev acc, last_cursor
+           | Board.Read_invalid_id _ | Board.Read_post_not_found _
+           | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _ ->
+             log_and_count_unavailable ~context:"signal replay" unavailable;
+             consume_posts (Some next_cursor) acc rest)
     in
     let final_events, last_cursor = consume_posts None [] posts in
     if advance_cursor

@@ -503,7 +503,7 @@ let candidate_to_json candidate =
     ; "signal", signal_to_yojson candidate.signal
     ; ( "audience"
       , match candidate.audience with
-        | Some audience -> Board_audience.to_yojson audience
+        | Some audience -> Board.to_yojson audience
         | None -> `Null )
     ; "keeper_context", candidate.keeper_context
     ; "recorded_at", `Float candidate.recorded_at
@@ -1449,7 +1449,7 @@ let candidate_of_json json =
     match List.assoc_opt "audience" fields with
     | None | Some `Null -> Ok None
     | Some audience_json ->
-      (match Board_audience.of_yojson audience_json with
+      (match Board.of_yojson audience_json with
        | Some audience -> Ok (Some audience)
        | None -> Error (context ^ ".audience has unknown shape"))
   in

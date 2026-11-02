@@ -893,6 +893,47 @@ let test_malformed_queued_comment_identity_is_a_failed_read () =
   refused "parent id" (queued ~comment_id:valid ~parent_id:(Some "not-a-comment-id"))
 ;;
 
+let test_malformed_queued_audience_is_a_failed_read () =
+  let module Signal = Keeper_world_observation_board_signal in
+  let queued targets : Keeper_event_queue.board_stimulus =
+    { kind = Keeper_event_queue.Post_created
+    ; author = "poster"
+    ; title = "thread"
+    ; content = "content"
+    ; hearth = None
+    ; updated_at = None
+    ; audience = Some (Keeper_event_queue.Audience_targets targets)
+    }
+  in
+  let refused targets =
+    match Signal.board_observation_of_board_stimulus ~post_id:"p-queued" (queued targets) with
+    | Error unavailable ->
+      check bool "reported as an audience parse" true
+        (unavailable.Signal.operation = Signal.Parse_queued_audience);
+      check string "names the queued post" "p-queued" unavailable.Signal.post_id;
+      check bool "invalid audience is consumed without an event" true
+        (Keeper_heartbeat_stimulus_intake.classify_pending_board_event_result (Error unavailable)
+         = Keeper_heartbeat_stimulus_intake.Stimulus_consumed []);
+      (match unavailable.Signal.error with
+       | Board.Read_invalid_id _ -> ()
+       | Board.Read_post_not_found _ | Board.Read_comment_not_found _
+       | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ ->
+         fail (Signal.unavailable_to_string unavailable))
+    | Ok _ -> fail "an invalid audience became a Board observation"
+  in
+  refused [];
+  refused [ "alpha"; "../bad" ];
+  match Signal.board_observation_of_board_stimulus ~post_id:"p-queued" (queued [ "alpha"; "beta" ]) with
+  | Ok observation ->
+    (match observation.Signal.audience with
+     | Some (Board.Targets targets) ->
+       check (list string) "valid targets retain their order"
+         [ "alpha"; "beta" ] (List.map Board.Agent_id.to_string targets)
+     | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable) | None ->
+       fail "valid targets were not preserved")
+  | Error unavailable -> fail (Signal.unavailable_to_string unavailable)
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -949,6 +990,10 @@ let () =
             "a malformed queued comment identity is a failed read"
             `Quick
             test_malformed_queued_comment_identity_is_a_failed_read
+        ; test_case
+            "a malformed queued audience is a failed read"
+            `Quick
+            test_malformed_queued_audience_is_a_failed_read
         ; test_case
             "queued comment keeps its author and body"
             `Quick

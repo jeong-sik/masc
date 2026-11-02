@@ -379,6 +379,24 @@ let inspected_record ~target = function
            then Some exact.record
            else None)
 
+(* These readings show a plain message rather than a selectable proof row. *)
+let scroll_plain_body ~tab ~target = function
+  | Request_failed _ | Turn_read_failed _ -> true
+  | Turn_read { selection; _ } ->
+      (match tab, target with
+       | Input_map, Recent turn_back ->
+           Option.is_none (viewing_record selection ~turn_back)
+       | Input_map, Pinned _
+       | (Composition | Exact_input | Response), (Recent _ | Pinned _) -> false)
+  | Exact_read _ -> false
+
+let proof_scroll_should_reset ~target ~previous reading =
+  match previous with
+  | None -> false
+  | Some previous ->
+      scroll_plain_body ~tab:Input_map ~target previous
+      <> scroll_plain_body ~tab:Input_map ~target reading
+
 let exact_fields expected fields =
   List.length expected = List.length fields
   && List.for_all

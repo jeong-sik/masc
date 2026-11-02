@@ -4,14 +4,13 @@
    Under the figures, the same parts in the order the request carries them. *)
 
 module Inspector = Masc_tui_context_inspector
-open Masc_tui_ansi
 
 let signed_tokens n =
   if n < 0 then "\xe2\x88\x92" ^ Inspector.format_tokens (-n)
   else Inspector.format_tokens n
 ;;
 
-let rec origin_sentence = function
+let rec origin_sentence ~safe_detail = function
   | Inspector.Carried_from_ledger -> "front from this runtime's ledger"
   | Inspector.Carried_from_turn_record { turn } ->
       Printf.sprintf "front from turn #%d's record; nothing counted since the server started" turn
@@ -22,7 +21,7 @@ let rec origin_sentence = function
   | Inspector.Carried_past_librarian_point { librarian_end_atom; front } ->
       Printf.sprintf
         "the Librarian point is atom %d; the range opens later, where the provider last accepted it (%s)"
-        librarian_end_atom (origin_sentence front)
+        librarian_end_atom (origin_sentence ~safe_detail front)
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the
          range opens on ([first_atom]); [end_atom] is the completed boundary
@@ -34,7 +33,7 @@ let rec origin_sentence = function
   | Inspector.Carried_turn_start_unknown { reason } ->
       Printf.sprintf
         "no front, and where this turn began could not be read: the newest atom alone (%s)"
-        reason
+        (safe_detail reason)
   | Inspector.Carried_librarian_snapshot { end_atom; boundary_line } ->
       Printf.sprintf
         "the Librarian's working state stands in for the atoms before %d (Turn Boundary log row %d covering the captured prefix)"
@@ -85,14 +84,14 @@ let walk_sentence ~safe (walk : Inspector.forecast_walk)
   Printf.sprintf "Walks %s: %s%s." (ordinal candidate.place.walks_at) why rest
 ;;
 
-let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
+let candidate_lines ~runtime_details ~prose ~fact ~detail ~safe ~safe_detail ~scale ~(walk : Inspector.forecast_walk)
     (candidate : Inspector.forecast_candidate) =
   let tokens_of_bytes = Masc_tui_token_scale.estimate scale in
   let approx bytes = "\xe2\x89\x88" ^ signed_tokens (tokens_of_bytes bytes) in
   let head =
     match candidate.lane with
     | Inspector.Lane_not_applicable reason ->
-        fact (safe candidate.runtime_id) @ prose (safe reason ^ ".")
+        fact (safe candidate.runtime_id) @ detail ~dim:true (safe_detail reason ^ ".")
     | Inspector.Lane_agent_core -> fact (safe candidate.runtime_id)
   in
   (* The pinned figure names its lane only when it is not this one. *)
@@ -105,7 +104,7 @@ let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspecto
   in
   let parts_line =
     match candidate.parts with
-    | Error reason -> prose ("Fixed parts unknown: " ^ safe reason ^ ".")
+    | Error reason -> detail ~dim:true ("Fixed parts unknown: " ^ safe_detail reason ^ ".")
     | Ok parts ->
         fact
           (Printf.sprintf "fixed parts %s tok (turn #%d) + pinned %s tok %s"
@@ -130,9 +129,16 @@ let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspecto
           | (Inspector.Carried_from_ledger | Inspector.Carried_turn_start_after_seed_refusal | Inspector.Carried_turn_start_after_librarian_refusal | Inspector.Carried_from_turn_record _ | Inspector.Carried_turn_start _ | Inspector.Carried_turn_start_unknown _ | Inspector.Carried_librarian_progress _ | Inspector.Carried_past_librarian_point _) as origin -> Printf.sprintf
                 "History preview: send %d of %d original atoms, starting at #%d (%s tok estimated). %s."
                 carried.kept_atoms candidate.history_atoms carried.first_atom
-                (approx carried.transmitted_bytes) (origin_sentence origin)
+                (approx carried.transmitted_bytes) (origin_sentence ~safe_detail origin)
         in
-        fact history
+        (match carried.origin with
+         | Inspector.Carried_turn_start_unknown _ -> detail ~dim:false history
+         | Inspector.Carried_from_ledger | Inspector.Carried_from_turn_record _
+         | Inspector.Carried_turn_start_after_seed_refusal
+         | Inspector.Carried_turn_start_after_librarian_refusal
+         | Inspector.Carried_past_librarian_point _ | Inspector.Carried_turn_start _
+         | Inspector.Carried_librarian_snapshot _ | Inspector.Carried_librarian_progress _ ->
+             fact history)
         @ (match carried.counted_tokens with
            | Some counted ->
                fact
@@ -182,11 +188,11 @@ let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspecto
   @ assembly_lines
 ;;
 
-let lines ?(runtime_details = fun _ -> []) ~prose ~fact ~safe ~scale
+let lines ?(runtime_details = fun _ -> []) ~prose ~fact ~detail ~error ~safe ~safe_detail ~scale
     (forecast : (Inspector.forecast, string) result) =
   match forecast with
   | Error detail ->
-      [ Theme.bad () ^ "  Next request not forecast: " ^ safe detail ^ Ansi.reset ]
+      error ~label:"Next request not forecast" detail
   | Ok forecast ->
       let checkpoint =
         prose
@@ -197,12 +203,12 @@ let lines ?(runtime_details = fun _ -> []) ~prose ~fact ~safe ~scale
       in
       (match forecast.Inspector.walk with
        | Error refusal ->
-           [ Theme.bad () ^ "  Next request not walked: " ^ safe refusal ^ Ansi.reset ]
+           error ~label:"Next request not walked" refusal
            @ checkpoint
        | Ok walk ->
            fact (Printf.sprintf "Lane %s · %d candidates · execution order" (safe walk.lane_id) (List.length forecast.Inspector.candidates))
            @ List.concat_map
-             (candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~walk)
+             (candidate_lines ~runtime_details ~prose ~fact ~detail ~safe ~safe_detail ~scale ~walk)
              forecast.Inspector.candidates
            @ checkpoint
            @ prose "Figures marked ≈ estimate token equivalents from bytes; they are not provider usage."

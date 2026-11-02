@@ -11,10 +11,15 @@ val lines
   :  ?runtime_details:(string -> string list)
   -> prose:(string -> string list)
   -> fact:(string -> string list)
+  -> detail:(dim:bool -> string -> string list)
+  -> error:(label:string -> string -> string list)
   -> safe:(string -> string)
+  -> safe_detail:(string -> string)
   -> scale:Masc_tui_token_scale.t
   -> (Masc_tui_context_inspector.forecast, string) result
   -> string list
 (** [prose] folds a sentence to the pane in the dim colour, [fact] folds a row
-    of figures in its own colour, [safe] strips terminal control sequences
-    from server-supplied text. *)
+    of figures in its own colour, [detail] folds already-bounded diagnostics,
+    [error] bounds, sanitizes and folds a failure,
+    [safe] strips terminal controls from server-supplied identifiers, and
+    [safe_detail] bounds and sanitizes server-supplied diagnostic detail. *)

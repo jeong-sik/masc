@@ -389,14 +389,15 @@ let append_signal config signal =
          (Unix.error_message err))
 ;;
 
+module Occurrence_key_set = Set.Make (String)
+
 (* The keys of the last schedule list they were taken from. The store hands
    every tick of an unchanged ledger the same decoded list, and a decoded list
    is never changed in place, so such a tick reuses the keys instead of
    hashing every stored schedule again. A list the tick has not seen, from a
-   ledger that changed, takes its keys anew. Only [append_new_signals] reads
-   the table, and nothing writes it once it is kept. *)
+   ledger that changed, takes its keys anew. *)
 let keys_of_last_schedules :
-  (Schedule_domain.schedule_request list * (string, unit) Hashtbl.t) option Atomic.t
+  (Schedule_domain.schedule_request list * Occurrence_key_set.t) option Atomic.t
   =
   Atomic.make None
 ;;
@@ -423,11 +424,15 @@ let current_occurrence_keys (state : Schedule_store.state) =
   match Atomic.get keys_of_last_schedules with
   | Some (schedules, keys) when schedules == state.schedules -> keys
   | Some _ | None ->
-    let keys = Hashtbl.create (List.length state.schedules) in
-    List.iter
-      (fun request ->
-         Hashtbl.replace keys (Schedule_occurrence_id.to_string (occurrence_id request)) ())
-      state.schedules;
+    let keys =
+      List.fold_left
+        (fun acc request ->
+           Occurrence_key_set.add
+             (Schedule_occurrence_id.to_string (occurrence_id request))
+             acc)
+        Occurrence_key_set.empty
+        state.schedules
+    in
     Atomic.set keys_of_last_schedules (Some (state.schedules, keys));
     keys
 ;;
@@ -438,13 +443,10 @@ let append_new_signals config ~(state : Schedule_store.state) candidates =
     let* seen = read_seen config in
     (* Dedupe against the whole list read from disk, pruned keys included, so
        this tick's candidates are judged exactly as before the prune. *)
-    let seen_tbl = Hashtbl.create (List.length seen + List.length candidates) in
-    List.iter (fun key -> Hashtbl.replace seen_tbl key ()) seen;
+    let seen_set = Occurrence_key_set.of_list seen in
     let current = current_occurrence_keys state in
-    let kept = List.filter (fun key -> Hashtbl.mem current key) seen in
+    let kept = List.filter (fun key -> Occurrence_key_set.mem key current) seen in
     let pruned = List.compare_lengths kept seen < 0 in
-    let emitted_rev = ref [] in
-    let seen_rev = ref (List.rev kept) in
     (* The file is rewritten only when this tick changed its contents: it
        pruned a key or emitted a signal. A tick that does neither writes
        nothing.
@@ -455,18 +457,19 @@ let append_new_signals config ~(state : Schedule_store.state) candidates =
        write from the clean end of the candidate list, so a mid-list failure
        discarded [seen_rev] entirely and the next tick re-appended every
        signal this one had already committed to the JSONL store. *)
-    let persist_progress () =
-      match !emitted_rev, pruned with
+    let persist_progress ~emitted_rev ~seen_rev =
+      match emitted_rev, pruned with
       | [], false -> Ok ()
-      | [], true | _ :: _, _ -> write_seen config (List.rev !seen_rev)
+      | [], true | _ :: _, _ -> write_seen config (List.rev seen_rev)
     in
-    let rec loop = function
+    let rec loop seen_set seen_rev emitted_rev = function
       | [] ->
-        let* () = persist_progress () in
-        Ok (List.rev !emitted_rev)
+        let* () = persist_progress ~emitted_rev ~seen_rev in
+        Ok (List.rev emitted_rev)
       | (signal : wake_signal) :: rest ->
         let occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id in
-        if Hashtbl.mem seen_tbl occurrence_id then loop rest
+        if Occurrence_key_set.mem occurrence_id seen_set
+        then loop seen_set seen_rev emitted_rev rest
         else (
           match append_signal config signal with
           | Error msg ->
@@ -474,15 +477,16 @@ let append_new_signals config ~(state : Schedule_store.state) candidates =
                failure; this module stays telemetry-free (see the header),
                so a secondary failure here has nowhere to go. *)
             (* fire-and-forget: does not change which error is returned. *)
-            ignore (persist_progress ());
+            ignore (persist_progress ~emitted_rev ~seen_rev);
             Error msg
           | Ok () ->
-            Hashtbl.replace seen_tbl occurrence_id ();
-            seen_rev := occurrence_id :: !seen_rev;
-            emitted_rev := signal :: !emitted_rev;
-            loop rest)
+            loop
+              (Occurrence_key_set.add occurrence_id seen_set)
+              (occurrence_id :: seen_rev)
+              (signal :: emitted_rev)
+              rest)
     in
-    loop candidates)
+    loop seen_set (List.rev kept) [] candidates)
   |> function
   | Ok emitted -> Ok emitted
   | Error msg -> Error (Signal_store_error msg)

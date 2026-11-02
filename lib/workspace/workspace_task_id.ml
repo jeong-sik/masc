@@ -47,6 +47,7 @@ let read_archive_entries_for_write config =
      | None -> Error "the document has no \"tasks\" list")
 
 module Archive_ids = Map.Make (String)
+module Archive_id_set = Set.Make (String)
 type archive_identity = Unique of Yojson.Safe.t | Duplicate
 type archive_index = { rows : archive_identity Archive_ids.t; unidentified : bool }
 
@@ -121,10 +122,15 @@ let append_archive_tasks config (tasks : task list) =
       | Ok existing_rows ->
         let new_rows = List.map task_to_yojson tasks in
         let id_of row = Json_util.get_string row "id" in
-        let incoming = Hashtbl.create 64 in
-        List.iter
-          (fun row -> Option.iter (fun id -> Hashtbl.replace incoming id ()) (id_of row))
-          new_rows;
+        let incoming =
+          List.fold_left
+            (fun acc row ->
+               match id_of row with
+               | Some id -> Archive_id_set.add id acc
+               | None -> acc)
+            Archive_id_set.empty
+            new_rows
+        in
         (* The rows given are the current copies, so each replaces the archive
            row with the same id, whatever that row holds: an older copy, or a
            row that does not decode as a Task. Every other row stays as it is,
@@ -134,20 +140,23 @@ let append_archive_tasks config (tasks : task list) =
           List.filter
             (fun row ->
               match id_of row with
-              | Some id -> not (Hashtbl.mem incoming id)
+              | Some id -> not (Archive_id_set.mem id incoming)
               | None -> true)
             existing_rows
         in
-        let seen = Hashtbl.create 64 in
-        let appended =
-          List.filter
-            (fun row ->
+        let _seen, rev_appended =
+          List.fold_left
+            (fun (seen, acc) row ->
               match id_of row with
               | Some id ->
-                if Hashtbl.mem seen id then false else (Hashtbl.add seen id (); true)
-              | None -> true)
+                if Archive_id_set.mem id seen
+                then seen, acc
+                else Archive_id_set.add id seen, row :: acc
+              | None -> seen, row :: acc)
+            (Archive_id_set.empty, [])
             new_rows
         in
+        let appended = List.rev rev_appended in
         let archive_json = `Assoc [
           ("tasks", `List (kept @ appended));
           ("last_updated", `String (now_iso ()));
@@ -190,9 +199,10 @@ let drop_archive_tasks config ~ids =
              "tasks-archive.json could not be read, so nothing was dropped: %s"
              detail)
       | Ok entries ->
+        let id_set = Archive_id_set.of_list ids in
         let kept = List.filter (fun entry ->
           match Json_util.get_string entry "id" with
-          | Some id -> not (List.mem id ids)
+          | Some id -> not (Archive_id_set.mem id id_set)
           | None -> true
         ) entries in
         let archive_json = `Assoc [

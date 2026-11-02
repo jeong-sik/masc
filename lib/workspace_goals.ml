@@ -204,19 +204,16 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
        does not decode renders the explicit [ledger_error] marker per goal —
        never the pre-verification default, which would disguise corruption as
        "not verified yet". *)
-    let records = Goal_verification.load_records_authoritative ctx.config in
+    let records_by_goal_id =
+      Goal_verification.load_records_by_goal_id_authoritative ctx.config
+    in
     let measurements = Goal_measurement.load ctx.config in
     let goal_json (goal : Goal_store.goal) =
       let verification =
-        match records with
+        match records_by_goal_id with
         | Error detail -> Goal_verification.ledger_error_to_yojson detail
-        | Ok records ->
-          (match
-             List.find_opt
-               (fun (record : Goal_verification.record) ->
-                 String.equal record.goal_id goal.id)
-               records
-           with
+        | Ok records_by_goal_id ->
+          (match Goal_store.Goal_id_map.find_opt goal.id records_by_goal_id with
            | Some record -> record
            | None -> Goal_verification.default_record ~goal_id:goal.id)
           |> Goal_verification.record_to_yojson_for_goal ~goal

@@ -16,12 +16,12 @@ let read ~config ~task_id =
   if task_id = "" then Error Missing_task_id
   else
     try
-      match Workspace_backlog.read_backlog_r config with
+      match Workspace_backlog.read_prepared_backlog_r config with
       | Error _ -> Error Task_detail_unavailable
-      | Ok backlog ->
-          match List.find_opt
-            (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-            backlog.tasks with
+      | Ok prepared ->
+          match
+            Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id
+          with
           | None -> Error Task_not_found
           | Some task ->
               match Workspace_goal_index.read_goal_task_links_authoritative_r config with

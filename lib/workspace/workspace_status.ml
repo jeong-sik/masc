@@ -76,7 +76,7 @@ let status config =
 
   Buffer.add_string buf "\nQuest Board:\n";
 
-  let sorted_tasks = List.sort (fun a b -> compare a.priority b.priority) backlog.tasks in
+  let sorted_tasks = List.sort (fun a b -> Int.compare a.priority b.priority) backlog.tasks in
   let active_tasks, done_count, cancelled_count =
     List.fold_left
       (fun (active, done_cnt, cancelled_cnt) task ->

@@ -188,6 +188,11 @@ val derived_last_non_immediate_served :
   last_transition:transition_receipt option ->
   projected_dispositions:durable_disposition list ->
   Keeper_event_queue.urgency option
+(** Reconstruct the most recently served non-immediate urgency across legacy or
+    partially projected snapshots in strict reverse-chronological precedence:
+    1. [transition_outbox] (an applied transition awaiting projection),
+    2. [last_transition] (the latest projected full receipt),
+    3. [projected_dispositions] (newest-first displaced history). *)
 
 type frontier
 (** The point in queue history at which one reader loaded the state. *)

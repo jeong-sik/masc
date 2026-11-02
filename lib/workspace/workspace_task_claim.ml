@@ -71,12 +71,18 @@ let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
   let held_ids =
     active_owned_task_ids_for_agent config ~agent_name backlog
     |> List.filter (fun task_id -> not (String.equal task_id requested_task_id))
+    |> Task_id_set.of_list
   in
-  match
-    List.filter (fun (task : Masc_domain.task) -> List.mem task.id held_ids) backlog.tasks
-  with
-  | [] -> None
-  | held_tasks -> Some (held_tasks_refusal_message ~agent_name held_tasks)
+  if Task_id_set.is_empty held_ids
+  then None
+  else (
+    match
+      List.filter
+        (fun (task : Masc_domain.task) -> Task_id_set.mem task.id held_ids)
+        backlog.tasks
+    with
+    | [] -> None
+    | held_tasks -> Some (held_tasks_refusal_message ~agent_name held_tasks))
 ;;
 
 let run_post_commit ~task_id ~agent_name ~action label f =

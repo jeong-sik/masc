@@ -9,6 +9,8 @@ type link_goalless_task_to_goal_error =
   | Already_linked_to_goals of string list
   | Link_write_failed of goal_task_links_write_error
 
+module Task_id_map : Map.S with type key = string
+
 (** Build a reverse index from goal_id to its linked tasks.
 
     [goal_task_links] is the authoritative source of goal-task
@@ -53,6 +55,16 @@ val build_task_goal_index
   :  ?goal_task_links:(string * string list) list
   -> unit
   -> (string, string list) Hashtbl.t
+
+val build_task_goal_map
+  :  ?goal_task_links:(string * string list) list
+  -> unit
+  -> string list Task_id_map.t
+
+val goals_for_task_in_map
+  :  string list Task_id_map.t
+  -> task_id:string
+  -> string list
 
 (** Path to the persistent goal-task link registry. *)
 val goal_task_links_path : Workspace_utils_backend_setup.config -> string
@@ -141,6 +153,9 @@ val build_goal_task_index_for_config :
 
 val build_task_goal_index_for_config :
   Workspace_utils_backend_setup.config -> (string, string list) Hashtbl.t
+
+val build_task_goal_map_for_config :
+  Workspace_utils_backend_setup.config -> string list Task_id_map.t
 
 (** Remove one Task from every Goal under the links lock. Callers deleting
     Tasks hold the backlog lock through this operation. Primary-only mutation;

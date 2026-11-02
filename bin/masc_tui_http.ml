@@ -728,10 +728,13 @@ let get_msx_json ~host ~port ~path = get_json_decoded ~timeout_sec:(Some (reques
 (* The query fields that bind a read to the workspace this terminal
    confirmed. The server compares both canonical paths with its own and
    answers 409 when another workspace answers on the same port. *)
-let expected_workspace_query (expected : Masc.Tui_decode.server_identity) =
+let expected_workspace_paths_query ~base_path ~masc_root =
   let encoded value = Uri.pct_encode ~component:`Query_value (Masc.Tui_decode.Canonical_path.to_string value) in
   Printf.sprintf "expected_base_path=%s&expected_masc_root=%s"
-    (encoded expected.sid_base_path) (encoded expected.sid_masc_root)
+    (encoded base_path) (encoded masc_root)
+
+let expected_workspace_query (expected : Masc.Tui_decode.server_identity) =
+  expected_workspace_paths_query ~base_path:expected.sid_base_path ~masc_root:expected.sid_masc_root
 
 let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
@@ -1745,13 +1748,14 @@ let workspace_read_attested headers =
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events ~on_identity ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
+let observe_runtime_events ~on_identity ~clock ~expected_base_path ~expected_masc_root
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
   let url =
     url_of ~host ~port
-      ~path:(observer_stream_path ^ "&" ^ expected_workspace_query expected_workspace)
+      ~path:(observer_stream_path ^ "&" ^ expected_workspace_paths_query
+               ~base_path:expected_base_path ~masc_root:expected_masc_root)
   in
   let headers =
     ("Accept", "text/event-stream")

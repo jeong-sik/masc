@@ -140,6 +140,6 @@ val moves_goal : phase:t -> action:action -> bool
 
 val offers_public_action : phase:t -> action:Public_action.t -> bool
 (** Whether the operator can use an action from this phase. In addition to
-    phase changes, a completion request while [Verifying] can re-arm or
-    reconcile the existing proof. This predicate owns both UI projections;
+    phase changes, a completion request while [Verifying] can retry a matching
+    pending request or reconcile its committed proof. This predicate owns both UI projections;
     it does not claim that a verifier has started or finished. *)

@@ -371,6 +371,40 @@ describe('GoalTree', () => {
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['missing', undefined],
+    ['idle', { state: 'current', completion: { state: 'idle' } }],
+    ['stale', { state: 'stale', historical: { state: 'pending', requestId: 'old-request',
+      requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'old-revision',
+        title: 'Old goal', metric: null, target_value: null } } }],
+    ['confirmed', { state: 'current', completion: { state: 'proven', requestId: 'confirmed-request',
+      runId: 'confirmed-run', evidence: 'proof', recordedAt: '2026-10-30T07:45:56Z', actor: 'verifier',
+      criterion: { revision: 'revision-default', title: 'Uncertain proof', metric: null, target_value: null },
+      confirmation: { operatorId: 'operator', confirmedAt: '2026-10-30T08:00:00Z' } } }],
+  ] satisfies Array<[string, GoalTreeNode['verification']]>)
+  ('does not offer a retry for a verifying Goal with %s proof', async (_description, verification) => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-uncertain-proof', 'Uncertain proof'), phase: 'verifying', verification,
+      goal_fsm: { state: 'verifying', source: 'goal.phase', next_actions: ['request_complete', 'pause'],
+        activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    await screen.findByRole('button', { name: 'Pause' })
+    expect(screen.queryByRole('button', { name: 'Retry verification' })).toBeNull()
+    if (_description === 'idle') {
+      expect(screen.getByText('검증 · 원장에 현재 요청 없음').getAttribute('title'))
+        .toContain('이전 실행의 종료 여부는 확인되지 않았습니다')
+    }
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
   it('requests goal completion through the goal transition tool and refreshes goal data', async () => {
     const goal = {
       ...makeGoal('goal-ready', 'Ready goal'),

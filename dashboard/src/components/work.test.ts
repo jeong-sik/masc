@@ -237,11 +237,11 @@ describe('Work', () => {
     })
 
     it.each([
-      ['idle', { state: 'current', completion: { state: 'idle' } }, '검증 · 미제출'],
+      ['idle', { state: 'current', completion: { state: 'idle' } }, '검증 · 원장에 현재 요청 없음'],
       ['stale', { state: 'stale', historical: { state: 'proven',
         criterion: { revision: 'old', title: 'Old goal', metric: null, target_value: null },
         requestId: 'old-request', runId: 'old-run', evidence: 'old evidence',
-        recordedAt: '2026-09-08', actor: 'verifier_exact' } }, '검증 · 기준 변경 · 재검증 필요'],
+        recordedAt: '2026-09-08', actor: 'verifier_exact' } }, '검증 · 이전 기준의 기록'],
       ['unreadable', { state: 'unreadable', detail: 'primary ledger failed' }, '검증 · 확인 불가'],
     ] as const)('shows %s proof independently of a completed Goal phase', (_state, verification, label) => {
       goals.value = [{ id: 'proof-goal', title: 'Measured goal', priority: 1,

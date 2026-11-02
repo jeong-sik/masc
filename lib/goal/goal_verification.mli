@@ -70,6 +70,25 @@ type criterion_relation = Current | Stale_criterion
 
 val relation_for_goal : goal:Goal_store.goal -> record -> criterion_relation
 
+type verifying_issue =
+  | Missing_proof_record
+  | Idle_proof_record
+  | Mismatched_proof_record
+  | Confirmed_proof_record
+
+type verifying_record =
+  | Current_pending of record * string * Goal_store.criterion
+  | Current_verdict of record * verdict
+  | Unavailable_request of verifying_issue
+
+val classify_verifying_record : goal:Goal_store.goal -> record option -> verifying_record
+(** Classify a proof read against the complete current Goal criterion. Missing,
+    idle, mismatched and already-confirmed records do not establish that an
+    earlier verification ended and cannot authorize a new request. The caller
+    must read the record under the Goal transaction before using this result. *)
+
+val verifying_issue_to_string : verifying_issue -> string
+
 val record_to_yojson_for_goal : goal:Goal_store.goal -> record -> Yojson.Safe.t
 (** Current-Goal projection. A mismatched criterion is [stale_criterion], with
     its historical completion retained under [historical_completion]. It must
@@ -143,7 +162,10 @@ val mark_proof_pending :
   goal_id:string ->
   criterion:Goal_store.criterion ->
   (record, string) result
-(** Persist before invoking a reviewer. The same pending criterion and exact
+(** The caller holds the Goal transaction and establishes that the Goal is
+    Executing before creating or replacing a request. This low-level function
+    does not check the phase or establish that earlier originals have ended.
+    Persist before invoking a reviewer. The same pending criterion and exact
     submitted evidence return the identical request. Omitted evidence preserves
     the same criterion's prior snapshot, including after refutation; explicit
     evidence replaces it. A changed criterion does not inherit omitted evidence.
@@ -156,7 +178,8 @@ val record_proof_verdict :
   goal_id:string ->
   verdict ->
   (record, string) result
-(** Requires the exact pending request identity and criterion. [before_commit]
+(** The caller holds the Goal transaction. Requires the exact pending request
+    identity and criterion. [before_commit]
     runs under the proof lock after identity validation and before a new verdict
     write. It must not re-enter Goal/proof mutations. Refusal and exact replay
     never invoke it. This preserves Candle-before-proof ordering without
@@ -173,11 +196,13 @@ val record_human_confirmation : Workspace_utils.config -> goal_id:string -> verd
 
 type review_binding_error =
   | No_current_review of string
-      (** An authoritative read found no matching, currently Verifying proof
-          request (including a missing Goal). An old retry can be retired. *)
+      (** An authoritative read found that the Goal is no longer Verifying,
+          is missing, or has a current committed verdict. An old retry can be
+          retired. *)
   | Binding_unavailable of string
-      (** Goal/proof authority could not be read. This does not establish that
-          the request ended and must not consume its existing retry. *)
+      (** Goal/proof authority could not be read or the Verifying record is
+          missing, idle, mismatched or already confirmed. This does not
+          establish that the request ended and must not consume its retry. *)
 
 val review_binding_error_to_string : review_binding_error -> string
 

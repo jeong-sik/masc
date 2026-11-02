@@ -90,8 +90,8 @@ let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
 
    List candidate Goals, then revalidate every transition under the Goal lock
    against the primary ledger. A display recovery snapshot cannot authorize
-   review or reconciliation. Recovery re-arms only still-Verifying Goals; an
-   ordinary criterion edit must not become an implicit completion request. *)
+   review or reconciliation. Recovery retains only a matching pending request;
+   a missing or inconsistent record does not authorize a new request. *)
 
 (* Why a scan produced no work: a store this build cannot read. It is
    recorded as a durable row and one WARN line (RFC-0444 §2.3 row 7). *)
@@ -101,10 +101,9 @@ let scan_failure_to_string = function
   | Scan_skipped unavailable -> Goal_store.unavailable_to_string unavailable
 ;;
 
-(* One Verifying goal whose ledger the scan could read but not reconcile or
-   re-arm. The scan skips that goal and keeps collecting the others; its
-   pending row stays durable, and the Goal rows the operator reads carry the
-   failure until a scan no longer finds it. *)
+(* One Verifying goal whose ledger the scan could not reconcile or bind to a
+   current request. The scan skips it and keeps collecting the others; Goal
+   rows carry the failure until a scan no longer finds it. *)
 type reconcile_failure =
   { failed_goal_id : string
   ; step : Goal_reconcile_step.t
@@ -127,7 +126,7 @@ let collect_pending config : (scan, scan_failure) result =
         Ok None
       | Ok Workspace_goals.No_committed_proof ->
         Workspace_goals.recover_current_proof config ~goal_id:goal.id
-        |> Result.map (fun rearmed -> if rearmed then Some { goal_id = goal.id } else None)
+        |> Result.map (fun pending -> if pending then Some { goal_id = goal.id } else None)
         |> Result.map_error (fun failure -> Goal_reconcile_step.Rearm_proof, failure)
     in
     let collected, unreconciled =

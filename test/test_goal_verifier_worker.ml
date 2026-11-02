@@ -87,8 +87,8 @@ let submit_measurement config goal_id value =
 let pending config =
   let goal,_ = stored (Goal_store.upsert_goal config ~title:"Measure the original result"
     ~metric:measurement_reference ~target_value:"100" ()) in
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
   submit_measurement config goal.id 100;
+  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
   goal.id
 let prepared config store =
   let goal_id = pending config in
@@ -553,6 +553,7 @@ let test_actual_goal_commit_reply_loss_and_conflict () =
           ~decision:Workspace_goals.Proof_proven ~evidence:"actual proof" in
         if Tool_result.is_success result then Error "actual proof committed but reply lost"
         else Error (Tool_result.message result) in
+      (* Model an old or out-of-contract writer replacing the pending snapshot. *)
       if conflict then submit_measurement config subject.goal_id 101;
       (match W.commit ~store ~retained ~change:{P.before; after} ~observe ~apply with
        | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "commit frontier was not retained");

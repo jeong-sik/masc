@@ -449,19 +449,19 @@ let verdict ~width tone headline reason =
    the store's reason wraps under it like a verdict's. *)
 let unreconciled_heading = function
   | Goal_reconcile_step.Reconcile_proof -> "verifier could not apply the committed proof"
-  | Goal_reconcile_step.Rearm_proof -> "verifier could not re-arm the request"
+  | Goal_reconcile_step.Rearm_proof -> "verifier could not resolve the proof request"
   | Goal_reconcile_step.Read_original -> "verifier could not read the retained request"
 
-(* [c] on a Verifying goal sends [request_complete] again, the explicit retry
-   of RFC-0387 §5: under the goal lock it applies a committed proof or
-   re-arms a missing request -- the two steps a scan can fail -- and answers
-   with the reason when it still cannot. [o] reopens the goal, which archives
+(* [c] on a Verifying goal sends [request_complete] again: under the goal lock
+   it applies a committed proof or retries the matching pending request. An
+   unavailable binding cannot establish that an older review ended. [o]
+   reopens the goal, which archives
    a committed proof, so it is offered as taking the goal back, never as the
    way to unstick it. *)
 let verifying_next_step ~can_retry unreconciled =
   if not can_retry then
     ( Unreadable
-    , "verification binding unavailable - check connection, server storage and runtime, then [r] refresh; [x] requests drop" )
+    , "verification binding unavailable - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop" )
   else match unreconciled with
   | Some (_ : Tui_decode.verifier_unreconciled) ->
     ( Refused

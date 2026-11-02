@@ -439,7 +439,7 @@ let planning_proof_detail ~ko (goal : planning_goal) =
       , Printf.sprintf "%s: %s"
           (if ko then match blocked.vu_step with
            | Goal_reconcile_step.Reconcile_proof -> "검증기가 확정 증거를 적용하지 못함"
-           | Goal_reconcile_step.Rearm_proof -> "검증기가 요청을 다시 준비하지 못함"
+           | Goal_reconcile_step.Rearm_proof -> "검증기가 증명 요청을 확인하지 못함"
            | Goal_reconcile_step.Read_original -> "검증기가 보존된 요청을 읽지 못함"
            else Planning_detail.unreconciled_heading blocked.vu_step)
           (Terminal_text.single_line blocked.vu_detail) )

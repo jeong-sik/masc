@@ -1333,11 +1333,11 @@ let refuted_verdict reason =
     ]
 ;;
 
-let decoded_proof ?verification ?last_review_note ?(extra = []) () =
+let decoded_proof ?verification ?last_review_note ?(phase = "executing") ?(extra = []) () =
   let fields =
     [ "id", `String "goal-x"
     ; "title", `String "Goal x"
-    ; "phase", `String "executing"
+    ; "phase", `String phase
     ; "priority", `Int 1
     ]
     @ (if List.mem_assoc "verifier_unreconciled" extra
@@ -1391,8 +1391,8 @@ let test_planning_retry_binding_tracks_the_observed_request () =
       "request_id", `String request_id; "requested_at", `String "2026-10-30T07:45:56Z";
       "criterion", criterion revision];
     "updated_at", `String "2026-10-30T07:45:56Z"] in
-  let decode revision verification =
-    decoded_proof ~extra:["criterion_revision", `String revision] ~verification () in
+  let decode ?(phase="executing") revision verification =
+    decoded_proof ~phase ~extra:["criterion_revision", `String revision] ~verification () in
   let current = decode "revision-a" (pending "revision-a" "request-a") in
   Alcotest.check Alcotest.bool "current request is retained" true
     (match current.Tui_decode.pg_retry_binding with
@@ -1400,7 +1400,23 @@ let test_planning_retry_binding_tracks_the_observed_request () =
      | Some _ | None -> false);
   let stale = decode "revision-b" (pending "revision-a" "request-a") in
   Alcotest.check Alcotest.bool "another criterion grants no retry binding" true
-    (Option.is_none stale.Tui_decode.pg_retry_binding)
+    (Option.is_none stale.Tui_decode.pg_retry_binding);
+  let verifying = decode ~phase:"verifying" "revision-a" (pending "revision-a" "request-a") in
+  Alcotest.check Alcotest.bool "a current verifying request keeps its binding" true
+    (match verifying.Tui_decode.pg_retry_binding with
+     | Some {grb_phase=Completion_verifying; grb_request_id=Some "request-a"; _} -> true
+     | Some _ | None -> false);
+  let idle = decode ~phase:"verifying" "revision-a" (verification_json "idle") in
+  Alcotest.check Alcotest.bool "an idle verifying record grants no retry" true
+    (Option.is_none idle.Tui_decode.pg_retry_binding);
+  let stale_projection = `Assoc ["goal_id", `String "goal-x";
+    "completion", `Assoc ["state", `String "stale_criterion";
+      "historical_completion", `Assoc ["state", `String "proof_pending";
+        "request_id", `String "old-request"; "requested_at", `String "2026-10-30T07:45:56Z";
+        "criterion", criterion "revision-a"]]; "updated_at", `String "2026-10-30T07:45:56Z"] in
+  let stale_verifying = decode ~phase:"verifying" "revision-b" stale_projection in
+  Alcotest.check Alcotest.bool "a stale verifying record grants no retry" true
+    (Option.is_none stale_verifying.Tui_decode.pg_retry_binding)
 ;;
 
 (* The phase says "executing" for a goal nobody asked about and for one the

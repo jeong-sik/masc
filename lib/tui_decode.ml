@@ -1314,11 +1314,14 @@ let decode_goal_retry_binding ~goal_id ~phase ~criterion_revision verification =
       if stale then not (String.equal revision proof_revision)
       else String.equal revision proof_revision in
     let request =
+      if stale && grb_phase = Completion_verifying then None else
       match Goal_verification.completion_state_of_yojson completion with
-      | Ok Goal_verification.Completion_idle when not stale -> Some None
+      | Ok Goal_verification.Completion_idle when not stale && grb_phase = Completion_executing -> Some None
       | Ok (Proof_pending {request_id; criterion; _}) when valid_criterion criterion -> Some (Some request_id)
-      | Ok (Proof_proven {request_id; criterion; _} | Proof_refuted {request_id; criterion; _}
-          | Human_confirmed ({request_id; criterion; _}, _)) when valid_criterion criterion -> Some (Some request_id)
+      | Ok (Proof_proven {request_id; criterion; _} | Proof_refuted {request_id; criterion; _})
+        when valid_criterion criterion -> Some (Some request_id)
+      | Ok (Human_confirmed ({request_id; criterion; _}, _))
+        when grb_phase = Completion_executing && valid_criterion criterion -> Some (Some request_id)
       | Ok (Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _) | Error _ -> None in
     Option.map (fun grb_request_id -> {grb_phase; grb_criterion_revision=revision; grb_request_id}) request
   | (Some _ | None), (Some _ | None),

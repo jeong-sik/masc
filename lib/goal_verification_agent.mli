@@ -113,10 +113,9 @@ module For_testing : sig
       It is recorded as a durable row and a WARN line. *)
   type scan_failure = Scan_skipped of Goal_store.unavailable
 
-  (** One Verifying goal whose ledger the scan could read but not reconcile
-      or re-arm. The scan skips it and keeps collecting the other goals; the
-      scan that calls {!collect_pending} logs it at ERROR, and its pending
-      row stays durable. *)
+  (** One Verifying goal whose proof the scan could not reconcile or bind.
+      The scan skips it and keeps collecting the other goals; the scan that
+      calls {!collect_pending} logs it at ERROR. *)
   type reconcile_failure =
     { failed_goal_id : string
     ; step : Goal_reconcile_step.t
@@ -134,10 +133,10 @@ module For_testing : sig
   val collect_pending :
     Workspace_utils_backend_setup.config ->
     (scan, scan_failure) result
-  (** Reconciles or re-arms only currently-Verifying Goals through
+  (** Reconciles or retains the current request of a Verifying Goal through
       authoritative, locked reads. A goal that fails reconciliation lands in
       [unreconciled] and does not stop the other goals from being collected.
-      It writes the Goal store when it reconciles or re-arms a proof, and
+      It writes the Goal store when it reconciles a proof, and
       writes no log: the row and the WARN line for a skipped scan, and the
       ERROR line for each unreconciled goal, come from the scan that calls it
       ({!drain_once}, the daemon). *)

@@ -173,14 +173,18 @@ val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backen
   (Goal_store.goal * Goal_verification.record, proof_request_error) result
 (** Bind a proof request and Verifying phase to the same current criterion.
     Explicit Board/Fusion/Task source references are captured with the request;
-    omitting references on retry retains the same immutable submitted bytes. *)
+    omitting references on retry retains the same immutable submitted bytes.
+    While Verifying, an existing pending request keeps its identity and
+    submitted evidence. Different explicit evidence is refused while the prior
+    review may still be active. A current committed verdict is reconciled. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, Goal_store.write_error) result
-(** Recover a missing/stale request only while the current Goal remains Verifying.
+(** Retain a matching pending request only while the Goal remains Verifying.
     A current committed verdict observed under that same Goal lock is reconciled
-    instead of being replaced. [Ok false] means no request is ready for review,
-    either because the phase changed or because its verdict was reconciled. *)
+    instead of being replaced. Missing, idle, mismatched and confirmed records
+    are refused: they do not prove that an earlier review ended. [Ok false]
+    means the phase changed or its verdict was reconciled. *)
 
 val confirm_completion : ?after_confirmation:confirmation_step ->
   Workspace_utils_backend_setup.config -> goal_id:string ->

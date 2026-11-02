@@ -46,8 +46,8 @@ let submit_items config goal_id items =
 let pending ?id ?(items=evidence) config =
   let goal, _ = stored (Goal_store.upsert_goal config ?id
     ~title:"Measure the actual result" ~metric:"artifact:measurement.json" ~target_value:"100" ()) in
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
   submit_items config goal.id items;
+  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
   goal.id
 let authority config goal_id = get (A.create_goal_review ~config ~goal_id)
 let original authority = get (V.prepare ~attempt:0 ~authority)
@@ -157,6 +157,8 @@ let test_other_subject_evidence_and_workspace_refuse () = with_workspace (fun co
   let admitted = authority config goal_id in
   let prepared = original admitted in
   let other_goal = authority config (pending config) in
+  (* Model an old or out-of-contract writer replacing the pending snapshot;
+     the public Verifying retry no longer permits this replacement. *)
   submit_items config goal_id [Evidence.Evidence_note "Changed submission"];
   let changed_submission = authority config goal_id in
   ignore (stored (Goal_store.upsert_goal config ~id:goal_id ~target_value:"101" ()));

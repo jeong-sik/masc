@@ -4962,6 +4962,21 @@ let inspect_file_cmd =
     ~doc:"Inspect original media as JSON with rendered content. No LLM verdict or Task/Goal transition.")
     Term.(const (fun base_path path -> Masc_cli_inspect_file.run ~base_path ~path) $ base_path $ path)
 
+let inspect_checkpoint_cmd =
+  let workspace =
+    let doc = "Workspace containing the Keeper checkpoint." in
+    Arg.(required & opt (some dir) None & info ["base-path"] ~docv:"PATH" ~doc)
+  in
+  let keeper =
+    let doc = "Keeper whose canonical checkpoint is inspected." in
+    Arg.(required & opt (some string) None & info ["keeper"] ~docv:"NAME" ~doc)
+  in
+  Cmd.v
+    (Cmd.info "inspect-checkpoint"
+       ~doc:"Print a decoded canonical Keeper checkpoint, including conversation context, as JSON.")
+    Term.(const (fun base_path keeper_name ->
+      Masc_cli_checkpoint_inspect.run ~base_path ~keeper_name) $ workspace $ keeper)
+
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -4973,6 +4988,7 @@ let cmd =
     info
     [ init_cmd
     ; inspect_file_cmd
+    ; inspect_checkpoint_cmd
     ; skills_refresh_cmd
     ; start_cmd
     ; schema_observe_cmd

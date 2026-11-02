@@ -1829,14 +1829,22 @@ let ensure_apple_volume role ~volume_name ~size ~timeout_sec =
     read here, the way the two inspect parsers are kept apart. *)
 let msb_volume_names_of_json = function
   | `List entries ->
-    let open Yojson.Safe.Util in
-    Ok
-      (List.filter_map
-         (fun entry ->
-           match member "name" entry with
-           | `String name -> Some name
-           | _ -> None)
-         entries)
+    let malformed index =
+      Error
+        (Printf.sprintf
+           "msb volume list row %d must be an object with one nonblank name"
+           index)
+    in
+    let rec parse index names = function
+      | [] -> Ok (List.rev names)
+      | `Assoc fields :: rest ->
+        (match List.filter (fun (key, _) -> String.equal key "name") fields with
+         | [ (_, `String name) ] when not (String.equal (String.trim name) "") ->
+           parse (index + 1) (name :: names) rest
+         | _ -> malformed index)
+      | _ :: _ -> malformed index
+    in
+    parse 0 [] entries
   | _ -> Error "msb volume list did not return a JSON array"
 ;;
 

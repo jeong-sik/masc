@@ -1786,6 +1786,60 @@ let test_an_unreadable_volume_listing_is_an_error () =
     (Result.is_error result)
 ;;
 
+let test_msb_volume_creation_requires_an_identified_inventory () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "msb-volume-inventory-" in
+  let cli = Filename.concat dir "msb" in
+  let log = Filename.concat dir "calls" in
+  let previous_path = Sys.getenv_opt "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ Option.value previous_path ~default:"");
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      (match previous_path with
+       | Some path -> Unix.putenv "PATH" path
+       | None -> Unix.unsetenv "PATH");
+      List.iter (fun path -> if Sys.file_exists path then Unix.unlink path) [ cli; log ];
+      Unix.rmdir dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let check bytes expected expected_calls =
+    Out_channel.with_open_bin log (fun _ -> ());
+    Out_channel.with_open_bin cli (fun out ->
+      Printf.fprintf out
+        "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\n\
+         case \"$*\" in\n\
+         'volume list --format json') printf '%%s\\n' %s;;\n\
+         'volume create --kind dir target') exit 0;;\n\
+         *) exit 99;;\n\
+         esac\n"
+        (Filename.quote log) (Filename.quote bytes));
+    Unix.chmod cli 0o755;
+    let result =
+      M.ensure_work_volume_for Backend.Microsandbox
+        ~volume_name:"target" ~size:"128g" ~timeout_sec:5.0
+    in
+    (match expected, result with
+     | `Created, Ok `Created | `Present, Ok `Already_present | `Refused, Error _ -> ()
+     | (`Created | `Present | `Refused), (Ok _ | Error _) ->
+       Alcotest.failf "unexpected msb provisioning outcome for %s" bytes);
+    Alcotest.(check (list string)) "only confirmed absence permits create"
+      expected_calls (In_channel.with_open_bin log In_channel.input_lines)
+  in
+  let listing = [ "volume list --format json" ] in
+  check "[]" `Created (listing @ [ "volume create --kind dir target" ]);
+  check {|[{"name":"target","kind":"dir"}]|} `Present listing;
+  List.iter (fun bytes -> check bytes `Refused listing)
+    [ {|[{}]|}; {|[{"id":"target"}]|}; {|[{"name":42}]|}
+    ; {|[null]|}; {|["target"]|}; {|[{"name":""}]|}; {|[{"name":"  \t"}]|}
+    ; {|[{"name":"other"},{}]|}
+    ; {|[{"name":"other","name":"target"}]|}
+    ; {|[{"name":"target","name":"target"}]|}
+    ]
+;;
+
 (* The build volume goes through the same [container volume] probe and
    sized create as the work volume; only the error code differs. A fake
    [container] on PATH records every call and keeps the volume's existence
@@ -5142,6 +5196,8 @@ let () =
             test_a_volume_still_listed_is_an_error
         ; Alcotest.test_case "an unreadable volume listing is an error" `Quick
             test_an_unreadable_volume_listing_is_an_error
+        ; Alcotest.test_case "msb volume creation requires an identified inventory" `Quick
+            test_msb_volume_creation_requires_an_identified_inventory
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick
             test_recreate_apple_build_volume_shares_the_work_volume_commands
         ; Alcotest.test_case "work create timeout reconciles confirmed presence" `Quick

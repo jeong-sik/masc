@@ -94,6 +94,7 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
         ; content = "references a post_id that was never created"
         ; hearth = None
         ; updated_at = Some (Time_compat.now ())
+        ; audience = None
         }
   }
 ;;
@@ -511,6 +512,7 @@ let comment_event ~meta ~post_id ~comment_id ~author content =
           ; content
           ; hearth = None
           ; updated_at = Some (Time_compat.now ())
+          ; audience = Some Keeper_event_queue.Audience_thread_participants
           }
     }
   in
@@ -693,14 +695,14 @@ let accepted_comment_identity_survives_queue_projection ~shape () =
     | Ok comment -> comment
     | Error error -> fail (Board.show_board_error error)
   in
-  let signal =
+  let addressed =
     match !captured with
-    | Some addressed -> addressed.Board_dispatch.signal
+    | Some addressed -> addressed
     | None -> fail "accepted comment did not emit a signal"
   in
   let stimulus : Keeper_event_queue.stimulus =
     { post_id; urgency = Normal; arrived_at = Time_compat.now ()
-    ; payload = Board_signal (Signal.board_stimulus_of_board_signal signal)
+    ; payload = Board_signal (Signal.board_stimulus_of_board_signal addressed)
     }
   in
   let restored =
@@ -743,6 +745,7 @@ let test_malformed_queued_comment_identity_is_a_failed_read () =
     ; content = "a reply"
     ; hearth = None
     ; updated_at = None
+    ; audience = None
     }
   in
   let refused what stimulus =

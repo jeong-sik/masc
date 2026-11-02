@@ -409,6 +409,91 @@ let test_queued_edits_keep_their_captured_content () =
     (event.Keeper_world_observation.event_kind = Keeper_world_observation.Board_post_updated)) events
 ;;
 
+let test_queued_edits_keep_their_recorded_audience () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let meta =
+    keeper_meta ~mention_targets:[ "alice-alias"; "bob-alias" ] config "multireader"
+  in
+  register config meta;
+  let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+    ~title:"Original title" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let edit title body = get (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+    ~editor:"editor" ~title ~body ~content:body ()) in
+  let _first = edit "First title" "@alice-alias first addressed body" in
+  let _second = edit "Second title" "@bob-alias second addressed body" in
+  let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path meta.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "both addressed edits are durable before consumption" 2
+    (Keeper_event_queue.length queue);
+  let events = Keeper_event_queue.to_list queue |> List.map (fun stimulus ->
+    match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path ~meta stimulus with
+    | Ok (Some event) -> event
+    | Ok None -> fail "queued edit disappeared from projection"
+    | Error unavailable ->
+      fail ("queued edit could not read its Board source: "
+        ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)) in
+  (match events with
+   | [ first_event; second_event ] ->
+     check bool "first edit still explicitly mentions its own target" true
+       first_event.Keeper_world_observation.explicit_mention;
+     check (list string) "first edit matches alice alias only" [ "alice-alias" ]
+       first_event.Keeper_world_observation.matched_targets;
+     check bool "second edit still explicitly mentions its own target" true
+       second_event.Keeper_world_observation.explicit_mention;
+     check (list string) "second edit matches bob alias only" [ "bob-alias" ]
+       second_event.Keeper_world_observation.matched_targets
+   | _ -> fail "expected two queued edit projections in order")
+;;
+
+let test_queued_edit_keeps_audience_across_late_alias () =
+  Eio_main.run @@ fun _env ->
+  let alias_declared = ref false in
+  let recipient_lookup =
+    Recipient_lookup.make (fun candidate ->
+      let name = Recipient_lookup.Candidate.to_string candidate in
+      if String.equal name "latealias" && not !alias_declared
+      then Ok None
+      else Ok (Result.to_option (Board.Agent_id.parse name))) in
+  with_temp_workspace ~recipient_lookup @@ fun config ->
+  let meta = keeper_meta config "alice" in
+  register config meta;
+  let late_meta = keeper_meta config "latealias" in
+  register config late_meta;
+  let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+    ~title:"Original title" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let post_id = Board.Post_id.to_string post.id in
+  let _first = get (Board_dispatch.update_post ~post_id ~editor:"editor"
+    ~title:"First title" ~body:"@alice first addressed body" ~content:"@alice first addressed body" ()) in
+  check int "first edit reaches alice before the late alias exists" 1
+    (queue_length config meta.name);
+  alias_declared := true;
+  let _second = get (Board_dispatch.update_post ~post_id ~editor:"editor"
+    ~title:"Second title" ~body:"@latealias second addressed body" ~content:"@latealias second addressed body" ()) in
+  check int "second edit reaches the late alias lane" 1
+    (queue_length config late_meta.name);
+  let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path meta.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "alice still holds only her own edit" 1 (Keeper_event_queue.length queue);
+  let event = match Keeper_event_queue.to_list queue with
+    | [ stimulus ] ->
+      (match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path ~meta stimulus with
+       | Ok (Some event) -> event
+       | Ok None -> fail "queued edit disappeared from projection"
+       | Error unavailable ->
+         fail ("queued edit could not read its Board source: "
+           ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+    | _ -> fail "expected one queued edit for alice" in
+  check bool "first edit still explicitly mentions alice after the later edit" true
+    event.Keeper_world_observation.explicit_mention;
+  check (list string) "first edit still matches alice only" [ "alice" ]
+    event.Keeper_world_observation.matched_targets
+;;
+
 let test_existing_durable_comment_candidates_respect_parent_visibility () =
   Eio_main.run @@ fun _env ->
   List.iter
@@ -448,7 +533,10 @@ let test_existing_durable_comment_candidates_respect_parent_visibility () =
          ; updated_at = Some comment.created_at
          }
        in
-       let candidate = KBAC.of_board_signal ~meta ~recorded_at:comment.created_at comment_signal in
+       let addressed_comment : Board_dispatch.addressed_board_signal =
+         { signal = comment_signal; audience = Board.Thread_participants }
+       in
+       let candidate = KBAC.of_board_signal ~meta ~recorded_at:comment.created_at addressed_comment in
        let persisted =
          match KBAC.record ~base_path:config.base_path candidate with
          | KBAC.Recorded persisted | KBAC.Duplicate persisted -> persisted
@@ -502,7 +590,7 @@ let test_existing_durable_comment_candidates_respect_parent_visibility () =
                { candidate_id = persisted.candidate_id
                ; signal =
                    Keeper_world_observation_board_signal.board_stimulus_of_board_signal
-                     comment_signal
+                     addressed_comment
                }
          }
        in
@@ -538,6 +626,10 @@ let () =
             test_existing_durable_comment_candidates_respect_parent_visibility
         ; test_case "queued edits preserve captured content before consumption" `Quick
             test_queued_edits_keep_their_captured_content
+        ; test_case "queued edits keep their recorded audience" `Quick
+            test_queued_edits_keep_their_recorded_audience
+        ; test_case "queued edit keeps audience across late alias" `Quick
+            test_queued_edit_keeps_audience_across_late_alias
         ; test_case
             "initialized lane defers to owner cursor"
             `Quick

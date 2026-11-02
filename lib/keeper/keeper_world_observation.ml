@@ -616,6 +616,7 @@ let pending_board_event_kind_of_observation
 let pending_board_event_of_board_observation
       ~(meta : keeper_meta)
       ~arrived_at:(_ : float)
+      ~allow_legacy_unknown
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
@@ -627,18 +628,34 @@ let pending_board_event_of_board_observation
       ; error
       }
   | Ok post_snapshot ->
+    let legacy_missing kind_label =
+      if allow_legacy_unknown then Ok None
+      else
+        Error
+          { Board_signal.operation = Board_signal.Parse_queued_audience
+          ; post_id = observation.post_id
+          ; error =
+              Board.Read_audience_not_pinned
+                (Printf.sprintf
+                   "post %s %s predates audience pinning"
+                   observation.post_id
+                   kind_label)
+          }
+    in
     let recorded_audience =
       match observation.kind with
-      | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _ ->
-        Ok (post_snapshot : Board.post).audience
-      | Board_signal.Observed_comment_added identity ->
-        (match Board_dispatch.read_comments ~post_id:observation.post_id with
-         | Error error ->
-           Error { Board_signal.operation = Board_signal.Get_comments; post_id = observation.post_id; error }
-         | Ok comments ->
-           Ok (Option.bind (List.find_opt (fun (c : Board.comment) ->
-                 Board.Comment_id.equal c.id identity.comment_id) comments)
-                 (fun comment -> comment.audience)))
+      | Board_signal.Observed_post_created ->
+        (match observation.audience with
+         | Some _ as pinned -> Ok pinned
+         | None -> legacy_missing "post_created")
+      | Board_signal.Observed_post_updated _ ->
+        (match observation.audience with
+         | Some _ as pinned -> Ok pinned
+         | None -> legacy_missing "post_updated")
+      | Board_signal.Observed_comment_added _ ->
+        (match observation.audience with
+         | Some _ as pinned -> Ok pinned
+         | None -> legacy_missing "comment_added")
       | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> Ok None
     in
     Result.map (fun audience ->
@@ -1227,7 +1244,10 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Board_signal bs ->
     Result.bind
       (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
-      (pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at)
+      (pending_board_event_of_board_observation
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         ~allow_legacy_unknown:false)
     |> Result.map Option.some
   | Keeper_event_queue.Board_attention attention ->
     Result.bind
@@ -1242,11 +1262,19 @@ let pending_board_event_of_stimulus
               match Keeper_board_attention_candidate.filter_comment_parent_visibility post_snapshot.visibility with
               | Keeper_board_attention_candidate.Skip_non_discoverable_comment -> Ok None
               | Keeper_board_attention_candidate.Keep_discoverable_comment ->
-                pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at observation
+                pending_board_event_of_board_observation
+                  ~meta
+                  ~arrived_at:stimulus.arrived_at
+                  ~allow_legacy_unknown:true
+                  observation
                 |> Result.map Option.some)
          | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
          | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
-           pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at observation
+           pending_board_event_of_board_observation
+             ~meta
+             ~arrived_at:stimulus.arrived_at
+             ~allow_legacy_unknown:true
+             observation
            |> Result.map Option.some)
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
@@ -1389,7 +1417,11 @@ let collect_board_events_with_cursor_policy
          | Some id -> compare_board_cursor_token token (ts, id) > 0)
         && compare_board_cursor_token token (board_cursor_token_of_post p) <= 0
     in
-    let route_signal ~classified (signal : Board_dispatch.board_signal) =
+    let route_signal
+        ~classified
+        ~(board_audience : Board.audience option)
+        (signal : Board_dispatch.board_signal)
+      =
       match classified with
       | Error error ->
         Otel_metric_store.inc_counter
@@ -1400,14 +1432,25 @@ let collect_board_events_with_cursor_policy
           meta.name signal.post_id (Board_audience.classification_error_to_string error);
         Ok None
       | Ok audience ->
-        (match Board_audience.route_for_keeper ~audience ~meta ~signal with
-         | Board_signal.Unavailable unavailable -> Error (Source_unavailable unavailable)
-         | Board_signal.Available Board_audience.Ignore -> Ok None
-         | Board_signal.Available Board_audience.Judge_discoverable ->
-           (* Prompt previews never persist candidates or wake a lane. *)
-           if advance_cursor then (
-             let candidate = Keeper_board_attention_candidate.of_board_signal
-                 ~meta ~recorded_at:(Time_compat.now ()) signal in
+        (match board_audience with
+         | None ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string ObservationQueryFailures)
+             ~labels:[ "operation", Runtime_observation_query_operation.(to_label Board_events) ] ();
+           Log.Keeper.warn
+             "board replay audience missing: keeper=%s post=%s"
+             meta.name signal.post_id;
+           Ok None
+         | Some pinned ->
+           let addressed : Board_dispatch.addressed_board_signal = { signal; audience = pinned } in
+           (match Board_audience.route_for_keeper ~audience ~meta ~signal with
+            | Board_signal.Unavailable unavailable -> Error (Source_unavailable unavailable)
+            | Board_signal.Available Board_audience.Ignore -> Ok None
+            | Board_signal.Available Board_audience.Judge_discoverable ->
+              (* Prompt previews never persist candidates or wake a lane. *)
+              if advance_cursor then (
+                let candidate = Keeper_board_attention_candidate.of_board_signal
+                    ~meta ~recorded_at:(Time_compat.now ()) addressed in
              match Keeper_board_attention_candidate.record_and_wake ~base_path candidate with
              | Ok acceptance ->
                let persistence =
@@ -1435,7 +1478,7 @@ let collect_board_events_with_cursor_policy
            let result =
              if advance_cursor then (
                let stimulus = Board_signal.board_signal_stimulus
-                   ~arrived_at:(Time_compat.now ()) ~reason signal in
+                   ~arrived_at:(Time_compat.now ()) ~reason addressed in
                match Keeper_registry_event_queue.enqueue_stimulus_durable_result
                        ~base_path meta.name stimulus with
                | Keeper_registry_event_queue.Stimulus_enqueued
@@ -1446,16 +1489,20 @@ let collect_board_events_with_cursor_policy
                Result.bind
                  (Board_signal.board_observation_of_board_stimulus
                     ~post_id:signal.post_id
-                    (Board_signal.board_stimulus_of_board_signal signal))
-                 (pending_board_event_of_board_observation ~meta
-                    ~arrived_at:(Time_compat.now ()))
+                    (Board_signal.board_stimulus_of_signal_with_audience
+                       ~signal
+                       ~audience:(Some pinned)))
+                 (pending_board_event_of_board_observation
+                    ~meta
+                    ~arrived_at:(Time_compat.now ())
+                    ~allow_legacy_unknown:false)
                |> Result.map Option.some
                |> Result.map_error (fun error -> Source_unavailable error)
            in
            (match result with
             | Ok _ when reason = Board_signal.Explicit_mention -> incr mention_count
             | Ok _ | Error _ -> ());
-           result)
+           result))
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in
@@ -1474,12 +1521,13 @@ let collect_board_events_with_cursor_policy
         (* Each signal is paired with the audience its post or comment recorded. *)
         let signals =
           (if signal_after_cursor p p.content_updated_at
-           then [ Board_audience.of_post p, post_signal ]
+           then [ Board_audience.of_post p, p.audience, post_signal ]
            else [])
           @ List.filter_map (fun (comment : Board.comment) ->
               if not (signal_after_cursor p comment.created_at) then None
               else Some
                 ( Board_audience.of_comment comment
+                , comment.audience
                 , { post_signal with
                     kind = Board_dispatch.Board_comment_added
                       { comment_id = comment.id; parent_id = comment.parent_id }
@@ -1489,8 +1537,8 @@ let collect_board_events_with_cursor_policy
         in
         let rec collect acc = function
           | [] -> Ok (List.rev acc)
-          | (classified, signal) :: rest ->
-            (match route_signal ~classified signal with
+          | (classified, board_audience, signal) :: rest ->
+            (match route_signal ~classified ~board_audience signal with
              | Error (Source_unavailable unavailable) ->
                log_and_count_unavailable ~context:"signal replay" unavailable;
                collect acc rest

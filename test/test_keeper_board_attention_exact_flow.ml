@@ -89,6 +89,7 @@ let candidate post_id : Candidate.candidate =
   { candidate_id
   ; keeper_name
   ; signal
+  ; audience = Some Board.Discoverable
   ; recorded_at = 1.0
   ; keeper_context =
       `Assoc
@@ -2107,7 +2108,7 @@ let test_normal_discoverable_producer_batches_owner_cursor_catchup () =
             request_signal := Some signal;
             (* A recovered prior judgment with a Ready root must stay with
                ordinary delivery; stable-id duplicates are not fresh work. *)
-            let candidate = Candidate.of_board_signal ~meta:judged_meta ~recorded_at:1. signal in
+            let candidate = Candidate.of_board_signal ~meta:judged_meta ~recorded_at:1. addressed in
             ignore (Candidate.record ~base_path:config.base_path candidate);
             let judgment : Candidate.judgment =
               { verdict = { Judgment.decision = Judgment.Not_relevant; rationale = "already judged" }
@@ -2323,8 +2324,9 @@ let test_normal_duplicate_payloads_use_persisted_signal_groups () =
             let signal = addressed.Board_dispatch.signal in
             current := Some signal;
             let persisted_signal = { signal with Board_dispatch.content = "older durable source evidence" } in
+            let persisted_addressed = { addressed with Board_dispatch.signal = persisted_signal } in
             ignore (Candidate.record ~base_path:config.base_path
-              (Candidate.of_board_signal ~meta:first ~recorded_at:1. persisted_signal));
+              (Candidate.of_board_signal ~meta:first ~recorded_at:1. persisted_addressed));
             Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
               ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed);
           ignore (admission_post ~author:"external" ~title:"payload research"));

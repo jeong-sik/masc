@@ -20,13 +20,19 @@ type board_observation =
   ; content : string
   ; hearth : string option
   ; updated_at : float option
+  ; audience : Board.audience option
   }
-(** Durable queue observation, including the producer-issued comment identity. *)
+(** Durable queue observation, including the producer-issued comment identity.
+
+    The [audience] is the event-time audience the producer pinned to the
+    queue row alongside its content. [None] is a legacy row written before
+    pinning (explicit unknown, never a default). *)
 
 type board_read_operation =
   | Get_post
   | Get_comments
   | Parse_queued_comment_identity
+  | Parse_queued_audience
 
 (** A Board read that answered no row: the id did not parse, or nothing has
     it ({!Board.board_read_error}). Reads are served from memory, so this is
@@ -74,12 +80,27 @@ val board_observation_of_board_stimulus
   -> (board_observation, board_unavailable) result
 (** Preserve the queued signal. The queued comment and parent identities are
     wire strings; they are parsed here into {!Board.Comment_id.t}, and one
-    that does not parse is [Error] with [Parse_queued_comment_identity]. *)
+    that does not parse is [Error] with [Parse_queued_comment_identity].
+    The queued audience mirror becomes {!Board.audience}; a target that does
+    not parse is [Error] with [Parse_queued_audience]. A missing queue
+    audience stays [None] (legacy row) for the drain to refuse. *)
 
 val board_stimulus_of_board_signal
-  :  Board_dispatch.board_signal
+  :  Board_dispatch.addressed_board_signal
   -> Keeper_event_queue.board_stimulus
-(** Preserve live signal identity and content in the durable queue. *)
+(** Preserve live signal identity, content, and event-time audience in the
+    durable queue. *)
+
+val queue_audience_of_board : Board.audience -> Keeper_event_queue.board_audience
+(** Mirror a Board audience into the queue leaf DTO. *)
+
+val board_stimulus_of_signal_with_audience
+  :  signal:Board_dispatch.board_signal
+  -> audience:Board.audience option
+  -> Keeper_event_queue.board_stimulus
+(** Preserve a signal with an explicitly pinned audience option. [None] is a
+    legacy row without pinning; the drain refuses audience-dependent
+    judgments for it. Candidates use this with their stored audience. *)
 
 (* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
    its only caller. *)
@@ -131,7 +152,7 @@ type wake_reason =
     attention boundary, not through board-publish keyword matching. *)
 
 val board_signal_stimulus :
-  arrived_at:float -> reason:wake_reason -> Board_dispatch.board_signal -> Keeper_event_queue.stimulus
+  arrived_at:float -> reason:wake_reason -> Board_dispatch.addressed_board_signal -> Keeper_event_queue.stimulus
 (** Shared live/catchup stimulus construction; identity and urgency remain identical. *)
 
 val wake_reason_label : wake_reason -> string

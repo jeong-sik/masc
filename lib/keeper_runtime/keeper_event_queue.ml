@@ -44,6 +44,12 @@ and board_vote_change = {
   direction : board_vote_direction;
 }
 
+type board_audience =
+  | Audience_targets of string list
+  | Audience_broadcast
+  | Audience_thread_participants
+  | Audience_discoverable
+
 type board_stimulus = {
   kind : board_stimulus_kind;
   author : string;
@@ -51,6 +57,7 @@ type board_stimulus = {
   content : string;
   hearth : string option;
   updated_at : float option;
+  audience : board_audience option;
 }
 
 type stimulus_payload =
@@ -1200,6 +1207,41 @@ let board_vote_change_fields (vote : board_vote_change) =
     ; "vote_direction", `String (board_vote_direction_to_string vote.direction)
     ]
 
+let board_audience_to_yojson = function
+  | Audience_targets targets ->
+    `Assoc
+      [ "kind", `String "targets"
+      ; "targets", `List (List.map (fun target -> `String target) targets)
+      ]
+  | Audience_broadcast -> `Assoc [ "kind", `String "broadcast" ]
+  | Audience_thread_participants -> `Assoc [ "kind", `String "thread_participants" ]
+  | Audience_discoverable -> `Assoc [ "kind", `String "discoverable" ]
+;;
+
+let board_audience_of_yojson ~context json =
+  match json with
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "kind", `String "targets"; "targets", `List values ] ->
+       let rec parse acc = function
+         | [] ->
+           (match List.rev acc with
+            | [] -> Error (context ^ ".audience.targets must not be empty")
+            | _ :: _ as targets -> Ok (Audience_targets targets))
+         | `String value :: rest ->
+           if String.trim value = ""
+           then Error (context ^ ".audience.targets must not be empty")
+           else parse (value :: acc) rest
+         | _ :: _ -> Error (context ^ ".audience.targets must be strings")
+       in
+       parse [] values
+     | [ "kind", `String "broadcast" ] -> Ok Audience_broadcast
+     | [ "kind", `String "thread_participants" ] -> Ok Audience_thread_participants
+     | [ "kind", `String "discoverable" ] -> Ok Audience_discoverable
+     | _ -> Error (context ^ ".audience has unknown shape"))
+  | _ -> Error (context ^ ".audience must be an object")
+;;
+
 let board_stimulus_fields board =
   [ "board_kind", `String (board_stimulus_kind_to_string board.kind)
   ; "author", `String board.author
@@ -1207,6 +1249,7 @@ let board_stimulus_fields board =
   ; "content", `String board.content
   ; "hearth", option_json (fun value -> `String value) board.hearth
   ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+  ; "audience", option_json board_audience_to_yojson board.audience
   ]
   @
   match board.kind with
@@ -1459,20 +1502,26 @@ let payload_of_yojson json =
     let* kind =
       match board_kind with
       | "post_updated" ->
-        let* () = exact_fields ~context
-          ~expected:([ "kind"; "board_kind"; "author"; "title"; "content";
-            "hearth"; "updated_at_unix"; "content_updated_at" ]
-            @ if kind = "board_attention" then [ "candidate_id" ] else []) fields in
+        let has_audience = List.mem_assoc "audience" fields in
+        let expected =
+          ([ "kind"; "board_kind"; "author"; "title"; "content";
+             "hearth"; "updated_at_unix"; "content_updated_at" ]
+           @ (if has_audience then [ "audience" ] else [])
+           @ if kind = "board_attention" then [ "candidate_id" ] else [])
+        in
+        let* () = exact_fields ~context ~expected fields in
         let* content_updated_at = float_field ~context "content_updated_at" fields in
         if Float.is_finite content_updated_at then Ok (Post_updated {content_updated_at})
         else Error (context ^ ".content_updated_at must be finite")
       | "comment_added" ->
-        let* () = exact_fields ~context
-            ~expected:
-              ([ "kind"; "board_kind"; "author"; "title"; "content";
-                 "hearth"; "updated_at_unix"; "comment_id"; "parent_id" ]
-               @ if kind = "board_attention" then [ "candidate_id" ] else [])
-            fields in
+        let has_audience = List.mem_assoc "audience" fields in
+        let expected =
+          ([ "kind"; "board_kind"; "author"; "title"; "content";
+             "hearth"; "updated_at_unix"; "comment_id"; "parent_id" ]
+           @ (if has_audience then [ "audience" ] else [])
+           @ if kind = "board_attention" then [ "candidate_id" ] else [])
+        in
+        let* () = exact_fields ~context ~expected fields in
         let nonempty_id name =
           let* value = string_field ~context name fields in
           if String.trim value = "" then Error (context ^ "." ^ name ^ " must not be empty")
@@ -1510,7 +1559,14 @@ let payload_of_yojson json =
     let* content = string_field ~context "content" fields in
     let* hearth = optional_string_field ~context "hearth" fields in
     let* updated_at = optional_float_field ~context "updated_at_unix" fields in
-    Ok { kind; author; title; content; hearth; updated_at }
+    let* audience =
+      match optional_field "audience" fields with
+      | None -> Ok None
+      | Some json ->
+        let* parsed = board_audience_of_yojson ~context json in
+        Ok (Some parsed)
+    in
+    Ok { kind; author; title; content; hearth; updated_at; audience }
   in
   match kind with
   | "board_signal" ->

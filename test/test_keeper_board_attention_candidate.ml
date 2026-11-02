@@ -99,6 +99,7 @@ let candidate ?(context = keeper_context ()) signal :
   { candidate_id
   ; keeper_name
   ; signal
+  ; audience = Some Masc.Board.Discoverable
   ; keeper_context = context
   ; recorded_at = 1.0
   ; status = A.Pending { last_delivery_failure = None }

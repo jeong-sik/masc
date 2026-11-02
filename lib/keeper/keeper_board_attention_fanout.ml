@@ -201,7 +201,10 @@ let enqueue_discoverable_post ~sw ~clock ~(config : Workspace.config) signal =
         match Keeper_board_audience.route_for_keeper
                 ~audience:Keeper_board_audience.Discoverable ~meta ~signal with
         | Keeper_world_observation_board_signal.Available Keeper_board_audience.Judge_discoverable ->
-          let candidate = Candidate.of_board_signal ~meta ~recorded_at:(Time_compat.now ()) signal in
+          let addressed : Board_dispatch.addressed_board_signal =
+            { signal; audience = Board.Discoverable }
+          in
+          let candidate = Candidate.of_board_signal ~meta ~recorded_at:(Time_compat.now ()) addressed in
           let observe persistence = Otel_metric_store.inc_counter
             Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
             ~labels:["keeper", meta.name; "kind", "post_created";

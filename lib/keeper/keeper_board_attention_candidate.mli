@@ -166,6 +166,7 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
+  ; audience : Board.audience option
   ; keeper_context : Yojson.Safe.t
         (** Partition identity ([Context_key]), read for candidates in every
             status, so it does not ride on the pending state. *)
@@ -176,7 +177,8 @@ type candidate =
     on load. All floats in the signal and lifecycle
     state must be finite. [Judged] and
     [Consumed] states additionally require a nonblank verdict rationale and
-    nonblank judgment provenance. *)
+    nonblank judgment provenance. The [audience] is the event-time audience
+    pinned at record; [None] is a legacy row without pinning. *)
 
 module Context_key : sig
   type t
@@ -266,10 +268,11 @@ val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
 val of_board_signal :
   meta:Keeper_meta_contract.keeper_meta ->
   recorded_at:float ->
-  Board_dispatch.board_signal ->
+  Board_dispatch.addressed_board_signal ->
   candidate
-(** Constructs a v7 candidate from the producer-owned current typed signal.
-    It does not re-read or retain mutable Board thread history. *)
+(** Constructs a v7 candidate from the producer-owned current typed signal
+    and its event-time audience. It does not re-read or retain mutable Board
+    thread history. *)
 
 val candidate_to_json : candidate -> Yojson.Safe.t
 val candidate_of_json : Yojson.Safe.t -> (candidate, string) result

@@ -109,6 +109,7 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   { candidate_id
   ; keeper_name
   ; signal
+  ; audience = Some Masc.Board.Discoverable
   ; recorded_at
   ; keeper_context =
       `Assoc
@@ -633,8 +634,9 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
     (A.apply_judgment_and_deliver ~base_path ~keeper_name:"alpha"
        ~candidate_id:first.candidate_id ~judgment:first_judgment));
   let conflicting_signal =
-    Masc.Keeper_world_observation_board_signal.board_stimulus_of_board_signal
-      { failing.signal with title = "conflicting durable payload" }
+    Masc.Keeper_world_observation_board_signal.board_stimulus_of_signal_with_audience
+      ~signal:{ failing.signal with title = "conflicting durable payload" }
+      ~audience:failing.audience
   in
   let conflict : Event_queue.stimulus =
     { post_id = failing.signal.post_id; urgency = Event_queue.Normal

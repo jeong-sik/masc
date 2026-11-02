@@ -126,6 +126,7 @@ type candidate = Keeper_board_attention_candidate_wire.candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
+  ; audience : Board.audience option
   ; keeper_context : Yojson.Safe.t
         (* 후보가 속한 파티션의 정체성이다 ([Context_key]). 소비된 뒤에도
            소속을 확인하므로 상태와 함께 사라지지 않는다. *)
@@ -985,7 +986,10 @@ let board_attention_stimulus candidate =
   ; payload =
       Keeper_event_queue.Board_attention
         { candidate_id = candidate.candidate_id
-        ; signal = Board_signal.board_stimulus_of_board_signal candidate.signal
+        ; signal =
+            Board_signal.board_stimulus_of_signal_with_audience
+              ~signal:candidate.signal
+              ~audience:candidate.audience
         }
   }
 ;;

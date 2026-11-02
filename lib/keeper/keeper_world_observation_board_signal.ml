@@ -26,12 +26,14 @@ type board_observation =
   ; content : string
   ; hearth : string option
   ; updated_at : float option
+  ; audience : Board.audience option
   }
 
 type board_read_operation =
   | Get_post
   | Get_comments
   | Parse_queued_comment_identity
+  | Parse_queued_audience
 
 type board_unavailable =
   { operation : board_read_operation
@@ -61,6 +63,7 @@ let board_read_operation_to_string = function
   | Get_post -> "get_post"
   | Get_comments -> "get_comments"
   | Parse_queued_comment_identity -> "parse_queued_comment_identity"
+  | Parse_queued_audience -> "parse_queued_audience"
 ;;
 
 let unavailable_to_string unavailable =
@@ -147,7 +150,49 @@ let queue_vote_change_of_board (vote : Board_dispatch.board_vote_change)
   }
 ;;
 
-let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
+let queue_audience_of_board : Board.audience -> Keeper_event_queue.board_audience
+  = function
+  | Board.Targets targets ->
+    Keeper_event_queue.Audience_targets
+      (List.map Board.Agent_id.to_string targets)
+  | Board.Broadcast -> Keeper_event_queue.Audience_broadcast
+  | Board.Thread_participants -> Keeper_event_queue.Audience_thread_participants
+  | Board.Discoverable -> Keeper_event_queue.Audience_discoverable
+;;
+
+let board_audience_of_queue
+      ~(post_id : string)
+      (audience : Keeper_event_queue.board_audience)
+  : (Board.audience, board_unavailable) result
+  =
+  match audience with
+  | Keeper_event_queue.Audience_broadcast -> Ok Board.Broadcast
+  | Keeper_event_queue.Audience_thread_participants -> Ok Board.Thread_participants
+  | Keeper_event_queue.Audience_discoverable -> Ok Board.Discoverable
+  | Keeper_event_queue.Audience_targets targets ->
+    let rec parse acc = function
+      | [] ->
+        (match List.rev acc with
+         | [] ->
+           Error
+             { operation = Parse_queued_audience
+             ; post_id
+             ; error = Board.Read_invalid_id "queued audience targets must not be empty"
+             }
+         | _ :: _ as parsed -> Ok (Board.Targets parsed))
+      | target :: rest ->
+        (match Board.Agent_id.parse target with
+         | Ok id -> parse (id :: acc) rest
+         | Error error ->
+           Error { operation = Parse_queued_audience; post_id; error })
+    in
+    parse [] targets
+;;
+
+let board_stimulus_of_signal_with_audience
+      ~(signal : Board_dispatch.board_signal)
+      ~(audience : Board.audience option)
+  =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
@@ -168,7 +213,16 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   ; content = signal.content
   ; hearth = signal.hearth
   ; updated_at = signal.updated_at
+  ; audience = Option.map queue_audience_of_board audience
   }
+;;
+
+let board_stimulus_of_board_signal
+      (addressed : Board_dispatch.addressed_board_signal)
+  =
+  board_stimulus_of_signal_with_audience
+    ~signal:addressed.signal
+    ~audience:(Some addressed.audience)
 ;;
 
 (* The queue keeps the comment identity as its wire string (the queue is a
@@ -204,6 +258,13 @@ let board_observation_of_board_stimulus
     | Keeper_event_queue.Vote_cast vote ->
       Ok (Observed_vote_cast (board_vote_change_of_queue vote))
   in
+  let* audience =
+    match bs.audience with
+    | None -> Ok None
+    | Some queued ->
+      let* parsed = board_audience_of_queue ~post_id queued in
+      Ok (Some parsed)
+  in
   Ok
     { kind
     ; post_id
@@ -212,6 +273,7 @@ let board_observation_of_board_stimulus
     ; content = bs.content
     ; hearth = bs.hearth
     ; updated_at = bs.updated_at
+    ; audience
     }
 ;;
 
@@ -433,13 +495,13 @@ let wake_reason_label = function
 let board_signal_stimulus
       ~arrived_at
       ~(reason : wake_reason)
-      (signal : Board_dispatch.board_signal)
+      (addressed : Board_dispatch.addressed_board_signal)
   =
   let payload : Keeper_event_queue.stimulus_payload =
     Keeper_event_queue.Board_signal
-      (board_stimulus_of_board_signal signal)
+      (board_stimulus_of_board_signal addressed)
   in
-  { Keeper_event_queue.post_id = signal.post_id
+  { Keeper_event_queue.post_id = addressed.signal.post_id
   ; urgency =
       (match reason with
        | Explicit_mention | Broadcast ->

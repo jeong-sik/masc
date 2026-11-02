@@ -42,6 +42,10 @@ type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
   | Read_comment_not_found of string
+  | Read_audience_not_pinned of string
+      (** A durable queue stimulus predates event-audience pinning and names
+          no audience for its event. The post exists; the queued row cannot
+          support an audience-dependent judgment. *)
 [@@deriving show]
 
 val board_error_of_read_error : board_read_error -> board_error

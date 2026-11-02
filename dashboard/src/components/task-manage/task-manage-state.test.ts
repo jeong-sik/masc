@@ -40,6 +40,7 @@ vi.mock('../../api/published-artifacts', () => ({
   artifactWorkspaceBody: (workspace: { basePath: string; mascRoot: string }) =>
     ({ base_path: workspace.basePath, masc_root: workspace.mascRoot }),
 }))
+vi.mock('./task-create-workspace', () => ({ observeReceiptWorkspace: () => mockCaptureWorkspace() }))
 vi.mock('../common/toast', () => ({ showToast: (...args: any[]) => mockShowToast(...args) }))
 vi.mock('../../store', () => ({
   executionWorkspaceAuthority: { peek: () => mockAuthority.peek() },

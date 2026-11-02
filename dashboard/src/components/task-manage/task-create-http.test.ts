@@ -82,7 +82,7 @@ it('sends a goalless Task once with the observed workspace and identity', async 
     expect(request.params.arguments).not.toHaveProperty('goal_id')
     const text = JSON.stringify({ ok: true, creation_request_id: request.params.arguments.creation_request_id,
       goal_id: null, task_id: 'task-1' })
-    return new Response(JSON.stringify({ id: request.id, result: { content: [{ type: 'text', text }] } }),
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text }] } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } })
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -101,7 +101,7 @@ it.each([401, 403])('does not authorize restored evidence when the current crede
     expect(request.params.name).toBe('masc_add_task')
     const text = JSON.stringify({ ok: true, creation_request_id: request.params.arguments.creation_request_id,
       goal_id: null, task_id: 'task-private' })
-    return new Response(JSON.stringify({ id: request.id, result: { content: [{ type: 'text', text }] } }),
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text }] } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } })
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -141,7 +141,7 @@ it('does not present a late response as success after the workspace changes', as
   await started
   mocks.authority.peek.mockReturnValue({ epoch: 'epoch-b', workspaceRoot: '/b', connectionGeneration: 1 })
   const text = JSON.stringify({ ok: true, creation_request_id: creationRequestId, goal_id: null, task_id: 'task-1' })
-  finishBody(JSON.stringify({ id: requestId, result: { content: [{ type: 'text', text }] } }))
+  finishBody(JSON.stringify({ jsonrpc: '2.0', id: requestId, result: { content: [{ type: 'text', text }] } }))
   expect(await pending).toBe(true)
   expect(finish).not.toHaveBeenCalled()
   expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
@@ -173,7 +173,7 @@ it('retains a validated stale success only on its original reservation after a t
     }
     const text = JSON.stringify({ ok: true, creation_request_id: request.params.arguments.creation_request_id,
       goal_id: null, task_id: 'task-b' })
-    return new Response(JSON.stringify({ id: request.id, result: { content: [{ type: 'text', text }] } }),
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text }] } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } })
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -185,7 +185,7 @@ it('retains a validated stale success only on its original reservation after a t
   const newAttempt = taskCreateReceipts.attempts.peek().find(item => item.requestId !== oldCreationId)
   expect(newAttempt?.original).toEqual({ kind: 'created', taskId: 'task-b' })
   const text = JSON.stringify({ ok: true, creation_request_id: oldCreationId, goal_id: null, task_id: 'task-a' })
-  finishOld(JSON.stringify({ id: oldRpcId, result: { content: [{ type: 'text', text }] } }))
+  finishOld(JSON.stringify({ jsonrpc: '2.0', id: oldRpcId, result: { content: [{ type: 'text', text }] } }))
   expect(await oldRequest).toBe(false)
   expect(taskCreateReceipts.attempts.peek().find(item => item.requestId === oldCreationId)).toMatchObject({
     original: { kind: 'created', taskId: 'task-a' }, originalCurrent: false, presented: false,
@@ -217,7 +217,7 @@ it('keeps an uncertain outcome when a stale success names another creation reque
   await started
   setStoredToken('actor-b-token', { source: 'manual' })
   const text = JSON.stringify({ ok: true, creation_request_id: 'different-request', goal_id: null, task_id: 'foreign' })
-  finishBody(JSON.stringify({ id: rpcId, result: { content: [{ type: 'text', text }] } }))
+  finishBody(JSON.stringify({ jsonrpc: '2.0', id: rpcId, result: { content: [{ type: 'text', text }] } }))
   expect(await pending).toBe(false)
   expect(taskCreateReceipts.attempts.peek()[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
   expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)

@@ -2,7 +2,8 @@ import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
 import { acknowledgeTaskCreateResult, compactTaskCreateReceipts, recheckTaskCreation, retryTaskCreateStorage,
   taskCreateReceiptOwner, taskCreateReceipts } from './task-manage-state'
-import { hasUnresolvedTaskCreationEvidence, type TaskCreateAttempt, type TaskCreationRead } from './task-create-receipt'
+import { hasResolvedPendingNegative, hasUnresolvedTaskCreationEvidence,
+  type TaskCreateAttempt, type TaskCreationRead } from './task-create-receipt'
 
 function readText(read: TaskCreationRead): string {
   switch (read.kind) {
@@ -26,7 +27,7 @@ function attemptText(attempt: TaskCreateAttempt, canShow: boolean): string {
 
 export function TaskCreateReceiptsPanel() {
   const owner = taskCreateReceiptOwner.value
-  const attempts = taskCreateReceipts.attempts.value.filter(item => item.original.kind === 'pending'
+  const attempts = taskCreateReceipts.attempts.value.filter(item => item.checking || item.original.kind === 'pending'
     || item.original.kind === 'unconfirmed' || (item.original.kind === 'created' && !item.presented)
     || (!item.originalCurrent && (item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
       || (item.original.kind === 'created' && item.presented)))
@@ -53,14 +54,16 @@ export function TaskCreateReceiptsPanel() {
         ${canShow && attempt.latestReadCurrent && attempt.reads.length > 0 ? html`<ol>
           ${attempt.reads.map((read, readIndex) => html`<li key=${readIndex}>${readText(read)}</li>`)}
         </ol>` : null}
-        ${canShow && hasUnresolvedTaskCreationEvidence(attempt)
-          ? html`<p>서로 다른 조회 기록이 있어 이 요청을 정리하지 않고 보관합니다. 조회 시점에 따라 결과가 다를 수 있습니다.</p>` : null}
+        ${canShow && hasResolvedPendingNegative(attempt)
+          ? html`<p>요청 중 확인한 미관측 기록 이후 같은 태스크의 생성 기록을 확인했습니다. 결과를 확인하면 이 기록을 정리합니다.</p>`
+          : canShow && hasUnresolvedTaskCreationEvidence(attempt)
+            ? html`<p>서로 다른 조회 기록이 있어 이 요청을 정리하지 않고 보관합니다. 조회 시점에 따라 결과가 다를 수 있습니다.</p>` : null}
         ${attempt.persistence === 'memory' ? html`<p>이 요청은 새로고침하면 이 탭에서 확인할 수 없습니다.</p>` : null}
         <${ActionButton} variant="ghost" size="sm" disabled=${attempt.checking}
           onClick=${() => { void recheckTaskCreation(attempt.requestId) }}>
           ${attempt.checking ? '확인 중...' : '결과 다시 확인'}
         <//>
-        ${canShow && attempt.original.kind === 'created' && !attempt.presented ? html`<${ActionButton} variant="ghost" size="sm"
+        ${canShow && attempt.original.kind === 'created' && (!attempt.presented || hasResolvedPendingNegative(attempt)) ? html`<${ActionButton} variant="ghost" size="sm"
           onClick=${() => acknowledgeTaskCreateResult(attempt.requestId)}>이 결과 확인<//>` : null}
       </div>`
     })}

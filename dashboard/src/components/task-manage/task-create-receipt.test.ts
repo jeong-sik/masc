@@ -11,6 +11,7 @@ import {
   createTaskCreateReceiptStore,
   decodeTaskCreationReceipt,
   decodeTaskCreationResponse,
+  hasResolvedPendingNegative,
   type TaskReceiptOwner,
 } from './task-create-receipt'
 
@@ -226,6 +227,68 @@ describe('Task creation receipts', () => {
       store.dispose()
     },
   )
+
+  it.each(['resolved', 'same-version', 'reversal', 'other-task', 'unmarked-negative', 'positive-before-success'])(
+    'only explicitly forgets a provably resolved pending negative: %s', async scenario => {
+      const { store, storage } = setup()
+      const request = reserve(store)
+      if (scenario !== 'unmarked-negative') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+        await store.observe(request.requestId)
+      }
+      if (scenario === 'positive-before-success') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-a'], workspaceA, 6))
+        await store.observe(request.requestId)
+      }
+      store.settleOriginal(request.requestId, { kind: 'created', taskId: 'task-a' })
+      if (scenario === 'unmarked-negative') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+        await store.observe(request.requestId)
+      }
+      if (scenario === 'reversal') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-a'], workspaceA, 7))
+        await store.observe(request.requestId)
+      }
+      if (scenario !== 'positive-before-success') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded',
+          [scenario === 'other-task' ? 'task-b' : 'task-a'], workspaceA, scenario === 'same-version' ? 5 : 6))
+        await store.observe(request.requestId)
+      }
+      store.markPresented(request.requestId)
+      const item = store.attempts.value[0]
+      if (!item) throw new Error('Missing attempt')
+      expect(hasResolvedPendingNegative(item)).toBe(scenario === 'resolved')
+      expect(store.forgetDefinite(request.requestId)).toBe(false)
+      expect(store.compact()).toMatchObject({ removedAttempts: 0 })
+      const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
+      const restoredItem = restored.attempts.value[0]
+      if (!restoredItem) throw new Error('Missing restored attempt')
+      expect(hasResolvedPendingNegative(restoredItem)).toBe(scenario === 'resolved')
+      restored.dispose()
+      expect(store.forgetDefinite(request.requestId, true)).toBe(scenario === 'resolved')
+      expect(store.attempts.value).toHaveLength(scenario === 'resolved' ? 0 : 1)
+      store.dispose()
+    },
+  )
+
+  it('does not treat an in-flight positive that started before original success as a later read', async () => {
+    const { store } = setup()
+    const request = reserve(store)
+    mocks.call.mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+    await store.observe(request.requestId)
+    let finish!: (value: string) => void
+    mocks.call.mockImplementationOnce(() => new Promise<string>(resolve => { finish = resolve }))
+    const reading = store.observe(request.requestId)
+    store.settleOriginal(request.requestId, { kind: 'created', taskId: 'task-a' })
+    finish(response(request.requestId, 'recorded', ['task-a'], workspaceA, 6))
+    await reading
+    const item = store.attempts.value[0]
+    if (!item) throw new Error('Missing attempt')
+    expect(hasResolvedPendingNegative(item)).toBe(false)
+    store.markPresented(request.requestId)
+    expect(store.forgetDefinite(request.requestId, true)).toBe(false)
+    store.dispose()
+  })
 
   it.each(['not_sent', 'rejected_before_effect'] as const)(
     'retains a %s original if a creation receipt exists', async kind => {

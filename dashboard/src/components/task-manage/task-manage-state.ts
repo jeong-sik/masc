@@ -16,6 +16,7 @@ import type { DashboardGoalsTreeResponse, GoalTreeNode } from '../../types'
 import { isRecord } from '../common/normalize'
 import { createTaskCreateReceiptStore, decodeTaskCreationResponse, TASK_CREATE_RECEIPT_STORAGE_KEY, type TaskCreateReservation,
   type TaskReceiptOwner } from './task-create-receipt'
+import { observeReceiptWorkspace } from './task-create-workspace'
 
 export const showTaskCreate = signal(false)
 const currentTaskDraft = signal(Symbol('task-create-draft'))
@@ -30,7 +31,14 @@ export const taskCreateReceiptOwner: ReadonlySignal<TaskReceiptOwner | null> = r
 export let taskCreateReceipts = createTaskCreateReceiptStore({ owner: receiptOwner })
 let observedReceiptAuthority: unknown
 let receiptAuthorityEpoch = 0
+let receiptInvalidationEpoch = 0
 let receiptHealthTicket = 0
+let latestReceiptHealth: { ticket: number; workspace: ArtifactWorkspace | null } | null = null
+
+function retireReceiptOwner(): void {
+  receiptInvalidationEpoch++
+  if (receiptOwner.peek()) receiptOwner.value = null
+}
 
 export const taskCreating = computed(() => {
   const draft = currentTaskDraft.value
@@ -72,7 +80,7 @@ export function _testResetTaskCreateState(options?: { preserveStorage?: boolean 
   if (!options?.preserveStorage) {
     try { globalThis.sessionStorage?.removeItem(TASK_CREATE_RECEIPT_STORAGE_KEY) } catch { /* unavailable in this test */ }
   }
-  receiptOwner.value = null
+  retireReceiptOwner()
   draftRequests.value = new Map()
   preparingDrafts.value = new Set()
   taskCreateReceipts = createTaskCreateReceiptStore({ owner: receiptOwner })
@@ -106,6 +114,7 @@ function bindReceiptOwner(workspace: ArtifactWorkspace, readOnlyWithoutAuthority
     && existing.access === (authority === null ? 'read_only' : 'create_and_read') && existing.isCurrent()) return existing
   const owner: TaskReceiptOwner = { workspace: { ...workspace }, identity: { revision, actor },
     access: authority === null ? 'read_only' : 'create_and_read', isCurrent }
+  if (existing) receiptInvalidationEpoch++
   receiptOwner.value = owner
   return owner
 }
@@ -124,10 +133,10 @@ effect(() => {
   void managedDashboardRefusal.value
   void managedDashboardUnverified.value
   const current = receiptOwner.peek()
-  if (current && !current.isCurrent()) receiptOwner.value = null
+  if (current && !current.isCurrent()) retireReceiptOwner()
 })
 
-async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskReceiptOwner | null> {
+async function verifyReceiptOwner(expected?: ArtifactWorkspace, preflightCurrent: () => boolean = () => true): Promise<TaskReceiptOwner | null> {
   const ticket = ++receiptHealthTicket
   const authority = executionWorkspaceAuthority.peek()
   if (!authority && !expected) {
@@ -143,27 +152,34 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskRec
   const actorVersion = managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek()
   const managedAuthVersion = managedDashboardAuthRevision.peek()
   const ownerAtStart = receiptOwner.peek()
-  const current = () => executionWorkspaceAuthority.peek() === authority && executionWorkspaceRevision.peek() === workspaceRevision
-    && receiptAuthorityEpoch === authorityEpoch && receiptHealthTicket === ticket
+  let invalidationEpoch = receiptInvalidationEpoch
+  const connectionCurrent = () => executionWorkspaceAuthority.peek() === authority && executionWorkspaceRevision.peek() === workspaceRevision
+    && receiptAuthorityEpoch === authorityEpoch && preflightCurrent()
     && currentStoredTokenRevision() === revision
     && currentDashboardActor() === actor
     && (managed ? getStoredToken() === token && getStoredTokenMeta()?.source === 'dev'
       && managedDashboardActorRevision.peek() === actorVersion && managedDashboardAuthRevision.peek() === managedAuthVersion
       : dashboardActorRevision.peek() === actorVersion)
-  const retireMatchingOwner = () => {
-    const owner = receiptOwner.peek()
-    if (current() && owner && (owner.access === 'read_only' || (expected && owner === ownerAtStart
-      && owner.workspace.basePath === expected.basePath && owner.workspace.mascRoot === expected.mascRoot))) {
-      receiptOwner.value = null
-    }
-  }
+  const current = () => connectionCurrent() && receiptInvalidationEpoch === invalidationEpoch
   try {
-    const basePath = authority?.workspaceRoot ?? expected?.basePath
-    if (!basePath) return null
-    const workspace = await captureArtifactWorkspace(basePath, undefined, { reportCredentialRefusal: false })
+    const workspace = await observeReceiptWorkspace()
+    if (!connectionCurrent()) return null
+    const sameWorkspace = (other: ArtifactWorkspace) => workspace.basePath === other.basePath && workspace.mascRoot === other.mascRoot
+    const existing = receiptOwner.peek()
+    if (existing && !sameWorkspace(existing.workspace)) {
+      const replaced = existing !== ownerAtStart
+      retireReceiptOwner()
+      if (replaced) {
+        showToast('작업 공간이 달라 이전 요청의 확인 권한을 철회했습니다.', 'warning')
+        return null
+      }
+      invalidationEpoch = receiptInvalidationEpoch
+    }
     if (!current()) return null
-    if (expected && (workspace.basePath !== expected.basePath || workspace.mascRoot !== expected.mascRoot)) {
-      retireMatchingOwner()
+    const newer = latestReceiptHealth && latestReceiptHealth.ticket > ticket ? latestReceiptHealth : null
+    if (!newer) latestReceiptHealth = { ticket, workspace }
+    if ((expected && !sameWorkspace(expected)) || (authority && authority.workspaceRoot !== workspace.basePath)
+      || (newer && (!newer.workspace || !sameWorkspace(newer.workspace)))) {
       showToast('이 요청을 보낸 작업 공간에서 다시 확인해 주세요.', 'warning')
       return null
     }
@@ -186,7 +202,10 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskRec
     return owner
   } catch {
     if (current()) {
-      retireMatchingOwner()
+      if (!latestReceiptHealth || ticket >= latestReceiptHealth.ticket) {
+        latestReceiptHealth = { ticket, workspace: null }
+        retireReceiptOwner()
+      }
       showToast('이전 요청의 작업 공간을 확인하지 못했습니다.', 'warning')
     }
     return null
@@ -195,11 +214,20 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskRec
 
 /** Explicit receipt lookup; it never resends the creation request. */
 export async function recheckTaskCreation(requestId: string): Promise<void> {
-  const attempt = taskCreateReceipts.attempts.peek().find(item => item.requestId === requestId)
-  if (!attempt || !await verifyReceiptOwner(attempt.workspace)) return
-  const result = await taskCreateReceipts.observe(requestId)
-  if (result.kind === 'owner_unavailable' || result.kind === 'workspace_mismatch') {
-    showToast('현재 인증과 작업 공간을 다시 확인해 주세요.', 'warning')
+  const receipts = taskCreateReceipts
+  const attempt = receipts.attempts.peek().find(item => item.requestId === requestId)
+  if (!attempt) return
+  const check = receipts.beginCheck(requestId)
+  if (!check) return
+  try {
+    if (!await verifyReceiptOwner(attempt.workspace, () => taskCreateReceipts === receipts
+      && receipts.attempts.peek().some(item => item.requestId === requestId && item.checking))) return
+    const result = await receipts.observe(requestId, check)
+    if (result.kind === 'owner_unavailable' || result.kind === 'workspace_mismatch' || result.kind === 'stale') {
+      showToast('현재 인증과 작업 공간을 다시 확인해 주세요.', 'warning')
+    }
+  } finally {
+    receipts.endCheck(requestId, check)
   }
 }
 
@@ -209,7 +237,7 @@ export function acknowledgeTaskCreateResult(requestId: string): void {
   if (!item || item.checking || !owner || !owner.isCurrent() || item.workspace.basePath !== owner.workspace.basePath
     || item.workspace.mascRoot !== owner.workspace.mascRoot || item.latestReadFailureCurrent
     || !(item.originalCurrent || item.latestReadCurrent)) return
-  if (taskCreateReceipts.markPresented(requestId)) taskCreateReceipts.forgetDefinite(requestId)
+  if (taskCreateReceipts.markPresented(requestId)) taskCreateReceipts.forgetDefinite(requestId, true)
 }
 
 export function compactTaskCreateReceipts(): void {
@@ -415,7 +443,12 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
         const treeRevision = goalTreeObservationRevision.peek()
         const tree = goalTreeData.peek()
         if (treeHasCreatedTask(tree, linkedGoalId, created.taskId)) {
-          const scoped = await fetchDashboardGoalsTree(reservation.workspace)
+          const scopedOwner = receiptOwner.peek()
+          const scoped = await fetchDashboardGoalsTree(reservation.workspace, undefined, status => {
+            if (status === 401 && scopedOwner && receiptOwner.peek() === scopedOwner && reservation?.isCurrent()) {
+              retireReceiptOwner()
+            }
+          })
           goalConfirmed = reservation.isCurrent() && goalTreeObservationRevision.peek() === treeRevision
             && goalTreeData.peek() === tree && !goalTreeLoading.peek() && goalTreeError.peek() === null
             && lastGoalsRefreshAt.peek() !== null && treeHasCreatedTask(scoped, linkedGoalId, created.taskId)

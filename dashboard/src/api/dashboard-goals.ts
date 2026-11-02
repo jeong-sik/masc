@@ -516,7 +516,7 @@ function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | 
   }
 }
 
-function observeTreeTaskIds(rows: unknown): { ids: string[]; complete: boolean } {
+function observeTreeTaskIds(rows: unknown, summary: unknown): { ids: string[]; complete: boolean } {
   const ids: string[] = []
   let complete = true
   function collect(value: unknown): void {
@@ -524,7 +524,9 @@ function observeTreeTaskIds(rows: unknown): { ids: string[]; complete: boolean }
     for (const item of value) {
       if (!isRecord(item) || !Array.isArray(item.tasks) || !Array.isArray(item.children)
         || typeof item.task_count !== 'number' || !Number.isSafeInteger(item.task_count)
-        || item.task_count < 0 || item.task_count !== item.tasks.length) { complete = false; continue }
+        || item.task_count < 0 || item.task_count !== item.tasks.length
+        || typeof item.child_count !== 'number' || !Number.isSafeInteger(item.child_count)
+        || item.child_count < 0 || item.child_count !== item.children.length) { complete = false; continue }
       for (const task of item.tasks) {
         if (!isRecord(task) || typeof task.id !== 'string' || task.id.trim() === ''
           || (task.goal_id !== undefined && task.goal_id !== null
@@ -538,6 +540,8 @@ function observeTreeTaskIds(rows: unknown): { ids: string[]; complete: boolean }
     }
   }
   collect(rows)
+  if (!isRecord(summary) || typeof summary.total_tasks !== 'number' || !Number.isSafeInteger(summary.total_tasks)
+    || summary.total_tasks < 0 || summary.total_tasks !== ids.length) complete = false
   return { ids, complete }
 }
 
@@ -557,7 +561,7 @@ function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeRespo
     && Number.isSafeInteger(rawTotalGoals) && rawTotalGoals >= 0
   const identity_observation = { ...observedIds, complete: observedIds.complete && validTotal
     && observedIds.ids.length === rawTotalGoals }
-  const task_identity_observation = observeTreeTaskIds(raw.tree)
+  const task_identity_observation = observeTreeTaskIds(raw.tree, raw.summary)
   return generatedAt
     ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary, identity_observation, task_identity_observation }
     : { approval_queue_state: approvalQueueState, tree, summary, identity_observation, task_identity_observation }
@@ -590,7 +594,7 @@ export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace, sig
   onResponseStatus?: (status: number) => void): Promise<DashboardGoalsTreeResponse> {
   const raw = workspace === undefined ? await get<unknown>('/api/v1/dashboard/goals', signal ? { signal } : undefined) : await (async () => {
     const result = await getWithResponse<unknown>(`/api/v1/dashboard/goals?${artifactWorkspaceQuery(workspace)}`,
-      { consumeWithinTimeout: true, reportCredentialRefusal: false, ...(signal ? { signal } : {}),
+      { consumeWithinTimeout: true, reportCredentialRefusal: false, rejectDuplicateJsonMembers: true, ...(signal ? { signal } : {}),
         ...(onResponseStatus ? { beforeResponseBody: response => onResponseStatus(response.status) } : {}) })
     requireArtifactWorkspaceRead(result.headers)
     if (result.headers.get('x-masc-goal-tree-read') !== 'direct-v1') {

@@ -20,8 +20,8 @@ export type TaskCreateSettledOriginal = Exclude<TaskCreateOriginal, { kind: 'pen
 
 /** A recorded creation is not a claim about current Task status or existence. */
 export type TaskCreationObservation =
-  | { readonly kind: 'not_observed'; readonly backlogVersion: number }
-  | { readonly kind: 'recorded'; readonly taskId: string; readonly backlogVersion: number }
+  | { readonly kind: 'not_observed'; readonly backlogVersion: number; readonly originalPhase?: 'pending' }
+  | { readonly kind: 'recorded'; readonly taskId: string; readonly backlogVersion: number; readonly originalPhase?: 'created' }
   | { readonly kind: 'ambiguous'; readonly taskIds: readonly string[]; readonly backlogVersion: number }
 
 export type TaskCreationRead = TaskCreationObservation
@@ -55,6 +55,30 @@ export function hasUnresolvedTaskCreationEvidence(item: Pick<TaskCreateAttempt, 
     if (item.original.kind === 'created') return read.taskId !== item.original.taskId
     return item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
   })
+}
+
+/** Only explicit confirmation may retire a negative proven to predate the
+ * original success and a later, strictly newer matching positive receipt. */
+export function hasResolvedPendingNegative(item: Pick<TaskCreateAttempt, 'original' | 'reads'>): boolean {
+  if (item.original.kind !== 'created') return false
+  let negativeVersion: number | null = null
+  let previousVersion = 0
+  let matched = false
+  for (const read of item.reads) {
+    if (read.kind === 'error') continue
+    if (read.backlogVersion < previousVersion) return false
+    previousVersion = read.backlogVersion
+    if (read.kind === 'ambiguous') return false
+    if (read.kind === 'not_observed') {
+      if (read.originalPhase !== 'pending') return false
+      negativeVersion = read.backlogVersion
+      matched = false
+    } else {
+      if (read.taskId !== item.original.taskId) return false
+      if (negativeVersion !== null && read.originalPhase === 'created' && read.backlogVersion > negativeVersion) matched = true
+    }
+  }
+  return negativeVersion !== null && matched
 }
 
 /** The caller must publish a new immutable owner whenever authority, actor,
@@ -101,9 +125,12 @@ export interface TaskCreateReceiptStore {
   /** Marks an already-confirmed response as presented; it never creates a Task. */
   readonly markPresented: (requestId: string) => boolean
   /** Removes only this current owner's definite, unambiguous outcome. */
-  readonly forgetDefinite: (requestId: string) => boolean
+  readonly forgetDefinite: (requestId: string, confirmResolvedNegative?: boolean) => boolean
+  /** A request-specific lease also covers the workspace health preflight. */
+  readonly beginCheck: (requestId: string) => symbol | null
+  readonly endCheck: (requestId: string, check: symbol) => void
   /** A deliberate read only. No creation or lookup request is replayed. */
-  readonly observe: (requestId: string) => Promise<TaskCreateObserveResult>
+  readonly observe: (requestId: string, check?: symbol) => Promise<TaskCreateObserveResult>
   readonly retryStorage: () => boolean
   /** Explicitly remove presented/definite records and redundant identical read errors. */
   readonly compact: () => { readonly removedAttempts: number; readonly removedErrors: number;
@@ -142,8 +169,8 @@ function canonicalTimestamp(value: unknown): value is string {
 
 function sameObservationContent(a: TaskCreationObservation, b: TaskCreationObservation): boolean {
   if (a.kind !== b.kind) return false
-  if (a.kind === 'not_observed' && b.kind === 'not_observed') return true
-  if (a.kind === 'recorded' && b.kind === 'recorded') return a.taskId === b.taskId
+  if (a.kind === 'not_observed' && b.kind === 'not_observed') return a.originalPhase === b.originalPhase
+  if (a.kind === 'recorded' && b.kind === 'recorded') return a.taskId === b.taskId && a.originalPhase === b.originalPhase
   if (a.kind === 'ambiguous' && b.kind === 'ambiguous') {
     return a.taskIds.length === b.taskIds.length && a.taskIds.every((id, index) => id === b.taskIds[index])
   }
@@ -263,11 +290,16 @@ function decodeStoredRead(value: unknown): TaskCreationRead | null {
     return { kind: 'error', reason: value.reason }
   }
   if (!positiveVersion(value.backlogVersion)) return null
-  if (value.kind === 'not_observed' && exactKeys(value, ['kind', 'backlogVersion'])) {
-    return { kind: 'not_observed', backlogVersion: value.backlogVersion }
+  if (value.kind === 'not_observed' && (exactKeys(value, ['kind', 'backlogVersion'])
+    || (exactKeys(value, ['kind', 'backlogVersion', 'originalPhase']) && value.originalPhase === 'pending'))) {
+    return value.originalPhase === 'pending' ? { kind: 'not_observed', backlogVersion: value.backlogVersion, originalPhase: 'pending' }
+      : { kind: 'not_observed', backlogVersion: value.backlogVersion }
   }
-  if (value.kind === 'recorded' && exactKeys(value, ['kind', 'taskId', 'backlogVersion']) && nonblank(value.taskId)) {
-    return { kind: 'recorded', taskId: value.taskId, backlogVersion: value.backlogVersion }
+  if (value.kind === 'recorded' && nonblank(value.taskId) && (exactKeys(value, ['kind', 'taskId', 'backlogVersion'])
+    || (exactKeys(value, ['kind', 'taskId', 'backlogVersion', 'originalPhase']) && value.originalPhase === 'created'))) {
+    return value.originalPhase === 'created'
+      ? { kind: 'recorded', taskId: value.taskId, backlogVersion: value.backlogVersion, originalPhase: 'created' }
+      : { kind: 'recorded', taskId: value.taskId, backlogVersion: value.backlogVersion }
   }
   if (value.kind === 'ambiguous' && exactKeys(value, ['kind', 'taskIds', 'backlogVersion'])
     && Array.isArray(value.taskIds) && value.taskIds.length >= 2 && value.taskIds.every(nonblank)) {
@@ -336,6 +368,7 @@ export function createTaskCreateReceiptStore(options: {
   const storageState = signal<TaskReceiptStorageState>('read_failed')
   const originalGuards = new Map<string, () => boolean>()
   const reads = new Map<string, symbol>()
+  const checks = new Map<string, { token: symbol; preflight: boolean }>()
   let ownerEpoch = 0
   let disposed = false
 
@@ -361,9 +394,10 @@ export function createTaskCreateReceiptStore(options: {
     void options.owner.value
     ownerEpoch += 1
     reads.clear()
+    for (const [requestId, check] of checks) if (!check.preflight) checks.delete(requestId)
     const existing = attempts.peek()
     if (existing.some(item => item.checking || item.originalCurrent || item.latestReadCurrent || item.latestReadFailureCurrent)) {
-      attempts.value = existing.map(item => ({ ...item, checking: false, originalCurrent: false, latestReadCurrent: false,
+      attempts.value = existing.map(item => ({ ...item, checking: checks.has(item.requestId), originalCurrent: false, latestReadCurrent: false,
         latestReadFailureCurrent: false }))
     }
   })
@@ -395,8 +429,9 @@ export function createTaskCreateReceiptStore(options: {
     item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
       || (item.original.kind === 'created' && item.presented)
 
-  const canForget = (item: TaskCreateAttempt): boolean =>
-    canManage(item) && definite(item) && !item.checking && !hasUnresolvedTaskCreationEvidence(item)
+  const canForget = (item: TaskCreateAttempt, confirmResolvedNegative = false): boolean =>
+    canManage(item) && definite(item) && !item.checking && (!hasUnresolvedTaskCreationEvidence(item)
+      || (confirmResolvedNegative && hasResolvedPendingNegative(item)))
 
   const reserveWith = (persistence: 'session' | 'memory', goalId: string | null = null): TaskCreateReserveResult => {
     if (disposed) return { kind: 'disposed' }
@@ -442,16 +477,16 @@ export function createTaskCreateReceiptStore(options: {
   const markPresented = (requestId: string): boolean => {
     if (disposed) return false
     const existing = attempts.peek().find(item => item.requestId === requestId)
-    if (!existing || existing.original.kind !== 'created') return false
+    if (!existing || existing.checking || existing.original.kind !== 'created') return false
     attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, presented: true } : item)
     if (existing.persistence === 'session') save(attempts.peek())
     return true
   }
 
-  const forgetDefinite = (requestId: string): boolean => {
+  const forgetDefinite = (requestId: string, confirmResolvedNegative = false): boolean => {
     if (disposed) return false
     const item = attempts.peek().find(attempt => attempt.requestId === requestId)
-    if (!item || !canForget(item)) return false
+    if (!item || !canForget(item, confirmResolvedNegative)) return false
     const next = attempts.peek().filter(attempt => attempt.requestId !== requestId)
     // Keep the in-memory evidence if a session-backed deletion cannot persist.
     if (item.persistence === 'session' && !save(next)) return false
@@ -459,50 +494,68 @@ export function createTaskCreateReceiptStore(options: {
     return true
   }
 
-  const observe = async (requestId: string): Promise<TaskCreateObserveResult> => {
-    if (disposed) return { kind: 'disposed' }
-    const existing = attempts.peek().find(item => item.requestId === requestId)
-    if (!existing) return { kind: 'not_found' }
-    const owner = options.owner.peek()
-    if (!owner || !workspaceValue(owner.workspace)) return { kind: 'owner_unavailable' }
-    if (!sameWorkspace(owner.workspace, existing.workspace)) return { kind: 'workspace_mismatch' }
-    const identity = { revision: owner.identity.revision, actor: owner.identity.actor }
-    const ownerIsCurrent = ownerGuard(owner, ownerEpoch, existing.workspace, identity)
-    if (!ownerIsCurrent()) return { kind: 'owner_unavailable' }
-    if (reads.has(requestId)) return { kind: 'already_checking' }
-    const ticket = Symbol('task-creation-read')
-    reads.set(requestId, ticket)
-    const isCurrent = () => ownerIsCurrent() && reads.get(requestId) === ticket
+  const startCheck = (requestId: string, preflight: boolean): symbol | null => {
+    if (disposed || checks.has(requestId) || !attempts.peek().some(item => item.requestId === requestId)) return null
+    const check = Symbol('task-creation-check')
+    checks.set(requestId, { token: check, preflight })
     attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, checking: true } : item)
-    if (!isCurrent()) {
-      if (reads.get(requestId) === ticket) reads.delete(requestId)
-      attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, checking: false } : item)
-      return { kind: 'stale' }
-    }
-    let result: TaskCreationRead
+    return check
+  }
+  const beginCheck = (requestId: string): symbol | null => startCheck(requestId, true)
+  const endCheck = (requestId: string, check: symbol): void => {
+    if (checks.get(requestId)?.token !== check) return
+    checks.delete(requestId)
+    attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, checking: false } : item)
+  }
+
+  const observe = async (requestId: string, preflight?: symbol): Promise<TaskCreateObserveResult> => {
+    if (disposed) return { kind: 'disposed' }
+    const check = preflight ?? startCheck(requestId, false)
+    if (!check || checks.get(requestId)?.token !== check) return { kind: 'already_checking' }
     try {
-      const raw = await lookup(owner, requestId, isCurrent)
-      if (!isCurrent()) return { kind: 'stale' }
-      result = decodeTaskCreationReceipt(raw, requestId, existing.workspace) ?? { kind: 'error', reason: 'invalid_response' }
-    } catch {
-      if (!isCurrent()) return { kind: 'stale' }
-      result = { kind: 'error', reason: 'lookup_failed' }
-    } finally {
-      if (reads.get(requestId) === ticket) {
-        reads.delete(requestId)
-        if (!ownerIsCurrent()) {
-          attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, checking: false } : item)
+      const existing = attempts.peek().find(item => item.requestId === requestId)
+      if (!existing) return { kind: 'not_found' }
+      const owner = options.owner.peek()
+      if (!owner || !workspaceValue(owner.workspace)) return { kind: 'owner_unavailable' }
+      if (!sameWorkspace(owner.workspace, existing.workspace)) return { kind: 'workspace_mismatch' }
+      const identity = { revision: owner.identity.revision, actor: owner.identity.actor }
+      const ownerIsCurrent = ownerGuard(owner, ownerEpoch, existing.workspace, identity)
+      if (!ownerIsCurrent()) return { kind: 'owner_unavailable' }
+      if (reads.has(requestId)) return { kind: 'already_checking' }
+      const ticket = Symbol('task-creation-read')
+      reads.set(requestId, ticket)
+      const isCurrent = () => ownerIsCurrent() && reads.get(requestId) === ticket && checks.get(requestId)?.token === check
+      if (!isCurrent()) {
+        if (reads.get(requestId) === ticket) reads.delete(requestId)
+        return { kind: 'stale' }
+      }
+      let result: TaskCreationRead
+      try {
+        const raw = await lookup(owner, requestId, isCurrent)
+        if (!isCurrent()) return { kind: 'stale' }
+        result = decodeTaskCreationReceipt(raw, requestId, existing.workspace) ?? { kind: 'error', reason: 'invalid_response' }
+      } catch {
+        if (!isCurrent()) return { kind: 'stale' }
+        result = { kind: 'error', reason: 'lookup_failed' }
+      } finally {
+        if (reads.get(requestId) === ticket) {
+          reads.delete(requestId)
         }
       }
+      // No await occurs between the final owner check and admitting this read.
+      if (!ownerIsCurrent()) return { kind: 'stale' }
+      const next = attempts.peek().map(item => item.requestId === requestId
+        ? { ...item, reads: appendRead(item.reads,
+          result.kind === 'not_observed' && item.original.kind === 'pending' ? { ...result, originalPhase: 'pending' }
+            : result.kind === 'recorded' && existing.original.kind === 'created' && item.original.kind === 'created'
+              && existing.original.taskId === item.original.taskId ? { ...result, originalPhase: 'created' } : result),
+          latestReadCurrent: result.kind !== 'error', latestReadFailureCurrent: result.kind === 'error' } : item)
+      attempts.value = next
+      const persisted = existing.persistence === 'session' && save(attempts.peek())
+      return { kind: 'observed', result, persisted }
+    } finally {
+      if (preflight === undefined) endCheck(requestId, check)
     }
-    // No await occurs between the final owner check and admitting this read.
-    if (!ownerIsCurrent()) return { kind: 'stale' }
-    const next = attempts.peek().map(item => item.requestId === requestId
-      ? { ...item, reads: appendRead(item.reads, result), checking: false,
-        latestReadCurrent: result.kind !== 'error', latestReadFailureCurrent: result.kind === 'error' } : item)
-    attempts.value = next
-    const persisted = existing.persistence === 'session' && save(attempts.peek())
-    return { kind: 'observed', result, persisted }
   }
 
   const retryStorage = (): boolean => {
@@ -548,11 +601,12 @@ export function createTaskCreateReceiptStore(options: {
     disposed = true
     ownerEpoch += 1
     reads.clear()
+    checks.clear()
     stopOwnerEffect()
     attempts.value = attempts.peek().map(item => ({ ...item, checking: false, originalCurrent: false, latestReadCurrent: false,
       latestReadFailureCurrent: false }))
   }
 
   return { attempts, storageState, reserve, reserveMemoryOnly, settleOriginal, markPresented, forgetDefinite,
-    observe, retryStorage, compact, dispose }
+    beginCheck, endCheck, observe, retryStorage, compact, dispose }
 }

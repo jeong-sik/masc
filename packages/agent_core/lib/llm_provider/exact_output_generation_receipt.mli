@@ -47,6 +47,7 @@ val snapshot : t -> snapshot
 val snapshot_phase : snapshot -> effect_phase
 val snapshot_dispatch_count : snapshot -> int
 val snapshot_generation_dispatched : snapshot -> bool
+val snapshot_http_status : snapshot -> int option
 val snapshot_call_id : snapshot -> call_id
 val snapshot_plan_fingerprint : snapshot -> string
 val snapshot_request_body_sha256 : snapshot -> string

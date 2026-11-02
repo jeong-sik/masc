@@ -47,6 +47,7 @@ type t =
 type snapshot =
   { phase : effect_phase
   ; dispatch_count : int
+  ; http_status : int option
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
@@ -363,16 +364,17 @@ let rec record_provider_trace receipt provider_trace =
 
 let snapshot receipt =
   let state = Atomic.get receipt.state in
-  let phase, dispatch_count =
+  let phase, dispatch_count, http_status =
     match state with
-    | Not_started_state -> Not_started, 0
-    | Before_dispatch_state -> Before_dispatch, 0
-    | Dispatch_started_state -> Dispatch_started, 1
-    | Response_received_state _ -> Response_received, 1
-    | Terminal_state _ -> Terminal, 1
+    | Not_started_state -> Not_started, 0, None
+    | Before_dispatch_state -> Before_dispatch, 0, None
+    | Dispatch_started_state -> Dispatch_started, 1, None
+    | Response_received_state { status; provider_trace = _ } -> Response_received, 1, status
+    | Terminal_state { status; provider_trace = _ } -> Terminal, 1, Some status
   in
   { phase
   ; dispatch_count
+  ; http_status
   ; call_id = receipt.call_id
   ; plan_fingerprint = receipt.plan_fingerprint
   ; request_body_sha256 = receipt.request_body_sha256
@@ -385,6 +387,7 @@ let snapshot_dispatch_count (snapshot : snapshot) = snapshot.dispatch_count
 (* [generation_dispatched] read off a copy: the copy's count comes from the
    same receipt state. *)
 let snapshot_generation_dispatched (snapshot : snapshot) = snapshot.dispatch_count = 1
+let snapshot_http_status (snapshot : snapshot) = snapshot.http_status
 let snapshot_call_id (snapshot : snapshot) = snapshot.call_id
 let snapshot_plan_fingerprint (snapshot : snapshot) = snapshot.plan_fingerprint
 let snapshot_request_body_sha256 (snapshot : snapshot) = snapshot.request_body_sha256

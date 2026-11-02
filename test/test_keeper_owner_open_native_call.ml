@@ -710,7 +710,8 @@ let test_owned_input_wait ?response fixture () =
             | Declined -> [Agent_core.Types.user_msg "original admitted input";
                 Agent_core.Types.user_msg "[Input declined] Which original choice?"]
             | Timeout -> [Agent_core.Types.user_msg "original admitted input";
-                Agent_core.Types.user_msg "[Input timed out] Which original choice?"] in
+                { (Agent_core.Types.user_msg "[Input timed out] Which original choice?")
+                  with origin=Agent_core.Types.Recovery_instruction }] in
           check bool "response uses canonical question and does not append original prompt again" true (consumed.messages=expected);
           (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:waiting ~response with
            | Error (Owner.Response_owner_error (Owner.Operation_rejected (Store.Invalid_input _))) -> ()

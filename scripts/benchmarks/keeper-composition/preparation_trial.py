@@ -275,9 +275,9 @@ def useful_identity(root: Path, attempt: dict, receipt: dict) -> dict:
                 and text(fixture["trace_id"]) and fixture["trace_id"] == turn["trace_id"] == leaf.get("trace_id")
                 and type(turn["absolute_turn"]) is int and turn["absolute_turn"] >= 0
                 and same_json(turn["absolute_turn"], leaf.get("keeper_turn_id")))
-        source_keys = ("stimulus_id", "source_snapshot_ref", "admitted_revision", "first_admitted_at")
+        source_keys = ("stimulus_id", "source_kind", "source_snapshot_ref", "admitted_revision", "first_admitted_at")
         sources = [{key: admission[key] for key in source_keys}]
-        require(all(text(admission[key]) for key in source_keys[:3])
+        require(all(text(admission[key]) for key in source_keys[:4])
                 and type(admission["first_admitted_at"]) in (int, float)
                 and same_json(admission, timing["admission"])
                 and intake["state"] == "observed" and intake["manifest_sha256"] == hashes[marker_path]

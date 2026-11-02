@@ -986,6 +986,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   let stimulus_id = Ledger.stimulus_id_of_event_queue selection.source in
   let source_ref = Keeper_event_queue_state.source_snapshot_ref selection.source in
   let admission = `Assoc ["post_id",`String (Board.Post_id.to_string post.id);"stimulus_id",`String stimulus_id;
+      "source_kind",`String (Keeper_event_queue.payload_kind_label selection.source.payload);
       "source_snapshot_ref",`String source_ref;"admitted_revision",`String (Int64.to_string selection.admitted_revision);
       "first_admitted_at",(match selection.first_admitted_at with None -> `Null | Some value -> `Float value);
       "enqueue_entered",admission_entered;"enqueue_returned",admission_returned] in
@@ -1081,13 +1082,14 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
         row.keeper_turn_id=Some (integer "absolute_turn" turn_json) -> Some row
     | Active_row _ | Unsupported_row _ -> None) manifest_rows in
   let expected_sources = `List [`Assoc (List.map (fun key -> key,field key admission)
-      ["stimulus_id";"source_snapshot_ref";"admitted_revision";"first_admitted_at"])] in
+      ["stimulus_id";"source_kind";"source_snapshot_ref";"admitted_revision";"first_admitted_at"])] in
   let intake_turn_entry = match entries with
     | [row] when Yojson.Safe.equal (field "intake_sources" row.decision) expected_sources ->
       let persisted = Keeper_runtime_manifest.to_json row in
       json (Filename.concat attempt_dir "turn-entry-manifest.json") persisted;
-      require (field "intake_sources" (field "decision" (Keeper_runtime_manifest.public_to_json row))=`Null)
-        "private intake source identity leaked through public manifest projection";
+      require (Yojson.Safe.equal
+        (field "intake_sources" (field "decision" (Keeper_runtime_manifest.public_to_json row))) expected_sources)
+        "public intake projection did not preserve only the exact source references";
       `Assoc ["state",`String "observed";"ts",`String row.ts;
         "trace_id",`String row.trace_id;"keeper_turn_id",`Int (integer "absolute_turn" turn_json);
         "sources",expected_sources;"clock_refs",field "clock_refs" row.decision;

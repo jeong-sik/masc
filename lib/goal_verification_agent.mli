@@ -43,6 +43,20 @@ val scan_skipped_log_prefix : string
     line count = skipped scan count). The same scan appends one
     {!Goal_verification_run_registry.Scan_skipped} row. *)
 
+type observation_snapshot
+(** Immutable in-process verifier observations. This is not a durable receipt
+    or an atomic snapshot of the Goal and verification ledgers. *)
+
+val capture_observations : unit -> observation_snapshot
+(** Capture scan and original-read observations together for one response. *)
+
+val unreconciled_from_snapshot_to_yojson :
+  observation_snapshot ->
+  config:Workspace_utils_backend_setup.config ->
+  record:Goal_verification.record option -> Goal_store.goal -> Yojson.Safe.t
+(** Project one Goal from the supplied snapshot. Request binding and evidence
+    limits are the same as {!unreconciled_to_yojson}. *)
+
 val unreconciled_to_yojson :
   config:Workspace_utils_backend_setup.config ->
   record:Goal_verification.record option -> Goal_store.goal -> Yojson.Safe.t

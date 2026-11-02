@@ -1880,6 +1880,18 @@ let test_original_failure_projection_is_bound_to_request_and_workspace () =
       fail "the actual host did not observe the retained body failure" in
   observe_actual_failure ();
   assert_original_failure_visible config goal_id;
+  let original_snapshot = Goal_verification_agent.capture_observations () in
+  let original_goal = match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_absent -> fail "original Goal disappeared"
+    | Store_unavailable error -> fail (Goal_store.unavailable_to_string error) in
+  let original_record = Some (ledger_record config goal_id) in
+  let project snapshot =
+    Goal_verification_agent.unreconciled_from_snapshot_to_yojson snapshot
+      ~config ~record:original_record original_goal in
+  let original_projection = project original_snapshot in
+  check bool "the captured view contains the observed original failure" true
+    (original_projection <> `Null);
   Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.base_path) (fun () ->
     let other = Workspace.default_config (Filename.concat config.base_path "cloned-diagnostic-workspace") in
     let copy source target =
@@ -1911,6 +1923,11 @@ let test_original_failure_projection_is_bound_to_request_and_workspace () =
      failure for the replacement request, rather than inheriting stale state. *)
   observe_actual_failure ();
   assert_original_failure_visible config goal_id;
+  let replacement_snapshot = Goal_verification_agent.capture_observations () in
+  check bool "the old captured view does not change with a newer read" true
+    (Yojson.Safe.equal original_projection (project original_snapshot));
+  check bool "the newer view does not attach a replacement failure to the old request" true
+    (project replacement_snapshot = `Null);
   ignore (must_succeed "change the actual criterion" (dispatch ctx ~name:"masc_goal_upsert"
     ["id", `String goal_id; "target_value", `String "4"]));
   ignore (must_succeed "request the changed criterion" (transition ctx goal_id "request_complete"));

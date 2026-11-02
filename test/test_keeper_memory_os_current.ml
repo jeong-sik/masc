@@ -4996,13 +4996,23 @@ let test_generic_publication_journal_cancellation_keeps_producer_commit () =
   check int "recovery does not replay old producer callback" 1 !commits
 ;;
 
+let quarantine_fixture_snapshot ~keepers_dir =
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Out_channel.with_open_bin path (fun out -> output_string out "{invalid snapshot");
+  match Current.inspect_for_boot ~keepers_dir ~keeper_id:"keeper" with
+  | Current.Boot_undecodable {rejection;snapshot_sha256} ->
+    Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      ~now:250. ~rejection ~expected_snapshot_sha256:snapshot_sha256 () |> require_ok |> ignore
+  | Current.Boot_absent | Current.Boot_readable | Current.Boot_unreadable _ ->
+    fail "fixture snapshot must be a rejected regular file"
+;;
+
 let test_generic_publication_reused_revision_keeps_exact_history () =
   with_temp_keepers @@ fun keepers_dir ->
   ignore (replace ~keepers_dir ~facts:[fact ~claim:"previous snapshot generation" ()] () |> require_ok);
   let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let old_journal = Fs_compat.load_file journal in
-  ignore (Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-    ~now:250. ~rejection:"fixture explicit quarantine" () |> require_ok);
+  quarantine_fixture_snapshot ~keepers_dir;
   let write_snapshot path content =
     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ~sync_parent:(fun _ -> failwith "after rename") path content in
@@ -5028,8 +5038,7 @@ let test_generic_publication_quarantine_requires_current_generation_journal () =
   let facts = [fact ~claim:"replayed publication" ()] in
   ignore (replace ~keepers_dir ~facts () |> require_ok);
   let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
-  ignore (Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-    ~now:250. ~rejection:"fixture explicit quarantine" () |> require_ok);
+  quarantine_fixture_snapshot ~keepers_dir;
   let write_snapshot path content =
     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ~sync_parent:(fun _ -> failwith "after rename") path content in

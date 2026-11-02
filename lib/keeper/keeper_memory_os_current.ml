@@ -1557,15 +1557,6 @@ let parse_publication text =
   | json -> publication_of_json json
   | exception Yojson.Json_error detail -> Error ("publication receipt: " ^ detail)
 
-let read_publication ~keepers_dir ~keeper_id =
-  let path = publication_receipt_path ~keepers_dir ~keeper_id in
-  try match Fs_compat.load_file_opt path with
-    | None -> Ok None
-    | Some text -> Result.map Option.some (parse_publication text)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error ("publication receipt unreadable: " ^ Printexc.to_string exn)
-
 type preflight_observation =
   | Preflight_absent
   | Preflight_snapshot
@@ -1573,7 +1564,28 @@ type preflight_observation =
 
 (* Open without blocking on special files and inspect the opened descriptor,
    not a path that may be replaced between a stat and an open. *)
-let preflight_file path =
+let preflight_file_unix ?(allow_missing_ancestors=false) path =
+  let rec inspect_parent parent =
+    match Unix.lstat parent with
+    | stat ->
+      (match stat.Unix.st_kind with
+       | Unix.S_DIR -> Ok None
+       | Unix.S_LNK ->
+         (match Unix.stat parent with
+          | target when target.Unix.st_kind = Unix.S_DIR -> Ok None
+          | _ -> Error (parent ^ ": not a directory")
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+            Error (parent ^ ": " ^ Printexc.to_string exn))
+       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+         Error (parent ^ ": not a directory"))
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) when allow_missing_ancestors ->
+      let next = Filename.dirname parent in
+      if String.equal next parent then Error (parent ^ ": missing directory")
+      else inspect_parent next
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+      Error (parent ^ ": " ^ Printexc.to_string exn) in
   try
     let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
     let channel = Unix.in_channel_of_descr fd in
@@ -1585,18 +1597,46 @@ let preflight_file path =
   | Unix.Unix_error (Unix.ENOENT, _, _) ->
     (match Unix.lstat path with
      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-       (match Unix.stat (Filename.dirname path) with
-        | stat when stat.Unix.st_kind = Unix.S_DIR -> Ok None
-        | _ -> Error (Filename.dirname path ^ ": not a directory")
-        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
-          Error (Filename.dirname path ^ ": " ^ Printexc.to_string exn))
+       inspect_parent (Filename.dirname path)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
        Error (path ^ ": " ^ Printexc.to_string exn)
      | _ -> Error (path ^ ": file target is absent"))
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Unix.Unix_error _ | Sys_error _) as exn -> Error (path ^ ": " ^ Printexc.to_string exn)
+
+let preflight_file ?(allow_missing_ancestors=false) path =
+  try
+    let result =
+      Systhread_host.run ~label:"memory-current-observe-file" (fun () ->
+        preflight_file_unix ~allow_missing_ancestors path)
+    in
+    (match Eio_guard.execution_context () with
+     | Eio_guard.Eio_fiber -> Eio.Fiber.check ()
+     | Eio_guard.Non_eio -> ());
+    result
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Systhread_host.Host_failed exn ->
+    Error (path ^ ": observation worker failed: " ^ Printexc.to_string exn)
+
+let quarantine_regular_path path =
+  try match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_REG -> Ok ()
+    | Unix.S_LNK -> Error (path ^ ": snapshot symlink requires manual reconciliation")
+    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      Error (path ^ ": snapshot is not a regular file")
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Unix.Unix_error _ | Sys_error _) as exn -> Error (path ^ ": " ^ Printexc.to_string exn)
+
+let read_publication ~keepers_dir ~keeper_id =
+  let path = publication_receipt_path ~keepers_dir ~keeper_id in
+  let* text = preflight_file ~allow_missing_ancestors:true path
+    |> Result.map_error (fun detail -> "publication receipt unreadable: " ^ detail) in
+  match text with
+  | None -> Ok None
+  | Some text -> Result.map Option.some (parse_publication text)
 
 let inspect_for_preflight ~keepers_dir ~keeper_id =
   let publication_path = publication_receipt_path ~keepers_dir ~keeper_id in
@@ -1619,19 +1659,49 @@ let inspect_for_preflight ~keepers_dir ~keeper_id =
       | None -> Ok Preflight_absent
       | Some text -> let+ _ = parse path text in Preflight_snapshot
 
+type boot_observation =
+  | Boot_absent
+  | Boot_readable
+  | Boot_undecodable of { rejection : string; snapshot_sha256 : string }
+  | Boot_unreadable of { detail : string }
+
+let inspect_for_boot ~keepers_dir ~keeper_id =
+  let publication_path = publication_receipt_path ~keepers_dir ~keeper_id in
+  let publication () =
+    let* contents = preflight_file publication_path in
+    match contents with
+    | None -> Ok ()
+    | Some _ -> Error (publication_path ^ ": publication recovery is pending") in
+  let observed =
+    let* () = publication () in
+    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let* content = preflight_file path in
+    let* () = publication () in
+    match content with
+    | None -> Ok Boot_absent
+    | Some content ->
+      (match parse path content with
+       | Ok _ -> Ok Boot_readable
+       | Error rejection ->
+         let+ () = quarantine_regular_path path in
+         Boot_undecodable {rejection; snapshot_sha256=sha256 content}) in
+  match observed with
+  | Ok observation -> observation
+  | Error detail -> Boot_unreadable {detail}
+
 let write_publication ~keepers_dir ~keeper_id receipt =
   let json = publication_to_json receipt in
   let* _ = publication_of_json json in
   Fs_compat.save_file_atomic_strict (publication_receipt_path ~keepers_dir ~keeper_id)
     (Yojson.Safe.to_string json)
 
-let remove_publication ~keepers_dir ~keeper_id =
+let remove_publication ~sync_parent ~keepers_dir ~keeper_id =
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     try
       (try Unix.unlink (publication_receipt_path ~keepers_dir ~keeper_id)
        with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
       let fd = Unix.openfile keepers_dir [Unix.O_RDONLY] 0 in
-      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> sync_parent fd);
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1734,7 +1804,7 @@ let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
 
 (* Caller owns aggregate and snapshot locks. Inspect the receipt before parsing
    or quarantining a snapshot: an unmatched publication must preserve all bytes. *)
-let recover_publication_locked ~keepers_dir ~keeper_id =
+let recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id =
   let* _ = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id in
   let* receipt = read_publication ~keepers_dir ~keeper_id in
   match receipt with
@@ -1749,7 +1819,7 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
         then Ok () else Error "ordered publication incarnation/prior binding changed; stores preserved"
       | Journal_committed {program=None;_} | Journal_failed _ | Journal_quarantined _ -> Ok () in
     let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let content = Fs_compat.load_file_opt path in
+    let* content = preflight_file path in
     let prior_matches = match receipt.prior, content with
       | None, None -> true
       | Some (_, digest), Some text -> String.equal digest (sha256 text)
@@ -1766,7 +1836,7 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
          consumed nothing; the reconcile still moves them aside as it does
          every receipt it drops. *)
       let* _ = reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot in
-      let+ () = remove_publication ~keepers_dir ~keeper_id in None
+      let+ () = remove_publication ~sync_parent ~keepers_dir ~keeper_id in None
     else match content with
       | Some text when String.equal receipt.target_sha256 (sha256 text) ->
         let* current = parse path text in
@@ -1786,7 +1856,7 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
         Some pending
       | None | Some _ -> Error "publication target is absent or conflicting; stores preserved"
 
-let dispatch_publication ~keepers_dir ~keeper_id receipt =
+let dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt =
   Keeper_memory_commit_notifications.notify_committed
     {keepers_dir=Unix.realpath keepers_dir; keeper_id; store=Ordinary; revision=receipt.target_revision};
   Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
@@ -1794,18 +1864,21 @@ let dispatch_publication ~keepers_dir ~keeper_id receipt =
       let* current = read_publication ~keepers_dir ~keeper_id in
       match current with
       | None -> Ok ()
-      | Some current when current = receipt -> remove_publication ~keepers_dir ~keeper_id
+      | Some current when current = receipt -> remove_publication ~sync_parent ~keepers_dir ~keeper_id
       | Some _ -> Error "publication changed during notification dispatch; receipt preserved"))
 
-let recover_publication ~keepers_dir ~keeper_id =
+let recover_publication_with_sync ~sync_parent ~keepers_dir ~keeper_id =
   let* existing = read_publication ~keepers_dir ~keeper_id in
   match existing with
   | None -> Ok ()
   | Some _ ->
   let* pending = Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
     File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
-      recover_publication_locked ~keepers_dir ~keeper_id)) in
-  match pending with None -> Ok () | Some receipt -> dispatch_publication ~keepers_dir ~keeper_id receipt
+      recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id)) in
+  match pending with None -> Ok () | Some receipt -> dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt
+
+let recover_publication ~keepers_dir ~keeper_id =
+  recover_publication_with_sync ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id
 
 let with_program_reset ~keepers_dir ~keeper_id remove =
   Fs_compat.mkdir_p keepers_dir;
@@ -2417,7 +2490,7 @@ let update_locked_with_output
     let committed = ref None in
     let notify () =
       Option.iter (fun receipt ->
-        match dispatch_publication ~keepers_dir ~keeper_id receipt with
+        match dispatch_publication ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id receipt with
         | Ok () -> ()
         | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id "%s" detail) !committed
     in
@@ -3786,16 +3859,32 @@ let read_journal_tail_projection ~keepers_dir ~keeper_id ~limit =
    keeper before any keeper loop starts. A snapshot this build cannot decode
    is therefore never discovered mid-turn by whichever read or write happens
    to come first. *)
-let move_aside_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now ~rejection () =
+let move_aside_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now ~rejection
+    ~expected_snapshot_sha256 () =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   Keeper_memory_os_aggregate_lock.with_lock ?clock ~keepers_dir ~keeper_id (fun () ->
     File_lock_eio.with_lock ?clock snapshot_path (fun () ->
+      let* publication = read_publication ~keepers_dir ~keeper_id in
+      let* () = match publication with
+        | None -> Ok ()
+        | Some _ -> Error "publication evidence is pending; snapshot quarantine refused" in
+      let* () = quarantine_regular_path snapshot_path in
+      let* content = preflight_file snapshot_path in
+      let* content = Option.to_result ~none:"snapshot disappeared before quarantine" content in
+      let* () = if String.equal (sha256 content) expected_snapshot_sha256
+        then Ok () else Error "snapshot changed before quarantine" in
+      let* () = match parse snapshot_path content with
+        | Ok _ -> Error "snapshot is readable; quarantine refused"
+        | Error actual when String.equal actual rejection -> Ok ()
+        | Error _ -> Error "snapshot decoder rejection changed before quarantine" in
+      let* () = quarantine_regular_path snapshot_path in
       quarantine_snapshot_and_receipt
         ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection))
 ;;
 
 module For_testing = struct
   let decode_snapshot text = parse "captured snapshot" text
+  let recover_publication_with_sync = recover_publication_with_sync
 
   let apply_program_with_publication_io ~write_snapshot ~sync_snapshot ~before_journal ~on_committed
       ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =

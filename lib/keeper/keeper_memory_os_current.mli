@@ -414,6 +414,18 @@ val inspect_for_preflight :
 (** Decode without recovering or notifying. A readable pending receipt is
     reported as pending, not as proof that its companions can be recovered. *)
 
+type boot_observation =
+  | Boot_absent
+  | Boot_readable
+  | Boot_undecodable of { rejection : string; snapshot_sha256 : string }
+  | Boot_unreadable of { detail : string }
+
+val inspect_for_boot : keepers_dir:string -> keeper_id:string -> boot_observation
+(** Read without recovery or notification. Only a decoder rejection of the
+    observed regular snapshot produces [Boot_undecodable]; pending publication,
+    unavailable paths and other I/O errors are [Boot_unreadable]. The digest
+    identifies the exact rejected bytes and does not authorize a move by itself. *)
+
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
 (** Completes pending publication recovery before reading. May append the exact
@@ -992,10 +1004,11 @@ val to_json : t -> Yojson.Safe.t
 
 (** {1 Boot-time reconcile} *)
 
-(** Move one keeper's current snapshot, which this build's decoder has already
-    refused with [rejection], to a fresh [.rejected-<now>] path and journal the
-    quarantine -- exactly what a writer would do on its next commit, done once
-    at boot under the same locks after the operator accepted it (RFC-0420).
+(** Move one keeper's current snapshot to a fresh [.rejected-<now>] path and
+    journal the quarantine after the operator accepted it (RFC-0420). Under the
+    aggregate and snapshot locks, re-read the file and require the exact
+    [expected_snapshot_sha256] and the same decoder [rejection] before moving.
+    A changed, readable, absent or unavailable snapshot is not quarantined.
     A pending removal receipt moves aside first, preserving its original
     bytes even when it cannot be decoded. This prevents an active receipt
     from requiring the quarantined snapshot's hash on the next write.
@@ -1008,6 +1021,7 @@ val move_aside_for_keepers_dir
   -> keeper_id:string
   -> now:float
   -> rejection:string
+  -> expected_snapshot_sha256:string
   -> unit
   -> (string, string) result
 
@@ -1023,6 +1037,11 @@ val merge_basis
 module For_testing : sig
   val decode_snapshot : string -> (t, string) result
   (** Decode captured bytes only; does not establish publication durability. *)
+
+  val recover_publication_with_sync :
+    sync_parent:(Unix.file_descr -> unit) -> keepers_dir:string -> keeper_id:string ->
+    (unit, string) result
+  (** Use the actual recovery and unlink path with an injected parent sync. *)
 
   val apply_program_with_publication_io :
     write_snapshot:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->

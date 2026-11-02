@@ -3399,6 +3399,37 @@ let test_interval_wake_to_unstarted_owner_holds_the_next_occurrence () =
          [ occurrence_id ] (pending_ids ()))
 ;;
 
+let test_wake_received_during_a_turn_survives_its_finish () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let entry = register_keeper ~proactive_enabled:true config keeper_name in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       let observation_token = Keeper_turn_observation_token.fresh () in
+       Keeper_registry.mark_turn_started ~observation_token ~base_path
+         ~wake:Keeper_registry.Chat_request keeper_name;
+       Atomic.set entry.fiber_wakeup false;
+       let request = create_keeper_wake_schedule
+           ~recurrence:(Schedule_domain.Interval { interval_sec = 60 }) config in
+       let delivered = tick_ok config ~now:(request.due_at +. 1.0) in
+       let occurrence_id = single_occurrence_id delivered in
+       check bool "schedule signals the owner during its active turn" true
+         (Atomic.get entry.fiber_wakeup);
+       Keeper_registry.mark_turn_finished ~observation_token ~base_path keeper_name;
+       check bool "finishing the active turn preserves the pending wake" true
+         (Atomic.get entry.fiber_wakeup);
+       let pending_ids =
+         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.to_list
+         |> List.map (fun (source : Keeper_event_queue.stimulus) -> source.post_id)
+       in
+       check (list string) "the original occurrence is still pending once"
+         [ occurrence_id ] pending_ids)
+;;
+
 let test_interval_wake_retries_acceptance_commit ~complete_before_retry () =
   with_workspace
   @@ fun config ->
@@ -4855,6 +4886,8 @@ let () =
             test_unstarted_owner_accepts_the_occurrence_once
         ; test_case "an interval wake to an unstarted owner holds the next occurrence"
             `Quick test_interval_wake_to_unstarted_owner_holds_the_next_occurrence
+        ; test_case "a scheduled wake received during a turn survives its finish"
+            `Quick test_wake_received_during_a_turn_survives_its_finish
         ; test_case "interval wake retries acceptance commit"
             `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:false)
         ; test_case "completed interval wake retries acceptance without enqueue"

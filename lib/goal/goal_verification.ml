@@ -299,10 +299,26 @@ let clear_verifications_cache_for path =
     ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
     (fun () -> Hashtbl.remove verifications_cache path)
 
+(* A failed follow-symlink existence check is not evidence that the directory
+   entry is absent. In particular, a dangling link may name an earlier ledger. *)
+let local_entry_present path =
+  let result = Eio_guard.run_in_systhread ~label:"goal-proof-entry-presence" (fun () ->
+    match Unix.lstat path with
+    | _ -> Ok true
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)) in
+  Eio_guard.check_if_ready ();
+  result
+
 let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) result =
+  let confirmed_local_absence () =
+    match local_entry_present path with
+    | Ok false -> Ok None
+    | Ok true -> Error (Workspace_utils.Json_doc_unreadable "Goal proof entry exists but could not be read")
+    | Error detail -> Error (Workspace_utils.Json_doc_unreadable detail) in
   let read_local () =
     match Safe_ops.read_file_result path with
-    | Error (Safe_ops.File_not_found _) -> Ok None
+    | Error (Safe_ops.File_not_found _) -> confirmed_local_absence ()
     | Error (Safe_ops.Read_failed _ as error) ->
         Error
           (Workspace_utils.Json_doc_unreadable
@@ -320,7 +336,10 @@ let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) r
                   (Workspace_utils.Json_doc_unreadable
                      (Printf.sprintf "backend_get failed for %s: %s" key
                         (Backend_types.show_error e)))
-            | Ok None -> Ok None
+            | Ok None ->
+              (match config.Workspace_utils.backend with
+               | Workspace_utils.FileSystem _ -> confirmed_local_absence ()
+               | Workspace_utils.Memory _ -> Ok None)
             | Ok (Some content) -> Ok (Some content)))
   | None -> read_local ()
 
@@ -401,15 +420,46 @@ let load_state config : load_outcome =
        | (Ok (Some _) | Error _) as recovery_read ->
            recovered ~primary_detail:"primary ledger is missing" recovery_read)
 
+(* When the primary is absent, an existing or uninspectable mirror cannot be
+   treated as a new empty ledger. Inspect the entry itself so a dangling
+   symlink or FIFO still counts, without opening the mirror's contents. *)
+let recovery_mirror_present config =
+  let path = verifications_recovery_path config in
+  let local_presence () = local_entry_present path in
+  match config.Workspace_utils.backend, Workspace_utils.key_of_path config path with
+  | Workspace_utils.Memory _, Some key ->
+    (match Workspace_utils.backend_get config ~key with
+     | Ok None -> Ok false
+     | Ok (Some _) -> Ok true
+     | Error error -> Error (Backend_types.show_error error))
+  | Workspace_utils.Memory _, None -> local_presence ()
+  | Workspace_utils.FileSystem backend, _ ->
+    let backend_root = Backend.FileSystem.physical_root backend in
+    Eio_guard.check_if_ready ();
+    (match backend_root with
+     | Error error -> Error (Backend_types.show_error error)
+     | Ok backend_root ->
+       let local_root = Eio_guard.run_in_systhread ~label:"goal-proof-workspace-root" (fun () ->
+         match Unix.realpath (Workspace_utils.masc_dir config) with
+         | root -> Ok root
+         | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)) in
+       Eio_guard.check_if_ready ();
+       match local_root with
+       | Error _ as error -> error
+       | Ok local_root when String.equal backend_root local_root -> local_presence ()
+       | Ok _ -> Error "Goal proof backend and workspace roots differ")
+
 let load_primary_state config =
   ensure_dirs config;
   match read_state config (verifications_path config) with
   | Error detail -> Undecodable detail
   | Ok (Some prepared) -> Loaded prepared
   | Ok None ->
-      if Workspace_utils.path_exists config (verifications_recovery_path config) then
-        Undecodable "primary ledger is missing while its recovery mirror exists"
-      else Loaded (default_prepared_state ())
+      (match recovery_mirror_present config with
+       | Ok false -> Loaded (default_prepared_state ())
+       | Ok true -> Undecodable "primary ledger is missing while its recovery mirror exists"
+       | Error detail ->
+         Undecodable ("primary ledger is missing and its recovery mirror cannot be inspected: " ^ detail))
 
 let undecodable_store_error config detail =
   Printf.sprintf

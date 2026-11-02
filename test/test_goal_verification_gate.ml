@@ -1877,6 +1877,78 @@ let test_recovery_proof_cannot_authorize_mutation () =
   check string "primary failure is not overwritten" "broken-primary" (ledger_bytes config)
 ;;
 
+let proof_mirror_presence_scenario () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep an unresolved proof ledger" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let _, criterion = proof_identity config goal_id in
+  let primary = Goal_verification.verifications_path config in
+  let mirror = primary ^ ".last-good" in
+  let primary_saved = primary ^ ".saved-for-test" in
+  let mirror_saved = mirror ^ ".saved-for-test" in
+  let before_primary = Fs_compat.load_file primary in
+  let before_mirror = Fs_compat.load_file mirror in
+  Unix.rename primary primary_saved;
+  Unix.rename mirror mirror_saved;
+  let refuse label =
+    (match Goal_verification.get_record_authoritative config ~goal_id with
+     | Error _ -> () | Ok _ -> fail (label ^ ": mirror was treated as no prior proof"));
+    (match Goal_verification.bind_review config ~goal_id with
+     | Error (Goal_verification.Binding_unavailable _) -> ()
+     | Error (Goal_verification.No_current_review _) | Ok _ -> fail (label ^ ": verifier admission did not retain uncertainty"));
+    (match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
+     | Error _ -> () | Ok _ -> fail (label ^ ": missing primary was overwritten"));
+    check bool (label ^ ": no new primary") false (Sys.file_exists primary);
+    check string (label ^ ": original primary preserved") before_primary (Fs_compat.load_file primary_saved);
+    check string (label ^ ": original mirror preserved") before_mirror (Fs_compat.load_file mirror_saved) in
+  let with_entry make f =
+    make ();
+    Fun.protect ~finally:(fun () -> Unix.unlink mirror) f in
+  with_entry (fun () -> Unix.symlink "missing-test-target" mirror) (fun () -> refuse "dangling mirror");
+  with_entry (fun () -> Unix.symlink (Filename.basename mirror) mirror) (fun () -> refuse "cyclic mirror");
+  with_entry (fun () -> Unix.mkfifo mirror 0o600) (fun () -> refuse "FIFO mirror");
+  with_entry (fun () -> Unix.symlink (Filename.basename mirror_saved) mirror) (fun () -> refuse "regular mirror link");
+  let with_primary_link target f =
+    Unix.symlink target primary;
+    Fun.protect ~finally:(fun () -> Unix.unlink primary) (fun () ->
+      f ();
+      check bool "primary symlink is preserved" true ((Unix.lstat primary).Unix.st_kind = Unix.S_LNK);
+      check string "primary symlink target is preserved" target (Unix.readlink primary)) in
+  with_primary_link "missing-test-target" (fun () -> refuse "dangling primary");
+  with_primary_link (Filename.basename primary) (fun () -> refuse "cyclic primary");
+  let memory_backend = Backend.Memory.create () in
+  let memory = {config with Workspace_utils.backend = Workspace_utils.Memory memory_backend} in
+  let key = match Workspace_utils.key_of_path memory mirror with
+    | Some key -> key | None -> fail "memory mirror is outside the workspace" in
+  with_primary_link "missing-test-target" (fun () ->
+    match Goal_verification.get_record memory ~goal_id with
+    | Ok None -> () | Ok (Some _) | Error _ -> fail "local primary must not stand in for a historical memory read");
+  (match Backend.Memory.set memory_backend key before_mirror with
+   | Ok () -> () | Error error -> fail (Backend_types.show_error error));
+  (match Goal_verification.get_record_authoritative memory ~goal_id with
+   | Error _ -> () | Ok _ -> fail "memory mirror authorized an empty primary");
+  check string "memory check leaves the original primary alone" before_primary (Fs_compat.load_file primary_saved)
+;;
+
+let test_proof_mirror_presence_guarded () =
+  let program = "import os,signal,subprocess,sys\n" ^
+    "child=subprocess.Popen([sys.argv[1],'--proof-mirror-presence'],start_new_session=True)\n" ^
+    "try: code=child.wait(timeout=40)\n" ^
+    "except subprocess.TimeoutExpired:\n" ^
+    " os.killpg(child.pid,signal.SIGKILL); child.wait(); sys.exit(124)\n" ^
+    "sys.exit(code if code>=0 else 128-code)\n" in
+  let executable = Unix.realpath Sys.executable_name in
+  let pid = Unix.create_process "python3" [|"python3"; "-c"; program; executable|]
+      Unix.stdin Unix.stdout Unix.stderr in
+  match snd (Unix.waitpid [] pid) with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED 124 -> fail "Goal mirror presence check exceeded its process hang guard"
+  | Unix.WEXITED code -> fail (Printf.sprintf "Goal mirror presence check exited %d" code)
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    fail (Printf.sprintf "Goal mirror presence check ended with signal %d" signal)
+;;
+
 
 (* {1 The caller's step before a passing verdict is written} *)
 
@@ -2327,7 +2399,9 @@ let test_proof_request_follows_the_phase_machine () =
 ;;
 
 let () =
-  run
+  if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) "--proof-mirror-presence" then
+    proof_mirror_presence_scenario ()
+  else run
     "goal_verification_gate"
     [ ( "durable proof effects"
       , [ test_case "proof request follows the phase machine" `Quick
@@ -2367,6 +2441,8 @@ let () =
             test_recovered_goal_cannot_authorize_edits_or_deletion
         ; test_case "recovery proof cannot authorize mutation" `Quick
             test_recovery_proof_cannot_authorize_mutation
+        ; test_case "unknown proof mirror refuses admission without reading it" `Quick
+            test_proof_mirror_presence_guarded
         ] )
     ; ( "store discipline"
       , [ test_case "undecodable ledger fails closed and loud" `Quick

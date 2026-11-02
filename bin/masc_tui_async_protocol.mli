@@ -771,6 +771,8 @@ type async_msg =
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
+  | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
+      * Masc.Tui_decode.server_identity * Sse_wire.observer_identity
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -830,6 +832,9 @@ val workspace_message_admitted :
 
 val observer_retry_owned : state -> authority:workspace_authority -> unit ref -> bool
 val observer_recovery_owned : state -> authority:workspace_authority -> unit ref -> bool
+val observer_recovery_identity_owned :
+  state -> authority:workspace_authority -> owner:unit ref -> live:bool ref ->
+  instance:string -> expected:Masc.Tui_decode.server_identity -> bool
 (** A retry belongs only to the workspace and exact closed stream that scheduled it. *)
 
 val account_login_action_is_read : Masc_tui_account_login.action -> bool

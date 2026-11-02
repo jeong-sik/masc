@@ -35,6 +35,8 @@ Mode = Literal[
     "workspace_outage",
     "workspace_outage_health",
     "workspace_outage_session",
+    "workspace_outage_attested",
+    "workspace_outage_new_epoch",
     "missing",
     "conflict",
     "missing_after_live",
@@ -43,6 +45,8 @@ OUTAGE_MODES = (
     "workspace_outage",
     "workspace_outage_health",
     "workspace_outage_session",
+    "workspace_outage_attested",
+    "workspace_outage_new_epoch",
 )
 
 
@@ -161,9 +165,10 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/health":
             if server.mode in OUTAGE_MODES and server.outage_started.is_set():
-                if (
-                    server.release_outage.is_set()
-                    and server.mode != "workspace_outage_health"
+                if server.release_outage.is_set() and server.mode not in (
+                    "workspace_outage_health",
+                    "workspace_outage_attested",
+                    "workspace_outage_new_epoch",
                 ):
                     server.release_identity.wait(30)
                 if not server.release_identity.is_set():
@@ -204,6 +209,8 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
                 "workspace_outage",
                 "workspace_outage_health",
                 "workspace_outage_session",
+                "workspace_outage_attested",
+                "workspace_outage_new_epoch",
             ):
                 expected = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 if expected.get("expected_base_path") != [server.base] or expected.get(
@@ -264,11 +271,39 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
                 if not server.gates[0].wait(30):
                     self.respond(503, {"error": "fixture gate unavailable"})
                     return
+                if server.mode in (
+                    "workspace_outage_attested",
+                    "workspace_outage_new_epoch",
+                ):
+                    body = b'id: 37\ndata: {"type":"fixture-control"}\n\n'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("x-masc-workspace-read", "matched-v1")
+                    self.send_header("x-masc-sse-instance-id", INSTANCE)
+                    self.send_header("x-masc-sse-replay", "fresh")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    self.wfile.flush()
+                    with server.condition:
+                        server.sent.append(index)
+                        server.condition.notify_all()
+                    self.close_connection = True
+                    return
                 server.outage_started.set()
                 self.respond(409, {"code": "workspace_precondition_failed"})
                 with server.condition:
                     server.sent.append(index)
                     server.condition.notify_all()
+                return
+            if (
+                server.mode
+                in ("workspace_outage_attested", "workspace_outage_new_epoch")
+                and index == 1
+            ):
+                server.outage_started.set()
+                self.respond(409, {"code": "workspace_precondition_failed"})
                 return
             if not server.release_outage.is_set():
                 self.respond(503, {"error": "stream outage"})
@@ -284,8 +319,30 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("x-masc-workspace-read", "matched-v1")
-            self.send_header("x-masc-sse-instance-id", INSTANCE)
-            self.send_header("x-masc-sse-replay", "fresh")
+            response_instance = (
+                "successor-instance"
+                if server.mode == "workspace_outage_new_epoch"
+                else INSTANCE
+            )
+            self.send_header(
+                "x-masc-sse-instance-id",
+                response_instance,
+            )
+            replay = (
+                "fresh"
+                if cursor is None
+                else "resumed"
+                if raw_instance == response_instance
+                else "reset-instance-changed"
+            )
+            self.send_header("x-masc-sse-replay", replay)
+            if server.mode in (
+                "workspace_outage_attested",
+                "workspace_outage_new_epoch",
+            ):
+                self.send_header("x-masc-observer-identity", "v1")
+                self.send_header("x-masc-observer-version", "fixture")
+                self.send_header("x-masc-observer-binary-commit", "fixture")
             self.send_header("Connection", "close")
             self.end_headers()
             try:
@@ -471,6 +528,8 @@ class ObserverHandshakeTest(unittest.TestCase):
                                 "workspace_outage",
                                 "workspace_outage_health",
                                 "workspace_outage_session",
+                                "workspace_outage_attested",
+                                "workspace_outage_new_epoch",
                             )
                             or server.fleet_count() >= 1
                         )
@@ -492,6 +551,8 @@ class ObserverHandshakeTest(unittest.TestCase):
                     "workspace_outage",
                     "workspace_outage_health",
                     "workspace_outage_session",
+                    "workspace_outage_attested",
+                    "workspace_outage_new_epoch",
                 ):
                     last_health = server.snapshot()[1]
                     quiet_since = time.monotonic()
@@ -530,7 +591,10 @@ class ObserverHandshakeTest(unittest.TestCase):
                         server.probe_open.is_set,
                         "observer did not reconnect during outage recovery",
                     )
-                    if mode == "workspace_outage_health":
+                    if mode in (
+                        "workspace_outage_health",
+                        "workspace_outage_new_epoch",
+                    ):
                         wait_until(
                             lambda: server.health_failures > failures_before_open,
                             "opened recovery stream did not trigger identity revalidation",
@@ -558,6 +622,36 @@ class ObserverHandshakeTest(unittest.TestCase):
                             server.health_failures,
                             failures,
                             "an open recovery stream must not poll identity",
+                        )
+                        if mode == "workspace_outage_new_epoch":
+                            self.assertEqual(
+                                len(server.successful_streams),
+                                1,
+                                "a new epoch cannot reuse the prior workspace authority",
+                            )
+                    elif mode == "workspace_outage_attested":
+                        wait_until(
+                            lambda: len(server.successful_streams) >= 2,
+                            "attested recovery stream did not resume the normal observer",
+                        )
+                        wait_until(
+                            lambda: server.fleet_count() >= 2,
+                            "attested recovery did not resume Fleet",
+                        )
+                        self.assertEqual(
+                            server.successful_streams[1],
+                            StreamRequest(True, "37", "fixture"),
+                        )
+                        self.assertEqual(server.snapshot()[0], 1)
+                        stable_until = time.monotonic() + 4.0
+                        wait_until(
+                            lambda: time.monotonic() >= stable_until,
+                            "resumed Observer did not stay open",
+                        )
+                        self.assertEqual(
+                            len(server.successful_streams),
+                            2,
+                            "attested recovery must not reconnect repeatedly",
                         )
                     else:
                         consume_until = time.monotonic() + 1.0
@@ -703,6 +797,12 @@ class ObserverHandshakeTest(unittest.TestCase):
 
     def test_recovery_reinitializes_a_lost_session(self) -> None:
         self.run_scenario(mode="workspace_outage_session")
+
+    def test_attested_stream_recovers_while_health_is_unavailable(self) -> None:
+        self.run_scenario(mode="workspace_outage_attested")
+
+    def test_changed_epoch_does_not_reuse_prior_identity(self) -> None:
+        self.run_scenario(mode="workspace_outage_new_epoch")
 
     def test_missing_or_conflicting_session_is_reinitialized(self) -> None:
         for mode in ("missing", "conflict"):

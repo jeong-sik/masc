@@ -155,6 +155,7 @@ type observer_replay =
   | Resumed_after_gap of { missed_through : int }
   | Reset of observer_reset
 type observer_handshake = { instance_id : string; replay : observer_replay }
+type observer_identity = { version : string; binary_commit : string option }
 
 let instance_header = "x-masc-sse-instance-id"
 let replay_header = "x-masc-sse-replay"
@@ -176,6 +177,31 @@ let valid_instance_id value =
          | '^' | '_' | '`' | '|' | '~' -> true
          | _ -> false)
        value
+;;
+
+let observer_identity_header = "x-masc-observer-identity"
+let observer_version_header = "x-masc-observer-version"
+let observer_commit_header = "x-masc-observer-binary-commit"
+
+let observer_identity_headers {version; binary_commit} =
+  if valid_instance_id version && Option.fold ~none:true ~some:valid_instance_id binary_commit then
+    [observer_identity_header, "v1"; observer_version_header, version]
+    @ (match binary_commit with Some commit -> [observer_commit_header, commit] | None -> [])
+  else []
+;;
+
+let decode_observer_identity headers =
+  match headers_named observer_identity_header headers,
+        headers_named observer_version_header headers,
+        headers_named observer_commit_header headers with
+  | [], [], [] -> Ok None
+  | ["v1"], [version], commits when valid_instance_id version ->
+      (match commits with
+       | [] -> Ok (Some {version; binary_commit = None})
+       | [commit] when valid_instance_id commit ->
+           Ok (Some {version; binary_commit = Some commit})
+       | _ -> Error "Invalid observer binary identity")
+  | _ -> Error "Incomplete or ambiguous observer identity"
 ;;
 
 let observer_cursor_headers = function

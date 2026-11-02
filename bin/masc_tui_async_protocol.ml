@@ -780,6 +780,8 @@ type async_msg =
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
+  | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
+      * Masc.Tui_decode.server_identity * Sse_wire.observer_identity
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -1034,7 +1036,7 @@ let rec workspace_message_is_read = function
   | Identity_providers_loaded _
   | Observer_session_ready _ | Observer_opened _
   | Observer_received _
-  | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _
+  | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
   | Fleet_stream_view _
   | Fleet_stream_reader_ended _
   | Keeper_chat_dispatch_started _
@@ -1201,7 +1203,7 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _ | Account_login_event _ | Account_login_json _
   | Account_login_removal _ | Github_login_lines _ | Github_login_finished _
-  | Github_token_saved _ | Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _
+  | Github_token_saved _ | Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
   | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
   | Task_creation_read_done _ | Keeper_queue_action_received _
@@ -1224,6 +1226,16 @@ let observer_recovery_owned state ~authority expected =
      | Some current, Workspace_identity_match_unconfirmed _ -> current == expected
      | None, _ | Some _, (Workspace_identity_unread | Workspace_identity_match
                          | Workspace_identity_mismatch _) -> false
+
+let observer_recovery_identity_owned state ~authority ~owner ~live ~instance ~expected =
+  !live && observer_recovery_owned state ~authority owner
+  && expected.Masc.Tui_decode.sid_state_ready <> Some false
+  && (match state.observer_scope_binding with
+      | Observer_scope_bound previous -> String.equal previous instance
+      | Observer_scope_unbound | Observer_scope_retired -> false)
+  && match state.server_identity with
+     | Some current -> server_workspace_matches ~expected:(Some expected) (Ok current)
+     | None -> false
 
 (* Capture the read intent while the exact effect owner is still Loading.
    The UI applies the receipt first, then retains or dispatches this read. *)
@@ -1342,7 +1354,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
-    | Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _
+    | Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
     | Fleet_stream_view _ | Fleet_stream_reader_ended _
     | Task_dispatch_completed _ -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
@@ -1480,5 +1492,5 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Fleet_stream_view _
+  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _
   | Fleet_stream_reader_ended _ | Task_dispatch_completed _ -> message

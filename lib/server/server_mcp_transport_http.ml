@@ -915,7 +915,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
            | Ok (client_id, _, _) when not (scope_is_current ()) ->
               Sse.unregister_if_current session_id client_id;
               refuse_workspace Workspace.Workspace_precondition_failed
+           | Ok (client_id, _, _) when sse_kind = Sse.Observer && not (deps.is_ready ()) ->
+              Sse.unregister_if_current session_id client_id;
+              respond_not_ready ~deps request reqd
            | Ok (client_id, event_stream, evicted) ->
+              let attested_runtime =
+                match sse_kind, admission_headers with
+                | Sse.Observer, [receipt]
+                  when receipt = Workspace.read_precondition_admission_header ->
+                    Some (deps.get_runtime_result ())
+                | (Sse.Observer | Sse.Agent_stream | Sse.Presence), _ -> None
+              in
               (* Read after registering, which the live handoff below needs,
                  and before responding: an observer's response headers say
                  whether the replay starts after a gap. An agent-stream client
@@ -939,12 +949,35 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                     Sse_wire.observer_response_headers
                       (Sse_wire.observer_after_replay handshake ~missed_through)
               in
+              (* This receipt is emitted only after the exact requested scope
+                 matched, the scope was still current, and readiness was
+                 rechecked. Build fields are embedded process facts. *)
+              let identity_headers =
+                match attested_runtime with
+                | None | Some (Error _) -> []
+                | Some (Ok runtime) ->
+                    (match sse_kind, observer_handshake, admission_headers, observer_scope with
+                     | Sse.Observer, Some _, [receipt], Some (_, scope)
+                       when receipt = Workspace.read_precondition_admission_header
+                            && String.equal runtime.base_path scope.config.base_path ->
+                         Sse_wire.observer_identity_headers
+                           { version = Runtime_build_version.current
+                           ; binary_commit = Build_identity.embedded_commit }
+                     | (Sse.Observer | Sse.Agent_stream | Sse.Presence), _, _, _ -> [])
+              in
               let headers =
                 Httpun.Headers.of_list
-                  (admission_headers @ observer_headers
+                  (admission_headers @ observer_headers @ identity_headers
                    @ sse_stream_headers ~deps session_id protocol_version origin)
               in
               let response = Httpun.Response.create ~headers `OK in
+              if not (scope_is_current ()) then begin
+                Sse.unregister_if_current session_id client_id;
+                refuse_workspace Workspace.Workspace_precondition_failed
+              end else if sse_kind = Sse.Observer && not (deps.is_ready ()) then begin
+                Sse.unregister_if_current session_id client_id;
+                respond_not_ready ~deps request reqd
+              end else
               let writer = Httpun.Reqd.respond_with_streaming reqd response in
               let mutex = Eio.Mutex.create () in
           (match evicted with
@@ -979,7 +1012,9 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             | None -> []
           in
           let replay_handoff = Sse.create_replay_handoff replayed in
-          (match deps.get_runtime_result () with
+          (match (match attested_runtime with
+             | Some result -> result
+             | None -> deps.get_runtime_result ()) with
           | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in

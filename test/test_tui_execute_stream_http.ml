@@ -411,7 +411,7 @@ let test_observer_rejects_bad_replay_before_delivering_bytes env =
     with_server env ~handler:(stream_response ~receipts:(receipt :: headers) [ "data: {}\n\n" ]) (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
           ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match result with
@@ -423,13 +423,41 @@ let test_observer_rejects_bad_replay_before_delivering_bytes env =
       Alcotest.(check int) (label ^ ": no body callback") 0 !chunks)) cases
 ;;
 
+let test_observer_identity_requires_scoped_admission env =
+  let scoped = ["x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "fresh"] in
+  let identity_headers = Sse_wire.observer_identity_headers
+      {version="0.66.0"; binary_commit=Some "abc123"} in
+  let cases =
+    [ "valid", receipt :: scoped @ identity_headers, true, true
+    ; "unadvertised", receipt :: scoped, true, false
+    ; "missing workspace receipt", scoped @ identity_headers, false, false
+    ; "missing scope epoch", receipt :: identity_headers, false, false
+    ; "duplicate identity", receipt :: scoped @ identity_headers @ identity_headers, false, false
+    ; "partial identity", receipt :: scoped @ ["x-masc-observer-identity", "v1"], false, false
+    ] in
+  List.iter (fun (label, headers, accepted, attested) ->
+    with_server env ~handler:(stream_response ~receipts:headers ["data: {}\n\n"]) (fun ~port ->
+      let identities = ref [] and opens = ref 0 and chunks = ref 0 and order = ref [] in
+      let outcome = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+          ~expected_workspace:identity ~host:"127.0.0.1" ~port ~session_id:"observer-test"
+          ~cursor:None ~on_identity:(fun value -> identities := value :: !identities; order := `Identity :: !order)
+          ~on_open:(fun _ -> incr opens; order := `Open :: !order)
+          ~on_chunk:(fun _ -> incr chunks; order := `Body :: !order) in
+      Alcotest.(check bool) (label ^ ": accepted") accepted (Result.is_ok outcome);
+      Alcotest.(check bool) (label ^ ": identity callback") attested (!identities <> []);
+      Alcotest.(check bool) (label ^ ": open callback") accepted (!opens > 0);
+      Alcotest.(check bool) (label ^ ": body callback") accepted (!chunks > 0);
+      if attested then Alcotest.(check bool) (label ^ ": identity before open and body") true
+          (match List.rev !order with `Identity :: `Open :: `Body :: _ -> true | _ -> false))) cases
+;;
+
 let test_observer_accepts_valid_and_unadvertised_live_streams env =
   let requested = Some Sse_wire.{ instance_id = "process-a"; event_id = 50 } in
   List.iter (fun (label, cursor, headers) ->
     with_server env ~handler:(stream_response ~receipts:(receipt :: headers) [ "data: {}\n\n" ]) (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
           ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match result with
@@ -463,7 +491,7 @@ let test_observer_requires_workspace_receipt env =
     with_server env ~handler (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
           ~host:"127.0.0.1" ~port ~session_id:"observer-workspace" ~cursor:None
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match accepted, result with
@@ -516,7 +544,7 @@ let test_sse_status_and_content_type_gate env =
     with_server env ~handler (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
           ~host:"127.0.0.1" ~port ~session_id:"observer-media" ~cursor:None
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       let check_outcome source outcome =
@@ -540,7 +568,7 @@ let test_sse_http_refusals_keep_status_and_body env =
     with_server env ~handler:(json_response ~status body) (fun ~port ->
       let chunks = ref 0 and opens = ref 0 in
       let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
           ~host:"127.0.0.1" ~port ~session_id:"observer-refused" ~cursor:None
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       let fleet = Http.observe_fleet_stream ~clock:(Eio.Stdenv.clock env)
@@ -794,6 +822,10 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
     let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
       | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
     let mode = ref `Admit in
+    let readiness = ref (fun () -> true) in
+    let runtime_result = ref (fun () -> Error "unused") in
+    let auth = Masc_test_deps.make_sse_auth workspace "ready-change" in
+    let token = Option.get auth.Masc.Sse.token in
     let verify ~base_path:_ _request =
       match !mode with
       | `Admit -> Ok ()
@@ -806,8 +838,8 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
       { get_origin = (fun _ -> "")
       ; cors_headers = (fun _ -> [])
       ; auth_token_from_request = (fun _ -> None)
-      ; is_ready = (fun () -> true)
-      ; get_runtime_result = (fun () -> Error "unused")
+      ; is_ready = (fun () -> !readiness ())
+      ; get_runtime_result = (fun () -> !runtime_result ())
       ; get_base_path = (fun () -> workspace)
       ; get_server_state = (fun () -> Some state)
       ; verify_mcp_auth = verify
@@ -829,7 +861,8 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
       let check label fields expected_status =
         let url = query fields in
         match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env) ~timeout_sec:3.
-            ~url ~headers:["Accept", "text/event-stream"; "Mcp-Session-Id", label] () with
+            ~url ~headers:["Accept", "text/event-stream"; "Mcp-Session-Id", label;
+                           "Authorization", "Bearer " ^ token] () with
         | Error detail -> Alcotest.failf "%s: %s" label detail
         | Ok response ->
           Alcotest.(check int) label expected_status response.status;
@@ -846,7 +879,35 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
         ["expected_base_path", "/foreign"; "expected_masc_root", root] 401;
       mode := `Replace;
       check "same-path scope replacement during authentication"
-        ["expected_base_path", base; "expected_masc_root", root] 409))
+        ["expected_base_path", base; "expected_masc_root", root] 409;
+      mode := `Admit;
+      let checks = ref 0 in
+      readiness := (fun () -> incr checks; !checks = 1);
+      ignore (Masc.Session.McpSessionStore.get_or_create ~id:"readiness-lost" ());
+      check "readiness-lost" ["expected_base_path", base; "expected_masc_root", root] 503;
+      Alcotest.(check int) "readiness was rechecked after registration" 2 !checks;
+      checks := 0;
+      readiness := (fun () -> incr checks; !checks < 3);
+      ignore (Masc.Session.McpSessionStore.get_or_create ~id:"readiness-lost-late" ());
+      check "readiness-lost-late" ["expected_base_path", base; "expected_masc_root", root] 503;
+      Alcotest.(check int) "readiness was rechecked before response" 3 !checks;
+      readiness := (fun () -> true);
+      runtime_result := (fun () ->
+        Result.get_ok (Masc.Mcp_server.set_workspace_config state scope.config);
+        Error "scope changed");
+      ignore (Masc.Session.McpSessionStore.get_or_create ~id:"scope-lost-late" ());
+      check "scope-lost-late" ["expected_base_path", base; "expected_masc_root", root] 409;
+      runtime_result := (fun () -> Error "unused");
+      ignore (Masc.Session.McpSessionStore.get_or_create ~id:"no-runtime" ());
+      let url = query ["expected_base_path", base; "expected_masc_root", root] in
+      let response = match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env)
+          ~timeout_sec:3. ~url ~headers:["Accept", "text/event-stream";
+            "Mcp-Session-Id", "no-runtime"; "Authorization", "Bearer " ^ token] () with
+        | Ok response -> response
+        | Error detail -> Alcotest.failf "runtime unavailable: %s" detail in
+      Alcotest.(check int) "unavailable runtime retains the existing stream status" 200 response.status;
+      Alcotest.(check bool) "unavailable runtime carries no identity receipt" true
+        (Sse_wire.decode_observer_identity response.headers = Ok None)))
 ;;
 
 (* A retired scope's delayed close must not remove a successor that reused
@@ -979,6 +1040,10 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         Alcotest.(check bool) "the admitted observer carries the workspace receipt" true
           (List.exists (fun (name, value) ->
              String.equal (String.lowercase_ascii name) receipt_name && String.equal value (snd receipt)) headers);
+        Alcotest.(check bool) "the ready scoped response attests its actual build" true
+          (Sse_wire.decode_observer_identity headers =
+           Ok (Some {version=(Masc.Build_identity.current ()).release_version;
+                     binary_commit=Masc.Build_identity.embedded_commit}));
         let handshake = Sse_wire.decode_observer_response headers in
         let expected : Sse_wire.observer_handshake =
           { instance_id
@@ -1061,6 +1126,7 @@ let () =
       , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
         ; case "observer requires the workspace receipt" test_observer_requires_workspace_receipt
+        ; case "identity requires scoped admission" test_observer_identity_requires_scoped_admission
         ; case "workspace refusal differs from session conflict" test_observer_workspace_refusal_is_not_a_session_conflict
         ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration
         ; case "MCP refuses foreign and retired workspaces" test_mcp_observer_refuses_foreign_and_retired_workspaces

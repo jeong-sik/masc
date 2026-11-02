@@ -1534,8 +1534,8 @@ type server_identity = {
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
   sid_state_ready : bool option;
-      (** [/health] [startup.state_ready]. [None] when the probe carries no
-          startup section: neither booting nor vouched ready. *)
+      (** [/health] [startup.state_ready] or a ready scoped Observer receipt.
+          [None] means neither booting nor vouched ready. *)
   sid_uptime : string option;
       (** [/health] [uptime] human-readable elapsed duration (e.g. "1h 42m"). *)
   sid_sse_clients : int option;
@@ -1545,7 +1545,8 @@ type server_identity = {
   sid_scheduler : server_scheduler_health option;
       (** [/health] [scheduler] scheduler latency probe distribution and stalls. *)
 }
-(** Which server the TUI is talking to, as [/health] reports it.
+(** Which server the TUI is talking to, from [/health] or an attested scoped
+    Observer response. Fields absent from the latter remain unknown.
 
     The footer said [Port: 8935] and nothing else, so two checkouts serving
     on the same port were indistinguishable from the screen -- and a binary

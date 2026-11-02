@@ -676,38 +676,49 @@ let test_non_eio_source_inspection () =
   let base = Filename.temp_dir "board-posts-inspection-" "" in
   let workspace = Common.masc_dir_from_base_path ~base_path:base in
   Fun.protect ~finally:(fun () -> remove_tree base) (fun () ->
-    let post, path = Eio_main.run (fun env ->
+    let path = Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let store = make_store workspace in
-      load_posts store 0;
-      require_post (create store "actual preflight row"), Board.persist_path store) in
+      Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
+        let store = make_store workspace in
+        load_posts store 0;
+        ignore (require_post (create store "actual preflight row"));
+        Board.persist_path store)) in
     (* Keeper's deploy preflight can run outside an Eio main scope. Read the
        real source there through the same lower-shell entrypoint it uses. *)
     let bytes = read_bytes path in
     (match Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
-     | Board.Posts_complete { observation; posts = [saved]; _ } ->
-       Alcotest.(check string) "preflight retains the exact stable bytes"
-         bytes observation.snapshot.bytes;
-       Alcotest.(check string) "preflight uses the captured canonical path"
-         path observation.source_path;
-       Alcotest.(check string) "preflight decodes the actual producer row"
-         post.body saved.body
-     | Board.Posts_complete _ | Board.Posts_partial _ | Board.Posts_unavailable _ ->
+     | Board_core.Inspected {
+         observation = Observed_present {
+           accepted_rows = 1; errors = []; framing = Complete_rows };
+         settlement_diagnostic = None } -> ()
+     | Board_core.Inspected _ | Board_core.Inspection_failed _ ->
        Alcotest.fail "non-Eio inspection did not read the complete source");
+    Alcotest.(check string) "preflight preserves the actual producer bytes"
+      bytes (read_bytes path);
     let partial = bytes ^ "{}\n" in
     write_bytes path partial;
     (match Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
-     | Board.Posts_partial { observation; posts = [_]; errors = [_]; _ } ->
-       Alcotest.(check string) "partial preflight retains rejected-source bytes"
-         partial observation.snapshot.bytes
-     | Board.Posts_complete _ | Board.Posts_partial _ | Board.Posts_unavailable _ ->
+     | Board_core.Inspected {
+         observation = Observed_present {
+           accepted_rows = 1; errors = [_]; framing = Complete_rows };
+         settlement_diagnostic = None } -> ()
+     | Board_core.Inspected _ | Board_core.Inspection_failed _ ->
        Alcotest.fail "preflight lost the actual malformed-row refusal");
+    Alcotest.(check string) "partial preflight preserves rejected-source bytes"
+      partial (read_bytes path);
     let torn = bytes ^ "{" in
     write_bytes path torn;
     (match Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
-     | Board.Posts_unavailable _ -> ()
-     | Board.Posts_complete _ | Board.Posts_partial _ ->
-       Alcotest.fail "preflight admitted a torn source");
+     | Board_core.Inspected {
+         observation = Observed_present {
+           accepted_rows = 1; errors = []; framing = Torn_tail { rows_end; end_offset } };
+         settlement_diagnostic = None } ->
+       Alcotest.(check int) "only complete producer bytes were decoded"
+         (String.length bytes) rows_end;
+       Alcotest.(check int) "torn observation retains the actual end offset"
+         (String.length torn) end_offset
+     | Board_core.Inspected _ | Board_core.Inspection_failed _ ->
+       Alcotest.fail "preflight lost the incomplete-tail observation");
     Alcotest.(check string) "preflight never repairs the torn source"
       torn (read_bytes path))
 

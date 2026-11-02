@@ -595,17 +595,45 @@ let finish_posts_read outcome =
    | Posts_complete { settlement_diagnostic = None; _ }
    | Posts_partial { settlement_diagnostic = None; _ } | Posts_unavailable _ -> ());
   Board_posts_source.finish_read outcome
+type posts_inspection_framing = Board_posts_inspection.posts_inspection_framing =
+  | Complete_rows
+  | Torn_tail of { rows_end : int; end_offset : int }
+
+type posts_inspection_observation = Board_posts_inspection.posts_inspection_observation =
+  | Observed_missing
+  | Observed_present of {
+      accepted_rows : int;
+      errors : posts_row_error list;
+      framing : posts_inspection_framing;
+    }
+
+type posts_inspection = Board_posts_inspection.posts_inspection =
+  | Inspected of {
+      observation : posts_inspection_observation;
+      settlement_diagnostic : Fs_compat.private_jsonl_operation_failure option;
+    }
+  | Inspection_failed of {
+      error : Fs_compat.Private_jsonl_unique_fold.error;
+      settlement_diagnostic : Fs_compat.private_jsonl_operation_failure option;
+    }
+
+
+let finish_posts_inspection inspection =
+  let settlement_diagnostic = match inspection with
+    | Inspected { settlement_diagnostic; _ }
+    | Inspection_failed { settlement_diagnostic; _ } -> settlement_diagnostic in
+  Option.iter (fun failure ->
+    record_persist_error ~where:"posts inspection settlement"
+      (Fs_compat.private_jsonl_operation_failure_to_string failure)) settlement_diagnostic;
+  Board_posts_inspection.finish inspection;
+  inspection
+
 let inspect_posts_source ~workspace_masc_dir =
-  let store = create_store ~workspace_masc_dir () in
-  (* This independent unpublished store has no concurrent model or lock owner;
-     unlike live loader admission this preflight is also usable outside Eio. *)
-  try
-    let outcome = read_posts_source store in
-    publish_posts_read store outcome;
-    finish_posts_read outcome;
-    outcome
-  with Board_posts_source.Reserved_settlement settlement ->
-    Printexc.raise_with_backtrace settlement.exception_ settlement.backtrace
+  Board_posts_inspection.read ~workspace_masc_dir |> finish_posts_inspection
+
+let inspect_posts_source_with_io_for_testing ~workspace_masc_dir ~io =
+  Board_posts_inspection.read_with_io_for_testing ~workspace_masc_dir ~io
+  |> finish_posts_inspection
 ;;
 let comments_jsonl_unlocked store =
   let buf = Buffer.create 4096 in

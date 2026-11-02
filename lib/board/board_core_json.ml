@@ -11,18 +11,8 @@ let post_close_state_to_yojson = Board_content_json.post_close_state_to_yojson
 let comment_to_yojson = Board_content_json.comment_to_yojson
 let audience_to_yojson = Board_content_json.audience_to_yojson
 
-let emit_content_diagnostic (diagnostic : Board_content_json.diagnostic) =
-  match diagnostic with
-  | Board_content_json.Invalid_post_kind { post_id } ->
-    Log.BoardLog.warn
-      "dropping persisted board post %s: missing or invalid post_kind"
-      post_id
-  | Board_content_json.Invalid_agent_id { raw } ->
-    ignore (Agent_id.of_string raw)
-;;
-
 let decoded_content (decoded : 'a Board_content_json.decoded) : 'a option =
-  List.iter emit_content_diagnostic decoded.diagnostics;
+  Board_content_diagnostics.emit decoded.diagnostics;
   decoded.value
 ;;
 

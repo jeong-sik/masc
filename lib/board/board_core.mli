@@ -192,9 +192,37 @@ val read_posts_source : store -> posts_source_read
 (** Caller holds persistence; general reads never recover tails or settle an
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
 val finish_posts_read : posts_source_read -> unit
-val inspect_posts_source : workspace_masc_dir:string -> posts_source_read
-(** Coherent lower-shell read for durable preflight. It grants no operation
-    receipt, historical absence or authority to mutate a separate live store. *)
+type posts_inspection_framing = Board_core_persist.posts_inspection_framing =
+  | Complete_rows
+  | Torn_tail of { rows_end : int; end_offset : int }
+
+type posts_inspection_observation = Board_core_persist.posts_inspection_observation =
+  | Observed_missing
+  | Observed_present of {
+      accepted_rows : int;
+      errors : posts_row_error list;
+      framing : posts_inspection_framing;
+    }
+
+type posts_inspection = Board_core_persist.posts_inspection =
+  | Inspected of {
+      observation : posts_inspection_observation;
+      settlement_diagnostic : Fs_compat.private_jsonl_operation_failure option;
+    }
+  | Inspection_failed of {
+      error : Fs_compat.Private_jsonl_unique_fold.error;
+      settlement_diagnostic : Fs_compat.private_jsonl_operation_failure option;
+    }
+
+val inspect_posts_source : workspace_masc_dir:string -> posts_inspection
+(** Noncreating unique-regular read observation. This uses the data reader's
+    shared lock and before/after snapshot checks, not stable-sibling exclusion.
+    Missing is an observation, not initialized absence, a durability receipt or
+    authority to mutate any store. Reserved failures retain their backtrace. *)
+val inspect_posts_source_with_io_for_testing :
+  workspace_masc_dir:string ->
+  io:Fs_compat.private_jsonl_transaction_io_for_testing -> posts_inspection
+
 
 (** {!save_posts_snapshot} for {!comments_path}, guarded by
     [store.comments_load_result]. *)

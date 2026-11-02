@@ -4519,8 +4519,11 @@ end
    held). The fragment is reported by [rows_end < end_offset], never returned
    as bytes, so the caller sees exactly the rows a later append would build
    on. *)
-let read_private_jsonl_locked_with_io ~io ~missing path read =
-  let open Private_jsonl_rows in
+let read_private_jsonl_locked_with_errors
+      ~io ~on_missing ~non_regular ~operation_failed path read =
+  let capture operation f =
+    private_jsonl_capture operation f |> Result.map_error operation_failed
+  in
   try
     test_exec_home_guard ~op:"read_private_jsonl_rows_locked" path;
     let path_mu = get_append_path_mutex path in
@@ -4529,29 +4532,43 @@ let read_private_jsonl_locked_with_io ~io ~missing path read =
       ~path
       (fun () ->
          Stdlib.Mutex.protect path_mu (fun () ->
-           match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
-           | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-             Private_file_succeeded missing
-           | fd ->
+           match capture Open_transaction_data (fun () ->
+             match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
+             | fd -> Some fd
+             | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None) with
+           | Error error -> Private_file_failed error
+           | Ok None ->
+             (match on_missing () with
+              | Ok value -> Private_file_succeeded value
+              | Error error -> Private_file_failed error)
+           | Ok (Some fd) ->
              private_jsonl_with_fd_outcome
                ~close_operation:Close_transaction_data
                ~close_fd:io.close_fd
                fd
                (fun () ->
-                  try
-                    match (Unix.fstat fd).Unix.st_kind with
+                  let open Result.Syntax in
+                  let* stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
+                  match stats.Unix.st_kind with
                     | (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
                       | Unix.S_FIFO | Unix.S_SOCK) as kind ->
-                      Error (Non_regular_file kind)
+                      Error (non_regular kind)
                     | Unix.S_REG ->
-                    lock_whole_file_shared fd;
-                    Ok (read fd)
-                  with
-                  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-                  | exn -> Error (Io_failed exn))))
+                      capture Read_transaction_data (fun () ->
+                        lock_whole_file_shared fd;
+                        read fd))))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Private_file_failed (Io_failed exn)
+  | exception_ ->
+    Private_file_failed
+      (operation_failed (private_jsonl_failure Read_transaction_data exception_))
+;;
+
+let read_private_jsonl_locked_with_io ~io ~missing path read =
+  read_private_jsonl_locked_with_errors ~io ~on_missing:(fun () -> Ok missing)
+    ~non_regular:(fun kind -> Private_jsonl_rows.Non_regular_file kind)
+    ~operation_failed:(fun failure -> Private_jsonl_rows.Io_failed failure.exception_)
+    path read
 ;;
 
 let read_private_jsonl_rows_locked_with_io ~io path =
@@ -4585,50 +4602,118 @@ module Private_jsonl_fold = struct
     | Snapshot_changed
 end
 
-let fold_private_jsonl_locked_result path ~init ~f =
+let fold_private_jsonl_fd ~snapshot_changed ~validate_binding fd ~init ~f =
   let open Private_jsonl_fold in
-  let folded = read_private_jsonl_locked_with_io
-    ~io:private_jsonl_transaction_unix_io ~missing:(Ok Missing) path (fun fd ->
-      let before = Unix.fstat fd in
-      let binding_matches () =
-        match Unix.stat path with
-        | current -> same_file_snapshot before current
-        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false in
-      if not (binding_matches ()) then Error Snapshot_changed else
-      let buffer = Bytes.create 65536 and row = Buffer.create 256 in
-      let value = ref init and end_offset = ref 0 and rows_end = ref 0 in
-      let rec read () =
-        let remaining = before.Unix.st_size - !end_offset in
-        let length = if remaining <= 0 then 0
-          else Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) in
-        if length > 0 then (
-          let start = ref 0 in
-          for index = 0 to length - 1 do
-            if Bytes.get buffer index = '\n' then (
-              Buffer.add_subbytes row buffer !start (index - !start);
-              value := f !value (Buffer.contents row);
-              Buffer.clear row;
-              rows_end := !end_offset + index + 1;
-              start := index + 1)
-          done;
-          Buffer.add_subbytes row buffer !start (length - !start);
-          end_offset := !end_offset + length;
-          read ()) in
-      read ();
-      if not (same_file_snapshot before (Unix.fstat fd))
-          || not (binding_matches ()) || !end_offset <> before.Unix.st_size
-      then Error Snapshot_changed
-      else Ok (Present {value= !value;rows_end= !rows_end;end_offset= !end_offset})) in
-  match folded with
+  let open Result.Syntax in
+  let before = Unix.fstat fd in
+  let* () = validate_binding before in
+  let buffer = Bytes.create 65536 and row = Buffer.create 256 in
+  let value = ref init and end_offset = ref 0 and rows_end = ref 0 in
+  let rec read () =
+    let remaining = before.Unix.st_size - !end_offset in
+    let length = if remaining <= 0 then 0
+      else Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) in
+    if length > 0 then (
+      let start = ref 0 in
+      for index = 0 to length - 1 do
+        if Bytes.get buffer index = '\n' then (
+          Buffer.add_subbytes row buffer !start (index - !start);
+          value := f !value (Buffer.contents row);
+          Buffer.clear row;
+          rows_end := !end_offset + index + 1;
+          start := index + 1)
+      done;
+      Buffer.add_subbytes row buffer !start (length - !start);
+      end_offset := !end_offset + length;
+      read ()) in
+  read ();
+  let* () = validate_binding before in
+  if not (same_file_snapshot before (Unix.fstat fd))
+      || !end_offset <> before.Unix.st_size
+  then Error snapshot_changed
+  else Ok (Present {value= !value;rows_end= !rows_end;end_offset= !end_offset})
+;;
+
+let private_jsonl_fold_outcome ~read_error = function
   | Private_file_succeeded (Ok value) -> Private_file_succeeded value
   | Private_file_succeeded (Error error) -> Private_file_failed error
   | Private_file_succeeded_with_cleanup_failure {value=Ok value;cleanup_failure} ->
     Private_file_succeeded_with_cleanup_failure {value;cleanup_failure}
   | Private_file_succeeded_with_cleanup_failure {value=Error error;cleanup_failure} ->
     Private_file_failed_with_cleanup_failure {error;cleanup_failure}
-  | Private_file_failed error -> Private_file_failed (Read_error error)
+  | Private_file_failed error -> Private_file_failed (read_error error)
   | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
-    Private_file_failed_with_cleanup_failure {error=Read_error error;cleanup_failure}
+    Private_file_failed_with_cleanup_failure {error=read_error error;cleanup_failure}
+;;
+
+let fold_private_jsonl_locked_result path ~init ~f =
+  let open Private_jsonl_fold in
+  read_private_jsonl_locked_with_io
+    ~io:private_jsonl_transaction_unix_io ~missing:(Ok Missing) path (fun fd ->
+      let validate_binding before =
+        match Unix.stat path with
+        | current ->
+          if same_file_snapshot before current then Ok () else Error Snapshot_changed
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error Snapshot_changed in
+      fold_private_jsonl_fd ~snapshot_changed:Snapshot_changed ~validate_binding fd ~init ~f)
+  |> private_jsonl_fold_outcome ~read_error:(fun error -> Read_error error)
+;;
+
+module Private_jsonl_unique_fold = struct
+  type error =
+    | Non_regular_file of Unix.file_kind
+    | Snapshot_changed
+    | Binding_refused of private_jsonl_transaction_error
+    | Operation_failed of private_jsonl_operation_failure
+
+  let error_to_string = function
+    | Non_regular_file kind ->
+      "private JSONL store is not a regular file: " ^ file_kind_to_string kind
+    | Snapshot_changed -> "private JSONL source changed during observation"
+    | Binding_refused error -> private_jsonl_transaction_error_to_string error
+    | Operation_failed failure -> private_jsonl_operation_failure_to_string failure
+end
+
+let fold_private_jsonl_unique_regular_locked_with_io ~io path ~init ~f =
+  let open Private_jsonl_unique_fold in
+  let on_missing () =
+    match private_jsonl_capture Inspect_transaction_path (fun () ->
+      match Unix.lstat path with
+      | stats -> Some stats
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None) with
+    | Error failure -> Error (Operation_failed failure)
+    | Ok None -> Ok (Ok Private_jsonl_fold.Missing)
+    | Ok (Some stats) ->
+      let error = if stats.Unix.st_kind <> Unix.S_REG
+        then Unexpected_transaction_file_kind stats.Unix.st_kind
+        else Transaction_path_binding_changed { path } in
+      Ok (Error (Binding_refused error))
+  in
+  read_private_jsonl_locked_with_errors ~io ~on_missing
+    ~non_regular:(fun kind -> Non_regular_file kind)
+    ~operation_failed:(fun failure -> Operation_failed failure)
+    path (fun fd ->
+      let validate_binding before =
+        let open Result.Syntax in
+        let* path_stats, fd_stats =
+          private_jsonl_capture Inspect_transaction_path (fun () -> Unix.lstat path, Unix.fstat fd)
+          |> Result.map_error (fun failure -> Operation_failed failure) in
+        let* () = private_jsonl_validate_unique_regular_binding ~path ~path_stats ~fd_stats
+          |> Result.map_error (fun error -> Binding_refused error) in
+        if same_file_snapshot before path_stats && same_file_snapshot before fd_stats
+        then Ok () else Error Snapshot_changed
+      in
+      fold_private_jsonl_fd ~snapshot_changed:Snapshot_changed ~validate_binding fd ~init ~f)
+  |> private_jsonl_fold_outcome ~read_error:Fun.id
+;;
+
+let fold_private_jsonl_unique_regular_locked_result path ~init ~f =
+  fold_private_jsonl_unique_regular_locked_with_io
+    ~io:private_jsonl_transaction_unix_io path ~init ~f
+;;
+
+let fold_private_jsonl_unique_regular_locked_with_io_for_testing ~io path ~init ~f =
+  fold_private_jsonl_unique_regular_locked_with_io ~io path ~init ~f
 ;;
 
 module Private_jsonl_window = struct

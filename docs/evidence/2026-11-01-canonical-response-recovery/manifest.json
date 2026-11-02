@@ -1,0 +1,158 @@
+{
+  "workflow": "Test",
+  "ref": "fix/terminal-resume-frontier-20261101",
+  "executions": [
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41305104822,
+      "job_id": 124843800035,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41305104822",
+      "head": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/remote-core-drift/candidate-124843800035.raw.log",
+      "raw_bytes": 266718,
+      "raw_sha256": "66a6e7c3b443f005446651addcd67e051c68999c1eb3673c8318fa299a517499",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 20163,
+      "selected_sha256": "f070b7fb840c850dcf77efc178d2c92622bc7c385b12401051d4f5bb2e669dda",
+      "actual_pass": 124,
+      "actual_fail": 19,
+      "retained_case_pass": 124,
+      "retained_case_fail": 19,
+      "summaries": [
+        "2026-11-01T12:11:28.5156377Z 19 failures! in 2.557s. 122 tests run.",
+        "2026-11-01T12:11:30.2954295Z Test Successful in 0.278s. 21 tests run."
+      ]
+    },
+    {
+      "name": "corrected-candidate",
+      "workflow": "Test",
+      "run_id": 41307303997,
+      "job_id": 124850218531,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41307303997",
+      "head": "b8a1523884e571a91b90971d8cb682442d4296f7",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "b8a1523884e571a91b90971d8cb682442d4296f7",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/remote-core-drift/corrected-candidate-124850218531.raw.log",
+      "raw_bytes": 230093,
+      "raw_sha256": "1f3350d2407fb815968df524e99a106f0b92c542695e565789719979e30c92cc",
+      "selected_capture": "corrected-candidate.txt",
+      "selected_bytes": 16509,
+      "selected_sha256": "6d6f89937d538c654f779955da3947e744f996e16545002df0679f28c397c305",
+      "actual_pass": 143,
+      "actual_fail": 0,
+      "retained_case_pass": 143,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T12:38:40.0694190Z Test Successful in 2.491s. 122 tests run.",
+        "2026-11-01T12:38:42.0738440Z Test Successful in 0.305s. 21 tests run."
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "workflow": "Test",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "head": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+      "minimal": true,
+      "suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_execution_journal"
+      ],
+      "suite_timeout_sec": 600,
+      "requested_at": "2026-11-01T12:09:17.374436+00:00",
+      "stdout": "https://github.com/jeong-sik/masc/actions/runs/41305104822\n",
+      "stderr": "",
+      "exit_code": 0,
+      "status": "requested_not_observed",
+      "reason": "Concrete canonical-response persistence repair after two independently confirmed source P2; public durable producer and palette-change regression coverage.",
+      "planned_cases": 143,
+      "planned_case_count_is_not_execution": true,
+      "run_id": 41305104822
+    },
+    {
+      "workflow": "Test",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "head": "b8a1523884e571a91b90971d8cb682442d4296f7",
+      "minimal": true,
+      "suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_execution_journal"
+      ],
+      "suite_timeout_sec": 600,
+      "requested_at": "2026-11-01T12:36:30.848269+00:00",
+      "stdout": "https://github.com/jeong-sik/masc/actions/runs/41307303997\n",
+      "stderr": "",
+      "exit_code": 0,
+      "status": "requested_not_observed",
+      "reason": "Correct public completed-response fixture golden after actual initial-candidate124/19; retain exact full response including telemetry.",
+      "comparison_limit": "Production is byte-identical to8b, fixture changed; this is not a same-fixture product before/after pair.",
+      "run_id": 41307303997
+    }
+  ],
+  "source_sealed_case_key_sha256": {
+    "candidate": "c29a78f528a8eecc3e639b8757fbba37e54e1e5d8932db7538910d18685f0b22",
+    "corrected-candidate": "ab2ae41b1f7e1f1ea347eec31dd34b9b3dcb1c9ea6d044db423d7668a4a4eb09"
+  },
+  "case_count_per_execution": 143,
+  "suite_counts": {
+    "candidate": {
+      "packages/agent_core/test/test_pipeline.ml": {
+        "pass": 103,
+        "fail": 19
+      },
+      "packages/agent_core/test/test_execution_journal.ml": {
+        "pass": 21,
+        "fail": 0
+      }
+    },
+    "corrected-candidate": {
+      "packages/agent_core/test/test_pipeline.ml": {
+        "pass": 122,
+        "fail": 0
+      },
+      "packages/agent_core/test/test_execution_journal.ml": {
+        "pass": 21,
+        "fail": 0
+      }
+    }
+  },
+  "same_fixture_product_before_after_pair": false,
+  "source_head": "b8a1523884e571a91b90971d8cb682442d4296f7",
+  "source_snapshot": "source-sha256.json",
+  "full_regression": "not_run",
+  "formal_non_author_approval": false,
+  "issue_closed": false,
+  "retained": {
+    "README.md": {
+      "bytes": 3918,
+      "sha256": "3d7dc24301ba1d4db83367be10fca28a2832095d46d821d757a19d68dfc30369"
+    },
+    "candidate.txt": {
+      "bytes": 20163,
+      "sha256": "f070b7fb840c850dcf77efc178d2c92622bc7c385b12401051d4f5bb2e669dda"
+    },
+    "cases.tsv": {
+      "bytes": 13891,
+      "sha256": "8d8ad2248a96e70cab3b201f3a5bc3b22c1eba4a7ad727f0cdb0aec54efdc8c4"
+    },
+    "corrected-candidate.txt": {
+      "bytes": 16509,
+      "sha256": "6d6f89937d538c654f779955da3947e744f996e16545002df0679f28c397c305"
+    },
+    "source-comparison.json": {
+      "bytes": 2497,
+      "sha256": "83d1f9ad7619a153a5146868e77ba3cdcb860652847e57d04e5fb8463e17745d"
+    },
+    "source-sha256.json": {
+      "bytes": 2649,
+      "sha256": "de4e2c421a23e5b6853cd5c764db2403b0547a386b767326f09776fcc26bdc2d"
+    }
+  }
+}

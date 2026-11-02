@@ -1,0 +1,1446 @@
+{
+  "identity": "Exact byte-identical test source plus actual suite/group/index; ellipsized display names are not identities.",
+  "key_encoding": "UTF-8 compact JSON [test source path,group,index,source SHA256] array, ensure_ascii=false, comma/colon separators, one LF",
+  "keys_sha256": "f13407fc77ba93feb2ace9592c1a5f61a31c6d75a505680be221c4999f03f6b7",
+  "source_hashes": {
+    "packages/agent_core/test/test_pipeline.ml": "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb",
+    "packages/agent_core/test/test_execution_journal.ml": "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+  },
+  "common_completed_cases": 135,
+  "maintained_pass": 126,
+  "fail_to_pass": 9,
+  "pass_to_fail": 0,
+  "all_cases": [
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        3,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        4,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        5,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        6,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        7,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        8,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        9,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        10,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        11,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "terminal stop authority",
+        12,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        3,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        4,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        5,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        6,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "mock_responses",
+        7,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "agent_state",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "agent_state",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "agent_state",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "agent_state",
+        3,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "agent_state",
+        4,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "agent_state",
+        5,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        3,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        4,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        5,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        6,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        7,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        8,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        9,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        10,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        11,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        12,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        13,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        14,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        15,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "turn_mechanics",
+        16,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "tool_results",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "tool_results",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "tool_results",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "accumulate_usage",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "accumulate_usage",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "accumulate_usage",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "error_domain",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "error_domain",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "error_domain",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "error_domain",
+        3,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "error_domain",
+        4,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        0,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        1,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        2,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        3,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        4,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        5,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        6,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        7,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        8,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        9,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        10,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        11,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        12,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        13,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        14,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        15,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        16,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        17,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        18,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        19,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        20,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        21,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        22,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        23,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        24,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        25,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        26,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        27,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        28,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        29,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        30,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        31,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        32,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        33,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        34,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        35,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        36,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        37,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        38,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        39,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        40,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        41,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        42,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        43,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        44,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        45,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        46,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        47,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        48,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        49,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        50,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        51,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        52,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        53,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        54,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        55,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        56,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        57,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_pipeline.ml",
+        "provider_mock_extra",
+        58,
+        "4928a9dbcf1686c53f4c4a66f165ddac896ebe5c4beec7c076555531502ba0fb"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        0,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        1,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        2,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        3,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        4,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        5,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        6,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        7,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        8,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        9,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        10,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        11,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        12,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        13,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "topology",
+        14,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "codec",
+        0,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "codec",
+        1,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "codec",
+        2,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "codec",
+        3,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "codec",
+        4,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "packages/agent_core/test/test_execution_journal.ml",
+        "codec",
+        5,
+        "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a"
+      ],
+      "baseline": "OK",
+      "candidate": "OK"
+    }
+  ],
+  "new_terminal_group_full_names": [
+    {
+      "index": 0,
+      "full_literal_name": "active MaxTokens with tool content completes without effects",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 1,
+      "full_literal_name": "active Refusal with tool content completes without effects",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "index": 2,
+      "full_literal_name": "active injected EndTurn with tool content completes without effects",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "index": 3,
+      "full_literal_name": "provider-closed MaxTokens with tool content replays without hooks",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 4,
+      "full_literal_name": "provider-closed Refusal with tool content replays without hooks",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 5,
+      "full_literal_name": "provider-closed injected EndTurn with tool content replays without hooks",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 6,
+      "full_literal_name": "turn-closed MaxTokens with tool content replays without hooks",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 7,
+      "full_literal_name": "turn-closed Refusal with tool content replays without hooks",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 8,
+      "full_literal_name": "turn-closed injected EndTurn with tool content replays without hooks",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 9,
+      "full_literal_name": "streaming active MaxTokens with tool content completes without effects",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 10,
+      "full_literal_name": "Advanced active MaxTokens with tool content completes without effects",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "index": 11,
+      "full_literal_name": "unknown stop with tool content remains rejected",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "index": 12,
+      "full_literal_name": "unmatched tool calls remain rejected with tool content",
+      "baseline": "OK",
+      "candidate": "OK"
+    }
+  ],
+  "early_exit_limit": "Failed baseline recovery cases can stop at their result assertion. Candidate PASS establishes all later effect/hook/counter/usage/canonical-observation assertions."
+}

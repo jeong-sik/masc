@@ -1,0 +1,30 @@
+{
+  "head": "b8a1523884e571a91b90971d8cb682442d4296f7",
+  "files": {
+    "packages/agent_core/lib/llm_provider/stop_reason_wire.ml": "3f724aad1a1a764fe3e7bb058b072e5e4a3711f622e5000bfe0458585f58b6c7",
+    "packages/agent_core/lib/llm_provider/stop_reason_wire.mli": "29c29708749557e0c67753157f750a1aa73ea740c5fce56f518f156a4e256e3c",
+    "packages/agent_core/lib/llm_provider/types.ml": "8bd852f1800d7464540ef979d98861525703cce254613b78c4535f9c77826790",
+    "packages/agent_core/lib/llm_provider/types.mli": "c1113f88322be439c935011641da2bdf9b8b7715c35097acdd19d0026c4488b3",
+    "packages/agent_core/lib/pipeline/pipeline.ml": "54e1f49ccd57811c8991c5ae40e5800882120b1556b510682f1b37b3b4729ae3",
+    "packages/agent_core/lib/pipeline/pipeline.mli": "3f2c65e8c5d4d9deba4ca4c006b741ff89b2ea488e82cae5e14aa301818ee0a3",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.ml": "c62f06b2f2de3ecdf7a6e3b69c29ff1ffbf532b9eac984dad400501ccfc8feb5",
+    "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli": "3f3b304b12b3093846cfcb8d110a4b1c352bc5e348f765454c02197f05fd9fb4",
+    "packages/agent_core/lib/pipeline/pipeline_execution_scope.ml": "9b951f91854557e9881b3ea7cedc2613a46b4c309f7860758d58415a220ad9db",
+    "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli": "a0ab44398909707ea0dece16fc08aebc3942caabac474687f74e86442805cf56",
+    "packages/agent_core/lib/pipeline/pipeline_terminal_tool.ml": "f8ef87dfe80fff6c90d4a43ddd97e31275daf70391d0dd8e524c24bbbdfb045f",
+    "packages/agent_core/lib/agent/agent.mli": "680f2023abbaa4cd071ed635bfebbdae674e9e0ffa0ad99e3562432c695d4388",
+    "packages/agent_core/lib/base/hooks.mli": "81e23949256f102c6c08f88c265ba22289afe687792718defc46f20ac6a8ed7a",
+    "packages/agent_core/test/test_pipeline.ml": "ac9f9cf6a474fb6cf30f0b50064a4bfbcef9c50c3da0ee75e5a12a77913c6437",
+    "packages/agent_core/test/test_execution_journal.ml": "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a",
+    "packages/agent_core/test/dune": "fe6c966b1b30c8d0466f3dc9a5b97ff98bba7b1a57ce3286e6d8df79f1ec7b3b",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b"
+  },
+  "trees": {
+    "lib": "40a7da14f61f03f8e03fb53ea8262c388c4e46e8",
+    "test": "3859c6c08a08f8f33d28ed0214b362184607317e",
+    "packages/agent_core": "cddd9409bb7e65958e990630a3688649a19655b2",
+    "config": "b9b3372a0113ac693ee297ea10f22bcb055c53ec"
+  }
+}

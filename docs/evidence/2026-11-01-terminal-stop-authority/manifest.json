@@ -1,0 +1,212 @@
+{
+  "workflow": "Test",
+  "ref": "fix/terminal-resume-frontier-20261101",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41288965057,
+      "job_id": 124796028696,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41288965057",
+      "head": "4f88413fdbd8eb4d27bcb5c134828becdf00720d",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "4f88413fdbd8eb4d27bcb5c134828becdf00720d",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/terminal-remote-advance/baseline-124796028696.raw.log",
+      "raw_bytes": 94285,
+      "raw_sha256": "1fea0e3328b1d58a40f5619cb4dc1b22a039fbed1d2b25fde45ef9d95ab78550",
+      "selected_capture": "invalid-baseline.txt",
+      "selected_bytes": 3467,
+      "selected_sha256": "de27da449cfecff3dd257579686d5bb6ccaf708e1ea533c1ab5db11a45e4c3c4",
+      "actual_pass": 21,
+      "actual_fail": 0,
+      "retained_case_pass": 21,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T08:29:46.6236328Z Test Successful in 0.299s. 21 tests run."
+      ],
+      "per_suite": {
+        "packages/agent_core/test/test_pipeline.ml": {
+          "pass": 0,
+          "fail": 0
+        },
+        "packages/agent_core/test/test_execution_journal.ml": {
+          "pass": 21,
+          "fail": 0
+        }
+      },
+      "comparison_role": "invalid fixture compilation; not behavioral reproduction",
+      "minimal": true,
+      "suite_timeout_sec": 600,
+      "suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_execution_journal"
+      ]
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41289637453,
+      "job_id": 124797995406,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41289637453",
+      "head": "68119836b420bee9d2b26be19cc913f08c2c41e0",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "68119836b420bee9d2b26be19cc913f08c2c41e0",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/terminal-remote-advance/candidate-124797995406.raw.log",
+      "raw_bytes": 94300,
+      "raw_sha256": "15da66c8b850de15fcdda3a242b6a3f725449107fb098792971352b6d946ffe3",
+      "selected_capture": "invalid-candidate.txt",
+      "selected_bytes": 3467,
+      "selected_sha256": "c0d4743b65d0e816db575054094796ec806e7413a11403c8904f3495e7512d0b",
+      "actual_pass": 21,
+      "actual_fail": 0,
+      "retained_case_pass": 21,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T08:39:17.6246867Z Test Successful in 0.294s. 21 tests run."
+      ],
+      "per_suite": {
+        "packages/agent_core/test/test_pipeline.ml": {
+          "pass": 0,
+          "fail": 0
+        },
+        "packages/agent_core/test/test_execution_journal.ml": {
+          "pass": 21,
+          "fail": 0
+        }
+      },
+      "comparison_role": "invalid fixture compilation; not behavioral reproduction",
+      "minimal": true,
+      "suite_timeout_sec": 600,
+      "suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_execution_journal"
+      ]
+    },
+    {
+      "name": "repro-baseline",
+      "workflow": "Test",
+      "run_id": 41291035705,
+      "job_id": 124802168802,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41291035705",
+      "head": "e185f43bf978cc4922584754f9e3e398ec2cff57",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "e185f43bf978cc4922584754f9e3e398ec2cff57",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/terminal-remote-advance/repro-baseline-124802168802.raw.log",
+      "raw_bytes": 228684,
+      "raw_sha256": "d7bd6bf29accf24321ed9ae1d36cbc529b56f47b2bbce698e1b72f849e587840",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 16822,
+      "selected_sha256": "3870d00dba73fc3e2cae29d0b8a4a2e9baccc00ce3bab90467aaee73a42d45f9",
+      "actual_pass": 126,
+      "actual_fail": 9,
+      "retained_case_pass": 126,
+      "retained_case_fail": 9,
+      "summaries": [
+        "2026-11-01T09:00:10.8412152Z 9 failures! in 2.073s. 114 tests run.",
+        "2026-11-01T09:00:12.8754659Z Test Successful in 0.296s. 21 tests run."
+      ],
+      "per_suite": {
+        "packages/agent_core/test/test_pipeline.ml": {
+          "pass": 105,
+          "fail": 9
+        },
+        "packages/agent_core/test/test_execution_journal.ml": {
+          "pass": 21,
+          "fail": 0
+        }
+      },
+      "comparison_role": "corrected identical-fixture pair",
+      "minimal": true,
+      "suite_timeout_sec": 600,
+      "suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_execution_journal"
+      ]
+    },
+    {
+      "name": "repro-candidate",
+      "workflow": "Test",
+      "run_id": 41291435494,
+      "job_id": 124803337052,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41291435494",
+      "head": "c3d7d202c2abad5a9b5fa173757fe621fcc797e0",
+      "ref": "fix/terminal-resume-frontier-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "c3d7d202c2abad5a9b5fa173757fe621fcc797e0",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/terminal-remote-advance/repro-candidate-124803337052.raw.log",
+      "raw_bytes": 201878,
+      "raw_sha256": "ea5bbb1aa12f670ceb8cbd4b4e4cb13ea9284c7d49de8aebdf4e8e94ad57059a",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 15629,
+      "selected_sha256": "9bc390abda9dce5017ac08b151cfed760f5a691f9672f382fc9b9d782d9b0616",
+      "actual_pass": 135,
+      "actual_fail": 0,
+      "retained_case_pass": 135,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T09:05:48.6068930Z Test Successful in 2.809s. 114 tests run.",
+        "2026-11-01T09:05:50.4650988Z Test Successful in 0.288s. 21 tests run."
+      ],
+      "per_suite": {
+        "packages/agent_core/test/test_pipeline.ml": {
+          "pass": 114,
+          "fail": 0
+        },
+        "packages/agent_core/test/test_execution_journal.ml": {
+          "pass": 21,
+          "fail": 0
+        }
+      },
+      "comparison_role": "corrected identical-fixture pair",
+      "minimal": true,
+      "suite_timeout_sec": 600,
+      "suites": [
+        "packages/agent_core/test/test_pipeline",
+        "packages/agent_core/test/test_execution_journal"
+      ]
+    }
+  ],
+  "all_completed_case_rows_retained": true,
+  "invalid_fixture_diagnostic": {
+    "file": "invalid-fixture-diagnostics.txt",
+    "bytes": 1331,
+    "sha256": "e1e5d11e3e859e47cd022f429e57317da8effb33ebcd5b771f9196143e5e5c98",
+    "derivation": "Six exact normalized source-log lines beginning at each compiler location, with explicit run/head headers."
+  },
+  "common_case_key_sha256": "f13407fc77ba93feb2ace9592c1a5f61a31c6d75a505680be221c4999f03f6b7",
+  "full_regression": {
+    "candidate_status": "not_run",
+    "latest_prior_scheduled_observation": {
+      "workflow": "Test",
+      "query": "latest event=schedule; no watch",
+      "runs": [
+        {
+          "id": 41225921334,
+          "name": "Test",
+          "head_sha": "1abd207e3e2a73cda5423e0ccd18cc85e2e21438",
+          "head_branch": "main",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "failure",
+          "html_url": "https://github.com/jeong-sik/masc/actions/runs/41225921334",
+          "created_at": "2026-10-31T17:43:41Z"
+        }
+      ],
+      "TARGET_SUITES": "inferred empty for schedule from checked workflow, not a downloaded job-log receipt",
+      "not_a_current_candidate_full_regression": true
+    }
+  },
+  "limits": [
+    "Focused Pipeline 114 and Journal 21, not full repository regression",
+    "Controlled injected provider with public Agent APIs and a registered effect-counting tool",
+    "Same-process persisted recovery, not an OS restart or real provider/account measurement",
+    "No local Dune/typecheck, installed runtime, integration, deployment, formal approval or original journal hard-cut acceptance"
+  ]
+}

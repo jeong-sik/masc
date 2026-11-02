@@ -317,6 +317,15 @@ val observe_execution :
     restored user input, and replays settled ToolResults without rerunning tool
     gates, handlers, or completion observers. An admitted Tool attempt without
     a settled result fails closed because its external outcome is unknown.
+    If a terminal response and its collected checkpoint were persisted before
+    the provider/turn close, recovery validates their exact content and turn
+    identity, then runs the pending output stage before closing and returning
+    that response without another provider call or AfterTurn. The stop reason
+    and OnStop decision are validated as for a fresh response. OnStop may repeat
+    if interrupted before provider close, so the callback must tolerate replay.
+    A successfully closed provider reuses its output decision without calling
+    OnStop again. A mismatched terminal checkpoint or a persisted tool invocation
+    refuses that terminal recovery.
 
     The same optional value is accepted by regular, streaming, handoff,
     single-turn, and [Advanced] run entry points; no parallel durable run

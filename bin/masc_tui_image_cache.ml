@@ -225,10 +225,14 @@ let png_path ~cache_dir input =
   Filename.concat cache_dir
     ("conv_" ^ Digest.to_hex (Digest.string (input ^ "_converted_png")) ^ ".png")
 
+let downloaded_frame_path ~cache_dir url =
+  png_path ~cache_dir (input_path ~cache_dir url) ^ ".bound"
+
 let invalidate_download ~cache_dir url =
   let input = input_path ~cache_dir url in
   discard input;
-  discard (png_path ~cache_dir input)
+  discard (png_path ~cache_dir input);
+  discard (downloaded_frame_path ~cache_dir url)
 
 (* A cache path is derived from the URL, so every worker on one URL names the
    same file. Writing it in place makes two workers visible to each other in the
@@ -252,7 +256,7 @@ let publish ~attempt ~target =
    Publish a new file so later writes through that handle cannot change the
    cached frame. This does not prove the converter had finished writing when
    its output was read. *)
-let publish_snapshot ~cache_dir ~target bytes =
+let publish_snapshot ~cache_dir ~target parts =
   match Filename.open_temp_file ~mode:[Open_binary] ~temp_dir:cache_dir "conv_frame_" ".png" with
   | exception Sys_error detail -> Error detail
   | path, channel ->
@@ -261,14 +265,28 @@ let publish_snapshot ~cache_dir ~target bytes =
       close_out_noerr channel;
       if not !moved then discard path) (fun () ->
       try
-        Out_channel.output_string channel bytes;
+        List.iter (Out_channel.output_string channel) parts;
         Out_channel.close channel;
         Sys.rename path target;
         moved := true;
         Ok target
       with Sys_error detail -> Error detail)
 
-let download ~run ~cache_dir url =
+type download = Download of string
+
+let download_bytes (Download bytes) = bytes
+
+let with_download_snapshot ~cache_dir (Download bytes) f =
+  match attempt_path ~cache_dir ~prefix:"download_input_" ~suffix:".img" with
+  | Error detail -> Error detail
+  | Ok path ->
+    Fun.protect ~finally:(fun () -> discard path) (fun () ->
+      let written =
+        try Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc bytes); Ok ()
+        with Sys_error detail -> Error detail in
+      Result.map (fun () -> f path) written)
+
+let download ?(force_fetch = false) ~run ~cache_dir url =
   let target = input_path ~cache_dir url in
   let judge bytes = verdict_of_bytes bytes in
   let read_cached () =
@@ -276,7 +294,7 @@ let download ~run ~cache_dir url =
     | Error detail -> discard target; Error (Cache_unreadable { detail })
     | Ok bytes ->
       match judge bytes with
-      | Known_image _ | Unknown_signature -> Ok target
+      | Known_image _ | Unknown_signature -> Ok (Download bytes)
       | Empty -> discard target; Error Empty_body
   in
   let fetch () =
@@ -302,27 +320,35 @@ let download ~run ~cache_dir url =
                 let result = publish ~attempt ~target in
                 owns_attempt := false;
                 match result with
-                | Ok path -> Ok path
+                | Ok _ -> Ok (Download bytes)
                 | Error detail -> Error (Cache_unreadable { detail }))
   in
-  if Sys.file_exists target then
-    match read_cached () with Ok path -> Ok path | Error _ -> fetch ()
+  if not force_fetch && Sys.file_exists target then
+    match read_cached () with Ok body -> Ok body | Error _ -> fetch ()
   else fetch ()
 
-let run_decoder_bytes ~run ~output_path command =
-  discard output_path;
+let collect_decoder_bytes ~run ~output_path command =
   match run_checked ~run command with
-  (* Public callers may share [output_path]. The caller must own the path to
-     remove it after an exception or runner failure. *)
   | Error failure -> Error (Decoder_runner_failed failure)
   | Ok status ->
     match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
-    | Some failure -> discard output_path; Error failure
+    | Some failure -> Error failure
     | None ->
       match read_bytes output_path with
-      | Error detail -> discard output_path; Error (Frame_unreadable { detail })
-      | Ok "" -> discard output_path; Error No_frame_written
+      | Error detail -> Error (Frame_unreadable { detail })
+      | Ok "" -> Error No_frame_written
       | Ok bytes -> Ok bytes
+
+let run_decoder_bytes ~run ~output_path command =
+  discard output_path;
+  match collect_decoder_bytes ~run ~output_path command with
+  (* Public callers may share [output_path]. The caller must own the path to
+     remove it after an exception or runner failure. *)
+  | Error (Decoder_runner_failed _ as failure) -> Error failure
+  | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
+           | Decoder_stopped _ | No_frame_written | Frame_unreadable _) as failure) ->
+    discard output_path; Error failure
+  | Ok bytes -> Ok bytes
 
 let run_decoder ~run ~output_path command =
   Result.map (fun _ -> output_path) (run_decoder_bytes ~run ~output_path command)
@@ -337,11 +363,7 @@ let conversion_failure_text failures =
   String.concat "; " (List.map (fun (converter, failure) ->
     converter_name converter ^ ": " ^ decode_failure_text failure) failures)
 
-let convert_to_png ~run ~cache_dir input =
-  let target = png_path ~cache_dir input in
-  match read_bytes target with
-  | Ok bytes when String.length bytes > 0 -> Ok target
-  | Ok _ | Error _ ->
+let convert_frame ~run ~cache_dir input =
     let source = Filename.quote input in
     let commands =
       [ Sips,
@@ -365,12 +387,8 @@ let convert_to_png ~run ~cache_dir input =
           (* Publish only a nonempty frame captured from this attempt. *)
           match run_decoder_bytes ~run ~output_path:attempt_file (command attempt_file) with
           | Ok bytes ->
-            (* Keep the converter's file separate from the published snapshot. *)
             Fun.protect ~finally:(fun () -> discard attempt_file) (fun () ->
-              match publish_snapshot ~cache_dir ~target bytes with
-              | Ok path -> Ok path
-              | Error detail ->
-                Error (List.rev ((converter, Frame_unreadable {detail}) :: failures)))
+              Ok (converter, failures, bytes))
           | Error (Decoder_runner_failed _ as failure) ->
             Error (List.rev ((converter, failure) :: failures))
           | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
@@ -379,19 +397,59 @@ let convert_to_png ~run ~cache_dir input =
       in
       attempt [] commands
 
+let convert_and_publish ~run ~cache_dir ~target ~encode input =
+  match convert_frame ~run ~cache_dir input with
+  | Error failures -> Error failures
+  | Ok (converter, failures, bytes) ->
+    (* Keep the converter's file separate from the published snapshot. *)
+    match publish_snapshot ~cache_dir ~target (encode bytes) with
+    | Ok _ -> Ok bytes
+    | Error detail ->
+      Error (List.rev ((converter, Frame_unreadable {detail}) :: failures))
+
+let convert_to_png ~run ~cache_dir input =
+  let target = png_path ~cache_dir input in
+  match read_bytes target with
+  | Ok bytes when String.length bytes > 0 -> Ok target
+  | Ok _ | Error _ ->
+    Result.map (fun _ -> target)
+      (convert_and_publish ~run ~cache_dir ~target ~encode:(fun bytes -> [bytes]) input)
+
+let downloaded_frame_prefix bytes =
+  "masc-tui-image-frame-v1:" ^ Agent_core_sha256.(digest_string bytes |> to_hex) ^ "\n"
+
+let cached_downloaded_frame ~prefix path =
+  try In_channel.with_open_bin path (fun channel ->
+    if really_input_string channel (String.length prefix) <> prefix then None
+    else match In_channel.input_line channel with
+      | None -> None
+      | Some size ->
+        match int_of_string_opt size with
+        | Some size when size > 0 ->
+          let frame = In_channel.input_all channel in
+          if String.length frame = size then Some frame else None
+        | Some _ | None -> None)
+  with Sys_error _ | End_of_file -> None
+
 let prepare_png ~run ~cache_dir url =
   match download ~run ~cache_dir url with
   | Error error -> Error (download_error_text error)
-  | Ok input ->
-    match read_bytes input with
-    | Error detail -> Error detail
-    | Ok bytes ->
+  | Ok body ->
+    let bytes = download_bytes body in
       match verdict_of_bytes bytes with
       | Known_image { media_type = "image/png" } -> Ok bytes
       | Known_image _ | Unknown_signature | Empty ->
-        match convert_to_png ~run ~cache_dir input with
-        | Ok path -> read_bytes path
-        | Error failures -> Error (conversion_failure_text failures)
+        let target = downloaded_frame_path ~cache_dir url in
+        let prefix = downloaded_frame_prefix bytes in
+        let cached = cached_downloaded_frame ~prefix target in
+        match cached with
+        | Some frame -> Ok frame
+        | None ->
+          Result.bind (with_download_snapshot ~cache_dir body (fun input ->
+            let encode frame = [prefix; string_of_int (String.length frame); "\n"; frame] in
+            match convert_and_publish ~run ~cache_dir ~target ~encode input with
+            | Ok frame -> Ok frame
+            | Error failures -> Error (conversion_failure_text failures))) Fun.id
 
 let prepare_payload ~run ~cache_dir bytes =
   match verdict_of_bytes bytes with
@@ -451,8 +509,10 @@ let prepare_presentation ~run ~cache_dir display png =
           let command = Printf.sprintf
             "ffmpeg -v error -nostdin -y -i %s -vf scale=%d:%d -frames:v 1 -f rawvideo -pix_fmt rgba %s >/dev/null 2>&1"
             (Filename.quote input) columns pixel_rows (Filename.quote output) in
-          let* _ = Result.map_error decode_failure_text (run_decoder ~run ~output_path:output command) in
-          let* bytes = read_bytes output in
+          (* [output] is an exclusively reserved empty file. Keep the name
+             occupied until this attempt finishes and read its bytes once. *)
+          let* bytes = Result.map_error decode_failure_text
+            (collect_decoder_bytes ~run ~output_path:output command) in
           if String.length bytes <> columns * pixel_rows * 4 then
             Error "image decoder returned an incomplete or unexpected RGBA frame"
           else Ok (Rgba {columns;pixel_rows;bytes})))

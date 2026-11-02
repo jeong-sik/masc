@@ -327,25 +327,50 @@ let test_character_frame_protocol_and_cleanup () =
     check (list string) "failed attempt leaves no temporary files"
       ["ffmpeg";"retained-original"] (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
 
+let test_character_frame_keeps_output_reserved () =
+  with_cache (fun cache_dir _ ->
+    let png = png_header ^ "\000\000\000\002\000\000\000\002" in
+    let display = Cache.Character_cells {columns=2;rows=1} in
+    List.iter (fun status ->
+      let reserved = ref false in
+      let run command =
+        let output = capture_converter_output cache_dir command in
+        reserved := (match Unix.openfile output [Unix.O_CREAT; Unix.O_EXCL; Unix.O_WRONLY] 0o600 with
+          | fd -> Unix.close fd; false
+          | exception Unix.Unix_error (Unix.EEXIST, _, _) -> true);
+        status in
+      check bool "failed or empty decode is refused" true
+        (Result.is_error (Cache.prepare_presentation ~run ~cache_dir display png));
+      check bool "another attempt cannot reserve the output while decoder runs" true !reserved;
+      check (list string) "owned attempt files are cleaned up" ["output-path"]
+        (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
+      [Unix.WEXITED 1; Unix.WEXITED 0];
+    check_raises "unexpected runner exceptions propagate" Runner_interrupted (fun () ->
+      ignore (Cache.prepare_presentation ~run:(fun _ -> raise Runner_interrupted)
+        ~cache_dir display png));
+    check (list string) "exception cleans owned attempt files" ["output-path"]
+      (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
+
 let test_mosaic_failure_retains_input_and_can_recover () =
   List.iter (fun code -> with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/preview.png" in
     serve cache_dir png_header;
     executable cache_dir "ffmpeg" (Printf.sprintf "exit %d" code);
-    let input = unwrap (Cache.download ~run ~cache_dir url) in
-    let output_path = Filename.concat cache_dir "frame.raw" in
-    let command = Printf.sprintf "ffmpeg -i %s %s"
-      (Filename.quote input) (Filename.quote output_path) in
-    (* A failed command must not accept a frame left by an earlier attempt. *)
-    write_file output_path "stale";
-    check bool "decode fails" true
-      (Result.is_error (Cache.run_decoder ~run ~output_path command));
-    check string "original bytes retained" png_header (read_file input);
-    check bool "failed output discarded" false (Sys.file_exists output_path);
-    converter_succeeds cache_dir "ffmpeg" "rgbRGB";
-    ignore (unwrap (Cache.download ~run ~cache_dir url));
-    ignore (unwrap (Cache.run_decoder ~run ~output_path command));
-    check string "recovered frame" "rgbRGB" (read_file output_path);
+    let body = unwrap (Cache.download ~run ~cache_dir url) in
+    unwrap (Cache.with_download_snapshot ~cache_dir body (fun input ->
+      let output_path = Filename.concat cache_dir "frame.raw" in
+      let command = Printf.sprintf "ffmpeg -i %s %s"
+        (Filename.quote input) (Filename.quote output_path) in
+      (* A failed command must not accept a frame left by an earlier attempt. *)
+      write_file output_path "stale";
+      check bool "decode fails" true
+        (Result.is_error (Cache.run_decoder ~run ~output_path command));
+      check string "original bytes retained" png_header (read_file input);
+      check bool "failed output discarded" false (Sys.file_exists output_path);
+      converter_succeeds cache_dir "ffmpeg" "rgbRGB";
+      ignore (unwrap (Cache.download ~run ~cache_dir url));
+      ignore (unwrap (Cache.run_decoder ~run ~output_path command));
+      check string "recovered frame" "rgbRGB" (read_file output_path)));
     check string "retained source avoids another fetch" "x"
       (read_file (Filename.concat cache_dir "fetches"))))
     [ 1; 126; 127 ]
@@ -358,8 +383,10 @@ let test_v_missing_converters_retains_input () =
       [ "sips"; "convert"; "ffmpeg" ];
     check bool "PNG preparation reports failure" true
       (Result.is_error (Cache.prepare_png ~run ~cache_dir url));
-    let input = unwrap (Cache.download ~run ~cache_dir url) in
-    check string "JPEG still cached" jpeg_header (read_file input);
+    check bool "failed conversion removes its private input" false
+      (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"download_input_"));
+    let body = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "JPEG still cached" jpeg_header (Cache.download_bytes body);
     converter_succeeds cache_dir "sips" png_header;
     check string "next explicit view can convert" png_header
       (unwrap (Cache.prepare_png ~run ~cache_dir url));
@@ -372,12 +399,13 @@ let test_explicit_retry_recovers_without_background_loop () =
     let url = "https://fixture.invalid/retry.png" in
     Preview.clear_cache ();
     let attempts = ref 0 in
-    let compute () =
+    let compute ?(force_fetch = false) () =
       incr attempts;
-      match Cache.download ~run ~cache_dir url with
+      match Cache.download ~force_fetch ~run ~cache_dir url with
         | Error failure ->
           Preview.Refused (Preview.Fetch_failed { detail = Cache.download_error_text failure })
-        | Ok input ->
+        | Ok body ->
+          unwrap (Cache.with_download_snapshot ~cache_dir body (fun input ->
           let output_path = Filename.concat cache_dir "retry.raw" in
           let command = Printf.sprintf "ffmpeg -i %s %s"
             (Filename.quote input) (Filename.quote output_path) in
@@ -385,10 +413,10 @@ let test_explicit_retry_recovers_without_background_loop () =
           | Error failure ->
             Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
           | Ok path ->
-            Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))
+            Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))))
     in
     executable cache_dir "curl" "exit 28";
-    Preview.load_mosaic url ~compute;
+    Preview.load_mosaic url ~compute:(fun () -> compute ());
     ignore (Preview.mosaic_lookup url);
     ignore (Preview.mosaic_lookup url);
     check int "reads do not retry a timeout" 1 !attempts;
@@ -396,7 +424,7 @@ let test_explicit_retry_recovers_without_background_loop () =
     converter_succeeds cache_dir "ffmpeg" "rgbRGB";
     let retry () =
       Cache.invalidate_download ~cache_dir url;
-      compute ()
+      compute ~force_fetch:true ()
     in
     Preview.retry_mosaic ~retry url;
     (match Preview.mosaic_lookup url with
@@ -426,7 +454,8 @@ let test_a_direct_image_retry_drops_the_body_its_first_view_cached () =
     let retry () =
       incr attempts;
       Cache.invalidate_download ~cache_dir url;
-      let input = unwrap (Cache.download ~run ~cache_dir url) in
+      let body = unwrap (Cache.download ~force_fetch:true ~run ~cache_dir url) in
+      unwrap (Cache.with_download_snapshot ~cache_dir body (fun input ->
       let output_path = Filename.concat cache_dir "direct.raw" in
       let command = Printf.sprintf "ffmpeg -i %s %s"
         (Filename.quote input) (Filename.quote output_path) in
@@ -434,7 +463,7 @@ let test_a_direct_image_retry_drops_the_body_its_first_view_cached () =
       | Error failure ->
         Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
       | Ok path ->
-        Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))
+        Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))))
     in
     Preview.retry_mosaic ~retry url;
     check int "the explicit retry ran" 1 !attempts;
@@ -591,8 +620,8 @@ let test_explicit_refresh_replaces_a_refused_body () =
       [ "sips"; "convert"; "ffmpeg" ];
     check bool "notice cannot be converted" true
       (Result.is_error (Cache.prepare_png ~run ~cache_dir url));
-    let input = unwrap (Cache.download ~run ~cache_dir url) in
-    check string "ambiguous decode does not discard bytes" html_page (read_file input);
+    let body = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "ambiguous decode does not discard bytes" html_page (Cache.download_bytes body);
     serve cache_dir png_header;
     Cache.invalidate_download ~cache_dir url;
     check string "explicit refresh gets new source" png_header
@@ -617,15 +646,16 @@ let test_a_delete_during_the_fetch_does_not_take_the_download () =
          (shell_bytes (String.sub png_header 0 4))
          (Filename.quote shared)
          (shell_bytes (String.sub png_header 4 (String.length png_header - 4))));
-    let path = unwrap (Cache.download ~run ~cache_dir url) in
-    check string "the published file is the whole body" png_header (read_file path);
-    check string "and it is the shared path the readers look at" shared path)
+    let body = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "the returned body is whole" png_header (Cache.download_bytes body);
+    check string "the published file is the whole body" png_header (read_file shared))
 
 let test_a_delete_during_the_conversion_does_not_take_the_frame () =
   with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/raced.bmp" in
     serve cache_dir bmp_header;
-    let input = unwrap (Cache.download ~run ~cache_dir url) in
+    ignore (unwrap (Cache.download ~run ~cache_dir url));
+    let input = Cache.input_path ~cache_dir url in
     let shared = Cache.png_path ~cache_dir input in
     executable cache_dir "sips"
       (Printf.sprintf
@@ -650,6 +680,118 @@ let test_a_refused_body_never_reaches_the_cache_path () =
      | Ok _ -> fail "an empty body must be refused"
      | Error _ -> ());
     check bool "nothing was left at the shared path" false (Sys.file_exists shared))
+
+let test_download_owns_its_bytes_across_replacement () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/replaced.png" in
+    let first = png_header ^ "first" and second = png_header ^ "second" in
+    serve cache_dir first;
+    let fetched = unwrap (Cache.download ~run ~cache_dir url) in
+    let cached = unwrap (Cache.download ~run ~cache_dir url) in
+    Cache.invalidate_download ~cache_dir url;
+    serve cache_dir second;
+    let newer = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "a fetched body remains the first image" first (Cache.download_bytes fetched);
+    check string "a cache hit remains the first image" first (Cache.download_bytes cached);
+    check string "the new download is the second image" second (Cache.download_bytes newer);
+    let path = ref "" in
+    unwrap (Cache.with_download_snapshot ~cache_dir fetched (fun input ->
+      path := input;
+      check string "successful decoder input uses captured bytes" first (read_file input)));
+    check bool "snapshot is removed after success" false (Sys.file_exists !path);
+    check_raises "snapshot callback exception propagates" Runner_interrupted (fun () ->
+      ignore (Cache.with_download_snapshot ~cache_dir fetched (fun input ->
+        path := input;
+        check string "decoder input uses captured bytes" first (read_file input);
+        raise Runner_interrupted)));
+    check bool "snapshot is removed after an exception" false (Sys.file_exists !path);
+    check string "shared cache still contains the newer body" second
+      (read_file (Cache.input_path ~cache_dir url)))
+
+let test_explicit_fetch_bypasses_a_republished_body () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/republished.png" in
+    let old = png_header ^ "old" and fresh = png_header ^ "fresh" in
+    serve cache_dir old;
+    ignore (unwrap (Cache.download ~run ~cache_dir url));
+    Cache.invalidate_download ~cache_dir url;
+    (* An older in-flight download published after the invalidation. *)
+    write_file (Cache.input_path ~cache_dir url) old;
+    serve cache_dir fresh;
+    let body = unwrap (Cache.download ~force_fetch:true ~run ~cache_dir url) in
+    check string "retry fetched instead of using the republished body"
+      fresh (Cache.download_bytes body);
+    check string "retry performed another fetch" "xx"
+      (read_file (Filename.concat cache_dir "fetches")))
+
+let test_late_conversion_cannot_poison_a_refreshed_body () =
+  with_cache (fun cache_dir shell_run ->
+    let url = "https://fixture.invalid/concurrent.bmp" in
+    let old = bmp_header ^ "old" and fresh = bmp_header ^ "fresh" in
+    let old_frame = png_header ^ "old-frame" and fresh_frame = png_header ^ "fresh-frame" in
+    let old_path = Filename.concat cache_dir "old-body" in
+    let fresh_path = Filename.concat cache_dir "fresh-body" in
+    let conversions = Filename.concat cache_dir "conversions" in
+    write_file old_path old;
+    write_file fresh_path fresh;
+    executable cache_dir "sips" (Printf.sprintf
+      "printf x >> %s\nif /usr/bin/cmp -s \"$4\" %s; then printf %%b %s > \"$6\";\nelif /usr/bin/cmp -s \"$4\" %s; then printf %%b %s > \"$6\";\nelse exit 1; fi"
+      (Filename.quote conversions) (Filename.quote old_path) (shell_bytes old_frame)
+      (Filename.quote fresh_path) (shell_bytes fresh_frame));
+    serve cache_dir old;
+    let interleaved = ref false in
+    let refresh_result = ref None in
+    let rec run command =
+      if String.starts_with ~prefix:"sips " command && not !interleaved then begin
+        interleaved := true;
+        Cache.invalidate_download ~cache_dir url;
+        serve cache_dir fresh;
+        refresh_result := Some (unwrap (Cache.prepare_png ~run ~cache_dir url))
+      end;
+      shell_run command in
+    check string "late first conversion returns its own frame" old_frame
+      (unwrap (Cache.prepare_png ~run ~cache_dir url));
+    check (option string) "refresh returned its own frame" (Some fresh_frame) !refresh_result;
+    check string "old frame cannot be reused for the refreshed input" fresh_frame
+      (unwrap (Cache.prepare_png ~run ~cache_dir url));
+    check string "matching source reuses its frame" fresh_frame
+      (unwrap (Cache.prepare_png ~run ~cache_dir url));
+    check string "only the mismatch requires another conversion" "xxx" (read_file conversions);
+    check string "one original fetch and one refresh" "xx"
+      (read_file (Filename.concat cache_dir "fetches")))
+
+let test_invalid_converted_cache_is_not_reused () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/damaged.bmp" in
+    let conversions = Filename.concat cache_dir "conversions" in
+    serve cache_dir bmp_header;
+    executable cache_dir "sips" (Printf.sprintf
+      "printf x >> %s\nprintf %%b %s > \"$6\""
+      (Filename.quote conversions) (shell_bytes png_header));
+    let view () = check string "converter frame returned" png_header
+        (unwrap (Cache.prepare_png ~run ~cache_dir url)) in
+    view ();
+    view ();
+    let name = Sys.readdir cache_dir |> Array.to_list
+      |> List.find_opt (String.ends_with ~suffix:".bound")
+      |> Option.value ~default:"" in
+    check bool "bound cache was published" true (name <> "");
+    let path = Filename.concat cache_dir name in
+    let valid = read_file path in
+    let header_only = String.sub valid 0 (String.index valid '\n' + 1) in
+    List.iter (fun damaged ->
+      write_file path damaged;
+      view ())
+      [""; "legacy png"; header_only; String.sub valid 0 (String.length valid - 1)];
+    check string "invalid cache entries are converted again" "xxxxx"
+      (read_file conversions);
+    check string "invalid frames do not trigger a new download" "x"
+      (read_file (Filename.concat cache_dir "fetches"));
+    let legacy = Cache.png_path ~cache_dir (Cache.input_path ~cache_dir url) in
+    write_file legacy png_header;
+    Cache.invalidate_download ~cache_dir url;
+    check bool "refresh removes the bound frame" false (Sys.file_exists path);
+    check bool "refresh also removes the legacy frame" false (Sys.file_exists legacy))
 
 (* ---- bounded run ---- *)
 
@@ -707,12 +849,22 @@ let () =
             test_character_frame_refuses_unrepresentable_ratio
         ; test_case "character decoder frame protocol and attempt cleanup" `Quick
             test_character_frame_protocol_and_cleanup
+        ; test_case "character decoder retains output reservation" `Quick
+            test_character_frame_keeps_output_reserved
         ; test_case "a delete during the fetch does not take the download" `Quick
             test_a_delete_during_the_fetch_does_not_take_the_download
         ; test_case "a delete during the conversion does not take the frame" `Quick
             test_a_delete_during_the_conversion_does_not_take_the_frame
         ; test_case "a refused body never reaches the cache path" `Quick
             test_a_refused_body_never_reaches_the_cache_path
+        ; test_case "download owns its bytes across replacement" `Quick
+            test_download_owns_its_bytes_across_replacement
+        ; test_case "explicit fetch bypasses a republished body" `Quick
+            test_explicit_fetch_bypasses_a_republished_body
+        ; test_case "late conversion cannot poison refreshed input" `Quick
+            test_late_conversion_cannot_poison_a_refreshed_body
+        ; test_case "invalid converted cache is not reused" `Quick
+            test_invalid_converted_cache_is_not_reused
         ; test_case "mosaic failure retains input and can recover" `Quick
             test_mosaic_failure_retains_input_and_can_recover
         ; test_case "view retains input when all converters are missing" `Quick

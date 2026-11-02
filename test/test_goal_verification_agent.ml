@@ -99,9 +99,17 @@ let with_workspace f =
   Fun.protect
     ~finally:(fun () ->
       ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
       rm_rf dir)
     (fun () ->
        let config = Workspace.default_config dir in
+       Masc_test_deps.Board_test_preparation.prepare ~base_path:dir
+         ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
+       Board.reset_global_for_test ();
+       Board_dispatch.reset_for_test ();
+       Result.get_ok (Board_dispatch.init_jsonl ~base_path:dir
+         ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared ());
        ignore (Workspace.init config ~agent_name:(Some "planner"));
        ignore (ensure_producer_playground config "unassigned");
        f config)

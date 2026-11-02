@@ -364,6 +364,18 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
+  it('routes an approval_rules_changed SSE event to the Gate refresh', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateRefresh(refreshGate)
+
+    sseStore.routeServerPushEvent({ type: 'approval_rules_changed' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshGate).toHaveBeenCalledWith({ force: true })
+  })
+
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {
     const { sseStore } = await loadSseStore()
 

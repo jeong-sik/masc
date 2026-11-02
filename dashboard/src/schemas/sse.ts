@@ -35,6 +35,8 @@ export const SSE_APPROVAL_PENDING_EVENT = 'approval:pending'
 export const SSE_APPROVAL_RESOLVED_EVENT = 'approval:resolved'
 export const SSE_APPROVAL_AUDIT_EVENT = 'approval:audit'
 export const SSE_APPROVAL_SUMMARY_UPDATED_EVENT = 'approval:summary_updated'
+// The standing approval rules changed (lib/keeper/keeper_gate_broadcast.ml).
+export const SSE_APPROVAL_RULES_CHANGED_EVENT = 'approval_rules_changed'
 
 // Dead entries are removed, not kept for compatibility: an allowlist row whose
 // OCaml producer no longer exists only hides real drops (#28925 audit, defect
@@ -87,6 +89,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
+  SSE_APPROVAL_RULES_CHANGED_EVENT,
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

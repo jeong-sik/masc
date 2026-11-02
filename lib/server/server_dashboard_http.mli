@@ -56,6 +56,10 @@ val dashboard_memory_http_payload :
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
+val invalidate_gate_snapshots : base_path:string -> unit
+(** Drop every cached Gate snapshot of [base_path], whatever its limit,
+    window and queue revision. *)
+
 val dashboard_gate_tool_events_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 

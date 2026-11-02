@@ -220,13 +220,23 @@ let upsert_rule_with_save
       | None -> persist candidate Created (candidate :: store.rules))
 ;;
 
+(* A new rule and a renewed expiry change the rules a Gate read shows; a
+   repeated, superseded or already applied approval leaves them as they were. *)
 let upsert_rule
       ~base_path ~keeper_name ~tool_name ~input ?created_by
       ~source_approval_id ~resolution_sequence ~expires_at ()
   =
-  upsert_rule_with_save ~save:save_rule_store_unlocked
-    ~base_path ~keeper_name ~tool_name ~input ?created_by
-    ~source_approval_id ~resolution_sequence ~expires_at ()
+  let result =
+    upsert_rule_with_save ~save:save_rule_store_unlocked
+      ~base_path ~keeper_name ~tool_name ~input ?created_by
+      ~source_approval_id ~resolution_sequence ~expires_at ()
+  in
+  (match result with
+   | Ok (Applied { disposition = Created | Renewed _; _ }) ->
+     Keeper_gate_broadcast.approval_rules_changed ~base_path
+   | Ok (Applied { disposition = Existing; _ } | Already_applied _ | Superseded _)
+   | Error _ -> ());
+  result
 ;;
 
 module For_testing = struct
@@ -235,6 +245,7 @@ module For_testing = struct
 end
 
 let delete_rule ~base_path ~id () =
+  let result =
   with_rules_write_lock (fun () ->
     match load_rule_store_unlocked ~base_path () with
     | Error _ as error -> error
@@ -250,6 +261,11 @@ let delete_rule ~base_path ~id () =
          (match save_rule_store_unlocked ~base_path { store with rules } with
           | Ok () -> Ok deleted
           | Error _ as error -> error)))
+  in
+  (match result with
+   | Ok _ -> Keeper_gate_broadcast.approval_rules_changed ~base_path
+   | Error _ -> ());
+  result
 ;;
 
 let find_matching_rule

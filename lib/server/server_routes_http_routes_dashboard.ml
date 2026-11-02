@@ -1447,8 +1447,7 @@ let handle_keeper_exact_lane_body state operator_name request reqd body_str =
         with
         | Error message -> refuse message
         | Ok current ->
-          Dashboard_cache.invalidate_prefix
-            (Printf.sprintf "gate:%s;" config.base_path);
+          Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
           Sse.broadcast
             (`Assoc
                [ "type", `String "keeper_exact_lane_preference_changed"
@@ -1525,8 +1524,7 @@ let handle_gate_keeper_mode_body state operator_name request reqd body_str =
         with
         | Error message -> refuse message
         | Ok change ->
-          Dashboard_cache.invalidate_prefix
-            (Printf.sprintf "gate:%s;" config.base_path);
+          Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
           Sse.broadcast
             (`Assoc
                [ "type", `String "gate_keeper_mode_changed"
@@ -1600,8 +1598,7 @@ let handle_gate_mode_body_for_lane
               reqd
               (operator_error_json message)
           | Ok (change : Keeper_gate_mode.change) ->
-            Dashboard_cache.invalidate_prefix
-              (Printf.sprintf "gate:%s;" config.base_path);
+            Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
             Sse.broadcast
               (`Assoc
                  [ "type", `String sse_type

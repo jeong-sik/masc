@@ -58,7 +58,19 @@ let retained_stop ~store ~(record:Retained.retained) ~request =
             |> Result.map_error Keeper_librarian_input_sources.read_error_to_string) in
           Ok (if committed then None else Some {request_id=record.request_id;
             destination=Request.destination request;refusal})
-        | Error refusal ->
+        | Error ((Consumer.Keeper_meta_absent
+                 | Original_publication_blocked _ | Source_capture_failed _
+                 | Keeper_meta_unreadable _ | Boundary_log_unreadable _
+                 | Progress_unreadable _ | Checkpoint_unreadable _
+                 | Position_in_other_trace _ | Position_not_in_history _
+                 | Range_stopped _ | Range_end_boundary_missing _
+                 | Progress_boundary_missing _ | Memory_snapshot_unreadable _
+                 | Counterpart_interval_non_monotone _
+                 | Counterpart_observations_unreadable _ | Progress_write_failed _
+                 | Official_progress_unreadable _ | Official_progress_write_failed _
+                 | Official_progress_boundary_missing _
+                 | Committed_official_range_mismatch | Official_range_stopped _
+                 | Fragment_store_unreadable _ | Fragment_line_unreadable _) as refusal) ->
           Ok (Some {request_id=record.request_id;destination=Request.destination request;refusal})
         | Ok _ -> Ok None)
      | Call_final (Answered _ | Invalid_output _ | Input_refused Invalid_request | Output_limit_reached _)

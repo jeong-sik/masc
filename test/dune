@@ -3012,6 +3012,7 @@
 
 (include stanzas/test_fs_compat_durable_append.inc)
 (include stanzas/test_fs_compat_unique_fold.inc)
+(include stanzas/test_fs_compat_missing_binding.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)

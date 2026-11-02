@@ -1652,8 +1652,14 @@ val purge_private_jsonl_durable_locked_at_snapshot_result :
     after that exact file identity and offset. A replacement, truncation, or
     disappearance is a typed [Cursor_mismatch], never an implicit full rescan.
     The returned cursor distinguishes a missing store from a present empty
-    store. The data path is opened nonblocking before its regular-file check,
-    so a FIFO with no writer is refused without waiting for one. *)
+    store. Stable transactions report Missing only when a failed existing-file
+    open is followed by lstat confirming actual leaf absence. A dangling leaf
+    symlink is refused, and an entry observed after the failed open is never
+    accepted as Missing. This remains an observation under the cooperative
+    stable lock, not an atomic comparison against actors bypassing that lock.
+    The parent and sibling lock may be initialized by the transaction.
+    The data path is opened nonblocking before its regular-file check, so a
+    FIFO with no writer is refused without waiting for one. *)
 val read_private_jsonl_durable_locked_result :
   string ->
   after:Private_jsonl_cursor.t option ->

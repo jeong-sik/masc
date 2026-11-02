@@ -41,6 +41,20 @@ let curl_exit_http_error_status = 22
 let curl_exit_operation_timeout = 28
 let sh_exit_command_not_found = 127
 
+type runner_failure = { error : Unix.error; operation : string; argument : string }
+
+let run_checked ~run command =
+  try Ok (run command) with
+  | Unix.Unix_error (error, operation, argument) -> Error { error; operation; argument }
+
+let runner_failure_text { error; operation; argument } =
+  let context = match operation, argument with
+    | "", "" -> ""
+    | operation, "" -> " (" ^ operation ^ ")"
+    | "", argument -> " (" ^ argument ^ ")"
+    | operation, argument -> " (" ^ operation ^ ": " ^ argument ^ ")" in
+  Unix.error_message error ^ context
+
 type fetch_failure =
   | Http_error_status
   | Operation_timeout
@@ -50,6 +64,7 @@ type fetch_failure =
   | Curl_exit of { code : int }
   | Curl_signaled of { signal : int }
   | Curl_stopped of { signal : int }
+  | Curl_runner_failed of runner_failure
   | No_body_written
 
 let fetch_failure_of_status status ~body_present =
@@ -75,6 +90,7 @@ let fetch_failure_text = function
   | Curl_exit { code } -> Printf.sprintf "curl exited %d" code
   | Curl_signaled { signal } -> Printf.sprintf "curl was killed by signal %d" signal
   | Curl_stopped { signal } -> Printf.sprintf "curl was stopped by signal %d" signal
+  | Curl_runner_failed failure -> "could not run curl: " ^ runner_failure_text failure
   | No_body_written -> "curl wrote no body"
 
 type download_error =
@@ -92,6 +108,7 @@ type decode_failure =
   | Decoder_exit of { code : int }
   | Decoder_signaled of { signal : int }
   | Decoder_stopped of { signal : int }
+  | Decoder_runner_failed of runner_failure
   | No_frame_written
   | Frame_unreadable of { detail : string }
 
@@ -113,6 +130,7 @@ let decode_failure_text = function
     then "decoder was killed (SIGKILL: out of time or memory)"
     else Printf.sprintf "decoder was killed by signal %d" signal
   | Decoder_stopped { signal } -> Printf.sprintf "decoder was stopped by signal %d" signal
+  | Decoder_runner_failed failure -> "could not run decoder: " ^ runner_failure_text failure
   | No_frame_written -> "decoder wrote no frame"
   | Frame_unreadable { detail } -> "the decoded frame could not be read: " ^ detail
 
@@ -265,20 +283,27 @@ let download ~run ~cache_dir url =
     match attempt_path ~cache_dir ~prefix:"dl_" ~suffix:".part" with
     | Error detail -> Error (Cache_unreadable { detail })
     | Ok attempt ->
-      let status = run (Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
-        (Filename.quote attempt) (Filename.quote url)) in
-      (match fetch_failure_of_status status ~body_present:(Sys.file_exists attempt) with
-       | Some failure -> discard attempt; Error (Fetch_failed failure)
-       | None ->
-         match read_bytes attempt with
-         | Error detail -> discard attempt; Error (Cache_unreadable { detail })
-         | Ok bytes ->
-           match judge bytes with
-           | Empty -> discard attempt; Error Empty_body
-           | Known_image _ | Unknown_signature ->
-             (match publish ~attempt ~target with
-              | Ok path -> Ok path
-              | Error detail -> Error (Cache_unreadable { detail })))
+      let owns_attempt = ref true in
+      Fun.protect ~finally:(fun () -> if !owns_attempt then discard attempt) (fun () ->
+        let command = Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
+            (Filename.quote attempt) (Filename.quote url) in
+        match run_checked ~run command with
+        | Error failure -> Error (Fetch_failed (Curl_runner_failed failure))
+        | Ok status ->
+          match fetch_failure_of_status status ~body_present:(Sys.file_exists attempt) with
+          | Some failure -> Error (Fetch_failed failure)
+          | None ->
+            match read_bytes attempt with
+            | Error detail -> Error (Cache_unreadable { detail })
+            | Ok bytes ->
+              match judge bytes with
+              | Empty -> Error Empty_body
+              | Known_image _ | Unknown_signature ->
+                let result = publish ~attempt ~target in
+                owns_attempt := false;
+                match result with
+                | Ok path -> Ok path
+                | Error detail -> Error (Cache_unreadable { detail }))
   in
   if Sys.file_exists target then
     match read_cached () with Ok path -> Ok path | Error _ -> fetch ()
@@ -286,14 +311,18 @@ let download ~run ~cache_dir url =
 
 let run_decoder_bytes ~run ~output_path command =
   discard output_path;
-  let status = run command in
-  match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
-  | Some failure -> discard output_path; Error failure
-  | None ->
-    match read_bytes output_path with
-    | Error detail -> discard output_path; Error (Frame_unreadable { detail })
-    | Ok "" -> discard output_path; Error No_frame_written
-    | Ok bytes -> Ok bytes
+  match run_checked ~run command with
+  (* Public callers may share [output_path]. The caller must own the path to
+     remove it after an exception or runner failure. *)
+  | Error failure -> Error (Decoder_runner_failed failure)
+  | Ok status ->
+    match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
+    | Some failure -> discard output_path; Error failure
+    | None ->
+      match read_bytes output_path with
+      | Error detail -> discard output_path; Error (Frame_unreadable { detail })
+      | Ok "" -> discard output_path; Error No_frame_written
+      | Ok bytes -> Ok bytes
 
 let run_decoder ~run ~output_path command =
   Result.map (fun _ -> output_path) (run_decoder_bytes ~run ~output_path command)
@@ -342,7 +371,11 @@ let convert_to_png ~run ~cache_dir input =
               | Ok path -> Ok path
               | Error detail ->
                 Error (List.rev ((converter, Frame_unreadable {detail}) :: failures)))
-          | Error failure -> attempt ((converter, failure) :: failures) rest
+          | Error (Decoder_runner_failed _ as failure) ->
+            Error (List.rev ((converter, failure) :: failures))
+          | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
+                   | Decoder_stopped _ | No_frame_written | Frame_unreadable _) as failure) ->
+            attempt ((converter, failure) :: failures) rest
       in
       attempt [] commands
 

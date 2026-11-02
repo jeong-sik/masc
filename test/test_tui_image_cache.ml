@@ -176,6 +176,90 @@ let converter_succeeds dir name bytes =
 
 let unwrap = function Ok value -> value | Error _ -> fail "unexpected workflow failure"
 
+let exhausted_runner_failure =
+  Cache.{ error = Unix.EMFILE; operation = "open"; argument = "/dev/null" }
+
+let raise_exhausted () = raise (Unix.Unix_error (Unix.EMFILE, "open", "/dev/null"))
+
+let capture_converter_output cache_dir command =
+  let captured_path = Filename.concat cache_dir "output-path" in
+  let capture = Printf.sprintf
+      "set -- %s\nfor output do :; done\nprintf '%%s' \"$output\" > %s"
+      command (Filename.quote captured_path) in
+  check bool "fixture captured converter path" true (Unix.system capture = Unix.WEXITED 0);
+  read_file captured_path
+
+let test_download_reports_runner_failure_and_cleans_attempt () =
+  with_cache (fun cache_dir _ ->
+    let result = Cache.download ~run:(fun _ -> raise_exhausted ()) ~cache_dir
+        "https://fixture.invalid/image" in
+    check bool "OS error remains distinct from curl exit" true
+      (result = Error (Cache.Fetch_failed (Cache.Curl_runner_failed exhausted_runner_failure)));
+    (match result with
+     | Error error ->
+       check string "error keeps the operation and argument"
+         ("could not download the image: could not run curl: " ^
+          Unix.error_message Unix.EMFILE ^ " (open: /dev/null)")
+         (Cache.download_error_text error)
+     | Ok _ -> fail "runner failure succeeded");
+    check (list string) "failed download left no attempt" []
+      (Sys.readdir cache_dir |> Array.to_list))
+
+let test_decoder_reports_runner_failure_without_removing_shared_output () =
+  with_cache (fun cache_dir _ ->
+    let output = Filename.concat cache_dir "partial.raw" in
+    let run _ = write_file output "partial"; raise_exhausted () in
+    let result = Cache.run_decoder ~run ~output_path:output "fixture" in
+    check bool "runner failure retains its OS cause" true
+      (result = Error (Cache.Decoder_runner_failed exhausted_runner_failure));
+    check string "runner failure does not remove another writer's output" "partial"
+      (read_file output))
+
+let test_runner_failure_stops_converter_fallback () =
+  with_cache (fun cache_dir _ ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    let calls = ref 0 in
+    write_file source bmp_header;
+    let run command =
+      incr calls;
+      if !calls = 1 then Unix.WEXITED 1 else begin
+        write_file (capture_converter_output cache_dir command) "partial";
+        raise_exhausted ()
+      end in
+    let result = Cache.convert_to_png ~run ~cache_dir source in
+    check bool "previous exit and runner failure stay separate" true
+      (result = Error [Cache.Sips, Cache.Decoder_exit {code=1};
+                       Cache.Image_magick, Cache.Decoder_runner_failed exhausted_runner_failure]);
+    check int "no further converter starts after a runner failure" 2 !calls;
+    check string "source remains intact" bmp_header (read_file source);
+    check string "runner failure leaves the unowned output path alone" "partial"
+      (read_file (read_file (Filename.concat cache_dir "output-path"))))
+
+exception Runner_interrupted
+
+let test_unexpected_runner_exception_preserves_shared_output () =
+  with_cache (fun cache_dir _ ->
+    let interrupt _ = raise Runner_interrupted in
+    check_raises "unexpected download exception propagates" Runner_interrupted (fun () ->
+      ignore (Cache.download ~run:interrupt ~cache_dir "https://fixture.invalid/image"));
+    check (list string) "interrupted download leaves no attempt" []
+      (Sys.readdir cache_dir |> Array.to_list);
+    let output = Filename.concat cache_dir "partial.raw" in
+    check_raises "unexpected decoder exception propagates" Runner_interrupted (fun () ->
+      ignore (Cache.run_decoder ~output_path:output ~run:(fun _ ->
+        write_file output "partial"; raise Runner_interrupted) "fixture"));
+    check string "interrupted shared decoder path is not removed" "partial" (read_file output);
+    Sys.remove output;
+    let source = Filename.concat cache_dir "original.bmp" in
+    write_file source bmp_header;
+    let run command =
+      write_file (capture_converter_output cache_dir command) "partial";
+      raise Runner_interrupted in
+    check_raises "unexpected conversion exception propagates" Runner_interrupted (fun () ->
+      ignore (Cache.convert_to_png ~run ~cache_dir source));
+    check string "interrupted conversion leaves the unowned output path alone" "partial"
+      (read_file (read_file (Filename.concat cache_dir "output-path"))))
+
 let test_local_file_preserves_original () =
   with_cache (fun cache_dir run ->
     let source = Filename.concat cache_dir "original.bmp" in
@@ -610,6 +694,14 @@ let () =
   run "tui image cache"
     [ ( "workflows"
       , [ test_case "local conversion preserves original" `Quick test_local_file_preserves_original
+        ; test_case "download preserves runner failure and removes attempt" `Quick
+            test_download_reports_runner_failure_and_cleans_attempt
+        ; test_case "decoder preserves runner failure and shared output" `Quick
+            test_decoder_reports_runner_failure_without_removing_shared_output
+        ; test_case "runner failure stops converter fallback" `Quick
+            test_runner_failure_stops_converter_fallback
+        ; test_case "unexpected runner exceptions preserve shared output" `Quick
+            test_unexpected_runner_exception_preserves_shared_output
         ; test_case "local refusal and explicit recovery" `Quick test_local_file_failure_and_recovery
         ; test_case "character preview refuses an unrepresentable ratio before decoding" `Quick
             test_character_frame_refuses_unrepresentable_ratio

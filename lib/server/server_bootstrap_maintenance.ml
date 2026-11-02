@@ -123,8 +123,9 @@ let wake_enqueue_counts_of_dispatches dispatches =
 (* One tick of the schedule runner, from its start to the record of its outcome.
    It catches its own failures so a corrupt schedule row or a transient write
    error cannot cancel the loop. Once the outcome is on record the cached fleet
-   schedule list is dropped: the page reports the runner's status and holds,
-   and would otherwise keep the previous tick's for up to its cache lifetime
+   schedule list is dropped, and the change is announced if a reader may now
+   read something else: the page reports the runner's status and holds, and
+   would otherwise keep the previous tick's for up to its cache lifetime
    (#38411). *)
 type active_schedule_runner =
   { held : Schedule_runner.held list
@@ -135,8 +136,27 @@ type schedule_runner_state = Startup_pending | Active of active_schedule_runner
 
 let initial_schedule_runner_state = Startup_pending
 
-let run_schedule_runner_tick ~clock config ~state =
+let run_schedule_runner_tick ~clock (config : Workspace.config) ~state =
   let started_at = clock () in
+  (* What the list said of the runner before this tick, so a tick that left
+     it the same is not announced. A list read while the tick ran says
+     [running], and a reader answering an announcement made meanwhile (a
+     store write of this tick, say) read it then, so such a tick is announced
+     too. The cache is dropped after every tick: a read while it ran may have
+     cached [running]. *)
+  let runner_view () =
+    Server_dashboard_schedule_projection.runner_page_view ~now:(clock ())
+      (Schedule_runner_status.snapshot ())
+  in
+  let view_before = runner_view () in
+  let announced_before = Server_schedule_broadcast.announcements () in
+  let announce_if_changed () =
+    if Yojson.Safe.equal view_before (runner_view ())
+       && Server_schedule_broadcast.announcements () = announced_before
+    then Server_dashboard_http_core_cache.invalidate_scheduled_automation
+        ~base_path:config.base_path
+    else Server_schedule_broadcast.runner_changed ~base_path:config.base_path
+  in
   let last_observed_at = ref started_at in
   let observe_clock () =
     let observed = clock () in
@@ -189,10 +209,9 @@ let run_schedule_runner_tick ~clock config ~state =
         "schedule_runner: idle due_changed=%d held=%d pending_settlements=%d"
         result.due_changed (List.length result.held) (List.length result.pending_settlements);
       record_schedule_runner_tick_outcome "ok";
-      Server_dashboard_http_core_cache.invalidate_scheduled_automation
-        ~base_path:config.base_path;
       Schedule_runner_status.record_tick_ok ~wake_enqueue_counts
-        ~started_at ~finished_at result
+        ~started_at ~finished_at result;
+      announce_if_changed ()
     | Error failure ->
       next_state := Active { previous with
         pending_settlements = failure.pending_settlements };
@@ -208,9 +227,8 @@ let run_schedule_runner_tick ~clock config ~state =
           "error", Schedule_runner_status.record_tick_error in
       record_schedule_runner_tick_outcome outcome;
       Log.Server.warn "schedule_runner: tick %s: %s" outcome error;
-      Server_dashboard_http_core_cache.invalidate_scheduled_automation
-        ~base_path:config.base_path;
-      record ~started_at ~finished_at error
+      record ~started_at ~finished_at error;
+      announce_if_changed ()
   in
   (try
      let active = match state with
@@ -228,9 +246,8 @@ let run_schedule_runner_tick ~clock config ~state =
            let finished_at = observe_clock () in
            record_schedule_runner_tick_outcome "error";
            Log.Server.warn "schedule_runner: %s" error;
-           Server_dashboard_http_core_cache.invalidate_scheduled_automation
-             ~base_path:config.base_path;
            Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
+           announce_if_changed ();
            None
      in
      match active with None -> () | Some previous -> run_active previous
@@ -238,11 +255,11 @@ let run_schedule_runner_tick ~clock config ~state =
    | Eio.Cancel.Cancelled _ as exn -> raise exn
    | exn ->
      report_crash exn;
-     (* Invalidation is an observation effect too. The crash is already on
-        record; a second observation failure cannot erase captured progress. *)
+     (* The announcement is an observation effect too. The crash is already
+        on record; a second observation failure cannot erase captured
+        progress. *)
      Cancel_safe.protect ~on_exn:(fun _ -> ()) (fun () ->
-       Server_dashboard_http_core_cache.invalidate_scheduled_automation
-         ~base_path:config.base_path));
+       announce_if_changed ()));
   !next_state
 ;;
 
@@ -587,6 +604,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop next_state
       in
       loop initial_schedule_runner_state);
+  (* The runner's status also turns, with nothing recorded, when its ticks
+     stop finishing; that moment is announced here. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "schedule_runner_staleness")
+    (fun () ->
+      Server_schedule_runner_staleness.watch ~clock
+        ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+        ~finished_at:(fun () ->
+          (Schedule_runner_status.snapshot ()).last_tick_finished_at)
+        ~on_deadline:(fun () ->
+          Server_schedule_broadcast.runner_changed
+            ~base_path:(Mcp_server.workspace_config state).base_path));
   (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path

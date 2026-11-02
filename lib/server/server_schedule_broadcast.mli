@@ -10,9 +10,19 @@ val changed : base_path:string -> unit
 (** [schedules_changed]. [base_path] names the workspace in the log line a
     failed broadcast leaves. *)
 
+val announcements : unit -> int
+(** How many times {!changed} has run in this process. A schedule runner tick
+    that sees it move knows a reader may have read the list while the tick
+    ran. *)
+
 val install_store_announcer : sw:Eio.Switch.t -> unit
 (** Installs the schedule store's change observer and the fiber that
     announces for it. The observer drops the workspace's cached [/health]
     snapshot and fleet schedule list on the writer, then wakes the fiber,
     which signals {!changed}: a reader that answers the signal reads the
     write. Writes that land before the fiber runs are announced once. *)
+
+val runner_changed : base_path:string -> unit
+(** The schedule runner recorded a tick's outcome, or its status passed the
+    staleness deadline: drops the workspace's cached fleet schedule list, then
+    signals {!changed}. The list carries the runner's status and holds. *)

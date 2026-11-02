@@ -1,6 +1,10 @@
 let changed_event = "schedules_changed"
 
+let announcement_count = Atomic.make 0
+let announcements () = Atomic.get announcement_count
+
 let changed ~base_path =
+  Atomic.incr announcement_count;
   try Sse.broadcast (`Assoc [ "type", `String changed_event ]) with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -33,4 +37,9 @@ let install_store_announcer ~sw =
     in
     announce ());
   Schedule_store.install_change_observer observer
+;;
+
+let runner_changed ~base_path =
+  Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path;
+  changed ~base_path
 ;;

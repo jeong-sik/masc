@@ -95,7 +95,7 @@ vi.mock('../task-manage/task-create-form', () => ({
 import { GoalTree, _testResetGoalActionReceipts, useGoalTreeDecisionObservation } from './goal-tree'
 import { _testResetConfirmationReceipts } from './goal-confirmation'
 import { executionError, executionWorkspaceAuthority } from '../../store'
-import { ApiRequestError, clearStoredToken, setStoredToken } from '../../api/core'
+import { ApiRequestError, clearStoredToken, getStoredToken, setStoredToken } from '../../api/core'
 import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 import { showToast } from '../common/toast'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
@@ -218,6 +218,7 @@ describe('GoalTree', () => {
     mocks.post.mockReset()
     clearStoredToken()
     resetDashboardSessionActorForTests()
+    vi.unstubAllGlobals()
   })
 
   it('treats the first render before the read effect as loading', async () => {
@@ -374,6 +375,15 @@ describe('GoalTree', () => {
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2)
   })
 
+  it('recovers a current expired credential on a bound tree read', async () => {
+    setStoredToken('expired-token', { source: 'manual' })
+    mocks.fetchDashboardGoalsTree.mockRejectedValueOnce(new ApiRequestError({
+      method: 'GET', path: '/api/v1/dashboard/goals', status: 401, authErrorCode: 'token_expired',
+    })).mockImplementation(() => new Promise(() => {}))
+    render(html`<${ObservationProbe} />`)
+    await waitFor(() => expect(getStoredToken()).toBeNull())
+  })
+
   it('withdraws detail until a new tree is bound after a detail refresh', async () => {
     const goal = makeGoal('goal-detail-refresh', 'Refresh goal')
     const tree: DashboardGoalsTreeResponse = { approval_queue_state: { state: 'ready' }, tree: [goal],
@@ -419,6 +429,38 @@ describe('GoalTree', () => {
     resolveTree(tree)
     await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id)
+  })
+
+  it('recovers an expired credential refused by the current detail read', async () => {
+    setStoredToken('expired-token', { source: 'manual' })
+    const goal = makeGoal('goal-detail-auth', 'Detail auth')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } })
+    mocks.fetchDashboardGoalDetail.mockRejectedValueOnce(new ApiRequestError({
+      method: 'GET', path: '/api/v1/dashboard/goals/detail', status: 401, authErrorCode: 'token_expired',
+    })).mockImplementation(() => new Promise(() => {}))
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(getStoredToken()).toBeNull())
+  })
+
+  it('does not recover a detail refusal from a previous workspace', async () => {
+    setStoredToken('same-token', { source: 'manual' })
+    const goal = makeGoal('goal-detail-auth-old', 'Detail auth old')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    let rejectOld!: (error: Error) => void
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject }))
+      .mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledTimes(1))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledTimes(2))
+    rejectOld(new ApiRequestError({ method: 'GET', path: '/api/v1/dashboard/goals/detail', status: 401,
+      authErrorCode: 'token_expired' }))
+    await Promise.resolve()
+    expect(getStoredToken()).toBe('same-token')
   })
 
   it('keeps a successful response visible if the following tree refresh fails', async () => {
@@ -694,6 +736,45 @@ describe('GoalTree', () => {
     expect(mocks.post).toHaveBeenCalledTimes(1)
   })
 
+  it('withdraws lifecycle actions while a confirmation readback refusal is recovering', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal: GoalTreeNode = { ...makeGoal('goal-confirm-auth', 'Confirm auth'), phase: 'awaiting_confirmation',
+      goal_fsm: { state: 'awaiting_confirmation', source: 'goal.phase', next_actions: ['drop'], activity_observation: 'goal_metadata' } }
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    const criterion = { revision: goal.criterion_revision, title: goal.title, metric: null, target_value: null }
+    const verdict = { criterion, request_id: 'request-auth', verification_run_id: 'run-auth',
+      outcome: 'proven', reason: null, authority: { kind: 'system_llm_agent', actor: 'verifier' },
+      evidence: 'verified', recorded_at: '2026-11-01T00:00:00Z' }
+    const evidence = (confirmed: boolean) => ({ inspection_operator_id: 'operator', goal: { id: goal.id,
+      phase: confirmed ? 'completed' : 'awaiting_confirmation', criterion_revision: criterion.revision,
+      title: criterion.title, metric: criterion.metric, target_value: criterion.target_value },
+    verification: { goal_id: goal.id, updated_at: '2026-11-01T00:00:00Z', completion: confirmed
+      ? { state: 'human_confirmed', verdict, operator_id: 'operator', confirmed_at: '2026-11-01T01:00:00Z' }
+      : { state: 'proof_proven', verdict } } })
+    mocks.getWithResponse.mockResolvedValueOnce({ data: evidence(false), headers: new Headers({
+      'x-masc-workspace-read': 'matched-v1', 'x-masc-execution-publication-epoch': 'fixture-a',
+      'x-masc-runtime-instance-id': '018f83d7-93a4-7f5d-9a72-123456789abc',
+    }) }).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/goals/confirmation',
+      status: 401, authErrorCode: 'token_expired' }))
+    mocks.post.mockResolvedValueOnce(evidence(true))
+    mocks.fetchDashboardGoalsTree.mockResolvedValueOnce(tree).mockImplementation(() => new Promise(() => {}))
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    let resolveRefresh!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveRefresh = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.post).toHaveBeenCalledTimes(1)
+    resolveRefresh(new Response(JSON.stringify({ token: 'old-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+  })
+
   it('rechecks execution authority when retrying without a workspace', async () => {
     let resolveOld!: (value: DashboardGoalsTreeResponse) => void
     mocks.fetchDashboardGoalsTree.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
@@ -734,10 +815,12 @@ describe('GoalTree', () => {
     ;(executionWorkspaceAuthority as { value: unknown }).value =
       { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 3 }
     await waitFor(() => expect(screen.getByTestId('bound-tree').textContent).toBe('Current workspace A'))
-    rejectOld(new ApiRequestError({ method: 'GET', path: '/api/v1/dashboard/goals', status: 401, detail: 'old refusal' }))
+    rejectOld(new ApiRequestError({ method: 'GET', path: '/api/v1/dashboard/goals', status: 401,
+      authErrorCode: 'token_expired', detail: 'old refusal' }))
     await Promise.resolve()
     expect(screen.getByTestId('bound-tree').textContent).toBe('Current workspace A')
     expect(screen.getByTestId('bound-tree-error').textContent).toBe('')
+    expect(getStoredToken()).toBe('same-token')
   })
 
   it('renders the decoded wire measurement with its criterion and evidence', async () => {
@@ -2091,7 +2174,7 @@ describe('GoalTree', () => {
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
-  it('retains a pending bearer request when its canonical actor arrives', async () => {
+  it('rechecks a pending bearer request when its canonical actor changes', async () => {
     setStoredToken('manual-bearer', { source: 'manual' })
     const goal = makeGoal('goal-actor-hint', 'Actor hint goal')
     mocks.fetchDashboardGoalsTree.mockResolvedValue({
@@ -2108,8 +2191,11 @@ describe('GoalTree', () => {
     mocks.currentDashboardActor.mockReturnValue('alice')
     setCanonicalDashboardActor('alice')
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(true))
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
     resolveAction(transitionResponse(goal.id, 'request_complete'))
-    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent).toContain('Request completion applied'))
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(3))
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
   })
 
   it('keeps a drop reason with its originating workspace', async () => {

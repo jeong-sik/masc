@@ -4,7 +4,8 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { confirmationBinding, readGoalConfirmation, sameConfirmationBinding, submitGoalConfirmation } from '../../api/goal-confirmation'
 import type { GoalConfirmationEvidence } from '../../api/goal-confirmation'
 import type { ArtifactWorkspace } from '../../api/published-artifacts'
-import { ApiRequestError } from '../../api/core'
+import { ApiRequestError, getStoredToken } from '../../api/core'
+import { recoverScopedRejectedCredential } from '../../api/dev-token'
 
 type View =
   | { kind: 'loading' }
@@ -54,6 +55,10 @@ function beginAuthorityRead(key: string) {
 }
 
 const errorStatus = (error: unknown) => error instanceof ApiRequestError ? error.status : undefined
+const recoverRefusal = (error: unknown, token: string | null, isCurrent: () => boolean) =>
+  error instanceof ApiRequestError && error.status === 401 && token
+    ? recoverScopedRejectedCredential({ token, authErrorCode: error.authErrorCode }, isCurrent)
+    : Promise.resolve()
 
 function anotherRequestPending(owner: ConfirmationOwner): boolean {
   return Object.values(receipts.peek()).some(receipt => receipt.owner.key !== owner.key
@@ -84,8 +89,9 @@ export function confirmationHasUnsettledReceipt(workspace: ArtifactWorkspace, go
     && (receipt.view.kind === 'submitting' || receipt.view.kind === 'uncertain'))
 }
 
-export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed, onOutcome }: {
+export function GoalConfirmationPanel({ owner, isCurrent, isRecoveryCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed, onOutcome }: {
   owner: ConfirmationOwner; isCurrent: () => boolean; readAuthority: object
+  isRecoveryCurrent?: () => boolean
   lifecyclePending: boolean; hasLifecyclePending: () => boolean; onConfirmed: () => void
   onOutcome?: (result: { ticket: number; state: 'pending' | 'confirmed' | 'uncertain' }) => void
 }) {
@@ -142,6 +148,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
     setVerifiedOwner(null)
     setReadingAuthority({ key: owner.key, readAuthority, ticket })
     setView({ kind: 'loading' })
+    const sentToken = getStoredToken()
     try {
       const evidence = await readGoalConfirmation(goalId, workspace, owner.executionEpoch, status => {
         if (ticket === generation.current && current()) refuseAuthority(
@@ -164,6 +171,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
           setDismissedTicket(receipt?.ticket ?? null)
           setView({ kind: 'unavailable', detail })
         }
+        void recoverRefusal(error, sentToken, () => ticket === generation.current && current())
       }
     } finally {
       if (ticket === generation.current && current()) setReadingAuthority(null)
@@ -185,6 +193,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
     setDismissedTicket(null)
     setReceipt({ owner, ticket, view: { kind: 'submitting', evidence, stage: 'sending' } })
     onOutcome?.({ ticket, state: 'pending' })
+    const sentToken = getStoredToken()
     try {
       // No await separates this authority check from constructing the POST.
       if (!current()) throw new Error('인증 또는 작업 공간이 변경되어 요청을 보내지 않았습니다')
@@ -218,7 +227,12 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
         setReceipt({ owner, ticket, view: { kind: 'uncertain', evidence,
           detail: readbackStarted ? '확인 후 재조회에 실패했습니다.' : message(error),
           status: errorStatus(error) ?? refusalStatuses.peek()[owner.key] ?? null } })
+        // Start recovery under the original owner, then immediately withdraw
+        // the old tree. Never replay the POST after a credential change.
+        const recovery = recoverRefusal(error, sentToken, () =>
+          (isRecoveryCurrent ? isRecoveryCurrent() : current()) && receipts.peek()[owner.key]?.ticket === ticket)
         onOutcome?.({ ticket, state: 'uncertain' })
+        void recovery.catch(error => console.warn('[goal-confirmation] credential recovery failed', error))
       }
     }
   }

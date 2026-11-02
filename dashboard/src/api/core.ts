@@ -12,6 +12,7 @@ import { isAbortError } from '../lib/async-state'
 import {
   currentCanonicalDashboardActor,
   currentDashboardActorName,
+  dashboardActorRevision,
   setCanonicalDashboardActor,
 } from '../lib/dashboard-session-actor'
 
@@ -186,6 +187,30 @@ export function currentDashboardActor(): string {
   return currentDashboardActorName()
 }
 
+/** Authority that sent a request; revisions distinguish token and actor ABA. */
+export interface DashboardCredentialOwner {
+  token: string | null
+  tokenRevision: number
+  actor: string
+  actorRevision: number
+}
+
+export function captureDashboardCredentialOwner(): DashboardCredentialOwner {
+  return {
+    token: dashboardBearerToken(),
+    tokenRevision: currentStoredTokenRevision(),
+    actor: currentDashboardActor(),
+    actorRevision: dashboardActorRevision.peek(),
+  }
+}
+
+export function dashboardCredentialOwnerIsCurrent(owner: DashboardCredentialOwner): boolean {
+  return owner.token === dashboardBearerToken()
+    && owner.tokenRevision === currentStoredTokenRevision()
+    && owner.actor === currentDashboardActor()
+    && owner.actorRevision === dashboardActorRevision.peek()
+}
+
 type HeaderOptions = {
   includeActor?: boolean
   actorName?: string | null
@@ -341,14 +366,16 @@ function sentBearerToken(headers: HeadersInit | undefined): string | null {
 async function reportRejectedCredential(
   init: RequestInit,
   response: Response,
+  owner: DashboardCredentialOwner,
 ): Promise<void> {
   const listener = rejectedCredentialListener
   if (response.status !== 401 || listener === null) return
   const token = sentBearerToken(init.headers)
-  if (token === null) return
+  if (token === null || token !== owner.token) return
   // Cloned before this function first awaits, so the caller still owns the
   // original body.
   const info = await errorResponseInfoFromResponse(response.clone())
+  if (!dashboardCredentialOwnerIsCurrent(owner)) return
   listener({ token, authErrorCode: info.authErrorCode })
 }
 
@@ -356,8 +383,9 @@ type CredentialedRequestInit = RequestInit & { reportCredentialRefusal?: boolean
 
 async function credentialedFetch(path: string, init: CredentialedRequestInit): Promise<Response> {
   const { reportCredentialRefusal = true, ...requestInit } = init
+  const owner = captureDashboardCredentialOwner()
   const response = await fetch(path, requestInit)
-  if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response).catch(err => {
+  if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner).catch(err => {
     console.warn('[dashboard-auth] rejected credential listener failed', err)
   })
   return response

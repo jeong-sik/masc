@@ -14,6 +14,7 @@ import {
 } from './core'
 import {
   ensureDevToken,
+  recoverScopedRejectedCredential,
   refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
 } from './dev-token'
@@ -23,6 +24,7 @@ import {
 } from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
+import { dashboardActorRevision } from '../lib/dashboard-session-actor'
 
 const MCP_PROTOCOL_VERSION = '2026-07-28'
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
@@ -182,7 +184,7 @@ async function mcpPost(
   binding: McpRequestBinding,
   timeoutMs = DEFAULT_MCP_TIMEOUT_MS,
   actorName?: string | null,
-  consumeWithinTimeout = false,
+  scoped = false,
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
@@ -190,27 +192,30 @@ async function mcpPost(
     method: 'POST',
     headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
     body: JSON.stringify(request.body),
+    reportCredentialRefusal: !scoped,
   }
   const consume = async (res: Response) => {
     assertBinding(binding)
     if (!res.ok) {
-      if (res.status === 403) {
+      if (res.status === 403 && !scoped) {
         blockedAuthRevision = binding.authRevision
         throw new Error(MCP_BLOCKED_MESSAGE)
       }
-      throw await apiRequestErrorFromResponse('POST', '/mcp', res, consumeWithinTimeout)
+      const error = await apiRequestErrorFromResponse('POST', '/mcp', res, scoped)
+      assertBinding(binding)
+      throw error
     }
     const text = await res.text()
     assertBinding(binding)
     return text
   }
-  if (consumeWithinTimeout) return fetchWithTimeout('/mcp', init, timeoutMs, consume)
+  if (scoped) return fetchWithTimeout('/mcp', init, timeoutMs, consume)
   return consume(await fetchWithTimeout('/mcp', init, timeoutMs))
 }
 
-async function ensureBinding(): Promise<McpRequestBinding> {
+async function ensureBinding(ignoreGlobalBlock = false): Promise<McpRequestBinding> {
   synchronizeMcpAuthRevision()
-  if (blockedAuthRevision === currentStoredTokenRevision()) {
+  if (!ignoreGlobalBlock && blockedAuthRevision === currentStoredTokenRevision()) {
     if (!blockedToastShown) {
       blockedToastShown = true
       showActionToast(
@@ -264,15 +269,8 @@ class McpPreDispatchIdentityChangedError extends Error {
   }
 }
 
-class McpIdentityRefreshedAfterRefusalError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'McpIdentityRefreshedAfterRefusalError'
-  }
-}
-
 export function mcpIdentityRequiresGoalRefresh(error: unknown): boolean {
-  return error instanceof McpPreDispatchIdentityChangedError || error instanceof McpIdentityRefreshedAfterRefusalError
+  return error instanceof McpPreDispatchIdentityChangedError
 }
 
 class McpToolCallError extends Error {
@@ -403,8 +401,11 @@ async function callMcpToolInternal(
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
   let explicitActor: string | null = null
+  let sentToken: string | null = null
+  let sentActorRevision: number | null = null
+  let sentRevision: number | null = null
   try {
-    const binding = await ensureBinding()
+    const binding = await ensureBinding(expectedIdentity !== undefined)
     if (expectedIdentity && (binding.authRevision !== expectedIdentity.revision
       || (getStoredToken() === null && currentDashboardActor() !== expectedIdentity.actor))) {
       throw new McpPreDispatchIdentityChangedError()
@@ -427,6 +428,9 @@ async function callMcpToolInternal(
         : args
     })()
     if (isCurrent && !isCurrent()) throw new McpPreDispatchIdentityChangedError()
+    sentToken = getStoredToken()
+    sentActorRevision = dashboardActorRevision.peek()
+    sentRevision = binding.authRevision
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',
@@ -447,15 +451,19 @@ async function callMcpToolInternal(
     if (
       allowAuthRecovery
       && explicitActor === null
+      && sentRevision !== null && currentStoredTokenRevision() === sentRevision
+      && dashboardActorRevision.peek() === sentActorRevision
       && await refreshDevTokenAfterAuthError(authErrorCode)
     ) {
       observedTokenRevision = currentStoredTokenRevision()
       return callMcpToolInternal(toolName, args, false)
     }
-    if (!allowAuthRecovery && expectedIdentity && explicitActor === null
-      && await refreshDevTokenAfterAuthError(authErrorCode)) {
-      observedTokenRevision = currentStoredTokenRevision()
-      throw new McpIdentityRefreshedAfterRefusalError('MCP authentication was refreshed after refusal; refresh the Goal before retrying')
+    if (!allowAuthRecovery && expectedIdentity && isCurrent && explicitActor === null && sentToken) {
+      const token = sentToken
+      const actorRevision = sentActorRevision
+      await recoverScopedRejectedCredential({ token, authErrorCode: typeof authErrorCode === 'string' ? authErrorCode : undefined }, () =>
+        isCurrent() && currentStoredTokenRevision() === expectedIdentity.revision
+        && dashboardActorRevision.peek() === actorRevision)
     }
     const message = errorToString(err)
     const failure = toolHostFailureObservation(err)

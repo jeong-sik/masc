@@ -12,6 +12,7 @@ import {
 const {
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout,
   getStoredToken,
   getStoredTokenMeta,
@@ -20,6 +21,7 @@ const {
 } = vi.hoisted(() => ({
   clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn(),
+  currentStoredTokenRevision: vi.fn(() => 0),
   fetchWithTimeout: vi.fn(),
   getStoredToken: vi.fn(),
   getStoredTokenMeta: vi.fn(),
@@ -30,6 +32,7 @@ const {
 vi.mock('./core', () => ({
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout: (path: string, init: RequestInit, timeout: number, consume?: (res: Response) => Promise<unknown>) => {
     const response = fetchWithTimeout(path, init, timeout, consume)
     return consume ? Promise.resolve(response).then(consume) : response
@@ -54,6 +57,7 @@ function setBootstrapStatus(value: DevTokenBootstrapStatus): void {
 describe('ensureDevToken', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    currentStoredTokenRevision.mockReset().mockReturnValue(0)
     resetDevTokenBootstrap()
     setBootstrapStatus('idle')
     getStoredToken.mockReturnValue(null)
@@ -209,6 +213,7 @@ describe('ensureDevToken', () => {
 
   it('refreshes a managed loopback token only for a typed refreshable auth code', async () => {
     let token: string | null = 'stale-token'
+    let revision = 0
     let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
       source: 'dev',
       actor: 'dashboard',
@@ -216,6 +221,7 @@ describe('ensureDevToken', () => {
     }
     getStoredToken.mockImplementation(() => token)
     getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
@@ -223,6 +229,7 @@ describe('ensureDevToken', () => {
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      revision += 1
     })
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'fresh-token',
@@ -244,6 +251,7 @@ describe('ensureDevToken', () => {
 
   it('coalesces concurrent stale-token recovery onto one refresh', async () => {
     let token: string | null = 'stale-token'
+    let revision = 0
     let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
       source: 'dev',
       actor: 'dashboard',
@@ -255,6 +263,7 @@ describe('ensureDevToken', () => {
     })
     getStoredToken.mockImplementation(() => token)
     getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
@@ -262,6 +271,7 @@ describe('ensureDevToken', () => {
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      revision += 1
     })
     fetchWithTimeout.mockReturnValueOnce(pendingFetch)
 

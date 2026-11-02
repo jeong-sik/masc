@@ -6,6 +6,7 @@ import { currentDashboardActor } from '../../api/core'
 import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpStructuredContentFromError } from '../../api/mcp'
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { storedTokenRevision } from '../../api/token-revision'
+import { dashboardActorRevision } from '../../lib/dashboard-session-actor'
 import { executionWorkspaceAuthority, refreshGoals, type ExecutionWorkspaceAuthority } from '../../store'
 import { isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
@@ -36,6 +37,7 @@ type GoalCreateOutcome = {
   authority: ExecutionWorkspaceAuthority
   authRevision: number
   actor: string
+  actorRevision: number
   workspace: ArtifactWorkspace
   goalId: string
   state: 'pending' | 'created' | 'uncertain'
@@ -48,10 +50,11 @@ let creationTicket = 0
 export function goalCreateOutcomeIsCurrent(outcome: GoalCreateOutcome): boolean {
   return outcome.authority === executionWorkspaceAuthority.peek()
     && outcome.authRevision === storedTokenRevision.peek() && outcome.actor === currentDashboardActor()
+    && outcome.actorRevision === dashboardActorRevision.peek()
 }
 
 export function goalCreateDraftHasOutcome(outcomes: readonly GoalCreateOutcome[]): boolean {
-  return outcomes.some(outcome => outcome.draft === draftToken && goalCreateOutcomeIsCurrent(outcome))
+  return outcomes.some(outcome => outcome.draft === draftToken)
 }
 
 function setOutcome(outcome: GoalCreateOutcome) {
@@ -122,8 +125,10 @@ export async function createGoal(input: GoalCreateInput, isStoreUnavailableNow: 
   }
   const authRevision = storedTokenRevision.peek()
   const actor = currentDashboardActor()
+  const actorRevision = dashboardActorRevision.peek()
   const sameConnection = () => executionWorkspaceAuthority.peek() === authority
     && storedTokenRevision.peek() === authRevision && currentDashboardActor() === actor
+    && dashboardActorRevision.peek() === actorRevision
   const canDispatch = () => owner === draftToken && sameConnection() && !isStoreUnavailableNow()
   goalCreating.value = true
   goalCreateError.value = null
@@ -138,7 +143,7 @@ export async function createGoal(input: GoalCreateInput, isStoreUnavailableNow: 
       return false
     }
     const goalId = `goal-${randomUuid()}`
-    outcome = { ticket: ++creationTicket, draft: owner, authority, authRevision, actor, workspace, goalId, state: 'pending' }
+    outcome = { ticket: ++creationTicket, draft: owner, authority, authRevision, actor, actorRevision, workspace, goalId, state: 'pending' }
     setOutcome(outcome)
     const response = await callMcpToolAtIdentity('masc_goal_upsert', {
       id: goalId, if_absent: true, expected_workspace: artifactWorkspaceBody(workspace),

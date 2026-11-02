@@ -156,7 +156,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
     })
     expect((await fetchDashboardGoalDetail('goal-measured', workspace)).goal.id).toBe('goal-measured')
     expect(getWithResponseMock.mock.calls[3]![0]).toContain('expected_masc_root=%2Fworkspace-a%2F.masc')
-    expect(getWithResponseMock.mock.calls[3]![1]).toEqual({ consumeWithinTimeout: true })
+    expect(getWithResponseMock.mock.calls[3]![1]).toEqual({ consumeWithinTimeout: true, reportCredentialRefusal: false })
   })
 
   it('preserves current criterion measurements through tree and detail fetches', async () => {

@@ -582,7 +582,7 @@ export async function fetchDashboardGoalDetail(goalId: string, workspace?: Artif
   params.set('goal_id', goalId)
   const path = `/api/v1/dashboard/goals/detail?${params}`
   const raw = workspace === undefined ? await get<unknown>(path) : await (async () => {
-    const result = await getWithResponse<unknown>(path, { consumeWithinTimeout: true })
+    const result = await getWithResponse<unknown>(path, { consumeWithinTimeout: true, reportCredentialRefusal: false })
     requireArtifactWorkspaceRead(result.headers)
     return result.data
   })()

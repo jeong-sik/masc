@@ -40,8 +40,13 @@ import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 import { isRecord, asString, asNumber } from './components/common/normalize'
-import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
-import { dashboardBearerToken } from './api/core'
+import { currentCanonicalDashboardActor, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { sanitizeDashboardActorName } from './lib/dashboard-actor'
+import {
+  captureDashboardCredentialOwner,
+  dashboardCredentialOwnerIsCurrent,
+  type DashboardCredentialOwner,
+} from './api/core'
 import { recoverFromRejectedCredential } from './api/dev-token'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
@@ -691,7 +696,7 @@ function hydrateDashboardBootstrap(
   data: DashboardBootstrapResponse,
   executionRequestGeneration: number,
   goalOwnerAtStart: symbol,
-  sentToken: string | null,
+  authOwner: DashboardCredentialOwner,
 ): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
@@ -700,7 +705,7 @@ function hydrateDashboardBootstrap(
     throw new Error('dashboard bootstrap execution slice unavailable')
   }
 
-  hydrateShellSnapshot(data.shell, { light: true, sentToken })
+  hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner })
   hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
@@ -771,12 +776,12 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
       executionLoading.value = true
       executionError.value = null
       try {
-        const sentToken = dashboardBearerToken()
+        const authOwner = captureDashboardCredentialOwner()
         hydrateDashboardBootstrap(
           await fetchDashboardBootstrap(),
           executionRequestGeneration,
           goalOwnerAtStart,
-          sentToken,
+          authOwner,
         )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
@@ -897,18 +902,26 @@ function recoverFromRejectedShellAuth(
 
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
-  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null },
-): void {
+  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner },
+): boolean {
   const wantsLight = opts.light === true
-  const preserveAuth = opts.preserveAuth === true
+  const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
+  const preserveAuth = opts.preserveAuth === true || staleOwner
+  let applyAuth = !preserveAuth
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
-  if (!preserveAuth) {
-    recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
-    setCanonicalDashboardActor(
-      normalizedAuth?.token_valid
-        ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
-        : null,
-    )
+  if (applyAuth) {
+    const before = captureDashboardCredentialOwner()
+    const previousActor = currentCanonicalDashboardActor()
+    const nextActor = sanitizeDashboardActorName(normalizedAuth?.token_valid
+      ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent : null)
+    setCanonicalDashboardActor(nextActor)
+    const after = captureDashboardCredentialOwner()
+    // The actor reset above belongs to this response. A separate token or
+    // actor change triggered by a subscriber must not inherit its refusal.
+    applyAuth = after.token === before.token && after.tokenRevision === before.tokenRevision
+      && after.actorRevision === before.actorRevision + (previousActor === nextActor ? 0 : 1)
+      && currentCanonicalDashboardActor() === nextActor
+    if (applyAuth) recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
   }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   if (normalizedStatus) {
@@ -929,7 +942,7 @@ export function hydrateShellSnapshot(
         : {}),
     }
   }
-  if (!preserveAuth) {
+  if (applyAuth) {
     shellAuthSummary.value = normalizedAuth
   }
   const normalizedConfigResolution = normalizeDashboardConfigResolution(data.config_resolution)
@@ -940,7 +953,9 @@ export function hydrateShellSnapshot(
   if (!wantsLight || normalizedRuntimeResolution) {
     shellRuntimeResolution.value = normalizedRuntimeResolution
   }
-  lastShellRefreshAt = Date.now()
+  const admitted = !staleOwner && (opts.preserveAuth === true || applyAuth)
+  lastShellRefreshAt = admitted ? Date.now() : 0
+  return admitted
 }
 
 export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
@@ -964,16 +979,17 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
   inflightShellRefreshLight = wantsLight
   inflightShellRefresh = (async () => {
+    const authOwner = captureDashboardCredentialOwner()
     try {
-      const sentToken = dashboardBearerToken()
       const data = await fetchDashboardShell({ light: wantsLight })
-      hydrateShellSnapshot(data, { light: wantsLight, sentToken })
-      return true
+      return hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner })
     } catch (err) {
-      setCanonicalDashboardActor(null)
-      shellAuthSummary.value = null
+      if (dashboardCredentialOwnerIsCurrent(authOwner)) {
+        setCanonicalDashboardActor(null)
+        shellAuthSummary.value = null
+        showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
+      }
       console.warn('[Dashboard] shell fetch error:', err)
-      showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
       return false
     } finally {
       inflightShellRefresh = null

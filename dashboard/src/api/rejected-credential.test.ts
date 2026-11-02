@@ -9,7 +9,8 @@ import {
   jsonHeaders,
   setStoredToken,
 } from './core'
-import { installRejectedCredentialRecovery, resetDevTokenBootstrap } from './dev-token'
+import { ensureDevToken, installRejectedCredentialRecovery, recoverScopedRejectedCredential, resetDevTokenBootstrap } from './dev-token'
+import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 /* #44189: a tab holding a pasted token the server had stopped accepting kept
    polling `/api/v1/dashboard/runtime-probe` and `/api/v1/board/reactions` with
@@ -55,6 +56,20 @@ afterEach(() => {
 })
 
 describe('a credential the server refused', () => {
+  it.each([200, 404])('does not let an earlier dev-token %i response change a newer dev token', async status => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveOld!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveOld = resolve })))
+    const pending = ensureDevToken()
+    setStoredToken('new-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    resolveOld(status === 200
+      ? new Response(JSON.stringify({ token: 'stale-response-token', actor: 'dashboard', role: 'admin' }), {
+        status, headers: { 'Content-Type': 'application/json' },
+      }) : new Response('', { status }))
+    await pending
+    expect(getStoredToken()).toBe('new-dev-token')
+  })
+
   it('drops a pasted token the server called expired and stops sending it', async () => {
     setStoredToken('pasted-token', { source: 'manual' })
     const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => refusal('token_expired'))
@@ -98,6 +113,27 @@ describe('a credential the server refused', () => {
     await expectRecoveryStillDropsExpired()
   })
 
+  it.each(['token', 'actor'] as const)('ignores a late refusal after %s changes and returns', async changed => {
+    setStoredToken('token-a', { source: 'manual' })
+    setCanonicalDashboardActor('actor-a')
+    let resolveResponse!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveResponse = resolve })))
+    const pending = get('/api/v1/board/reactions')
+    if (changed === 'token') {
+      setStoredToken('token-b', { source: 'manual' })
+      setStoredToken('token-a', { source: 'manual' })
+      setCanonicalDashboardActor('actor-a')
+    } else {
+      setCanonicalDashboardActor('actor-b')
+      setCanonicalDashboardActor('actor-a')
+    }
+    resolveResponse(refusal('token_expired'))
+    await expect(pending).rejects.toBeInstanceOf(ApiRequestError)
+    await settle()
+    expect(getStoredToken()).toBe('token-a')
+    await expectRecoveryStillDropsExpired()
+  })
+
   it('keeps the token when the refusal is about the actor', async () => {
     setStoredToken('pasted-token', { source: 'manual' })
     vi.stubGlobal('fetch', vi.fn(async () => refusal('actor_mismatch')))
@@ -137,5 +173,57 @@ describe('a credential the server refused', () => {
     await settle()
 
     expect(getStoredToken()).toBe('pasted-token')
+  })
+})
+
+describe('a refusal owned by a Goal request', () => {
+  it('clears a current expired manual credential', async () => {
+    setStoredToken('manual-token', { source: 'manual' })
+    await recoverScopedRejectedCredential({ token: 'manual-token', authErrorCode: 'token_expired' }, () => true)
+    expect(getStoredToken()).toBeNull()
+  })
+
+  it('keeps a manual credential when the actor was refused', async () => {
+    setStoredToken('manual-token', { source: 'manual' })
+    await recoverScopedRejectedCredential({ token: 'manual-token', authErrorCode: 'actor_mismatch' }, () => true)
+    expect(getStoredToken()).toBe('manual-token')
+  })
+
+  it.each([200, 404])('does not publish a dev-token %i response after its owner changes', async status => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let current = true
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const pending = recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => current)
+    current = false
+    resolveFetch(status === 200
+      ? new Response(JSON.stringify({ token: 'new-token', actor: 'dashboard', role: 'admin' }), {
+        status, headers: { 'Content-Type': 'application/json' },
+      }) : new Response('', { status }))
+    await pending
+    expect(getStoredToken()).toBe('old-dev-token')
+  })
+
+  it('installs a renewed dev credential for the same owner', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      token: 'fresh-dev-token', actor: 'dashboard', role: 'admin',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => true)
+    expect(getStoredToken()).toBe('fresh-dev-token')
+  })
+
+  it('does not publish after the same token is removed and restored', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const pending = recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => true)
+    setStoredToken('other-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    resolveFetch(new Response(JSON.stringify({ token: 'stale-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await pending
+    expect(getStoredToken()).toBe('old-dev-token')
   })
 })

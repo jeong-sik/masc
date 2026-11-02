@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({ getWithResponse: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), ...api }))
 import { GoalConfirmationPanel, _testResetConfirmationReceipts } from './goal-confirmation'
+import { ApiRequestError, clearStoredToken, getStoredToken, setStoredToken } from '../../api/core'
 
 const criterion = { revision: 'revision-1', title: 'Original criterion', metric: 'passed cases', target_value: '10' }
 const verdict = { criterion, request_id: 'request-1', verification_run_id: 'run-1', outcome: 'proven', reason: null,
@@ -26,9 +27,98 @@ function response(data: unknown, matched = true) {
   return { data, headers: new Headers(matched ? { 'x-masc-workspace-read': 'matched-v1',
     'x-masc-execution-publication-epoch': epoch, 'x-masc-runtime-instance-id': instance } : {}) }
 }
-afterEach(() => { cleanup(); _testResetConfirmationReceipts() })
+afterEach(() => { cleanup(); _testResetConfirmationReceipts(); clearStoredToken(); vi.unstubAllGlobals() })
 beforeEach(() => { api.getWithResponse.mockReset(); api.post.mockReset() })
 describe('real Goal confirmation component through API decoding', () => {
+  it('recovers a current credential refused while reading evidence', async () => {
+    setStoredToken('expired-token', { source: 'manual' })
+    api.getWithResponse.mockRejectedValueOnce(new ApiRequestError({
+      method: 'GET', path: '/api/v1/goals/confirmation', status: 401, authErrorCode: 'token_expired',
+    }))
+    render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${current} onConfirmed=${vi.fn()} />`)
+    await waitFor(() => expect(getStoredToken()).toBeNull())
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('retains an uncertain confirmation while recovering its current credential', async () => {
+    setStoredToken('expired-token', { source: 'manual' })
+    api.getWithResponse.mockResolvedValueOnce(response(evidence()))
+    api.post.mockRejectedValueOnce(new ApiRequestError({
+      method: 'POST', path: '/api/v1/goals/confirmation', status: 401, authErrorCode: 'token_expired',
+    }))
+    const outcomes = vi.fn()
+    render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${current}
+      onOutcome=${outcomes} onConfirmed=${vi.fn()} />`)
+    fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+    await screen.findByText(/서버에 반영되었을 수 있습니다/)
+    await waitFor(() => expect(getStoredToken()).toBeNull())
+    expect(outcomes).toHaveBeenCalledWith(expect.objectContaining({ state: 'uncertain' }))
+    expect(api.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a credential when an old confirmation refusal arrives after ownership changes', async () => {
+    setStoredToken('current-token', { source: 'manual' })
+    api.getWithResponse.mockResolvedValueOnce(response(evidence()))
+    let rejectPost!: (error: Error) => void
+    api.post.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPost = reject }))
+    let active = true
+    render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${() => active} onConfirmed=${vi.fn()} />`)
+    fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+    active = false
+    rejectPost(new ApiRequestError({ method: 'POST', path: '/api/v1/goals/confirmation', status: 401,
+      authErrorCode: 'token_expired' }))
+    await screen.findByText(/서버에 반영되었을 수 있습니다/)
+    expect(getStoredToken()).toBe('current-token')
+    expect(api.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('withdraws the tree before waiting for credential recovery after a failed confirmation readback', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    api.getWithResponse.mockResolvedValueOnce(response(evidence())).mockRejectedValueOnce(new ApiRequestError({
+      method: 'GET', path: '/api/v1/goals/confirmation', status: 401, authErrorCode: 'token_expired',
+    }))
+    api.post.mockResolvedValueOnce(evidence(true))
+    let resolveRefresh!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveRefresh = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    let treeCurrent = true
+    const outcomes = vi.fn((result: { state: string }) => { if (result.state === 'uncertain') treeCurrent = false })
+    render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${() => treeCurrent}
+      isRecoveryCurrent=${() => true} onOutcome=${outcomes} onConfirmed=${vi.fn()} />`)
+    fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(outcomes).toHaveBeenCalledWith(expect.objectContaining({ state: 'uncertain' }))
+    expect(treeCurrent).toBe(false)
+    expect(api.post).toHaveBeenCalledTimes(1)
+    resolveRefresh(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+    expect(api.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not publish a recovery after the confirmation workspace changes', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    api.getWithResponse.mockResolvedValueOnce(response(evidence()))
+    api.post.mockRejectedValueOnce(new ApiRequestError({ method: 'POST', path: '/api/v1/goals/confirmation',
+      status: 401, authErrorCode: 'token_expired' }))
+    let resolveRefresh!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveRefresh = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    let sameWorkspace = true
+    render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${current}
+      isRecoveryCurrent=${() => sameWorkspace} onConfirmed=${vi.fn()} />`)
+    fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    sameWorkspace = false
+    resolveRefresh(new Response(JSON.stringify({ token: 'stale-refresh-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(getStoredToken()).toBe('old-dev-token')
+    expect(api.post).toHaveBeenCalledTimes(1)
+  })
+
   it('shows exact evidence, sends its workspace and proof binding, and requires post/readback completion', async () => {
     api.getWithResponse.mockResolvedValueOnce(response(evidence())).mockResolvedValueOnce(response(evidence(true)))
     let resolve!: (value: unknown) => void

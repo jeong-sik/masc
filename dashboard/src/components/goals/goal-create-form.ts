@@ -118,9 +118,12 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
   void dashboardActorRevision.value
   void executionWorkspaceAuthority.value
   void storedTokenRevision.value
-  const visibleOutcomes = goalCreateOutcomes.value.filter(goalCreateOutcomeIsCurrent)
+  const outcomes = goalCreateOutcomes.value
+  const visibleOutcomes = outcomes.filter(goalCreateOutcomeIsCurrent)
+  const earlierDraftOutcomes = outcomes.filter(outcome => outcome.draft === currentGoalCreateDraft()
+    && !goalCreateOutcomeIsCurrent(outcome))
   const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
-    || sourceUnavailable !== null || goalCreateDraftHasOutcome(visibleOutcomes)
+    || sourceUnavailable !== null || goalCreateDraftHasOutcome(outcomes)
   const error = goalCreateError.value
   const visibleError = error?.kind === 'uncertain'
     && !visibleOutcomes.some(outcome => outcome.ticket === error.ticket) ? null : error
@@ -263,6 +266,18 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
             ${outcome.state === 'pending' ? null : html`
               <${ActionButton} variant="ghost" size="sm" onClick=${() => dismissGoalCreateOutcome(outcome.ticket)}>
                 안내 닫기
+              <//>`}
+          </div>
+        `)}
+
+        ${earlierDraftOutcomes.map(outcome => html`
+          <div key=${outcome.ticket} class="wk-goal-create-sec" role="status" data-testid="goal-create-earlier-outcome">
+            <p>${outcome.state === 'pending'
+              ? '이 초안의 이전 생성 요청이 진행 중입니다. 결과를 기다려 주세요.'
+              : '이 초안으로 보낸 이전 생성 요청이 있습니다. 다시 요청하기 전에 원래 작업 공간에서 결과를 확인해 주세요.'}</p>
+            ${outcome.state === 'pending' ? null : html`
+              <${ActionButton} variant="ghost" size="sm" onClick=${() => dismissGoalCreateOutcome(outcome.ticket)}>
+                이전 요청 확인 후 안내 닫기
               <//>`}
           </div>
         `)}

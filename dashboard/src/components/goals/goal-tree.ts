@@ -10,8 +10,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'prea
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { ApiRequestError, currentDashboardActor, getStoredToken, getStoredTokenMeta } from '../../api/core'
+import { recoverScopedRejectedCredential } from '../../api/dev-token'
 import { storedTokenRevision } from '../../api/token-revision'
-import { dashboardActorRevision } from '../../lib/dashboard-session-actor'
+import { currentCanonicalDashboardActor, dashboardActorRevision } from '../../lib/dashboard-session-actor'
 import { executionError, executionLoading, executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../../store'
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { approvalInputText } from '../../lib/keeper-approval-input-text'
@@ -259,7 +260,7 @@ function recordTreeErrorOwner(authority: ExecutionWorkspaceAuthority, authRevisi
     unavailable: storeUnavailable.peek() }
 }
 
-type GoalActionOwner = { epoch: string; authorityIdentity: number; connectionGeneration: number; workspaceRoot: string; mascRoot: string; authRevision: number; authScope: string; actor: string; goalId: string }
+type GoalActionOwner = { epoch: string; authorityIdentity: number; connectionGeneration: number; workspaceRoot: string; mascRoot: string; authRevision: number; authScope: string; actor: string; actorName: string; goalId: string }
 type GoalOperationNoticeState = 'transition_pending' | 'transition_ack' | 'transition_drop'
   | 'transition_unknown' | 'transition_refused' | 'confirmation_pending' | 'confirmation_verified' | 'confirmation_unknown'
 type GoalOperationNotice = { authority: ExecutionWorkspaceAuthority; authRevision: number; actor: string;
@@ -376,10 +377,13 @@ function goalActionAuthScope(revision: number): string {
     ? 'managed-dev-dashboard' : `credential:${revision}`
 }
 
-// A bearer, not the dashboard's late-arriving actor hint, owns authenticated
-// actions. Without a bearer the actor hint is part of the request authority.
+// Bind observations to the actor that the request may send as well as its
+// revision, so changing away and back cannot revive an older observation.
 function goalDecisionActor(): string {
-  return getStoredToken() ? 'credential-bound' : currentDashboardActor()
+  const token = getStoredToken()
+  const meta = getStoredTokenMeta()
+  if (token && meta?.source === 'dev' && meta.actor) return JSON.stringify(['dev', meta.actor])
+  return JSON.stringify([token ? currentCanonicalDashboardActor() : currentDashboardActor(), dashboardActorRevision.peek()])
 }
 
 function rememberGoalOperation(key: string, notice: GoalOperationNotice) {
@@ -430,7 +434,7 @@ function relatedEarlierGoalOwner(earlier: GoalActionOwner, current: GoalActionOw
   const previousConnection = (earlier.epoch !== current.epoch || earlier.authorityIdentity !== current.authorityIdentity)
     && earlier.authScope === current.authScope
     && earlier.actor === current.actor
-  const dashboardBootstrap = earlier.actor === 'dashboard' && earlier.authScope.startsWith('credential:')
+  const dashboardBootstrap = earlier.actorName === 'dashboard' && earlier.authScope.startsWith('credential:')
     && current.authScope === 'managed-dev-dashboard'
   return sameLocation && (previousConnection || dashboardBootstrap)
 }
@@ -533,6 +537,7 @@ async function refreshTree() {
   }
   const authRevision = storedTokenRevision.peek()
   const actor = goalDecisionActor()
+  const sentToken = getStoredToken()
   const intent = treeRetryIntent.peek()
   if (intent && (intent.authority !== authority || intent.authRevision !== authRevision || intent.actor !== actor)) {
     treeRetryIntent.value = null
@@ -586,6 +591,11 @@ async function refreshTree() {
       recordTreeErrorOwner(authority, authRevision, actor)
       treeRetryIntent.value = null
     })
+    if (err instanceof ApiRequestError && err.status === 401 && sentToken) {
+      void recoverScopedRejectedCredential({ token: sentToken, authErrorCode: err.authErrorCode }, () =>
+        treeRequestSeq === request && executionWorkspaceAuthority.peek() === authority
+        && storedTokenRevision.peek() === authRevision && goalDecisionActor() === actor)
+    }
   } finally {
     if (treeRequestInFlight.peek()?.request === request) treeRequestInFlight.value = null
     if (treeRequestSeq === request) treeLoading.value = false
@@ -634,6 +644,20 @@ function refreshTreeAfterWrite(binding: NonNullable<typeof treeDecisionBinding.v
   return true
 }
 
+// The credential or actor can change while a write is in flight. If the new
+// view has independently identified the same workspace, let that owner read
+// again after the old write; do not expose the old response to the new owner.
+function refreshRelatedTreeAfterWrite(binding: NonNullable<typeof treeDecisionBinding.value>): boolean {
+  const current = treeDecisionBinding.peek()
+  if (current && current.authority === binding.authority && sameArtifactWorkspace(current.workspace, binding.workspace)) {
+    return refreshTreeAfterWrite(current)
+  }
+  const active = treeRequestInFlight.peek()
+  if (!active?.workspace || active.authority !== binding.authority
+    || !sameArtifactWorkspace(active.workspace, binding.workspace)) return false
+  return refreshTreeAfterWrite({ ...binding, authRevision: active.authRevision, actor: active.actor })
+}
+
 function retryTree() {
   const authority = executionWorkspaceAuthority.peek()
   if (!authority) return refreshExecution({ force: true }).catch(() => {})
@@ -665,6 +689,7 @@ async function refreshGoalDetail(goalId: string) {
     return
   }
   const reqId = ++detailRequestSeq
+  const sentToken = getStoredToken()
   const current = () => detailRequestSeq === reqId && selectedGoalId.value === goalId
     && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
     && executionWorkspaceAuthority.peek() === binding.authority
@@ -691,6 +716,9 @@ async function refreshGoalDetail(goalId: string) {
         detailError.value = errorToString(err)
       }
     })
+    if (err instanceof ApiRequestError && err.status === 401 && sentToken) {
+      void recoverScopedRejectedCredential({ token: sentToken, authErrorCode: err.authErrorCode }, current)
+    }
   } finally {
     if (current()) detailLoading.value = false
   }
@@ -843,7 +871,8 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
   const actions = identityUnsafe ? [] : lifecycleActionsForGoal(node)
   const authScope = goalActionAuthScope(tokenRevision)
   const owner = authority && binding ? { epoch: authority.epoch, authorityIdentity: dropAuthorityIdentity(authority), connectionGeneration: authority.connectionGeneration, workspaceRoot: authority.workspaceRoot,
-    mascRoot: binding.workspace.mascRoot, authRevision: tokenRevision, authScope, actor: binding.actor, goalId: node.id } : null
+    mascRoot: binding.workspace.mascRoot, authRevision: tokenRevision, authScope, actor: binding.actor,
+    actorName: currentDashboardActor(), goalId: node.id } : null
   const ownerKey = owner ? goalActionOwnerKey(owner) : ''
   const receipt = goalActionReceipts.value[ownerKey]
   const history = (goalActionHistory.value[ownerKey] ?? []).filter(item => item.ticket !== receipt?.ticket)
@@ -932,7 +961,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
         setGoalActionReceipt(ownerKey, { owner, ticket, action, ...outcome, ...(completionBinding ? { binding: completionBinding } : {}) })
         notice(action === 'drop' ? 'transition_drop' : 'transition_ack')
         const wasCurrent = ownerIsCurrent()
-        const refreshRequested = refreshTreeAfterWrite(binding)
+        const refreshRequested = refreshTreeAfterWrite(binding) || refreshRelatedTreeAfterWrite(binding)
         if (!wasCurrent) {
           if (!refreshRequested) showToast('이전 연결의 Goal 변경 결과가 도착했습니다. 원래 workspace에서 확인하세요.', 'warning')
           return
@@ -956,7 +985,8 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           uncertain: disposition !== 'known_pre_effect', ...(completionBinding ? { binding: completionBinding } : {}) })
         notice(disposition === 'known_pre_effect' ? 'transition_refused' : 'transition_unknown')
         const wasCurrent = ownerIsCurrent()
-        const refreshRequested = disposition !== 'known_pre_effect' && refreshTreeAfterWrite(binding)
+        const refreshRequested = disposition !== 'known_pre_effect'
+          && (refreshTreeAfterWrite(binding) || refreshRelatedTreeAfterWrite(binding))
         if (!wasCurrent) {
           if (mcpIdentityRequiresGoalRefresh(err)) {
             showToast('인증이 변경되거나 거부되어 Goal을 변경하지 않았습니다. 현재 Goal을 다시 확인한 뒤 요청해 주세요.', 'warning')
@@ -1572,6 +1602,16 @@ function GoalDetailPanel({
     && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
     && executionWorkspaceAuthority.peek() === binding.authority
     && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
+  const confirmationRecoveryIsCurrent = () => {
+    if (!binding || selectedGoalId.peek() !== selectedNode.id || executionWorkspaceAuthority.peek() !== binding.authority
+      || storedTokenRevision.peek() !== binding.authRevision || goalDecisionActor() !== binding.actor) return false
+    const current = treeDecisionBinding.peek()
+    if (current && current.authority === binding.authority && current.authRevision === binding.authRevision
+      && current.actor === binding.actor && sameArtifactWorkspace(current.workspace, binding.workspace)) return true
+    const active = treeRequestInFlight.peek()
+    return Boolean(active?.workspace && active.authority === binding.authority && active.authRevision === binding.authRevision
+      && active.actor === binding.actor && sameArtifactWorkspace(active.workspace, binding.workspace))
+  }
   const candleIsCurrent = () => {
     const current = treeDecisionBinding.peek()
     return Boolean(binding && current && goalIdIsUnambiguous(selectedNode.id, current.snapshot)
@@ -1644,6 +1684,7 @@ function GoalDetailPanel({
       ${confirmationOwner && ((identitySafe && (selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed'))
         || confirmationHasUnsettledReceipt(confirmationOwner.workspace, selectedNode.id)) ? html`
         <${GoalConfirmationPanel} key=${confirmationOwner.key} owner=${confirmationOwner} isCurrent=${confirmationIsCurrent}
+          isRecoveryCurrent=${confirmationRecoveryIsCurrent}
           readAuthority=${binding} lifecyclePending=${lifecyclePending} hasLifecyclePending=${hasLifecyclePending}
           onOutcome=${(result: { ticket: number; state: 'pending' | 'confirmed' | 'uncertain' }) => {
             if (!binding) return
@@ -1651,7 +1692,7 @@ function GoalDetailPanel({
               : result.state === 'confirmed' ? 'confirmation_verified' : 'confirmation_unknown'
             rememberGoalOperation(`confirmation:${result.ticket}`, { authority: binding.authority,
               authRevision: binding.authRevision, actor: binding.actor, workspace: binding.workspace, goalId: selectedNode.id, state })
-            if (result.state !== 'pending') refreshTreeAfterWrite(binding)
+            if (result.state !== 'pending' && !refreshTreeAfterWrite(binding)) refreshRelatedTreeAfterWrite(binding)
           }}
           onConfirmed=${() => {}} />` : null}
 
@@ -2024,7 +2065,7 @@ export function GoalTree() {
   const compatibleDropOwner = (owner: GoalActionOwner) => sameDropActor(owner) || Boolean(data && authority && decisionBinding
     && relatedEarlierGoalOwner(owner, { epoch: authority.epoch, workspaceRoot: authority.workspaceRoot,
       authorityIdentity: dropAuthorityIdentity(authority), connectionGeneration: authority.connectionGeneration, mascRoot: decisionBinding.workspace.mascRoot, authRevision: tokenRevision,
-      authScope: goalActionAuthScope(tokenRevision), actor: goalDecisionActor(), goalId: owner.goalId }))
+      authScope: goalActionAuthScope(tokenRevision), actor: goalDecisionActor(), actorName: currentDashboardActor(), goalId: owner.goalId }))
   const sameDropSession = (owner: GoalActionOwner) => Boolean(authority && owner.epoch === authority.epoch
     && owner.authorityIdentity === dropAuthorityIdentity(authority) && sameDropActor(owner))
   const earlierReceiptViewKey = (ticket: number) => authority && decisionBinding

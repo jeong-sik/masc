@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/preact'
 import '@testing-library/jest-dom'
 import { h } from 'preact'
-import { showGoalCreate, resetGoalCreateForm, goalCreateError, goalCreating, goalCreateOutcomes, _testResetGoalCreateOutcomes } from './goal-create-state'
+import { createGoal, showGoalCreate, resetGoalCreateForm, goalCreateError, goalCreating, goalCreateOutcomes, _testResetGoalCreateOutcomes } from './goal-create-state'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { executionWorkspaceAuthority } from '../../store'
-import { clearStoredToken } from '../../api/core'
+import { clearStoredToken, setStoredToken } from '../../api/core'
+import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 
 const api = vi.hoisted(() => ({
   callMcpToolAtIdentity: vi.fn(),
@@ -54,6 +55,7 @@ describe('GoalCreateForm side panel', () => {
 
   afterEach(() => {
     showGoalCreate.value = false
+    resetDashboardSessionActorForTests()
   })
 
   it('renders the side panel header and eyebrow', () => {
@@ -211,6 +213,60 @@ describe('GoalCreateForm side panel', () => {
     expect(screen.getByTestId('goal-create-title-input')).toHaveValue('Captured goal')
   })
 
+  it('does not treat a late creation as current after the actor changes away and back', async () => {
+    setCanonicalDashboardActor('actor-a')
+    let resolveCreate!: (value: string) => void
+    let sentId = ''
+    api.callMcpToolAtIdentity.mockImplementationOnce((_name, args) => {
+      sentId = args.id
+      return new Promise(resolve => { resolveCreate = resolve })
+    })
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'Actor-owned draft')
+    fillField('goal-create-metric', 'metric')
+    fillField('goal-create-target', 'target')
+    fireEvent.click(screen.getByTestId('goal-create-submit'))
+    await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
+    setCanonicalDashboardActor('actor-b')
+    setCanonicalDashboardActor('actor-a')
+    resolveCreate(JSON.stringify({ status: 'ok', action: 'created', goal_id: sentId, goal: { id: sentId } }))
+    await waitFor(() => expect(goalCreating.value).toBe(false))
+    expect(goalCreateOutcomes.value[0]?.state).toBe('created')
+    expect(showGoalCreate.value).toBe(true)
+    expect(screen.getByTestId('goal-create-title-input')).toHaveValue('Actor-owned draft')
+    expect(screen.queryByTestId('goal-create-outcome')).toBeNull()
+    expect(screen.getByTestId('goal-create-earlier-outcome')).not.toHaveTextContent(sentId)
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    await expect(createGoal({ title: 'Actor-owned draft', metric: 'metric', targetValue: 'target', priority: 3 }))
+      .resolves.toBe(false)
+    expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
+    expect(api.refreshGoals).not.toHaveBeenCalled()
+  })
+
+  it('keeps the same draft blocked when the managed actor is hydrated during creation', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveCreate!: (value: string) => void
+    let sentId = ''
+    api.callMcpToolAtIdentity.mockImplementationOnce((_name, args) => {
+      sentId = args.id
+      return new Promise(resolve => { resolveCreate = resolve })
+    })
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'One managed Goal')
+    fillField('goal-create-metric', 'metric')
+    fillField('goal-create-target', 'target')
+    fireEvent.click(screen.getByTestId('goal-create-submit'))
+    await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
+    setCanonicalDashboardActor('dashboard')
+    await screen.findByTestId('goal-create-earlier-outcome')
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    expect(screen.getByTestId('goal-create-earlier-outcome')).not.toHaveTextContent(sentId)
+    resolveCreate(JSON.stringify({ status: 'ok', action: 'created', goal_id: sentId, goal: { id: sentId } }))
+    await waitFor(() => expect(goalCreating.value).toBe(false))
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
+  })
+
   it('does not send to the captured root after the view moves under the same connection', async () => {
     let resolveWorkspace!: (workspace: { basePath: string; mascRoot: string }) => void
     api.captureArtifactWorkspace.mockImplementationOnce(() => new Promise(resolve => { resolveWorkspace = resolve }))
@@ -326,7 +382,7 @@ describe('GoalCreateForm side panel', () => {
     expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
   })
 
-  it('does not let an old connection receipt block a new connection', async () => {
+  it('blocks the same draft after a connection changes until the previous outcome is acknowledged', async () => {
     api.callMcpToolAtIdentity.mockRejectedValueOnce(new Error('connection closed'))
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Old connection goal')
@@ -336,9 +392,14 @@ describe('GoalCreateForm side panel', () => {
     await waitFor(() => expect(screen.getByTestId('goal-create-error')).toHaveTextContent('생성 결과를 확인하지 못했습니다'))
     ;(executionWorkspaceAuthority as { value: unknown }).value =
       { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
-    await waitFor(() => expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByTestId('goal-create-earlier-outcome')).toBeInTheDocument())
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
     expect(screen.queryByTestId('goal-create-error')).toBeNull()
     expect(screen.queryByTestId('goal-create-outcome')).toBeNull()
+    expect(screen.getByTestId('goal-create-earlier-outcome').textContent).not.toContain('connection closed')
+    fireEvent.click(screen.getByRole('button', { name: '이전 요청 확인 후 안내 닫기' }))
+    expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
+    expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
   })
 
   it('does not turn a successful creation into a failure when refresh rejects', async () => {

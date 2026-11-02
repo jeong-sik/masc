@@ -285,6 +285,7 @@ type delete_goal_outcome =
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Ambiguous_goal of string  (** The decoded primary has multiple rows for the id. *)
   | Store_unavailable of unavailable
   | Persistence_failed of string  (** The write after a successful read failed. *)
 
@@ -294,7 +295,8 @@ val delete_goal :
   Workspace_utils.config ->
   goal_id:string ->
   (delete_goal_outcome, delete_goal_error) result
-(** Removes the goal whose [.id] matches.
+(** Removes the uniquely matched goal. A duplicate decoded id is refused before
+    any Goal write or Goal-task link cleanup.
 
     Returns [Error (Unknown_goal _)] when the id is unknown (including on an
     {!Uninitialized} store) and no delete was committed. Goal-task link

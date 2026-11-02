@@ -252,6 +252,39 @@ let test_delete_goal_prunes_goal_task_links () =
           String.equal goal_id "g-2" && List.mem "task-c" task_ids)
        links)
 
+let test_delete_refuses_duplicate_goal_identity () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "duplicate" "First Goal" in
+  let duplicate = { goal with title = "Different Goal"; phase = Goal_phase.Verifying;
+                              criterion_revision = "other-revision" } in
+  let independent = make_goal "independent" "Independent Goal" in
+  (match Goal_store.write_state_result config
+      { pending_events = []; pending_notifications = []; version = 3; updated_at = iso_now ();
+        goals = [goal; duplicate; independent] } with
+   | Ok () -> () | Error detail -> fail detail);
+  Workspace_goal_index.write_goal_task_links config
+    [goal.id, ["task-a"]; independent.id, ["task-b"]];
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let links = Workspace_goal_index.goal_task_links_path config in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror, Fs_compat.load_file links in
+  (match Goal_store.delete_goal config ~goal_id:goal.id with
+   | Error (Goal_store.Ambiguous_goal id) -> check string "ambiguous Goal ID" goal.id id
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error)
+   | Ok _ -> fail "ambiguous Goal was deleted");
+  let goals_before, mirror_before, links_before = before in
+  check string "primary unchanged" goals_before (Fs_compat.load_file primary);
+  check string "mirror unchanged" mirror_before (Fs_compat.load_file mirror);
+  check string "links not pruned" links_before (Fs_compat.load_file links);
+  (match Goal_store.delete_goal config ~goal_id:independent.id with
+   | Ok Goal_store.Deleted -> ()
+   | Ok (Goal_store.Deleted_with_orphaned_links detail) -> fail detail
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  check bool "independent delete keeps both decoded Goal rows" true ((available config).goals = [goal; duplicate]);
+  let remaining_links = Workspace_goal_index.read_goal_task_links config in
+  check bool "ambiguous Goal link remains" true
+    (List.exists (fun (id, tasks) -> String.equal id goal.id && List.mem "task-a" tasks) remaining_links)
+
 let test_delete_goal_wraps_prune_failure_after_goal_delete () =
   with_workspace
   @@ fun config ->
@@ -1866,6 +1899,8 @@ let () =
             test_multiple_deletes_each_bump;
           test_case "missing goal: no bump" `Quick
             test_delete_nonexistent_does_not_bump;
+          test_case "duplicate Goal identity refuses deletion and link cleanup" `Quick
+            test_delete_refuses_duplicate_goal_identity;
           test_case "updated_at also refreshed" `Quick
             test_updated_at_also_refreshed;
           test_case "delete prunes goal_task_links" `Quick

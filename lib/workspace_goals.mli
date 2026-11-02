@@ -44,7 +44,8 @@ val handle_goal_measure
   -> Tool_result.result
 
 (** [handle_goal_transition ctx args] handles
-    [masc_goal_transition].  Required arg: [action] (one of
+    [masc_goal_transition]. [goal_id] must occur once and match the exact,
+    nonblank identifier without surrounding whitespace. Required arg: [action] (one of
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing
     Goal to [Verifying]. Repeating it while a proof remains pending preserves
     the idempotent [Already] response and emits a fresh verifier scan wake;

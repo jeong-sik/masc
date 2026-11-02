@@ -804,19 +804,26 @@ let new_goal ~now ~id ~criterion_revision ~title ~metric ~target_value ~due_date
     last_review_note = None; last_review_at = None;
     created_at = now; updated_at = now }
 
+type goal_id_error = Goal_id_blank | Goal_id_padded of string
+
+let goal_id_error_to_string = function
+  | Goal_id_blank -> "goal id cannot be blank"
+  | Goal_id_padded raw_id ->
+    Printf.sprintf "goal id %S must not have leading or trailing whitespace" raw_id
+
+let validate_goal_id raw_id =
+  let trimmed = String.trim raw_id in
+  if String.equal trimmed "" then Error Goal_id_blank
+  else if not (String.equal trimmed raw_id) then
+    Error (Goal_id_padded raw_id)
+  else Ok ()
+
 let resolve_goal_id = function
   | None -> Ok (gen_goal_id ())
   | Some raw_id ->
-      let trimmed = String.trim raw_id in
-      if String.equal trimmed "" then
-        Error (Rejected "goal id cannot be blank")
-      else if not (String.equal trimmed raw_id) then
-        Error
-          (Rejected
-             (Printf.sprintf
-                "goal id %S must not have leading or trailing whitespace"
-                raw_id))
-      else Ok raw_id
+      let* () = Result.map_error (fun error -> Rejected (goal_id_error_to_string error))
+          (validate_goal_id raw_id) in
+      Ok raw_id
 
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
     ?priority () =

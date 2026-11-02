@@ -2500,6 +2500,9 @@ and goal_timeline_unavailability =
   | Approval_queue_failure of string
 
 val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
+val decode_goal_detail_timeline_for_goal : goal_id:string -> Yojson.Safe.t -> (goal_timeline, string) result
+(** Preserve source failures; accept a ready timeline only when the response
+    has one Goal object with one ID exactly matching the requested ID. *)
 
 type task_history_source = Task_activity | Task_audit
 type task_history_origin =

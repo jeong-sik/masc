@@ -3848,8 +3848,12 @@ type planning_goal = Tui_decode.planning_goal
   pg_updated_at: string option;
 }
 
+let planning_goal_has_valid_id (goal : planning_goal) =
+  Result.is_ok (Goal_store.validate_goal_id goal.pg_id)
+
 let planning_goal_offers_action (goal : planning_goal) action =
-  Goal_phase.offers_public_action ~phase:goal.pg_phase ~action
+  planning_goal_has_valid_id goal
+  && Goal_phase.offers_public_action ~phase:goal.pg_phase ~action
   && (action <> Goal_phase.Public_action.Request_complete || Option.is_some goal.pg_retry_binding)
 
 let planning_goal_retains_arm (goal : planning_goal) ~action ~phase ~retry_binding =

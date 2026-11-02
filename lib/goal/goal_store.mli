@@ -28,6 +28,15 @@
 val parse_goal_phase : string option -> Goal_phase.t option
 (** Delegates to {!Goal_phase.parse}.  [None] passes through. *)
 
+type goal_id_error = Goal_id_blank | Goal_id_padded of string
+
+val goal_id_error_to_string : goal_id_error -> string
+val validate_goal_id : string -> (unit, goal_id_error) result
+(** Require a nonblank Goal ID without leading or trailing space, tab, line
+    feed, carriage return or form feed (the [String.trim] characters). This
+    validates the supplied identifier only; it does not prove Goal membership
+    or that historical stored IDs follow this rule. *)
+
 (** {1 Goal record} *)
 
 type goal = {

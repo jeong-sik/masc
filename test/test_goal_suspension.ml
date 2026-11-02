@@ -65,6 +65,65 @@ let set_phase config goal phase =
       (fun current -> Ok ({ current with phase }, ())) with
   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error)
 
+let test_transition_refuses_ids_that_would_be_retargeted () = with_workspace @@ fun config wakes ->
+  let canonical = create config in
+  let padded = {canonical with id=" " ^ canonical.id ^ " "; title="Imported Goal"} in
+  let original = state config in
+  (match Goal_store.write_state_result config {original with goals=[canonical; padded]} with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let proof_path = Goal_verification.verifications_path config in
+  let read_optional path = if Sys.file_exists path then Some (Fs_compat.load_file path) else None in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+  let proof_before = read_optional proof_path in
+  let refused_before_effect result =
+    (match result with
+     | Tool_result.Failed { class_ = Tool_result.Policy_rejection;
+                            effect_disposition = Tool_result.Proven_pre_effect; _ } -> ()
+     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+       fail "ID rejection did not prove a pre-effect policy refusal");
+    let body = Yojson.Safe.from_string (Tool_result.message result) in
+    check bool "failure data retains the error envelope" true (Tool_result.data result = body);
+    check string "failure status" "error" Yojson.Safe.Util.(member "status" body |> to_string);
+    check string "failure code" "validation_error" Yojson.Safe.Util.(member "error_code" body |> to_string)
+  in
+  List.iter (fun id ->
+    List.iter (fun action -> refused_before_effect (transition config id action))
+      ["pause"; "block"; "drop"; "request_complete"])
+    [padded.id; " " ^ canonical.id; canonical.id ^ " "; "\t" ^ canonical.id];
+  let ctx : Masc.Workspace_types.context = { config; agent_name = "operator" } in
+  List.iter (fun ids ->
+    let result = Goals.handle_goal_transition ~tool_name:"masc_goal_transition"
+      ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc (ids @ ["action", `String "pause"])) in
+    refused_before_effect result)
+    [ ["goal_id", `String canonical.id; "goal_id", `String padded.id]
+    ; ["goal_id", `String padded.id; "goal_id", `String canonical.id]
+    ; ["goal_id", `String canonical.id; "goal_id", `String canonical.id]
+    ; ["goal_id", `String canonical.id; "goal_id", `Int 3]
+    ; ["goal_id", `Null; "goal_id", `String canonical.id] ];
+  List.iter (fun value ->
+    let result = transition config value "pause" in
+    refused result;
+    let body = Yojson.Safe.from_string (Tool_result.message result) in
+    match Yojson.Safe.Util.member "field_errors" body with
+    | `List [error] ->
+      check string "blank ID keeps the field name" "goal_id"
+        Yojson.Safe.Util.(member "field" error |> to_string);
+      check string "blank ID keeps the nonempty constraint" "non_empty"
+        Yojson.Safe.Util.(member "constraint" error |> to_string)
+    | _ -> fail "blank ID lost its structured field error") [""; "  "];
+  check string "primary unchanged by refused transitions" (fst before) (Fs_compat.load_file primary);
+  check string "mirror unchanged by refused transitions" (snd before) (Fs_compat.load_file mirror);
+  check (option string) "proof unchanged by refused transitions" proof_before (read_optional proof_path);
+  check int "no verification wake for a refused target" 0 !wakes;
+  phase GP.Executing (saved config canonical.id);
+  phase GP.Executing (saved config padded.id);
+  change config canonical.id "pause";
+  phase (GP.Paused GP.Resume_executing) (saved config canonical.id);
+  phase GP.Executing (saved config padded.id)
+
 let test_restore_matrix () = with_workspace @@ fun config _ ->
   List.iter (fun (live, target) ->
     List.iter (fun first ->
@@ -653,6 +712,8 @@ let () = run "Goal suspension" ["drop", [
   test_case "drop refuses link recovery as authority" `Quick (fun () -> test_drop_rejects_recovery_candidate ~links:true ());
   test_case "drop without a reason is refused and changes nothing" `Quick test_drop_without_reason_is_refused;
 ]; "contract", [
+  test_case "transition refuses IDs that would be retargeted" `Quick
+    test_transition_refuses_ids_that_would_be_retargeted;
   test_case "restore every live state across both suspension kinds" `Quick test_restore_matrix;
   test_case "terminal refusal and Drop/Reopen escape" `Quick test_terminal_and_escape;
   test_case "bound verdict preserves suspension and reconciles on restore" `Quick test_bound_result;

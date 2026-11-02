@@ -276,10 +276,14 @@ export async function fetchKeeperToolApprovals(
     if (typeof record.approval_id !== 'string' || record.approval_id.trim() === '') {
       throw new Error('Invalid tool approval listing: approval_id must be a non-empty string')
     }
+    if (typeof record.keeper !== 'string' || record.keeper.trim() === ''
+      || typeof record.tool_call_id !== 'string' || record.tool_call_id.trim() === '') {
+      throw new Error('Invalid tool approval listing: keeper and tool_call_id must be non-empty strings')
+    }
     return {
       approval_id: record.approval_id,
-      keeper: asString(record.keeper) ?? '',
-      tool_call_id: asString(record.tool_call_id) ?? '',
+      keeper: record.keeper,
+      tool_call_id: record.tool_call_id,
       tool: asString(record.tool) ?? '',
       args: asString(record.args) ?? '',
       question: asString(record.question) ?? '',
@@ -287,7 +291,7 @@ export async function fetchKeeperToolApprovals(
       asked_at: typeof record.asked_at === 'number' ? record.asked_at : null,
       timeout_sec: typeof record.timeout_sec === 'number' ? record.timeout_sec : null,
     }
-  }).filter(row => row.keeper && row.tool_call_id)
+  })
 }
 
 // The displayed ask owns this answer. Neither success status alone nor a

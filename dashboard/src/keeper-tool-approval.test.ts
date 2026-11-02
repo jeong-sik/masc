@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { keeperToolApprovals, keeperActionErrors, upsertKeeperToolApproval, dropKeeperToolApproval } from './keeper-state'
 import { answerHeldKeeperToolApproval, hydrateKeeperToolApprovals } from './keeper-actions'
 import { answerKeeperToolApproval, fetchKeeperToolApprovals } from './api/keeper'
+import { resetExecutionSnapshotGeneration } from './store'
 
 // task-343: the answer path for a held tool call. Before this surface the
 // dashboard decoded KEEPER_TOOL_APPROVAL_REQUESTED and drew nothing; the
@@ -169,9 +170,11 @@ describe('hydrateKeeperToolApprovals', () => {
 describe('approval instance ownership', () => {
   it('keeps the ask pending when neither settlement nor late recording was accepted', async () => {
     pendingRow('call-1')
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }),
-    ))
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockResolvedValueOnce(jsonResponse(200, { pending: [{ keeper: 'sangsu', tool_call_id: 'call-1',
+        approval_id: 'approval-call-1', tool: 'Execute', args: '{}', question: 'run?', because: '',
+        asked_at: 1, timeout_sec: 180 }] })))
     await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-call-1', 'approve')).resolves.toBe(false)
     expect(keeperToolApprovals.value.sangsu?.['call-1']).toMatchObject({
       approvalId: 'approval-call-1', settled: false, answering: false, answeredDecision: null,
@@ -315,5 +318,214 @@ describe('approval hydration ownership', () => {
     await expect(fetchKeeperToolApprovals()).rejects.toThrow()
     await hydrateKeeperToolApprovals()
     expect(keeperToolApprovals.value.sangsu?.['call-1']).toBe(existing)
+  })
+})
+
+describe('recovery after an unsettled approval answer', () => {
+  const row = (approvalId: string) => ({ keeper: 'sangsu', tool_call_id: 'call-1', approval_id: approvalId,
+    tool: 'Execute', args: '{}', question: 'run?', because: '', asked_at: 1, timeout_sec: 180 })
+
+  it('recovers replacement B after its request event was missed without answering B for A', async () => {
+    pendingRow('call-1', 'approval-a')
+    pendingRow('other-call', 'other-ask')
+    pendingRow('call-1', 'other-keeper-ask', 'other-keeper')
+    const otherCall = keeperToolApprovals.value.sangsu?.['other-call']
+    const otherKeeper = keeperToolApprovals.value['other-keeper']
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockResolvedValueOnce(jsonResponse(200, { pending: [row('approval-b')] }))
+      .mockResolvedValueOnce(jsonResponse(200, { settled: true, remembered: false, decision: 'deny' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toMatchObject({
+      approvalId: 'approval-b', answering: false, settled: false, answeredDecision: null,
+    })
+    expect(keeperActionErrors.value.sangsu).toBeTruthy()
+    expect(keeperToolApprovals.value.sangsu?.['other-call']).toBe(otherCall)
+    expect(keeperToolApprovals.value['other-keeper']).toBe(otherKeeper)
+    const requests = fetchMock.mock.calls as [string, RequestInit][]
+    expect(requests.map(([, init]) => init.method)).toEqual(['POST', 'GET'])
+    const [, firstRequest] = requests[0] as [string, RequestInit]
+    expect(JSON.parse(String(firstRequest.body)).approval_id).toBe('approval-a')
+
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-b', 'deny')).resolves.toBe(true)
+    const [, nextRequest] = requests[2] as [string, RequestInit]
+    expect(JSON.parse(String(nextRequest.body)).approval_id).toBe('approval-b')
+    expect(keeperToolApprovals.value.sangsu?.['call-1']?.settled).toBe(true)
+  })
+
+  it('removes only server-absent A after the unsettled answer is reconciled', async () => {
+    pendingRow('call-1', 'approval-a')
+    pendingRow('other-call', 'other-ask')
+    pendingRow('call-1', 'other-keeper-ask', 'other-keeper')
+    const otherCall = keeperToolApprovals.value.sangsu?.['other-call']
+    const otherKeeper = keeperToolApprovals.value['other-keeper']
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockResolvedValueOnce(jsonResponse(200, { pending: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toBeUndefined()
+    expect(keeperToolApprovals.value.sangsu?.['other-call']).toBe(otherCall)
+    expect(keeperToolApprovals.value['other-keeper']).toBe(otherKeeper)
+    expect(keeperActionErrors.value.sangsu).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    { keeper: undefined }, { keeper: ' ' }, { tool_call_id: undefined }, { tool_call_id: ' ' },
+  ])('keeps A pending when the listing identity is malformed: %s', async malformed => {
+    pendingRow('call-1', 'approval-a')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockResolvedValueOnce(jsonResponse(200, { pending: [{ ...row('approval-b'), ...malformed }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toMatchObject({
+      approvalId: 'approval-a', answering: false, settled: false, answeredDecision: null,
+    })
+    expect(keeperActionErrors.value.sangsu).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves pending A and exposes failure when the one listing read fails', async () => {
+    pendingRow('call-1', 'approval-a')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockResolvedValueOnce(jsonResponse(503, { error: 'unavailable' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toMatchObject({
+      approvalId: 'approval-a', answering: false, settled: false, answeredDecision: null,
+    })
+    expect(keeperActionErrors.value.sangsu).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['stale', 'empty', 'failure'])('cannot alter concurrent B when the old recovery read is %s', async mode => {
+    pendingRow('call-1', 'approval-a')
+    let releaseRead!: (response: Response) => void
+    let markStarted!: () => void
+    const read = new Promise<Response>(resolve => { releaseRead = resolve })
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockImplementationOnce(() => { markStarted(); return read })
+    vi.stubGlobal('fetch', fetchMock)
+    const answer = answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')
+    await started
+    expect(keeperToolApprovals.value.sangsu?.['call-1']?.answering).toBe(true)
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'deny')).resolves.toBe(false)
+    pendingRow('call-1', 'approval-b')
+    const replacement = keeperToolApprovals.value.sangsu?.['call-1']
+    keeperActionErrors.value = { sangsu: 'owned by B' }
+    releaseRead(mode === 'failure' ? jsonResponse(503, { error: 'unavailable' })
+      : jsonResponse(200, { pending: mode === 'empty' ? [] : [row('approval-a')] }))
+
+    await expect(answer).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toBe(replacement)
+    expect(keeperActionErrors.value.sangsu).toBe('owned by B')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not give an old recovery read authority over a newly observed copy of A', async () => {
+    pendingRow('call-1', 'approval-a')
+    let releaseRead!: (response: Response) => void
+    let markStarted!: () => void
+    const read = new Promise<Response>(resolve => { releaseRead = resolve })
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockImplementationOnce(() => { markStarted(); return read }))
+    const answer = answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')
+    await started
+    dropKeeperToolApproval('sangsu', 'call-1', 'approval-a')
+    pendingRow('call-1', 'approval-a')
+    const observed = keeperToolApprovals.value.sangsu?.['call-1']
+    keeperActionErrors.value = { sangsu: 'new observation' }
+    releaseRead(jsonResponse(200, { pending: [] }))
+
+    await expect(answer).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toBe(observed)
+    expect(keeperActionErrors.value.sangsu).toBe('new observation')
+  })
+
+  it('cannot resurrect A from a hydration GET that preceded the answer recovery', async () => {
+    pendingRow('call-1', 'approval-a')
+    let releaseRead!: (response: Response) => void
+    const read = new Promise<Response>(resolve => { releaseRead = resolve })
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => read)
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockResolvedValueOnce(jsonResponse(200, { pending: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const hydration = hydrateKeeperToolApprovals()
+
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')).resolves.toBe(false)
+    releaseRead(jsonResponse(200, { pending: [row('approval-a')] }))
+    await hydration
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps a newer answer owner when the recovery listing completes', async () => {
+    pendingRow('call-1', 'approval-a')
+    let releaseRead!: (response: Response) => void
+    let markStarted!: () => void
+    const read = new Promise<Response>(resolve => { releaseRead = resolve })
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockImplementationOnce(() => { markStarted(); return read })
+      .mockResolvedValueOnce(jsonResponse(200, { settled: true, remembered: false, decision: 'deny' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const answer = answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')
+    await started
+    dropKeeperToolApproval('sangsu', 'call-1', 'approval-a')
+    pendingRow('call-1', 'approval-a')
+    await expect(answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'deny')).resolves.toBe(true)
+    const settled = keeperToolApprovals.value.sangsu?.['call-1']
+    releaseRead(jsonResponse(200, { pending: [row('approval-b')] }))
+
+    await expect(answer).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toBe(settled)
+    expect(keeperToolApprovals.value.sangsu?.['call-1']?.settled).toBe(true)
+    expect(keeperActionErrors.value.sangsu).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('withdraws a recovery read when the existing workspace authority is invalidated', async () => {
+    pendingRow('call-1', 'approval-a')
+    let releaseRead!: (response: Response) => void
+    let markStarted!: () => void
+    const read = new Promise<Response>(resolve => { releaseRead = resolve })
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+      .mockImplementationOnce(() => { markStarted(); return read }))
+    const answer = answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')
+    await started
+    resetExecutionSnapshotGeneration()
+    keeperActionErrors.value = { sangsu: 'new workspace' }
+    releaseRead(jsonResponse(200, { pending: [row('approval-b')] }))
+
+    await expect(answer).resolves.toBe(false)
+
+    expect(keeperToolApprovals.value.sangsu?.['call-1']).toMatchObject({
+      approvalId: 'approval-a', answering: false, settled: false, answeredDecision: null,
+    })
+    expect(keeperActionErrors.value.sangsu).toBe('new workspace')
   })
 })

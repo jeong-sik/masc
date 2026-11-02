@@ -748,8 +748,8 @@ export interface KeeperToolApprovalPending {
   // Server-stated seconds until the wait retires itself. Null when unknown;
   // the view derives the remaining time from its own clock.
   timeoutSec: number | null
-  // Client-side answer state: 'answering' while the POST is in flight so the
-  // buttons cannot be double-clicked into two answers for one call.
+  // 'answering' covers the POST and any read reconciling an unsettled answer,
+  // so the same displayed ask cannot send another answer before that settles.
   answering: boolean
   answeredDecision: 'approve' | 'deny' | null
   answeredOutcome: string | null

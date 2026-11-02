@@ -18673,7 +18673,32 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
             true
           end else begin
             state.board_compose_armed <- false;
-            Masc_tui_board_requests.start_board_comment state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~post_id ~content;
+            let sent_draft = Buffer.contents state.board_draft in
+            let request_id = ref () in
+            let cancelled =
+              Board_comment_done
+                { request_id
+                ; post_id
+                ; sent_draft
+                ; result = Error "Board comment interrupted; outcome unknown; check the thread before retrying"
+                }
+            in
+            let on_not_run () =
+              Masc_tui_board_updates.comment_launch_failed state ~request_id
+            in
+            Masc_tui_board_requests.start_board_comment state ~host:server_peer_host
+              ~request_id
+              ~report:(report_action state)
+              ~launch:(fun ~deliver read ->
+                let authority = state.workspace_authority in
+                let identity = state.server_identity in
+                let host = server_peer_host and port = state.port in
+                launch_workspace_result ~cancelled ~on_not_run state ~mailbox
+                  ~boundary_error:Fun.id ~deliver (fun () ->
+                    match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                    | Error detail -> Error detail
+                    | Ok () -> read ()))
+              ~post_id ~content;
             true
           end
       | None ->
@@ -20788,8 +20813,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
         outcome
-  | Board_comment_done { post_id; sent_draft; result } ->
-      Masc_tui_board_updates.comment_done state ~post_id ~sent_draft
+  | Board_comment_done { request_id; post_id; sent_draft; result } ->
+      Masc_tui_board_updates.comment_done state ~request_id ~post_id ~sent_draft
         ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host

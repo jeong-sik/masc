@@ -606,6 +606,7 @@ type async_msg =
       * (Masc_tui_keeper_control.outcome, string) result
   | Board_publication_done of workspace_authority Masc_tui_board_publication.outcome
   | Board_comment_done of {
+      request_id : board_comment_request_id;
       post_id : string;
       sent_draft : string;
       result : (string, string) result;

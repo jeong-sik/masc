@@ -247,9 +247,11 @@ def render(spec, binary=None, base_path=None):
         context = spec.get('max_context')
         if type(context) is not int or context <= 0:
             raise SetupError('max_context must be a positive integer supplied by the operator')
-        for key in ('tools', 'streaming'):
+        for key in ('tools', 'streaming', 'provider_declared'):
             if type(spec.get(key)) is not bool:
                 raise SetupError(key + ' must be an explicitly declared boolean')
+        if 'wizard_default' in spec and type(spec['wizard_default']) is not bool:
+            raise SetupError('wizard_default must be a boolean when declared')
         if 'supports_image_input' in spec and type(spec['supports_image_input']) is not bool:
             raise SetupError('supports_image_input must be a boolean when declared')
         endpoint = text(spec, 'endpoint')
@@ -262,13 +264,17 @@ def render(spec, binary=None, base_path=None):
         if not valid:
             raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
         key = spec.get('api_key_env', '')
-        credential_file = spec.get('credential_file', '')
-        if key:
-            if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
-                raise SetupError('api_key_env must name an environment variable, not a credential value')
-        elif (not isinstance(credential_file, str) or not credential_file
+        credential_file = spec.get('credential_file')
+        if not isinstance(key, str) or (key and not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key)):
+            raise SetupError('api_key_env must name an environment variable, not a credential value')
+        if 'credential_file' in spec and (not isinstance(credential_file, str) or not credential_file
                 or credential_file != credential_file.strip()
-                or any(ord(c) < 32 for c in credential_file) or not os.path.isabs(credential_file)):
+                or any(ord(c) < 32 or ord(c) == 127 for c in credential_file)
+                or not os.path.isabs(credential_file)):
+            raise SetupError('credential_file must be an absolute nonempty path')
+        if key and credential_file is not None:
+            raise SetupError('a named catalog provider cannot declare both api_key_env and credential_file')
+        if not key and credential_file is None:
             raise SetupError('a named catalog provider needs api_key_env or an absolute credential_file')
         provider = text(spec, 'provider_id')
         model_key = provider + '-' + text(spec, 'model_key')
@@ -1756,11 +1762,13 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
         spec = dict(choice=choice, model=model['id'], max_context=catalog['max_context'],
                     tools=catalog.get('supports_tools') is True,
                     streaming=catalog.get('supports_streaming') is True,
-                    endpoint=source['endpoint'], api_key_env=source['api_key_env'],
+                    endpoint=source['endpoint'],
                     provider_id=source['provider_id'], provider_display_name=source['label'],
                     model_key=model_slug(model['id']),
                     provider_declared=source['catalog_provider'].get('declared') is True)
-        if source.get('credential_file'):
+        if source['api_key_env'] != '':
+            spec['api_key_env'] = source['api_key_env']
+        if source.get('credential_file') is not None:
             spec['credential_file'] = source['credential_file']
         image_input = model.get('supports_image_input', catalog.get('supports_image_input'))
         if image_input is None:

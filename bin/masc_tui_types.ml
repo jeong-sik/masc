@@ -2572,14 +2572,16 @@ type board_outbound_attachment = Masc_tui_board_publication.board_outbound_attac
 let board_outbound_attachments_field =
   Masc_tui_board_publication.board_outbound_attachments_field
 
+type board_comment_request_id = unit ref
+
 type board_write =
   | Board_idle
   | Board_posting of workspace_authority Masc_tui_board_publication.request
-  | Board_commenting
+  | Board_commenting of board_comment_request_id
 
 let board_write_inflight = function
   | Board_idle -> false
-  | Board_posting _ | Board_commenting -> true
+  | Board_posting _ | Board_commenting _ -> true
 
 (** Board post (light projection for list view) *)
 type board_post = {

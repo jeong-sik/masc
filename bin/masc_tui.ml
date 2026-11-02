@@ -4083,7 +4083,8 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Schedules_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_schedules ~host ~port ~cursor:page.sp_cursor)
+    (capture_workspace_json_read state (fun () ->
+      Masc_tui_loader.load_schedules ~host ~port ~cursor:page.sp_cursor))
 
   end
 
@@ -4100,7 +4101,8 @@ let launch_schedule_agenda_load state ~mailbox =
         Masc_tui_async_read.launch
           ~deliver:(fun result ->
             enqueue_async mailbox (Schedules_loaded (Schedule_agenda_read ticket, result)))
-          (fun () -> Masc_tui_loader.load_schedules ~host ~port ~cursor:None)
+          (capture_workspace_json_read state (fun () ->
+            Masc_tui_loader.load_schedules ~host ~port ~cursor:None))
   end
 
 (* A change during an existing read needs one successor, since that read may

@@ -130,6 +130,13 @@ class WaitingHandler(FixtureHandler):
             self.close_connection = True
         elif request.path == SCHEDULE_PATH:
             phase = server.record(SCHEDULE_PATH)
+            expected = urllib.parse.parse_qs(request.query)
+            if expected.get("expected_base_path") != [server.base] or expected.get(
+                "expected_masc_root"
+            ) != [server.base + "/.masc"]:
+                server.valid_admission = False
+                self.respond(409, {"error": "workspace precondition failed"})
+                return
             if phase == "agenda-held":
                 server.agenda_held_started.set()
                 server.release_agenda_held.wait()

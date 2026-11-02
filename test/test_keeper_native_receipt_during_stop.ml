@@ -15,6 +15,7 @@ open Masc
 module Native = Keeper_direct_native_continuation
 module Registry = Keeper_owner_registry
 module Agent = Agent_core.Agent
+module Identity = Keeper_chat_delivery_identity
 
 let keeper_name = "native-stop-receipt"
 let session_id = "native-stop-receipt-session"
@@ -180,8 +181,18 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
   let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
       ~turn_instructions:None ~surface_context:None ~attachments:[]
     |> Keeper_chat_operation.canonical_json |> require "canonical input" in
+  let thread_id = "keeper:" ^ keeper_name in
+  let channel = Keeper_continuation_channel.dashboard ~thread_id
+    |> require "continuation channel" in
+  let source = Keeper_chat_operation_payload.source_to_json ~submitted_by:"operator"
+      ~thread_id ~continuation_channel:channel
+      ~surface:(Surface_ref.Dashboard {session_id=None})
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+      ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append
+    |> require "operation source" in
   Registry.submit_operation ~base_path:root ~keeper_name ~operation_id
-    ~source:(`Assoc ["kind", `String "fixture"]) ~input |> require "submit operation" |> ignore;
+    ~source ~input |> require "submit operation" |> ignore;
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
     (fun () -> Eio.Promise.await
       (if settled_tools then second_request else server.first_request_arrived));
@@ -280,6 +291,26 @@ let after_restart ~root ~workspace =
   Registry.exact_operation ~base_path:root ~keeper_name operation_id
   |> require "read restarted operation" |> Option.get
 
+let check_failure_projection ~root =
+  let request_id = Keeper_chat_operation.Operation_id.to_string operation_id
+    |> Identity.Request_id.of_string |> require "failure request ID" in
+  let key = Identity.Operation request_id in
+  let rows = Keeper_chat_store.load_result ~base_dir:root ~keeper_name
+    |> require "load failure transcript"
+    |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+      match row.delivery_provenance with
+      | Some provenance -> Identity.delivery_key_equal provenance.delivery_key key
+          && Identity.transcript_slot_equal provenance.transcript_slot Identity.Settled_failure
+      | None -> false) in
+  match rows with
+  | [row] ->
+    check bool "the operation has a failure transcript" true
+      (Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure);
+    check bool "the failure retains its dashboard route" true
+      (Option.fold ~none:false
+         ~some:(Surface_ref.equal (Surface_ref.Dashboard {session_id=None})) row.surface)
+  | [] | _::_::_ -> fail "failure transcript is missing or duplicated"
+
 let run_case ?(cancel_hook=false) ?(settled_tools=false) root =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -303,6 +334,7 @@ let run_case ?(cancel_hook=false) ?(settled_tools=false) root =
   let stopped = stop_while_dispatching env ~root ~workspace ~session_dir
       ~cancel_hook ~settled_tools in
   let restarted = after_restart ~root ~workspace in
+  check_failure_projection ~root;
   stopped, restarted
 
 let with_root f =

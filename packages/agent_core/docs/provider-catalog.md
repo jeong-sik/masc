@@ -105,10 +105,11 @@ declare `capabilities_base_by_identity_kind` overrides. Registry and runtime
 binding metadata retain absent provider capabilities as `None`; capability
 predicates do not turn that absence into a preset.
 
-These required-field and model-only rules describe TOML provider rows. The JSON
-overlay decoder still has optional-field defaults; removing those defaults is
-remaining work in #27898. An admitted JSON overlay retains its explicitly
-resolved selected policy, while raw id lookup does not acquire that policy.
+JSON overlay rows require the same explicit connection and capability decisions.
+An admitted JSON overlay retains its explicitly resolved selected policy, while
+raw id lookup does not acquire a JSON provider-wide preset. Both paths retain
+exact admitted model facts. A JSON `models_only` replacement revokes the seed's
+provider-wide preset rather than inheriting it.
 
 `auth` states whether the endpoint takes an API key (`"api-key"` or `"none"`,
 exactly); the row never names where the key lives. Selection uses the row's
@@ -146,20 +147,25 @@ Required fields:
 |---|---|---|
 | `schema_version` | integer | Must be `1`. |
 | `providers[].id` | string | Opaque provider id. This is config identity, not a vendor branch in code. |
+| `providers[].kind` | string | Explicit HTTP wire kind. |
+| `providers[].base_url` | string | Exact, nonempty endpoint base URL. |
+| `providers[].request_path` | string | Explicit request path; only Gemini permits an empty path. |
+| `providers[].auth` | object | Explicit credential decision; `type` is required. |
+| `providers[].capabilities_base` | string | Named preset or `models_only`. |
 
 Important provider fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `kind` | string | Existing HTTP wire/runtime kind, for example `openai_compat`, `anthropic`, or `gemini`. Defaults to `openai_compat`. |
+| `kind` | string | Existing HTTP wire/runtime kind, for example `openai_compat`, `anthropic`, or `gemini`. |
 | `base_url` | string | HTTP endpoint base URL. |
-| `request_path` | string | Completion request path. Defaults from `kind`. |
+| `request_path` | string | Explicit completion request path. |
 | `auth` | object | Credential mode. See below. |
 | `default_model` | string | Used when a caller selects the provider without a model. |
 | `discovery_timeout_s` | number | Optional positive finite total deadline for one discovery HTTP request, including its response body. No value is inferred from provider kind, URL, or connect timeout. |
 | `aliases` | string array | Catalog-local lookup names. They are not provider registry ids. |
-| `capabilities_base` | string | Provider preset from `Capabilities.capabilities_for_provider_label`. |
-| `capabilities` | object | Optional capability overrides. |
+| `capabilities_base` | string | Closed `Capability_preset` spelling or explicit `models_only`. |
+| `capabilities` | object | Optional overrides for a named preset. `models_only` permits only absent, null or empty overrides. |
 | `credential_scope` | string | Human-readable credential scope label. |
 
 Auth modes:
@@ -174,11 +180,17 @@ Catalog entries describe HTTP execution only. A caller that owns a managed,
 OAuth, or subprocess transport must inject that typed transport explicitly;
 the catalog does not claim an execution mode that agent_core cannot perform.
 
+Required provider fields and `auth.type` cannot be absent or null. No wire kind,
+request path, no-auth decision or provider preset is inferred. `auth` is also
+the sole credential carrier in the typed `Provider_catalog.entry`; keyed modes
+carry their exact environment name in their constructor. A typed models-only
+entry uses `capabilities=None` and preserves that absence through admission.
+
 The JSON parser is fail-closed: root, provider, `auth`, and `capabilities`
 objects reject duplicate or unknown fields; scalar and list values must have
 their declared types; lists declared as non-empty must contain exact item
 types; and positive integer fields must fit the OCaml native integer range.
-JSON `null` is accepted only where the schema defines it as an omitted/default
+JSON `null` is accepted only where the schema defines it as an omitted optional
 value. A malformed provider entry rejects the catalog instead of being skipped.
 
 ## Cloud API Example
@@ -216,6 +228,7 @@ The `capabilities` object accepts the same capability field names used by
 - `max_context_tokens`, `max_output_tokens`
 - `supports_tools`, `supports_tool_choice`, `supports_parallel_tool_calls`
 - `assistant_tool_content_format`
+- `chat_output_budget_field`, `tool_schema_conformance`, `content_inline_reasoning`
 - `supports_reasoning`
 - `accepted_reasoning_efforts`
 - `thinking_control_format`, `preserve_thinking_control_format`

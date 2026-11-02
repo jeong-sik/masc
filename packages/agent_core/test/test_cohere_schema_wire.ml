@@ -149,7 +149,8 @@ let test_strict_declarations () =
   let parsed_provider = get_ok "typed provider override" (Provider_catalog.of_json (provider valid)) in
   (match Provider_catalog.entries parsed_provider with
    | [ row ] -> check bool "provider override carries typed dialect" true
-       (row.capabilities.json_schema_dialect = Capabilities.Json_object_schema)
+       (Option.map (fun capabilities -> capabilities.Capabilities.json_schema_dialect)
+          row.capabilities = Some Capabilities.Json_object_schema)
    | _ -> fail "expected one provider");
   List.iter (fun invalid ->
     check bool "unknown TOML dialect is an error" true

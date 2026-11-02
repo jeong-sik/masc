@@ -508,8 +508,7 @@ base = "models_only"
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "provider-only models_only choice accepted as a model preset")
 
-let test_models_only_selected_and_raw_policy () = with_publication (fun () ->
-  let catalog = models {|[[providers]]
+let models_only_catalog () = models {|[[providers]]
 id = "openai"
 aliases = ["fixture-alias"]
 kind = "openai_compat"
@@ -524,8 +523,9 @@ base = "openai_chat"
 supports_structured_output = true
 input_per_million = 2.0
 output_per_million = 3.0
-|} in
-  let snapshot = D.of_catalogs ~models:(Some catalog) ~providers:None |> admitted in
+|}
+
+let check_models_only_selected_and_raw_policy snapshot =
   D.publish snapshot;
   Alcotest.(check bool) "provider identity supplies no capability profile" true
     ((entry snapshot "openai").capabilities = None);
@@ -556,7 +556,32 @@ output_per_million = 3.0
   Alcotest.(check (option (float 0.000001))) "exact model retains selected pricing"
     (Some 2.)
     (Option.map (fun (pricing : Pricing.pricing) -> pricing.input_per_million)
-      (Pricing.pricing_for_model (Provider_config.pricing_source known) "declared-model")))
+      (Pricing.pricing_for_model (Provider_config.pricing_source known) "declared-model"))
+
+let test_models_only_selected_and_raw_policy () = with_publication (fun () ->
+  let snapshot = D.of_catalogs ~models:(Some (models_only_catalog ())) ~providers:None
+    |> admitted in
+  check_models_only_selected_and_raw_policy snapshot)
+
+let test_json_models_only_revokes_seed_policy () = with_publication (fun () ->
+  let catalog = models_only_catalog () in
+  let provider = match Model_catalog.provider_entries catalog with
+    | [provider] -> provider | _ -> Alcotest.fail "expected one provider" in
+  let catalog = Model_catalog.with_provider_entry catalog {provider with
+    capability_policy = Model_provider_catalog.Provider_defaults
+      {base = Capability_preset.Openai_chat; by_identity_kind = []}} in
+  let seed_snapshot = D.of_catalogs ~models:(Some catalog) ~providers:None |> admitted in
+  Alcotest.(check bool) "seed has a provider preset before replacement" true
+    (Option.is_some (entry seed_snapshot "openai").capabilities);
+  let json = providers {|{"schema_version":1,"providers":[{
+    "id":"openai","aliases":["fixture-alias"],"kind":"openai_compat",
+    "base_url":"https://json-models-only.example.invalid",
+    "request_path":"/v1/chat/completions","auth":{"type":"none"},
+    "capabilities_base":"models_only"}]}|} in
+  let snapshot = D.of_catalogs ~models:(Some catalog) ~providers:(Some json) |> admitted in
+  Alcotest.(check string) "JSON replacement owns its endpoint"
+    "https://json-models-only.example.invalid" (entry snapshot "openai").base_url;
+  check_models_only_selected_and_raw_policy snapshot)
 
 let test_packaged_openai_is_models_only () =
   let catalog = Model_catalog.load_default () |> ok in
@@ -631,6 +656,7 @@ let () = Alcotest.run "catalog snapshot"
     "immutable captured selection",`Quick,test_snapshot_survives_source_replacement;
     "credential observation",`Quick,test_credential_observation_edge;
     "models-only selected and raw request policy",`Quick,test_models_only_selected_and_raw_policy;
+    "JSON models-only revokes seed policy and retains exact model facts",`Quick,test_json_models_only_revokes_seed_policy;
     "packaged OpenAI retains only exact model policy",`Quick,test_packaged_openai_is_models_only;
     "independent declared provider requests",`Quick,test_distinct_providers_keep_independent_policy];
    "publication",[

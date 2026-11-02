@@ -86,7 +86,117 @@ let rec flatten_table path fields =
     fields
 ;;
 
-let normalize_source content =
+type source_mode = Outside | Comment | Basic | Multiline_basic | Literal | Multiline_literal
+
+(* Otoml 1.0.5 can consume eight hex digits after a lowercase [\u],
+   although TOML assigns exactly four to that escape. Separate any following
+   hex characters into their own escapes, but only inside basic strings:
+   literal strings and comments must keep their original contents. The same
+   pass preserves an escaped initial newline in multiline basic strings and
+   prevents Otoml treating literal-string backslashes as line continuations. *)
+let normalize_otoml_strings content =
+  let length = String.length content in
+  let output = Buffer.create length in
+  let is_hex = function
+    | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+    | _ -> false in
+  let triple quote index =
+    index + 2 < length && content.[index] = quote
+    && content.[index + 1] = quote && content.[index + 2] = quote in
+  let rec quote_end quote index =
+    if index < length && content.[index] = quote then quote_end quote (index + 1)
+    else index in
+  let rec literal_close index =
+    if index >= length then None
+    else if triple '\'' index then
+      let last = quote_end '\'' index in
+      if last - index <= 5 then Some last else None
+    else literal_close (index + 1) in
+  let copy index count = Buffer.add_substring output content index count in
+  let rec loop mode index single_line_break =
+    if index >= length then single_line_break
+    else
+      match mode with
+      | Outside ->
+          (match content.[index] with
+           | '#' -> copy index 1; loop Comment (index + 1) single_line_break
+           | '"' when triple '"' index ->
+               copy index 3;
+               (* Otoml trims an initial newline after decoding escapes.
+                  Supply an escaped newline for it to trim; unlike a physical
+                  one this keeps later parser error line numbers unchanged. *)
+               if index + 3 < length
+                  && (content.[index + 3] = '\\' || content.[index + 3] = '"')
+               then Buffer.add_string output "\\n";
+               loop Multiline_basic (index + 3) single_line_break
+           | '"' -> copy index 1; loop Basic (index + 1) single_line_break
+           | '\'' when triple '\'' index ->
+               (match literal_close (index + 3) with
+                | None -> copy index 3; loop Multiline_literal (index + 3) single_line_break
+                | Some last ->
+                    Buffer.add_string output "\"\"\"";
+                    if content.[index + 3] <> '\n' then Buffer.add_string output "\\n";
+                    for pos = index + 3 to last - 4 do
+                      (match content.[pos] with
+                       | '\\' -> Buffer.add_string output "\\\\"
+                       | '"' -> Buffer.add_string output "\\\""
+                       | char -> Buffer.add_char output char)
+                    done;
+                    Buffer.add_string output "\"\"\"";
+                    loop Outside last single_line_break)
+           | '\'' -> copy index 1; loop Literal (index + 1) single_line_break
+           | _ -> copy index 1; loop Outside (index + 1) single_line_break)
+      | Comment ->
+          copy index 1;
+          loop (if content.[index] = '\n' then Outside else Comment) (index + 1) single_line_break
+      | Literal ->
+          let single_line_break =
+            single_line_break || content.[index] = '\n' || content.[index] = '\r' in
+          copy index 1;
+          loop (if content.[index] = '\'' then Outside else Literal) (index + 1) single_line_break
+      | Multiline_literal ->
+          if triple '\'' index then begin
+            let last = quote_end '\'' index in
+            copy index (last - index); loop Outside last single_line_break
+          end else begin
+            copy index 1; loop Multiline_literal (index + 1) single_line_break
+          end
+      | Basic | Multiline_basic ->
+          let single_line_break =
+            single_line_break ||
+            (mode = Basic &&
+             (content.[index] = '\n' || content.[index] = '\r'
+              || (content.[index] = '\\' && index + 1 < length
+                  && (content.[index + 1] = '\n' || content.[index + 1] = '\r')))) in
+          if content.[index] = '\\' && index + 1 < length then begin
+            if content.[index + 1] = 'u' && index + 5 < length
+               && is_hex content.[index + 2] && is_hex content.[index + 3]
+               && is_hex content.[index + 4] && is_hex content.[index + 5]
+            then begin
+              copy index 6;
+              let rec escape_hex rest =
+                if rest < length && is_hex content.[rest] then begin
+                  Printf.bprintf output "\\u%04x" (Char.code content.[rest]);
+                  escape_hex (rest + 1)
+                end else loop mode rest single_line_break in
+              escape_hex (index + 6)
+            end else begin
+              copy index 2; loop mode (index + 2) single_line_break
+            end
+          end else if mode = Multiline_basic && triple '"' index then begin
+            let last = quote_end '"' index in
+            copy index (last - index); loop Outside last single_line_break
+          end else begin
+            copy index 1;
+            let next = if mode = Basic && content.[index] = '"' then Outside else mode in
+            loop next (index + 1) single_line_break
+          end
+  in
+  let single_line_break = loop Outside 0 false in
+  Buffer.contents output, single_line_break
+;;
+
+let normalize_source_with_single_line_break content =
   (* TOML defines CRLF and LF as equivalent newlines. Otoml 1.0.5 preserves
      CRLF bytes inside multiline strings, so normalize only CRLF boundaries
      before semantic parsing. *)
@@ -94,6 +204,18 @@ let normalize_source content =
   |> String.split_on_char '\n'
   |> List.map String_util.strip_trailing_cr
   |> String.concat "\n"
+  |> normalize_otoml_strings
+;;
+
+let normalize_source content =
+  fst (normalize_source_with_single_line_break content)
+;;
+
+let normalize_editor_source content =
+  let normalized, single_line_break = normalize_source_with_single_line_break content in
+  if single_line_break then
+    Error "A single-line TOML string cannot contain a physical newline; use triple quotes for multiline text"
+  else Ok normalized
 ;;
 
 let of_otoml = function

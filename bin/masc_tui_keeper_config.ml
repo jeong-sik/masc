@@ -60,6 +60,175 @@ let editor_stem json =
 
 let editable_field_names = List.map editable_field_name editable_fields
 
+type editor_format = Toml | Json
+
+let editor_suffix = function Toml -> ".toml" | Json -> ".json"
+
+(* TOML has no null. These are the two fields in this form whose server
+   contract accepts null as an explicit clear. An omitted field remains an
+   unchanged field, as it does in the JSON form. *)
+let reset_fields_key = "reset_fields"
+let resettable_fields = [ "max_context_override"; "remote_endpoint" ]
+
+let ( let* ) = Result.bind
+
+let rec traverse f = function
+  | [] -> Ok []
+  | value :: rest ->
+      let* value = f value in
+      let* rest = traverse f rest in
+      Ok (value :: rest)
+
+let rec toml_of_json (value : Yojson.Safe.t) =
+  match value with
+  | `String text -> Ok (Otoml.TomlString text)
+  | `Int number -> Ok (Otoml.TomlInteger number)
+  | `Bool flag -> Ok (Otoml.TomlBoolean flag)
+  | `Float number when Float.is_finite number -> Ok (Otoml.TomlFloat number)
+  | `List values ->
+      let* values = traverse toml_of_json values in
+      Ok (Otoml.TomlArray values)
+  | `Assoc fields ->
+      let* fields = traverse (fun (key, value) ->
+        let* value = toml_of_json value in Ok (key, value)) fields in
+      Ok (Otoml.TomlInlineTable fields)
+  | `Null | `Intlit _ | `Float _ -> Error "value has no TOML representation"
+
+let rec json_of_toml = function
+  | Otoml.TomlString text -> Ok (`String text)
+  | Otoml.TomlInteger number -> Ok (`Int number)
+  | Otoml.TomlBoolean flag -> Ok (`Bool flag)
+  | Otoml.TomlFloat number when Float.is_finite number -> Ok (`Float number)
+  | Otoml.TomlArray values ->
+      let* values = traverse json_of_toml values in
+      Ok (`List values)
+  | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
+      let* fields = traverse (fun (key, value) ->
+        let* value = json_of_toml value in Ok (key, value)) fields in
+      Ok (`Assoc fields)
+  | Otoml.TomlFloat _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlTableArray _ ->
+      Error "value is not supported by the Keeper settings API"
+
+let parse_toml_editor text =
+  let* normalized = Keeper_toml_loader.normalize_editor_source text in
+  let* parsed = Otoml.Parser.from_string_result normalized in
+  let* json = json_of_toml parsed in
+  match json with
+  | `Assoc fields ->
+      let* resets = match List.assoc_opt reset_fields_key fields with
+        | None -> Ok []
+        | Some (`List values) ->
+            traverse (function
+              | `String name when List.mem name resettable_fields -> Ok name
+              | `String name -> Error ("cannot reset Keeper setting: " ^ name)
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+                  Error "reset_fields must contain field names") values
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
+            Error "reset_fields must be an array of field names" in
+      let settings = List.remove_assoc reset_fields_key fields in
+      let rec check_resets seen = function
+        | [] -> Ok ()
+        | name :: _ when List.mem name seen -> Error ("duplicate reset field: " ^ name)
+        | name :: _ when List.mem_assoc name settings ->
+            Error ("remove " ^ name ^ " before listing it in reset_fields")
+        | name :: rest -> check_resets (name :: seen) rest in
+      let* () = check_resets [] resets in
+      Ok (`Assoc (settings @ List.map (fun name -> name, `Null) resets))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "Keeper settings must be a TOML table"
+
+let parse_editor ~format text =
+  match format with
+  | Toml -> parse_toml_editor text
+  | Json ->
+      (match Yojson.Safe.from_string text with
+       | json -> Ok json
+       | exception Yojson.Json_error detail -> Error detail)
+
+let print_toml value = Otoml.Printer.to_string value
+
+(* Otoml owns escaping. Print each newline-free segment as a basic string,
+   remove its outer quotes, then join them in a multiline basic string. This
+   also escapes CR rather than letting TOML's newline normalization change it. *)
+let escaped_toml_segment line =
+  let quoted = print_toml (Otoml.TomlString line) in
+  String.sub quoted 1 (String.length quoted - 2)
+
+let multiline_toml_string text =
+  "\"\"\"\n" ^ String.concat "\n" (List.map escaped_toml_segment (String.split_on_char '\n' text))
+  ^ "\"\"\""
+
+(* Other fields can contain newlines too, including within arrays. Render
+   them as escaped basic strings so CRLF is not normalized in the editor. *)
+let basic_toml_string text =
+  "\"" ^ String.concat "\\n" (List.map escaped_toml_segment (String.split_on_char '\n' text)) ^ "\""
+
+let rec print_inline_toml = function
+  | Otoml.TomlString text -> Ok (basic_toml_string text)
+  | Otoml.TomlArray values ->
+      let* values = traverse print_inline_toml values in
+      Ok ("[" ^ String.concat ", " values ^ "]")
+  | Otoml.TomlInlineTable fields ->
+      let* fields = traverse (fun (key, value) ->
+        let* value = print_inline_toml value in
+        Ok (Otoml.string_of_path [key] ^ " = " ^ value)) fields in
+      Ok ("{" ^ String.concat ", " fields ^ "}")
+  | (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _) as value ->
+      Ok (print_toml value)
+  | Otoml.TomlTable _ | Otoml.TomlTableArray _ | Otoml.TomlOffsetDateTime _
+  | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ ->
+      Error "value cannot be written in an inline Keeper setting"
+
+let toml_document ~before ~desired =
+  match before, desired with
+  | `Assoc before_fields, `Assoc desired_fields ->
+      let resets = List.filter_map (fun (key, value) ->
+        if value = `Null && List.mem key resettable_fields
+           && List.assoc_opt key before_fields <> Some `Null
+        then Some key else None) desired_fields in
+      let* lines = traverse (fun (key, value) ->
+        match value with
+        | `Null when List.mem key resettable_fields ->
+            Ok ("# " ^ key ^ " is unset; add an assignment to set it")
+        | `Null -> Error (key ^ ": null cannot be represented in TOML; use JSON")
+        | `String text when String.equal key "instructions" ->
+            Ok (key ^ " = " ^ multiline_toml_string text)
+        | (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) as value ->
+            let* value = toml_of_json value |> Result.map_error (fun detail -> key ^ ": " ^ detail) in
+            let* value = print_inline_toml value |> Result.map_error (fun detail -> key ^ ": " ^ detail) in
+            Ok (key ^ " = " ^ value)) desired_fields in
+      let reset_value = Otoml.TomlArray (List.map (fun name -> Otoml.TomlString name) resets) in
+      let text = String.concat "\n"
+        ([ "# Remove a field's assignment and list it in reset_fields to clear it."
+         ; "# Clearable fields: max_context_override, remote_endpoint."
+         ; reset_fields_key ^ " = " ^ print_toml reset_value
+         ; "" ] @ lines) ^ "\n" in
+      let* parsed = parse_toml_editor text in
+      (match parsed with
+       | `Assoc parsed_fields ->
+           let same (key, value) =
+             let actual = match List.assoc_opt key parsed_fields with
+               | Some actual -> Some actual
+               | None -> List.assoc_opt key before_fields in
+             Option.equal Yojson.Safe.equal actual (Some value) in
+           if List.for_all same desired_fields then Ok text
+           else Error "TOML editor document does not preserve the observed settings; use JSON"
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+           Error "TOML editor document is not a table")
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _), _
+  | `Assoc _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+      Error "Keeper settings projection is not an object"
+
+let document_of_projection ~format ~before ~desired =
+  match format with
+  | Toml -> toml_document ~before ~desired
+  | Json -> Ok (Yojson.Safe.pretty_to_string desired ^ "\n")
+
+let editor_document ~format observed =
+  let projection = editable_snapshot observed in
+  document_of_projection ~format ~before:projection ~desired:projection
+
 (* Control key, not a setting: the server refuses a patch that lowers
    [max_context_override] unless it carries this flag, and its refusal tells
    the operator to re-send with it. Without accepting the key here that
@@ -425,19 +594,20 @@ let patch_of_edit ~before ~after =
           |> Result.map_error (fun detail -> Cannot_send detail))
   | _ -> Error (Fix_in_editor "keeper settings must remain a JSON object")
 
-(* The editor reopens on a refusal the operator can fix, with the reason as a
-   [//] line on top: Yojson reads line comments, so the reopened text parses
-   exactly as the operator left it. Earlier refusal lines are dropped first,
-   so a second refusal replaces the first instead of stacking above it. *)
-let reopened_stem ~reason edited =
-  let one_line = String.map (function '\n' | '\r' -> ' ' | c -> c) reason in
-  let rec drop_refusals = function
-    | line :: rest when String.starts_with ~prefix:"//" (String.trim line) ->
-      drop_refusals rest
-    | lines -> lines
+(* Only our own refusal comment is replaced. Other comments are part of the
+   operator's draft and must survive a failed edit. *)
+let reopened_stem ~format ?prior_reason ~reason edited =
+  let prefix = match format with
+    | Toml -> "# MASC settings: "
+    | Json -> "// MASC settings: " in
+  let line reason = prefix ^ String.map (function '\n' | '\r' -> ' ' | c -> c) reason ^ "\n" in
+  let body = match prior_reason with
+    | Some prior when String.starts_with ~prefix:(line prior) edited ->
+        let skip = String.length (line prior) in
+        String.sub edited skip (String.length edited - skip)
+    | Some _ | None -> edited
   in
-  let body = String.split_on_char '\n' edited |> drop_refusals |> String.concat "\n" in
-  "// " ^ one_line ^ "\n" ^ body
+  line reason ^ body
 
 let remote_endpoint_names snapshot =
   match member "remote_ssh_endpoints" snapshot with
@@ -512,12 +682,8 @@ let sandbox_patch ~profile snapshot =
   | [] -> Ok None
   | _ :: _ -> Ok (Some (`Assoc (("expected_config_revision",revision) :: changes)))
 
-let reopen_edit_on_current ~before ~edited ~current =
+let reopen_edit_on_current ~format ~patch ~current =
   let open Result.Syntax in
-  let* after = match Yojson.Safe.from_string edited with
-    | json -> Ok json
-    | exception Yojson.Json_error detail -> Error (Fix_in_editor detail) in
-  let* patch = patch_of_edit ~before ~after in
   let* _ = expected_config_revision current |> Result.map_error (fun detail -> Cannot_send detail) in
   match patch, editable_snapshot current with
   | `Assoc changes, `Assoc fields ->
@@ -527,9 +693,12 @@ let reopen_edit_on_current ~before ~edited ~current =
         if String.equal key "expected_config_revision"
            || String.equal key confirm_context_shrink_field then fields
         else (key,value) :: List.remove_assoc key fields) fields changes in
-      Ok (reopened_stem
+      let* document = document_of_projection ~format
+          ~before:(editable_snapshot current) ~desired:(`Assoc fields)
+          |> Result.map_error (fun detail -> Cannot_send detail) in
+      Ok (reopened_stem ~format
         ~reason:"Current settings reloaded; your changed values retained. Review before saving."
-        (Yojson.Safe.pretty_to_string (`Assoc fields)))
+        document)
   | _ -> Error (Cannot_send "settings recovery requires object projections")
 
 (* Marker column. The glyph carries the editable/read-only split on its own,
@@ -760,8 +929,8 @@ let view_lines ~sanitize json =
       (styled Masc_tui_theme.Sgr.cyan editable_glyph)
       (styled Masc_tui_theme.Sgr.dim read_only_glyph)
   ; ""
-  ; section "1. 편집 안내 (edit here)" "$EDITOR JSON form"
-  ; "   Press e. Save and close the editor to apply; exit non-zero to cancel."
+  ; section "1. 편집 안내 (edit here)" "$EDITOR form"
+  ; "   e: TOML · E: JSON. Save and close the editor to apply; exit non-zero to cancel."
   ; "   Only changed fields are sent. The server validates before persisting."
   ; ""
   ; section "2. 적용 중인 설정 (effective settings)" (Printf.sprintf "e opens %d fields" editable_count)
@@ -839,6 +1008,6 @@ let view_lines ~sanitize json =
   @ [ ""
     ; section "8. 필드 편집 규칙 (field rules)" ""
     ; "   Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
-    ; "   Deleting a field means unchanged. null clears context/wake overrides."
+    ; "   Deleting a field means unchanged. JSON null or TOML reset_fields clears an override."
     ]
 ;;

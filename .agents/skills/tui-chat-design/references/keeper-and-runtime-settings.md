@@ -4,7 +4,9 @@
 
 ## 에디터 준비 조회
 
-- Keeper 설정의 `e`는 workspace 확인·설정 snapshot 읽기·재확인을 소유된 비동기 조회로
+- Keeper 설정의 `e`는 TOML, `E`는 JSON 편집을 연다. 두 형식은 같은 snapshot과 저장
+  계약을 쓰며 TOML의 `reset_fields`는 명시적으로 지울 설정을 나타낸다.
+- Keeper 설정의 `e`/`E`는 workspace 확인·설정 snapshot 읽기·재확인을 소유된 비동기 조회로
   시작한다. 키 처리 안에서 HTTP를 기다리거나 아직 확인하지 못한 이전 snapshot을 열지 않는다.
 - 반복 `e`는 진행 중이거나 편집 대기 중인 같은 요청을 공유한다. Esc, Keeper·화면·탭 이동,
   다른 입력창·모달 진입, workspace/read authority 철회는 그 준비를 취소한다.
@@ -23,7 +25,7 @@
 - navigation은 저장 취소 선언이 아니다. authority 철회·중단 전후를 미전송과 결과 미확인으로
   나누고 영수증은 bounded mailbox 없이 남긴다. 알려진 미적용 거절·revision 충돌·조정 필요·
   적용 후 runtime sync 실패를 따로 보존한다. 늦은 영수증은 다른 Keeper 화면을 갱신하지 않는다.
-- 실패 뒤 `e`는 current snapshot을 새로 읽고 변경했던 값만 편집기에 복원한다. 손대지 않은
+- 실패 뒤 `e`/`E`는 current snapshot을 새로 읽고 변경했던 값만 선택한 형식의 편집기에 복원한다. 손대지 않은
   필드는 current 값을 쓰고, 이전 revision과 context 축소 확인은 재사용하지 않는다. 편집기에서
   다시 확인하기 전 재전송하지 않는다. 원래 작업의 입력·응답은 후속 복구가 덮어쓰지 않는다.
 - Sandbox `d/m/s`는 SSOT의 typed profile을 같은 저장 작업에 캡처한다. worker가 최신 config

@@ -359,7 +359,7 @@ let keeper_actions =
   ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"
   ; b Act "s" "shutdown"
-  ; b Act "e" "settings"
+  ; b Act "e/E" "settings TOML/JSON"
   ; b Act "f" "files" ~help:"file changes this keeper wrote"
   ; b Act "a" "new" ~help:"new keeper"
   ; b Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
@@ -1948,12 +1948,13 @@ let reference_notes : surface -> string list = function
       (* The last paragraph also explains the Runtime catalogue, Overview and
          Board readers. It reads under Keepers because the reference has
          carried it there. *)
-      [ "Keeper settings `e` reads a fresh snapshot asynchronously before opening the\n\
-         external editor. After the editor returns, workspace rechecking and the guarded\n\
-         save also run asynchronously; navigation stays available while the receipt is\n\
-         pending. Repeated `e` shares that pending save. The footer retains progress or\n\
-         failure for the selected Keeper, and a late receipt cannot refresh another Keeper."
-      ; "After a refusal or unconfirmed result, `e` reads current settings and restores\n\
+      [ "Keeper settings `e` opens TOML and `E` opens JSON in the external editor.\n\
+         Both read a fresh snapshot asynchronously and use the same guarded save.\n\
+         In TOML, remove an assignment and list `max_context_override` or\n\
+         `remote_endpoint` in `reset_fields` to clear it; an omitted field is unchanged.\n\
+         Navigation stays available while the receipt is pending. Repeated edit keys\n\
+         share that save. A late receipt cannot refresh another Keeper."
+      ; "After a refusal or unconfirmed result, `e` or `E` reads current settings and restores\n\
          only your changed values for review in the editor. Untouched fields use current\n\
          values. The old revision and context-shrink confirmation are not reused; saving\n\
          requires the new editor roundtrip. Original input and receipts stay with their\n\
@@ -2165,8 +2166,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Meta "R" "refresh"
       ]
   | Detail_instructions ->
-      [ b Act "e" "edit JSON in $EDITOR"
-          ~help:"the settings form; only changed fields are sent"
+      [ b Act "e" "edit TOML in $EDITOR"
+          ~help:"multiline Keeper instructions; only changed fields are sent"
+      ; b Act "E" "edit JSON in $EDITOR"
+          ~help:"the same settings and guarded save in JSON"
       ]
   | Detail_identity ->
       [ (* Arrows first: the digits only reach the first nine rows and the
@@ -2234,7 +2237,7 @@ let key_atoms key =
 
 (* The keys a detail tab's own arms answer before the Keeper controls do.
    Sandbox takes [s] for the remote_ssh backend and [o] for its container
-   logs; Channels takes [j/k] and [e]; Settings takes [e]. *)
+   logs; Channels takes [j/k] and [e/E]; Settings takes [e/E]. *)
 let keeper_detail_tab_taken_keys tab =
   List.concat_map
     (fun binding -> key_atoms binding.key)

@@ -122,7 +122,7 @@ let table_header_of_line trimmed =
   if not (String.starts_with ~prefix:"[" trimmed)
   then Not_table_header
   else
-    match Otoml.Parser.from_string_result trimmed with
+    match Otoml.Parser.from_string_result (normalize_source trimmed) with
     | Ok value ->
       (match singleton_table_path value with
        | Some path -> Standard_table path
@@ -138,7 +138,7 @@ let assignment_path_of_line trimmed =
     if String.equal raw_key ""
     then None
     else
-      match Otoml.Parser.from_string_result (raw_key ^ " = true") with
+      match Otoml.Parser.from_string_result (normalize_source (raw_key ^ " = true")) with
       | Ok value -> singleton_bool_path value
       | Error _ -> None
 ;;
@@ -326,11 +326,19 @@ let update_rendered_field_in_content ~table ~key ~rendered_value content =
     content
 ;;
 
+(* Otoml emits CR literally in multiline basic strings. Escape it so the
+   parser's TOML newline normalization does not remove data before an LF. *)
+let render_otoml_value value =
+  Otoml.Printer.to_string value
+  |> String.split_on_char '\r'
+  |> String.concat "\\r"
+;;
+
 let update_field_in_content ~table ~key ~value content =
   update_rendered_field_in_content
     ~table
     ~key
-    ~rendered_value:(Otoml.Printer.to_string (Otoml.TomlString value) |> String.trim)
+    ~rendered_value:(render_otoml_value (Otoml.TomlString value) |> String.trim)
     content
 ;;
 
@@ -378,7 +386,7 @@ let render_toml_value = function
     | Toml_array _ | Toml_inline_table _ | Toml_offset_datetime _ | Toml_local_datetime _
     | Toml_local_date _ | Toml_local_time _ ) as value ->
     Result.map
-      (fun value -> Otoml.Printer.to_string value |> String.trim)
+      (fun value -> render_otoml_value value |> String.trim)
       (otoml_value_of_toml_value value)
 ;;
 

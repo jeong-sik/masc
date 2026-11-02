@@ -11560,8 +11560,8 @@ let draw_prepared_image ?scene ?origin state ~refuse ~title = function
               (Message_layout.fit_width "  colour-cell preview · any key: back" (max 1 (columns - 1))));
         state.image_open <- true
 
-let download_remote_image url =
-  Masc_tui_image_cache.download ~run:Unix.system
+let download_remote_image ?(force_fetch = false) url =
+  Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
     ~cache_dir:(ensure_img_cache_dir ()) url
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
@@ -11580,15 +11580,16 @@ let mosaic_cols = 120
    Blocking (curl + ffmpeg through
    Unix.system): the caller runs it off the render loop inside
    run_in_systhread. *)
-let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
-  match download_remote_image url with
+let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview.mosaic_entry =
+  match download_remote_image ~force_fetch url with
   | Error (Masc_tui_image_cache.Fetch_failed failure) ->
       Masc_tui_link_preview.(
         Refused (Fetch_failed { detail = Masc_tui_image_cache.fetch_failure_text failure }))
   | Error Masc_tui_image_cache.Empty_body -> Masc_tui_link_preview.(Refused Empty_body)
   | Error (Masc_tui_image_cache.Cache_unreadable { detail }) ->
       Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
-  | Ok local_path -> (
+  | Ok body ->
+    let decode local_path =
       let raw =
         Filename.concat
           (ensure_img_cache_dir ())
@@ -11620,7 +11621,12 @@ let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
               let rows = String.length data / (cols * 3) in
               match Masc_tui_image_mosaic.render ~cols ~rows data with
               | [] -> refuse Masc_tui_image_cache.No_frame_written
-              | lines -> Masc_tui_link_preview.Mosaic lines)))
+              | lines -> Masc_tui_link_preview.Mosaic lines))
+    in
+    match Masc_tui_image_cache.with_download_snapshot
+        ~cache_dir:(ensure_img_cache_dir ()) body decode with
+    | Ok entry -> entry
+    | Error detail -> Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
 
 let () =
   compute_and_store_mosaic :=
@@ -11640,7 +11646,7 @@ let retry_image_mosaic img =
         Masc_tui_link_preview.retry_mosaic img ~retry:(fun () ->
           Masc_tui_image_cache.invalidate_download
             ~cache_dir:(ensure_img_cache_dir ()) img;
-          image_url_to_mosaic ~cols:mosaic_cols img));
+          image_url_to_mosaic ~force_fetch:true ~cols:mosaic_cols img));
       `Stop_daemon)
 
 (* Download a remote image and hand back PNG bytes ready for [draw_image], or

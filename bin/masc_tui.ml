@@ -11627,6 +11627,14 @@ let cell_image_notice ~columns ~short ~long =
   "\x1b[1;1H" ^ Message_layout.fit_width notice (columns - 1)
 
 let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_frame) =
+  let view = match view.ic_copy_path with
+    | None -> view
+    | Some path ->
+        let text = Keeper_chat.terminal_safe_text ~preserve_newlines:false path in
+        let lines = Message_layout.wrap_words ~max_cells:(max 1 (columns - 2)) text in
+        let width = List.fold_left
+          (fun width line -> max width (Message_layout.display_width line)) 0 lines in
+        {view with ic_lines=lines;ic_columns=width} in
   let contents =
     if cell_image_fits view (rows, columns) then
       let header_rows = 1 + List.length view.ic_caption in
@@ -11637,11 +11645,30 @@ let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_fram
       let body = List.mapi (fun index line ->
         Printf.sprintf "\x1b[%d;1H%s" (index + 1 + header_rows) line) view.ic_lines
         |> String.concat "" in
-      let footer = if view.ic_unconfirmed then "! source unconfirmed · any key: back"
-        else "  colour-cell preview · any key: back" in
+      let footer = match view.ic_copy_path, view.ic_unconfirmed, view.ic_unsaved_remote with
+        | Some _, true, (Some _ | None) -> "! source unconfirmed · y:copy path · other key: back"
+        | Some _, false, Some _ -> "  s:save original · y:copy link · o:open link · key:back"
+        | Some _, false, None -> "  y:copy · o:open link · x:other · key:back"
+        | None, true, (Some _ | None) -> "! source unconfirmed · any key: back"
+        | None, false, (Some _ | None) -> "  colour-cell preview · any key: back" in
       header ^ body
       ^ Printf.sprintf "\x1b[%d;1H%s" rows
           (Message_layout.fit_width footer (columns - 1))
+    else if Option.is_some view.ic_copy_path then
+      let hint = match view.ic_unsaved_remote, view.ic_save_cancelled with
+        | Some _, true when rows = 2 -> cell_image_notice ~columns ~short:"cancelled"
+            ~long:"Save cancelled; s retries"
+        | Some _, (true | false) -> cell_image_notice ~columns ~short:"s:save"
+            ~long:"Window too small · s:save original · y:copy link · key:close"
+        | None, (true | false) -> cell_image_notice ~columns ~short:"y:copy"
+            ~long:"Window too small · y:copy · o:open · x:other · key:close" in
+      (match view.ic_caption with
+       | _ :: status :: cancellation :: _ when rows > 2 ->
+           hint ^ "\x1b[2;1H" ^ Message_layout.fit_width status (columns - 1)
+           ^ "\x1b[3;1H" ^ Message_layout.fit_width cancellation (columns - 1)
+       | _ :: status :: _ when rows > 1 ->
+           hint ^ "\x1b[2;1H" ^ Message_layout.fit_width status (columns - 1)
+       | _ :: _ | [] -> hint)
     else cell_image_notice ~columns ~short:"key:close"
       ~long:"Window too small · resize larger or press any key to close"
   in
@@ -11692,7 +11719,128 @@ let draw_prepared_image ?scene ?(caption=[]) ~origin state ~refuse ~title = func
             draw_cell_image state ~terminal_size:(rows, columns)
               {ic_title=title;ic_caption=caption;ic_lines=lines;ic_columns=image_columns;
                ic_terminal_size=(rows, columns);ic_workspace=state.workspace_authority;
-               ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin}
+               ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin;
+               ic_copy_path=None;ic_copy_page=None;ic_alternate_target=None;ic_last_open=None;
+               ic_unsaved_remote=None;ic_save_cancelled=false}
+
+let show_image_link_card state ~origin ~page_url ~copy ~unsaved ~last_open =
+  let path, title, caption, alternate = match copy, unsaved with
+    | None, Some source ->
+        page_url, "Captured image", Printf.sprintf "Original held until closed (%d bytes); s saves a temporary copy."
+          (String.length source.uri_bytes), page_url
+    | None, None -> page_url, "Original image link", "Inline preview unavailable.", page_url
+    | Some (path, openable), (Some _ | None) ->
+        path, "Temporary image copy", "y keeps and copies the path; move it for long-term storage.",
+        (if openable then path else page_url) in
+  let view =
+    {ic_title=title;ic_caption=[caption];
+     ic_lines=[];ic_columns=0;ic_terminal_size=(0, 0);ic_workspace=state.workspace_authority;
+     ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin;
+     ic_copy_path=Some path;ic_copy_page=Some page_url;ic_alternate_target=Some alternate;ic_last_open=last_open;
+     ic_unsaved_remote=unsaved;ic_save_cancelled=false} in
+  match cell_image_terminal_size () with
+  | None ->
+      let retire_pixels = match !active_graphics_protocol, state.image_open, state.image_cell_view with
+        | Masc_tui_graphics.Kitty_protocol, true, None -> Masc_tui_graphics.delete_all
+        | (Kitty_protocol | ITerm2_protocol | Unsupported_protocol), (true | false), (Some _ | None) -> "" in
+      if retire_pixels <> "" then write_to_terminal retire_pixels;
+      Masc_tui_msx.invalidate ();
+      state.browser_viewport <- None;
+      state.image_inspection <- None;
+      browser_image_region := None;
+      browser_pointer_press := None;
+      state.image_cell_view <- Some (Image_cells view);
+      state.image_open <- true;
+      output_string stdout (Ansi.clear ^
+        (if view.ic_unconfirmed then "! y:copy"
+         else if Option.is_some view.ic_unsaved_remote then "s:save y:copy o:open"
+         else "y:copy o:open x:other"));
+      flush stdout
+  | Some (rows, columns) ->
+      draw_cell_image state ~terminal_size:(rows, columns) view
+
+let update_image_link_card state ~path status =
+  match state.image_cell_view with
+  | Some (Image_cells view) when state.image_open && not state.msx_open
+      && view.ic_copy_path = Some path ->
+      let status = Keeper_chat.terminal_safe_text ~preserve_newlines:false status in
+      let caption = match view.ic_caption with first :: _ -> first | [] -> "" in
+      let cancellation = if view.ic_save_cancelled then ["Save cancelled; s retries"] else [] in
+      let view = {view with ic_caption=caption :: status :: cancellation} in
+      (match cell_image_terminal_size () with
+       | Some terminal_size -> draw_cell_image state ~terminal_size view
+       | None ->
+           state.image_cell_view <- Some (Image_cells view);
+           output_string stdout (Ansi.clear ^
+             (if Option.is_some view.ic_unsaved_remote then "s:save y:copy o:open\r\n"
+              else "y:copy o:open x:other\r\n") ^ status
+             ^ (if view.ic_save_cancelled then "\r\nSave cancelled; s retries" else ""));
+           flush stdout)
+  | Some (Image_cells _ | Image_cells_withdrawn _) | None -> ()
+
+let mark_image_save_cancelled state =
+  match state.image_cell_view with
+  | Some (Image_cells ({ic_unsaved_remote=Some _;_} as view)) when state.image_open ->
+      state.image_cell_view <- Some (Image_cells {view with ic_save_cancelled=true});
+      view.ic_copy_path
+  | Some (Image_cells _ | Image_cells_withdrawn _) | None -> None
+
+let record_image_link_opener state ~path ~target opener =
+  match state.image_cell_view with
+  | Some (Image_cells view) when view.ic_copy_path = Some path ->
+      state.image_cell_view <- Some (Image_cells {view with ic_last_open=Some (target,opener)})
+  | Some (Image_cells _ | Image_cells_withdrawn _) | None -> ()
+
+(* An opener may wait for the image viewer to close. Admit at most one child,
+   start it while the input owner is current, and reap it without killing the
+   viewer. Create the reaper before starting a process. *)
+let remote_image_opener = Masc_tui_board_preview_work.create ()
+let image_opener_generation = ref 0
+
+let launch_image_opener ?after ~url ~allow_start ~on_result () =
+  match Eio_context.get_switch_opt () with
+  | None -> Error "external opening is unavailable"
+  | Some _ when not (Masc_tui_board_preview_work.try_acquire remote_image_opener) ->
+      Error "another image opener is still running"
+  | Some sw ->
+      incr image_opener_generation;
+      let generation = !image_opener_generation in
+      let completed, resolve = Eio.Promise.create () in
+      let lock = Mutex.create () and ready = Condition.create () in
+      let started = ref None in
+      let await_start () =
+        Mutex.lock lock;
+        Fun.protect ~finally:(fun () -> Mutex.unlock lock) (fun () ->
+          while Option.is_none !started do Condition.wait ready lock done;
+          Option.get !started) in
+      (match Thread.create (fun () ->
+        let result = Fun.protect ~finally:(fun () ->
+          Masc_tui_board_preview_work.release remote_image_opener) (fun () ->
+          match await_start () with
+          | Error detail -> Masc_tui_browser.Rejected detail
+          | Ok (opener, pid) -> Masc_tui_browser.await_opener ~opener pid) in
+        Eio.Promise.resolve resolve result) () with
+       | exception exn ->
+           Masc_tui_board_preview_work.release remote_image_opener;
+           Error (Printexc.to_string exn)
+       | _ ->
+           let result = try
+             if not (allow_start ()) then Error "opening cancelled before start"
+             else Masc_tui_browser.spawn_url ?after url
+             with exn -> Error (Printexc.to_string exn) in
+           Mutex.lock lock;
+           started := Some result;
+           Condition.signal ready;
+           Mutex.unlock lock;
+           match result with
+           | Error detail -> Error detail
+           | Ok (opener, _) ->
+               (try Eio.Fiber.fork_daemon ~sw (fun () ->
+                  let result = Eio.Promise.await completed in
+                  if generation = !image_opener_generation then on_result result;
+                  `Stop_daemon)
+                with _ -> ());
+               Ok opener)
 
 let download_remote_image ?(force_fetch = false) url =
   Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
@@ -11722,6 +11870,9 @@ let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview
   | Error Masc_tui_image_cache.Empty_body -> Masc_tui_link_preview.(Refused Empty_body)
   | Error (Masc_tui_image_cache.Cache_unreadable { detail }) ->
       Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
+  | Error (Masc_tui_image_cache.Cached_body_too_large _ as error) ->
+      Masc_tui_link_preview.(Refused (Cache_unreadable {
+        detail=Masc_tui_image_cache.download_error_text error }))
   | Ok body ->
     let decode local_path =
       let raw =
@@ -11783,20 +11934,35 @@ let retry_image_mosaic img =
           image_url_to_mosaic ~force_fetch:true ~cols:mosaic_cols img));
       `Stop_daemon)
 
-(* Download a remote image and hand back PNG bytes ready for [draw_image], or
-   why they could not be produced. Pure of the render loop: no terminal writes,
-   so it is safe to run on a systhread. *)
+(* The colour-cell pixel-count ceiling equals one UHD image. Its 8-bit RGBA
+   equivalent also bounds encoded input, cache reads and each helper output;
+   it is not a bound on the decoder's total memory. *)
+let remote_cell_image_max_bytes = 3840 * 2160 * 4
+
+(* The existing link mosaic width also bounds the total work of a full-screen
+   colour frame, even when a virtual terminal reports an enormous size. *)
+let remote_cell_image_max_cells = mosaic_cols * mosaic_cols
+
+(* The bounded path keeps the fetched source bytes so a late native capability
+   can use the same one-shot URL response without another download. *)
 let prepare_remote_image_bytes url =
-  Masc_tui_image_cache.prepare_png
-    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
-    ~cache_dir:(ensure_img_cache_dir ()) url
+  Result.map Masc_tui_image_cache.download_bytes
+    (Masc_tui_image_cache.download ~max_bytes:remote_cell_image_max_bytes
+      ~run:(Masc_tui_image_cache.run_bounded ~max_file_bytes:remote_cell_image_max_bytes
+        ~deadline_seconds:image_process_deadline_seconds)
+      ~cache_dir:(ensure_img_cache_dir ()) url)
+  |> Result.map_error Masc_tui_image_cache.download_error_text
 
 let remote_fetch_worker = Masc_tui_board_preview_work.create ()
 let remote_cell_worker = Masc_tui_board_preview_work.create ()
+let remote_copy_worker = Masc_tui_board_preview_work.create ()
+let remote_copy_cleanup_worker = Masc_tui_board_preview_work.create ()
+let pending_image_copy : Masc_tui_image_cache.captured_copy option ref = ref None
 
 let withdraw_remote_image_reservations () =
   ignore (Masc_tui_board_preview_work.withdraw_pending remote_fetch_worker);
-  ignore (Masc_tui_board_preview_work.withdraw_pending remote_cell_worker)
+  ignore (Masc_tui_board_preview_work.withdraw_pending remote_cell_worker);
+  ignore (Masc_tui_board_preview_work.withdraw_pending remote_copy_worker)
 
 let launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url work =
   Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
@@ -11804,48 +11970,128 @@ let launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~imag
     ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
     work
 
-let launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+let launch_remote_image_worker ?(wait_for_active=false) state ~mailbox ~request ~title ~caption ~page_url ~image_url
     ~worker ~label ~busy ~on_exception work =
   launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url (fun () ->
     let current = Option.exists (fun pending -> pending == request) state.sent_image_read
       && request.sir_generation=state.image_request_generation && request.sir_view=state.view
       && not state.msx_open && image_request_keeper_is_current state request
       && image_reading_is_current state request in
-    if not current then Ok (Masc_tui_image_cache.Remote_busy busy)
-    else match Masc_tui_board_preview_work.reserve worker with
-      | None -> Ok (Masc_tui_image_cache.Remote_busy busy)
+    if not current then Ok busy
+    else match (if wait_for_active then Masc_tui_board_preview_work.reserve_after_active worker
+                else Masc_tui_board_preview_work.reserve worker) with
+      | None -> Ok busy
       | Some admission ->
           (match Fun.protect
             ~finally:(fun () -> Masc_tui_board_preview_work.withdraw worker admission)
             (fun () -> Eio_guard.run_in_systhread ~label (fun () ->
-              match Masc_tui_board_preview_work.run_reserved worker admission work with
+              let run = if wait_for_active then Masc_tui_board_preview_work.run_reserved_after_active
+                else Masc_tui_board_preview_work.run_reserved in
+              match run worker admission work with
               | Some result -> result
-              | None -> Ok (Masc_tui_image_cache.Remote_busy busy))) with
+              | None -> Ok busy)) with
            | result -> result
            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
            | exception exn -> on_exception exn))
 
-let launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url =
+let launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url ~bounded =
   launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
-    ~worker:remote_fetch_worker ~label:"tui-remote-image-bytes" ~busy:None
+    ~worker:remote_fetch_worker ~label:"tui-remote-image-bytes"
+    ~busy:(Masc_tui_image_cache.Remote_busy None)
     ~on_exception:(fun exn -> Error (Printexc.to_string exn)) (fun () ->
-      Result.map (fun png -> Masc_tui_image_cache.Remote_png png) (prepare_remote_image_bytes image_url))
+      if bounded then
+        match prepare_remote_image_bytes image_url with
+        | Ok source -> Ok (Masc_tui_image_cache.Remote_bounded_source source)
+        | Error reason -> Ok (Masc_tui_image_cache.Remote_bounded_failure reason)
+      else
+        let cache_dir=ensure_img_cache_dir () in
+        let run command = Masc_tui_image_cache.run_bounded
+          ~deadline_seconds:image_process_deadline_seconds command in
+        match Masc_tui_image_cache.download ~run ~cache_dir image_url with
+        | Error error -> Error (Masc_tui_image_cache.download_error_text error)
+        | Ok body ->
+            let source=Masc_tui_image_cache.download_bytes body in
+            (match Masc_tui_image_cache.prepare_downloaded_png ~run ~cache_dir ~url:image_url body with
+             | Ok png -> Ok (Masc_tui_image_cache.Remote_native {source;png})
+             | Error detail -> Ok (Masc_tui_image_cache.Remote_native_failed {source;detail})))
 
-let launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display png =
+let launch_remote_image_native_source state ~mailbox ~request ~title ~caption ~page_url ~image_url source =
+  let failed detail = Masc_tui_image_cache.Remote_native_failed {source;detail} in
+  launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+    ~worker:remote_fetch_worker ~label:"tui-remote-image-conversion"
+    ~busy:(failed "another image is still preparing")
+    ~on_exception:(fun exn -> Ok (failed (Printexc.to_string exn))) (fun () ->
+      let run command = Masc_tui_image_cache.run_bounded
+        ~deadline_seconds:image_process_deadline_seconds command in
+      match Masc_tui_image_cache.prepare_captured_png ~run ~cache_dir:(ensure_img_cache_dir ()) source with
+      | Ok png -> Ok (Masc_tui_image_cache.Remote_native {source;png})
+      | Error detail -> Ok (failed detail))
+
+let launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display source =
   match display with
   | Error detail ->
       launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
-        (fun () -> Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error detail}))
+        (fun () -> Ok (Masc_tui_image_cache.Remote_cells {source;cells=Error detail}))
   | Ok display ->
       launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
-        ~worker:remote_cell_worker ~label:"tui-remote-image-cells" ~busy:(Some png)
+        ~worker:remote_cell_worker ~label:"tui-remote-image-cells"
+        ~busy:(Masc_tui_image_cache.Remote_busy (Some source))
         ~on_exception:(fun exn ->
-          Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error (Printexc.to_string exn)}))
+          Ok (Masc_tui_image_cache.Remote_cells {source;cells=Error (Printexc.to_string exn)}))
         (fun () ->
           let cells = Masc_tui_image_cache.prepare_presentation
-            ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
-            ~cache_dir:(ensure_img_cache_dir ()) display png in
-          Ok (Masc_tui_image_cache.Remote_cells {png;cells}))
+            ~max_bytes:remote_cell_image_max_bytes
+            ~max_cells:remote_cell_image_max_cells
+            ~run:(Masc_tui_image_cache.run_bounded ~max_file_bytes:remote_cell_image_max_bytes
+              ~deadline_seconds:image_process_deadline_seconds)
+            ~cache_dir:(ensure_img_cache_dir ()) display source in
+          Ok (Masc_tui_image_cache.Remote_cells {source;cells}))
+
+let launch_remote_image_copy state ~mailbox ~request ~title ~caption ~page_url ~image_url ~reason ~requested_save source =
+  let failed detail = Masc_tui_image_cache.Remote_copy_failed {source;reason;detail;requested_save} in
+  launch_remote_image_worker ~wait_for_active:true state ~mailbox ~request ~title ~caption ~page_url ~image_url
+    ~worker:remote_copy_worker ~label:"tui-remote-image-copy"
+    ~busy:(failed "another image is still preparing")
+    ~on_exception:(fun exn -> Ok (failed (Printexc.to_string exn))) (fun () ->
+      if not requested_save && String.length source > remote_cell_image_max_bytes then
+        Ok (failed "the captured image exceeds the copy limit")
+      else match Masc_tui_image_cache.save_captured_copy ~directory:(Filename.get_temp_dir_name ()) source with
+        | Ok copy -> Ok (Masc_tui_image_cache.Remote_copy_ready {copy;reason;requested_save})
+        | Error detail -> Ok (failed detail))
+
+let schedule_discarded_copy_cleanup () =
+  match Eio_context.get_switch_opt (), Masc_tui_board_preview_work.reserve_after_active remote_copy_cleanup_worker with
+  | Some sw, Some admission ->
+      (match Eio.Fiber.fork_daemon ~sw (fun () ->
+        Fun.protect ~finally:(fun () -> Masc_tui_board_preview_work.withdraw remote_copy_cleanup_worker admission)
+          (fun () -> Eio_guard.run_in_systhread ~label:"tui-remote-image-cleanup" (fun () ->
+            ignore (Masc_tui_board_preview_work.run_reserved_after_active remote_copy_cleanup_worker admission
+              Masc_tui_image_cache.cleanup_discarded_copies)));
+        `Stop_daemon) with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) ->
+           Masc_tui_board_preview_work.withdraw remote_copy_cleanup_worker admission;
+           raise exn
+       | exception _ -> Masc_tui_board_preview_work.withdraw remote_copy_cleanup_worker admission)
+  | None, Some admission -> Masc_tui_board_preview_work.withdraw remote_copy_cleanup_worker admission
+  | (Some _ | None), None -> ()
+
+let discard_pending_image_copy () =
+  match !pending_image_copy with
+  | None -> ()
+  | Some copy ->
+      pending_image_copy := None;
+      Masc_tui_image_cache.discard_captured_copy copy;
+      schedule_discarded_copy_cleanup ()
+
+let keep_pending_image_copy path =
+  match !pending_image_copy with
+  | Some copy when String.equal copy.path path ->
+      if Masc_tui_image_cache.retain_captured_copy copy then begin
+        pending_image_copy := None;
+        true
+      end else false
+  | Some _ | None -> true
 
 (* A remote preview retains one input-cancellable owner across download and,
    when needed, colour-cell conversion.  Each blocking stage runs off the
@@ -11942,8 +12188,11 @@ let board_preview_worker = Masc_tui_board_preview_work.create ()
 let vector_inspection_worker = Masc_tui_board_preview_work.create ()
 
 let () = at_exit (fun () ->
+  Masc_tui_board_preview_work.stop remote_image_opener;
   Masc_tui_board_preview_work.stop remote_fetch_worker;
   Masc_tui_board_preview_work.stop remote_cell_worker;
+  Masc_tui_board_preview_work.stop remote_copy_worker;
+  Masc_tui_board_preview_work.stop remote_copy_cleanup_worker;
   Masc_tui_board_preview_work.stop board_preview_worker;
   Masc_tui_board_preview_work.stop vector_inspection_worker;
   Masc_tui_board_preview_work.stop resource_diagram_worker;
@@ -11951,6 +12200,9 @@ let () = at_exit (fun () ->
   Masc_tui_image_cache.stop_subprocesses ();
   Masc_tui_board_preview_work.await_stopped remote_fetch_worker;
   Masc_tui_board_preview_work.await_stopped remote_cell_worker;
+  Masc_tui_board_preview_work.await_stopped remote_copy_worker;
+  Masc_tui_board_preview_work.await_stopped remote_copy_cleanup_worker;
+  Masc_tui_image_cache.stop_captured_copies ();
   Masc_tui_board_preview_work.await_stopped board_preview_worker;
   Masc_tui_board_preview_work.await_stopped vector_inspection_worker;
   Masc_tui_board_preview_work.await_stopped resource_diagram_worker;
@@ -11992,6 +12244,9 @@ let cancel_board_image_read state =
   | None -> ()
 
 let withdraw_pending_image_open state =
+  if unsaved_remote_save_in_flight state then
+    Option.iter (fun path -> update_image_link_card state ~path "s retries")
+      (mark_image_save_cancelled state);
   match Masc_tui_types.withdraw_image_open state with
   | Some {sir_owner=Board_image_read (_,_,job);_} ->
       Masc_tui_workspace_job.cancel_observation state ~key:job
@@ -12149,7 +12404,8 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       hex (Masc_tui_terminal_palette.background palette))
       (Masc_tui_terminal_palette.snapshot_palette palette) in
     let run = match board_worker with
-      | Some _ -> Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds
+      | Some _ -> (fun command -> Masc_tui_image_cache.run_bounded
+          ~deadline_seconds:image_process_deadline_seconds command)
       | None -> Unix.system in
     let load () =
       Masc_tui_image_requests.load ~host:server_peer_host ~port
@@ -12598,6 +12854,7 @@ let withdraw_pending_music_editor state =
 let close_image state =
   let cell_was_open = Option.is_some state.image_cell_view in
   withdraw_remote_image_reservations ();
+  discard_pending_image_copy ();
   state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
@@ -20149,21 +20406,23 @@ let present_identity_notice state ~keeper_name (kind, text) =
   | Some name -> report_action state "system" (name ^ ": " ^ text)
   | None -> report_action state "system" text
 
-let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
+let rec apply_async_message ?(input_pending = fun () -> false) ?(image_input_pending = fun () -> false)
+    state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   fun message ->
     Masc_tui_types.preserve_keeper_list_selection state (fun () ->
-      apply_async_message_body ~input_pending state ~base_path ~http_refresh_inflight
+      apply_async_message_body ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message);
     reconcile_observer_recovery state ~refresh_inflight:http_refresh_inflight ~mailbox
-and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
+and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pending = fun () -> false)
+    state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
   | Workspace_scoped (authority, reading, message) ->
       if workspace_message_admitted state ~authority ~reading message then begin
         let retry = retired_operation_observation state ~authority ~reading message in
         let message = project_workspace_operation_reply state ~authority ~reading message in
-        apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
+        apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message;
         (match retry with
          | Some retry when retain_operation_observation state retry
@@ -20317,11 +20576,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
-        apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
+        apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
       end
   | Workspace_operation message ->
-      apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
+      apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
   | Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket } ->
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
@@ -20806,7 +21065,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           Masc_tui_types.finish_http_surface_read state request;
           http_scoped_refresh_inflight :=
             Surface_read_order.navigation_in_flight state.http_surface_reads)
-          (fun () -> apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
+          (fun () -> apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
             ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox completed);
         log_http_surface_read_finished state context;
         (* The last collector's slot must be released before a retained full
@@ -23582,27 +23841,60 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | None -> false in
       if current then begin
       let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
-      let open_page e =
+      let last_open_of_unsaved () = match state.image_cell_view with
+        | Some (Image_cells view) when state.image_open && view.ic_workspace=state.workspace_authority
+            && view.ic_origin.sir_owner == request.sir_owner
+            && Option.is_some view.ic_unsaved_remote -> view.ic_last_open
+        | Some (Image_cells _ | Image_cells_withdrawn _) | None -> None in
+      let open_page ?unsaved ?last_open ?(open_after=true) e =
            let url =
              Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
            in
-           match Masc_tui_browser.open_url url with
-           | Ok opener ->
-               notice ~kind:Notice_reply
-                 (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
-                    e opener url)
-           | Error opener_err ->
-               notice ~kind:Notice_failure
-                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err) in
+           discard_pending_image_copy ();
+           show_image_link_card state ~origin:request ~page_url:url ~copy:None ~unsaved ~last_open;
+           let report ~kind ~status message =
+             notice ~kind message;
+             if not (unsaved_remote_save_in_flight state) then
+               update_image_link_card state ~path:url status in
+           let authority = state.workspace_authority in
+           let current () = state.image_open && not state.msx_open && state.workspace_authority = authority
+             && request.sir_view = state.view
+             && image_keeper_is_current state ~view:request.sir_view ~keeper_name:request.sir_keeper
+             && (match state.image_cell_view with
+                | Some (Image_cells view) -> view.ic_copy_path = Some url
+                    && view.ic_origin.sir_generation = request.sir_generation
+                    && Option.is_some (image_cell_origin_for_redraw state
+                      ~workspace:view.ic_workspace view.ic_origin)
+                    && not (image_cell_source_unconfirmed state view.ic_origin)
+                | Some (Image_cells_withdrawn _) | None -> false) in
+           let on_result result = if current () then match result with
+             | Masc_tui_browser.Opened opener ->
+                 report ~kind:Notice_reply ~status:"Opener accepted the link"
+                   (Printf.sprintf "Could not draw inline (%s). %s accepted: %s" e opener url)
+             | Rejected detail -> report ~kind:Notice_failure ~status:detail
+                 (Printf.sprintf "image %s: %s; browser: %s" title e detail)
+             | Uncertain detail -> report ~kind:Notice_failure ~status:"Opener result unknown"
+                 (Printf.sprintf "image %s: %s; browser outcome unknown: %s" title e detail) in
+           if open_after then begin
+             report ~kind:Notice_reply ~status:"Opening requested"
+               (Printf.sprintf "Could not draw inline (%s). Opening requested: %s" e url);
+             match launch_image_opener ~url
+               ~allow_start:(fun () -> current () && not (image_input_pending ())) ~on_result () with
+             | Ok opener -> record_image_link_opener state ~path:url ~target:url opener
+             | Error detail -> report ~kind:Notice_failure ~status:detail
+                 (Printf.sprintf "image %s: %s; browser: %s" title e detail)
+           end else
+             report ~kind:Notice_failure ~status:"Original held; s saves it"
+               (Printf.sprintf "image %s: %s" title e) in
       let refuse reason =
         notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason) in
-      let defer_page ~png reason =
+      let defer_page ~source reason =
         (* A size change can refuse a cell frame after the worker completes.
            Let pending terminal input withdraw the request before opening the
            browser, just as it can for an ordinary worker failure. *)
         state.sent_image_read <- Some request;
         launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
-          (fun () -> Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error reason})) in
+          (fun () -> Ok (Masc_tui_image_cache.Remote_cells {source;cells=Error reason})) in
       (match result with
        | Error e -> open_page e
        | Ok prepared ->
@@ -23612,18 +23904,115 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                state.sent_image_read <- Some request;
                notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
                launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url
-           | Prepare_remote_cells png ->
+                 ~bounded:(!terminal_draws_images = Some false)
+           | Prepare_native_source source ->
+               state.sent_image_read <- Some request;
+               launch_remote_image_native_source state ~mailbox ~request ~title ~caption ~page_url ~image_url source
+           | Prepare_remote_cells source ->
                let display = match cell_image_terminal_size () with
                  | None -> Error "terminal size is unavailable"
                  | Some (rows, columns) -> Ok (Masc_tui_image_cache.Character_cells {
                      columns=max 0 (columns - 2);rows=max 0 (rows - 3 - List.length caption)}) in
                state.sent_image_read <- Some request;
-               launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display png
+               launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display source
            | Draw_remote_png png -> draw_image state ~caption ~refuse ~title png
-           | Draw_remote_cells {png;cells} ->
-               draw_prepared_image ~caption ~origin:request state ~refuse:(defer_page ~png) ~title cells
-           | Open_remote_page reason -> open_page reason)
-      end
+           | Draw_remote_cells {source;cells} ->
+               draw_prepared_image ~caption ~origin:request state ~refuse:(defer_page ~source) ~title cells
+           | Open_remote_page {reason;source} ->
+               (match source with
+                | Some source ->
+                    state.sent_image_read <- Some request;
+                    launch_remote_image_copy state ~mailbox ~request ~title ~caption
+                      ~page_url ~image_url ~reason ~requested_save:false source
+                | None -> open_page reason)
+           | Hold_remote_source {source;reason;detail;requested_save} ->
+               let unsaved = {uri_bytes=source;uri_image_url=image_url;uri_reason=reason} in
+               let last_open = if requested_save then last_open_of_unsaved () else None in
+               open_page ~unsaved ?last_open ~open_after:(not requested_save && not (String.equal page_url image_url))
+                 (reason ^ "; could not save the captured image: " ^ detail)
+           | Open_remote_copy {copy;reason;requested_save} ->
+               let path = Keeper_chat.terminal_safe_text ~preserve_newlines:false copy.path in
+               begin
+                 let last_open = if requested_save then last_open_of_unsaved () else None in
+                 discard_pending_image_copy ();
+                 pending_image_copy := Some copy;
+                 let card_current = if not requested_save then false else
+                   match state.image_cell_view with
+                     | Some (Image_cells view) when state.image_open && not state.msx_open
+                         && view.ic_workspace=state.workspace_authority
+                         && view.ic_origin.sir_owner == request.sir_owner
+                         && Option.is_some view.ic_unsaved_remote ->
+                         Option.is_some (image_cell_origin_for_redraw state
+                           ~workspace:view.ic_workspace view.ic_origin)
+                         && not (image_cell_source_unconfirmed state view.ic_origin)
+                     | Some (Image_cells _ | Image_cells_withdrawn _) | None -> false in
+                 let interrupted = card_current && image_input_pending () in
+                 let retain_requested = card_current && not interrupted && keep_pending_image_copy copy.path in
+                 if requested_save && not retain_requested then begin
+                   discard_pending_image_copy ();
+                   if interrupted then
+                     Option.iter (fun path -> update_image_link_card state ~path "s retries")
+                       (mark_image_save_cancelled state)
+                   else if card_current then
+                     (match state.image_cell_view with
+                      | Some (Image_cells {ic_copy_path=Some path;_}) ->
+                          update_image_link_card state ~path "Save could not be retained; s retries"
+                      | Some (Image_cells _ | Image_cells_withdrawn _) | None -> ())
+                 end
+                 else begin
+                 show_image_link_card state ~origin:request ~page_url
+                   ~copy:(Some (copy.path,copy.openable)) ~unsaved:None ~last_open;
+                 let report ~kind ~status message =
+                   notice ~kind message;
+                   update_image_link_card state ~path:copy.path status in
+                 let current_copy () = match state.image_cell_view with
+                   | Some (Image_cells view) when state.image_open && not state.msx_open
+                       && view.ic_copy_path = Some copy.path
+                       && view.ic_origin.sir_generation = request.sir_generation ->
+                       Option.is_some (image_cell_origin_for_redraw state
+                         ~workspace:view.ic_workspace view.ic_origin)
+                   | Some (Image_cells _ | Image_cells_withdrawn _) | None -> false in
+                 let open_target ~image url =
+                   let on_result result =
+                     if current_copy () then match result with
+                     | Masc_tui_browser.Opened opener ->
+                         report ~kind:Notice_reply ~status:"Opener accepted the request"
+                           (Printf.sprintf "Saved copy: %s. %s accepted the %s"
+                             path opener (if image then "image" else "original link"))
+                     | Rejected detail ->
+                         report ~kind:Notice_failure ~status:"Opener could not start"
+                           (Printf.sprintf "Saved copy: %s. Opener: %s" path detail)
+                     | Uncertain detail ->
+                         report ~kind:Notice_failure ~status:"Opener result unknown"
+                           (Printf.sprintf "Saved copy: %s. Opener outcome is unknown: %s" path detail) in
+                   match launch_image_opener ~url
+                     ~allow_start:(fun () -> current_copy ()
+                       && not (image_cell_source_unconfirmed state request)
+                       && not (image_input_pending ())) ~on_result () with
+                   | Ok opener ->
+                       record_image_link_opener state ~path:copy.path ~target:url opener;
+                       if image then ignore (keep_pending_image_copy copy.path)
+                   | Error detail ->
+                       report ~kind:Notice_failure ~status:detail
+                         (Printf.sprintf "Saved copy: %s. Opener: %s" path detail) in
+                 if requested_save then begin
+                   report ~kind:Notice_reply ~status:"Original saved; y copies its path"
+                     (Printf.sprintf "Saved copy: %s" path)
+                 end else begin
+                   report ~kind:Notice_reply ~status:"Opening requested"
+                     (Printf.sprintf "Saved copy: %s. Opening requested; preview: %s" path reason);
+                   let open_copy = copy.openable && String.equal page_url image_url in
+                   open_target ~image:open_copy (if open_copy then copy.path else page_url)
+                 end
+                 end
+               end)
+      end else
+        (match result with
+         | Ok (Masc_tui_image_cache.Remote_copy_ready {copy;_}) ->
+             Masc_tui_image_cache.discard_captured_copy copy;
+             schedule_discarded_copy_cleanup ()
+         | Ok (Remote_unfetched | Remote_png _ | Remote_native _ | Remote_bounded_source _ | Remote_cells _
+              | Remote_busy _ | Remote_bounded_failure _ | Remote_native_failed _ | Remote_copy_failed _) | Error _ -> ())
   | Msx_tick_withdrawn (request, detail) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
@@ -25550,7 +25939,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
         let image_was_open = state.image_open in
         let machine_was_open = state.msx_open in
         let previous_copy = state.resource_copy_ready in
-        apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
+        apply_async_message ~input_pending ~image_input_pending:share_input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         if previous_copy != state.resource_copy_ready then begin
           resource_copy_sweep := None; copy_sweep_complete := false
@@ -28571,7 +28960,11 @@ Use relative paths for resources already held in the package. -->
       in
       (* Retire the old preview before a frame barrier or paste recovery can
          consume the event. Protocol replies do not represent operator input. *)
-      if Option.exists is_operator_input input then begin
+      let duplicate_image_save = match input with
+        | Some (Key ("s" | "S")) -> unsaved_remote_save_in_flight state
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _
+                | Mouse_left_release _ | Mouse_wheel _) | None -> false in
+      if Option.exists is_operator_input input && not duplicate_image_save then begin
         withdraw_pending_image_open state;
         withdraw_resource_diagram_pending state
       end;
@@ -28613,6 +29006,7 @@ Use relative paths for resources already held in the package. -->
        | Some (Image_cells view) when state.image_open && not state.msx_open ->
            (match image_cell_origin_for_redraw state ~workspace:view.ic_workspace view.ic_origin with
            | None ->
+             discard_pending_image_copy ();
              (match cell_image_terminal_size () with
               | Some terminal_size ->
                   draw_withdrawn_cell_image state ~terminal_size;
@@ -29069,6 +29463,7 @@ Use relative paths for resources already held in the package. -->
            that is refused sets it below, after this. *)
         state.browser_lane <-
           Option.map Browser_lane_view.withdraw_unserved_gesture state.browser_lane;
+        if not duplicate_image_save then
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
         else match state.browser_lane with
@@ -29193,6 +29588,90 @@ Use relative paths for resources already held in the package. -->
              {inspected with ii_viewport=viewport;ii_frame=Original_image}) action
        | (Some _ | None), (Some _ | None), (Some _ | None) -> ());
       let input = if inspection_owned_input then None else input in
+      let handled_image_copy = match state.image_cell_view, input with
+        | Some (Image_cells ({ic_unsaved_remote=Some captured;ic_copy_path=Some path;
+                              ic_copy_page=Some page_url;_} as shown)),
+          Some (Key ("s" | "S")) when state.image_open && not state.msx_open ->
+            let origin = shown.ic_origin in
+            let report status = update_image_link_card state ~path status in
+            if Option.is_some state.sent_image_read || Masc_tui_board_preview_work.is_busy remote_copy_worker then
+              report "An image save is still in progress"
+            else if Option.is_none (image_cell_origin_for_redraw state
+              ~workspace:shown.ic_workspace origin)
+              || image_cell_source_unconfirmed state origin then
+              report "Source unconfirmed; reopen the preview"
+            else if asynchronous_input_pending () then report "Save cancelled while input was pending"
+            else begin
+              (* Operator input has advanced the generation. This save owns a
+                 fresh request while the displayed card keeps the source. *)
+              state.image_cell_view <- Some (Image_cells {shown with ic_save_cancelled=false});
+              let request = {origin with sir_generation=state.image_request_generation} in
+              state.sent_image_read <- Some request;
+              report "Saving the captured original";
+              launch_remote_image_copy state ~mailbox:async_messages ~request
+                ~title:origin.sir_name ~caption:[] ~page_url ~image_url:captured.uri_image_url
+                ~reason:captured.uri_reason ~requested_save:true captured.uri_bytes
+            end;
+            true
+        | Some (Image_cells {ic_copy_path=Some path;_}), Some (Key ("y" | "Y"))
+            when state.image_open && not state.msx_open ->
+            if keep_pending_image_copy path then copy_reference_to_terminal render_schedule path
+            else update_image_link_card state ~path "The saved copy is no longer available";
+            true
+        | Some (Image_cells ({ic_copy_path=Some path;ic_copy_page=Some url;
+                              ic_alternate_target=Some alternate;_} as shown)),
+          Some (Key (("o" | "O" | "x" | "X") as key)) when state.image_open && not state.msx_open ->
+            (* Do not retain the whole frame in a long-lived opener callback:
+               it can contain the captured bytes awaiting an explicit save. *)
+            let origin = shown.ic_origin and last_open = shown.ic_last_open in
+            let notice = image_notice state ~view:origin.sir_view
+              ~keeper_name:origin.sir_keeper in
+            let report ~kind ~status message =
+              notice ~kind message;
+              if not (unsaved_remote_save_in_flight state) then begin
+                update_image_link_card state ~path status
+              end in
+            let still_current () = match state.image_cell_view with
+              | Some (Image_cells view) when state.image_open && not state.msx_open
+                  && view.ic_copy_path = Some path
+                  && view.ic_origin.sir_generation = origin.sir_generation ->
+                  Option.is_some (image_cell_origin_for_redraw state
+                    ~workspace:view.ic_workspace view.ic_origin)
+              | Some (Image_cells _ | Image_cells_withdrawn _) | None -> false in
+            if not (still_current ()) || image_cell_source_unconfirmed state origin then
+              report ~kind:Notice_failure ~status:"Source unconfirmed"
+                "Source is unconfirmed; reopen the image to open its link"
+            else if asynchronous_input_pending () then
+              report ~kind:Notice_failure ~status:"Opening cancelled"
+                "Opening cancelled while terminal input was pending"
+            else begin
+              let on_result result = if still_current () then match result with
+                | Masc_tui_browser.Opened opener ->
+                    report ~kind:Notice_reply ~status:"Opener accepted the request"
+                      (opener ^ " accepted the image request")
+                | Rejected detail -> report ~kind:Notice_failure ~status:"Opener could not start" ("Opener: " ^ detail)
+                | Uncertain detail -> report ~kind:Notice_failure ~status:"Opener result unknown"
+                    ("Opener outcome is unknown: " ^ detail) in
+              let use_alternate = key = "x" || key = "X" in
+              let target = if use_alternate then alternate else url in
+              let after = match use_alternate, last_open with
+                | true, Some (previous_target,opener) when String.equal previous_target target -> Some opener
+                | (true | false), (Some _ | None) -> None in
+              report ~kind:Notice_reply ~status:"Opening requested" "Opening the image target was requested";
+              match launch_image_opener ?after ~url:target
+                ~allow_start:(fun () -> still_current ()
+                  && not (image_cell_source_unconfirmed state origin)
+                  && not (asynchronous_input_pending ())) ~on_result () with
+              | Ok opener ->
+                  record_image_link_opener state ~path ~target opener;
+                  if String.equal target path then ignore (keep_pending_image_copy path)
+              | Error detail -> report ~kind:Notice_failure ~status:detail ("Opener: " ^ detail)
+            end;
+            true
+        | (Some (Image_cells _ | Image_cells_withdrawn _) | None),
+          (Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _
+                | Mouse_left_release _ | Mouse_wheel _) | None) -> false in
+      let input = if handled_image_copy then None else input in
       let dismissed_image =
         state.image_open && Option.exists Masc_tui_input_reader.is_operator_input input
       in

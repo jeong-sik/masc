@@ -10,7 +10,7 @@ let verdict_of_bytes bytes =
     | Ok media_type -> Known_image { media_type }
     | Error _ -> Unknown_signature
 
-let has_png_structure bytes =
+let has_png_structure ?(single_frame = false) bytes =
   let length = String.length bytes in
   let be32 offset =
     (Char.code bytes.[offset] lsl 24) lor (Char.code bytes.[offset+1] lsl 16)
@@ -24,6 +24,17 @@ let has_png_structure bytes =
     if first then kind="IHDR" && size=13 && chunks next false false
     else match kind with
       | "IHDR" -> false
+      | ("acTL" | "fcTL" | "fdAT") when single_frame -> false
+      (* Colour-cell fitting uses the stored dimensions. Defer metadata that
+         can alter their display orientation or pixel aspect to the original. *)
+      | "eXIf" when single_frame -> false
+      | ("tEXt" | "zTXt") when single_frame ->
+          let exif_keyword = "Raw profile type exif\000" in
+          not (size >= String.length exif_keyword
+               && String.sub bytes (offset+8) (String.length exif_keyword) = exif_keyword)
+          && chunks next false has_data
+      | "pHYs" when single_frame ->
+          size = 9 && be32 (offset+8) = be32 (offset+12) && chunks next false has_data
       | "IDAT" -> chunks next false (has_data || size > 0)
       | "IEND" -> size=0 && has_data && next=length
       | _ -> chunks next false has_data in
@@ -97,11 +108,14 @@ type download_error =
   | Fetch_failed of fetch_failure
   | Empty_body
   | Cache_unreadable of { detail : string }
+  | Cached_body_too_large of { max_bytes : int }
 
 let download_error_text = function
   | Fetch_failed failure -> "could not download the image: " ^ fetch_failure_text failure
   | Empty_body -> "the URL answered with an empty body"
   | Cache_unreadable { detail } -> "the cached image could not be read: " ^ detail
+  | Cached_body_too_large { max_bytes } ->
+      Printf.sprintf "the cached image exceeds the %d-byte preview limit" max_bytes
 
 type decode_failure =
   | Decoder_missing
@@ -177,7 +191,37 @@ let stop_subprocesses () =
 
 let () = at_exit stop_subprocesses
 
-let run_bounded ~deadline_seconds command =
+let bounded_command_environment () =
+  Unix.environment () |> Array.to_list |> List.filter (fun entry ->
+    match String.index_opt entry '=' with
+    | None -> false
+    | Some split ->
+        let name = String.sub entry 0 split in
+        let value = String.sub entry (split + 1) (String.length entry - split - 1) in
+        not (List.mem name ["BASH_ENV"; "ENV"; "SHELLOPTS"; "BASHOPTS"; "POSIXLY_CORRECT"])
+        && not (String.starts_with ~prefix:"BASH_FUNC_" name)
+        && not (String.starts_with ~prefix:"() {" value)) |> Array.of_list
+
+let run_bounded ?max_file_bytes ~deadline_seconds command =
+  let command = match max_file_bytes with
+    | None -> command
+    | Some bytes ->
+        (* Bash uses 1024-byte blocks outside POSIX mode on both supported
+           platforms. Set the hard limit too, so descendants inherit it. *)
+        if bytes <= 0 || bytes mod 1024 <> 0 then
+          invalid_arg "max_file_bytes must be a positive multiple of 1024";
+        let script = Printf.sprintf
+          "builtin set +o posix || exit 1; \
+           masc_limit_current=$(builtin ulimit -S -f) || exit 1; \
+           case \"$masc_limit_current\" in \
+           unlimited) masc_limit_blocks=%d ;; \
+           ''|*[!0-9]*) exit 1 ;; \
+           *) if [ \"$masc_limit_current\" -lt %d ]; then \
+                masc_limit_blocks=$masc_limit_current; \
+              else masc_limit_blocks=%d; fi ;; esac; \
+           builtin ulimit -f \"$masc_limit_blocks\" && exec %s"
+          (bytes / 1024) (bytes / 1024) (bytes / 1024) command in
+        "/bin/bash -c " ^ Filename.quote script in
   (* Standard input, output and error are the null device: a decoder that
      reads a terminal would take the keys the operator is typing, and one that
      writes to it would draw over the screen. *)
@@ -190,7 +234,11 @@ let run_bounded ~deadline_seconds command =
          Mutex.lock subprocess_mutex;
          Fun.protect ~finally:(fun () -> Mutex.unlock subprocess_mutex) (fun () ->
            if !subprocess_stopping then None else
-           let pid = Unix.create_process "/bin/sh" [| "sh"; "-c"; "exec " ^ command |] null null null in
+           let args = [| "sh"; "-c"; "exec " ^ command |] in
+           let pid = match max_file_bytes with
+             | None -> Unix.create_process "/bin/sh" args null null null
+             | Some _ -> Unix.create_process_env "/bin/sh" args
+                 (bounded_command_environment ()) null null null in
            let cancelled = Atomic.make false in
            subprocesses := (pid,cancelled) :: !subprocesses;
            Some (pid,cancelled)) in
@@ -214,9 +262,38 @@ let run_bounded ~deadline_seconds command =
 
 let discard path = try Sys.remove path with Sys_error _ -> ()
 
-let read_bytes path =
-  try Ok (In_channel.with_open_bin path In_channel.input_all)
-  with Sys_error detail -> Error detail
+type bounded_read_error = Read_too_large | Read_unavailable of string
+
+let read_bounded_bytes ~max_bytes path =
+  try
+    let descriptor = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+      if (Unix.fstat descriptor).Unix.st_kind <> Unix.S_REG then
+        Error (Read_unavailable "not a regular file")
+      else
+        let buffer = Buffer.create (min max_bytes 65536) in
+        let chunk = Bytes.create 65536 in
+        let rec read () =
+          let remaining = max_bytes + 1 - Buffer.length buffer in
+          if remaining = 0 then Error Read_too_large
+          else match Unix.read descriptor chunk 0 (min remaining (Bytes.length chunk)) with
+            | 0 -> Ok (Buffer.contents buffer)
+            | count -> Buffer.add_subbytes buffer chunk 0 count; read ()
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> read () in
+        read ())
+  with
+  | Sys_error detail -> Error (Read_unavailable detail)
+  | Unix.Unix_error (error,_,_) -> Error (Read_unavailable (Unix.error_message error))
+
+let read_bytes ?max_bytes path =
+  match max_bytes with
+  | None ->
+      (try Ok (In_channel.with_open_bin path In_channel.input_all)
+       with Sys_error detail -> Error detail)
+  | Some max_bytes ->
+      Result.map_error (function
+        | Read_too_large -> Printf.sprintf "image exceeds the %d-byte preview limit" max_bytes
+        | Read_unavailable detail -> detail) (read_bounded_bytes ~max_bytes path)
 
 let input_path ~cache_dir url =
   Filename.concat cache_dir ("img_" ^ Digest.to_hex (Digest.string url))
@@ -286,16 +363,26 @@ let with_download_snapshot ~cache_dir (Download bytes) f =
         with Sys_error detail -> Error detail in
       Result.map (fun () -> f path) written)
 
-let download ?(force_fetch = false) ~run ~cache_dir url =
+let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
   let target = input_path ~cache_dir url in
   let judge bytes = verdict_of_bytes bytes in
   let read_cached () =
-    match read_bytes target with
-    | Error detail -> discard target; Error (Cache_unreadable { detail })
+    let reading = match max_bytes with
+      | None -> Result.map_error (fun detail -> Cache_unreadable { detail }) (read_bytes target)
+      | Some max_bytes -> Result.map_error (function
+          | Read_too_large -> Cached_body_too_large { max_bytes }
+          | Read_unavailable detail -> Cache_unreadable { detail })
+          (read_bounded_bytes ~max_bytes target) in
+    match reading with
+    | Error error ->
+        if Option.is_none max_bytes then discard target;
+        Error error
     | Ok bytes ->
       match judge bytes with
       | Known_image _ | Unknown_signature -> Ok (Download bytes)
-      | Empty -> discard target; Error Empty_body
+      | Empty ->
+          if Option.is_none max_bytes then discard target;
+          Error Empty_body
   in
   let fetch () =
     match attempt_path ~cache_dir ~prefix:"dl_" ~suffix:".part" with
@@ -311,30 +398,36 @@ let download ?(force_fetch = false) ~run ~cache_dir url =
           match fetch_failure_of_status status ~body_present:(Sys.file_exists attempt) with
           | Some failure -> Error (Fetch_failed failure)
           | None ->
-            match read_bytes attempt with
+            match read_bytes ?max_bytes attempt with
             | Error detail -> Error (Cache_unreadable { detail })
             | Ok bytes ->
               match judge bytes with
               | Empty -> Error Empty_body
               | Known_image _ | Unknown_signature ->
-                let result = publish ~attempt ~target in
-                owns_attempt := false;
-                match result with
-                | Ok _ -> Ok (Download bytes)
-                | Error detail -> Error (Cache_unreadable { detail }))
+                if Option.is_some max_bytes then Ok (Download bytes)
+                else begin
+                  let result = publish ~attempt ~target in
+                  owns_attempt := false;
+                  match result with
+                  | Ok _ -> Ok (Download bytes)
+                  | Error detail -> Error (Cache_unreadable { detail })
+                end)
   in
   if not force_fetch && Sys.file_exists target then
-    match read_cached () with Ok body -> Ok body | Error _ -> fetch ()
+    match read_cached () with
+    | Ok body -> Ok body
+    | Error (Cached_body_too_large _ as error) -> Error error
+    | Error (Fetch_failed _ | Empty_body | Cache_unreadable _) -> fetch ()
   else fetch ()
 
-let collect_decoder_bytes ~run ~output_path command =
+let collect_decoder_bytes ?max_bytes ~run ~output_path command =
   match run_checked ~run command with
   | Error failure -> Error (Decoder_runner_failed failure)
   | Ok status ->
     match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
     | Some failure -> Error failure
     | None ->
-      match read_bytes output_path with
+      match read_bytes ?max_bytes output_path with
       | Error detail -> Error (Frame_unreadable { detail })
       | Ok "" -> Error No_frame_written
       | Ok bytes -> Ok bytes
@@ -432,25 +525,184 @@ let cached_downloaded_frame ~prefix path =
         | Some _ | None -> None)
   with Sys_error _ | End_of_file -> None
 
+(* Admit one supported JPEG frame header and scan through EOI. A second SOF,
+   including one after a progressive scan, must not give the decoder a larger
+   frame than the dimensions already checked by the caller. *)
+let has_bounded_jpeg_structure ~width ~height bytes =
+  let length=String.length bytes in
+  let byte offset=Char.code bytes.[offset] in
+  let be16 offset=(byte offset lsl 8) lor byte (offset+1) in
+  let valid=ref (String.starts_with ~prefix:"\xff\xd8" bytes) in
+  let position=ref 2 and in_scan=ref false and seen_frame=ref false
+  and seen_scan=ref false and finished=ref false in
+  while !valid && not !finished do
+    if !position >= length then valid := false
+    else if !in_scan && byte !position <> 0xff then incr position
+    else if byte !position <> 0xff then valid := false
+    else begin
+      while !position < length && byte !position = 0xff do incr position done;
+      if !position >= length then valid := false
+      else begin
+        let marker=byte !position in
+        incr position;
+        if !in_scan && (marker = 0x00 || (marker >= 0xd0 && marker <= 0xd7)) then ()
+        else if marker = 0xd9 then begin
+          if !seen_frame && !seen_scan then finished := true else valid := false
+        end
+        else if marker = 0x00 || marker = 0xd8 || marker = 0x01
+             || (marker >= 0xd0 && marker <= 0xd7) then valid := false
+        else if !position > length - 2 then valid := false
+        else begin
+          let segment=be16 !position in
+          if segment < 2 || segment > length - !position then valid := false
+          else begin
+            let is_frame = marker >= 0xc0 && marker <= 0xcf
+              && marker <> 0xc4 && marker <> 0xc8 && marker <> 0xcc in
+            if is_frame then begin
+              if !seen_frame || (marker <> 0xc0 && marker <> 0xc1 && marker <> 0xc2)
+                 || segment < 8 || byte (!position+2) <> 8
+                 || be16 (!position+3) <> height || be16 (!position+5) <> width
+                 || byte (!position+7) = 0 || byte (!position+7) > 4
+                 || segment <> 8 + (3 * byte (!position+7))
+              then valid := false
+              else seen_frame := true
+            end else if marker <> 0xc4 && marker <> 0xdb && marker <> 0xdd
+              && marker <> 0xda && marker <> 0xfe && not (marker >= 0xe0 && marker <= 0xef)
+            then valid := false;
+            if marker = 0xe0 && segment >= 7
+               && String.sub bytes (!position+2) 5 = "JFIF\000"
+               && (segment < 16 || be16 (!position+10) <> be16 (!position+12))
+            then valid := false;
+            if marker = 0xda then begin
+              if not !seen_frame || segment < 6 || byte (!position+2) = 0
+                 || byte (!position+2) > 4
+                 || segment <> 6 + (2 * byte (!position+2))
+              then valid := false;
+              (* A decoder recovering from a malformed scan header can
+                 interpret an embedded marker before the declared end. *)
+              for index = !position + 2 to !position + segment - 1 do
+                if byte index = 0xff then valid := false
+              done;
+              seen_scan := true;
+              in_scan := true
+            end else in_scan := false;
+            position := !position + segment
+          end
+        end
+      end
+    end
+  done;
+  !valid && !finished && !position = length
+
+(* GIF89a image descriptors must fit the logical screen. Check every frame,
+   not just the canvas dimensions, before the decoder sees the stream.
+   https://giflib.sourceforge.net/gifstandard/GIF89a.html *)
+let has_bounded_gif_structure ~width ~height bytes =
+  let length = String.length bytes in
+  let valid = ref (length >= 13 &&
+    (String.starts_with ~prefix:"GIF87a" bytes || String.starts_with ~prefix:"GIF89a" bytes)
+    && (Char.code bytes.[12] = 0 || Char.code bytes.[12] = 49)) in
+  let position = ref 13 and found_image = ref false and finished = ref false in
+  let byte offset = Char.code bytes.[offset] in
+  let le16 offset = byte offset lor (byte (offset + 1) lsl 8) in
+  let skip count =
+    if count < 0 || !position > length - count then valid := false
+    else position := !position + count in
+  let skip_table packed =
+    if packed land 0x80 <> 0 then skip (3 * (1 lsl ((packed land 7) + 1))) in
+  let skip_subblocks () =
+    let ended = ref false in
+    while !valid && not !ended do
+      if !position >= length then valid := false
+      else begin
+        let size = byte !position in
+        incr position;
+        if size = 0 then ended := true else skip size
+      end
+    done in
+  if !valid then skip_table (byte 10);
+  while !valid && not !finished do
+    if !position >= length then valid := false
+    else match byte !position with
+    | 0x3b -> incr position; finished := true
+    | 0x21 ->
+        if !position > length - 2 then valid := false
+        else begin
+          let label = byte (!position + 1) in
+          (* Plain-text and unknown extensions can contain their own graphics
+             dimensions; do not guess how a decoder will allocate for them. *)
+          if label <> 0xf9 && label <> 0xfe && label <> 0xff then valid := false
+          else begin skip 2; if !valid then skip_subblocks () end
+        end
+    | 0x2c ->
+        if !position > length - 10 then valid := false
+        else begin
+          let left=le16 (!position + 1) and top=le16 (!position + 3) in
+          let frame_width=le16 (!position + 5) and frame_height=le16 (!position + 7) in
+          let packed=byte (!position + 9) in
+          if frame_width <= 0 || frame_height <= 0 || frame_width > width || frame_height > height
+             || left > width - frame_width || top > height - frame_height then valid := false
+          else begin
+            found_image := true;
+            skip 10;
+            skip_table packed;
+            skip 1;
+            if !valid then skip_subblocks ()
+          end
+        end
+    | _ -> valid := false
+  done;
+  !valid && !found_image && !finished && !position = length
+
+(* Bound encoded input and declared pixels before invoking the colour-cell
+   decoder. This does not bound every allocation the decoder makes. *)
+let check_bounded_image ~max_bytes bytes =
+  if String.length bytes > max_bytes then
+    Error (Printf.sprintf "image exceeds the %d-byte preview limit" max_bytes)
+  else match verdict_of_bytes bytes, Masc.Keeper_image_dimensions.image_dimensions bytes with
+    | Known_image {media_type="image/png"}, Some (width,height)
+        when has_png_structure ~single_frame:true bytes
+          && width > 0 && height > 0 && width <= (max_bytes / 4) / height -> Ok ()
+    | Known_image {media_type="image/jpeg"}, Some (width,height)
+        when width > 0 && height > 0 && width <= (max_bytes / 4) / height
+          && has_bounded_jpeg_structure ~width ~height bytes -> Ok ()
+    | Known_image {media_type="image/gif"}, Some (width,height)
+        when width > 0 && height > 0 && width <= (max_bytes / 4) / height
+          && has_bounded_gif_structure ~width ~height bytes -> Ok ()
+    | (Known_image _ | Unknown_signature | Empty), (Some _ | None) ->
+        Error "bounded colour preview requires a supported image within the image limit"
+
+let prepare_downloaded_png ~run ~cache_dir ~url body =
+    let bytes = download_bytes body in
+    match verdict_of_bytes bytes with
+    | Known_image { media_type = "image/png" } -> Ok bytes
+    | Known_image _ | Unknown_signature | Empty ->
+      let target = downloaded_frame_path ~cache_dir url in
+      let prefix = downloaded_frame_prefix bytes in
+      let cached = cached_downloaded_frame ~prefix target in
+      match cached with
+      | Some frame -> Ok frame
+      | None ->
+        Result.bind (with_download_snapshot ~cache_dir body (fun input ->
+          let encode frame = [prefix; string_of_int (String.length frame); "\n"; frame] in
+          match convert_and_publish ~run ~cache_dir ~target ~encode input with
+          | Ok frame -> Ok frame
+          | Error failures -> Error (conversion_failure_text failures))) Fun.id
+
 let prepare_png ~run ~cache_dir url =
   match download ~run ~cache_dir url with
   | Error error -> Error (download_error_text error)
-  | Ok body ->
-    let bytes = download_bytes body in
-      match verdict_of_bytes bytes with
-      | Known_image { media_type = "image/png" } -> Ok bytes
-      | Known_image _ | Unknown_signature | Empty ->
-        let target = downloaded_frame_path ~cache_dir url in
-        let prefix = downloaded_frame_prefix bytes in
-        let cached = cached_downloaded_frame ~prefix target in
-        match cached with
-        | Some frame -> Ok frame
-        | None ->
-          Result.bind (with_download_snapshot ~cache_dir body (fun input ->
-            let encode frame = [prefix; string_of_int (String.length frame); "\n"; frame] in
-            match convert_and_publish ~run ~cache_dir ~target ~encode input with
-            | Ok frame -> Ok frame
-            | Error failures -> Error (conversion_failure_text failures))) Fun.id
+  | Ok body -> prepare_downloaded_png ~run ~cache_dir ~url body
+
+let prepare_captured_png ~run ~cache_dir bytes =
+  match verdict_of_bytes bytes with
+  | Empty -> Error "image payload is empty"
+  | Known_image {media_type="image/png"} -> Ok bytes
+  | Known_image _ | Unknown_signature ->
+      Result.bind (with_download_snapshot ~cache_dir (Download bytes) (fun input ->
+        convert_frame ~run ~cache_dir input
+        |> Result.map (fun (_,_,frame) -> frame)
+        |> Result.map_error conversion_failure_text)) Fun.id
 
 let prepare_payload ~run ~cache_dir bytes =
   match verdict_of_bytes bytes with
@@ -485,35 +737,160 @@ type presentation =
   | Png of string
   | Rgba of { columns : int; pixel_rows : int; bytes : string }
 
-let prepare_presentation ~run ~cache_dir display png =
+type captured_copy = { path : string; openable : bool }
+
+let captured_copy_mutex = Mutex.create ()
+type pending_copy = { copy : captured_copy; mutable discarded : bool }
+let pending_copies : pending_copy list ref = ref []
+let captured_copy_stopping = ref false
+
+let with_captured_copy_lock f =
+  Mutex.lock captured_copy_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock captured_copy_mutex) f
+
+(* This runs on the cleanup worker, not the terminal fiber. A failed unlink stays
+   registered for another attempt during shutdown. *)
+let cleanup_discarded_copies () =
+  let copies = with_captured_copy_lock (fun () ->
+    List.filter (fun entry -> entry.discarded) !pending_copies) in
+  List.iter (fun entry ->
+    let removed = try Unix.unlink entry.copy.path; true with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> true
+      | Unix.Unix_error _ -> false in
+    if removed then with_captured_copy_lock (fun () ->
+      pending_copies := List.filter (fun current -> current != entry) !pending_copies)) copies
+
+let save_captured_copy ~directory bytes =
+  let suffix, openable = match verdict_of_bytes bytes with
+    | Known_image {media_type="image/png"} -> ".png", true
+    | Known_image {media_type="image/jpeg"} -> ".jpg", true
+    | Known_image {media_type="image/gif"} -> ".gif", true
+    | Known_image {media_type="image/webp"} -> ".webp", true
+    | Known_image _ | Unknown_signature | Empty -> ".bin", false in
+  if with_captured_copy_lock (fun () -> !captured_copy_stopping) then
+    Error "image copy worker is stopping"
+  else match Filename.open_temp_file ~mode:[Open_binary] ~perms:0o600
+      ~temp_dir:directory "masc-image-" suffix with
+    | exception Sys_error detail -> Error detail
+    | path, channel ->
+        let handed_off = ref false in
+        Fun.protect ~finally:(fun () ->
+          close_out_noerr channel;
+          if not !handed_off then discard path) (fun () ->
+          try
+            Out_channel.output_string channel bytes;
+            Out_channel.close channel;
+            let copy = {path;openable} in
+            let registered = with_captured_copy_lock (fun () ->
+              if !captured_copy_stopping then false
+              else begin
+                pending_copies := {copy;discarded=false} :: !pending_copies;
+                true
+              end) in
+            if registered then begin handed_off := true; Ok copy end
+            else Error "image copy worker is stopping"
+          with Sys_error detail -> Error detail)
+
+let retain_captured_copy copy =
+  with_captured_copy_lock (fun () ->
+    match List.find_opt (fun pending -> pending.copy == copy && not pending.discarded) !pending_copies with
+    | Some entry ->
+        pending_copies := List.filter (fun pending -> pending != entry) !pending_copies;
+        true
+    | None -> false)
+
+let discard_captured_copy copy =
+  with_captured_copy_lock (fun () ->
+    List.iter (fun pending -> if pending.copy == copy then pending.discarded <- true) !pending_copies)
+
+let stop_captured_copies () =
+  let pending = with_captured_copy_lock (fun () ->
+    captured_copy_stopping := true;
+    let pending = !pending_copies in
+    pending_copies := [];
+    pending) in
+  List.iter (fun entry -> discard entry.copy.path) pending
+
+let () = at_exit stop_captured_copies
+
+let limit_cell_grid ~max_cells (columns, pixel_rows) =
+  if columns <= 0 || pixel_rows <= 1 || columns <= max_cells / (pixel_rows / 2) then
+    columns, pixel_rows
+  else
+    let scale = sqrt (float_of_int max_cells /.
+      (float_of_int columns *. float_of_int (pixel_rows / 2))) in
+    let columns = min max_cells (max 1 (int_of_float (float_of_int columns *. scale))) in
+    let pixel_rows = max 2 (int_of_float (float_of_int pixel_rows *. scale) land lnot 1) in
+    columns, 2 * min (pixel_rows / 2) (max_cells / columns)
+
+(* FFmpeg's own pixel guard also applies when its decoder sees dimensions that
+   differ from a preliminary header read. It does not bound total memory. *)
+let ffmpeg_decode_limits = function
+  | None -> ""
+  | Some bytes ->
+      Printf.sprintf "-max_pixels %d -threads 1 " (bytes / 4)
+
+(* ffmpeg applies EXIF orientation when it decodes a JPEG. Measure the
+   oriented frame, rather than the pre-orientation SOF, before fitting it to
+   terminal cells. The original source has already passed the JPEG admission
+   check, and both the private output and its dimensions are checked again. *)
+let normalize_bounded_jpeg ~run ~cache_dir ~max_bytes source =
+  let open Result.Syntax in
+  Result.bind (with_download_snapshot ~cache_dir (Download source) (fun input ->
+    let* output = attempt_path ~cache_dir ~prefix:"oriented_image_" ~suffix:".png" in
+    Fun.protect ~finally:(fun () -> discard output) (fun () ->
+      let command = Printf.sprintf
+        "ffmpeg -v error -nostdin -y %s-i %s -frames:v 1 -f image2 -c:v png %s >/dev/null 2>&1"
+        (ffmpeg_decode_limits (Some max_bytes)) (Filename.quote input) (Filename.quote output) in
+      let* png = Result.map_error decode_failure_text
+        (collect_decoder_bytes ~max_bytes ~run ~output_path:output command) in
+      let* () = check_bounded_image ~max_bytes png in
+      match verdict_of_bytes png with
+      | Known_image {media_type="image/png"} -> Ok png
+      | Known_image _ | Unknown_signature | Empty -> Error "image decoder did not return PNG"))) Fun.id
+
+let prepare_presentation ?max_bytes ?max_cells ~run ~cache_dir display source =
   match display with
-  | Pixel_graphics -> Ok (Png png)
+  | Pixel_graphics -> Ok (Png source)
   | Character_cells {columns;rows} ->
     let open Result.Syntax in
+    let* () = match max_bytes with
+      | None -> Ok ()
+      | Some max_bytes -> check_bounded_image ~max_bytes source in
+    let* source = match max_bytes, verdict_of_bytes source with
+      | Some max_bytes, Known_image {media_type="image/jpeg"} ->
+          normalize_bounded_jpeg ~run ~cache_dir ~max_bytes source
+      | (Some _ | None), (Known_image _ | Unknown_signature | Empty) -> Ok source in
     let* width, height =
-      match verdict_of_bytes png, Masc.Keeper_image_dimensions.image_dimensions png with
-      | Known_image {media_type="image/png"}, Some (width,height)
+      match verdict_of_bytes source, Masc.Keeper_image_dimensions.image_dimensions source with
+      | Known_image {media_type=("image/png" | "image/jpeg" | "image/gif")}, Some (width,height)
         when width > 0 && height > 0 -> Ok (width,height)
       | (Known_image _ | Unknown_signature | Empty), (Some _ | None) ->
-        Error "character image preview requires a PNG with valid dimensions" in
+        Error "character image preview requires a supported image with valid dimensions" in
     let columns, pixel_rows = Masc_tui_image_mosaic.fit_grid
       ~src_w:width ~src_h:height ~max_cols:columns ~max_rows:(rows * 2) in
+    let columns, pixel_rows = match max_cells with
+      | None -> columns, pixel_rows
+      | Some limit when limit > 0 -> limit_cell_grid ~max_cells:limit (columns, pixel_rows)
+      | Some _ -> 0, 0 in
     if columns <= 0 || pixel_rows <= 0 then Error "no room for the image preview"
+    else if Option.exists (fun limit -> columns > (limit / 4) / pixel_rows) max_bytes then
+      Error "terminal image dimensions exceed the colour preview limit"
     else
-      let* input = attempt_path ~cache_dir ~prefix:"cell_image_" ~suffix:".png" in
+      let* input = attempt_path ~cache_dir ~prefix:"cell_image_" ~suffix:".img" in
       Fun.protect ~finally:(fun () -> discard input) (fun () ->
         let* output = attempt_path ~cache_dir ~prefix:"cell_frame_" ~suffix:".rgba" in
         Fun.protect ~finally:(fun () -> discard output) (fun () ->
           let* () =
-            try Out_channel.with_open_bin input (fun oc -> Out_channel.output_string oc png); Ok ()
+            try Out_channel.with_open_bin input (fun oc -> Out_channel.output_string oc source); Ok ()
             with Sys_error detail -> Error detail in
           let command = Printf.sprintf
-            "ffmpeg -v error -nostdin -y -i %s -vf scale=%d:%d -frames:v 1 -f rawvideo -pix_fmt rgba %s >/dev/null 2>&1"
-            (Filename.quote input) columns pixel_rows (Filename.quote output) in
+            "ffmpeg -v error -nostdin -y %s-i %s -vf scale=%d:%d -frames:v 1 -f rawvideo -pix_fmt rgba %s >/dev/null 2>&1"
+            (ffmpeg_decode_limits max_bytes) (Filename.quote input) columns pixel_rows (Filename.quote output) in
           (* [output] is an exclusively reserved empty file. Keep the name
              occupied until this attempt finishes and read its bytes once. *)
           let* bytes = Result.map_error decode_failure_text
-            (collect_decoder_bytes ~run ~output_path:output command) in
+            (collect_decoder_bytes ?max_bytes ~run ~output_path:output command) in
           if String.length bytes <> columns * pixel_rows * 4 then
             Error "image decoder returned an incomplete or unexpected RGBA frame"
           else Ok (Rgba {columns;pixel_rows;bytes})))
@@ -521,30 +898,62 @@ let prepare_presentation ~run ~cache_dir display png =
 type remote_image =
   | Remote_unfetched
   | Remote_png of string
-  | Remote_cells of { png : string; cells : (presentation, string) result }
+  | Remote_native of { source : string; png : string }
+  | Remote_bounded_source of string
+  | Remote_cells of { source : string; cells : (presentation, string) result }
   | Remote_busy of string option
+  | Remote_bounded_failure of string
+  | Remote_native_failed of { source : string; detail : string }
+  | Remote_copy_ready of { copy : captured_copy; reason : string; requested_save : bool }
+  | Remote_copy_failed of { source : string; reason : string; detail : string; requested_save : bool }
 
 type remote_action =
   | Fetch_remote
   | Prepare_remote_cells of string
+  | Prepare_native_source of string
   | Draw_remote_png of string
-  | Draw_remote_cells of { png : string; cells : presentation }
-  | Open_remote_page of string
+  | Draw_remote_cells of { source : string; cells : presentation }
+  | Open_remote_page of { reason : string; source : string option }
+  | Open_remote_copy of { copy : captured_copy; reason : string; requested_save : bool }
+  | Hold_remote_source of { source : string; reason : string; detail : string; requested_save : bool }
+
+let native_source_action source =
+  match verdict_of_bytes source with
+  | Known_image {media_type="image/png"} -> Draw_remote_png source
+  | Known_image _ | Unknown_signature | Empty -> Prepare_native_source source
 
 let decide_remote ~graphics ~colour image =
   match graphics, colour, image with
+  | (None | Some true | Some false), (true | false), Remote_copy_ready {copy;reason;requested_save} ->
+      Open_remote_copy {copy;reason;requested_save}
+  | (None | Some true | Some false), (true | false), Remote_copy_failed {source;reason;detail;requested_save} ->
+      Hold_remote_source {source;reason;detail;requested_save}
   | (None | Some true), (true | false), Remote_unfetched -> Fetch_remote
-  | (None | Some true), (true | false), (Remote_png png | Remote_cells {png;_}) ->
-      Draw_remote_png png
-  | (None | Some true), (true | false), Remote_busy (Some png) -> Draw_remote_png png
+  | (None | Some true), (true | false), Remote_bounded_failure _ -> Fetch_remote
+  | (None | Some true), (true | false), Remote_png png -> Draw_remote_png png
+  | (None | Some true), (true | false), Remote_native {png;_} -> Draw_remote_png png
+  | (None | Some true), (true | false),
+    (Remote_bounded_source source | Remote_cells {source;_} | Remote_busy (Some source)) ->
+      native_source_action source
+  | (None | Some true), (true | false), Remote_native_failed {source;detail} ->
+      Open_remote_page {reason=detail;source=Some source}
   | (None | Some true), (true | false), Remote_busy None ->
-      Open_remote_page "another image is still preparing"
-  | Some false, false, (Remote_unfetched | Remote_png _ | Remote_cells _ | Remote_busy _) ->
-      Open_remote_page "terminal does not support pixel or colour-cell images"
+      Open_remote_page {reason="another image is still preparing";source=None}
+  | Some false, false, (Remote_png source | Remote_bounded_source source
+      | Remote_cells {source;_} | Remote_busy (Some source) | Remote_native_failed {source;_}
+      | Remote_native {source;_}) ->
+      Open_remote_page {reason="terminal does not support pixel or colour-cell images";source=Some source}
+  | Some false, false, (Remote_unfetched | Remote_busy None | Remote_bounded_failure _) ->
+      Open_remote_page {reason="terminal does not support pixel or colour-cell images";source=None}
   | Some false, true, Remote_unfetched -> Fetch_remote
-  | Some false, true, Remote_png png -> Prepare_remote_cells png
-  | Some false, true, Remote_cells {png;cells=Ok (Rgba _ as cells)} -> Draw_remote_cells {png;cells}
-  | Some false, true, Remote_cells {cells=Ok (Png _);_} ->
-      Open_remote_page "colour-cell renderer did not return a character frame"
-  | Some false, true, Remote_cells {cells=Error detail;_} -> Open_remote_page detail
-  | Some false, true, Remote_busy _ -> Open_remote_page "another image is still preparing"
+  | Some false, true, (Remote_png source | Remote_bounded_source source
+      | Remote_native_failed {source;_} | Remote_native {source;_}) ->
+      Prepare_remote_cells source
+  | Some false, true, Remote_cells {source;cells=Ok (Rgba _ as cells)} -> Draw_remote_cells {source;cells}
+  | Some false, true, Remote_cells {source;cells=Ok (Png _)} ->
+      Open_remote_page {reason="colour-cell renderer did not return a character frame";source=Some source}
+  | Some false, true, Remote_cells {source;cells=Error detail} ->
+      Open_remote_page {reason=detail;source=Some source}
+  | Some false, true, Remote_busy source ->
+      Open_remote_page {reason="another image is still preparing";source}
+  | Some false, true, Remote_bounded_failure detail -> Open_remote_page {reason=detail;source=None}

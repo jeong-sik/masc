@@ -306,34 +306,64 @@ let lift_enabled = ref true
 let set_lift_enabled value = lift_enabled := value
 let lift_is_enabled () = !lift_enabled
 
-let ansi_readable_for ~colors_enabled ~project palette color =
+type contrast_fallback = Keep_ansi | Default_foreground
+
+let ansi_readable_with_fallback ~fallback ~colors_enabled ~project palette color =
   let code = ansi_color_code color in
+  let fallback_code () =
+    match fallback with
+    | Keep_ansi -> code
+    | Default_foreground -> style_for ~colors_enabled "\027[39m"
+  in
+  let acceptable color background =
+    match fallback with
+    | Keep_ansi -> true
+    | Default_foreground ->
+      Color.contrast_ratio color background >= status_contrast_floor
+  in
   (* Off means the scheme's own colour goes out untouched -- what every other
      terminal UI does, and what a reader on a high-contrast scheme asked for
      by picking one. *)
-  if (not colors_enabled) || not !lift_enabled then code
+  if not colors_enabled then ""
+  else if not !lift_enabled then code
   else
     match palette with
-    | None -> code
+    | None -> fallback_code ()
     | Some palette -> (
       match Terminal_palette.ansi palette (ansi_color_index color) with
-      | None -> code
+      | None -> fallback_code ()
       | Some entry ->
         let background = Terminal_palette.background palette in
         let lifted =
           Color.lift_for_contrast ~background ~floor:status_contrast_floor
             entry
         in
-        if lifted = entry then code
+        if lifted = entry then
+          if acceptable entry background then code else fallback_code ()
         else
           (match project lifted with
-           | None -> code
-           | Some _ as projected ->
-             projected_foreground ~colors_enabled projected))
+           | None -> fallback_code ()
+           | Some projected ->
+             if acceptable (Terminal_palette.projected_rgb projected) background
+             then projected_foreground ~colors_enabled (Some projected)
+             else fallback_code ()))
+;;
+
+let ansi_readable_for ~colors_enabled ~project palette color =
+  ansi_readable_with_fallback ~fallback:Keep_ansi ~colors_enabled ~project
+    palette color
 ;;
 
 let status_readable_for ~colors_enabled ~project palette state =
   ansi_readable_for ~colors_enabled ~project palette (status_ansi_color state)
+;;
+
+(* For labels whose words already identify the state, keep them readable even
+   when an ANSI entry is unknown or its projected colour misses the floor.
+   Colour-only distinctions continue to use [status_readable_for]. *)
+let status_text_readable_for ~colors_enabled ~project palette state =
+  ansi_readable_with_fallback ~fallback:Default_foreground ~colors_enabled
+    ~project palette (status_ansi_color state)
 ;;
 
 module For_testing = struct
@@ -345,6 +375,7 @@ module For_testing = struct
   let ansi_color_index = ansi_color_index
   let ansi_color_code = ansi_color_code
   let ansi_readable = ansi_readable_for
+  let status_text_readable = status_text_readable_for
 end
 
 let ansi_readable palette color =
@@ -354,6 +385,11 @@ let ansi_readable palette color =
 
 let status_readable palette state =
   status_readable_for ~colors_enabled ~project:Terminal_palette.best_color
+    palette state
+;;
+
+let status_text_readable palette state =
+  status_text_readable_for ~colors_enabled ~project:Terminal_palette.best_color
     palette state
 ;;
 

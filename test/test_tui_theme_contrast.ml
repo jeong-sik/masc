@@ -530,6 +530,63 @@ let test_the_setting_reads_back () =
       check bool "on reads back as on" true (Masc_tui_theme.lift_is_enabled ()))
 ;;
 
+let test_status_text_uses_foreground_when_colour_is_unverified () =
+  let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+  let background = rgb 249 249 247 in
+  let foreground = rgb 28 28 28 in
+  let slots = Array.make Palette.ansi_slot_count None in
+  let palette () = Palette.of_responses ~foreground:(Some foreground)
+      ~background:(Some background) ~ansi:slots in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  let text ~colors_enabled ~level palette =
+    Masc_tui_theme.For_testing.status_text_readable ~colors_enabled
+      ~project:(project level) palette Masc_tui_theme.Info in
+  let default_foreground = "\027[39m" in
+  let cyan = Masc_tui_theme.Bright_cyan in
+  let ansi = Masc_tui_theme.For_testing.ansi_color_code cyan in
+  with_lift true (fun () ->
+      check string "no palette uses the terminal foreground" default_foreground
+        (text ~colors_enabled:true ~level:Palette.True_color None);
+      check string "unknown slot uses the terminal foreground" default_foreground
+        (text ~colors_enabled:true ~level:Palette.True_color (palette ()));
+      check string "NO_COLOR emits no colour" ""
+        (text ~colors_enabled:false ~level:Palette.True_color None);
+      check string "colour-only tokens keep their existing fallback" ansi
+        (Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
+           ~project:(project Palette.True_color) None cyan);
+      slots.(Masc_tui_theme.For_testing.ansi_color_index cyan) <- Some (rgb 52 226 226);
+      let measured = palette () in
+      let lifted = text ~colors_enabled:true ~level:Palette.True_color measured in
+      check bool "a verified truecolour lift retains colour" true
+        (String.starts_with ~prefix:truecolor_prefix lifted);
+      check string "256-colour projection below the floor uses the foreground"
+        default_foreground (text ~colors_enabled:true ~level:Palette.Ansi256 measured);
+      check string "an unavailable projection uses the foreground"
+        default_foreground (text ~colors_enabled:true ~level:Palette.Ansi16 measured);
+      slots.(Masc_tui_theme.For_testing.ansi_color_index cyan) <- Some (rgb 0 100 100);
+      check string "an already readable palette entry keeps its colour" ansi
+        (text ~colors_enabled:true ~level:Palette.True_color (palette ())));
+  with_lift false (fun () ->
+      check string "explicit lift off keeps the requested ANSI colour" ansi
+        (text ~colors_enabled:true ~level:Palette.True_color None))
+;;
+
+let test_status_text_cache_follows_lift_setting () =
+  let previous_palette = Palette.current () in
+  Fun.protect
+    ~finally:(fun () -> Palette.set_current previous_palette)
+    (fun () ->
+      Palette.set_current None;
+      with_lift true (fun () ->
+          check string "lift on uses the terminal foreground"
+            Masc_tui_theme.Sgr.default_fg
+            (Masc_tui_ansi.Theme.text_status Masc_tui_theme.Info);
+          with_lift false (fun () ->
+              check string "lift off takes effect without a palette change"
+                (Masc_tui_theme.For_testing.ansi_color_code Masc_tui_theme.Bright_cyan)
+                (Masc_tui_ansi.Theme.text_status Masc_tui_theme.Info))))
+;;
+
 let test_picker_orders_native_first_then_by_cost_and_name () =
   let entries = Masc_tui_theme_choice.entries () in
   let expected =
@@ -723,6 +780,10 @@ let () =
             test_lift_on_still_replaces_a_failing_entry
         ; Alcotest.test_case "the setting reads back" `Quick
             test_the_setting_reads_back
+        ; Alcotest.test_case "unverified status text uses the foreground" `Quick
+            test_status_text_uses_foreground_when_colour_is_unverified
+        ; Alcotest.test_case "status text cache follows the lift setting" `Quick
+            test_status_text_cache_follows_lift_setting
         ; Alcotest.test_case "picker orders native first, then cost and name"
             `Quick test_picker_orders_native_first_then_by_cost_and_name
         ] )

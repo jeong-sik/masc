@@ -1644,11 +1644,11 @@ let connection_status_parts (status : Masc_tui_types.connection_status) =
   (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
      can fail while the independent Recent event feed remains live. *)
   match status with
-  | Connected -> Theme.ok (), "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
-  | Degraded -> Theme.warn (), "partial", ["HTTP partial", false; "partial", true]
-  | Connecting -> Theme.warn (), "loading...", ["HTTP loading", false; "loading", true]
-  | Booting -> Theme.warn (), "server booting...", ["server booting", false; "booting", true]
-  | Disconnected -> Theme.bad (), "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
+  | Connected -> Theme.text_status Masc_tui_theme.Ok, "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
+  | Degraded -> Theme.text_status Masc_tui_theme.Warn, "partial", ["HTTP partial", false; "partial", true]
+  | Connecting -> Theme.text_status Masc_tui_theme.Warn, "loading...", ["HTTP loading", false; "loading", true]
+  | Booting -> Theme.text_status Masc_tui_theme.Warn, "server booting...", ["server booting", false; "booting", true]
+  | Disconnected -> Theme.text_status Masc_tui_theme.Bad, "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
 
 let connection_status_badge status =
   let style, label, _ = connection_status_parts status in
@@ -1721,9 +1721,9 @@ let connection_badge (state : state) =
   let connection = connection_status_badge state.connection_status in
   let connection = match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
-      connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
   connection ^ refresh_progress_badge state
@@ -1785,7 +1785,7 @@ let usage_connection_badge (state : state) =
   let badge = connection_badge state in
   match state.workspace_identity, state.connection_status with
   | Workspace_identity_unread, (Connected | Degraded) ->
-      badge ^ " " ^ Theme.warn () ^ "[workspace not observed]" ^ Ansi.reset
+      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace not observed]" ^ Ansi.reset
   | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
     | Workspace_identity_mismatch _), _
   | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
@@ -1800,14 +1800,14 @@ let compact_connection_badge (state : state) ~width =
   in
   let style, options, needs_context =
     match compact_connection_state state with
-    | Compact_workspace_mismatch -> Theme.bad (), ["WS mismatch", true; "mismatch", true], true
-    | Compact_workspace_unconfirmed -> Theme.warn (), ["WS unconfirmed", true; "unconfirmed", true], true
-    | Compact_workspace_unread -> Theme.warn (), ["WS unread", true; "unread", true], true
-    | Compact_read_failed -> Theme.bad (), ["read failed", true; "failed", true], true
-    | Compact_read_partial -> Theme.warn (), ["read partial", true; "partial", true], true
-    | Compact_read_interrupted -> Theme.warn (), ["read interrupted", true; "interrupted", true], true
-    | Compact_read_unfinished -> Theme.warn (), ["read unfinished", true; "unfinished", true], true
-    | Compact_reading -> Theme.warn (), ["reading data", true; "reading", true], true
+    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, ["WS mismatch", true; "mismatch", true], true
+    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, ["WS unconfirmed", true; "unconfirmed", true], true
+    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, ["WS unread", true; "unread", true], true
+    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, ["read failed", true; "failed", true], true
+    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, ["read partial", true; "partial", true], true
+    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, ["read interrupted", true; "interrupted", true], true
+    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, ["read unfinished", true; "unfinished", true], true
+    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, ["reading data", true; "reading", true], true
     | Compact_http status ->
         let style, _, options = connection_status_parts status in
         style, options, false in

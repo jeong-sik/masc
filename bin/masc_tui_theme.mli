@@ -213,6 +213,13 @@ val status_readable : Masc_tui_terminal_palette.t option -> status -> string
     the reply -- the plain code goes out, which is what every row drew before
     this existed. *)
 
+val status_text_readable : Masc_tui_terminal_palette.t option -> status -> string
+(** For text that names its own status, use the terminal's default foreground
+    when a palette entry is unknown or a projected colour cannot be verified
+    above the text contrast floor. Preserve the original ANSI colour when the
+    reader has explicitly disabled colour lifting. Colour-only distinctions
+    continue to use {!status_readable}. *)
+
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
     implementation/interface. Production callers use the semantic tokens
@@ -269,6 +276,16 @@ module For_testing : sig
     -> string
   (** Pure capability/environment fixture for {!val:ansi_readable}, so a test
       can drive it without the process capability deciding the answer. *)
+
+  val status_text_readable
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> status
+    -> string
+  (** Capability fixture for {!val:status_text_readable}. *)
 
   val recede
     :  colors_enabled:bool

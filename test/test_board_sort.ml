@@ -151,7 +151,7 @@ let test_indexed_reads_lifecycle_across_votes_deletions_and_reloads () =
   Fun.protect
     ~finally:(fun () -> Unix.rmdir workspace_masc_dir; Unix.rmdir base_path)
   @@ fun () ->
-  let store = Board.create_store ~workspace_masc_dir () in
+  let store = Board.create_store ~base_path () in
   let now = 1_000_000.0 in
   let p1 =
     make_post ~id:"p-1" ~created_at:(now -. 30.0) ~votes_up:1 ~votes_down:0

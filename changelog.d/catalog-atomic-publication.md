@@ -1,7 +1,0 @@
-Replace separate provider/model catalog globals with an admitted immutable
-`Catalog_snapshot` and one atomic publication. Failed admission leaves the
-previous selection intact; captured bindings, policies and prices retain their
-whole selection across replacement. Remove the old declaration façade and
-unused JSON-only binding lookup, and make wizard projections use one selection.
-Raw model observations respect admitted aliases and permissions without gaining
-JSON provider capabilities or credentials from an id alone.

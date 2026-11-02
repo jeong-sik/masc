@@ -54,7 +54,7 @@
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
-#                                       [--keep-build] [--no-guest-shim]
+#                                       [--no-guest-shim]
 #                                       [--no-browser-addon]
 #                                       [--print-build-targets]
 #   --prefix        where masc, masc-tui, masc-browser-host, the browser Add-on
@@ -72,7 +72,6 @@
 #                   manifest covers it
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
-#   --keep-build    retain build artifacts after a successful default build/install
 #   --no-browser-addon do not build or install the browser Add-on programs, and
 #                   leave the workspace's browser Add-on package and declaration
 #                   as they are. Without the Add-on no browser route works.
@@ -85,14 +84,12 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
-keep_build=false
 guest_shim=true
 # Every browser route and every native browser host's polls run in the browser
 # Add-on, so its programs are installed with masc, from the same build, unless
 # --no-browser-addon says the workspace needs no browser.
 browser_addon=true
 browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
-custom_build_dir=false
 print_build_targets=false
 base_path=""
 workspace_root=""
@@ -108,8 +105,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --manifest-dir) manifest_dir=${2:?--manifest-dir needs a directory}; shift 2 ;;
-    --build-dir) build_dir=${2:?--build-dir needs a directory}; custom_build_dir=true; shift 2 ;;
-    --keep-build) keep_build=true; shift ;;
+    --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
     --no-guest-shim) guest_shim=false; shift ;;
     --no-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
@@ -135,7 +131,7 @@ if [ "$print_build_targets" = true ]; then
 fi
 
 # Use the same lock as dune-local.sh for the complete installation transaction.
-# Releasing it after build permits another install's clean to remove our input
+# Releasing it after build permits a concurrent wrapper clean to remove our input
 # while preflight, binary copies or browser refresh are still using it.
 if [ "${MASC_DUNE_LOCK_HELD:-0}" != 1 ] && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
   repo_lock_key=$(printf '%s' "$repo" | cksum | awk '{print $1}')
@@ -732,40 +728,6 @@ if [ "$addon_failed" = true ] || [ "$refresh_failed" = true ]; then
   exit 1
 fi
 
-# Installed binaries and browser hosts now hold their own copies. Clean only
-# the default output this invocation built, never externally supplied input.
-# Installed destinations and the selected workspace must survive Dune's clean.
-if [ "$skip_build" = false ] && [ "$keep_build" = false ] \
-    && [ "$custom_build_dir" = false ] && [ -z "${DUNE_BUILD_DIR:-}" ] \
-    && [ ! -L "$repo/_build" ] \
-    && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
-  if python3 - "$repo/_build" "$prefix" "$manifest_dir" "$workspace_root" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-build, prefix, manifests = (Path(arg).resolve() for arg in sys.argv[1:4])
-destinations = [prefix, manifests]
-if sys.argv[4]:
-    destinations.append(Path(sys.argv[4]).resolve())
-if manifests.is_dir():
-    for manifest in manifests.glob("*.json"):
-        try:
-            declared = json.loads(manifest.read_text())
-        except (OSError, ValueError):
-            print("install-local-build: retaining output: manifest destination is unreadable", file=sys.stderr)
-            sys.exit(1)
-        if isinstance(declared, dict) and isinstance(declared.get("path"), str):
-            destinations.append(Path(declared["path"]).resolve())
-if any(path == build or build in path.parents for path in destinations):
-    print("install-local-build: retaining output: an installed destination or selected workspace is inside _build")
-    sys.exit(1)
-PY
-  then
-      if (cd "$repo" && scripts/dune-local.sh clean --root "$repo"); then
-        echo "install-local-build: removed default build artifacts after successful installation"
-      else
-        echo "install-local-build: WARN installation succeeded, but build cleanup failed" >&2
-      fi
-  fi
-fi
+# Keep this checkout's incremental output for the next build. Installation
+# already copied its executables; reclaiming build storage is an explicit
+# operator action (docs/guides/LOCAL-BUILD-STORAGE.md).

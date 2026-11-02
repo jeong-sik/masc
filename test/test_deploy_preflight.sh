@@ -97,7 +97,6 @@ write_helper() {
 #!/usr/bin/env bash
 case "\$1" in
     build-commit) echo fixture-commit ;;
-    durable-filenames) printf 'snapshot=fixture-snapshot.json\\nwal=fixture-wal.jsonl\\n' ;;
     validate-runtime-config) echo "runtime.toml ok" ;;
     validate-browser-addon)
         if [ "\$2" = --help ]; then exit 0; fi

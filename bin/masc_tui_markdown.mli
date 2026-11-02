@@ -303,6 +303,18 @@ val render : palette:palette -> width:int -> string -> string list
     Styling that spans a wrap is reopened on the next row, so a bold sentence
     stays bold past the break instead of ending at it. *)
 
+type clipping_render = {
+  reading_rows : string list;
+  clipped : bool;
+  width_sensitive_fence : bool;
+}
+
+val render_with_clipping : palette:palette -> width:int -> string -> clipping_render
+(** The same rows as [render], with whether a table cell or fenced-code
+    language label was fitted and whether the document has a Mermaid or
+    alphaTex fence. Their drawing can change when rendered at another width.
+    Other row overflow is left in the rows for the caller to measure. *)
+
 val inline_segments : string -> (string * string) list
 (** The inline parse alone, as [(text, kind)] pairs where kind is one of
     ["plain"], ["strong"], ["emphasis"], ["strike"], ["code"], ["link_text"] or

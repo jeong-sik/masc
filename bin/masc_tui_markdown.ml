@@ -965,7 +965,7 @@ type table_cell_source = {
   fragments : table_cell_fragment list;
 }
 
-let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
+let table_block ?on_cell ?source_rows ?on_clipped palette ~width ~alignments ~header ~body =
   let width = max 1 width in
   let alignments = Array.of_list alignments in
   let columns = Array.length alignments in
@@ -1077,6 +1077,7 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
         let text, ranges, content_width =
           if content_width <= cells then text, ranges, content_width
           else
+            let () = Option.iter (fun notify -> notify ()) on_clipped in
             let ranges = match semantic with
               | None -> []
               | Some (cell_text, _) ->
@@ -1349,7 +1350,8 @@ type block_layout = {
   source_blocks : source_block list;
 }
 
-let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~palette ~width text =
+let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
+    ?on_clipped ?on_width_sensitive_fence ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
   let rendered_rows = ref 0 in
@@ -1437,12 +1439,22 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
     Option.iter
       (fun language ->
         let label = fence_header_label language in
-        let on_language = Option.map (fun _ visible ->
-          emit_run {joins_previous=false;semantic_text=label;
-            origins=Array.init (String.length label) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
-            visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
-            reading=Source_order}) on_semantic in
+        let on_language =
+          if Option.is_none on_semantic && Option.is_none on_clipped then None
+          else Some (fun visible ->
+            if visible < String.length label then Option.iter (fun notify -> notify ()) on_clipped;
+            Option.iter (fun _ ->
+              emit_run {joins_previous=false;semantic_text=label;
+                origins=Array.init (String.length label) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
+                visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
+                reading=Source_order}) on_semantic)
+        in
         emit_all [code_header ?on_language palette ~width label]) language;
+    (match language with
+     | Some "mermaid" -> Option.iter (fun notify -> notify ()) on_width_sensitive_fence
+     | Some tag when is_alphatex_tag tag ->
+         Option.iter (fun notify -> notify ()) on_width_sensitive_fence
+     | Some _ | None -> ());
     let prepared = match closed, language, on_diagram with
       | true, Some "mermaid", Some prepare -> prepare ~row:!rendered_rows (body_text ())
       | (true | false), (Some _ | None), (Some _ | None) -> None in
@@ -1564,7 +1576,8 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
                         visible_rows=List.map (fun fragment ->
                           row_start+fragment.rendered_row, fragment.visible_ranges) cell.fragments;
                         reading=Source_order}) on_semantic in
-                    emit_all (table_block ?source_rows ?on_cell palette ~width ~alignments ~header ~body);
+                    emit_all (table_block ?source_rows ?on_cell ?on_clipped
+                      palette ~width ~alignments ~header ~body);
                     walk None [] remaining
                 | None ->
                     begin_block ~can_absorb_terminal:(Option.is_some (table_cells line.source_text)) line;
@@ -1648,3 +1661,22 @@ let render ~palette ~width text =
   if not (String.contains text '\n') && Option.is_none (fence_marker text) then
     block_rows palette ~width:(max 1 width) text
   else (render_streaming ~palette ~width text).rows
+
+type clipping_render = {
+  reading_rows : string list;
+  clipped : bool;
+  width_sensitive_fence : bool;
+}
+
+let render_with_clipping ~palette ~width text =
+  if not (String.contains text '\n') && Option.is_none (fence_marker text) then
+    { reading_rows = block_rows palette ~width:(max 1 width) text;
+      clipped = false; width_sensitive_fence = false }
+  else
+    let clipped = ref false and width_sensitive_fence = ref false in
+    let rendered = render_streaming_internal
+        ~on_clipped:(fun () -> clipped := true)
+        ~on_width_sensitive_fence:(fun () -> width_sensitive_fence := true)
+        ~palette ~width text in
+    { reading_rows = rendered.rows; clipped = !clipped;
+      width_sensitive_fence = !width_sensitive_fence }

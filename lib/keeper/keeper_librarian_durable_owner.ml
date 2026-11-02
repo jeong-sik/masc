@@ -132,7 +132,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
       Ok (Answer (proposal,record))
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
-  let publish_answer record proposal =
+  let publish_answer (record : Owner.retained) proposal =
     let already_acked_commit =
       match Progress.phase record.progress with
       | Progress.Committing _ | Commit_unknown _ ->

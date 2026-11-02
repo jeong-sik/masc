@@ -2139,6 +2139,53 @@ let test_archive_cache_does_not_cross_equal_stat_files () =
     Alcotest.(check int) "first archive retains invalid-row evidence" 1 (undecoded first);
     Alcotest.(check int) "second path cannot reuse first archive evidence" 0 (undecoded second))
 
+let test_fresh_local_work_reloads_equal_stat_archive () =
+  let dir = Filename.temp_file "tui-archive-refresh-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let masc = Filename.concat dir ".masc" in
+  let tasks = Filename.concat masc "tasks" in
+  Unix.mkdir masc 0o700;
+  Unix.mkdir tasks 0o700;
+  let backlog = Filename.concat tasks "backlog.json" in
+  let archive = Filename.concat masc "tasks-archive.json" in
+  let write path contents =
+    Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents) in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
+      (match previous_base_path with
+       | Some path -> Unix.putenv "MASC_BASE_PATH" path
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      Sys.remove backlog;
+      Sys.remove archive;
+      Unix.rmdir tasks;
+      Unix.rmdir masc;
+      Unix.rmdir dir)
+    (fun () ->
+      write backlog "{\"tasks\":[],\"last_updated\":\"2026-01-01T00:00:00Z\",\"version\":1}";
+      write archive "{\"tasks\":[0]}";
+      let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+      Unix.utimes archive stamp stamp;
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let observe ?(fresh = false) () =
+          (Masc_tui_loader.read_local_workspace ~fresh dir).lr_tasks_error in
+        let error = Some "1 archived tasks could not be read; the day bars miss them" in
+        Alcotest.(check (option string)) "unreadable archive is visible" error (observe ());
+        let before = Unix.stat archive in
+        write archive "{\"tasks\":[] }";
+        Unix.utimes archive before.Unix.st_atime before.Unix.st_mtime;
+        let after = Unix.stat archive in
+        Alcotest.(check bool) "archive replacement keeps cache stat" true
+          (before.Unix.st_size = after.Unix.st_size
+           && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+        Alcotest.(check (option string)) "ordinary read retains its cache" error (observe ());
+        Alcotest.(check (option string)) "fresh work read clears archive error" None
+          (observe ~fresh:true ())))
+
 let test_local_cache_cancel_releases_source_for_followup () =
   let exception Read_replaced in
   Eio_main.run (fun _env ->
@@ -5837,6 +5884,8 @@ let () =
             test_concurrent_created_keepers_retain_individual_refresh_coverage
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
+        ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick
+            test_fresh_local_work_reloads_equal_stat_archive
         ; Alcotest.test_case "created Keeper waits for owned metadata without Work" `Quick
             test_created_keeper_waits_for_owned_metadata_without_work
         ; Alcotest.test_case "fresh metadata confirms deletion without detail retargeting" `Quick

@@ -14948,7 +14948,7 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
             (fun () ->
               let result = try
                   Ok (Local_read_observation.run request.lwr_observation
-                    ~read:(fun () -> read request.lwr_base_path) ~prepare:(prepare request))
+                    ~read:(fun () -> read request) ~prepare:(prepare request))
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Error (Printexc.to_string exn) in
@@ -14989,23 +14989,28 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
 
 let launch_local_keeper_read state ~mailbox ~intent base_path =
   launch_local_source state ~mailbox ~intent ~source:Local_keepers
-    ~read:Masc_tui_loader.read_local_keepers ~prepare:(fun _ reading -> reading)
+    ~read:(fun request -> Masc_tui_loader.read_local_keepers request.lwr_base_path)
+    ~prepare:(fun _ reading -> reading)
     ~message:(fun request result -> Local_keepers_read (request, result)) base_path
+
+let launch_local_work_read state ~mailbox ~intent base_path =
+  launch_local_source state ~mailbox ~intent ~source:Local_work
+    ~read:(fun request ->
+      Masc_tui_loader.read_local_workspace
+        ~fresh:(request.lwr_intent = Snapshot_read.Refresh) request.lwr_base_path)
+    ~prepare:Masc_tui_loader.prepare_local_workspace
+    ~message:(fun request result -> Local_workspace_read (request, result)) base_path
 
 let launch_local_workspace_read state ~mailbox ~intent base_path =
   launch_local_keeper_read state ~mailbox ~intent base_path;
-  launch_local_source state ~mailbox ~intent ~source:Local_work
-    ~read:Masc_tui_loader.read_local_workspace ~prepare:Masc_tui_loader.prepare_local_workspace
-    ~message:(fun request result -> Local_workspace_read (request, result)) base_path
+  launch_local_work_read state ~mailbox ~intent base_path
 
 let launch_local_source_followup state ~mailbox source =
   if Local_read_order.has_followup (local_source_order state source) then
     match source with
     | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
     | Local_work ->
-        launch_local_source state ~mailbox ~intent:Snapshot_read.Poll ~source:Local_work
-          ~read:Masc_tui_loader.read_local_workspace ~prepare:Masc_tui_loader.prepare_local_workspace
-          ~message:(fun request result -> Local_workspace_read (request, result)) state.local_base_path
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
 
 let observe_local_source state ~source request result =
   let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
@@ -20226,6 +20231,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
       add_event state "observer" "runtime event feed open";
       launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+      (* A change can land between the initial read and subscription, or
+         during a disconnected interval. Read under the current authority. *)
+      launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       revalidate_visible_fusion state ~mailbox
   | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
@@ -20257,6 +20265,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Fusion_list -> None in
       let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
       let observer_source_loss_seen = ref false in
+      let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -20323,6 +20332,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                        ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
+               | Masc_tui_observer.Snapshot name
+                 when String.equal name Masc.Dashboard_event_slices.execution_snapshot_type ->
+                   execution_snapshot_seen := true
                | Masc_tui_observer.Agent_core
                    { kind = Masc_tui_observer.Relay_subscription_loss
                        { source_id; sequence; _ }; _ } ->
@@ -20388,6 +20400,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            | Masc_tui_observer.Undecodable _, _, _ -> ());
           end)
         decoded;
+      if !execution_snapshot_seen || !observer_source_loss_seen then
+        (* Both the compact invalidation and the complete snapshot use this
+           type. Work reads its own local source; it does not trust either
+           payload. A read already in flight queues one newer follow-up. *)
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then begin
         revalidate_visible_fusion state ~mailbox;
         (match acting_pane_changes_keeper state with

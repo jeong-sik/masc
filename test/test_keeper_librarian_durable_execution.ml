@@ -2978,7 +2978,24 @@ let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
     check int "publication never replays the original provider request" 1 (F.post_count fixture.server);
     no_memory fixture))
 
+let test_refused_observations_need_complete_input () =
+  let observation content : Keeper_counterpart_observation.t =
+    {origin=Durable_chat;channel="direct";workspace_id=None;
+     user_id=Some "external";user_name=Some "External";
+     authority=External;content} in
+  let original = [observation "full message"; observation "other message"] in
+  let covers = Keeper_librarian_durable_refusal.For_testing.observations_cover original in
+  check bool "a separate delivery preview does not prove the original text" false
+    (covers [observation "preview"; observation "other message"]);
+  check bool "one completed input can include later observations" true
+    (covers [observation "other message"; observation "full message"; observation "later"]);
+  check bool "one observation cannot account for duplicate source rows" false
+    (Keeper_librarian_durable_refusal.For_testing.observations_cover
+       [observation "same"; observation "same"] [observation "same"])
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "refusal coverage requires the complete original observations" `Quick
+    test_refused_observations_need_complete_input;
   test_case "proved original survives invalid working context on resume" `Quick
     test_retained_answer_with_invalid_working_context_recovers;
   test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;

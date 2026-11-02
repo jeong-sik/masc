@@ -6,6 +6,7 @@ module Runtime = Keeper_librarian_runtime
 module Consumer = Keeper_librarian_durable_consumer
 module Source = Keeper_librarian_durable_capture
 module Edge = Keeper_librarian_durable_edge
+module Current = Keeper_memory_os_current
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 type t = {request_id:string;destination:Request.destination;refusal:Consumer.error}
@@ -20,7 +21,62 @@ let report ~store request final =
   | Ok evidence -> Runtime.not_committed_of_failure ~detail evidence
   | Error why -> Runtime.not_committed_of_failure
       ~detail:(detail ^ "; reading less could not be judged: " ^ why) Keeper_exact_walk_failure.empty
-let retained_stop ~store ~(record:Retained.retained) ~request =
+(* A later completed request has to contain each original observation, with
+   multiplicity. A delivery preview is not equal to the original chat text. *)
+let observations_cover original actual =
+  let rec remove_one value = function
+    | [] -> None
+    | first :: rest when first = value -> Some rest
+    | first :: rest -> Option.map (fun tail -> first :: tail) (remove_one value rest)
+  in
+  let rec contains remaining = function
+    | [] -> true
+    | first :: rest ->
+      match remove_one first remaining with
+      | None -> false
+      | Some remaining -> contains remaining rest
+  in
+  contains actual original
+
+let source_covers original actual =
+  let atom = match Source.range_id original, Source.range_id actual with
+    | None, (None | Some _) -> true
+    | Some _, None -> false
+    | Some (old : Current.durable_range_id), Some (newer : Current.durable_range_id) ->
+      old.receipt_scope = newer.receipt_scope && old.trace_id = newer.trace_id
+      && old.history_start_boundary_line = newer.history_start_boundary_line
+      && newer.start_atom <= old.start_atom && newer.end_atom >= old.end_atom
+      && (newer.end_atom <> old.end_atom || newer.last_atom_digest = old.last_atom_digest)
+  in
+  let official = match Source.official_range_id original, Source.official_range_id actual with
+    | None, (None | Some _) -> true
+    | Some _, None -> false
+    | Some (old : Current.official_range_id), Some (newer : Current.official_range_id) ->
+      old.receipt_scope = newer.receipt_scope && newer.after_boundary_line <= old.after_boundary_line
+      && List.for_all (fun turn -> List.mem turn newer.turns) old.turns
+  in
+  atom && official
+  && observations_cover (Source.input original).counterpart_observations
+       (Source.input actual).counterpart_observations
+
+let completed_covers ~original completed =
+  let rec find = function
+    | [] -> Ok false
+    | ((record : Retained.retained), candidate) :: rest ->
+      (match Progress.phase record.progress with
+       | Finished _ when source_covers original (Request.source candidate) ->
+         (match Runtime.require_counterpart_template (Request.preparation candidate) with
+          | Error _ -> find rest
+          | Ok () ->
+            let* committed = Keeper_librarian_durable_commit.receipt_state candidate in
+            if committed then Ok true else find rest)
+       | Finished _ | Captured | Admission_wait _ | Dispatch_pending _ | Judged _
+       | Committing _ | Commit_unknown _ | Conflicted _ | Rejected _
+       | Subdividing _ | Subdivided _ -> find rest)
+  in
+  find completed
+
+let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   let source=Request.source request in
   let input=Source.input source in
   match Progress.phase record.progress with
@@ -40,22 +96,7 @@ let retained_stop ~store ~(record:Retained.retained) ~request =
         | Error (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
           let* committed=io (fun () ->
             let* past=Keeper_librarian_refusal_frontier.past_original ~counterpart_digest request in
-            if past then Ok true else
-            let* receipt=Keeper_librarian_durable_commit.receipt_state request in
-            if not receipt then Ok false else
-            let owner=Request.physical_owner request in
-            let keeper_id=Request.keeper_id owner in
-            let* external_cursor=
-              Keeper_external_read_cursor.observe
-                ~runtime_keepers_dir:(Source.runtime_keepers_dir source)
-                ~keeper_name:keeper_id in
-            Keeper_librarian_input_sources.counterparts_covered_at_frontier
-              (Source.counterparts source)
-              ~counterpart_digest
-              ~base_dir:(Request.base_path owner)
-              ~keeper_name:keeper_id
-              ~acked_external_offset:(Keeper_external_read_cursor.observation_offset external_cursor)
-            |> Result.map_error Keeper_librarian_input_sources.read_error_to_string) in
+            if past then completed_covers ~original:source completed else Ok false) in
           Ok (if committed then None else Some {request_id=record.request_id;
             destination=Request.destination request;refusal})
         | Error ((Consumer.Keeper_meta_absent
@@ -88,3 +129,7 @@ let blocked ~config ~reserved = function
     match Edge.with_destination ~config ~reserved (fun current -> Ok (blocks_destination stops current)) with
     | Ok refusal -> refusal
     | Error _ -> Some first.refusal
+
+module For_testing = struct
+  let observations_cover = observations_cover
+end

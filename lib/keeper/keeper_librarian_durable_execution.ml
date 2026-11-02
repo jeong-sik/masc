@@ -368,7 +368,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Some (_,_,_,settled) ->
         List.fold_left (fun stops (record,request) ->
           let* stops=stops in
-          let* stop=Refusal.retained_stop ~store ~record ~request in
+          let* stop=Refusal.retained_stop ~store ~completed:settled ~record ~request in
           Ok (Option.fold ~none:stops ~some:(fun stop -> stop::stops) stop))
           (Ok []) settled in
     match stops with

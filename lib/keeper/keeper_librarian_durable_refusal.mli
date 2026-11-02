@@ -3,7 +3,9 @@ val report : store:Lane_addon_store.t -> Keeper_librarian_durable_request.t ->
   Lane_addon_exact.final -> Keeper_librarian_runtime.not_committed
 
 type t
-val retained_stop : store:Lane_addon_store.t -> record:Lane_addon_tool_request_owner.retained ->
+val retained_stop : store:Lane_addon_store.t ->
+  completed:(Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t) list ->
+  record:Lane_addon_tool_request_owner.retained ->
   request:Keeper_librarian_durable_request.t ->
   (t option, string) result
 (** Call after strict whole-inventory original/host-final validation. A definite
@@ -14,9 +16,10 @@ val retained_stop : store:Lane_addon_store.t -> record:Lane_addon_tool_request_o
     Restoring and validating the retained complete input still costs I/O.
 
     This is an unresolved refusal of the original, not proof that today's
-    source payload is unchanged. Confirmed original Memory range receipts or
-    {!Keeper_librarian_refusal_frontier.past_original}'s Memory-backed reader
-    frontier and external ACK release it for ordinary settlement. This does
+    source payload is unchanged. Release also requires a validated, completed
+    request whose actual input includes every original counterpart observation
+    and whose Memory receipt covers the original range. Range coverage and an
+    external ACK alone do not establish what another request actually read. This does
     not promote accounted unread holes to read content. Changed positions alone
     do not release it.
     A different configured installation/package/tool/semantic configuration
@@ -43,3 +46,8 @@ val blocked : config:Workspace.config -> reserved:string list -> t list ->
 (** Read the current semantic destination before selecting fresh source. If
     configuration is unavailable, report a retained refusal without selecting.
     This observation does not replace [blocks_destination] at retention. *)
+
+module For_testing : sig
+  val observations_cover :
+    Keeper_counterpart_observation.t list -> Keeper_counterpart_observation.t list -> bool
+end

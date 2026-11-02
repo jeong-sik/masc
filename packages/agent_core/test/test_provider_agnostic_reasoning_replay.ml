@@ -2134,15 +2134,15 @@ let test_provider_replay_policy_matrix_pinned () =
 ;;
 
 let test_clear_thinking_replay_requires_catalog_reasoning_support () =
-  let previous = Model_catalog.global () in
-  let restore () = match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  let _,providers = Llm_provider.Catalog_snapshot.sources previous in
+  let restore () = Llm_provider.Catalog_snapshot.publish previous in
   let catalog = match Model_catalog.load_default () with
     | Ok catalog -> catalog
     | Error detail -> Alcotest.fail detail in
   Fun.protect ~finally:restore (fun () ->
-    Model_catalog.set_global catalog;
+    Llm_provider.Catalog_snapshot.publish
+      (Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers);
     List.iter (fun (model_id, supports_reasoning) ->
       let config = Provider_config.make
           ~kind:Glm ~provider_id:"glm" ~model_id ~base_url:"https://api.z.ai"

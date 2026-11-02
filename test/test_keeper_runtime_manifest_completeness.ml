@@ -161,6 +161,38 @@ let test_runtime_attempt_attribution_public_projection () =
     true
     (projected |> member "not_allowlisted_probe" = `Null)
 
+let test_intake_source_public_projection () =
+  let source =
+    [ "stimulus_id", `String "schedule:occurrence-one"
+    ; "source_kind", `String "schedule_due"
+    ; "source_snapshot_ref", `String "snapshot-one"
+    ; "admitted_revision", `String "17"
+    ; "first_admitted_at", `Float 123.0
+    ]
+  in
+  let decision =
+    `Assoc
+      [ "channel", `String "reactive"
+      ; "intake_sources",
+        `List [ `Assoc (source @ [ "payload", `String "private instruction"
+                               ; "error", `String "private nested error" ]) ]
+      ; "stimulus_id", `String "not a top-level source"
+      ]
+  in
+  let projected =
+    manifest ~event:M.Turn_started ~decision ~links:(links ())
+    |> M.public_to_json
+  in
+  let open Yojson.Safe.Util in
+  let projected_decision = projected |> member "decision" in
+  Alcotest.(check string) "turn entry remains visible" "reactive"
+    (projected_decision |> member "channel" |> to_string);
+  Alcotest.(check string) "only exact source references survive"
+    (Yojson.Safe.to_string (`List [ `Assoc source ]))
+    (Yojson.Safe.to_string (projected_decision |> member "intake_sources"));
+  Alcotest.(check bool) "source keys are scoped to the source list" true
+    (projected_decision |> member "stimulus_id" = `Null)
+
 let () =
   Alcotest.run "KeeperRuntimeManifestCompleteness"
     [ ( "defined but never registered until task-1768",
@@ -170,5 +202,6 @@ let () =
           ; Alcotest.test_case "is finished turn" `Quick test_is_finished_turn
           ; Alcotest.test_case "is complete turn" `Quick test_is_complete_turn
           ; Alcotest.test_case "runtime attempt attribution public projection" `Quick test_runtime_attempt_attribution_public_projection
+          ; Alcotest.test_case "intake source public projection" `Quick test_intake_source_public_projection
           ] )
     ]

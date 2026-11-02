@@ -126,6 +126,10 @@ val make_for_context :
 val to_json : t -> Yojson.Safe.t
 val public_to_json : t -> Yojson.Safe.t
 val public_projection_of_decision : Yojson.Safe.t -> Yojson.Safe.t
+(** Preserve turn-entry channel and exact intake source references, with a
+    dedicated nested allowlist. Source payloads and instruction text are never
+    part of that projection. Intake is observation, not proof of dispatch,
+    delivery, acknowledgement or completion. *)
 (** Decode and validate the common persisted envelope before classifying its
     event as active or unsupported. *)
 val decode_persisted_row : Yojson.Safe.t -> (decoded_row, string) result

@@ -322,16 +322,16 @@ let async_source_task_lines ~cols state source =
         | Field_unreadable reason -> text (Theme.warn ()) (" Task " ^ name ^ " 조회 불가: " ^ reason))
         ["handoff",detail.diagnostics.handoff_context_outcome;"reclaim policy",detail.diagnostics.reclaim_policy_outcome] in
       warnings @ (task_document_lines state ~cols Masc_tui_task_document.Body
-        |> List.map (fun line -> Theme.info (),line)) in
+        |> List.map (fun line -> "",line)) in
   text Ansi.bold (" 원본 Task · " ^ source.ats_task_id ^ " · r:본문·이력 재조회 · Esc:원본 요청")
   @ text Ansi.dim (Printf.sprintf " 출처 run: %s · 논리 관측 %.3f%s" source.ats_run_id source.ats_observed_at
       (if source.ats_retained then " · 이전 확인 관측에서 열림" else ""))
   @ pending @ errors @ content
   @ (Masc_tui_task_document.history_status_lines ~width ~view:history
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
-      |> List.concat_map (text Ansi.dim))
+      |> List.concat_map (text ""))
   @ (task_document_lines state ~cols Masc_tui_task_document.History
-     |> List.map (fun line -> Ansi.dim,line))
+     |> List.map (fun line -> "",line))
 
 let async_request_observation_lines ~cols state =
   match state.tools_async_detail_open,state.tools_async_selection,state.tools_async_task_source with

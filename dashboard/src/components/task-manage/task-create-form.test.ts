@@ -127,7 +127,9 @@ describe('TaskCreateForm', () => {
 
   it('calls createTask with form data on submit', async () => {
     const container = document.createElement('div')
-    render(html`<${TaskCreateForm} goalId="g-1" />`, container)
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true }
+    render(html`<${TaskCreateForm} goalId="g-1" goalDispatch=${goalDispatch} />`, container)
     showTaskCreate.value = true
     await flush()
     const input = container.querySelector('input') as HTMLInputElement
@@ -146,7 +148,26 @@ describe('TaskCreateForm', () => {
         priority: 3,
         goal_id: 'g-1',
       }),
+      goalDispatch,
     )
+  })
+
+  it('does not submit a Goal Task after the observed authority changes', async () => {
+    const container = document.createElement('div')
+    let current = true
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => current }
+    render(html`<${TaskCreateForm} goalId="g-1" goalDispatch=${goalDispatch} />`, container)
+    showTaskCreate.value = true
+    await flush()
+    const input = container.querySelector('input') as HTMLInputElement
+    input.value = 'My Task'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const submit = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('backlog에 추가'))!
+    current = false
+    submit.click()
+    expect(mockCreateTask).not.toHaveBeenCalled()
   })
 
   it('shows loading text while creating', async () => {

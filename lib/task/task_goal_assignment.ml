@@ -17,7 +17,10 @@ type set_task_goal_error =
   | Goal_lock_failed of Masc_domain.masc_error
   | Backlog_read_failed of string
   | Unknown_task of string
+  | Ambiguous_task of string
   | Unknown_goal of string
+  | Ambiguous_goal of string
+  | Goal_closed of { goal_id : string; phase : Goal_phase.t }
   | Task_finished of
       { task_id : string
       ; status : Masc_domain.task_status
@@ -34,7 +37,11 @@ let set_task_goal_error_to_string = function
   | Goal_lock_failed error -> "Goal store lock failed: " ^ Masc_domain.masc_error_to_string error
   | Backlog_read_failed message -> Printf.sprintf "failed to read authoritative backlog: %s" message
   | Unknown_task task_id -> Printf.sprintf "unknown task '%s'" task_id
+  | Ambiguous_task task_id -> Printf.sprintf "task '%s' has an ambiguous ID" task_id
   | Unknown_goal goal_id -> Printf.sprintf "unknown goal '%s'" goal_id
+  | Ambiguous_goal goal_id -> Printf.sprintf "goal '%s' has an ambiguous ID" goal_id
+  | Goal_closed { goal_id; phase } ->
+    Printf.sprintf "goal '%s' is %s; new work cannot be linked" goal_id (Goal_phase.to_string phase)
   | Task_finished { task_id; status } ->
     Printf.sprintf
       "task '%s' is already %s; a finished task is not linked to a goal (a link \
@@ -53,33 +60,34 @@ let set_task_goal_error_to_string = function
 let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result =
   let task_id = String.trim task_id in
   let goal_id = String.trim goal_id in
-  match Goal_store.with_existing_goals config ~goal_ids:[goal_id] (fun () ->
+  match Goal_store.with_assignable_goal config ~goal_id (fun () ->
     match Workspace_utils.with_file_lock_r config (Workspace_backlog.backlog_lock_path config) (fun () ->
       match Workspace_backlog.read_prepared_backlog_r config with
       | Error message -> Error (Backlog_read_failed message)
       | Ok prepared ->
-        (match
-           Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id
-         with
-         | None -> Error (Unknown_task task_id)
-         | Some task when Masc_domain.task_status_is_terminal task.Masc_domain.task_status ->
-           Error (Task_finished { task_id; status = task.Masc_domain.task_status })
-         | Some _ ->
-           (match
-              Workspace_goal_index.link_goalless_task_to_goal config ~goal_id ~task_id
-            with
-            | Ok () -> Ok ()
-            | Error (Workspace_goal_index.Already_linked_to_goals existing_goal_ids) ->
-              Error (Already_assigned { task_id; existing_goal_ids })
-            | Error (Workspace_goal_index.Link_write_failed message) ->
-              Error (Link_write_failed message)))) with
+        (match List.filter (fun (task : Masc_domain.task) ->
+           String.equal (String.trim task.id) task_id) prepared.backlog.tasks with
+         | [] -> Error (Unknown_task task_id)
+         | [task] when String.equal task.id task_id ->
+           if Masc_domain.task_status_is_terminal task.task_status then
+             Error (Task_finished { task_id; status = task.task_status })
+           else
+             (match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id ~task_id with
+              | Ok () -> Ok ()
+              | Error (Workspace_goal_index.Already_linked_to_goals existing_goal_ids) ->
+                Error (Already_assigned { task_id; existing_goal_ids })
+              | Error (Workspace_goal_index.Link_write_failed message) ->
+                Error (Link_write_failed message))
+         | [_] | _ :: _ :: _ -> Error (Ambiguous_task task_id))) with
     | Ok result -> result
     | Error error -> Error (Backlog_read_failed (Masc_domain.masc_error_to_string error))) with
   | Ok result -> result
-  | Error (Goal_store.Goal_missing id) -> Error (Unknown_goal id)
-  | Error (Goal_store.Goal_source_unavailable unavailable) ->
+  | Error (Goal_store.Assignment_goal_missing id) -> Error (Unknown_goal id)
+  | Error (Goal_store.Assignment_goal_ambiguous id) -> Error (Ambiguous_goal id)
+  | Error (Goal_store.Assignment_goal_closed phase) -> Error (Goal_closed { goal_id; phase })
+  | Error (Goal_store.Assignment_source_unavailable unavailable) ->
     Error (Goal_source_unavailable unavailable)
-  | Error (Goal_store.Goal_lock_failed error) -> Error (Goal_lock_failed error)
+  | Error (Goal_store.Assignment_lock_failed error) -> Error (Goal_lock_failed error)
 ;;
 
 (* Workspace is the persistence layer and Goal depends on it. This task-domain

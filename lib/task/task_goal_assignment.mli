@@ -15,7 +15,10 @@ type set_task_goal_error =
   | Goal_lock_failed of Masc_domain.masc_error
   | Backlog_read_failed of string
   | Unknown_task of string
+  | Ambiguous_task of string
   | Unknown_goal of string
+  | Ambiguous_goal of string
+  | Goal_closed of { goal_id : string; phase : Goal_phase.t }
   | Task_finished of
       { task_id : string
       ; status : Masc_domain.task_status
@@ -37,6 +40,8 @@ val set_task_goal :
     goalless task to an existing goal.
 
     - [Error (Unknown_task _)] — no task with [task_id] in the backlog.
+    - [Error (Ambiguous_task _)] — duplicate rows or a whitespace alias prevent
+      identifying the intended task.
     - [Error (Backlog_read_failed _)] — the authoritative backlog cannot be
       read; a recovery snapshot is never used to authorize this mutation.
     - [Error (Goal_source_unavailable _)] — the primary Goal store cannot be
@@ -44,6 +49,9 @@ val set_task_goal :
     - [Error (Goal_lock_failed _)] — the Goal file lock was not taken; nothing
       was read.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the primary Goal store.
+    - [Error (Ambiguous_goal _)] — duplicate rows or a whitespace alias prevent
+      identifying the intended Goal.
+    - [Error (Goal_closed _)] — the Goal is completed or dropped.
     - [Error (Task_finished _)] — the task is [Done] or [Cancelled]. A link
       carries no timestamp, so a task finished before it is linked could not
       be told apart from work done for the goal. This is checked before the
@@ -54,8 +62,8 @@ val set_task_goal :
       keeps Phase 2 strictly additive for goalless tasks).
     - [Error (Link_write_failed _)] — the task and goal are valid, but the
       registry update could not be durably written and verified.
-    - [Ok ()] — Goal membership, task existence, the unfinished task and the
-      goalless precondition were held through the link write under
+    - [Ok ()] — Goal identity and open phase, task existence, the unfinished
+      task and the goalless precondition were held through the link write under
       Goal -> backlog -> links locks.
 
     Neither an unknown task nor an unknown goal is silently tolerated: both

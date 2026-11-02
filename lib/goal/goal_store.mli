@@ -417,6 +417,21 @@ val with_existing_goals :
   Workspace_utils.config -> goal_ids:string list -> (unit -> 'a) ->
   ('a, goal_reference_error) result
 
+type assignable_goal_error =
+  | Assignment_source_unavailable of unavailable
+  | Assignment_lock_failed of Masc_domain.masc_error
+  | Assignment_goal_missing of string
+  | Assignment_goal_ambiguous of string
+  | Assignment_goal_closed of Goal_phase.t
+
+val with_assignable_goal :
+  Workspace_utils.config -> goal_id:string -> (unit -> 'a) ->
+  ('a, assignable_goal_error) result
+(** Hold the Goal lock across the callback only when the canonical ID names
+    exactly one row with no whitespace alias and that Goal is not completed or
+    dropped. The callback follows the Goal -> backlog -> links lock order and
+    must not re-enter the Goal store. *)
+
 val validate_state_json : Yojson.Safe.t -> (unit, string) result
 (** Pure current-schema validation for the setup CLI. Does not read, repair
     or write a store; the rejection is rendered as one sentence naming the
@@ -424,10 +439,15 @@ val validate_state_json : Yojson.Safe.t -> (unit, string) result
 
 (** Persist audit attribution atomically with the upsert. Events retain the
     store revision assigned under the Goal lock and survive every mutation. *)
+type upsert_precondition = Unconditional | Require_absent
+
 val upsert_goal_with_events :
   Workspace_utils.config -> actor:string -> ?id:string -> ?title:string ->
   ?metric:string -> ?target_value:string -> ?due_date:string -> ?priority:int ->
+  ?precondition:upsert_precondition ->
   unit -> (goal * [ `created | `updated of goal ] * pending_event list, write_error) result
+(** [Require_absent] refuses an existing raw ID or its trimmed alias under the
+    Goal write lock. It never updates an existing Goal. *)
 
 (** Idempotently publish pending audit rows and acknowledge them under the Goal
     lock. A failed append keeps all intents; an acknowledgement failure retains

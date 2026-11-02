@@ -1504,7 +1504,10 @@ let add_delete_action_routes router =
                 respond_error ~status:`Not_found ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err)
               | Error
-                  (( Task.Goal_assignment.Task_finished _
+                  (( Task.Goal_assignment.Ambiguous_task _
+                   | Task.Goal_assignment.Ambiguous_goal _
+                   | Task.Goal_assignment.Goal_closed _
+                   | Task.Goal_assignment.Task_finished _
                    | Task.Goal_assignment.Already_assigned _ ) as err) ->
                 respond_error ~status:`Conflict ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err)

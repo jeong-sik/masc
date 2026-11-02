@@ -74,6 +74,13 @@ describe('createRunActivityStore', () => {
     })
   })
 
+  it('retains a non-breaking-space Goal ID on an activity event', () => {
+    const s = createRunActivityStore(runId)
+    expect(s.append(event({ context: { goal_id: '\u00a0' } }))).toBe(true)
+    expect(s.events()[0]?.context?.goal_id).toBe('\u00a0')
+    expect(s.append(event({ context: { goal_id: ' \t' } }))).toBe(false)
+  })
+
   it('filters malformed seeded public input', () => {
     const s = createRunActivityStore(runId)
     s.seed([

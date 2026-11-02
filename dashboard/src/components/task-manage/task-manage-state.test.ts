@@ -3,11 +3,15 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { showTaskCreate, taskCreating, createTask, assignTaskToGoal } from './task-manage-state'
 
 const mockCallMcpTool = vi.fn()
+const mockCallMcpToolAtIdentity = vi.fn()
+const mockFailureDisposition = vi.fn<(error: unknown) => string>(() => 'outcome_unknown')
 const mockShowToast = vi.fn()
 const mockRefreshExecution = vi.fn()
 const mockRefreshGoals = vi.fn()
 
-vi.mock('../../api/mcp', () => ({ callMcpTool: (...args: any[]) => mockCallMcpTool(...args) }))
+vi.mock('../../api/mcp', () => ({ callMcpTool: (...args: any[]) => mockCallMcpTool(...args),
+  callMcpToolAtIdentity: (...args: any[]) => mockCallMcpToolAtIdentity(...args),
+  mcpCallFailureDisposition: (error: unknown) => mockFailureDisposition(error) }))
 vi.mock('../common/toast', () => ({ showToast: (...args: any[]) => mockShowToast(...args) }))
 vi.mock('../../store', () => ({
   refreshExecution: (...args: any[]) => mockRefreshExecution(...args),
@@ -20,10 +24,13 @@ describe('task-manage-state', () => {
     showTaskCreate.value = false
     taskCreating.value = false
     mockCallMcpTool.mockReset()
+    mockCallMcpToolAtIdentity.mockReset()
+    mockFailureDisposition.mockReset().mockReturnValue('outcome_unknown')
     mockShowToast.mockReset()
     mockRefreshExecution.mockReset()
     mockRefreshGoals.mockReset()
     mockCallMcpTool.mockResolvedValue(undefined)
+    mockCallMcpToolAtIdentity.mockResolvedValue(undefined)
     mockRefreshExecution.mockResolvedValue(undefined)
     mockRefreshGoals.mockResolvedValue(undefined)
   })
@@ -59,15 +66,58 @@ describe('task-manage-state', () => {
     expect(mockCallMcpTool).toHaveBeenCalledWith('masc_add_task', expect.objectContaining({ priority: 2 }))
   })
 
-  it('createTask includes goal_id when provided and trimmed', async () => {
-    await createTask({ title: 't', description: '', goal_id: '  g-123  ' })
-    expect(mockCallMcpTool).toHaveBeenCalledWith('masc_add_task', expect.objectContaining({ goal_id: 'g-123' }))
+  it('createTask preserves a canonical Goal ID and binds the observed workspace', async () => {
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true }
+    await createTask({ title: 't', description: '', goal_id: '\u00a0g-123\u00a0' }, goalDispatch)
+    expect(mockCallMcpToolAtIdentity).toHaveBeenCalledWith('masc_add_task', expect.objectContaining({
+      goal_id: '\u00a0g-123\u00a0', expected_workspace: { base_path: '/a', masc_root: '/a/.masc' },
+    }), goalDispatch.identity, goalDispatch.isCurrent)
   })
 
-  it('createTask omits goal_id when empty', async () => {
-    await createTask({ title: 't', description: '', goal_id: '' })
-    const args = mockCallMcpTool.mock.calls[0]![1] as Record<string, unknown>
-    expect(args.goal_id).toBeUndefined()
+  it('refuses blank, padded, or stale Goal targets instead of making an unlinked Task', async () => {
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true }
+    for (const goal_id of ['', '  g-123  ']) {
+      expect(await createTask({ title: 't', description: '', goal_id }, goalDispatch)).toBe(false)
+    }
+    expect(await createTask({ title: 't', description: '', goal_id: 'g-123' },
+      { ...goalDispatch, isCurrent: () => false })).toBe(false)
+    expect(mockCallMcpTool).not.toHaveBeenCalled()
+    expect(mockCallMcpToolAtIdentity).not.toHaveBeenCalled()
+  })
+
+  it('keeps an uncertain Goal Task outcome distinct from a refusal', async () => {
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true }
+    mockCallMcpToolAtIdentity.mockRejectedValueOnce(new Error('connection lost'))
+    expect(await createTask({ title: 't', description: '', goal_id: 'g-123' }, goalDispatch)).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('결과를 확인할 수 없습니다'), 'warning')
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('생성 실패'), 'error')
+  })
+
+  it.each([
+    ['known_pre_effect', '생성 전에 요청이 거부'],
+    ['known_tool_response', '서버가 오류를 반환'],
+  ])('explains a %s Goal Task failure without exposing its raw detail', async (disposition, message) => {
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true }
+    mockFailureDisposition.mockReturnValue(disposition)
+    mockCallMcpToolAtIdentity.mockRejectedValueOnce(new Error('private server detail'))
+    expect(await createTask({ title: 't', description: '', goal_id: 'g-123' }, goalDispatch)).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining(message), 'warning')
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('workspace'), 'warning')
+    expect(JSON.stringify(mockShowToast.mock.calls)).not.toContain('private server detail')
+  })
+
+  it('does not expose a late Goal Task error after the owner changes', async () => {
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: vi.fn().mockReturnValueOnce(true).mockReturnValue(false) }
+    mockFailureDisposition.mockReturnValue('known_pre_effect')
+    mockCallMcpToolAtIdentity.mockRejectedValueOnce(new Error('private server detail'))
+    expect(await createTask({ title: 't', description: '', goal_id: 'g-123' }, goalDispatch)).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('이전 요청'), 'warning')
+    expect(JSON.stringify(mockShowToast.mock.calls)).not.toContain('private server detail')
   })
 
   it('sets taskCreating true while working and false after success', async () => {
@@ -124,14 +174,76 @@ describe('task-manage-state', () => {
     expect(taskCreating.value).toBe(false)
   })
 
-  it('preserves a committed assignment after refresh failure but still refuses a real write failure', async () => {
+  it('binds an assignment to the observed workspace and retains success when refresh fails', async () => {
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true, isOwnerCurrent: () => true,
+      refreshAfterWrite: vi.fn(() => true) }
     mockRefreshExecution.mockRejectedValueOnce(new Error('observation unavailable'))
-    expect(await assignTaskToGoal('task-1', 'goal-1')).toBe(true)
-    expect(mockCallMcpTool).toHaveBeenCalledWith('masc_task_set_goal', { task_id: 'task-1', goal_id: 'goal-1' })
-    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('배정 실패'), 'error')
-    mockCallMcpTool.mockRejectedValueOnce(new Error('write refused'))
-    expect(await assignTaskToGoal('task-2', 'goal-1')).toBe(false)
-    expect(mockShowToast).toHaveBeenCalledWith('목표 배정 실패: write refused', 'error')
+    mockCallMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, task_id: 'task-1', goal_id: 'goal-1' }))
+    expect(await assignTaskToGoal('task-1', 'goal-1', dispatch)).toBe(true)
+    expect(mockCallMcpToolAtIdentity).toHaveBeenCalledWith('masc_task_set_goal', {
+      task_id: 'task-1', goal_id: 'goal-1', expected_workspace: { base_path: '/a', masc_root: '/a/.masc' },
+    }, dispatch.identity, dispatch.isCurrent)
+    expect(mockCallMcpTool).not.toHaveBeenCalled()
+    expect(dispatch.refreshAfterWrite).toHaveBeenCalledOnce()
+    expect(mockShowToast).toHaveBeenCalledWith('목표에 배정 완료', 'success')
+  })
+
+  it.each([
+    ['known_pre_effect', '배정 전에 요청이 거부'],
+    ['known_tool_response', '서버가 배정 오류를 반환'],
+    ['outcome_unknown', '배정 결과를 확인할 수 없습니다'],
+  ])('distinguishes a %s assignment outcome without exposing raw errors', async (disposition, expected) => {
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true, isOwnerCurrent: () => true,
+      refreshAfterWrite: vi.fn(() => true) }
+    mockFailureDisposition.mockReturnValue(disposition)
+    mockCallMcpToolAtIdentity.mockRejectedValueOnce(new Error('private error'))
+    expect(await assignTaskToGoal('task-1', 'goal-1', dispatch)).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining(expected), 'warning')
+    expect(dispatch.refreshAfterWrite).toHaveBeenCalledTimes(disposition === 'known_pre_effect' ? 0 : 1)
+    expect(JSON.stringify(mockShowToast.mock.calls)).not.toContain('private error')
+  })
+
+  it('does not refresh the new owner after an earlier assignment completes', async () => {
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true, isOwnerCurrent: () => false,
+      refreshAfterWrite: vi.fn(() => false) }
+    mockCallMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, task_id: 'task-1', goal_id: 'goal-1' }))
+    expect(await assignTaskToGoal('task-1', 'goal-1', dispatch)).toBe(true)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('이전 관측'), 'warning')
+    expect(mockRefreshExecution).not.toHaveBeenCalled()
+    expect(mockRefreshGoals).not.toHaveBeenCalled()
+    expect(dispatch.refreshAfterWrite).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes the same owner after the Task observation changes during assignment', async () => {
+    let current = true
+    let resolveWrite!: (value: string) => void
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => current, isOwnerCurrent: () => true,
+      refreshAfterWrite: vi.fn(() => true) }
+    mockCallMcpToolAtIdentity.mockImplementationOnce(() => new Promise<string>(resolve => { resolveWrite = resolve }))
+    const result = assignTaskToGoal('task-1', 'goal-1', dispatch)
+    current = false
+    resolveWrite(JSON.stringify({ ok: true, task_id: 'task-1', goal_id: 'goal-1' }))
+    expect(await result).toBe(true)
+    expect(mockRefreshExecution).toHaveBeenCalledWith({ force: true })
+    expect(dispatch.refreshAfterWrite).toHaveBeenCalledOnce()
+    expect(mockRefreshGoals).not.toHaveBeenCalled()
+    expect(mockShowToast).toHaveBeenCalledWith('목표에 배정 완료', 'success')
+  })
+
+  it.each(['', '{}', '{"ok":true,"task_id":"other","goal_id":"goal-1"}'])
+  ('treats an absent or mismatched assignment receipt as an unknown outcome', async response => {
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true, isOwnerCurrent: () => true,
+      refreshAfterWrite: vi.fn(() => true) }
+    mockCallMcpToolAtIdentity.mockResolvedValueOnce(response)
+    expect(await assignTaskToGoal('task-1', 'goal-1', dispatch)).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('배정 결과를 확인할 수 없습니다'), 'warning')
+    expect(dispatch.refreshAfterWrite).toHaveBeenCalledOnce()
+    expect(mockRefreshExecution).not.toHaveBeenCalled()
   })
 
 })

@@ -60,3 +60,22 @@ type = "string"
 [[params]]
 name = "priority"
 type = "integer"
+
+[[params]]
+name = "expected_workspace"
+type = "object"
+additional_properties = false
+description = "Optional canonical workspace paths observed by the caller. A mismatch refuses the upsert before changing the Goal."
+[[params.params]]
+name = "base_path"
+type = "string"
+required = true
+[[params.params]]
+name = "masc_root"
+type = "string"
+required = true
+
+[[params]]
+name = "if_absent"
+type = "boolean"
+description = "When true, refuse if the Goal ID or a trimmed alias already exists; never update an existing Goal."

@@ -25,3 +25,18 @@ name = "goal_id"
 type = "string"
 required = true
 description = "ID of the goal to assign the task to"
+
+[[params]]
+name = "expected_workspace"
+type = "object"
+description = "Optional operator-client precondition binding the assignment to the observed base_path and masc_root. The server rejects a different workspace before reading or assigning the Task."
+
+[[params.params]]
+name = "base_path"
+type = "string"
+required = true
+
+[[params.params]]
+name = "masc_root"
+type = "string"
+required = true

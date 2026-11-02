@@ -9,6 +9,7 @@
 import { signal } from '@preact/signals'
 import { hasNonEmptyStringField, isPositiveSafeInteger, isRecord } from '../common/normalize'
 import { isStringArray } from '../../lib/type-guards'
+import { nonblankGoalId } from '../../lib/goal-identity'
 
 const DEFAULT_MAX_EVENTS = 200
 const RUN_ACTIVITY_VERBS = [
@@ -158,7 +159,7 @@ function isRunActivityContext(value: unknown): value is RunActivityContext {
   if (!isRecord(value)) return false
   return optionalNonEmptyString(value.file_path)
     && optionalPositiveInteger(value.line)
-    && optionalNonEmptyString(value.goal_id)
+    && (value.goal_id === undefined || nonblankGoalId(value.goal_id) !== undefined)
     && optionalNonEmptyString(value.task_id)
     && optionalNonEmptyString(value.board_post_id)
     && optionalNonEmptyString(value.comment_id)

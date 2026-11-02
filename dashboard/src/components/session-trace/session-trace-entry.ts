@@ -7,6 +7,7 @@ import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { truncate } from '../../lib/truncate'
+import { exactGoalId, exactGoalIds } from '../../lib/goal-identity'
 import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
 import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
@@ -282,7 +283,8 @@ function mergeTraceRouteRecord(
   if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
   if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
 
-  const goalId = firstStringish(record, ['goal_id', 'goalId', 'goal'])
+  const goalId = exactGoalId(record.goal_id) ?? exactGoalId(record.goalId)
+    ?? exactGoalIds(record.goal_ids)[0] ?? exactGoalIds(record.goalIds)[0]
   if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
   const taskId = firstStringish(record, ['task_id', 'taskId', 'task'])
   if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
@@ -308,18 +310,6 @@ function firstStringish(record: Record<string, unknown>, keys: ReadonlyArray<str
   for (const key of keys) {
     const value = stringishField(record[key])
     if (value) return value
-  }
-  const goalIds = keys.includes('goal_id') || keys.includes('goalId')
-    ? firstStringishArray(record.goal_ids) ?? firstStringishArray(record.goalIds)
-    : null
-  return goalIds
-}
-
-function firstStringishArray(value: unknown): string | null {
-  if (!Array.isArray(value)) return null
-  for (const item of value) {
-    const normalized = stringishField(item)
-    if (normalized) return normalized
   }
   return null
 }

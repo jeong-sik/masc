@@ -7,13 +7,14 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
-import { goals, tasks, keepers, executionTaskTotal } from '../store'
-import { goalTreeData, goalTreeError } from '../goal-tree-state'
+import { tasks, keepers, executionTaskTotal } from '../store'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
+import { isUnambiguousGoalId } from '../lib/goal-identity'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
+import { useGoalTreeDecisionObservation } from './goals/goal-tree'
 import { VerificationRequestsPanel } from './verification-requests-panel'
 import { VerificationRunsPanel } from './verification-runs-panel'
 import { GoalVerificationRunsPanel } from './goal-verification-runs-panel'
@@ -26,8 +27,8 @@ import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { goalPhaseLabel } from './goals/goal-helpers'
 import { statusLabel } from '../lib/status-label'
-import { GoalCreateForm } from './goals/goal-create-form'
-import { GoalAssignPicker } from './goals/goal-assign-picker'
+import { GoalCreateForm, type GoalCreateSource } from './goals/goal-create-form'
+import { GoalAssignAvailability, GoalAssignPicker } from './goals/goal-assign-picker'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
 import { VerifyQueue } from './verification/verify-queue'
@@ -317,7 +318,7 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
     due_date: node.due_date,
     priority: node.priority,
     phase: node.phase,
-    last_review_note: null,
+    last_review_note: node.last_review_note ?? null,
     created_at: node.created_at,
     updated_at: node.updated_at,
   }
@@ -520,7 +521,7 @@ function GoalDetailSection({ title, children }: { title?: string; children: unkn
 function GoalDossierInstant({ label, at, testHook }: { label: string; at: string; testHook: string }) {
   return html`
     <span data-goal-detail-when=${testHook}>
-      ${label} <${TimeAgo} timestamp=${at} />
+      ${label} ${Number.isFinite(Date.parse(at)) ? html`<${TimeAgo} timestamp=${at} />` : '알 수 없음'}
     </span>
   `
 }
@@ -705,6 +706,7 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
 
 function GoalCard({
   goal,
+  proof,
   open,
   onToggle,
   goalTasks,
@@ -712,6 +714,7 @@ function GoalCard({
   goalNode,
 }: {
   goal: Goal
+  proof: Goal['verification']
   open: boolean
   onToggle: () => void
   goalTasks: Task[]
@@ -746,7 +749,7 @@ function GoalCard({
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
         <span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>
-        <${GoalProofStatus} proof=${goalNode?.verification ?? goal.verification} />
+        <${GoalProofStatus} proof=${proof} />
         ${goal.metric ? html`
           <span
             class="wk-metric mono"
@@ -888,6 +891,9 @@ interface WorkAsideProps {
   backlog: ReadonlyArray<WkaBacklogTask>
   recent: ReadonlyArray<WkaRecentTask>
   counts: WkaCounts
+  goalSourceLoading: boolean
+  goalSourceUnconfirmed: boolean
+  goalSourceError: string | null
   onJump: (goalId: string) => void
   onOpenKeeper?: (name: string) => void
 }
@@ -1084,9 +1090,10 @@ function KanbanView({
 }
 
 function WorkAside({
-  flagged, verifyTasks, blockers, backlog, recent, counts, onJump,
+  flagged, verifyTasks, blockers, backlog, recent, counts, goalSourceLoading, goalSourceUnconfirmed, goalSourceError, onJump,
 }: WorkAsideProps) {
   const needTotal = verifyTasks.length + blockers.length + backlog.length
+  const goalCountUnavailable = goalSourceLoading || goalSourceUnconfirmed || goalSourceError !== null
 
   const [collapsed, setCollapsed] = useState<boolean>(readStoredAsideCollapsed)
   const [w, setW] = useState<number>(readStoredAsideW)
@@ -1153,8 +1160,8 @@ function WorkAside({
             <b class="mono">${needTotal}</b>
             <span>할일</span>
           </div>
-          <div class=${`wka-rail-stat ${flagged.length ? 'bad' : ''}`}>
-            <b class="mono">${flagged.length}</b>
+          <div class=${`wka-rail-stat ${!goalCountUnavailable && flagged.length ? 'bad' : ''}`}>
+            <b class="mono">${goalCountUnavailable ? '—' : flagged.length}</b>
             <span>주의</span>
           </div>
         </div>
@@ -1188,7 +1195,8 @@ function WorkAside({
         <span class="wka-bar-t">운영 상태</span>
         <span class="wka-bar-live">
           <span class="wka-livedot" aria-hidden="true"></span>
-          ${goalTreeError.value ? '목표 확인 불가' : `${counts.active} active`}
+          ${goalSourceLoading ? '목표 확인 중' : goalSourceUnconfirmed ? 'workspace 확인 필요'
+            : goalSourceError ? '목표 확인 불가' : `${counts.active} active`}
         </span>
         <button
           type="button"
@@ -1224,10 +1232,14 @@ function WorkAside({
         <section class="wka-sec" aria-labelledby="wka-h-flagged">
           <div class="wka-h" id="wka-h-flagged" role="heading" aria-level=${3}>
             지금 상황
-            ${flagged.length > 0 ? html`<span class="wka-h-n bad">${flagged.length}</span>` : null}
+            ${!goalCountUnavailable && flagged.length > 0 ? html`<span class="wka-h-n bad">${flagged.length}</span>` : null}
           </div>
-          ${goalTreeError.value
-            ? html`<div role="alert" data-testid="wka-goal-source-error">목표 상태 확인 불가 · ${goalTreeError.value}</div>`
+          ${goalSourceLoading
+            ? html`<div role="status" data-testid="wka-goal-source-loading">목표 확인 중</div>`
+            : goalSourceUnconfirmed
+            ? html`<div role="status">workspace를 확인해 주세요.</div>`
+            : goalSourceError
+            ? html`<div role="alert" data-testid="wka-goal-source-error">목표 상태 확인 불가 · ${goalSourceError}</div>`
             : flagged.length === 0
             ? html`<div class="wka-calm mono" data-testid="wka-flagged-calm">주의 목표 없음 · 정상 순환</div>`
             : html`
@@ -1336,10 +1348,12 @@ function WorkSurfaceV2() {
   // Read showGoalCreate at the top so this component re-renders when the
   // side-panel toggle changes.
   const goalCreateOpen = showGoalCreate.value
-  const goalList = goals.value
+  const goalObservation = useGoalTreeDecisionObservation()
   const executionTasks = tasks.value
-  const goalTreeSnapshot = goalTreeData.value
-  const goalSourceError = goalTreeError.value
+  const goalTreeSnapshot = goalObservation.data
+  const goalCreateSource: GoalCreateSource = goalObservation.unavailable
+    ? { kind: 'unavailable', unavailable: goalObservation.unavailable }
+    : goalTreeSnapshot ? { kind: 'ready' } : { kind: 'unconfirmed' }
   const goalStoreTasks = useMemo(
     () => collectGoalTreeTasks(goalTreeSnapshot?.tree ?? []),
     [goalTreeSnapshot],
@@ -1352,17 +1366,33 @@ function WorkSurfaceV2() {
     () => flattenGoalTreeNodes(goalTreeSnapshot?.tree ?? []),
     [goalTreeSnapshot],
   )
+  const identityObservation = goalTreeSnapshot?.identity_observation
+  const goalList = useMemo(() => identityObservation?.complete
+    ? treeGoals.filter(goal => isUnambiguousGoalId(goal.id, identityObservation.ids)).map(goalFromGoalTreeNode)
+    : [], [treeGoals, identityObservation])
+  const identityUnavailable = goalTreeSnapshot !== null
+    && (!identityObservation?.complete || identityObservation.ids.length !== treeGoals.length
+      || goalList.length !== treeGoals.length)
+  const goalSourceLoading = !goalTreeSnapshot && goalObservation.loading
+  const goalSourceUnconfirmed = !goalTreeSnapshot && !goalObservation.loading
+    && (goalObservation.unconfirmed || (!goalObservation.authority && !goalObservation.authorityError))
+  const goalSourceError = !goalTreeSnapshot && !goalSourceLoading && !goalSourceUnconfirmed
+    ? !goalObservation.authority ? '현재 workspace 연결을 확인할 수 없습니다.'
+      : goalObservation.error ?? '현재 workspace의 Goal을 확인할 수 없습니다.'
+    : identityUnavailable ? '현재 Goal 목록에서 일부 항목을 확인하거나 ID를 구분할 수 없습니다.' : null
+  const assignmentBinding = goalObservation.decisionBinding
+  const assignmentSource = identityObservation && goalTreeSnapshot && assignmentBinding
+    ? { goals: treeGoals.map(goalFromGoalTreeNode), observation: identityObservation,
+      rowsIncomplete: identityObservation.ids.length !== treeGoals.length, workspace: assignmentBinding.workspace,
+      identity: { revision: assignmentBinding.authRevision, actor: assignmentBinding.actor },
+      isCurrent: () => goalObservation.isCurrent() && tasks.peek() === executionTasks,
+      isOwnerCurrent: goalObservation.isOwnerCurrent, refreshAfterWrite: goalObservation.refreshAfterWrite } : null
   const goalTreeNodeById = useMemo(() => {
     const map = new Map<string, GoalTreeNode>()
     for (const node of treeGoals) map.set(node.id, node)
     return map
   }, [treeGoals])
-  const displayGoals = useMemo(() => {
-    const map = new Map<string, Goal>()
-    for (const node of treeGoals) map.set(node.id, goalFromGoalTreeNode(node))
-    for (const goal of goalList) map.set(goal.id, goal)
-    return Array.from(map.values())
-  }, [goalList, treeGoals])
+  const displayGoals = goalList
 
   const [view, setView] = useState<WorkView>(readStoredWorkView)
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
@@ -1411,10 +1441,8 @@ function WorkSurfaceV2() {
     })
   }, [allTasks, claimed])
 
-  // KPI semantics: when a Goal Store tree summary is present, use its active
-  // goal count; otherwise fall back to the execution goal list. Task counts are
-  // always derived from the merged task set so execution and tree tasks are
-  // counted consistently.
+  // Count active Goals from the same bound tree as their cards. The KPI is
+  // withheld if that observation is incomplete or has ambiguous IDs.
   //
   // The "전체 작업" tile counts every task, so it reads the backlog size the
   // execution payload reports rather than counting the rows it happened to
@@ -1427,21 +1455,19 @@ function WorkSurfaceV2() {
   // payload that omits task_counts. The sub-counts below are deliberately
   // visible-set counts: they describe rows this view can show.
   const totals = useMemo(() => ({
-    goals: goalTreeSnapshot?.summary.active_goals ?? goalList.length,
+    goals: goalList.filter(goal => goal.phase === 'executing').length,
     tasks: executionTaskTotal.value ?? claimedTasks.length,
     wip: claimedTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
     verify: claimedTasks.filter(t => t.status === 'awaiting_verification').length,
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
   }), [goalTreeSnapshot, goalList, claimedTasks, executionTaskTotal.value])
 
-  // Goal title lookup: prefer execution-side goalList titles, but fall back
-  // to Goal Store tree titles so tree-only goals still render context.
+  // Goal titles and proof come from the same workspace-bound tree observation.
   const goalTitleById = useMemo(() => {
     const map = new Map<string, string>()
-    for (const g of treeGoals) map.set(g.id, g.title)
     for (const g of goalList) map.set(g.id, g.title)
     return map
-  }, [goalList, treeGoals])
+  }, [goalList])
 
   const tasksByGoalId = useMemo(() => {
     const map = new Map<string, Task[]>()
@@ -1662,11 +1688,18 @@ function WorkSurfaceV2() {
           </div>
         </header>
 
-          ${goalSourceError ? html`<div role="alert" data-testid="work-goal-source-error">목표 데이터를 읽을 수 없습니다 · ${goalSourceError}</div>` : null}
+          ${goalSourceLoading ? html`<div role="status" data-testid="work-goal-source-loading">목표를 확인하고 있습니다.</div>`
+            : goalSourceUnconfirmed ? html`<div role="status" data-testid="work-goal-source-unconfirmed">${goalObservation.unconfirmed
+              ? '현재 Goal 상태를 다시 확인해 주세요.' : '현재 workspace를 확인해 주세요.'}
+              <button type="button" onClick=${() => { void goalObservation.refresh() }}>다시 확인</button>
+            </div>`
+            : goalSourceError ? html`<div role="alert" data-testid="work-goal-source-error">목표 데이터를 읽을 수 없습니다 · ${goalSourceError}
+            <button type="button" disabled=${goalObservation.loading} onClick=${() => { void goalObservation.refresh() }}>다시 확인</button>
+          </div>` : null}
           <section class="wk-kpis" data-testid="work-kpis">
             <div class="wk-kpi primary">
               <div class="wk-kpi-k">활성 목표</div>
-              <div class="wk-kpi-v brass" data-testid="kpi-goals">${goalSourceError ? '—' : totals.goals}</div>
+              <div class="wk-kpi-v brass" data-testid="kpi-goals">${goalSourceLoading || goalSourceUnconfirmed || goalSourceError ? '—' : totals.goals}</div>
             </div>
             <div class="wk-kpi">
               <div class="wk-kpi-k">전체 작업</div>
@@ -1694,6 +1727,7 @@ function WorkSurfaceV2() {
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
               </div>
+              ${assignmentSource && backlogTasks.some(task => !task.goal_id) ? html`<${GoalAssignAvailability} source=${assignmentSource} />` : null}
               <${VirtualList}
                 items=${backlogTasks}
                 estimatedItemHeight=${48}
@@ -1713,7 +1747,7 @@ function WorkSurfaceV2() {
                     ${/* Goal presence is goal_id, not goalTitle: a title lookup
                           that misses also leaves goalTitle undefined, and
                           masc_task_set_goal refuses an already-assigned task. */
-                      t.goal_id ? null : html`<${GoalAssignPicker} taskId=${t.id} />`}
+                      t.goal_id || !assignmentSource ? null : html`<${GoalAssignPicker} taskId=${t.id} source=${assignmentSource} />`}
                     <button type="button" class="wk-task-claim" onClick=${() => claimTask(t.id)}>＋ claim</button>
                   </div>
                 `}
@@ -1733,6 +1767,7 @@ function WorkSurfaceV2() {
                     <${GoalCard}
                       key=${g.id}
                       goal=${g}
+                      proof=${g.verification}
                       open=${openSet.has(g.id)}
                       onToggle=${() => toggleGoal(g.id)}
                       goalTasks=${tasksByGoalId.get(g.id) ?? []}
@@ -1752,7 +1787,10 @@ function WorkSurfaceV2() {
 
           <div class="wk-foot mono">목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 백로그에서 claim</div>
       </div>
-      ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
+      ${goalCreateOpen ? html`<${GoalCreateForm} source=${goalCreateSource}
+        isStoreUnavailableNow=${goalObservation.isStoreUnavailableNow}
+        currentWorkspace=${goalObservation.decisionBinding?.workspace ?? null}
+        isWorkspaceCurrent=${goalObservation.isCurrent} />` : html`
         <${WorkAside}
           flagged=${wkaFlagged}
           verifyTasks=${wkaVerifyTasks}
@@ -1760,6 +1798,9 @@ function WorkSurfaceV2() {
           backlog=${wkaBacklog}
           recent=${wkaRecent}
           counts=${wkaCounts}
+          goalSourceLoading=${goalSourceLoading}
+          goalSourceUnconfirmed=${goalSourceUnconfirmed}
+          goalSourceError=${goalSourceError}
           onJump=${jumpToGoal}
           onOpenKeeper=${openKeeperWorkspace}
         />

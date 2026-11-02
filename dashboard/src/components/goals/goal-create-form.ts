@@ -5,15 +5,25 @@ import { isDismissEscape } from '../../lib/keyboard'
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import type { RenderableProps } from 'preact'
+import { useEffect, useRef } from 'preact/hooks'
 import { TextInput } from '../common/input'
 import { ActionButton } from '../common/button'
 import { goalStoreUnavailable } from '../../goal-tree-state'
 import { goalStoreUnavailableSummary } from '../../lib/goal-store-unavailable-labels'
+import type { ArtifactWorkspace } from '../../api/published-artifacts'
+import { storedTokenRevision } from '../../api/token-revision'
+import { dashboardActorRevision } from '../../lib/dashboard-session-actor'
+import { executionWorkspaceAuthority } from '../../store'
+import type { GoalStoreUnavailable } from '../../types/goal-store-unavailable'
 import {
   showGoalCreate,
   goalCreating,
   goalCreateError,
+  goalCreateOutcomes,
+  goalCreateOutcomeIsCurrent,
+  goalCreateDraftHasOutcome,
+  dismissGoalCreateOutcome,
   createGoal,
   currentGoalCreateDraft,
   resetGoalCreateForm,
@@ -40,7 +50,19 @@ export function resetGoalCreateFormLocal(): void {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function GoalCreateForm() {
+export type GoalCreateSource =
+  | { kind: 'ready' }
+  | { kind: 'unconfirmed' }
+  | { kind: 'unavailable'; unavailable: GoalStoreUnavailable }
+
+export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace, isWorkspaceCurrent }: RenderableProps<{
+  source?: GoalCreateSource
+  isStoreUnavailableNow?: () => boolean
+  currentWorkspace?: ArtifactWorkspace | null
+  isWorkspaceCurrent?: () => boolean
+}> = {}) {
+  const workspaceView = useRef({ currentWorkspace, isWorkspaceCurrent })
+  workspaceView.current = { currentWorkspace, isWorkspaceCurrent }
   // Escape key dismisses
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -57,12 +79,22 @@ export function GoalCreateForm() {
   if (!showGoalCreate.value) return null
 
   const handleSubmit = () => {
+    // Recheck at the event boundary in case an owned failure arrived after
+    // the last render. The server still makes the final write decision.
+    const unavailableNow = () => isStoreUnavailableNow ? isStoreUnavailableNow()
+      : source === undefined ? goalStoreUnavailable.peek() !== null : source.kind === 'unavailable'
+    if (unavailableNow()) return
     const owner = currentGoalCreateDraft()
     void createGoal({
       title: titleSignal.value,
       metric: metricSignal.value,
       targetValue: targetSignal.value,
       priority: prioritySignal.value,
+    }, unavailableNow, workspace => {
+      const view = workspaceView.current
+      if (!view.isWorkspaceCurrent?.() || !view.currentWorkspace) return 'unconfirmed'
+      return view.currentWorkspace.basePath === workspace.basePath && view.currentWorkspace.mascRoot === workspace.mascRoot
+        ? 'current' : 'different'
     }).then(ok => {
       if (ok && owner === currentGoalCreateDraft()) resetGoalCreateFormLocal()
     })
@@ -78,9 +110,20 @@ export function GoalCreateForm() {
   const isTargetEmpty = !targetSignal.value.trim()
   // RFC-0444 §2.2: every Goal write is refused while the store cannot be read,
   // so the form does not offer a submit that the server would reject.
-  const sourceUnavailable = goalStoreUnavailable.value
+  // Only the standalone form falls back to the shared observation. A Work
+  // source explicitly says whether its own bound observation is unavailable.
+  const sourceUnavailable = source === undefined ? goalStoreUnavailable.value
+    : source.kind === 'unavailable' ? source.unavailable : null
+  // The actor revision triggers a render even when no other signal changes.
+  void dashboardActorRevision.value
+  void executionWorkspaceAuthority.value
+  void storedTokenRevision.value
+  const visibleOutcomes = goalCreateOutcomes.value.filter(goalCreateOutcomeIsCurrent)
   const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
-    || sourceUnavailable !== null
+    || sourceUnavailable !== null || goalCreateDraftHasOutcome(visibleOutcomes)
+  const error = goalCreateError.value
+  const visibleError = error?.kind === 'uncertain'
+    && !visibleOutcomes.some(outcome => outcome.ticket === error.ticket) ? null : error
 
   return html`
     <aside
@@ -192,13 +235,37 @@ export function GoalCreateForm() {
           </div>
         ` : null}
 
-        ${goalCreateError.value?.kind === 'submit' ? html`
+        ${source?.kind === 'unconfirmed' ? html`
           <div class="wk-goal-create-sec">
-            <p class="wk-goal-create-err" role="alert" data-testid="goal-create-error">
-              ${goalCreateErrorMessage(goalCreateError.value)}
+            <p role="status" data-testid="goal-create-source-unconfirmed">
+              현재 Goal 저장소 상태를 확인하지 못했습니다. 생성 요청의 결과를 확인해 주세요.
             </p>
           </div>
         ` : null}
+
+        ${visibleError?.kind === 'submit' || visibleError?.kind === 'uncertain' ? html`
+          <div class="wk-goal-create-sec">
+            <p class="wk-goal-create-err" role="alert" data-testid="goal-create-error">
+              ${goalCreateErrorMessage(visibleError)}
+            </p>
+          </div>
+        ` : null}
+
+        ${visibleOutcomes.map(outcome => html`
+          <div key=${outcome.ticket} class="wk-goal-create-sec" role="status" data-testid="goal-create-outcome">
+            <p>${outcome.state === 'pending' ? '목표 생성 요청을 처리 중입니다.'
+              : outcome.state === 'created' ? '서버가 목표 생성 요청에 응답했습니다.'
+                : '생성 결과가 불확실합니다. 다시 요청하기 전에 원래 작업 공간을 확인해 주세요.'}</p>
+            ${currentWorkspace && isWorkspaceCurrent?.()
+              && currentWorkspace.basePath === outcome.workspace.basePath && currentWorkspace.mascRoot === outcome.workspace.mascRoot
+              ? html`<p>요청한 Goal ID: ${outcome.goalId}</p>`
+              : html`<p>원래 작업 공간을 확인하면 요청한 Goal ID를 볼 수 있습니다.</p>`}
+            ${outcome.state === 'pending' ? null : html`
+              <${ActionButton} variant="ghost" size="sm" onClick=${() => dismissGoalCreateOutcome(outcome.ticket)}>
+                안내 닫기
+              <//>`}
+          </div>
+        `)}
 
         <div class="wk-goal-create-actions">
           <${ActionButton}

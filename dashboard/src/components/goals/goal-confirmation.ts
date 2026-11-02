@@ -84,9 +84,10 @@ export function confirmationHasUnsettledReceipt(workspace: ArtifactWorkspace, go
     && (receipt.view.kind === 'submitting' || receipt.view.kind === 'uncertain'))
 }
 
-export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed }: {
+export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed, onOutcome }: {
   owner: ConfirmationOwner; isCurrent: () => boolean; readAuthority: object
   lifecyclePending: boolean; hasLifecyclePending: () => boolean; onConfirmed: () => void
+  onOutcome?: (result: { ticket: number; state: 'pending' | 'confirmed' | 'uncertain' }) => void
 }) {
   const { goalId, workspace } = owner
   const [storedView, setView] = useState<View>({ kind: 'loading' })
@@ -183,6 +184,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
     let readbackStarted = false
     setDismissedTicket(null)
     setReceipt({ owner, ticket, view: { kind: 'submitting', evidence, stage: 'sending' } })
+    onOutcome?.({ ticket, state: 'pending' })
     try {
       // No await separates this authority check from constructing the POST.
       if (!current()) throw new Error('인증 또는 작업 공간이 변경되어 요청을 보내지 않았습니다')
@@ -208,6 +210,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
       if (!current()) throw new Error('원래 연결에서 확인 후 재조회가 필요합니다')
       if (receipts.peek()[owner.key]?.ticket !== ticket) return
       setReceipt({ owner, ticket, view: { kind: 'confirmed', evidence: readback } })
+      onOutcome?.({ ticket, state: 'confirmed' })
       onConfirmed()
     } catch (error) {
       if (receipts.peek()[owner.key]?.ticket === ticket) {
@@ -215,6 +218,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
         setReceipt({ owner, ticket, view: { kind: 'uncertain', evidence,
           detail: readbackStarted ? '확인 후 재조회에 실패했습니다.' : message(error),
           status: errorStatus(error) ?? refusalStatuses.peek()[owner.key] ?? null } })
+        onOutcome?.({ ticket, state: 'uncertain' })
       }
     }
   }

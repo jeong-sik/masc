@@ -260,6 +260,23 @@ describe('real Goal confirmation component through API decoding', () => {
     await screen.findByText(verdict.evidence)
     expect(screen.getByText(/이전 확인 요청 결과 미확인/).textContent).toContain('request-1')
   })
+  it('retains an uncertain receipt if the panel unmounts while confirmation is in flight', async () => {
+    let resolvePost!: (value: unknown) => void
+    api.getWithResponse.mockResolvedValue(response(evidence()))
+    api.post.mockReturnValue(new Promise(resolve => { resolvePost = resolve }))
+    const confirmed = vi.fn()
+    const outcomes = vi.fn()
+    const props = { ...panelDefaults, owner: owner(), isCurrent: current, onConfirmed: confirmed, onOutcome: outcomes }
+    const first = render(html`<${GoalConfirmationPanel} ...${props} />`)
+    fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+    first.unmount()
+    resolvePost(evidence(true))
+    render(html`<${GoalConfirmationPanel} ...${props} />`)
+    await screen.findByText(/서버에 반영되었을 수 있습니다/)
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(confirmed).not.toHaveBeenCalled()
+    expect(outcomes.mock.calls.map(([result]) => result.state)).toEqual(['pending', 'uncertain'])
+  })
   it('withdraws a dismissed receipt when the tree observation changes', async () => {
     let refresh!: (value: unknown) => void
     api.getWithResponse.mockResolvedValueOnce(response(evidence())).mockResolvedValueOnce(response(evidence()))

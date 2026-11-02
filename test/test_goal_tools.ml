@@ -561,6 +561,51 @@ let test_goal_creation_survives_event_recording_failure () =
   check bool "the failed append did not overwrite its directory" true (Sys.is_directory path)
 ;;
 
+let test_goal_upsert_checks_expected_workspace () =
+  with_workspace @@ fun config ->
+  let base = Unix.realpath config.base_path in
+  let root = Unix.realpath (Workspace.masc_dir config) in
+  let expected base_path =
+    `Assoc [ "base_path", `String base_path; "masc_root", `String root ] in
+  let fields =
+    [ "id", `String "goal-bound"; "title", `String "Workspace-bound goal"
+    ; "metric", `String "measurement"; "target_value", `String "1" ] in
+  let call extra =
+    Tool_workspace.dispatch (workspace_ctx config) ~name:"masc_goal_upsert"
+      ~args:(`Assoc (fields @ extra)) in
+  let path = Goal_store.goals_path config in
+  List.iter (fun extra ->
+    ignore (expect_error (call extra));
+    check bool "refusal did not create the store" false (Sys.file_exists path))
+    [ [ "expected_workspace", expected (base ^ "-other") ]
+    ; [ "expected_workspace", `String "invalid" ]
+    ; [ "expected_workspace", expected base; "expected_workspace", expected base ] ];
+  (match call [ "expected_workspace", expected base; "if_absent", `Bool true ] with
+   | Some result ->
+     let created = parse_json_result result in
+     check string "matching workspace created the requested goal" "goal-bound"
+       (get_string_field created "goal_id")
+   | None -> fail "masc_goal_upsert not handled");
+  let before = Fs_compat.load_file path in
+  ignore (expect_error (call [ "expected_workspace", expected (base ^ "-other") ]));
+  check string "a refused update preserves the existing store" before (Fs_compat.load_file path);
+  List.iter (fun extra ->
+    ignore (expect_error (call ([ "expected_workspace", expected base ] @ extra)));
+    check string "a refused create preserves the existing store" before (Fs_compat.load_file path))
+    [ [ "if_absent", `Bool true ]; [ "if_absent", `String "true" ]
+    ; [ "if_absent", `Bool true; "if_absent", `Bool false ] ];
+  let state = match Goal_store.load_source config with
+    | Goal_store.Available state -> state
+    | Goal_store.Uninitialized | Goal_store.Unavailable _ -> fail "Goal store is not readable" in
+  let goal = match state.goals with
+    | [ goal ] -> goal
+    | _ -> fail "expected one created Goal" in
+  Goal_store.write_state config { state with goals = [ { goal with id = " goal-bound " } ] };
+  let padded_before = Fs_compat.load_file path in
+  ignore (expect_error (call [ "expected_workspace", expected base; "if_absent", `Bool true ]));
+  check string "a trimmed ID alias is not replaced or duplicated" padded_before (Fs_compat.load_file path)
+;;
+
 let test_metadata_edit_survives_event_recording_failure () =
   List.iter (fun phase ->
     with_workspace ~now:calendar_fixture_now @@ fun config ->
@@ -1384,6 +1429,7 @@ let () =
         ; test_case "a refusing confirmation step keeps the confirmation retryable" `Quick
             test_a_refusing_confirmation_step_keeps_the_confirmation_retryable
         ; test_case "upsert and list" `Quick test_goal_upsert_and_list
+        ; test_case "upsert checks expected workspace" `Quick test_goal_upsert_checks_expected_workspace
         ; test_case "different callers share a Goal without private delivery" `Quick
             test_callers_share_a_goal_without_private_delivery
         ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure

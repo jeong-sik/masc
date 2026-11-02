@@ -4,7 +4,8 @@ import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { ActionButton } from '../common/button'
 import { RichComposer } from '../common/rich-composer'
-import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
+import { showTaskCreate, taskCreating, createTask, type GoalTaskDispatch } from './task-manage-state'
+import { isCanonicalGoalId } from '../../lib/goal-identity'
 import { Tk } from '../tk'
 
 export const title = signal('')
@@ -19,9 +20,11 @@ const PRIORITY_OPTIONS = [
 
 export function resetForm() { title.value = ''; description.value = ''; priority.value = 3 }
 
-export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: string | null } = {}) {
-  const linkedGoalId = props.goalId?.trim() || null
+export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: string | null; goalDispatch?: GoalTaskDispatch } = {}) {
+  const linkedGoalId = props.goalId ?? null
   const linkedGoalTitle = props.goalTitle?.trim() || null
+  const goalUnavailable = linkedGoalId !== null
+    && (!isCanonicalGoalId(linkedGoalId) || !props.goalDispatch || !props.goalDispatch.isCurrent())
   if (!showTaskCreate.value) {
     return html`
       <div class="v2-workspace-surface flex flex-col gap-3">
@@ -110,14 +113,15 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           <${ActionButton}
             variant="primary"
             size="md"
-            disabled=${taskCreating.value || !title.value.trim()}
+            disabled=${taskCreating.value || !title.value.trim() || goalUnavailable}
             onClick=${() => {
+              if (linkedGoalId !== null && (!props.goalDispatch || !props.goalDispatch.isCurrent())) return
               void createTask({
                 title: title.value,
                 description: description.value,
                 priority: priority.value,
                 goal_id: linkedGoalId,
-              })
+              }, props.goalDispatch)
                 .then(ok => { if (ok) resetForm() })
             }}
           >

@@ -489,6 +489,12 @@ describe('IdeContextLens', () => {
     }).map(link => link.label)).toEqual(['Goal'])
   })
 
+  it('preserves the Goal ID in a context route', () => {
+    expect(routeLinksForContext({ goalId: ' goal-a ' })[0]).toMatchObject({
+      tab: 'workspace', params: { section: 'planning', goal: ' goal-a ' },
+    })
+  })
+
   it('links conversation threads into board, comment, keeper, and line context', () => {
     const model = deriveIdeContextLens({
       codebase,
@@ -636,7 +642,7 @@ describe('IdeContextLens', () => {
         target: 'PR #15000',
         timestamp_ms: 400,
         detail: [
-          'goal:goal-ide',
+          'goal:goal-ide ',
           'task:task-42',
           'board:post-1',
           'comment:comment-1',
@@ -673,10 +679,9 @@ describe('IdeContextLens', () => {
       line: 27,
       keeper_id: 'sangsu',
     })
-    expect(model.anchors[0]?.meta).toContain('goal goal-ide')
+    expect(model.anchors[0]?.meta).not.toContain('goal goal-ide')
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

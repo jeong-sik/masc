@@ -125,6 +125,27 @@ describe('IdeKeeperWorkPanel', () => {
     expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-151')
   })
 
+  it('keeps the exact Goal identity in the keeper work summary and links', () => {
+    const goalId = '\u00a0goal-a\u00a0'
+    keepers.value = [keeperFixture()]
+    goals.value = [goalFixture({ id: goalId, title: 'Unicode Goal' }), goalFixture({ id: 'goal-a', title: 'Different Goal' })]
+    tasks.value = [
+      taskFixture({ goal_id: goalId }),
+      taskFixture({ id: 'task-done', goal_id: goalId, status: 'done' }),
+      taskFixture({ id: 'other-done', goal_id: 'goal-a', status: 'done' }),
+    ]
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+    expect(container.textContent).toContain('Unicode Goal')
+    expect(container.textContent).toContain('1/2 tasks')
+    expect(container.textContent).not.toContain('Different Goal')
+    const goalButtons = Array.from(container.querySelectorAll('button')).filter(button => button.textContent === 'Goal')
+    expect(goalButtons.length).toBeGreaterThan(0)
+    for (const button of goalButtons) {
+      fireEvent.click(button)
+      expect(new URLSearchParams(window.location.hash.split('?')[1]).get('goal')).toBe(goalId)
+    }
+  })
+
   it('links the current task to git, telemetry, and keeper context', () => {
     keepers.value = [keeperFixture()]
     tasks.value = [taskFixture({

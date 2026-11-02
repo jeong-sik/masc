@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { computed, signal } from '@preact/signals'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
@@ -15,10 +15,18 @@ const routeSignal = signal<{
 })
 
 const navigateMock = vi.hoisted(() => vi.fn())
-const callMcpToolMock = vi.hoisted(() => vi.fn<() => Promise<string>>())
+const callMcpToolMock = vi.hoisted(() => vi.fn<(name: string, args: Record<string, unknown>) => Promise<string>>())
+const refreshGoalTreeMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../api/mcp', () => ({
   callMcpTool: callMcpToolMock,
+  callMcpToolAtIdentity: (name: string, args: Record<string, unknown>) => callMcpToolMock(name, args),
+  mcpCallFailureDisposition: () => 'outcome_unknown',
+  mcpStructuredContentFromError: () => null,
+}))
+vi.mock('../api/published-artifacts', async original => ({
+  ...await original<typeof import('../api/published-artifacts')>(),
+  captureArtifactWorkspace: async () => ({ basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }),
 }))
 
 // Only the two entry points this file drives are replaced. The rest of the
@@ -33,9 +41,11 @@ vi.mock('../router', async (importOriginal) => ({
 
 vi.mock('../store', () => ({
   goals: signal([]),
+  goalIdentityObservation: signal(null),
   tasks: signal([]),
   keepers: signal([]),
   executionTaskTotal: signal<number | null>(null),
+  executionWorkspaceAuthority: signal({ epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }),
   refreshGoals: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -49,6 +59,19 @@ vi.mock('./board/sub-board-surface', () => ({
 
 vi.mock('./planning-panel', () => ({
   PlanningPanel: () => html`<div data-testid="planning-panel">Planning</div>`,
+}))
+
+vi.mock('./goals/goal-tree', () => ({
+  useGoalTreeDecisionObservation: () => ({ data: fixtureBoundTree.value,
+    authority: fixtureAuthorityAvailable.value ? {} : null, authorityError: fixtureAuthorityError.value,
+    decisionBinding: { workspace: { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' },
+      authRevision: 1, actor: 'dashboard' },
+    error: goalTreeError.value, unavailable: fixtureOwnedUnavailable.value,
+    unconfirmed: fixtureTreeUnconfirmed.value,
+    loading: fixtureTreeLoading.value, refresh: refreshGoalTreeMock,
+    isStoreUnavailableNow: () => fixtureOwnedUnavailable.value !== null && !fixtureTreeLoading.value,
+    isCurrent: () => fixtureTreeAvailable.value, isOwnerCurrent: () => fixtureAuthorityAvailable.value,
+    refreshAfterWrite: () => true }),
 }))
 
 vi.mock('./verification-requests-panel', () => ({
@@ -67,12 +90,14 @@ vi.mock('./repository-management', () => ({
   RepositoryManagement: () => html`<div data-testid="repository-panel">Repositories</div>`,
 }))
 
-import { executionTaskTotal, goals, keepers, tasks } from '../store'
-import { goalTreeData, goalTreeError } from '../goal-tree-state'
+import { executionTaskTotal, goals, goalIdentityObservation, keepers, tasks } from '../store'
+import { normalizeTask } from '../store-normalizers'
+import { goalStoreUnavailable, goalTreeData, goalTreeError } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
+import type { GoalStoreUnavailable } from '../types/goal-store-unavailable'
 
 const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
@@ -140,6 +165,35 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
   }
 }
 
+function expandGoalCard(card: HTMLElement): void {
+  const button = card.querySelector<HTMLButtonElement>('.wk-goal-h')!
+  if (button.getAttribute('aria-expanded') !== 'true') fireEvent.click(button)
+}
+
+// Legacy surface fixtures specify Goal rows directly. Treat those rows as a
+// synthetic bound tree only when a test has not supplied an explicit tree.
+const fixtureTreeAvailable = signal(true)
+const fixtureTreeLoading = signal(false)
+const fixtureTreeUnconfirmed = signal(false)
+const fixtureAuthorityAvailable = signal(true)
+const fixtureAuthorityError = signal<string | null>(null)
+const fixtureOwnedUnavailable = signal<GoalStoreUnavailable | null>(null)
+const fixtureBoundTree = computed(() => {
+  if (!fixtureTreeAvailable.value || goalTreeError.value) return null
+  const explicit = goalTreeData.value
+  const tree = explicit?.tree ?? goals.value.map(goal => goalTreeNode({
+    ...goal, phase: goal.phase as GoalTreeNode['phase'],
+  }))
+  const allIds = (nodes: readonly GoalTreeNode[]): string[] => nodes.flatMap(node => [node.id, ...allIds(node.children)])
+  const ids = allIds(tree)
+  return {
+    tree,
+    summary: explicit?.summary ?? emptyGoalTreeSummary({ total_goals: ids.length,
+      active_goals: tree.filter(goal => goal.phase === 'executing').length }),
+    identity_observation: explicit?.identity_observation ?? { ids, complete: true },
+  }
+})
+
 describe('Work', () => {
   afterEach(() => {
     cleanup()
@@ -148,10 +202,20 @@ describe('Work', () => {
     showGoalCreate.value = false
     goalTreeData.value = null
     goalTreeError.value = null
+    goalIdentityObservation.value = null
+    fixtureTreeAvailable.value = true
+    fixtureTreeLoading.value = false
+    fixtureTreeUnconfirmed.value = false
+    fixtureAuthorityAvailable.value = true
+    fixtureAuthorityError.value = null
+    fixtureOwnedUnavailable.value = null
+    goalStoreUnavailable.value = null
+    refreshGoalTreeMock.mockClear()
   })
 
   beforeEach(() => {
     goals.value = []
+    goalIdentityObservation.value = null
     tasks.value = []
     keepers.value = []
     // Reset the reported backlog total too: it is a signal, so a value left by
@@ -159,6 +223,13 @@ describe('Work', () => {
     executionTaskTotal.value = null
     goalTreeData.value = null
     goalTreeError.value = null
+    fixtureTreeAvailable.value = true
+    fixtureTreeLoading.value = false
+    fixtureTreeUnconfirmed.value = false
+    fixtureAuthorityAvailable.value = true
+    fixtureAuthorityError.value = null
+    fixtureOwnedUnavailable.value = null
+    goalStoreUnavailable.value = null
     showGoalCreate.value = false
   })
 
@@ -224,6 +295,20 @@ describe('Work', () => {
       }
     })
 
+    it('keeps a decoded Task under its exact Goal ID', () => {
+      goals.value = [
+        { id: 'goal-a', title: 'Canonical Goal', priority: 1, phase: 'executing', created_at: 'now', updated_at: 'now' },
+        { id: '\u00a0goal-a\u00a0', title: 'Unicode Goal', priority: 1, phase: 'executing', created_at: 'now', updated_at: 'now' },
+      ]
+      tasks.value = [normalizeTask({ id: 'task-a', title: 'Unicode Goal Task', goal_id: '\u00a0goal-a\u00a0', status: 'todo' })!]
+      render(html`<${Work} />`)
+      const cards = screen.getAllByTestId('goal-card')
+      const canonical = cards.find(card => card.textContent?.includes('Canonical Goal'))!
+      const unicode = cards.find(card => card.textContent?.includes('Unicode Goal'))!
+      expect(unicode.textContent).toContain('Unicode Goal Task')
+      expect(canonical.textContent).not.toContain('Unicode Goal Task')
+    })
+
     it.each(['goals.json: criterion_revision is missing', 'goal_task_links: primary registry is missing'])('shows source failure instead of zero goals: %s', detail => {
       goals.value = []
       goalTreeData.value = null
@@ -246,11 +331,197 @@ describe('Work', () => {
     ] as const)('shows %s proof independently of a completed Goal phase', (_state, verification, label) => {
       goals.value = [{ id: 'proof-goal', title: 'Measured goal', priority: 1,
         phase: 'completed', created_at: '2026-09-08', updated_at: '2026-09-09', verification }]
+      goalIdentityObservation.value = { goals: goals.value, observation: { ids: ['proof-goal'], complete: true } }
       render(html`<${Work} />`)
       const card = screen.getByTestId('goal-card')
       expect(within(card).getByText(label)).toBeTruthy()
       expect(card.querySelector('.wk-goal-phase')?.textContent).toBe('completed')
       expect(card.querySelector('[data-goal-proof]')?.getAttribute('data-goal-proof')).toBe(_state)
+    })
+
+    it('uses the bound tree Goal and proof instead of an older planning Goal with the same ID', () => {
+      goals.value = [{ id: 'G-1', title: 'Old workspace Goal', priority: 1, phase: 'executing',
+        created_at: '2026-01-01', updated_at: '2026-01-02',
+        verification: { state: 'current', completion: { state: 'proven',
+          criterion: { revision: 'old', title: 'Old workspace Goal', metric: null, target_value: null },
+          requestId: 'r', runId: 'run', evidence: 'old evidence', recordedAt: 'now', actor: 'verifier' } } }]
+      goalIdentityObservation.value = { goals: goals.value, observation: { ids: ['G-1'], complete: true } }
+      goalTreeData.value = {
+        tree: [goalTreeNode({ id: 'G-1', title: 'Current workspace Goal',
+          verification: { state: 'current', completion: { state: 'idle' } } })],
+        summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+      }
+      render(html`<${Work} />`)
+      const card = screen.getByTestId('goal-card')
+      expect(card.querySelector('[data-goal-proof]')?.getAttribute('data-goal-proof')).toBe('idle')
+      expect(card.textContent).toContain('Current workspace Goal')
+      expect(card.textContent).not.toContain('Old workspace Goal')
+    })
+
+    it('offers Goal assignment from the same bound tree as the displayed card', () => {
+      goals.value = [{ id: 'G-1', title: 'Old workspace Goal', priority: 1, phase: 'executing',
+        created_at: 'now', updated_at: 'now' }]
+      goalIdentityObservation.value = { goals: goals.value, observation: { ids: ['G-1'], complete: true } }
+      goalTreeData.value = { tree: [goalTreeNode({ id: 'G-1', title: 'Current workspace Goal' })],
+        summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }) }
+      tasks.value = [{ id: 'task-a', title: 'Unassigned Task', status: 'todo' }]
+      render(html`<${Work} />`)
+      const select = screen.getByTestId('assign-goal') as HTMLSelectElement
+      expect([...select.options].map(option => option.textContent)).toEqual(['goal에 배정', 'Current workspace Goal'])
+    })
+
+    it('withholds partial Goal warning counts while keeping an independently identified option', () => {
+      localStorage.removeItem('v2.wkAsideCollapsed')
+      const good = goalTreeNode({ id: 'G-good', title: 'Identified Goal', phase: 'blocked' })
+      const duplicate = goalTreeNode({ id: 'G-duplicate', title: 'Duplicate Goal' })
+      goalTreeData.value = { tree: [good, duplicate, duplicate],
+        summary: emptyGoalTreeSummary({ total_goals: 3 }),
+        identity_observation: { ids: ['G-good', 'G-duplicate', 'G-duplicate'], complete: true } }
+      tasks.value = [{ id: 'task-a', title: 'Unassigned Task', status: 'todo' }]
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('work-goal-source-error')).toBeTruthy()
+      expect(screen.getByTestId('work-aside').querySelector('#wka-h-flagged .wka-h-n')).toBeNull()
+      const select = screen.getByTestId('assign-goal') as HTMLSelectElement
+      expect([...select.options].map(option => option.value)).toEqual(['', 'G-good'])
+      fireEvent.click(screen.getByRole('button', { name: '운영 상태 패널 접기' }))
+      const railCount = screen.getByTestId('work-aside-collapsed').querySelector('.wka-rail-stat:last-child')!
+      expect(railCount.querySelector('b')?.textContent).toBe('—')
+      expect(railCount.classList.contains('bad')).toBe(false)
+      localStorage.removeItem('v2.wkAsideCollapsed')
+    })
+
+    it.each([
+      { tree: [goalTreeNode({ id: 'G-duplicate' }), goalTreeNode({ id: 'G-duplicate' })],
+        ids: ['G-duplicate', 'G-duplicate'] },
+      { tree: [], ids: ['G-hidden'] },
+    ])('explains unavailable assignment when Goal rows are ambiguous or discarded', ({ tree, ids }) => {
+      goalTreeData.value = { tree, summary: emptyGoalTreeSummary({ total_goals: ids.length }),
+        identity_observation: { ids, complete: true } }
+      tasks.value = [{ id: 'task-a', title: 'Unassigned Task', status: 'todo' }]
+      render(html`<${Work} />`)
+      expect(screen.queryByTestId('assign-goal')).toBeNull()
+      expect(screen.getByText(/Goal ID 또는 목록을 확인할 수 없어 배정할 수 없습니다/)).toBeTruthy()
+    })
+
+    it('does not show an assignment warning for a complete list of closed Goals', () => {
+      goalTreeData.value = { tree: [goalTreeNode({ id: 'G-closed', phase: 'completed' })],
+        summary: emptyGoalTreeSummary({ total_goals: 1 }),
+        identity_observation: { ids: ['G-closed'], complete: true } }
+      tasks.value = [{ id: 'task-a', title: 'Unassigned Task', status: 'todo' }]
+      render(html`<${Work} />`)
+      expect(screen.queryByTestId('assign-goal')).toBeNull()
+      expect(screen.queryByText(/Goal ID 또는 목록을 확인할 수 없어 배정할 수 없습니다/)).toBeNull()
+    })
+
+    it.each([
+      { ids: ['G-1', 'G-1'], complete: true },
+      { ids: ['G-1'], complete: false },
+    ])('does not display a Goal when the bound tree identity observation is ambiguous or incomplete', observation => {
+      goals.value = [{ id: 'G-1', title: 'Current Goal', priority: 1, phase: 'executing',
+        created_at: 'now', updated_at: 'now', verification: { state: 'current', completion: { state: 'idle' } } }]
+      goalIdentityObservation.value = { goals: goals.value, observation }
+      goalTreeData.value = { tree: [goalTreeNode({ id: 'G-1' })],
+        summary: emptyGoalTreeSummary({ total_goals: 1 }),
+        identity_observation: observation }
+      render(html`<${Work} />`)
+      expect(screen.queryByTestId('goal-card')).toBeNull()
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain('ID를 구분할 수 없습니다')
+    })
+
+    it('does not use a retained planning Goal while the workspace-bound tree is unavailable', () => {
+      goals.value = [{ id: 'G-1', title: 'Old workspace Goal', priority: 1, phase: 'executing',
+        created_at: 'now', updated_at: 'now', verification: { state: 'current', completion: { state: 'idle' } } }]
+      fixtureTreeAvailable.value = false
+      render(html`<${Work} />`)
+      expect(screen.queryByTestId('goal-card')).toBeNull()
+      expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain('현재 workspace')
+    })
+
+    it('shows a pending Goal observation without an error or a false zero', () => {
+      fixtureTreeAvailable.value = false
+      fixtureTreeLoading.value = true
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('work-goal-source-loading').textContent).toContain('확인하고 있습니다')
+      expect(screen.queryByTestId('work-goal-source-error')).toBeNull()
+      expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
+      expect(screen.queryByTestId('wka-flagged-calm')).toBeNull()
+    })
+
+    it('offers a retry when the workspace has not been confirmed', () => {
+      fixtureTreeAvailable.value = false
+      fixtureAuthorityAvailable.value = false
+      render(html`<${Work} />`)
+      const status = screen.getByTestId('work-goal-source-unconfirmed')
+      expect(screen.queryByTestId('work-goal-source-error')).toBeNull()
+      expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
+      expect(screen.queryByTestId('wka-flagged-calm')).toBeNull()
+      fireEvent.click(within(status).getByRole('button', { name: '다시 확인' }))
+      expect(refreshGoalTreeMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers a retry without claiming to be loading after an unbound observation', () => {
+      fixtureTreeAvailable.value = false
+      fixtureTreeUnconfirmed.value = true
+      render(html`<${Work} />`)
+      const status = screen.getByTestId('work-goal-source-unconfirmed')
+      expect(status.textContent).toContain('Goal 상태를 다시 확인')
+      expect(screen.queryByTestId('work-goal-source-loading')).toBeNull()
+      fireEvent.click(within(status).getByRole('button', { name: '다시 확인' }))
+      expect(refreshGoalTreeMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('reports workspace connection failure without exposing its raw detail', () => {
+      fixtureTreeAvailable.value = false
+      fixtureAuthorityAvailable.value = false
+      fixtureAuthorityError.value = 'private error detail'
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain('workspace 연결')
+      expect(screen.getByTestId('work-goal-source-error').textContent).not.toContain('private error detail')
+    })
+
+    it('does not show a previous workspace store error in the Goal creation form', () => {
+      goalStoreUnavailable.value = { kind: 'unavailable', reason: 'not_json', field: null,
+        file: '/old-workspace/.masc/goals.json', mirror: { status: 'mirror_absent', goalCount: null },
+        resetStep: 'reset_goal_store' }
+      fixtureOwnedUnavailable.value = null
+      showGoalCreate.value = true
+      render(html`<${Work} />`)
+      expect(screen.queryByTestId('goal-create-source-unavailable')).toBeNull()
+      expect(screen.getByTestId('goal-create-panel').textContent).not.toContain('/old-workspace/')
+    })
+
+    it.each(['approval queue unavailable', 'Goal-task links unavailable'])(
+      'allows Goal creation when the tree is unavailable because %s', failure => {
+        fixtureTreeAvailable.value = false
+        goalTreeError.value = failure
+        showGoalCreate.value = true
+        render(html`<${Work} />`)
+        fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'A new goal' } })
+        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'metric' } })
+        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: 'target' } })
+        expect(screen.getByTestId('goal-create-source-unconfirmed')).toBeTruthy()
+        expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
+      },
+    )
+
+    it('does not present a complete Goal count if the tree decoder omitted an observed row', () => {
+      goalTreeData.value = { tree: [goalTreeNode({ id: 'G-1' })],
+        summary: emptyGoalTreeSummary({ total_goals: 2, active_goals: 2 }),
+        identity_observation: { ids: ['G-1', 'G-hidden'], complete: true } }
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain('ID를 구분할 수 없습니다')
+    })
+
+    it('uses the tree identity observation for a tree-only Goal', () => {
+      goalTreeData.value = { tree: [goalTreeNode({ id: 'G-1',
+        verification: { state: 'current', completion: { state: 'idle' } } })],
+        summary: emptyGoalTreeSummary({ total_goals: 1 }),
+        identity_observation: { ids: ['G-1'], complete: true } }
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('goal-card').querySelector('[data-goal-proof]')?.getAttribute('data-goal-proof'))
+        .toBe('idle')
     })
 
     it('renders the reference 5 KPI counts from goals and tasks', () => {
@@ -660,14 +931,17 @@ describe('Work', () => {
       beforeEach(async () => {
         callMcpToolMock.mockReset()
         // Reset the goal-create signals and local form state before each test
-        const { showGoalCreate } = await import('./goals/goal-create-state')
+        const { showGoalCreate, _testResetGoalCreateOutcomes } = await import('./goals/goal-create-state')
         const { resetGoalCreateFormLocal } = await import('./goals/goal-create-form')
         showGoalCreate.value = false
         resetGoalCreateFormLocal()
+        _testResetGoalCreateOutcomes()
       })
 
       it('calls masc_goal_upsert with the entered success criterion and priority', async () => {
-        callMcpToolMock.mockResolvedValue('ok')
+        callMcpToolMock.mockImplementation(async (_name, args) => JSON.stringify({
+          status: 'ok', action: 'created', goal_id: args.id, goal: { id: args.id },
+        }))
 
         goals.value = []
         tasks.value = []
@@ -688,13 +962,15 @@ describe('Work', () => {
         fireEvent.click(screen.getByTestId('goal-create-submit'))
 
         // Wait for async createGoal to resolve
-        await new Promise(resolve => setTimeout(resolve, 0))
+        await vi.waitFor(() => expect(callMcpToolMock).toHaveBeenCalledTimes(1))
 
         expect(callMcpToolMock).toHaveBeenCalledWith('masc_goal_upsert', expect.objectContaining({
           title: 'SLO 400ms 회복',
           metric: 'scheduler p99 over 24 hours',
           target_value: '400 ms or less',
           priority: expect.any(Number),
+          id: expect.stringMatching(/^goal-/), if_absent: true,
+          expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
         }))
         // masc_goal_upsert rejects lifecycle fields; the form must not send them.
         const rawCalls = callMcpToolMock.mock.calls as unknown as [string, Record<string, unknown>][]
@@ -1604,10 +1880,6 @@ describe('Work', () => {
             created_at: '2026-01-01',
             updated_at: '2026-01-04',
             last_review_note: 'metric 미충족 — merged PR은 1건뿐',
-            // The card header reads the goals feed, not the tree — `displayGoals`
-            // lets a goals-feed row win over the tree node of the same id. Live
-            // both feeds carry these: /api/v1/dashboard/planning serves metric
-            // on 35 of 48 goals and target_value on 32.
             metric: 'merged PR count',
             target_value: '5 PRs',
           },
@@ -1620,6 +1892,7 @@ describe('Work', () => {
               title: 'Goal One',
               priority: 5,
               phase: 'executing',
+              last_review_note: 'metric 미충족 — merged PR은 1건뿐',
               metric: 'merged PR count',
               target_value: '5 PRs',
               task_summary: {
@@ -1655,7 +1928,7 @@ describe('Work', () => {
         render(html`<${Work} />`)
 
         const goalCard = screen.getByTestId('goal-card')
-        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+        expandGoalCard(goalCard)
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier', 'G-1')
@@ -1728,7 +2001,7 @@ describe('Work', () => {
 
         render(html`<${Work} />`)
         const goalCard = screen.getByTestId('goal-card')
-        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+        expandGoalCard(goalCard)
 
         // The declaration sits next to the bar it qualifies, stated once.
         expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
@@ -1769,7 +2042,7 @@ describe('Work', () => {
 
         render(html`<${Work} />`)
         const goalCard = screen.getByTestId('goal-card')
-        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+        expandGoalCard(goalCard)
 
         // A goal with nothing declared gets no chip. There is no "정해진 지표가
         // 없어요" row any more — a placeholder telling the operator a field is
@@ -1802,7 +2075,7 @@ describe('Work', () => {
         }
 
         render(html`<${Work} />`)
-        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+        expandGoalCard(screen.getByTestId('goal-card'))
 
         // `source` was the constant `goal.phase` on every node, and the
         // next_actions strings named transitions this panel does not perform.
@@ -1824,7 +2097,7 @@ describe('Work', () => {
         }
 
         render(html`<${Work} />`)
-        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+        expandGoalCard(screen.getByTestId('goal-card'))
 
         const link = screen.getByTestId('goal-dossier')
           .querySelector<HTMLButtonElement>('[data-goal-detail-keeper="rondo"]')
@@ -1865,7 +2138,7 @@ describe('Work', () => {
         render(html`<${Work} />`)
 
         const goalCard = screen.getByTestId('goal-card')
-        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+        expandGoalCard(goalCard)
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         const toggle = dossier.querySelector('[data-goal-dossier-timeline-toggle="G-1"]')
@@ -1911,7 +2184,7 @@ describe('Work', () => {
 
         render(html`<${Work} />`)
         const goalCard = screen.getByTestId('goal-card')
-        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+        expandGoalCard(goalCard)
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         const activity = dossier.querySelector('[data-goal-detail-row="activity"]')
@@ -1957,7 +2230,7 @@ describe('Work', () => {
         const goalCard = screen.getByTestId('goal-card')
         expect(goalCard).toHaveAttribute('data-goal-id', 'G-tree')
         expect(goalCard.textContent).toContain('Tree Only Goal')
-        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+        expandGoalCard(goalCard)
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier', 'G-tree')

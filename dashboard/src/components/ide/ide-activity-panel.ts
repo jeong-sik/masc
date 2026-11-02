@@ -9,12 +9,8 @@ import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line
 import type { UnifiedDiffRow } from '../../api/workspace'
 import { KeeperBadge } from '../keeper-badge'
 import type { Goal, Task } from '../../types'
-import { goals, tasks } from '../../store'
-import {
-  formatProgressPct,
-  goalPhaseLabel,
-  type GoalProgress,
-} from '../goals/goal-helpers'
+import { goalIdentityObservation, goals, tasks } from '../../store'
+import { goalPhaseLabel } from '../goals/goal-helpers'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import {
@@ -41,6 +37,7 @@ import {
 import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
 import { activityFileContext } from './ide-activity-file-context'
 import { isRecord } from '../../lib/type-guards'
+import { isUnambiguousGoalId, nonblankGoalId, type GoalIdentityObservation } from '../../lib/goal-identity'
 
 const FALLBACK_VERB_MAP: Readonly<Record<string, RunActivityVerb>> = {
   approved: 'approved',
@@ -152,10 +149,10 @@ export interface IdeRunProgressKeeperCount {
 
 export interface IdeRunProgressGoal {
   readonly goalId: string
-  readonly taskId: string | null
+  readonly identityUnambiguousInObservation: boolean
+  readonly activityTaskId: string | null
   readonly title: string
   readonly phase: string
-  readonly progress: GoalProgress
   readonly progressLabel: string
 }
 
@@ -363,7 +360,7 @@ function mergeContextRecord(
     ?? positiveInteger(record.line_start)
     ?? positiveInteger(record.lineno)
   if (line !== undefined && (overwrite || next.line === undefined)) next.line = line
-  const goalId = stringValue(record.goal_id)
+  const goalId = nonblankGoalId(record.goal_id)
   if (goalId && (overwrite || next.goal_id === undefined)) next.goal_id = goalId
   const taskId = stringValue(record.task_id)
   if (taskId && (overwrite || next.task_id === undefined)) next.task_id = taskId
@@ -538,7 +535,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const diagnostics = activeFilePath === null
     ? EMPTY_DIAGNOSTICS
     : lspDiagnosticSnapshot.value.get(activeFilePath) ?? EMPTY_DIAGNOSTICS
-  const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value, codebase)
+  const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value, codebase, goalIdentityObservation.value)
 
   useEffect(() => {
     emittedTraceIds.current = bridgeRunActivityEventsToTrace(
@@ -635,12 +632,15 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   `
 }
 
+type GoalIdentityBinding = { readonly goals: ReadonlyArray<Goal>; readonly observation: GoalIdentityObservation }
+
 export function deriveIdeRunProgressSummary(
   events: ReadonlyArray<RunActivityEvent>,
   activeFile: string,
   goalList: ReadonlyArray<Goal> = goals.value,
   taskList: ReadonlyArray<Task> = tasks.value,
   codebase?: string | null,
+  identityBinding: GoalIdentityBinding | null = goalIdentityObservation.value,
 ): IdeRunProgressSummary {
   const activeFilePath = normalizeIdeContextFilePath(activeFile)
   const currentFileEvents = activeFilePath === null
@@ -694,7 +694,7 @@ export function deriveIdeRunProgressSummary(
     latestAgeLabel: latestAgeLabel(events),
     surfaceCounts,
     keeperCounts,
-    activeGoal: activeRunGoal(events, goalList, taskList),
+    activeGoal: activeRunGoal(events, goalList, taskList, identityBinding),
   }
 }
 
@@ -794,11 +794,10 @@ function RunProgressSurfaceChip(surface: IdeRunProgressSurfaceCount) {
 }
 
 function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
-  const percent = Math.round(goal.progress.ratio * 100)
-  const links = routeLinksForContext({
+  const links = goal.identityUnambiguousInObservation ? routeLinksForContext({
     goalId: goal.goalId,
-    taskId: goal.taskId ?? undefined,
-  })
+    taskId: goal.activityTaskId ?? undefined,
+  }) : []
   return html`
     <div
       class="ide-run-progress-goal"
@@ -810,14 +809,11 @@ function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
         <span>${goal.phase}</span>
       </div>
       <strong title=${goal.title}>${goal.title}</strong>
-      <div class="ide-run-progress-goal-bar" aria-hidden="true">
-        <span style=${{ width: `${percent}%` }} />
-      </div>
       <div class="ide-run-progress-goal-meta">
-        <span>${goal.progress.done}/${goal.progress.total} tasks</span>
         <span>${goal.progressLabel}</span>
         <span title=${goal.goalId}>${goal.goalId}</span>
       </div>
+      ${goal.activityTaskId ? html`<div class="ide-run-progress-goal-meta">Goal–Task relationship unverified</div>` : null}
       ${links.length > 0
         ? html`
           <div class="ide-run-progress-goal-links" aria-label="Run goal planning links">
@@ -828,7 +824,7 @@ function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
                 class="v2-ide-action"
                 title=${link.evidence}
                 onClick=${() => openIdeContextRouteLink(link)}
-              >${link.label}</button>
+              >${link.label === 'Task' ? 'Activity Task' : link.label}</button>
             `)}
           </div>
         `
@@ -841,20 +837,33 @@ function activeRunGoal(
   events: ReadonlyArray<RunActivityEvent>,
   goalList: ReadonlyArray<Goal>,
   taskList: ReadonlyArray<Task>,
+  identityBinding: GoalIdentityBinding | null,
 ): IdeRunProgressGoal | null {
-  const tasksById = new Map(taskList.map(task => [task.id, task]))
-  const goalHits = new Map<string, { count: number; latestMs: number; taskId: string | null }>()
+  const tasksById = new Map<string, Task[]>()
+  for (const task of taskList) {
+    const rows = tasksById.get(task.id) ?? []
+    rows.push(task)
+    tasksById.set(task.id, rows)
+  }
+  const goalHits = new Map<string, { count: number; latestMs: number; activityTaskId: string | null }>()
 
   for (const event of events) {
     const taskId = cleanContextId(event.context?.task_id)
-    const taskGoalId = taskId ? cleanContextId(tasksById.get(taskId)?.goal_id) : null
-    const goalId = cleanContextId(event.context?.goal_id) ?? taskGoalId
+    const taskRows = taskId ? tasksById.get(taskId) ?? [] : []
+    const firstTaskGoalId = nonblankGoalId(taskRows[0]?.goal_id)
+    const taskGoalId = firstTaskGoalId !== undefined
+      && taskRows.every(task => nonblankGoalId(task.goal_id) === firstTaskGoalId) ? firstTaskGoalId : undefined
+    const goalId = nonblankGoalId(event.context?.goal_id) ?? taskGoalId
     if (!goalId) continue
-    const current = goalHits.get(goalId) ?? { count: 0, latestMs: Number.NEGATIVE_INFINITY, taskId: null }
+    // Execution exposes at most one representative Goal per Task. A different
+    // representative does not rule out a shared Task, so offer the activity
+    // Task separately without claiming that its relationship is verified.
+    const activityTaskId = taskRows.length === 1 ? taskId : null
+    const current = goalHits.get(goalId) ?? { count: 0, latestMs: Number.NEGATIVE_INFINITY, activityTaskId: null }
     goalHits.set(goalId, {
       count: current.count + 1,
       latestMs: Math.max(current.latestMs, event.timestamp_ms),
-      taskId: current.taskId ?? taskId,
+      activityTaskId: current.activityTaskId ?? activityTaskId,
     })
   }
 
@@ -866,28 +875,19 @@ function activeRunGoal(
     )[0] ?? []
   if (!goalId || !hit) return null
 
-  const goal = goalList.find(candidate => candidate.id === goalId) ?? null
-  const progress = runGoalProgress(goalId, taskList)
+  const identityUnambiguousInObservation = Boolean(identityBinding && identityBinding.goals === goalList
+    && identityBinding.observation.complete && isUnambiguousGoalId(goalId, identityBinding.observation.ids))
+  const goal = identityUnambiguousInObservation ? goalList.find(candidate => candidate.id === goalId) ?? null : null
+  const identifiable = identityUnambiguousInObservation && goal !== null
   return {
     goalId,
-    taskId: hit.taskId,
+    identityUnambiguousInObservation: identifiable,
+    activityTaskId: identifiable ? hit.activityTaskId : null,
     title: goal?.title ?? goalId,
     phase: goal ? goalPhaseLabel(goal.phase) : 'unknown',
-    progress,
-    progressLabel: formatProgressPct(progress),
-  }
-}
-
-function runGoalProgress(goalId: string, taskList: ReadonlyArray<Task>): GoalProgress {
-  const relevantTasks = taskList.filter(task =>
-    task.goal_id === goalId && task.status !== 'cancelled',
-  )
-  const done = relevantTasks.filter(task => task.status === 'done').length
-  const total = relevantTasks.length
-  return {
-    done,
-    total,
-    ratio: total > 0 ? done / total : 0,
+    // Execution Tasks are a bounded, representative projection and missing
+    // link data may be folded into it. They cannot establish Goal progress.
+    progressLabel: identifiable ? 'Task progress unavailable from activity' : 'Goal identity unavailable',
   }
 }
 

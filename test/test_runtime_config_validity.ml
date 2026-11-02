@@ -7399,9 +7399,85 @@ let test_wizard_provider_models_share_catalog_authority () =
       (List.exists (fun row -> model_id row = "deepseek-v4-pro") proxy))
 ;;
 
+type materialized_catalog_fact = Context_window | Price_row
+
+let test_runtime_selection_owns_catalog ~initially_known ~fact () =
+  let module Catalog = Llm_provider.Model_catalog in
+  let module Config = Llm_provider.Provider_config in
+  let catalog ~known ~scale =
+    let row = if known then Printf.sprintf {|
+[[models]]
+model_id = "selection-model"
+provider_name = "selection-provider"
+base = "openai_chat"
+max_context_tokens = %d
+input_per_million = %.1f
+output_per_million = %.1f
+|} (if scale = 1.0 then 4096 else 8192) scale (2.0 *. scale) else "" in
+    match Catalog.of_toml_string ~source:"runtime selection fixture" ({|
+[[providers]]
+id = "selection-provider"
+kind = "openai_compat"
+base_url = "https://selection.invalid/v1"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+|} ^ row) with
+    | Ok catalog -> catalog | Error detail -> fail detail in
+  let runtime = match Runtime_toml.parse_string {|
+[providers.selection-provider]
+protocol = "openai-compatible-http"
+endpoint = "https://selection.invalid/v1"
+[models.selected]
+api-name = "selection-model"
+[selection-provider.selected]
+[runtime]
+default = "selection-provider.selected"
+|} with
+    | Ok runtime -> runtime
+    | Error _ -> fail "runtime selection fixture must parse" in
+  let binding = match runtime.Runtime_schema.bindings with
+    | [binding] -> binding | _ -> fail "one runtime binding required" in
+  let select () = match Runtime_instance.of_binding runtime binding with
+    | Ok selected -> selected | Error _ -> fail "runtime binding must materialize" in
+  let previous = Catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Catalog.set_global catalog | None -> Catalog.clear_global ())
+    (fun () ->
+      Catalog.set_global (catalog ~known:initially_known ~scale:1.0);
+      let selected = select () in
+      Catalog.set_global (catalog ~known:true ~scale:10.0);
+      let fresh = select () in
+      match fact with
+      | Context_window ->
+        let context runtime = Runtime_instance.resolve_max_context_of_runtime runtime
+          |> Option.map fst in
+        check (option int) "existing runtime retains selected context or its absence"
+          (if initially_known then Some 4096 else None) (context selected);
+        check (option int) "new runtime sees replacement context" (Some 8192) (context fresh)
+      | Price_row ->
+        let input_price runtime =
+          let config = agent_core_provider_config runtime in
+          Llm_provider.Pricing.pricing_for_model (Config.pricing_source config) config.model_id
+          |> Option.map (fun price -> price.Llm_provider.Pricing.input_per_million) in
+        check (option (float 1e-9)) "existing runtime retains selected rates or their absence"
+          (if initially_known then Some 1.0 else None) (input_price selected);
+        check (option (float 1e-9)) "new runtime sees replacement rates" (Some 10.0) (input_price fresh))
+
+;;
+
 let () =
   run "runtime_config_validity"
-    [ ( "runtime TOML gate",
+    [ ( "materialized catalog selection",
+        [ test_case "selected context survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:true ~fact:Context_window);
+          test_case "selected context absence survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:false ~fact:Context_window);
+          test_case "selected price survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:true ~fact:Price_row);
+          test_case "selected price absence survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:false ~fact:Price_row) ] );
+      ( "runtime TOML gate",
         [ test_case "Browser settings and machine activity follow the visible config across save failure and reload" `Quick
             test_browser_config_publication_follows_visible_file;
           test_case "same model serves three context windows concurrently" `Quick

@@ -89,6 +89,10 @@ val binding_to_provider_config
   -> (Llm_provider.Provider_config.t, string) result
 (** Materialize one binding into the hot-path {!Llm_provider.Provider_config.t}.
 
+    Catalog-derived model policy, pricing authority and their absence are
+    captured at this selection boundary. A later catalog replacement affects
+    newly materialized bindings; existing configs retain their selected facts.
+
     HTTP file credentials contain one raw API key at an absolute path. The
     process-owned regular file is read at materialization; whitespace is
     trimmed. Missing, unreadable, empty, relative, and JSON document references

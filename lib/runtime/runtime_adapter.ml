@@ -1051,7 +1051,8 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ~disable_parallel_tool_use:binding.disable_parallel_tool_use
          ?max_tokens:binding.max_tokens
          provider
-         spec)
+         spec
+       |> Result.map Llm_provider.Provider_config.freeze_for_request)
 ;;
 
 (* The official-client executions spawn the path

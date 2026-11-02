@@ -146,6 +146,12 @@ let stream_capacity =
   clamp
     (Env_config_core.get_int ~default "MASC_SSE_STREAM_CAPACITY")
 
+type delivery_stream = {
+  session_id : string;
+  client_id : int;
+  queue : delivery Eio.Stream.t;
+}
+
 (** SSE client state.
     [event_stream] is the per-session mailbox.  [broadcast] pushes here;
     the SSE connection fiber pops and writes to the HTTP body writer. *)
@@ -153,7 +159,7 @@ type client = {
   id: int;
   kind: session_kind;
   runtime_authority: runtime_authority;
-  event_stream: delivery Eio.Stream.t;
+  event_stream: delivery_stream;
   last_event_id: int Atomic.t;
   created_at: float;
   last_seen_at: float Atomic.t;
@@ -163,120 +169,69 @@ type client = {
 type client_registry_state = {
   entries : client SMap.t;
   count : int;
+  queue_inventory : Sse_queue_inventory.t;
 }
 
 (** Client registry - maps session_id to client plus a linearized count. *)
 let empty_client_registry_state = {
   entries = SMap.empty;
   count = 0;
+  queue_inventory = Sse_queue_inventory.empty;
 }
 
 let clients : client_registry_state Atomic.t =
   Atomic.make empty_client_registry_state
 
-type session_snapshot = {
-  session_id : string;
-  kind : session_kind;
-  queue_depth : int;
-  last_event_id : int;
-  idle_seconds : float;
-}
+(* Publishing reads the latest committed inventory under this lock. A slower
+   publisher cannot overwrite metrics from a later registry update. *)
+let transport_snapshot_mutex = Stdlib.Mutex.create ()
 
-(** Minimum interval between full transport snapshot computations (seconds).
-    The snapshot iterates all SSE clients and builds per-session records;
-    at ~9 broadcasts/sec this path accounts for most allocation on the
-    broadcast hot path.  Throttling to ~0.2/sec cuts allocation by ~97%
-    while keeping dashboard metrics within 5 seconds of reality.
-    Configurable via [MASC_SNAPSHOT_INTERVAL_SEC] env var (default 5.0). *)
-let snapshot_min_interval_sec =
-  (* Route through the validated helper (same idiom as [MASC_SSE_*] above):
-     a malformed value (e.g. "abc") previously raised [Failure] -- the
-     hand-rolled [with Not_found] only caught the unset case, so a typo in
-     this env var crashed the module at load. [get_float_nonneg] also maps
-     negative / NaN / +-inf to the default, which is correct for an
-     interval-seconds knob. *)
-  Env_config_core.get_float_nonneg
-    ~default:(Env_setting.Float_knob.default Snapshot_interval_sec)
-    (Env_setting.Float_knob.env_name Snapshot_interval_sec)
+let sync_transport_snapshot () =
+  Stdlib.Mutex.protect transport_snapshot_mutex (fun () ->
+    let inventory = (Atomic.get clients).queue_inventory in
+    let total = Sse_queue_inventory.count inventory in
+    let avg_depth =
+      if total = 0 then 0.0
+      else float_of_int (Sse_queue_inventory.total_queue_depth inventory) /. float_of_int total in
+    let hot_sessions =
+      Sse_queue_inventory.hot ~limit:3 inventory
+      |> List.map (fun (session : Sse_queue_inventory.entry) ->
+        { Transport_metrics.session_id = session.session_id;
+          kind = session.kind;
+          queue_depth = session.queue_depth;
+          last_event_id = session.last_event_id;
+          last_seen_at = session.last_seen_at }) in
+    Transport_metrics.set_sse_sessions ~kind:Observer
+      (Sse_queue_inventory.count_kind inventory Observer);
+    Transport_metrics.set_sse_sessions ~kind:Agent_stream
+      (Sse_queue_inventory.count_kind inventory Agent_stream);
+    Transport_metrics.set_sse_sessions ~kind:Presence
+      (Sse_queue_inventory.count_kind inventory Presence);
+    Transport_metrics.set_sse_queue_snapshot ~avg_depth
+      ~max_depth:(Sse_queue_inventory.max_queue_depth inventory) ~hot_sessions)
 
-(** Timestamp of the last completed snapshot.  CAS-guarded so that
-    concurrent [broadcast_impl] fibers racing to snapshot after the
-    interval expires do not duplicate work — only one fiber wins the
-    compare-and-set and runs the full iteration. *)
-let last_snapshot_time : float Atomic.t = Atomic.make 0.0
+let observe_queue ?(publish = true) (stream : delivery_stream) =
+  let current = Lockfree_atomic.update_with_commit clients (fun state ->
+    match SMap.find_opt stream.session_id state.entries with
+    | Some client when client.id = stream.client_id ->
+        let queue_inventory = Sse_queue_inventory.observe state.queue_inventory
+          ~session_id:stream.session_id ~client_id:stream.client_id
+          ~queue_depth:(Eio.Stream.length stream.queue)
+          ~last_event_id:(Atomic.get client.last_event_id)
+          ~last_seen_at:(Atomic.get client.last_seen_at) in
+        { next_state = { state with queue_inventory }; result = true }
+    | None | Some _ -> { next_state = state; result = false }) in
+  if publish && current then sync_transport_snapshot ()
 
-let sync_transport_snapshot ?(force = false) () =
-  let now = Time_compat.now () in
-  let last = Atomic.get last_snapshot_time in
-  if (not force) && now -. last < snapshot_min_interval_sec then ()
-  else if not (Atomic.compare_and_set last_snapshot_time last now) then ()
-  else begin
-  (* Single-pass aggregation: previously [SMap.fold] built a
-     [(sid, client)] tuple list, then [List.map] re-walked it to
-     produce [session_snapshot] records.  [SMap.iter] over the
-     immutable map snapshot folds both passes into one, dropping
-     the per-client tuple cons cell.  Counters and the [sessions]
-     accumulator share the iteration; [total_sessions] is also
-     counted in-line, avoiding a trailing [List.length].  Called
-     on every [broadcast_impl] invocation, so the saved allocation
-     compounds with the fan-out itself. *)
-  let observer = ref 0 in
-  let agent_stream = ref 0 in
-  let presence = ref 0 in
-  let queue_sum = ref 0 in
-  let max_queue_depth = ref 0 in
-  let sessions_acc = ref [] in
-  let total_sessions_acc = ref 0 in
-  SMap.iter (fun session_id client ->
-    let queue_depth = Eio.Stream.length client.event_stream in
-    queue_sum := !queue_sum + queue_depth;
-    max_queue_depth := max !max_queue_depth queue_depth;
-    (match client.kind with
-     | Observer -> incr observer
-     | Agent_stream -> incr agent_stream
-     | Presence -> incr presence);
-    incr total_sessions_acc;
-    sessions_acc :=
-      {
-        session_id;
-        kind = client.kind;
-        queue_depth;
-        last_event_id = Atomic.get client.last_event_id;
-        idle_seconds = max 0.0 (now -. Atomic.get client.last_seen_at);
-      } :: !sessions_acc
-  ) (Atomic.get clients).entries;
-  let sessions = !sessions_acc in
-  let total_sessions = !total_sessions_acc in
-  let avg_depth =
-    if total_sessions = 0 then 0.0
-    else float_of_int !queue_sum /. float_of_int total_sessions
-  in
-  let hot_sessions =
-    sessions
-    |> List.filter (fun session -> session.queue_depth > 0)
-    |> List.sort (fun left right ->
-         let by_queue = compare right.queue_depth left.queue_depth in
-         if by_queue <> 0 then by_queue
-         else
-           let by_idle = Float.compare right.idle_seconds left.idle_seconds in
-           if by_idle <> 0 then by_idle
-           else String.compare left.session_id right.session_id)
-    |> List.take 3
-    |> List.map (fun (session : session_snapshot) ->
-         {
-           Transport_metrics.session_id = session.session_id;
-           kind = session.kind;
-           queue_depth = session.queue_depth;
-           last_event_id = session.last_event_id;
-           idle_seconds = session.idle_seconds;
-         })
-  in
-  Transport_metrics.set_sse_sessions ~kind:Observer !observer;
-  Transport_metrics.set_sse_sessions ~kind:Agent_stream !agent_stream;
-  Transport_metrics.set_sse_sessions ~kind:Presence !presence;
-  Transport_metrics.set_sse_queue_snapshot ~avg_depth
-    ~max_depth:!max_queue_depth ~hot_sessions
-  end
+let take_delivery stream =
+  let delivery = Eio.Stream.take stream.queue in
+  observe_queue stream;
+  delivery
+
+let take_delivery_nonblocking stream =
+  match Eio.Stream.take_nonblocking stream.queue with
+  | None -> None
+  | Some delivery -> observe_queue stream; Some delivery
 
 let mark_seen (client : client) =
   Atomic.set client.last_seen_at (Time_compat.now ())
@@ -573,7 +528,9 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
      passed it, so it counts as no cursor. *)
   let floor = if last_event_id > current_id () then 0 else last_event_id in
   let last_event_id = Atomic.make floor in
-  let event_stream = Eio.Stream.create stream_capacity in
+  let event_stream =
+    { session_id; client_id; queue = Eio.Stream.create stream_capacity }
+  in
   let base_client = {
     id = client_id;
     kind;
@@ -616,10 +573,22 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
         last_seen_at = Atomic.make install_time;
       } in
       let next_entries = SMap.add session_id client entries_after_eviction in
+      let inventory =
+        match evicted with
+        | Some (sid, old_client) ->
+            Sse_queue_inventory.remove state.queue_inventory
+              ~session_id:sid ~client_id:old_client.id
+        | None -> state.queue_inventory
+      in
+      let queue_inventory =
+        Sse_queue_inventory.register inventory ~session_id ~client_id ~kind
+          ~last_event_id:(Atomic.get last_event_id) ~last_seen_at:install_time
+      in
       {
         next_state = {
           entries = next_entries;
-          count = SMap.cardinal next_entries;
+          count = Sse_queue_inventory.count queue_inventory;
+          queue_inventory;
         };
         result = evicted;
       })
@@ -634,7 +603,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
        invoke_disconnect_hook_for sid client
    | None ->
        ());
-  sync_transport_snapshot ~force:true ();
+  sync_transport_snapshot ();
   Ok (client_id, event_stream, Option.map fst evicted)
 
 (** Unregister an SSE client *)
@@ -655,6 +624,8 @@ let unregister session_id =
           next_state = {
             entries = next_entries;
             count = state.count - 1;
+            queue_inventory = Sse_queue_inventory.remove state.queue_inventory
+              ~session_id ~client_id:client.id;
           };
           result = Some client;
         }
@@ -669,7 +640,7 @@ let unregister session_id =
     (* Wake the removed connection before recording the transport snapshot.
        Its close may re-enter [unregister_if_current], which is now a no-op. *)
     invoke_disconnect_hook_for session_id client;
-    sync_transport_snapshot ~force:true ()
+    sync_transport_snapshot ()
   | None -> ()
 
 (** Unregister only if the current client matches the given client_id.
@@ -687,6 +658,8 @@ let unregister_if_current session_id client_id =
             next_state = {
               entries = next_entries;
               count = state.count - 1;
+              queue_inventory = Sse_queue_inventory.remove state.queue_inventory
+                ~session_id ~client_id;
             };
             result = Some client;
           }
@@ -700,7 +673,7 @@ let unregister_if_current session_id client_id =
   | Some client ->
     (* See [unregister] for the hook ordering rationale. *)
     invoke_disconnect_hook_for session_id client;
-    sync_transport_snapshot ~force:true ()
+    sync_transport_snapshot ()
   | None -> ()
 
 (** Check if client exists *)
@@ -710,7 +683,7 @@ let exists session_id =
 (** Mark a client as recently active *)
 let touch session_id =
   match SMap.find_opt session_id (Atomic.get clients).entries with
-  | Some client -> mark_seen client
+  | Some client -> mark_seen client; observe_queue client.event_stream
   | None -> ()
 
 let client_matches_target target ~jsonrpc_payload (client : client) =
@@ -1060,7 +1033,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
          all producers share [delivery_fanout_mutex]; consumers only reduce
          its length.  try/catch is retained as defense-in-depth.
          See TLA+ SSEBroadcastBlock spec. *)
-      (let queue_len = Eio.Stream.length client.event_stream in
+      (let queue_len = Eio.Stream.length client.event_stream.queue in
        if queue_len >= stream_capacity then begin
          (* Tier-A perf fix: queue overflow is now a {b disconnect}
             signal, not a silent drop.  The session is added to
@@ -1078,13 +1051,17 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
             [planning/claude-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
          failed := (session_id, client.id, `Full queue_len) :: !failed
        end else
-         try
-           Eio.Stream.add client.event_stream delivery;
-           Atomic.set client.last_event_id current_event_id;
-           mark_seen client
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | e ->
+         let enqueued =
+           try Eio.Stream.add client.event_stream.queue delivery; Ok () with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | e -> Error e
+         in
+         match enqueued with
+         | Ok () ->
+             Atomic.set client.last_event_id current_event_id;
+             mark_seen client;
+             observe_queue ~publish:false client.event_stream
+         | Error e ->
              failed := (session_id, client.id, `Raised e) :: !failed)
     end
   ) clients_entries;
@@ -1192,18 +1169,22 @@ let send_to session_id json =
       | None -> `Absent
       | Some client when client.kind <> Agent_stream -> `Wrong_kind client.kind
       | Some client ->
-          let queue_len = Eio.Stream.length client.event_stream in
+          let queue_len = Eio.Stream.length client.event_stream.queue in
           if queue_len >= stream_capacity then
             `Full (client.id, queue_len)
           else
-            try
-              Eio.Stream.add client.event_stream delivery;
-              Atomic.set client.last_event_id current_event_id;
-              mark_seen client;
-              `Enqueued
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | e -> `Raised (client.id, e))
+            let enqueued =
+              try Eio.Stream.add client.event_stream.queue delivery; Ok () with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | e -> Error e
+            in
+            match enqueued with
+            | Ok () ->
+                Atomic.set client.last_event_id current_event_id;
+                mark_seen client;
+                observe_queue ~publish:false client.event_stream;
+                `Enqueued
+            | Error e -> `Raised (client.id, e))
   in
   match outcome with
   | `Absent -> ()
@@ -1248,7 +1229,7 @@ let pop session_id =
   let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
   match client_opt with
   | None -> None
-  | Some client -> Some (Eio.Stream.take client.event_stream).frame
+  | Some client -> Some (take_delivery client.event_stream).frame
 
 (** Non-blocking pop. Returns [Some event] if one is queued, [None] otherwise. *)
 let try_pop session_id =
@@ -1256,7 +1237,7 @@ let try_pop session_id =
   match client_opt with
   | None -> None
   | Some client ->
-    Eio.Stream.take_nonblocking client.event_stream
+    take_delivery_nonblocking client.event_stream
     |> Option.map (fun delivery -> delivery.frame)
 
 (** Get client count.
@@ -1265,11 +1246,7 @@ let client_count () =
   (Atomic.get clients).count
 
 let client_count_by_kind kind =
-  SMap.fold
-    (fun _session_id (client : client) count ->
-       if client.kind = kind then count + 1 else count)
-    (Atomic.get clients).entries
-    0
+  Sse_queue_inventory.count_kind (Atomic.get clients).queue_inventory kind
 
 (** Close all SSE clients - for graceful shutdown.
     Returns the number of clients that were closed. *)
@@ -1282,7 +1259,7 @@ let close_all_clients () =
         result = sessions;
       })
   in
-  sync_transport_snapshot ~force:true ();
+  sync_transport_snapshot ();
   List.length sessions
 
 (** Remove clients idle longer than max_age_s (default 30 min).

@@ -42,7 +42,7 @@ let tool_result text =
 ;;
 
 let take stream =
-  match Eio.Stream.take_nonblocking stream with
+  match Sse.take_delivery_nonblocking stream with
   | Some delivery -> delivery
   | None -> fail "Expected an actual SSE delivery"
 ;;

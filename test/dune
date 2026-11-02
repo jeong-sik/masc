@@ -307,6 +307,8 @@
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
 
+(include stanzas/test_sse_queue_inventory.inc)
+
 (test
  (name test_server_exact_lane_retention_observation)
  (modules test_server_exact_lane_retention_observation)

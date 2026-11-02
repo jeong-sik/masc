@@ -177,7 +177,6 @@ module Float_knob = struct
     | Sidecar_control_timeout_sec
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
-    | Snapshot_interval_sec
   [@@deriving enumerate]
 
   let spec = function
@@ -209,11 +208,6 @@ module Float_knob = struct
       , "runtime"
       , "Repository auto-sync interval in seconds; a non-positive value keeps \
          the default" )
-    | Snapshot_interval_sec ->
-      ( "MASC_SNAPSHOT_INTERVAL_SEC"
-      , 5.0
-      , "runtime"
-      , "Minimum seconds between SSE snapshot broadcasts" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n

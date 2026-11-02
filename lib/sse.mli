@@ -46,11 +46,14 @@ type delivery =
     are allocated once. Transport adapters consume [payload] rather than
     reparsing [frame]. *)
 
+type delivery_stream
+(** A registered client's queue, observed whenever a delivery is taken. *)
+
 type client = {
   id : int;
   kind : session_kind;
   runtime_authority : runtime_authority;
-  event_stream : delivery Eio.Stream.t;
+  event_stream : delivery_stream;
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
@@ -60,14 +63,7 @@ type client = {
 type client_registry_state = {
   entries : client SMap.t;
   count : int;
-}
-
-type session_snapshot = {
-  session_id : string;
-  kind : session_kind;
-  queue_depth : int;
-  last_event_id : int;
-  idle_seconds : float;
+  queue_inventory : Sse_queue_inventory.t;
 }
 
 (** {1 Constants} *)
@@ -105,7 +101,7 @@ val registration_error_to_string : registration_error -> string
 val register :
   ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
   auth:registration_auth -> string -> last_event_id:int ->
-  (int * delivery Eio.Stream.t * string option, registration_error) result
+  (int * delivery_stream * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
     bearer token and MCP session pair before admitting the client.
 
@@ -179,6 +175,8 @@ val broadcast_presence_to_runtime : runtime_authority -> Yojson.Safe.t -> unit
     It is not replay-buffered and does not reach external subscribers.
     [Runtime_presence] cannot be passed to the generic broadcast functions. *)
 val send_to : string -> Yojson.Safe.t -> unit
+val take_delivery : delivery_stream -> delivery
+val take_delivery_nonblocking : delivery_stream -> delivery option
 val pop : string -> string option
 val try_pop : string -> string option
 
@@ -246,7 +244,7 @@ val rewrite_event_buffer_for_test : unit -> unit
 
 (** {1 Snapshots} *)
 
-val sync_transport_snapshot : ?force:bool -> unit -> unit
+val sync_transport_snapshot : unit -> unit
 (** {1 Test Hooks} *)
 
 val register_commit_test_hook : (unit -> unit) option Atomic.t

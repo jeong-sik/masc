@@ -1029,7 +1029,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
-                    let delivery = Eio.Stream.take event_stream in
+                    let delivery = Sse.take_delivery event_stream in
                     (try
                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
                         if Sse.accept_live_delivery replay_handoff delivery

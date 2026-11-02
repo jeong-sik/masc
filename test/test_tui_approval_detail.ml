@@ -117,9 +117,9 @@ let test_gate_rows_keep_value_authority () =
     Detail.of_gate_fields ~width:24 [ "key", value ]
     |> List.filter_map (fun (line : Detail.gate_line) ->
       match line.gate_origin with
-      | Detail.Gate_key | Detail.Gate_key_with_bytes | Detail.Gate_key_continuation
-      | Detail.Gate_key_with_bytes_continuation
-      | Detail.Gate_key_bytes | Detail.Gate_key_bytes_continuation -> None
+      | Detail.Gate_key | Detail.Gate_key_with_bytes _ | Detail.Gate_key_continuation
+      | Detail.Gate_key_with_bytes_continuation _
+      | Detail.Gate_key_bytes _ | Detail.Gate_key_bytes_continuation _ -> None
       | Detail.Gate_string | Detail.Gate_json | Detail.Gate_unreadable ->
         Some line.gate_origin)
   in

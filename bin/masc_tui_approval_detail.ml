@@ -7,8 +7,9 @@ type line =
   }
 
 type gate_origin =
-  | Gate_key | Gate_key_with_bytes | Gate_key_continuation | Gate_key_with_bytes_continuation
-  | Gate_key_bytes | Gate_key_bytes_continuation
+  | Gate_key | Gate_key_with_bytes of int
+  | Gate_key_continuation | Gate_key_with_bytes_continuation of int
+  | Gate_key_bytes of int | Gate_key_bytes_continuation of int
   | Gate_string | Gate_json | Gate_unreadable
 
 type gate_line =
@@ -19,11 +20,11 @@ type gate_line =
 
 let prefix = function
   | Gate_key -> "[key] "
-  | Gate_key_with_bytes -> "[key*] "
+  | Gate_key_with_bytes index -> Printf.sprintf "[k*%d] " index
   | Gate_key_continuation -> "[key+] "
-  | Gate_key_with_bytes_continuation -> "[key*+] "
-  | Gate_key_bytes -> "[bytes] "
-  | Gate_key_bytes_continuation -> "[bytes+] "
+  | Gate_key_with_bytes_continuation index -> Printf.sprintf "[k*%d+] " index
+  | Gate_key_bytes index -> Printf.sprintf "[b%d] " index
+  | Gate_key_bytes_continuation index -> Printf.sprintf "[b%d+] " index
   | Gate_string -> "[str] "
   | Gate_json -> "[json] "
   | Gate_unreadable -> "!"
@@ -341,16 +342,17 @@ let of_gate_fields ~width fields =
   in
   if fields <> [] && width <= String.length (prefix Gate_key_continuation) then unreadable ()
   else
-    let rows = List.concat_map
-    (fun (key, value) ->
+    let _, fields, byte_fields = List.fold_left
+    (fun (previous, fields, byte_fields) (key, value) ->
       let raw_key = key in
       let needs_bytes = gate_key_needs_bytes raw_key in
-      let first_key_origin = if needs_bytes then Gate_key_with_bytes else Gate_key in
+      let number = if needs_bytes then previous + 1 else previous in
+      let first_key_origin = if needs_bytes then Gate_key_with_bytes number else Gate_key in
       let next_key_origin =
-        if needs_bytes then Gate_key_with_bytes_continuation else Gate_key_continuation in
+        if needs_bytes then Gate_key_with_bytes_continuation number else Gate_key_continuation in
       let key_room = width - max (String.length (prefix first_key_origin))
           (String.length (prefix next_key_origin)) in
-      let byte_room = width - String.length (prefix Gate_key_bytes_continuation) in
+      let byte_room = width - String.length (prefix (Gate_key_bytes_continuation number)) in
       (* Refuse an impossible token before allocating rows for a long key.
          The byte literal's widest token is a four-cell [\xHH] escape. *)
       let bytes_fit =
@@ -364,7 +366,7 @@ let of_gate_fields ~width fields =
                        | _ -> false)
                      raw_key))
       in
-      if key_room < 1 || not bytes_fit then unreadable ()
+      let rows = if key_room < 1 || not bytes_fit then unreadable (), []
       else
       let key =
         raw_key
@@ -372,7 +374,7 @@ let of_gate_fields ~width fields =
         |> Masc.Tui_terminal_text.sanitize_terminal_text
       in
       match split_escaped_cells ~syntax:Text ~max_cells:key_room key with
-      | None -> unreadable ()
+      | None -> unreadable (), []
       | Some key_rows ->
         let byte_rows =
           if needs_bytes then
@@ -380,7 +382,7 @@ let of_gate_fields ~width fields =
           else Some []
         in
         (match byte_rows with
-        | None -> unreadable ()
+        | None -> unreadable (), []
         | Some byte_rows ->
         let origin, syntax, text =
           match value with
@@ -389,19 +391,26 @@ let of_gate_fields ~width fields =
             Gate_json, Json,
             (Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview)
         in
-        List.mapi
+        let key_rows = List.mapi
           (fun index text ->
             { gate_label = Some text; gate_text = text;
               gate_origin = if index = 0 then first_key_origin else next_key_origin })
-          key_rows
-        @ List.mapi
+          key_rows in
+        let byte_rows = List.mapi
           (fun index text ->
             { gate_label = None; gate_text = text;
-              gate_origin = if index = 0 then Gate_key_bytes else Gate_key_bytes_continuation })
-          byte_rows
-        @ value_rows origin syntax text))
-      fields
-    in
+              gate_origin = if index = 0 then Gate_key_bytes number
+                else Gate_key_bytes_continuation number })
+          byte_rows in
+        key_rows @ value_rows origin syntax text, byte_rows)
+      in
+      let input_rows, byte_rows = rows in
+      number, List.rev_append input_rows fields, List.rev_append byte_rows byte_fields)
+      (0, [], []) fields in
+    (* Keep every input value ahead of the potentially long byte appendix.
+       The starred-key number associates each appendix entry with its key,
+       even when distinct keys have the same readable spelling. *)
+    let rows = List.rev_append fields (List.rev byte_fields) in
     if List.exists (fun line -> line.gate_origin = Gate_unreadable) rows
     then unreadable ()
     else rows

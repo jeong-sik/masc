@@ -36,7 +36,13 @@ type submitted_original =
   | Original_unreadable of { reference : string option; reason : string }
   | Original_unknown of string
 
-type confirmation_workspace = { base_path : string; masc_root : string }
+type confirmation_workspace = {
+  base_path : Tui_decode.Canonical_path.t;
+  masc_root : Tui_decode.Canonical_path.t;
+}
+
+val confirmation_workspace_of_identity : Tui_decode.server_identity -> confirmation_workspace
+val same_confirmation_workspace : confirmation_workspace -> confirmation_workspace -> bool
 
 type confirmation = {
   goal_id : string;

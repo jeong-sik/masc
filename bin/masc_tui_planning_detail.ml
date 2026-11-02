@@ -57,7 +57,19 @@ type submitted_original =
   | Original_unreadable of { reference : string option; reason : string }
   | Original_unknown of string
 
-type confirmation_workspace = { base_path : string; masc_root : string }
+type confirmation_workspace = {
+  base_path : Tui_decode.Canonical_path.t;
+  masc_root : Tui_decode.Canonical_path.t;
+}
+
+let confirmation_workspace_of_identity (identity : Tui_decode.server_identity) = {
+  base_path = identity.sid_base_path;
+  masc_root = identity.sid_masc_root;
+}
+
+let same_confirmation_workspace (left : confirmation_workspace) (right : confirmation_workspace) =
+  Tui_decode.Canonical_path.equal left.base_path right.base_path
+  && Tui_decode.Canonical_path.equal left.masc_root right.masc_root
 
 type confirmation = {
   goal_id : string;
@@ -259,12 +271,14 @@ let confirmation_body { goal_id; verdict; workspace; inspection_operator_id; run
     ; "verification_run_id", `String verdict.verification_run_id
     ; "expected_operator_id", `String inspection_operator_id
     ; "expected_runtime_instance_id", `String runtime_instance_id
-    ; "expected_workspace", `Assoc ["base_path", `String workspace.base_path; "masc_root", `String workspace.masc_root]
+    ; "expected_workspace", `Assoc
+        [ "base_path", `String (Tui_decode.Canonical_path.to_string workspace.base_path)
+        ; "masc_root", `String (Tui_decode.Canonical_path.to_string workspace.masc_root) ]
     ]
 
 let same_confirmation_binding left right =
   String.equal left.goal_id right.goal_id
-  && left.workspace = right.workspace
+  && same_confirmation_workspace left.workspace right.workspace
   && String.equal left.inspection_operator_id right.inspection_operator_id
   && String.equal left.runtime_instance_id right.runtime_instance_id
   && left.credential_headers = right.credential_headers
@@ -281,7 +295,7 @@ let receipt_authority_current ~credential_current ~current_instance ~current_con
   && match current_confirmation with
   | None -> false
   | Some (confirmation : confirmation) ->
-      confirmation.workspace = receipt.ra_workspace
+      same_confirmation_workspace confirmation.workspace receipt.ra_workspace
       && String.equal confirmation.inspection_operator_id receipt.ra_operator_id
       && String.equal confirmation.runtime_instance_id receipt.ra_runtime_instance_id
       && confirmation.credential_owner == receipt.ra_credential_owner

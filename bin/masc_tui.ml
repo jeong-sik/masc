@@ -8325,6 +8325,15 @@ let launch_owed_history state ~mailbox =
         launch_keeper_history_load ~load_file_changes:false ~force:owed.kho_audit state
           ~mailbox ~keeper_name:owed.kho_keeper
 
+(* Runs on every loop iteration; it reads only a visible Fusion reading whose
+   failed read is due. *)
+let launch_owed_fusion state ~mailbox =
+  Masc_tui_fusion_updates.retry_due_visible state ~now:(monotonic_now_s ())
+    ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
+    ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
+    ~historical:(fun reference ->
+      launch_fusion_historical_detail_load state ~mailbox ~reference)
+
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
   if keeper_available_for_new_message state keeper_name then begin
@@ -17079,6 +17088,17 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
 
 let stream_reconnect_s = 2.0
 
+(* A failed Fusion read is retried with the streams' reconnect backoff; a
+   change re-reads on [fusion_run_status] (RFC-0480 L2b). *)
+let settle_fusion_retry state reading result =
+  Masc_tui_fusion_updates.settle_retry state reading
+    ~failure:(match result with
+      | Ok _ -> None
+      | Error _ ->
+          Some (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+                  ~max_retry_s:keeper_execute_stream_max_reconnect_s
+                  ~now:(monotonic_now_s ())))
+
 (* A recovery connection owns no application observations. Its scoped
    identity receipt may re-admit reads; an older peer instead triggers one
    revalidation for an existing workspace. A cold unadvertised stream stays
@@ -25698,17 +25718,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Reread when state.view = Fusion
                      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
            launch_fusion_runs_load state ~mailbox
-       | Reread | Applied | Await_observer | Obsolete -> ())
+       | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Runs result
+       | Reread | Await_observer | Obsolete -> ())
   | Fusion_detail_loaded (generation, run_id, result) ->
       (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
        | Reread when state.view = Fusion ->
            launch_fusion_detail_load state ~mailbox ~run_id
-       | Reread | Applied | Await_observer | Obsolete -> ())
+       | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Detail result
+       | Reread | Await_observer | Obsolete -> ())
   | Fusion_historical_detail_loaded (generation, reference, result) ->
       (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
        | Reread when state.view = Fusion ->
            launch_fusion_historical_detail_load state ~mailbox ~reference
-       | Reread | Applied | Await_observer | Obsolete -> ())
+       | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Historical result
+       | Reread | Await_observer | Obsolete -> ())
   | Fusion_launch_options_loaded (generation, result) ->
       Masc_tui_fusion_updates.launch_options_loaded state ~generation
         ~report:(report_action state "system") result
@@ -30663,6 +30686,7 @@ Use relative paths for resources already held in the package. -->
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
       launch_owed_history state ~mailbox:async_messages;
+      launch_owed_fusion state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration
@@ -39216,14 +39240,9 @@ Use relative paths for resources already held in the package. -->
              | Lanes -> launch_lanes_load state ~mailbox:async_messages
              | Clients -> launch_clients_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
-         | Fusion ->
-             launch_fusion_runs_load state ~mailbox:async_messages;
-             (match state.fusion_mode with
-              | Fusion_list -> ()
-              | Fusion_detail run_id ->
-                  launch_fusion_detail_load state ~mailbox:async_messages ~run_id
-              | Fusion_historical_detail reference ->
-                  launch_fusion_historical_detail_load state ~mailbox:async_messages ~reference)
+         (* Fusion re-reads on [fusion_run_status] and retries a failed read
+            ([launch_owed_fusion]). *)
+         | Fusion -> ()
          | Memory ->
              (* Fleet memory health is a reading, so the tick refreshes it
                 like the listings above. *)

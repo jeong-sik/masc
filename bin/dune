@@ -2017,7 +2017,7 @@
  (name masc_tui_fusion_updates)
  (wrapped false)
  (modules masc_tui_fusion_updates)
- (libraries masc_tui_fusion_model masc_tui_types masc_tui_fetched masc_tui_fusion_launch masc))
+ (libraries masc_tui_fusion_model masc_tui_types masc_tui_fetched masc_tui_fusion_launch masc_tui_owed_read masc))
 
 (library
  (name masc_tui_approval_authority)

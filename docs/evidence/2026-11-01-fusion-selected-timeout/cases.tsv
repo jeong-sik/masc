@@ -1,0 +1,34 @@
+group	index	case	baseline	candidate	classification
+selected timeout	0	Claude selected unbounded survives a live positive timeout	FAIL	OK	fixed
+selected timeout	1	Claude selected positive survives a live unbounded timeout	FAIL	OK	fixed
+selected timeout	2	Claude selected absence ignores a newly declared live timeout	FAIL	OK	fixed
+selected timeout	3	Claude selected positive survives runtime removal	FAIL	OK	fixed
+selected timeout	4	Claude explicit short preset overrides the selected default	OK	OK	maintained
+selected timeout	5	Claude explicit long preset overrides the selected default	OK	OK	maintained
+selected timeout	6	Codex selected unbounded survives a live positive timeout	FAIL	OK	fixed
+selected timeout	7	Codex selected positive survives a live unbounded timeout	FAIL	OK	fixed
+selected timeout	8	Codex selected absence ignores a newly declared live timeout	FAIL	OK	fixed
+selected timeout	9	Codex selected positive survives runtime removal	FAIL	OK	fixed
+selected timeout	10	Codex explicit short preset overrides the selected default	OK	OK	maintained
+selected timeout	11	Codex explicit long preset overrides the selected default	OK	OK	maintained
+selected timeout	12	Antigravity selected unbounded survives a live positive timeout	FAIL	OK	fixed
+selected timeout	13	Antigravity selected positive survives a live unbounded timeout	FAIL	OK	fixed
+selected timeout	14	Antigravity selected absence ignores a newly declared live timeout	FAIL	OK	fixed
+selected timeout	15	Antigravity selected positive survives runtime removal	FAIL	OK	fixed
+selected timeout	16	Antigravity explicit short preset overrides the selected default	OK	OK	maintained
+selected timeout	17	Antigravity explicit long preset overrides the selected default	OK	OK	maintained
+selected timeout	18	Muse selected unbounded survives a live positive timeout	OK	OK	maintained
+selected timeout	19	Muse selected positive survives a live unbounded timeout	OK	OK	maintained
+selected timeout	20	Muse selected absence ignores a newly declared live timeout	OK	OK	maintained
+selected timeout	21	Muse selected positive survives runtime removal	OK	OK	maintained
+selected timeout	22	Muse explicit short preset overrides the selected default	OK	OK	maintained
+selected timeout	23	Muse explicit long preset overrides the selected default	OK	OK	maintained
+Claude native effort authority	0	panel omission ke...	not selected	OK	candidate-only control
+Claude native effort authority	1	panel explicit no...	not selected	OK	candidate-only control
+Claude native effort authority	2	panel minimal kee...	not selected	OK	candidate-only control
+Claude native effort authority	3	panel low ignores...	not selected	OK	candidate-only control
+Claude native effort authority	4	panel medium igno...	not selected	OK	candidate-only control
+Claude native effort authority	5	panel high ignore...	not selected	OK	candidate-only control
+Claude native effort authority	6	panel xhigh ignor...	not selected	OK	candidate-only control
+Claude native effort authority	7	panel max ignores...	not selected	OK	candidate-only control
+Claude native effort authority	8	panel ultra keeps...	not selected	OK	candidate-only control

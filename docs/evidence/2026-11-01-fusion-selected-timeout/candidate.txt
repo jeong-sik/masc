@@ -1,0 +1,9 @@
+2026-11-01T10:24:57.3671603Z 07854855a9c9665f68490c735738ce3bba3b7dc6
+2026-11-01T10:25:00.2325705Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T10:25:00.2355959Z 07854855a9c9665f68490c735738ce3bba3b7dc6
+2026-11-01T10:25:56.4642418Z   TARGET_SUITES: test/test_fusion_selected_timeout
+2026-11-01T10:25:56.4775266Z   TARGET_SUITES: test/test_fusion_selected_timeout
+2026-11-01T10:25:56.5659611Z [targeted] EIO_BACKEND=<unset> timeout=900s per suite
+2026-11-01T10:25:56.6462184Z [targeted] dune build test/test_fusion_selected_timeout.exe
+2026-11-01T10:27:53.7826258Z Error (warning 26 [unused-var]): unused variable runtime_id.
+2026-11-01T10:29:50.4091568Z Error: Unbound module Fusion_types

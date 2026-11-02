@@ -1516,6 +1516,19 @@
  (libraries masc_test_deps masc masc.runtime masc.fusion_core))
 
 (test
+ (name test_fusion_selected_timeout)
+ (modules test_fusion_selected_timeout)
+ (deps
+  (source_tree %{workspace_root}/config/prompts))
+ (libraries
+  masc_test_deps
+  masc
+  masc.runtime
+  masc.fusion_core
+  masc.masc_eio_context
+  eio_main))
+
+(test
  (name test_fusion_official_client_panel)
  (modules test_fusion_official_client_panel)
  (deps

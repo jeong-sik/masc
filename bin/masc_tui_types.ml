@@ -10630,6 +10630,7 @@ type state = {
      with no features, which reads as "nothing is proven". *)
   mutable observer: observer_status;
   mutable observer_retry_owner: unit ref option;
+  mutable observer_recovery_owner: unit ref option;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
@@ -19098,6 +19099,7 @@ let create_state
   fusion_launch_generation = 0;
   observer = Observer_off;
   observer_retry_owner = None;
+  observer_recovery_owner = None;
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;

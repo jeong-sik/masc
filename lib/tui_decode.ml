@@ -3789,12 +3789,10 @@ let decode_tool_approval_mode_overrides json =
    says so, because sitting that possibly-truncated wall under "input"
    promised a whole it never was. *)
 type gate_input_rows =
-  | Rows of (string * string) list
-      (** One field per key of the stored input object: the key is the label,
-          the value is what the producer stored -- strings whole, every other
-          value as compact JSON. The order is the producer's, because a
-          producer that leads with the field the operator reads is making a
-          statement the serializer must not rearrange. *)
+  | Rows of (string * Yojson.Safe.t) list
+      (** The decoded input object's fields in producer order. Keeping each
+          value typed distinguishes a string from another JSON value with
+          the same text, and also preserves duplicate keys. *)
   | Flattened of string option
       (** The server's flattened preview, and the fact that this detail
           cannot draw the input per key. [None] means the server recorded no
@@ -3816,10 +3814,9 @@ type gate_pending = {
           show. A [tool_execute] row leads with the command it would run;
           every other operation keeps the server's flattened preview. *)
   gp_input_rows : gate_input_rows;
-      (** The detail pane's copy of the input, uncut. [Rows] is one field per
-          key of the stored input object -- strings whole, other values as
-          compact JSON. [Flattened] says this input never was an object, so
-          the pane draws the server preview under a label that names it. *)
+      (** The detail pane's decoded input object, without the preview limit.
+          [Flattened] says the input was not an object, so the pane draws the
+          server preview under a label that names it. *)
   gp_execution_cwd : string option;
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
@@ -3989,16 +3986,7 @@ let gate_execution_site ~operation envelope =
 let gate_input_rows ~operation ~server_preview envelope =
   let object_keys json =
     match json with
-    | `Assoc args ->
-      let field (key, value) =
-        let text =
-          match value with
-          | `String text -> text
-          | other -> Yojson.Safe.to_string other
-        in
-        (key, text)
-      in
-      Some (Rows (List.map field args))
+    | `Assoc args -> Some (Rows args)
     | _ -> None
   in
   let input_rows =

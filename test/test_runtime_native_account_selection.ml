@@ -357,6 +357,7 @@ let test_conflicting_current_codex_homes () =
 
 let test_missing_codex_home () =
   with_directory (fun directory ->
+    with_cwd directory (fun () ->
     with_env environment (fun () ->
       List.iter (fun home -> List.iter (fun codex_home ->
         with_env ["HOME", home; "CODEX_HOME", codex_home] (fun () ->
@@ -368,7 +369,7 @@ let test_missing_codex_home () =
         [None; Some ""];
       with_env ["HOME", Some ""; "CODEX_HOME", Some directory] (fun () ->
         check (option string) "a valid inherited CLI directory does not require HOME"
-          (Some directory) (env_value "CODEX_HOME" (child_environment (materialize Codex))))))
+          (Some directory) (env_value "CODEX_HOME" (child_environment (materialize Codex)))))))
 
 let () = run "native account selection"
   ["admission to execution",

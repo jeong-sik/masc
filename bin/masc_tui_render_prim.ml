@@ -1918,8 +1918,8 @@ let keeper_action_color
 let keeper_suggested_action reading =
   match reading.Keeper_control.liveness with
   | Keeper_control.Unobserved -> "not observed"
-  | Keeper_control.Invalid _ -> "config error"
-  | Keeper_control.Absent -> "not in roster"
+  | Keeper_control.Invalid _ -> "read error"
+  | Keeper_control.Absent -> "unavailable"
   | Keeper_control.Present runtime ->
       match runtime.kr_next_action with
       | None -> "not reported"
@@ -1969,10 +1969,13 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let rule = sidebar_rule ~cols in
   let selected = selected_keeper state in
   let action =
-    Option.map
+    Option.fold ~none:[]
+      ~some:
       (fun keeper ->
-        "", "  Selected next: "
-          ^ keeper_suggested_action (keeper_reading state keeper))
+        let indent = if inner >= 3 then "  " else "" in
+        Message_layout.wrap_words ~max_cells:(max 1 (inner - String.length indent))
+          ("Selected next: " ^ keeper_suggested_action (keeper_reading state keeper))
+        |> List.map (fun line -> "", indent ^ line))
       selected
   in
   let details =
@@ -2007,17 +2010,20 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let header_rows = min 3 height in
   let available = height - header_rows in
   let count = List.length state.keepers in
-  (* Keep the selected action visible even when the viewport is too short for
-     the larger detail block. One row is reserved only if a list row can stay. *)
-  let action = if available >= 2 then Option.to_list action else [] in
-  let available = available - List.length action in
   (* Supplementary details get no more rows than the list keeps, unless the
      entire fleet already fits beside them. Short viewports favor the list. *)
   let detail_rows = List.length details in
   let details =
     if available >= detail_rows + min count detail_rows then details else []
   in
-  let capacity = available - List.length details in
+  (* Decide the existing detail block first, so adding an action cannot make
+     health and runtime disappear at the height where they used to fit. *)
+  let remaining = available - List.length details in
+  let list_minimum = if count > 0 then 1 else 0 in
+  let action =
+    if remaining >= List.length action + list_minimum then action else []
+  in
+  let capacity = remaining - List.length action in
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
   let count_label =

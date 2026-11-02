@@ -6,6 +6,7 @@
    sees on the wire. *)
 
 open Alcotest
+module Preparation = Masc_test_deps.Board_test_preparation
 
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
@@ -808,7 +809,11 @@ let test_authenticated_graphql_post_reads_its_body () =
    The token-holding read must come back as the sub-board, not as a post
    lookup for "sub-boards/<id>". *)
 let test_board_reads_require_a_token_under_strict_auth () =
-  with_gateway @@ fun ~base_path ~clock handler ->
+  with_gateway
+    ~prepare_workspace:(fun base_path ->
+      Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
+      base_path)
+  @@ fun ~base_path ~clock handler ->
   Fun.protect ~finally:Masc.Board.reset_global_for_test
   @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key

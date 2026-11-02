@@ -3939,7 +3939,6 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    launch_tools_async_observation_load state ~mailbox;
     launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Skills_catalog_loaded (generation,
         Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
@@ -7879,6 +7878,11 @@ let owe_held_calls_read state =
 let owe_tool_modes_read state =
   state.tool_modes_owed <- Masc_tui_owed_read.changed state.tool_modes_owed
 
+(* The durable async requests the Keepers list and Tools draw read under the
+   same rules. *)
+let owe_async_requests_read state =
+  state.async_requests_owed <- Masc_tui_owed_read.changed state.async_requests_owed
+
 let launch_surface_reads state ~mailbox (surface : surface) =
   if server_authority_ready state then
   match surface with
@@ -7889,7 +7893,8 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Keepers
       ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
       | Keeper_runtime_pick ) ->
-      owe_tool_modes_read state
+      owe_tool_modes_read state;
+      owe_async_requests_read state
   | Overview -> owe_held_calls_read state
   | Approvals ->
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
@@ -7917,7 +7922,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       | None -> launch_connectors_load state ~mailbox
       | Some _ -> refresh_browser_lane state ~mailbox)
   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
-  | Tools -> launch_tools_load state ~mailbox
+  | Tools ->
+      owe_async_requests_read state;
+      launch_tools_load state ~mailbox
   | Config -> (
       (* Each pane loads its own source. Named rather than left to an
          if/else chain: a pane added later should have to say where its data
@@ -8663,6 +8670,36 @@ let launch_owed_tool_modes state ~mailbox =
   then begin
     state.tool_modes_owed <- Masc_tui_owed_read.started state.tool_modes_owed;
     launch_keeper_tool_modes_load state ~mailbox
+  end
+
+let async_requests_on_screen state =
+  match state.view with
+  | Keepers Keeper_list | Tools -> true
+  | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | System_logs ->
+      false
+
+(* Runs on every loop iteration. A read already in flight is let finish
+   first; one that will not deliver leaves the requests owed again. *)
+let launch_owed_async_requests state ~mailbox =
+  if not (async_requests_on_screen state) then
+    state.async_requests_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = state.tools_async_observation_inflight in
+    let read =
+      if reading then state.async_requests_owed
+      else Masc_tui_owed_read.abandoned state.async_requests_owed
+    in
+    state.async_requests_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+       && server_authority_ready state
+       && not reading
+    then begin
+      state.async_requests_owed <- Masc_tui_owed_read.started read;
+      launch_tools_async_observation_load state ~mailbox
+    end
   end
 
 let apply_board_hearths_load state result =
@@ -17699,7 +17736,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          (board_post_on_screen state);
        owe_gate_snapshot_read state;
        owe_held_calls_read state;
-       owe_tool_modes_read state
+       owe_tool_modes_read state;
+       owe_async_requests_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -18063,6 +18101,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        cold admission has read no Gate yet. The same holds for the questions. *)
     owe_gate_snapshot_read state;
     owe_asks_read state;
+    owe_async_requests_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21660,6 +21699,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let gate_changed = ref false in
       let held_calls_changed = ref false in
       let asks_changed = ref false in
+      let async_requests_changed = ref false in
       let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
@@ -21747,6 +21787,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.gate_snapshot_changed event then gate_changed := true;
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
+              if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
               if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
@@ -21766,7 +21807,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _
-               | Masc_tui_observer.Keeper_waiting_inventory_changed _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
@@ -21818,6 +21859,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
+               | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
@@ -21937,6 +21979,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !gate_changed && not !observer_source_loss_seen then owe_gate_snapshot_read state);
       (if !held_calls_changed && not !observer_source_loss_seen then owe_held_calls_read state);
       (if !asks_changed && not !observer_source_loss_seen then owe_asks_read state);
+      (if !async_requests_changed && not !observer_source_loss_seen then
+         owe_async_requests_read state);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -25482,7 +25526,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Tools_async_task_history_loaded (request,result) ->
       complete_tools_async_task_history state request result
   | Tools_async_observation_loaded (generation, result) ->
-      ignore (apply_tools_async_observation_result state ~generation result)
+      if apply_tools_async_observation_result state ~generation result then
+        state.async_requests_owed <-
+          (match result with
+           | Ok (Tui_decode.Async_ready _) -> Masc_tui_owed_read.succeeded state.async_requests_owed
+           | Ok (Tui_decode.Async_unavailable _) | Error _ -> failed_read state.async_requests_owed)
   | Runtime_lane_slots_written (written, replacement_selection, result) ->
       (* Re-read the list the write changed rather than patching the local
          snapshot: a hand-applied edit and a rejected write look the same on
@@ -31061,6 +31109,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_held_calls state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
+      launch_owed_async_requests state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
@@ -37014,7 +37063,10 @@ Use relative paths for resources already held in the package. -->
                   launch_tools_async_task ~force:true state ~mailbox:async_messages
                 else if state.tools_pane=Tools_async && state.tools_async_detail_open then
                   launch_tools_async_detail ~force:true state ~mailbox:async_messages
-                else launch_tools_load state ~mailbox:async_messages
+                else begin
+                  owe_async_requests_read state;
+                  launch_tools_load state ~mailbox:async_messages
+                end
             | Config -> (
                 (* Same per-pane dispatch as goto_surface: each Config pane
                    loads its own source, so a manual refresh must not
@@ -39577,9 +39629,10 @@ Use relative paths for resources already held in the package. -->
         (match state.view with
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
-         (* The list polls only its independent async badges; the detail arm
-            below keeps Info and Secrets current while they are on screen. *)
-         | Keepers Keeper_list -> launch_tools_async_observation_load state ~mailbox:async_messages
+         (* The list's async badges read again on
+            [keeper_async_requests_changed] and retry a failed read
+            ([launch_owed_async_requests]). *)
+         | Keepers Keeper_list -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              (* Info's execution facts and Secrets re-read on
                 [keeper_composite_changed] and retry a failed read

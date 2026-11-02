@@ -10095,6 +10095,8 @@ type state = {
   mutable board_list_owed: Masc_tui_owed_read.t;
   (* The read the questions to the operator owe on every surface. *)
   mutable asks_owed: Masc_tui_owed_read.t;
+  (* The read the durable async requests owe while the Keepers list or Tools is on screen. *)
+  mutable async_requests_owed: Masc_tui_owed_read.t;
   (* The read the Gate snapshot owes. *)
   mutable gate_snapshot_owed: Masc_tui_owed_read.t;
   (* The reads the held tool calls (Overview, Approvals) and the tool
@@ -14343,6 +14345,7 @@ let suspend_workspace_readings state =
   state.board_post_owed <- None;
   state.board_list_owed <- Masc_tui_owed_read.settled;
   state.asks_owed <- Masc_tui_owed_read.settled;
+  state.async_requests_owed <- Masc_tui_owed_read.settled;
   (* Resumed authority reads the Gate again. *)
   state.gate_snapshot_owed <- Masc_tui_owed_read.settled;
   state.held_calls_owed <- Masc_tui_owed_read.settled;
@@ -19355,6 +19358,7 @@ let create_state
   board_post_owed = None;
   board_list_owed = Masc_tui_owed_read.settled;
   asks_owed = Masc_tui_owed_read.settled;
+  async_requests_owed = Masc_tui_owed_read.settled;
   gate_snapshot_owed = Masc_tui_owed_read.settled;
   held_calls_owed = Masc_tui_owed_read.settled;
   tool_modes_owed = Masc_tui_owed_read.settled;

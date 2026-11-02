@@ -224,6 +224,10 @@ type event =
       { keeper : string; queue_kind : string option; at : float }
       (** The keeper's waiting queue changed. Names the keeper in
           [keeper_name], not [name]. *)
+  | Keeper_async_requests_changed of { keeper : string }
+      (** [keeper_async_requests_changed]: the Keeper's durable async message
+          requests changed. A server push: the reader re-fetches
+          [/api/v1/async-requests]. *)
   | Fusion_run_status of { keeper : string; run_id : string; status : string }
       (** A fusion deliberation changed stage or settled. A server push, not
           a keeper act: the Fusion surface re-fetches the run on it instead of
@@ -295,6 +299,9 @@ val held_calls_changed : event -> bool
 val tool_modes_changed : event -> bool
 (** What [/api/v1/keepers/tool-approval-mode] and the Keeper Gate settings
     answer changed: a tool approval mode or a Keeper's Gate setting. *)
+
+val async_requests_changed : event -> bool
+(** The durable async message requests changed. *)
 
 val asks_changed : event -> bool
 (** The questions a Keeper or a Lane Add-on installation puts to the operator

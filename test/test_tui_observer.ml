@@ -143,6 +143,8 @@ let summary = function
          | Observer.Keeper_asks_changed { keeper } -> "asks:" ^ keeper
          | Observer.Installation_asks_changed { declaration_id } ->
              "installation_asks:" ^ declaration_id)
+  | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
+      "async_requests:" ^ keeper
   | Observer.Event (Observer.Board_changed { post_id }) ->
       Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
@@ -590,6 +592,34 @@ let asks_frames =
 |}
   ]
 
+let async_requests_frame =
+  {|data: {"type":"keeper_async_requests_changed","name":"lane-smith"}
+
+|}
+
+let test_only_an_async_request_change_reads_the_async_requests () =
+  check (list string) "an async request change decodes with its Keeper"
+    [ "async_requests:lane-smith" ]
+    (List.map summary (decode_all [ async_requests_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it reads the async requests" 1
+    (count Observer.async_requests_changed [ async_requests_frame ]);
+  check int "no question, Gate, held call or mode change does" 0
+    (count Observer.async_requests_changed (asks_frames @ gate_frames @ tool_approval_frames));
+  check bool "a change without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_async_requests_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_async_requests_changed" reason
+     | _ -> false)
+
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"
     [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
@@ -1023,6 +1053,8 @@ let () =
             test_only_a_gate_change_changes_the_gate_snapshot
         ; test_case "only a question change reads the questions" `Quick
             test_only_a_question_change_reads_the_questions
+        ; test_case "only an async request change reads the async requests" `Quick
+            test_only_an_async_request_change_reads_the_async_requests
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

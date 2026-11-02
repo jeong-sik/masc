@@ -881,94 +881,161 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
              ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ]))
 ;;
 
-(* The work a dropped Goal leaves behind. A Task also linked to a Goal that is
-   not dropped still serves that Goal and is left alone. Of the rest, unclaimed
-   ones are cancelled once the drop commits; held ones keep running, because
-   cancelling would discard their work, and the drop notice names them so their
-   holders can finish, release or cancel them. *)
+(* Capture linked work before the Goal transaction. The link and Goal reads
+   can still race later changes. Each unclaimed Task is rechecked separately
+   before cancellation, subject to the backlog's existing cache and writer
+   contracts. Held Tasks are reported rather than selected for cancellation. *)
 type dropped_goal_work = {
-  unclaimed : string list;
+  unclaimed : Masc_domain.task list;
   held : (string * string) list;
+  ambiguous : (string * string) list;
 }
 
 let dropped_goal_work config ~goal_id =
   let ( let* ) = Result.bind in
-  let* links = Workspace_goal_index.read_goal_task_links_r config in
+  let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+  let linked = Option.value ~default:[] (List.assoc_opt goal_id links) in
   let* goals = match Goal_store.load_source config with
     | Goal_store.Available state -> Ok state.goals
     | Goal_store.Uninitialized -> Ok []
     | Goal_store.Unavailable error -> Error (Goal_store.unavailable_to_string error) in
-  let* tasks =
-    try Ok (Workspace.get_tasks_raw config) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn) in
-  let dropped_goal_ids =
+  let goals_by_id =
     List.fold_left
       (fun acc (goal : Goal_store.goal) ->
-         if goal.phase = Goal_phase.Dropped
-         then Workspace_backlog.Task_id_set.add goal.id acc
-         else acc)
-      (Workspace_backlog.Task_id_set.singleton goal_id)
-      goals
+         let rows = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt goal.id acc) in
+         Goal_store.Goal_id_map.add goal.id (goal :: rows) acc)
+      Goal_store.Goal_id_map.empty goals
   in
-  let dropped id = Workspace_backlog.Task_id_set.mem id dropped_goal_ids in
-  let linked_set =
-    match List.assoc_opt goal_id links with
-    | None -> Workspace_backlog.Task_id_set.empty
-    | Some ids -> Workspace_backlog.Task_id_set.of_list ids
-  in
-  let task_goal_map =
-    Workspace_goal_index.build_task_goal_map ~goal_task_links:links ()
-  in
-  let orphaned (task : Masc_domain.task) =
-    Workspace_backlog.Task_id_set.mem task.id linked_set
-    && List.for_all
-         dropped
-         (Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id:task.id)
-  in
-  let rev_unclaimed, rev_held =
+  let goal_rows id = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt id goals_by_id) in
+  let target_problem = match goal_rows goal_id with
+    | [_] -> None
+    | [] -> Some "not attempted: target Goal row was unavailable during Task observation"
+    | _ :: _ :: _ -> Some "not attempted: target Goal ID was ambiguous during Task observation" in
+  let* backlog =
+    try
+      if Workspace.is_initialized config then Workspace_backlog.read_backlog_r config
+      else Error "Workspace is not initialized"
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn) in
+  let linked_set = Workspace_backlog.Task_id_set.of_list linked in
+  let task_goal_map = Workspace_goal_index.build_task_goal_map ~goal_task_links:links () in
+  let deleted_task_ids =
     List.fold_left
-      (fun (rev_unclaimed, rev_held) (task : Masc_domain.task) ->
-         if not (orphaned task)
-         then rev_unclaimed, rev_held
-         else
-           match task.task_status with
-           | Masc_domain.Todo -> task.id :: rev_unclaimed, rev_held
-           | Masc_domain.Claimed _
-           | Masc_domain.InProgress _
-           | Masc_domain.AwaitingVerification _ ->
-             (match Masc_domain.task_assignee_of_status task.task_status with
-              | Some holder -> rev_unclaimed, (task.id, holder) :: rev_held
-              | None -> rev_unclaimed, rev_held)
-           | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
-             rev_unclaimed, rev_held)
-      ([], [])
-      tasks
+      (fun ids (receipt : Masc_domain.task_deletion_receipt) ->
+         Workspace_backlog.Task_id_set.add receipt.deleted_task_id ids)
+      Workspace_backlog.Task_id_set.empty backlog.task_deletion_receipts
   in
-  Ok { unclaimed = List.rev rev_unclaimed; held = List.rev rev_held }
+  let linkage task_id =
+    let other_ids =
+      Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id
+      |> List.filter (fun id -> not (String.equal id goal_id))
+      |> List.sort_uniq String.compare
+    in
+    match target_problem with
+    | Some detail -> `Ambiguous detail
+    | None ->
+        (match List.find_opt (fun id -> match goal_rows id with
+             | [] | [_] -> false
+             | _ :: _ :: _ -> true) other_ids with
+         | Some id -> `Ambiguous ("not attempted: linked Goal ID is ambiguous: " ^ id)
+         | None ->
+             if List.for_all (fun id -> match goal_rows id with
+                 | [goal] -> goal.phase = Goal_phase.Dropped
+                 | [] | _ :: _ :: _ -> false) other_ids
+             then `Orphaned else `Shared) in
+  let holders rows =
+    List.filter_map (fun (task : Masc_domain.task) ->
+        match task.task_status with
+        | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
+            Option.map (fun holder -> task.id, holder) (Masc_domain.task_assignee_of_status task.task_status)
+        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None) rows
+    |> List.sort_uniq compare in
+  let candidates_by_id =
+    List.fold_left
+      (fun acc (task : Masc_domain.task) ->
+         if not (Workspace_backlog.Task_id_set.mem task.id linked_set) then acc
+         else
+           Workspace_backlog.Task_id_map.update task.id
+             (function None -> Some [task] | Some rows -> Some (task :: rows)) acc)
+      Workspace_backlog.Task_id_map.empty backlog.tasks
+  in
+  let unclaimed, held, ambiguous = List.fold_right (fun (id, rows) (unclaimed, held, ambiguous) ->
+      let observed_holders = holders rows in
+      let deleted = Workspace_backlog.Task_id_set.mem id deleted_task_ids in
+      match linkage id with
+      | `Shared -> (unclaimed, held, ambiguous)
+      | `Ambiguous detail ->
+          (unclaimed, observed_holders @ held, (id, detail) :: ambiguous)
+      | `Orphaned ->
+          if deleted then
+            (unclaimed, observed_holders @ held, (id, "not attempted: Task ID has a deletion receipt") :: ambiguous)
+          else match rows with
+            | [task] ->
+                (match task.task_status with
+                 | Masc_domain.Todo -> (task :: unclaimed, held, ambiguous)
+                 | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
+                     (unclaimed, observed_holders @ held, ambiguous)
+                 | Masc_domain.Done _ | Masc_domain.Cancelled _ -> (unclaimed, held, ambiguous))
+            | [] | _ :: _ :: _ ->
+                (unclaimed, observed_holders @ held, (id, "not attempted: linked Task ID is ambiguous") :: ambiguous))
+    (Workspace_backlog.Task_id_map.bindings candidates_by_id) ([], [], []) in
+  Ok { unclaimed; held; ambiguous }
 ;;
 
 let dropped_goal_notice ~(goal : Goal_store.goal) held =
   Printf.sprintf
-    "[goal_dropped] %s — %s\nThese Tasks are still held and serve no live Goal. Finish, release or cancel them:\n%s"
+    "[goal_dropped] %s — %s\nBefore the drop, Task rows indicated these holders. Observations may be stale or ambiguous; check current Task status and Goal links before acting:\n%s"
     goal.id goal.title
     (String.concat "\n" (List.map (fun (task_id, holder) -> Printf.sprintf "- %s (%s)" task_id holder) held))
 ;;
 
-let cancel_dropped_goal_todos (ctx : context) ~goal_id ~reason task_ids =
+let cancel_dropped_goal_todos ?(before_transition = fun ~task_id:_ -> ()) (ctx : context) ~goal_id ~reason tasks =
   let reason = Printf.sprintf "Goal %s was dropped: %s" goal_id reason in
-  List.partition_map (fun task_id ->
-      match Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-              ~action:Masc_domain.Cancel ~reason () with
-      | Ok _ -> Either.Left task_id
-      | Error error -> Either.Right (task_id, Masc_domain.masc_error_to_string error))
-    task_ids
+  List.partition_map (fun (original : Masc_domain.task) ->
+      let task_id = original.id in
+      let observed =
+        try Workspace_backlog.read_backlog_r ctx.config with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      match observed with
+      | Error detail -> Either.Right (task_id, "not attempted: backlog unreadable: " ^ detail)
+      | Ok backlog ->
+          let deleted = List.exists (fun (receipt : Masc_domain.task_deletion_receipt) ->
+              String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
+          if deleted then Either.Right (task_id, "not attempted: Task ID has a deletion receipt")
+          else match List.filter (fun (task : Masc_domain.task) -> String.equal task.id task_id) backlog.tasks with
+            | [] -> Either.Right (task_id, "not attempted: Task is no longer in the backlog")
+            | [_; _] | _ :: _ :: _ :: _ -> Either.Right (task_id, "not attempted: Task ID is ambiguous")
+            | [task] ->
+                if not (Masc_domain.equal_task original task) then
+                  Either.Right (task_id, "not attempted: Task changed since the candidate observation")
+                else (match task.task_status with
+                 | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+                 | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
+                     Either.Right (task_id, "not attempted: Task is no longer Todo")
+                 | Masc_domain.Todo ->
+                     before_transition ~task_id;
+                     match Workspace.transition_task_outcome_r ctx.config ~agent_name:ctx.agent_name ~task_id
+                             ~action:Masc_domain.Cancel ~reason ~expected_version:backlog.version () with
+                     | Ok { noop = false; _ } -> Either.Left task_id
+                     | Ok { noop = true; _ } ->
+                         Either.Right (task_id, "Task cancellation reported a no-op; this call did not cancel it")
+                     | Error error ->
+                         Either.Right (task_id, "Task cancellation returned an error; its commit status may be unknown: "
+                                               ^ Masc_domain.masc_error_to_string error)))
+    tasks
 ;;
+
+module For_testing = struct
+  let cancel_dropped_goal_todos = cancel_dropped_goal_todos
+end
 
 let dropped_goal_tasks_json ctx ~goal_id ~reason = function
   | Error detail -> `Assoc [ "unread", `String detail ]
   | Ok work ->
       let cancelled, failed = cancel_dropped_goal_todos ctx ~goal_id ~reason work.unclaimed in
+      let failed = work.ambiguous @ failed in
       `Assoc
         [ "cancelled", `List (List.map (fun id -> `String id) cancelled)
         ; "cancel_failed", `List (List.map (fun (id, error) ->

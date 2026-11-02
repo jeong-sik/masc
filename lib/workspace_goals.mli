@@ -73,6 +73,15 @@ val handle_goal_transition
     active dispatch grants no retry. Publication failure is reported, rather
     than treating the scheduling wake as durable retry authority. *)
 
+module For_testing : sig
+  val cancel_dropped_goal_todos :
+    ?before_transition:(task_id:string -> unit) ->
+    Workspace_types.context -> goal_id:string -> reason:string -> Masc_domain.task list ->
+    string list * (string * string) list
+  (** Inject a change after the fresh Task read and before the conditional
+      transition. Production calls do not supply the hook. *)
+end
+
 type verifier_decision =
   | Proof_proven
   | Proof_refuted of { reason : string }

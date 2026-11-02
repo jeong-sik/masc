@@ -3706,6 +3706,17 @@ let note_observer_scope binding handshake =
   | Observer_scope_bound _, (Some _ | None) | Observer_scope_retired, (Some _ | None) ->
       Observer_scope_retired
 
+(** Whether an opened observer connection delivers every event published
+    since the last one this TUI applied. Only a [Resumed] replay does: the
+    server reads its retained window before answering, so a dropped event
+    already shows as [Resumed_after_gap]. A fresh, reset or unscoped
+    connection starts live and misses what changed while it was closed. *)
+let observer_replay_is_complete (handshake : Sse_wire.observer_handshake option) =
+  match handshake with
+  | Some { replay = Sse_wire.Resumed; _ } -> true
+  | Some { replay = Sse_wire.Fresh | Sse_wire.Resumed_after_gap _ | Sse_wire.Reset _; _ }
+  | None -> false
+
 let observer_replay_description ?(source_loss = false) replay =
   let description = match replay with
   | Observer_replay_unobserved -> "Replay: not negotiated"

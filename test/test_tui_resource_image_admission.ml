@@ -124,7 +124,7 @@ let test_skill_image_owner () =
     sir_skill_reference=Some original } in
   state.image_open <- true;
   state.image_cell_view <- Some (Types.Image_cells {
-    ic_title="diagram";ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_title="diagram";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
     ic_workspace=state.workspace_authority;ic_origin=image;ic_unconfirmed=false });
   let window : Masc_tui_image_viewport.window = {x=0;y=0;width=1;height=1;columns=1;rows=1} in
   let inspection={image with sir_purpose=Inspect_image {identity=ref ();window}} in
@@ -577,7 +577,7 @@ let test_tools_image_keeper_owner () =
     sir_keeper=Some "keeper-a";sir_skill_reference=Some reference } in
   state.image_open <- true;
   state.image_cell_view <- Some (Types.Image_cells {
-    ic_title="diagram";ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_title="diagram";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
     ic_workspace=state.workspace_authority;ic_origin=origin;ic_unconfirmed=false });
   state.msx_open <- true;
   check bool "a hidden image cannot restore Tools selection" true

@@ -8885,6 +8885,7 @@ type image_inspection = {
    while it owns the screen so they can be redrawn after a terminal resize. *)
 type image_cell_frame = {
   ic_title : string;
+  ic_caption : string list;
   ic_lines : string list;
   ic_columns : int;
   ic_terminal_size : int * int;

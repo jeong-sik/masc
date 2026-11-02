@@ -11541,7 +11541,8 @@ let cell_image_terminal_size () =
   | Some _ | None -> None
 
 let cell_image_fits (view : image_cell_frame) (rows, columns) =
-  view.ic_columns <= columns - 2 && List.length view.ic_lines <= rows - 3
+  view.ic_columns <= columns - 2
+  && List.length view.ic_lines + List.length view.ic_caption <= rows - 3
 
 let cell_image_notice ~columns ~short ~long =
   let notice = if columns <= 4 then "!" else if columns <= 9 then "key"
@@ -11551,12 +11552,17 @@ let cell_image_notice ~columns ~short ~long =
 let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_frame) =
   let contents =
     if cell_image_fits view (rows, columns) then
+      let header_rows = 1 + List.length view.ic_caption in
+      let header = List.mapi (fun index line ->
+        Printf.sprintf "\x1b[%d;1H%s" (index + 1)
+          (Message_layout.fit_width line (columns - 1))) (view.ic_title :: view.ic_caption)
+        |> String.concat "" in
       let body = List.mapi (fun index line ->
-        Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) view.ic_lines
+        Printf.sprintf "\x1b[%d;1H%s" (index + 1 + header_rows) line) view.ic_lines
         |> String.concat "" in
       let footer = if view.ic_unconfirmed then "! source unconfirmed · any key: back"
         else "  colour-cell preview · any key: back" in
-      "\x1b[1;1H" ^ Message_layout.fit_width view.ic_title (columns - 1) ^ body
+      header ^ body
       ^ Printf.sprintf "\x1b[%d;1H%s" rows
           (Message_layout.fit_width footer (columns - 1))
     else cell_image_notice ~columns ~short:"key:close"
@@ -11580,8 +11586,8 @@ let draw_withdrawn_cell_image state ~terminal_size:(_, columns as terminal_size)
   write_to_terminal (Ansi.clear ^ notice);
   state.image_cell_view <- Some (Image_cells_withdrawn (Some terminal_size))
 
-let draw_prepared_image ?scene ~origin state ~refuse ~title = function
-  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ~origin ~refuse ~title png
+let draw_prepared_image ?scene ?(caption=[]) ~origin state ~refuse ~title = function
+  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ~origin ~caption ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
     withdraw_resource_diagram_pending state;
     if state.msx_open then
@@ -11590,7 +11596,8 @@ let draw_prepared_image ?scene ~origin state ~refuse ~title = function
       refuse "this terminal has no colour image presentation"
     else match cell_image_terminal_size () with
     | None -> refuse "terminal size is unavailable; reopen the image preview"
-    | Some (rows, columns) when image_columns > columns - 2 || pixel_rows / 2 > rows - 3 ->
+    | Some (rows, columns) when image_columns > columns - 2
+        || pixel_rows / 2 + List.length caption > rows - 3 ->
         refuse "terminal size changed; reopen the image preview"
     | Some _ ->
       let lines = Masc_tui_image_mosaic.render_rgba
@@ -11600,11 +11607,12 @@ let draw_prepared_image ?scene ~origin state ~refuse ~title = function
       | [] -> refuse "image preview has no character frame"
       | _ :: _ ->
         let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
+        let caption = List.map (Keeper_chat.terminal_safe_text ~preserve_newlines:false) caption in
         match cell_image_terminal_size () with
         | None -> refuse "terminal size is unavailable; reopen the image preview"
         | Some (rows, columns) ->
             draw_cell_image state ~terminal_size:(rows, columns)
-              {ic_title=title;ic_lines=lines;ic_columns=image_columns;
+              {ic_title=title;ic_caption=caption;ic_lines=lines;ic_columns=image_columns;
                ic_terminal_size=(rows, columns);ic_workspace=state.workspace_authority;
                ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin}
 

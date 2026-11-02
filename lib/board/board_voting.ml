@@ -248,4 +248,3 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                       mark_dirty_comment store comment_key;
                       invalidate_comment_caches store;
                       Ok (updated.votes_up - updated.votes_down))))
-

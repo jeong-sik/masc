@@ -266,10 +266,6 @@ val hint : string -> hint
     candidates rather than describing one, because {!parse} does no prefix
     matching and the line is not sendable yet. *)
 
-val hint_line : hint -> string option
-(** {!hint} as one row for the composer's footer, or [None] where there is
-    nothing to say. *)
-
 val help_lines : string list
 (** One line per command, the list [/help] draws. Kept beside the parser so a
     new command cannot ship without its line. An alias shares its command's

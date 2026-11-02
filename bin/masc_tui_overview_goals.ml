@@ -165,15 +165,6 @@ let goal_rows ~now ~inner_width goals =
       ^ "  " ^ suffix)
     goals
 
-let wanted_rows (reading : Types.overview_goals_reading) =
-  match reading with
-  | Types.Goals_unread -> 1
-  | Types.Goals_failed _ -> 1
-  | Types.Goals_read goals ->
-      let goals = drawn_goals goals in
-      if goals = [] then 1
-      else 1 + List.length goals
-
 let title count =
   Ansi.bold
   ^ (match count with

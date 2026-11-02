@@ -59,12 +59,6 @@ let glyph proof =
 
 let legend = List.map entry kinds
 
-let legend_for proofs =
-  let present = List.filter_map kind_of_proof proofs in
-  List.filter_map
-    (fun kind -> if List.mem kind present then Some (entry kind) else None)
-    kinds
-
 let legend_rows ?(ko = false) ~max_cells ~max_rows proofs =
   let label = if ko then "  판정  " else "  JUDGE  " in
   let label_cells = Masc_tui_message_layout.display_width label in

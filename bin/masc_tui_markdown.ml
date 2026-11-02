@@ -1667,10 +1667,6 @@ let render_with_blocks ~palette ~width ~diagram_rows text =
   {layout_rows=rendered.rows;layout_diagrams=List.rev !slots;
    source_blocks=extents [] (List.rev !blocks)}
 
-let render_with_diagrams ~palette ~width ~diagram_rows text =
-  let rendered = render_with_blocks ~palette ~width ~diagram_rows text in
-  rendered.layout_rows, rendered.layout_diagrams
-
 let render_document_with_spans ~palette ~width text =
   let runs=ref [] and unmapped=ref [] in
   let rendered=render_streaming_internal

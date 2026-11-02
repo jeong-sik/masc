@@ -96,12 +96,6 @@ val render_with_blocks :
 (** Canonical block identities and extents from the same walk as the rows.
     [source_offset] indexes this immutable reading input, before rendering;
     equal block contents at different offsets remain different occurrences. *)
-val render_with_diagrams :
-  palette:palette -> width:int -> diagram_rows:(string -> int option) ->
-  string -> string list * diagram_slot list
-(** Reserve blank rows for prepared closed Mermaid blocks in the canonical
-    block walk. Unprepared and incomplete fences retain ordinary text drawing.
-    Slot offsets belong to these returned rows only; no processes or I/O. *)
 
 val non_colliding_fence_marker : string list -> string option
 (** Choose a Markdown fence marker that none of [lines] can close under this

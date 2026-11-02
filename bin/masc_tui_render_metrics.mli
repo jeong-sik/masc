@@ -19,7 +19,6 @@ type metrics_kpis = {
 }
 
 val calculate_kpis : state -> metrics_kpis
-val overview_pulse_line : cols:int -> state -> string
 val section_pills_line : cols:int -> active:metrics_section -> string
 
 val render_section_fleet : ?session_rows:int -> cols:int -> state -> string list

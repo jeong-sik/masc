@@ -3,11 +3,7 @@
 module Layout = Masc_tui_message_layout
 
 let bar_full = "\xe2\x96\x88" (* U+2588 FULL BLOCK *)
-let bar_dark = "\xe2\x96\x93" (* U+2593 DARK SHADE *)
-let bar_medium = "\xe2\x96\x92" (* U+2592 MEDIUM SHADE *)
 let bar_light = "\xe2\x96\x91" (* U+2591 LIGHT SHADE *)
-let dot_empty = "\xc2\xb7" (* U+00B7 MIDDLE DOT *)
-
 let glyph_block_1 = "\xe2\x96\x81" (* U+2581 *)
 let glyph_block_2 = "\xe2\x96\x82" (* U+2582 *)
 let glyph_block_3 = "\xe2\x96\x83" (* U+2583 *)
@@ -148,54 +144,6 @@ let gauge ~width ~value ~max_value ?label () =
         Layout.fit_width (Printf.sprintf "%s%d%%" prefix pct) width
 ;;
 
-let heatmap_glyphs = [| " "; bar_light; bar_medium; bar_dark; bar_full |]
-
-(** [heatmap_row ?max_val ?empty_glyph buckets] maps bucket counts to 5 intensity levels:
-    empty dot, [░], [▒], [▓], [█]. When [max_val] is provided, uses it as the shared scale ceiling. *)
-let heatmap_row ?max_val ?(empty_glyph = dot_empty) buckets =
-  if buckets = [] then ""
-  else
-    let effective_max =
-      match max_val with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.max 0 buckets
-    in
-    let buf = Buffer.create (List.length buckets * 16) in
-    List.iter
-      (fun count ->
-        if count <= 0 then
-          Buffer.add_string buf (Masc_tui_theme.tone Dim ^ empty_glyph ^ Masc_tui_theme.Sgr.reset)
-        else if effective_max <= 0 then
-          Buffer.add_string buf empty_glyph
-        else
-          let level = 1 + (((count - 1) * 3) / Stdlib.max 1 (effective_max - 1)) in
-          let glyph = heatmap_glyphs.(Stdlib.min 4 (Stdlib.max 1 level)) in
-          let style =
-            if level >= 4 then Masc_tui_theme.status Bad
-            else if level >= 3 then Masc_tui_theme.status Warn
-            else if level >= 2 then Masc_tui_theme.tone Accent
-            else Masc_tui_theme.tone Dim
-          in
-          Buffer.add_string buf (style ^ glyph ^ Masc_tui_theme.Sgr.reset))
-      buckets;
-    Buffer.contents buf
-;;
-
-let heatmap_24h ?label hours =
-  let arr = Array.make 24 0 in
-  List.iteri (fun i h -> if i < 24 then arr.(i) <- Stdlib.max 0 h) hours;
-  let global_peak = Array.fold_left Stdlib.max 0 arr in
-  let first_12 = Array.to_list (Array.sub arr 0 12) in
-  let last_12 = Array.to_list (Array.sub arr 12 12) in
-  let header =
-    match label with
-    | Some l -> [ Printf.sprintf "  %s%s%s (Peak: %d/h)" Masc_tui_theme.Sgr.bold l Masc_tui_theme.Sgr.reset global_peak ]
-    | None -> []
-  in
-  let row1 = "  00:00 " ^ heatmap_row ~max_val:global_peak first_12 ^ " 12:00" in
-  let row2 = "  12:00 " ^ heatmap_row ~max_val:global_peak last_12 ^ " 24:00" in
-  header @ [ row1; row2 ]
-;;
 
 type bar_item = {
   name : string;
@@ -275,85 +223,4 @@ let braille_cell ~mask =
   Bytes.set s 1 b2;
   Bytes.set s 2 b3;
   Bytes.to_string s
-;;
-
-let dot_mask ~dx ~dy =
-  match dx, dy with
-  | 0, 0 -> 0x01
-  | 0, 1 -> 0x02
-  | 0, 2 -> 0x04
-  | 0, 3 -> 0x40
-  | 1, 0 -> 0x08
-  | 1, 1 -> 0x10
-  | 1, 2 -> 0x20
-  | 1, 3 -> 0x80
-  | _ -> 0
-;;
-
-let sanitize_float f =
-  if Float.is_nan f || Float.is_infinite f then 0.0 else f
-;;
-
-let braille_plot ~width ~height ?min_val ?max_val points =
-  if width <= 0 || height <= 0 || points = [] then []
-  else
-    let safe_points = List.map sanitize_float points in
-    let v_min =
-      match min_val with
-      | Some m -> sanitize_float m
-      | None -> List.fold_left Float.min (List.hd safe_points) safe_points
-    in
-    let v_max =
-      match max_val with
-      | Some m -> sanitize_float m
-      | None -> List.fold_left Float.max (List.hd safe_points) safe_points
-    in
-    let range = if v_max -. v_min <= 0.0 then 1.0 else v_max -. v_min in
-    let grid = Array.make_matrix height width 0 in
-    let pixel_width = width * 2 in
-    let pixel_height = height * 4 in
-    let pts_arr = Array.of_list safe_points in
-    let pts_len = Array.length pts_arr in
-    let prev_y = ref None in
-    for x = 0 to pixel_width - 1 do
-      let v =
-        if pts_len = 1 then pts_arr.(0)
-        else
-          let t = float_of_int x *. float_of_int (pts_len - 1) /. float_of_int (pixel_width - 1) in
-          let i0 = int_of_float t in
-          let i1 = Stdlib.min (pts_len - 1) (i0 + 1) in
-          let frac = t -. float_of_int i0 in
-          let v0 = pts_arr.(i0) in
-          let v1 = pts_arr.(i1) in
-          v0 +. frac *. (v1 -. v0)
-      in
-      let norm = (v -. v_min) /. range in
-      let norm_clamped = Float.max 0.0 (Float.min 1.0 norm) in
-      let y_pixel =
-        int_of_float ((1.0 -. norm_clamped) *. float_of_int (pixel_height - 1))
-      in
-      let y_start, y_end =
-        match !prev_y with
-        | None -> y_pixel, y_pixel
-        | Some py -> Stdlib.min py y_pixel, Stdlib.max py y_pixel
-      in
-      prev_y := Some y_pixel;
-      for y = y_start to y_end do
-        let cx = x / 2 in
-        let dx = x mod 2 in
-        let cy = y / 4 in
-        let dy = y mod 4 in
-        if cy >= 0 && cy < height && cx >= 0 && cx < width then
-          grid.(cy).(cx) <- grid.(cy).(cx) lor (dot_mask ~dx ~dy)
-      done
-    done;
-    let rows = ref [] in
-    for r = 0 to height - 1 do
-      let row_buf = Buffer.create (width * 3) in
-      for c = 0 to width - 1 do
-        Buffer.add_string row_buf (braille_cell ~mask:grid.(r).(c))
-      done;
-      rows := (Buffer.contents row_buf) :: !rows
-    done;
-    List.rev !rows
 ;;

@@ -36,7 +36,6 @@ type skill_editor_write_error =
   | Skill_write_refused of string
   | Skill_write_unconfirmed of string
 
-val runtime_config_save_error_message : runtime_config_save_error -> string
 val runtime_config_text_revision : string -> string
 val runtime_config_conflict_document : string -> (Masc_tui_runtime_config_edit.document, string) result
 val skill_editor_body : Skill_reference.t -> string option -> string

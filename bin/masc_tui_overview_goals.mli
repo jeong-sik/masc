@@ -27,10 +27,6 @@ val progress :
   goals:Tui_decode.overview_goal list -> tasks:Tui_decode.task list -> progress
 (** [goals] is what the section draws ({!drawn_goals}). *)
 
-val wanted_rows : Masc_tui_types.overview_goals_reading -> int
-(** One headline plus one row per active Goal. Empty, unread and failed
-    readings need one row. *)
-
 val lines :
   now:float ->
   inner_width:int ->

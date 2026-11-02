@@ -3,12 +3,6 @@ type runtime_config_save_error =
   | Runtime_config_save_refused of string
   | Runtime_config_save_unconfirmed of string
 
-let runtime_config_save_error_message = function
-  | Runtime_config_conflict _ -> "The file changed after this draft was opened. Compare the current file before saving."
-  | Runtime_config_save_refused detail -> detail
-  | Runtime_config_save_unconfirmed detail ->
-    detail ^ " The file may already have changed; read the current file before retrying."
-
 let runtime_config_text_revision source_text =
   Runtime.config_source_revision_of_text source_text
   |> Runtime.config_source_revision_to_string

@@ -19,7 +19,6 @@ let same_resource a b =
    verified operation receipt can retire a witnessed tuple. *)
 let witness entry entries = if List.mem entry entries then entries else entry :: entries
 let resolve entry entries = List.filter ((<>) entry) entries
-let for_resource entry entries = List.filter (same_resource entry) entries
 
 let valid entry =
   let request = entry.request in

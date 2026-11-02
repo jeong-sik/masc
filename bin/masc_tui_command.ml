@@ -724,11 +724,6 @@ let hint_spans = function
 let hint_span_text = function
   | Typed text | Untyped text | Detail text | Wrong text -> text
 
-let hint_line hint =
-  match hint_spans hint with
-  | [] -> None
-  | spans -> Some (String.concat "" (List.map hint_span_text spans))
-
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —
    no prefix matching on command words — but a keeper NAME is an argument,
    and an operator mid-thought types the least of it that still names one

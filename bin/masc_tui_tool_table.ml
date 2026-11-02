@@ -9,8 +9,6 @@ let catalog_direct_width = 8
    columns the readings below do not start in, which is what it did. *)
 let catalog_row_indent = "      "
 let effective_row_indent = "   "
-let skill_usage_name_indent = "   "
-let skill_usage_keeper_indent = "     "
 
 (* A keeper that ran a skill, in columns: who, then the three counts that
    say what came of it, then when it last ran. The counts are narrow and

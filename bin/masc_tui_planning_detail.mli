@@ -98,11 +98,6 @@ val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
     presented reader frame containing the block's final evidence row; this
     does not establish that each earlier row was read. *)
 
-val timestamp_line : label:string -> string -> string
-(** One timeline row of the detail pane. The field is one wider than the
-    longest label ("reviewed:"), so a value never starts immediately after
-    its colon. *)
-
 val body :
   width:int -> Tui_decode.goal_proof -> string option -> line list
 (** The verdict, its reason, and the keeper's own note, wrapped to [width].

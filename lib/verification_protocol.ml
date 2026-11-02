@@ -582,10 +582,9 @@ let stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime
       goal_id request_id gate detail
   | Goal_review { goal_id; request_id; disposition = No_retry_armed } ->
     Printf.sprintf
-      "Stalled goal %s (request:%s) — no retry armed. gate=%s: %s. The Goal \
-       stays verifying. Forward path: a Keeper calls request_complete on \
-       this Goal, which starts the next review; while the cause above holds, \
-       that review stops the same way."
+      "Stalled goal %s (request:%s) — this observation armed no retry. \
+       gate=%s: %s. Whether a later request_complete starts a new review \
+       depends on the current Goal and retained review state."
       goal_id
       request_id
       gate

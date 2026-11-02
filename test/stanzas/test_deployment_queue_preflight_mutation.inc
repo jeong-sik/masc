@@ -32,6 +32,7 @@
   masc.skill_config
   fs_compat
   cmdliner
+  mtime.clock.os
   unix
   yojson))
 

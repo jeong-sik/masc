@@ -1549,6 +1549,10 @@
  (alias runtest-test_claude_probe_effort_authority)
  (action (run %{exe:test_runtime_verification.exe} test "Claude native effort authority")))
 
+(rule
+ (alias runtest-test_capability_probe_selected_timeout)
+ (action (run %{exe:test_runtime_verification.exe} test "selected probe idle")))
+
 ; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
 
 (test

@@ -1,0 +1,19 @@
+2026-11-01T11:30:42.4486633Z 116dd79de7b42b136d2dfa45180344b7a0869452
+2026-11-01T11:30:45.4188212Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T11:30:45.4217475Z 116dd79de7b42b136d2dfa45180344b7a0869452
+2026-11-01T11:31:55.0381351Z   TARGET_SUITES: test_capability_probe_selected_timeout
+2026-11-01T11:31:55.0516601Z   TARGET_SUITES: test_capability_probe_selected_timeout
+2026-11-01T11:31:55.0632142Z [targeted] EIO_BACKEND=<unset> timeout=900s per suite
+2026-11-01T11:31:55.0660600Z [targeted] @runtest-test_capability_probe_selected_timeout: start 2026-11-01T11:31:55Z (dune alias)
+2026-11-01T11:42:00.7692782Z   [FAIL]        selected probe idle                     0   claude-code selec...
+2026-11-01T11:42:02.9251221Z   [FAIL]        selected probe idle                     1   claude-code selec...
+2026-11-01T11:42:05.3818098Z   [OK]          selected probe idle                     2   claude-code selec...
+2026-11-01T11:42:07.5110968Z   [FAIL]        selected probe idle                     3   codex-app-server ...
+2026-11-01T11:42:09.6408618Z   [FAIL]        selected probe idle                     4   codex-app-server ...
+2026-11-01T11:42:12.0694540Z   [OK]          selected probe idle                     5   codex-app-server ...
+2026-11-01T11:42:12.0750267Z FAIL provider rejected: Claude Code stream was idle for 0.100s
+2026-11-01T11:42:12.0769003Z FAIL provider rejected: Claude Code stream was idle for 0.100s
+2026-11-01T11:42:12.0787824Z FAIL provider rejected: Codex app-server stream was idle for 0.100s after turn/start was accepted
+2026-11-01T11:42:12.0806608Z FAIL provider rejected: Codex app-server stream was idle for 0.100s after turn/start was accepted
+2026-11-01T11:42:12.0823058Z 4 failures! in 13.456s. 6 tests run.
+2026-11-01T11:42:12.2939663Z [targeted] @runtest-test_capability_probe_selected_timeout: FAIL exit 1 in 617s

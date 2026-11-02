@@ -769,6 +769,7 @@ let official_effort_fixture = {|#!/usr/bin/env python3
 import json
 from pathlib import Path
 import sys
+import time
 
 args = sys.argv[1:]
 if "auth" in args and "status" in args:
@@ -780,6 +781,14 @@ def read():
 
 def emit(frame):
     print(json.dumps(frame), flush=True)
+
+def record_input():
+    Path(sys.argv[0] + ".received").write_text("received")
+
+def pause_after_input():
+    delay = Path(sys.argv[0] + ".delay")
+    if delay.is_file():
+        time.sleep(float(delay.read_text()))
 
 capture = Path(sys.argv[0]).with_suffix(".json")
 if "app-server" in args:
@@ -810,7 +819,9 @@ if "app-server" in args:
     request = read()
     assert request["method"] == "turn/start"
     capture.write_text(json.dumps({"effort": request["params"].get("effort"), "model": model}))
+    record_input()
     emit({"id": request["id"], "result": {"turn": {"id": "effort-turn"}}})
+    pause_after_input()
     emit({"id": "effort-tool", "method": "item/tool/call", "params": {"threadId": "effort-thread",
         "turnId": "effort-turn", "callId": "effort-call", "tool": tool, "arguments": {}}})
     response = read()
@@ -831,7 +842,9 @@ else:
     emit({"type": "control_response", "response": {"subtype": "success",
         "request_id": request["request_id"], "response": {}}})
     assert read()["type"] == "user"
+    record_input()
     emit({"type": "system", "subtype": "init", "session_id": session})
+    pause_after_input()
     def mcp(method, params, rpc_id):
         message = {"jsonrpc": "2.0", "method": method, "params": params}
         if rpc_id is not None:
@@ -974,6 +987,74 @@ let test_official_probes_preserve_selected_effort () =
         ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
         ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"
         ] ()
+;;
+
+let test_capability_probe_retains_selected_idle ~protocol ~model ~selected_timeout ~remove_runtime () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  let directory = Filename.temp_dir "selected-probe-idle-" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore snapshot;
+    Eio_context.restore_state eio_state;
+    Fs_compat.remove_tree directory) @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some directory) @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
+  let account_home = Filename.concat directory "account" in
+  Fs_compat.mkdir_p account_home;
+  Out_channel.with_open_bin (Filename.concat account_home "config.toml")
+    (fun out -> output_string out "");
+  let script = Filename.concat directory "official-fixture" in
+  Out_channel.with_open_bin script (fun out -> output_string out official_effort_fixture);
+  Unix.chmod script 0o700;
+  Out_channel.with_open_bin (script ^ ".delay") (fun out -> output_string out "0.4");
+  let runtime_path = Filename.concat directory "runtime.toml" in
+  let load ~model_key ~timeout =
+    let idle = match timeout with
+      | None -> "" | Some seconds -> Printf.sprintf "turn-timeout-s = %.17g" seconds in
+    Out_channel.with_open_bin runtime_path (fun out -> Printf.fprintf out {|
+[providers.fixture]
+protocol = %S
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.%s]
+api-name = %S
+max-context = 272000
+tools-support = true
+%s
+[fixture.%s]
+[runtime]
+default = "fixture.%s"
+|} protocol script account_home model_key model idle model_key model_key);
+    Runtime.init_default ~config_path:runtime_path |> Result.get_ok in
+  load ~model_key:"selected" ~timeout:selected_timeout;
+  let reloaded = ref false in
+  let now () =
+    if not !reloaded then (
+      reloaded := true;
+      load ~model_key:(if remove_runtime then "other" else "selected") ~timeout:(Some 0.1);
+      check bool "live runtime removal matches the scenario" remove_runtime
+        (Option.is_none (Runtime.get_runtime_by_id "fixture.selected"));
+      if not remove_runtime then
+        check (option (float 0.000001)) "the live idle declaration actually changed"
+          (Some 0.1) (Runtime.turn_timeout_s_of_runtime_id "fixture.selected"));
+    Eio.Time.now env#clock in
+  let result = Masc.Keeper_capability_probe.probe_official_client_invocation
+      ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory ~now
+      ~runtime_id:"fixture.selected" ~tool:"masc_board_list"
+      ~prompt:"Call masc_board_list once." () in
+  check bool "catalog replacement ran inside the public probe" true !reloaded;
+  check bool "the native client actually received its model input" true
+    (Sys.file_exists (script ^ ".received"));
+  match result with
+  | Ok (Masc.Keeper_capability_probe.Tool_invoked {tool; _}) ->
+    check string "the actual inert host callback was invoked" "masc_board_list" tool
+  | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
+  | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error)
 ;;
 
 (* The child speaks the stream-json handshake, lists the host's tools as the
@@ -1736,7 +1817,17 @@ let test_vertex_live_catalog_pagination () =
 let () =
   run
     "runtime verification"
-    [ ( "Claude native effort authority",
+    [ ( "selected probe idle",
+        List.concat_map (fun (protocol, model) ->
+          List.map (fun (label, selected_timeout, remove_runtime) ->
+            test_case (protocol ^ " " ^ label) `Quick
+              (test_capability_probe_retains_selected_idle
+                 ~protocol ~model ~selected_timeout ~remove_runtime))
+            ["selected unbounded survives live positive idle", Some 0., false;
+             "selected absence ignores newly declared live idle", None, false;
+             "selected unbounded survives runtime removal", Some 0., true])
+          ["claude-code", "claude-sonnet-5-5"; "codex-app-server", "gpt-6.1-sol"])
+    ; ( "Claude native effort authority",
         List.map (fun (name, stage, requested, expected) ->
           test_case name `Quick
             (official_probes_preserve_selected_effort

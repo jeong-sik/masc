@@ -58,9 +58,31 @@ type t =
   ; gaps : gap list
   }
 
+type 'a scan =
+  { value : 'a
+  ; scope : scope
+  ; sessions_inspected : int
+  ; ledgers_loaded : int
+  ; gaps : gap list
+  }
+
+val scan :
+  Workspace.config -> init:'a ->
+  observe:('a -> trace_id:Keeper_id.Trace_id.t -> Keeper_skill_activation_ledger.t -> 'a) ->
+  'a scan
+(** Fold validated retained ledgers without retaining the whole inventory.
+    [observe] must be pure. The same root, inventory and ledger-revision
+    revalidation used by [discover] determines coverage. If ownership changes,
+    the returned value is [init]; an incomplete scan cannot prove absence. *)
+
 val discover : Workspace.config -> Skill_reference.t -> t
 
 module For_testing : sig
+  val scan :
+    after_first_pass:(unit -> unit) -> init:'a ->
+    observe:('a -> trace_id:Keeper_id.Trace_id.t -> Keeper_skill_activation_ledger.t -> 'a) ->
+    Workspace.config -> 'a scan
+
   val discover :
     after_first_pass:(unit -> unit) ->
     Workspace.config ->

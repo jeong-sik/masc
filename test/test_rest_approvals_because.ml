@@ -75,7 +75,7 @@ let test_rest_listing_serializes_because () =
             Eio.Fiber.both
               (fun () ->
                  ignore
-                   (Masc.Keeper_tool_approval_registry.await registry ~clock
+                   (Masc.Keeper_tool_approval_registry.await registry ~clock ~on_registered:Fun.id
                       ~approval_id:(Random_id.uuid_v7 ())
                       ~tool_name:"Execute" ~args:"{}"
                       ~question:"Run Execute on git status?"

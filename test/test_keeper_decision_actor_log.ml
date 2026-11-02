@@ -400,7 +400,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
   Eio.Fiber.both
     (fun () ->
        match
-         Keeper_tool_approval_registry.await registry ~clock
+         Keeper_tool_approval_registry.await registry ~clock ~on_registered:Fun.id
            ~approval_id:(Random_id.uuid_v7 ())
            ~tool_name:"Execute" ~args:"{}"
            ~question:"Run Execute?" ~because:"test held wait"
@@ -481,6 +481,75 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
   check int "subsequent dispatch succeeds with 200" 200 (status_of_response res_late_reused);
   let reused_json = Yojson.Safe.from_string (body_of_response res_late_reused) in
   check bool "reused answer is not remembered" false (U.member "remembered" reused_json |> U.to_bool)
+
+let test_published_tool_approval_is_already_registered
+    ~sw ~clock ~base_path ~state ~token ~keeper =
+  let module Registry = Keeper_tool_approval_registry in
+  let registry = Registry.shared () in
+  let requests = ref [] in
+  let events = ref [] in
+  let pending_at_publication = ref [] in
+  let responses = ref [] in
+  let config = Mcp_server.workspace_config state in
+  let gate =
+    Keeper_tool_approval_gate.create ~registry
+      ~late_approvals:(Keeper_late_approval.create ())
+      ~publish:(fun event ->
+        events := event :: !events;
+        match event with
+        | Keeper_chat_events.Tool_approval_requested _ ->
+            let request = Keeper_chat_event_log.keeper_chat_event_to_json event in
+            requests := request :: !requests;
+            pending_at_publication := Registry.pending registry;
+            let body = Yojson.Safe.to_string (`Assoc
+              [ "name", `String keeper;
+                "tool_call_id", U.member "tool_call_id" request;
+                "approval_id", U.member "approval_id" request;
+                "decision", `String "approve";
+                "expected_workspace", `Assoc
+                  [ "base_path", `String (Unix.realpath base_path);
+                    "masc_root", `String (Unix.realpath (Workspace.masc_dir config)) ] ]) in
+            responses := dispatch_post ~sw ~clock ~state ~token
+              ~path:"/api/v1/keepers/tool-approval" ~body :: !responses
+        | _ -> ())
+      ~redact_text:Fun.id ~clock ~base_path ~keeper_name:keeper ~timeout_sec:0.05
+  in
+  let invocation = Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id:"publication-call" ~turn:1
+    ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1;
+                execution_mode = Agent_core.Tool_contract.Serial }
+    ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let answer = gate.tool_approval
+    { Agent_core.Hooks.invocation; tool_name = "Edit";
+      input = `Assoc [ "file_path", `String "publication.ml" ];
+      prompt = { question = "Edit this file?"; because = "registration fixture" } } in
+  check int "one question was actually published" 1 (List.length !requests);
+  check int "the published question received one authenticated response" 1 (List.length !responses);
+  let request = List.hd !requests in
+  let approval_id = U.member "approval_id" request |> U.to_string in
+  let tool_call_id = U.member "tool_call_id" request |> U.to_string in
+  let response = List.hd !responses in
+  let json = Yojson.Safe.from_string (body_of_response response) in
+  Printf.eprintf "publication witness: pending=%d response=%s approved=%b\n%!"
+    (List.length !pending_at_publication) (Yojson.Safe.to_string json)
+    (answer = Agent_core.Hooks.Approved);
+  check int "the real authenticated route responds" 200 (status_of_response response);
+  check bool "the published exact approval accepts an immediate authenticated POST" true
+    (U.member "settled" json |> U.to_bool);
+  check bool "the immediate answer is live, not remembered" false
+    (U.member "remembered" json |> U.to_bool);
+  check bool "the exact waiter exists when its question becomes visible" true
+    (List.exists (fun (row : Registry.pending) ->
+       row.keeper_name = keeper && row.tool_call_id = tool_call_id
+       && row.approval_id = approval_id) !pending_at_publication);
+  check bool "the gate receives that approval" true (answer = Agent_core.Hooks.Approved);
+  let encoded = List.rev !events |> List.map Keeper_chat_event_log.keeper_chat_event_to_json in
+  check (list string) "the request is followed by its settlement"
+    ["tool_approval_requested"; "tool_approval_settled"]
+    (List.map (fun event -> U.member "type" event |> U.to_string) encoded);
+  check (list string) "both events retain the actual question identity"
+    [approval_id; approval_id]
+    (List.map (fun event -> U.member "approval_id" event |> U.to_string) encoded)
 
 let test_tool_approval_cannot_answer_a_replacement
     ~sw ~clock ~base_path ~state ~token ~keeper =
@@ -585,5 +654,8 @@ let () =
         ; test_case "a cancelled turn's response carries the actor" `Quick
             (fun () ->
                with_actor_test_setup test_cancelled_turn_response_carries_the_actor)
+        ; test_case "a published tool approval is already registered" `Quick
+            (fun () ->
+               with_actor_test_setup test_published_tool_approval_is_already_registered)
         ] )
     ]

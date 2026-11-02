@@ -901,6 +901,60 @@ let test_consume_only_v2_row_needs_no_approval_id () =
     check int "the acknowledgement closes the exact uncertainty" 0
       (Late.journal_uncertain restarted))
 
+let test_failed_remembered_publication_leaves_the_decision_spent () =
+  List.iter (fun decision ->
+    with_journal (fun ~clock ~journal ~make ~remove:_ ~base_path:_ ->
+      let exception Publication_failed in
+      let first = make () in
+      let args = edit_input "lib/publication.ml" in
+      let approval_id = Random_id.uuid_v7 () in
+      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"original" ~approval_id ~tool_name:"Edit" ~args ();
+      check remember_outcome "the original answer is remembered"
+        (Late.Remembered {tool_name = "Edit"})
+        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+          ~tool_call_id:"original" ~approval_id ~actor:"operator" decision ());
+      let registry = Registry.create () in
+      let published = ref [] in
+      let held_during_publication = ref [] in
+      let gate = Gate.create ~registry ~late_approvals:first ~redact_text:Fun.id
+        ~publish:(fun event ->
+          published := event :: !published;
+          held_during_publication := Registry.pending registry;
+          raise Publication_failed)
+        ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec:0.05 in
+      let failed =
+        try
+          ignore (gate.Gate.tool_approval
+            (request ~tool_call_id:"remembered-retry" ~tool_name:"Edit" ~input:args));
+          false
+        with Publication_failed -> true in
+      check bool "the publication failure is observable" true failed;
+      check int "a remembered decision publishes without any live waiter" 0
+        (List.length !held_during_publication);
+      check int "the first publication was attempted once" 1 (List.length !published);
+      let restored = make () in
+      check bool "the consumed decision restores cleanly" true (Late.journal_error restored = None);
+      check int "a committed Deliver intent leaves no consume-only uncertainty" 0
+        (Late.journal_uncertain restored);
+      let ops = In_channel.with_open_bin journal In_channel.input_all
+        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")
+        |> List.map (fun line -> Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "op" |> to_string)) in
+      check (list string) "publication failure neither reinserts nor acknowledges the decision"
+        ["note_timed_out"; "remember_late"; "consume"; "deliver"] ops;
+      let events = Events.create () in
+      let retry_gate = Gate.create ~registry ~late_approvals:restored ~redact_text:Fun.id
+        ~publish:(Events.publish events) ~clock ~base_path:workspace ~keeper_name:keeper
+        ~timeout_sec:0.05 in
+      let retry = retry_gate.Gate.tool_approval
+        (request ~tool_call_id:"after-publication-failure" ~tool_name:"Edit" ~input:args) in
+      check approval "a restart cannot reoffer the spent approval or denial"
+        Agent_core.Hooks.Timed_out retry;
+      check (list string) "the retry asks again rather than claiming remembered settlement"
+        ["requested(after-publication-failure,Run it?,policy: needs an operator's eye)";
+         "settled(after-publication-failure,timed_out)"] (event_labels events)))
+    [Registry.Approve; Registry.Deny]
+
 let () =
   run "keeper_late_approval"
     [ ( "remembering a late answer"
@@ -964,5 +1018,7 @@ let () =
             `Quick test_a_consumed_answer_is_never_reoffered_after_a_restart
         ; test_case "a consume without deliver reads as uncertain" `Quick
             test_a_consume_without_deliver_reads_as_uncertain
+        ; test_case "a failed remembered publication leaves the decision spent" `Quick
+            test_failed_remembered_publication_leaves_the_decision_spent
         ] )
     ]

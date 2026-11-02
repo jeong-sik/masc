@@ -56,15 +56,16 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
        redacted first: every other text on this bus was redacted by the
        stream bridge before publish, and the journal keeps what the bus
        carries, so a raw secret here would be a raw secret at rest. *)
-    publish
-      (Keeper_chat_events.Tool_approval_requested
+    let requested =
+      Keeper_chat_events.Tool_approval_requested
          { tool_call_id
          ; approval_id
          ; tool_call_name = request.tool_name
          ; args = redact_text (Yojson.Safe.to_string request.input)
          ; question = redact_text request.prompt.question
          ; because = redact_text request.prompt.because
-         });
+         }
+    in
     let decision, label =
       (* A remembered late answer settles this call before anyone is asked:
          it is the answer to this exact call (same keeper, tool, and
@@ -78,6 +79,10 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
           ~keeper_name ~tool_name:request.tool_name ~args:request.input ()
       with
       | Some remembered ->
+          (* [take] has already spent the decision. Publishing can fail, but
+             that never restores it or acknowledges an uncertain consume.
+             A journaled Deliver records intent, not tool-effect completion. *)
+          publish requested;
           ( (match remembered with
              | Registry.Approve -> Agent_core.Hooks.Approved
              | Registry.Deny -> Agent_core.Hooks.Denied)
@@ -87,7 +92,9 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
             "remembered_" ^ Registry.decision_to_string remembered )
       | None -> (
           let outcome =
-            Registry.await registry ~clock ~keeper_name ~tool_call_id ~approval_id
+            Registry.await registry ~clock
+              ~on_registered:(fun () -> publish requested)
+              ~keeper_name ~tool_call_id ~approval_id
               ~tool_name:request.tool_name
               ~args:(Yojson.Safe.to_string request.input)
               ~question:request.prompt.question ~because:request.prompt.because

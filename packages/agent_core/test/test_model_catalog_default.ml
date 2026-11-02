@@ -563,7 +563,7 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
            (option string)
            (model_id ^ " capability base")
            (Some "ollama_cloud")
-           entry.base_label;
+           (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
          check
            (option int)
            (model_id ^ " context")
@@ -993,7 +993,7 @@ let test_openrouter_rows_preserve_probe_truth () =
          (option string)
          (model_id ^ " capability base")
          (Some "openai_chat_extended")
-         entry.base_label;
+         (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
        check (option int) (model_id ^ " context") (Some context) entry.max_context_tokens;
        check
          (option int)

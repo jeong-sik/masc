@@ -557,6 +557,17 @@ let test_pricing_and_formatting_are_nonfunctional () =
     (evidence first = evidence formatted)
 ;;
 
+let test_model_preset_alias_evidence () =
+  let with_base base = snapshot (target_catalog ~model_extra:(Printf.sprintf "base = %S" base) ()) in
+  let alias = with_base "openai" and canonical = with_base "openai_chat" in
+  check string "equivalent model presets retain request generation"
+    (generation alias) (generation canonical);
+  check string "equivalent model presets retain canonical catalog evidence"
+    (evidence alias) (evidence canonical);
+  check bool "a different model preset remains auditable" true
+    (evidence canonical <> evidence (with_base "anthropic"))
+;;
+
 let test_supported_models_order_is_canonical () =
   let first =
     snapshot
@@ -967,6 +978,10 @@ let () =
             "pricing and formatting nonfunctional"
             `Quick
             test_pricing_and_formatting_are_nonfunctional
+        ; test_case
+            "model preset aliases share evidence"
+            `Quick
+            test_model_preset_alias_evidence
         ; test_case
             "supported_models canonical order"
             `Quick

@@ -10,11 +10,14 @@ type suggested_client = Claude_code | Codex
 type model_entry =
   { model_id : Model_identifiers.Model_id.t
   ; suggested_clients : suggested_client list
-  ; base_label : string option
+  ; base_label : Capability_preset.t option
+    (** Explicit model capability preset. Absence retains the existing
+        provider-scoped or bare-row inheritance rules; unknown labels cannot
+        enter this typed view. *)
+  ; provider_name : string option
     (** Registry provider identity for OpenAI-compatible model families whose
         wire kind alone would otherwise collapse to [openai_compat]. This is
         not a capability preset; [base_label] remains the capability base. *)
-  ; provider_name : string option
   ; max_context_tokens : int option
   ; serving_constraint : Serving_constraint.t option
     (** Evidence-backed input-token admission interval for this exact catalog

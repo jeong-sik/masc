@@ -1865,21 +1865,21 @@ let test_manifest_base_absent_uses_default () =
   | None -> fail "expected Some"
 ;;
 
-let test_manifest_base_label_constructor_rejects_unknown () =
-  match Capability_manifest.base_label_of_string "not_a_preset" with
-  | Error _ -> ()
-  | Ok _ -> fail "unknown base label should not be constructible"
+let test_shared_preset_constructor_rejects_unknown () =
+  match Capability_preset.of_string "not_a_preset" with
+  | None -> ()
+  | Some _ -> fail "unknown base label should not be constructible"
 ;;
 
-let test_manifest_base_label_constructor_canonicalizes () =
-  match Capability_manifest.base_label_of_string " OpenAI_CHAT " with
-  | Ok label ->
+let test_shared_preset_constructor_canonicalizes () =
+  match Capability_preset.of_string " OpenAI_CHAT " with
+  | Some preset ->
     check
       string
       "canonical base label"
       "openai_chat"
-      (Capability_manifest.base_label_to_string label)
-  | Error msg -> failf "known base label should parse: %s" msg
+      (Capability_preset.to_string preset)
+  | None -> fail "known base label should parse"
 ;;
 
 let test_example_manifest_base_labels_are_canonical () =
@@ -1921,8 +1921,8 @@ let test_example_manifest_base_labels_are_canonical () =
            if model_id <> "gpt-5.3-codex-spark"
            then
              check bool (Printf.sprintf "expected base for %s" model_id) true false
-         | Some label ->
-           let label = Capability_manifest.base_label_to_string label in
+         | Some preset ->
+           let label = Capability_preset.to_string preset in
            check
              bool
              (Printf.sprintf "base label resolves for %s: %s" model_id label)
@@ -3412,13 +3412,13 @@ let () =
         ; test_case "base anthropic" `Quick test_manifest_base_label_anthropic
         ; test_case "base absent = default" `Quick test_manifest_base_absent_uses_default
         ; test_case
-            "base label constructor rejects unknown"
+            "shared preset constructor rejects unknown"
             `Quick
-            test_manifest_base_label_constructor_rejects_unknown
+            test_shared_preset_constructor_rejects_unknown
         ; test_case
-            "base label constructor canonicalizes"
+            "shared preset constructor canonicalizes"
             `Quick
-            test_manifest_base_label_constructor_canonicalizes
+            test_shared_preset_constructor_canonicalizes
         ; test_case
             "example base labels are canonical"
             `Quick

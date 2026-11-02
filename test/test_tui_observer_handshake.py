@@ -25,7 +25,16 @@ from typing import Callable, Literal, cast
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
 CURSORS = {"37", "38", "500", "501", "502"}
-Mode = Literal["invalid", "resumed", "ahead", "media", "workspace"]
+Mode = Literal[
+    "invalid",
+    "resumed",
+    "ahead",
+    "media",
+    "workspace",
+    "missing",
+    "conflict",
+    "missing_after_live",
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -186,13 +195,31 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
                 server.sent.append(index)
                 server.condition.notify_all()
             return
+        missing_session = (server.mode in ("missing", "conflict") and index == 0) or (
+            server.mode == "missing_after_live" and index == 1
+        )
+        if missing_session:
+            self.respond(
+                404 if server.mode in ("missing", "missing_after_live") else 409,
+                {"error": "session lost"},
+            )
+            with server.condition:
+                server.sent.append(index)
+                server.condition.notify_all()
+            return
         response_count = 3 if server.mode in ("resumed", "media") else 2
         if index >= response_count:
             self.respond(503, {"error": "fixture completed"})
             return
 
         content_type = "text/event-stream"
-        if server.mode == "media":
+        if server.mode == "missing_after_live":
+            headers = (
+                f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: fresh\r\n"
+            )
+            event_id = 37
+            name = "fixture-control"
+        elif server.mode == "media":
             replay = "fresh" if index == 0 else "resumed"
             headers = (
                 f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: {replay}\r\n"
@@ -278,7 +305,8 @@ class ObserverHandshakeTest(unittest.TestCase):
                         "--port",
                         str(server.server_port),
                         "--refresh",
-                        "4",
+                        # Reconnects must not wait for this refresh cadence.
+                        "1000",
                     ],
                     stdin=slave,
                     stdout=slave,
@@ -330,7 +358,11 @@ class ObserverHandshakeTest(unittest.TestCase):
                 initial_health = server.snapshot()[1]
 
                 expected = (
-                    [
+                    [(None, "missing"), ("37", "fixture"), ("37", "fixture")]
+                    if mode == "missing_after_live"
+                    else [(None, "missing"), (None, "missing")]
+                    if mode in ("missing", "conflict")
+                    else [
                         (None, "missing"),
                         ("37", "fixture"),
                         ("38", "fixture"),
@@ -356,7 +388,17 @@ class ObserverHandshakeTest(unittest.TestCase):
                         f"observer request {index + 1} did not arrive",
                     )
                     initializes, _, requests, _ = server.snapshot()
-                    self.assertEqual(initializes, 1, "MCP must initialize only once")
+                    expected_initializes = (
+                        2
+                        if (mode in ("missing", "conflict") and index > 0)
+                        or (mode == "missing_after_live" and index > 1)
+                        else 1
+                    )
+                    self.assertEqual(
+                        initializes,
+                        expected_initializes,
+                        "unexpected MCP initialization",
+                    )
                     self.assertEqual(
                         requests[index],
                         StreamRequest(True, cursor, instance),
@@ -406,6 +448,14 @@ class ObserverHandshakeTest(unittest.TestCase):
 
     def test_workspace_refusal_rechecks_identity_without_reinitializing(self) -> None:
         self.run_scenario(mode="workspace")
+
+    def test_missing_or_conflicting_session_is_reinitialized(self) -> None:
+        for mode in ("missing", "conflict"):
+            with self.subTest(mode=mode):
+                self.run_scenario(mode=mode)
+
+    def test_session_reinitialized_after_live_keeps_replay_cursor(self) -> None:
+        self.run_scenario(mode="missing_after_live")
 
 
 if __name__ == "__main__":

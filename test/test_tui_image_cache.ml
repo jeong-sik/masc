@@ -26,7 +26,14 @@ let decode_failure =
 ;;
 
 let png_header = "\x89PNG\r\n\x1a\n\000\000\000\rIHDR"
+let static_png =
+  "\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\b\006\
+   \000\000\000\031\021\196\137\000\000\000\nIDATx\156c\000\001\000\000\005\
+   \000\001\r\n-\180\000\000\000\000IEND\174B`\130"
 let jpeg_header = "\xff\xd8\xff\xe0\000\x10JFIF"
+let sized_jpeg =
+  "\xff\xd8\xff\xc0\000\x0b\x08\000\x02\000\x02\x01\x01\x11\000\
+   \xff\xda\000\x08\x01\x01\000\000\x3f\000\xff\xd9"
 let bmp_header = "BM\x36\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00"
 let animated_gif =
   "\x47\x49\x46\x38\x39\x61\x02\x00\x02\x00\xf0\x00\x00\xff\x00\x00\
@@ -364,39 +371,309 @@ let test_character_frame_keeps_output_reserved () =
       (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
 
 let test_remote_capability_changes () =
-  let png = "png" in
+  let png = static_png in
   let rgba = Cache.Rgba {columns=2;pixel_rows=2;bytes=String.make 16 '\000'} in
-  let frame = Cache.Remote_cells {png;cells=Ok rgba} in
+  let frame = Cache.Remote_cells {source=png;cells=Ok rgba} in
   check bool "unknown capability tries native PNG" true
     (Cache.decide_remote ~graphics:None ~colour:true (Cache.Remote_png png) = Cache.Draw_remote_png png);
   check bool "confirmed non-pixel terminal prepares cells" true
     (Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_png png) = Cache.Prepare_remote_cells png);
   check bool "prepared cells are used on a colour terminal" true
-    (Cache.decide_remote ~graphics:(Some false) ~colour:true frame = Cache.Draw_remote_cells {png;cells=rgba});
+    (Cache.decide_remote ~graphics:(Some false) ~colour:true frame = Cache.Draw_remote_cells {source=png;cells=rgba});
   check bool "late native support uses the original PNG even after cell failure" true
     (Cache.decide_remote ~graphics:(Some true) ~colour:true
-       (Cache.Remote_cells {png;cells=Error "decoder failed"}) = Cache.Draw_remote_png png);
+       (Cache.Remote_cells {source=png;cells=Error "decoder failed"}) = Cache.Draw_remote_png png);
   check bool "late support resumes a previously unfetched request" true
     (Cache.decide_remote ~graphics:(Some true) ~colour:false Cache.Remote_unfetched = Cache.Fetch_remote);
+  check bool "late native support retries after a bounded refusal" true
+    (Cache.decide_remote ~graphics:(Some true) ~colour:true
+       (Cache.Remote_bounded_failure "bounded refusal") = Cache.Fetch_remote);
+  check bool "a bounded refusal falls back on a colour-only terminal" true
+    (match Cache.decide_remote ~graphics:(Some false) ~colour:true
+       (Cache.Remote_bounded_failure "bounded refusal") with
+     | Cache.Open_remote_page _ -> true
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Prepare_native_source _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ -> false);
+  check bool "late native support keeps the original bounded JPEG" true
+    (Cache.decide_remote ~graphics:(Some true) ~colour:true
+       (Cache.Remote_cells {source=jpeg_header;cells=Error "not a static PNG"})
+     = Cache.Prepare_native_source jpeg_header);
   check bool "no pixel or colour capability falls back" true
     (match Cache.decide_remote ~graphics:(Some false) ~colour:false frame with
      | Cache.Open_remote_page _ -> true
-     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
-     | Cache.Draw_remote_cells _ -> false);
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Prepare_native_source _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ -> false);
   check bool "failed cell decoding falls back" true
     (match Cache.decide_remote ~graphics:(Some false) ~colour:true
-       (Cache.Remote_cells {png;cells=Error "decoder failed"}) with
+       (Cache.Remote_cells {source=png;cells=Error "decoder failed"}) with
      | Cache.Open_remote_page _ -> true
-     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
-     | Cache.Draw_remote_cells _ -> false);
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Prepare_native_source _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ -> false);
   check bool "busy conversion can use PNG when native support arrives" true
     (Cache.decide_remote ~graphics:(Some true) ~colour:true (Cache.Remote_busy (Some png))
      = Cache.Draw_remote_png png);
   check bool "busy colour conversion falls back to the browser" true
     (match Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_busy (Some png)) with
      | Cache.Open_remote_page _ -> true
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Prepare_native_source _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ -> false)
+
+let test_bounded_remote_image_source () =
+  with_cache (fun cache_dir run ->
+    let fetch url = Cache.download ~max_bytes:256 ~run ~cache_dir url |> unwrap |> Cache.download_bytes in
+    let url = "https://fixture.invalid/static.png" in
+    serve cache_dir static_png;
+    check string "bounded static PNG retains its bytes" static_png (fetch url);
+    let oversized = "https://fixture.invalid/cached.png" in
+    let cache_path = Cache.input_path ~cache_dir oversized in
+    let bytes = String.make 257 'x' in
+    let exact = "https://fixture.invalid/exact.png" in
+    let exact_bytes = String.make 256 'x' in
+    write_file (Cache.input_path ~cache_dir exact) exact_bytes;
+    check string "cache at the byte limit is accepted" exact_bytes
+      (Cache.download ~max_bytes:256 ~run ~cache_dir exact |> unwrap |> Cache.download_bytes);
+    write_file cache_path bytes;
+    let calls = ref 0 in
+    let forbidden _ = incr calls; Unix.WEXITED 1 in
+    check bool "large shared cache is refused" true
+      (Cache.download ~max_bytes:256 ~run:forbidden ~cache_dir oversized
+       = Error (Cache.Cached_body_too_large {max_bytes=256}));
+    check int "large cache does not cause another fetch" 0 !calls;
+    check string "large shared cache remains intact" bytes (read_file cache_path);
+    let racing = "https://fixture.invalid/empty.png" in
+    let racing_cache = Cache.input_path ~cache_dir racing in
+    write_file racing_cache "";
+    executable cache_dir "curl" (Printf.sprintf
+      "printf native > %s\nprintf bounded > \"$7\"" (Filename.quote racing_cache));
+    check string "bounded request keeps its own fetched bytes" "bounded"
+      (Cache.download ~max_bytes:256 ~run ~cache_dir racing |> unwrap |> Cache.download_bytes);
+    check string "bounded fetch leaves concurrent native cache intact" "native" (read_file racing_cache);
+    let before_iend = String.length static_png - 12 in
+    let animated = String.sub static_png 0 before_iend ^ "\000\000\000\000acTL\000\000\000\000"
+      ^ String.sub static_png before_iend 12 in
+    let exif_png = String.sub static_png 0 before_iend ^ "\000\000\000\000eXIf\000\000\000\000"
+      ^ String.sub static_png before_iend 12 in
+    let with_chunk chunk =
+      String.sub static_png 0 before_iend ^ chunk ^ String.sub static_png before_iend 12 in
+    (* Valid CRCs; the zTXt payload is the compressed form of the EXIF profile. *)
+    let text_exif_png = with_chunk
+      "\000\000\000\x60tEXtRaw profile type exif\000\nexif\n32\n\
+       45786966000049492a0008000000010012010300010000000600000000000000\n\xfb\xf2\x35\xbc" in
+    let compressed_exif_png = with_chunk
+      "\000\000\000\x4bzTXtRaw profile type exif\000\000\x78\x9c\xe3\x4a\xad\xc8\
+       \x4c\xe3\x32\x36\xe2\x32\x31\x35\xb7\x30\xb3\x34\x33\x33\x00\x02\x13\x4b\
+       \x13\x4b\xa3\x44\x20\xc3\xc2\x00\x02\x0c\x81\xc8\x08\x48\x1a\x43\xd8\
+       \x60\x60\x66\x80\x02\xb8\x00\x4a\x9a\x0e\xd1\x1e\xbb\x5e\x5c" in
+    let comment_png = with_chunk
+      "\000\000\000\x19tEXtComment\000ordinary metadata\x71\x50\x55\xc5" in
+    let nonsquare_png = String.sub static_png 0 before_iend
+      ^ "\000\000\000\009pHYs\000\000\000\001\000\000\000\002\001\000\000\000\000"
+      ^ String.sub static_png before_iend 12 in
+    let huge = Bytes.of_string static_png in
+    Bytes.fill huge 16 8 '\255';
+    let oversized_frame = Bytes.of_string animated_gif in
+    let descriptor = String.index animated_gif '\x2c' in
+    Bytes.set oversized_frame (descriptor + 5) '\003';
+    let oversized_later_frame = Bytes.of_string animated_gif in
+    let later_descriptor = String.index_from animated_gif (descriptor + 10) '\x2c' in
+    Bytes.set oversized_later_frame (later_descriptor + 7) '\003';
+    let conflicting_jpeg =
+      "\xff\xd8\xff\xc9\000\x0b\x08\000\x01\000\x01\x01\x01\x11\000\
+       \xff\xc2\000\x0b\x08\x20\000\x20\000\x01\x01\x11\000\
+       \xff\xda\000\x08\x01\x01\000\000\x3f\000\xff\xd9" in
+    let conflicting_after_scan = String.sub sized_jpeg 0 (String.length sized_jpeg - 2)
+      ^ "\xff\xc2\000\x0b\x08\x20\000\x20\000\x01\x01\x11\000\xff\xd9" in
+    let missing_jpeg_scan = String.sub sized_jpeg 0 15 ^ "\xff\xd9" in
+    let malformed_jpeg_scan = String.sub sized_jpeg 0 15 ^ "\xff\xda\000\x06\000\000\000\000\xff\xd9" in
+    let embedded_jpeg_marker =
+      "\xff\xd8\xff\xc0\000\x0b\x08\000\x01\000\x01\x01\x01\x11\000\
+       \xff\xda\000\x0e\x04\x02\xff\xc2\000\x0b\x08\x20\000\x20\000\x01\x01\x11\000\xff\xd9" in
+    let nonsquare_jpeg = String.sub sized_jpeg 0 2
+      ^ "\xff\xe0\000\x10JFIF\000\x01\x01\000\000\x01\000\x02\000\000"
+      ^ String.sub sized_jpeg 2 (String.length sized_jpeg - 2) in
+    let nonsquare_gif = Bytes.of_string animated_gif in
+    Bytes.set nonsquare_gif 12 '\001';
+    let decoder_calls = ref 0 in
+    let decoder _ = incr decoder_calls; Unix.WEXITED 0 in
+    let refused body name =
+      serve cache_dir body;
+      let source = fetch ("https://fixture.invalid/" ^ name) in
+      check bool "unsafe source is refused" true
+        (Result.is_error (Cache.prepare_presentation ~max_bytes:256 ~run:decoder ~cache_dir
+          (Cache.Character_cells {columns=2;rows=1}) source)) in
+    refused animated "animated.png";
+    refused exif_png "oriented.png";
+    refused text_exif_png "text-exif.png";
+    refused compressed_exif_png "compressed-exif.png";
+    refused nonsquare_png "nonsquare.png";
+    refused (Bytes.to_string huge) "huge.png";
+    refused jpeg_header "image.jpg";
+    refused conflicting_jpeg "conflicting-frames.jpg";
+    refused conflicting_after_scan "conflicting-after-scan.jpg";
+    refused missing_jpeg_scan "missing-scan.jpg";
+    refused malformed_jpeg_scan "malformed-scan.jpg";
+    refused embedded_jpeg_marker "embedded-marker.jpg";
+    refused nonsquare_jpeg "nonsquare.jpg";
+    refused (Bytes.to_string oversized_frame) "oversized-frame.gif";
+    refused (Bytes.to_string oversized_later_frame) "oversized-later-frame.gif";
+    refused (Bytes.to_string nonsquare_gif) "nonsquare.gif";
+    refused (String.sub animated_gif 0 (String.length animated_gif - 1)) "truncated.gif";
+    check int "unsafe sources did not start the decoder" 0 !decoder_calls;
+    check bool "oversized output grid is refused before decoder" true
+      (Result.is_error (Cache.prepare_presentation ~max_bytes:256 ~run:decoder ~cache_dir
+        (Cache.Character_cells {columns=100;rows=50}) static_png));
+    check int "unrepresentable grid did not start decoder" 0 !decoder_calls;
+    converter_succeeds cache_dir "ffmpeg" nonsquare_png;
+    check bool "JPEG normalization rejects a non-square output frame" true
+      (Result.is_error (Cache.prepare_presentation ~max_bytes:256 ~run ~cache_dir
+        (Cache.Character_cells {columns=2;rows=1}) sized_jpeg));
+    let rgba = String.make 16 '\127' in
+    (* This fixture refuses to decode unless the producer passes the limits
+       as input options, before -i. JPEG exercises both decoder invocations. *)
+    executable cache_dir "ffmpeg" (Printf.sprintf
+      "pixels=0\nthreads=0\ninput=0\n\
+       while [ \"$#\" -gt 0 ]; do\n\
+       case \"$1\" in\n\
+       -max_pixels) [ \"$2\" = 64 ] || exit 11; pixels=1; shift 2 ;;\n\
+       -threads) [ \"$2\" = 1 ] || exit 12; threads=1; shift 2 ;;\n\
+       -i) [ \"$pixels$threads\" = 11 ] || exit 13; input=1; shift 2 ;;\n\
+       *) output=\"$1\"; shift ;;\n\
+       esac\ndone\n\
+       [ \"$input\" = 1 ] || exit 14\n\
+       case \"$output\" in *.png) printf %%b %s > \"$output\" ;; *) printf %%b %s > \"$output\" ;; esac"
+      (shell_bytes static_png) (shell_bytes rgba));
+    check bool "bounded static image reaches the cell decoder" true
+      (Cache.prepare_presentation ~max_bytes:256 ~run ~cache_dir
+        (Cache.Character_cells {columns=2;rows=1}) static_png
+       = Ok (Cache.Rgba {columns=2;pixel_rows=2;bytes=rgba}));
+    check bool "ordinary PNG text metadata still reaches the cell decoder" true
+      (Cache.prepare_presentation ~max_bytes:256 ~run ~cache_dir
+        (Cache.Character_cells {columns=2;rows=1}) comment_png
+       = Ok (Cache.Rgba {columns=2;pixel_rows=2;bytes=rgba}));
+    check bool "bounded JPEG is normalized before the cell decoder" true
+      (Cache.prepare_presentation ~max_bytes:256 ~run ~cache_dir
+        (Cache.Character_cells {columns=2;rows=1}) sized_jpeg
+       = Ok (Cache.Rgba {columns=2;pixel_rows=2;bytes=rgba}));
+    check bool "bounded GIF reaches the first-frame cell decoder" true
+      (Cache.prepare_presentation ~max_bytes:256 ~run ~cache_dir
+        (Cache.Character_cells {columns=2;rows=1}) animated_gif
+       = Ok (Cache.Rgba {columns=2;pixel_rows=2;bytes=rgba}));
+    converter_succeeds cache_dir "ffmpeg" rgba;
+    let limited = Cache.prepare_presentation ~max_cells:4 ~run ~cache_dir
+      (Cache.Character_cells {columns=100;rows=50}) static_png in
+    (match limited with
+     | Ok (Cache.Rgba {columns;pixel_rows;_}) ->
+         check bool "large terminals stay within the cell work limit" true
+           (columns > 0 && pixel_rows >= 2 && columns * (pixel_rows / 2) <= 4)
+     | Ok (Png _) | Error _ -> fail "bounded colour frame was not prepared");
+    converter_succeeds cache_dir "ffmpeg" (String.make 257 'x');
+    check bool "oversized decoder output is refused" true
+      (Result.is_error (Cache.prepare_presentation ~max_bytes:256 ~run ~cache_dir
+        (Cache.Character_cells {columns=2;rows=1}) static_png));
+    check bool "oversized decoder attempt was cleaned" false
+      (Sys.readdir cache_dir |> Array.exists (fun name ->
+        String.starts_with ~prefix:"cell_frame_" name || String.starts_with ~prefix:"cell_image_" name)))
+
+let test_late_native_uses_the_captured_source () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/one-shot.jpg" in
+    serve cache_dir jpeg_header;
+    let source = Cache.download ~max_bytes:256 ~run ~cache_dir url |> unwrap |> Cache.download_bytes in
+    executable cache_dir "curl" "exit 22";
+    let stale_input = Cache.input_path ~cache_dir ("payload:" ^ source) in
+    write_file (Cache.png_path ~cache_dir stale_input) "stale conversion";
+    converter_succeeds cache_dir "sips" png_header;
+    (match Cache.decide_remote ~graphics:(Some true) ~colour:true (Cache.Remote_bounded_source source) with
+     | Cache.Prepare_native_source captured ->
+         check string "conversion uses captured source" png_header
+           (unwrap (Cache.prepare_captured_png ~run ~cache_dir captured))
      | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
-     | Cache.Draw_remote_cells _ -> false)
+     | Cache.Draw_remote_cells _ | Cache.Open_remote_page _ | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ ->
+         fail "captured source was not selected");
+    check string "late native conversion did not refetch" "x"
+      (read_file (Filename.concat cache_dir "fetches"));
+    check bool "captured input snapshot was removed" false
+      (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"download_input_")))
+
+let test_native_to_colour_keeps_the_original () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/animated.gif" in
+    serve cache_dir animated_gif;
+    converter_succeeds cache_dir "sips" png_header;
+    let body = unwrap (Cache.download ~run ~cache_dir url) in
+    let source = Cache.download_bytes body in
+    let png = unwrap (Cache.prepare_downloaded_png ~run ~cache_dir ~url body) in
+    let native = Cache.Remote_native {source;png} in
+    check bool "native capability receives the converted frame" true
+      (Cache.decide_remote ~graphics:(Some true) ~colour:true native = Cache.Draw_remote_png png);
+    check bool "colour capability receives the original animated source" true
+      (Cache.decide_remote ~graphics:(Some false) ~colour:true native = Cache.Prepare_remote_cells animated_gif);
+    check string "conversion did not fetch the source again" "x" (read_file (Filename.concat cache_dir "fetches")))
+
+let test_captured_copy_preserves_one_shot_response () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/one-shot.jpg" in
+    serve cache_dir jpeg_header;
+    let source = Cache.download ~max_bytes:256 ~run ~cache_dir url |> unwrap |> Cache.download_bytes in
+    executable cache_dir "curl" "exit 22";
+    let fallback = Cache.decide_remote ~graphics:(Some false) ~colour:true
+      (Cache.Remote_cells {source;cells=Error "not a static PNG"}) in
+    let captured = match fallback with
+      | Cache.Open_remote_page {source=Some bytes;_} -> bytes
+      | Cache.Open_remote_page {source=None;_} | Cache.Fetch_remote | Cache.Prepare_remote_cells _
+      | Cache.Prepare_native_source _ | Cache.Draw_remote_png _ | Cache.Draw_remote_cells _
+      | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ -> fail "captured source was not retained" in
+    check bool "failed automatic copy still holds the original response" true
+      (Cache.decide_remote ~graphics:(Some false) ~colour:true
+        (Cache.Remote_copy_failed {source;reason="preview limit";detail="copy limit";requested_save=false})
+       = Cache.Hold_remote_source {source;reason="preview limit";detail="copy limit";requested_save=false});
+    check bool "failed explicit save still holds the original response" true
+      (Cache.decide_remote ~graphics:(Some false) ~colour:true
+        (Cache.Remote_copy_failed {source;reason="preview limit";detail="disk full";requested_save=true})
+       = Cache.Hold_remote_source {source;reason="preview limit";detail="disk full";requested_save=true});
+    let shared = Cache.input_path ~cache_dir url in
+    write_file shared "a newer response";
+    let copy = unwrap (Cache.save_captured_copy ~directory:cache_dir captured) in
+    check bool "recognized image may be opened" true copy.openable;
+    check string "saved bytes are the first response" source (read_file copy.path);
+    check int "saved file is private" 0o600 ((Unix.stat copy.path).Unix.st_perm land 0o777);
+    check bool "saved copy is selected for a colour-only terminal" true
+      (Cache.decide_remote ~graphics:(Some false) ~colour:true
+        (Cache.Remote_copy_ready {copy;reason="not a static PNG";requested_save=false})
+       = Cache.Open_remote_copy {copy;reason="not a static PNG";requested_save=false});
+    check bool "an explicit save stays distinct from automatic opening" true
+      (Cache.decide_remote ~graphics:(Some false) ~colour:true
+        (Cache.Remote_copy_ready {copy;reason="preview limit";requested_save=true})
+       = Cache.Open_remote_copy {copy;reason="preview limit";requested_save=true});
+    check string "saving the captured response leaves a newer cache untouched"
+      "a newer response" (read_file shared);
+    check bool "copy transfers to the opener" true (Cache.retain_captured_copy copy);
+    let second = unwrap (Cache.save_captured_copy ~directory:cache_dir captured) in
+    check bool "each response has a separate handoff file" true (copy.path <> second.path);
+    Cache.discard_captured_copy second;
+    Cache.discard_captured_copy copy;
+    Cache.cleanup_discarded_copies ();
+    check bool "discard removes only the pending copy" false (Sys.file_exists second.path);
+    check bool "discard does not remove an externally handed copy" true (Sys.file_exists copy.path);
+    check string "saving did not issue a second request" "x" (read_file (Filename.concat cache_dir "fetches"));
+    let unknown = unwrap (Cache.save_captured_copy ~directory:cache_dir html_page) in
+    check bool "unrecognized bytes are not automatically opened" false unknown.openable;
+    check string "unrecognized bytes are retained" html_page (read_file unknown.path);
+    Cache.discard_captured_copy unknown;
+    Cache.cleanup_discarded_copies ();
+    check bool "discard removes an unhanded copy" false (Sys.file_exists unknown.path))
+
+let test_captured_copy_shutdown_cleanup () =
+  with_cache (fun directory _ ->
+    let executable = Unix.realpath Sys.executable_name in
+    let command = Printf.sprintf "%s --copy-cleanup-probe %s"
+      (Filename.quote executable) (Filename.quote directory) in
+    check bool "cleanup subprocess exits successfully" true (Unix.system command = Unix.WEXITED 0);
+    match String.split_on_char '\n' (read_file (Filename.concat directory "copy-paths")) with
+    | [pending;retained] ->
+        check bool "shutdown removes an unhanded copy" false (Sys.file_exists pending);
+        check bool "shutdown preserves an externally handed copy" true (Sys.file_exists retained)
+    | _ -> fail "cleanup subprocess did not record its paths")
 
 let test_mosaic_failure_retains_input_and_can_recover () =
   List.iter (fun code -> with_cache (fun cache_dir run ->
@@ -873,6 +1150,40 @@ let test_a_bounded_run_gives_the_command_no_input () =
     (Cache.run_bounded ~deadline_seconds:5. "cat >/dev/null")
 ;;
 
+let test_bounded_runner_limits_descendant_file_and_ignores_bash_env () =
+  with_cache (fun cache_dir _ ->
+    let output = Filename.concat cache_dir "bounded-output" in
+    let startup = Filename.concat cache_dir "bash-startup" in
+    let marker = Filename.concat cache_dir "startup-was-run" in
+    write_file startup (Printf.sprintf "printf x > %s\n" (Filename.quote marker));
+    let previous = Sys.getenv_opt "BASH_ENV" in
+    Unix.putenv "BASH_ENV" startup;
+    Fun.protect ~finally:(fun () -> match previous with
+      | Some value -> Unix.putenv "BASH_ENV" value
+      | None -> Unix.unsetenv "BASH_ENV") (fun () ->
+      let child = Printf.sprintf "dd if=/dev/zero of=%s bs=1024 count=8"
+        (Filename.quote output) in
+      let command = "/bin/sh -c " ^ Filename.quote child in
+      let status = Cache.run_bounded ~max_file_bytes:4096 ~deadline_seconds:5. command in
+      check bool "oversized descendant write fails" true (status <> Unix.WEXITED 0);
+      let size = (Unix.stat output).Unix.st_size in
+      check bool "descendant file remains within the limit" true (size > 0 && size <= 4096);
+      check bool "noninteractive bash startup script did not run" false (Sys.file_exists marker)))
+;;
+
+let test_bounded_runner_preserves_inherited_limits () =
+  with_cache (fun cache_dir _ ->
+    let executable = Unix.realpath Sys.executable_name in
+    List.iter (fun (name, switch) ->
+      let output = Filename.concat cache_dir (name ^ ".raw") in
+      let script = Printf.sprintf
+        "set +o posix && builtin ulimit %s -f 2 && exec %s --bounded-limit-probe %s"
+        switch (Filename.quote executable) (Filename.quote output) in
+      let command = "/bin/bash -c " ^ Filename.quote script in
+      check status_testable name (Unix.WEXITED 0) (Unix.system command))
+      ["soft", "-S"; "hard", "-H -S"])
+;;
+
 let test_a_killed_decoder_is_described_as_killed () =
   check string "text"
     "decoder was killed (SIGKILL: out of time or memory)"
@@ -880,7 +1191,21 @@ let test_a_killed_decoder_is_described_as_killed () =
 ;;
 
 let () =
-  run "tui image cache"
+  if Array.length Sys.argv = 3 && Sys.argv.(1) = "--copy-cleanup-probe" then begin
+    let directory=Sys.argv.(2) in
+    let pending=unwrap (Cache.save_captured_copy ~directory jpeg_header) in
+    let retained=unwrap (Cache.save_captured_copy ~directory png_header) in
+    if not (Cache.retain_captured_copy retained) then exit 1;
+    write_file (Filename.concat directory "copy-paths") (pending.path ^ "\n" ^ retained.path);
+    exit 0
+  end else if Array.length Sys.argv = 3 && Sys.argv.(1) = "--bounded-limit-probe" then begin
+    let output = Sys.argv.(2) in
+    let command = Printf.sprintf "dd if=/dev/zero of=%s bs=1024 count=8"
+      (Filename.quote output) in
+    let status = Cache.run_bounded ~max_file_bytes:4096 ~deadline_seconds:5. command in
+    let size = try (Unix.stat output).Unix.st_size with Unix.Unix_error _ -> -1 in
+    exit (if status <> Unix.WEXITED 0 && size > 0 && size <= 2048 then 0 else 1)
+  end else run "tui image cache"
     [ ( "workflows"
       , [ test_case "local conversion preserves original" `Quick test_local_file_preserves_original
         ; test_case "download preserves runner failure and removes attempt" `Quick
@@ -902,6 +1227,16 @@ let () =
             test_character_frame_keeps_output_reserved
         ; test_case "remote preview follows current terminal capability" `Quick
             test_remote_capability_changes
+        ; test_case "bounded remote source preserves shared cache and rejects unsafe frames" `Quick
+            test_bounded_remote_image_source
+        ; test_case "late native support converts the captured source" `Quick
+            test_late_native_uses_the_captured_source
+        ; test_case "native to colour transition keeps the original source" `Quick
+            test_native_to_colour_keeps_the_original
+        ; test_case "captured copy preserves a one-shot response" `Quick
+            test_captured_copy_preserves_one_shot_response
+        ; test_case "shutdown cleans copies not handed to an opener" `Quick
+            test_captured_copy_shutdown_cleanup
         ; test_case "a delete during the fetch does not take the download" `Quick
             test_a_delete_during_the_fetch_does_not_take_the_download
         ; test_case "a delete during the conversion does not take the frame" `Quick
@@ -969,6 +1304,10 @@ let () =
             test_a_bounded_run_kills_a_command_past_its_deadline
         ; test_case "the command gets no input" `Quick
             test_a_bounded_run_gives_the_command_no_input
+        ; test_case "bounded runner limits descendants and ignores bash startup" `Quick
+            test_bounded_runner_limits_descendant_file_and_ignores_bash_env
+        ; test_case "bounded runner preserves inherited soft and hard limits" `Quick
+            test_bounded_runner_preserves_inherited_limits
         ; test_case "a killed decoder is described as killed" `Quick
             test_a_killed_decoder_is_described_as_killed
         ] )

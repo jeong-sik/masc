@@ -9014,6 +9014,12 @@ type image_inspection = {
   ii_frame : image_inspection_frame;
 }
 
+type unsaved_remote_image = {
+  uri_bytes : string;
+  uri_image_url : string;
+  uri_reason : string;
+}
+
 (* The text image lives outside the frame presenter. Keep its rendered rows
    while it owns the screen so they can be redrawn after a terminal resize. *)
 type image_cell_frame = {
@@ -9025,6 +9031,12 @@ type image_cell_frame = {
   ic_workspace : workspace_authority;
   ic_origin : sent_image_read;
   ic_unconfirmed : bool;
+  ic_copy_path : string option;
+  ic_copy_page : string option;
+  ic_alternate_target : string option;
+  ic_last_open : (string * string) option;
+  ic_unsaved_remote : unsaved_remote_image option;
+  ic_save_cancelled : bool;
 }
 
 type image_cell_view =
@@ -18109,6 +18121,21 @@ let image_reading_is_current (state : state) (pending : sent_image_read) =
   | Board_image_read (reading, subject, _) ->
     reading == state.workspace_read_authority && server_authority_ready state
     && pending.sir_view = Board && board_preview_subject_is_current state subject
+
+(* A save request is a fresh generation of the displayed remote owner. A
+   repeated save key must not withdraw that request or enqueue another copy. *)
+let unsaved_remote_save_in_flight (state : state) =
+  match state.image_cell_view, state.sent_image_read with
+  | Some (Image_cells {ic_origin;ic_unsaved_remote=Some _;_}), Some pending
+      when state.image_open && not state.msx_open
+        && pending.sir_generation = state.image_request_generation
+        && pending.sir_view = state.view && pending.sir_view = ic_origin.sir_view
+        && pending.sir_owner == ic_origin.sir_owner ->
+      (match pending.sir_owner, pending.sir_purpose with
+       | Remote_url_image_read _, Open_image -> true
+       | (Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ | Board_image_read _),
+         (Open_image | Inspect_image _) | Remote_url_image_read _, Inspect_image _ -> false)
+  | (Some (Image_cells _ | Image_cells_withdrawn _) | None), (Some _ | None) -> false
 
 (* Diagnostics may include unread documents or unrelated advisories.  They do
    not identify which absent profile failed, so absence is inconclusive while

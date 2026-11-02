@@ -40,6 +40,20 @@ let spawn_url ?after url =
       in attempt remaining)
   with Unix.Unix_error (error,_,_) -> Error (Unix.error_message error)
 
+type open_result = Opened of string | Rejected of string | Uncertain of string
+
+(* A nonzero exit does not prove the opener had no external effect. Reap the
+   one child that was actually started without launching another one. *)
+let await_opener ~opener pid =
+  let rec wait () =
+    match Unix.waitpid [] pid with
+    | _, Unix.WEXITED 0 -> Opened opener
+    | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
+        Uncertain (opener ^ " did not report success")
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+    | exception Unix.Unix_error (error, _, _) -> Uncertain (Unix.error_message error) in
+  wait ()
+
 type undrawn_image = { title : string; page_url : string; image_url : string }
 
 let browser_url { title = _; page_url; image_url = _ } = page_url

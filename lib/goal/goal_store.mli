@@ -174,9 +174,10 @@ and reason = Goal_store_unavailable.reason =
   | Not_json of string  (** The bytes are not JSON. *)
   | Schema_rejected of { field : string; detail : string }
       (** JSON, but this build's decoder refused member [field]. [field] is
-          the JSON member name ([criterion_revision], [phase], …); ["$"]
-          names the document root when the whole document is not an
-          object. *)
+          usually the JSON member name ([criterion_revision], [phase], …).
+          ["$"] can name the document root, while ["goals"] can name a Goal
+          row. A member name that is not plain printable ASCII is reported at
+          its containing location. *)
 
 and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_absent
@@ -186,7 +187,7 @@ and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_rejected of reason
 
 and reset_step = Goal_store_unavailable.reset_step =
-  | Repair_field of string  (** Fill or fix this member and it reads again. *)
+  | Repair_field of string  (** Inspect and repair this named location. *)
   | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
   | Restore_permission  (** [Unreadable EACCES]. *)
 

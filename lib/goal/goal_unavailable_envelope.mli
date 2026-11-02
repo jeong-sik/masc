@@ -6,7 +6,8 @@
        mirror:{status, goal_count}, reset_step }] where [reason],
     [mirror.status] and [reset_step] are constructor names in lowercase snake
     case ({!Goal_store_unavailable.reason_name} and siblings), [field] is the
-    refused member for [Schema_rejected] and [null] otherwise, and
+    refused member or its containing location when the name is not plain
+    printable ASCII for [Schema_rejected], and [null] otherwise, and
     [mirror.goal_count] is the mirror's row count for [Mirror_decodes] and
     [null] otherwise. No response built from it carries a [goals] member. *)
 

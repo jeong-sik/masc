@@ -67,7 +67,7 @@ val goal_to_yojson : goal -> Yojson.Safe.t
 val state_to_yojson : state -> Yojson.Safe.t
 val state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result
 (** Decode Goals, pending events and pending notifications in order, retaining
-    the first rejected member and its detail. *)
+    the first rejected member or containing location and its detail. *)
 
 val validate_state_json : Yojson.Safe.t -> (unit, string) result
 (** Render the same schema rejection for the public setup validator. *)

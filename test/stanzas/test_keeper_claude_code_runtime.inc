@@ -11,3 +11,7 @@
 (rule
  (alias runtest-test_keeper_claude_selected_inference)
  (action (run %{exe:test_keeper_claude_code_runtime.exe} test "selected inference")))
+
+(rule
+ (alias runtest-test_keeper_claude_effort_authority)
+ (action (run %{exe:test_keeper_claude_code_runtime.exe} test "native effort authority")))

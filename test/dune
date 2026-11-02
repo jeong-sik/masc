@@ -502,7 +502,7 @@
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
-  test_keeper_codex_effort_clamp
+  test_runtime_claude_effort_admission
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
@@ -856,7 +856,7 @@
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
-  test_keeper_codex_effort_clamp
+  test_runtime_claude_effort_admission
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
@@ -1527,6 +1527,14 @@
   masc.fusion_core
   masc.masc_eio_context
   eio_main))
+
+(rule
+ (alias runtest-test_fusion_claude_effort_authority)
+ (action (run %{exe:test_fusion_official_client_panel.exe} test "Claude native effort authority")))
+
+(rule
+ (alias runtest-test_claude_probe_effort_authority)
+ (action (run %{exe:test_runtime_verification.exe} test "Claude native effort authority")))
 
 ; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
 

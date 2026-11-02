@@ -1008,23 +1008,12 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       | Ok subscription -> Ok subscription
       | Error error -> Error (claude_error_to_core_error error)
     in
-    (* Snap the operator-declared effort so a value this lane cannot send does
-       not fail the turn — the same posture as the Codex lane's catalog clamp,
-       so which lane a keeper runs on no longer decides whether a config value
-       is survivable. Two layers because they answer different owners: the
-       catalog clamp obeys the model row (no-op today for anthropic rows,
-       whose accepted set the capability layer withholds), and
-       [cli_admitted_reasoning_effort] obeys the CLI's own vocabulary
-       ([minimal] -> [low], [ultra] -> [max]). The same value feeds the raw_trace start record
-       and the command line so observation matches the wire. *)
+    (* Claude Code owns the native vocabulary. The prepared intent reaches
+       that admission directly, independent of a bare HTTP catalog row.
+       The same admitted value feeds raw trace and native argv. *)
     let effective_reasoning_effort =
-      Host.effective_reasoning_effort
-        ~runtime_label
-        ~keeper_name
-        ~runtime_id
-        ~model_id:config.model
-        ~requested:prepared.reasoning_effort
-      |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+      Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+        prepared.reasoning_effort
     in
     (match prepared.reasoning_effort, effective_reasoning_effort with
      | Some asked, Some snapped

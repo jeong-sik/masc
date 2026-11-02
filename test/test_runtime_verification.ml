@@ -824,7 +824,8 @@ if "app-server" in args:
 else:
     model = args[args.index("--model") + 1]
     effort = args[args.index("--effort") + 1] if "--effort" in args else None
-    capture.write_text(json.dumps({"effort": effort, "model": model}))
+    thinking = args[args.index("--thinking") + 1] if "--thinking" in args else None
+    capture.write_text(json.dumps({"effort": effort, "thinking": thinking, "model": model}))
     session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
     request = read()
     emit({"type": "control_response", "response": {"subtype": "success",
@@ -854,13 +855,17 @@ for line in sys.stdin:
 |}
 ;;
 
-let test_official_probes_preserve_selected_effort () =
+let official_probes_preserve_selected_effort ~colliding_model ~stages cases () =
   let snapshot = Runtime.For_testing.snapshot () in
   let eio_state = Eio_context.snapshot_state () in
+  let catalog = Llm_provider.Model_catalog.global () in
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore snapshot;
-      Eio_context.restore_state eio_state)
+      Eio_context.restore_state eio_state;
+      match catalog with
+      | None -> Llm_provider.Model_catalog.clear_global ()
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog)
     (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let directory = Filename.temp_dir "official-effort-probe-" "" |> Unix.realpath in
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
@@ -899,50 +904,76 @@ default = "fixture.selected"
         match Runtime.init_default ~config_path:runtime_path with
         | Ok () -> ()
         | Error detail -> fail detail in
-      let check_capture label expected model =
+      let check_capture label requested expected model =
         let open Yojson.Safe.Util in
         let capture = Yojson.Safe.from_file (script ^ ".json") in
         check (option string) (label ^ " child received the selected effort") expected
           (capture |> member "effort" |> to_string_option);
+        check (option string) (label ^ " explicit none disables thinking")
+          (if requested = Some "none" then Some "disabled" else None)
+          (capture |> member "thinking" |> to_string_option);
         check string (label ^ " child received the selected model") model
           (capture |> member "model" |> to_string) in
+      let install_colliding_catalog () = match colliding_model with
+       | None -> ()
+       | Some model ->
+         let source = Printf.sprintf {|[[models]]
+model_id = %S
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} model in
+         (match Llm_provider.Model_catalog.of_toml_string ~source:"Claude probe effort collision" source with
+          | Error detail -> fail detail
+          | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+         match Llm_provider.Capabilities.for_model_id model with
+         | Some caps -> check bool "the conflicting HTTP ladder is loaded" true
+             (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+         | None -> fail "colliding HTTP row missing" in
       List.iter (fun (protocol, model, effort, expected) ->
         load_config ~protocol ~model ~effort;
+        install_colliding_catalog ();
         let selected = match Runtime.get_runtime_by_id "fixture.selected" with
           | Some runtime -> runtime
           | None -> fail "selected official fixture must resolve" in
-        let probe = Masc.Keeper_capability_probe.probe_official_client_invocation
-          ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory
-          ~now:(fun () -> Eio.Time.now env#clock) ~runtime_id:selected.id
-          ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
-        (match probe with
-         | Ok (Masc.Keeper_capability_probe.Tool_invoked _) -> ()
-         | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
-         | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error));
-        check_capture (protocol ^ " capability probe") expected model;
-        (* A config refresh after selection cannot change this verification's
-           model or effort: it measures the captured runtime, like dispatch. *)
-        load_config ~protocol ~model ~effort:(Some "low");
-        (* The readiness command gives each run its own private directory;
-           Codex prepares its isolated home once inside that directory. *)
-        let private_dir =
-          Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
-        let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
-          ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
-          ~cwd_path:private_dir ~timeout_s:15. selected in
-        check (option string) (protocol ^ " actual readiness roundtrip") None
-          (Option.map (fun failure ->
-             match Verify.failure_detail failure with
-             | Some detail -> Verify.failure_code failure ^ ": " ^ detail
-             | None -> Verify.failure_code failure) result.failure);
-        check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
-        check_capture (protocol ^ " readiness") expected model)
+        List.iter (function
+          | `Capability ->
+            let probe = Masc.Keeper_capability_probe.probe_official_client_invocation
+              ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory
+              ~now:(fun () -> Eio.Time.now env#clock) ~runtime_id:selected.id
+              ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
+            (match probe with
+             | Ok (Masc.Keeper_capability_probe.Tool_invoked _) -> ()
+             | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
+             | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error));
+            check_capture (protocol ^ " capability probe") effort expected model
+          | `Readiness ->
+            (* Readiness consumes the selected runtime even after a reload. *)
+            load_config ~protocol ~model ~effort:(Some "low");
+            install_colliding_catalog ();
+            let private_dir =
+              Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
+            let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+              ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
+              ~cwd_path:private_dir ~timeout_s:15. selected in
+            check (option string) (protocol ^ " actual readiness roundtrip") None
+              (Option.map (fun failure ->
+                 match Verify.failure_detail failure with
+                 | Some detail -> Verify.failure_code failure ^ ": " ^ detail
+                 | None -> Verify.failure_code failure) result.failure);
+            check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
+            check_capture (protocol ^ " readiness") effort expected model) stages)
+        cases)))
+;;
+
+let test_official_probes_preserve_selected_effort () =
+  official_probes_preserve_selected_effort ~colliding_model:None
+    ~stages:[`Capability; `Readiness]
         [ "codex-app-server", "gpt-6.1-sol", Some "ultra", Some "ultra"
         ; "codex-app-server", "gpt-future-fixture", Some "ultra", Some "ultra"
         ; "codex-app-server", "gpt-6.1-sol", None, None
         ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
         ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"
-        ])))
+        ] ()
 ;;
 
 (* The child speaks the stream-json handshake, lists the host's tools as the
@@ -1705,7 +1736,24 @@ let test_vertex_live_catalog_pagination () =
 let () =
   run
     "runtime verification"
-    [ ( "readiness"
+    [ ( "Claude native effort authority",
+        List.map (fun (name, stage, requested, expected) ->
+          test_case name `Quick
+            (official_probes_preserve_selected_effort
+               ~colliding_model:(Some "claude-authority-fixture") ~stages:[stage]
+               ["claude-code", "claude-authority-fixture",
+                Option.map Llm_provider.Reasoning_effort.to_string requested, expected]))
+          ["capability omission ignores a colliding HTTP ladder", `Capability, None, None;
+           "capability explicit none ignores a colliding HTTP ladder", `Capability, Some Llm_provider.Reasoning_effort.None_, None;
+           "capability high ignores a colliding HTTP ladder", `Capability, Some High, Some "high";
+           "capability minimal keeps native low admission", `Capability, Some Minimal, Some "low";
+           "capability ultra keeps native max admission", `Capability, Some Ultra, Some "max";
+           "readiness omission ignores a colliding HTTP ladder", `Readiness, None, None;
+           "readiness explicit none ignores a colliding HTTP ladder", `Readiness, Some None_, None;
+           "readiness high ignores a colliding HTTP ladder", `Readiness, Some High, Some "high";
+           "readiness minimal keeps native low admission", `Readiness, Some Minimal, Some "low";
+           "readiness ultra keeps native max admission", `Readiness, Some Ultra, Some "max"])
+    ; ( "readiness"
       , [ test_case "Vertex native runtime binding" `Quick test_vertex_native_binding
         ; test_case "Vertex live catalog pagination" `Quick test_vertex_live_catalog_pagination
         ; test_case "Vertex discovery auth headers without a model" `Quick

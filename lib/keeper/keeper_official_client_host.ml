@@ -139,36 +139,6 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
     run
 ;;
 
-(* Snap a requested reasoning effort into the catalog's accepted set: the
-   requested effort when it is accepted, otherwise the nearest accepted effort
-   (highest below; lowest when every accepted effort is higher). The catalog
-   ([models.toml] [accepted_reasoning_efforts]) is the SSOT, so an operator
-   controls the effective effort by editing that row.
-
-   Shared by the Codex and Claude Code lanes: before this lived here, the
-   same operator-declared effort was clamped on Codex but failed the whole
-   turn on Claude Code ([reasoning_args] rejects [Minimal]), so which lane a
-   keeper ran on decided whether a config value was survivable. *)
-let clamp_reasoning_effort_to_catalog = Runtime_inference.clamp_reasoning_effort_to_catalog
-;;
-
-let effective_reasoning_effort
-    ~runtime_label ~keeper_name ~runtime_id ~model_id ~requested =
-  let effective = clamp_reasoning_effort_to_catalog ~model_id ~requested in
-  (match requested, effective with
-   | Some asked, Some snapped
-     when Llm_provider.Reasoning_effort.compare asked snapped <> 0 ->
-     Log.Keeper.info
-       ~keeper_name
-       "%s reasoning effort clamped to catalog: model=%s asked=%s effective=%s"
-       runtime_label
-       (Option.value model_id ~default:runtime_id)
-       (Llm_provider.Reasoning_effort.to_string asked)
-       (Llm_provider.Reasoning_effort.to_string snapped)
-   | _ -> ());
-  effective
-;;
-
 let host_stop_result
       ~runtime_id
       ~model

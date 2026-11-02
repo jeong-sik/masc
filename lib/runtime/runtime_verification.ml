@@ -910,9 +910,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           }
         in
         let reasoning_effort =
-          Runtime_inference.clamp_reasoning_effort_to_catalog
-            ~model_id:execution.model ~requested:runtime.model.reasoning_effort
-          |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+          Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+            runtime.model.reasoning_effort
         in
         (match
            Runtime_claude_code.run_turn

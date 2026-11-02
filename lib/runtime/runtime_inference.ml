@@ -1,35 +1,3 @@
-let clamp_reasoning_effort_to_catalog
-    ~(model_id : string option)
-    ~(requested : Llm_provider.Reasoning_effort.t option)
-    : Llm_provider.Reasoning_effort.t option =
-  match requested, model_id with
-  | None, _ | _, None -> requested
-  | Some effort, Some model ->
-    (match Llm_provider.Capabilities.for_model_id model with
-     | None -> requested
-     | Some caps ->
-       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
-        | None -> requested
-        | Some accepted when List.mem effort accepted -> requested
-        | Some [] -> requested
-        | Some (first :: rest as accepted) ->
-          let below =
-            List.filter
-              (fun candidate ->
-                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
-              accepted
-          in
-          let pick_max a b =
-            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
-          in
-          let pick_min a b =
-            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
-          in
-          match below with
-          | [] -> Some (List.fold_left pick_min first rest)
-          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
-;;
-
 (* Per-runtime sampling temperature. A model may declare a fixed [temperature]
    in runtime.toml ([models.<id>.temperature], read via
    [Runtime.temperature_of_runtime_id]); when set, that value is the request
@@ -44,11 +12,11 @@ let resolve_temperature ~runtime_id ~fallback =
   | Some temperature -> temperature
   | None -> fallback ()
 
-(* Per-runtime reasoning effort. Official-client runtimes reject
-   [enable_thinking] and take effort instead, so without this the effort a
-   Claude Code / Codex / Antigravity turn runs at is whatever the CLI
-   defaults to and no operator declaration reaches it. [None] leaves the
-   caller's own value in place. *)
+(* Explicit live-ID reasoning lookup for callers that still request it.
+   Snapshot-driven native boundaries carry the selected model declaration
+   directly and apply their own client admission. This helper preserves an
+   absent declaration as [None]; it does not select a runtime or establish
+   a native client's effort policy. *)
 let resolve_reasoning_effort ~runtime_id =
   Runtime.reasoning_effort_of_runtime_id runtime_id
 

@@ -622,6 +622,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Ok admitted_subscription ->
        (match
           Runtime_claude_code.run_turn
+            ?reasoning_effort:(Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+              runtime.model.reasoning_effort)
             ~on_stream_event:(function
               | Runtime_claude_code.Usage_reported {usage; _} -> on_usage (claude_usage usage)
               | Runtime_claude_code.Conversation_compacted | Runtime_claude_code.Turn_started _

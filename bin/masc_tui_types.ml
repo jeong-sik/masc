@@ -3698,7 +3698,7 @@ let observer_replay_description ?(source_loss = false) replay =
         "Replay resumed after a gap: events up to #%d expired while disconnected"
         missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
-      "Replay reset: server instance changed; disconnected history not recovered"
+      "Replay reset: server or workspace changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
       "Replay reset: previous cursor had no instance; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->

@@ -339,10 +339,12 @@ let sse_headers ~(deps : deps) session_id protocol_version origin =
   @ deps.cors_headers origin
 
 let sse_stream_headers ~(deps : deps) session_id protocol_version origin =
+  (* Httpun streams without a content length, so the connection must close
+     when the writer closes for clients to observe the end of the response. *)
   [
     ("content-type", Http_negotiation.sse_content_type);
     ("cache-control", "no-cache");
-    ("connection", "keep-alive");
+    ("connection", "close");
   ]
   @ session_cookie_headers protocol_version session_id
   @ mcp_headers session_id protocol_version

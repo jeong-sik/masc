@@ -60,10 +60,19 @@ class LossHandler(FixtureHandler):
             if urllib.parse.parse_qs(request.query).get("sse_kind") != ["observer"]:
                 self.respond(400, {"error": "observer stream required"})
                 return
+            expected = urllib.parse.parse_qs(request.query)
+            if expected.get("expected_base_path") != [
+                os.path.realpath(server.base)
+            ] or expected.get("expected_masc_root") != [
+                os.path.realpath(server.base) + "/.masc"
+            ]:
+                self.respond(409, {"error": "workspace precondition failed"})
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("x-masc-sse-instance-id", "loss-fixture-instance")
             self.send_header("x-masc-sse-replay", "fresh")
+            self.send_header("x-masc-workspace-read", "matched-v1")
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.flush()

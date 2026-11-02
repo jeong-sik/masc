@@ -163,6 +163,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
         match current_server_state_opt () with
         | Some state -> (Mcp_server.workspace_config state).base_path
         | None -> Server_mcp_transport_http.default_base_path ());
+    get_server_state = current_server_state_opt;
     verify_mcp_auth =
       (fun ~base_path request ->
         verify_mcp_auth ~base_path request

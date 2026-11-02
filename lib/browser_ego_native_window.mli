@@ -86,6 +86,28 @@ val matches : completion -> expected -> bool
 (** Exact command/generation/step/source/current binding, for later Release/Input
     integration. No conversion to the existing receipt proof is provided. *)
 
+val same_completion : completion -> completion -> bool
+(** Exact private invocation and capture equality, including nonce/world/binding.
+    Does not expose those values. Contradictory duplicates cannot shed binding. *)
+
+type binding = private {
+  command_id : string; generation : string; step_index : int;
+  source : page; current : page;
+}
+val binding : completion -> binding
+(** Verified binding for the existing Input settlement check; not a grant. *)
+
+val public_summary : completion -> Yojson.Safe.t
+(** Explicit allowlist: SDK-tail/void provenance, step index and Page identities.
+    Never raw events, headers, nonce/world/binding or command/generation. *)
+
+val public_unconfirmed : index:int -> unconfirmed -> Yojson.Safe.t
+(** Closed reason/phase only, omitting arbitrary diagnostic prose and captures. *)
+
+val producer_contract : expected -> Yojson.Safe.t
+(** Fixed native marker/Page member order and closed event policy shared with
+    the one fixed producer. Internal validation data, never configuration. *)
+
 val observation : completion -> Yojson.Safe.t
 (** Original native setup/responses/arrays and explicit void provenance for
     private retained diagnostics. Native Network events may contain cookies or

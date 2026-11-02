@@ -112,8 +112,20 @@ let begin_holding t ~scope ~tab_id ~page_label ~operation =
        locally even when its durability is unconfirmed; no native effect follows. *)
     let next=Pending {pending;previous} in t.state<-next;
     let* ()=commit t next in Ok pending
-let command_settled t ~generation (_ : Browser_ego_release.proof) = match t.state with
-  | Pending {pending;_} when pending.generation=generation -> commit t (Available Command_settled)
+let command_settled t ~generation proof = match t.state with
+  | Pending {pending;_} when pending.generation=generation ->
+    let bindings = Browser_ego_release.window_bindings proof in
+    let* () = match bindings,t.retained with
+      | [],_ -> Ok ()
+      | _::_,None -> Error "native input-window settlement requires retained Space authority"
+      | _::_,Some retained ->
+        if List.for_all (fun (binding:Browser_ego_native_window.binding) ->
+            binding.command_id=pending.command_id && binding.generation=pending.generation
+            && binding.source.space_id=retained.space_id
+            && binding.source.native.label=Some pending.page_label
+            && (match pending.scope with Page_scope -> binding.current=binding.source | Space_scope -> true)) bindings
+        then Ok () else Error "native input-window proof does not match the pending command/Space/source" in
+    commit t (Available Command_settled)
   | Available _ | Pending _ -> Error "the pending input generation changed; settlement was not applied"
 let not_started t ~generation = match t.state with
   | Pending {pending;previous} when pending.generation=generation -> commit t (Available previous)

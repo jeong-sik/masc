@@ -20,10 +20,12 @@ let snapshot = ["urlBefore",str "https://example.test/start";"url",str "https://
   "snapshot",str "native snapshot";"chars",`Int 15;"truncated",`Bool false]
 let failure index method_ = obj ["index",`Int index;"method",str method_;"message",str "SDK error"]
 let unreleased fields = ("inputReleased",`Bool false)::List.remove_assoc "inputReleased" fields
-(* The rule reads the SDK's answer, not the method. The real keyboard.type answer is void and so never
-   releases; an object receipt for it is hypothetical and is judged like any other. *)
+(* Receipt-only methods require declared receipts. Raw typing instead needs its
+   independently authenticated native window, exercised separately below. *)
 let seen_input = function
   | Rel.Settled (Rel.Released (Rel.Released_by_receipts proven)) -> `Released proven
+  | Rel.Settled (Rel.Released (Rel.Completed_by_evidence evidence)) ->
+    `Released (List.map (function Rel.Receipt_step index|Rel.Window_step {index;_}->index) evidence)
   | Rel.Settled Rel.No_hold -> `No_hold
   | Rel.Unconfirmed reason -> `Unconfirmed reason
 let with_claim claim fields=if claim then fields else unreleased fields
@@ -34,7 +36,7 @@ let stopped label expected = function
 let refused label decoded = check bool label true (Result.is_error decoded)
 let not_released index answer = `Unconfirmed (Rel.Step_not_released {index;answer})
 (* [None] is the one answer that releases. *)
-let kind_of = function Rel.Receipt_without_dialog -> None | Rel.Unreleased kind -> Some kind
+let kind_of = function Rel.Receipt_without_dialog|Rel.Native_window_tail _ -> None | Rel.Unreleased kind -> Some kind
 (* The only way to get a releasing answer is to read a receipt the SDK declares. *)
 let clean = Rel.answer_of_json (obj [])
 (* Receipts that release nothing, with the kind the decoder must name for each. *)
@@ -72,14 +74,10 @@ let native_input_admission () =
   let module Contract=Browser_lane.Native_input in
   let denied=request [step "fill" ["selector",str "#editor";"text",str "before"];
     step "keyboard.type" ["text",str "unsafe"];click] in
-  (match W.validate_input_contract denied with
-   | Error reason ->
-     check int "preflight identifies the later step" 1 reason.index;
-     check bool "preflight retains the closed native gap" true (reason.reason=Contract.Keyboard_type_void);
-     check string "preflight identifies the native method" "keyboard.type" (W.method_name reason.action);
-     check bool "preflight message identifies method and position" true
-       (String.starts_with ~prefix:"native workflow step[1] (method \"keyboard.type\"):" (W.unavailable_input_message reason))
-   | Ok () -> fail "entire workflow must reject raw typing before its first step");
+  check bool "raw typing is admitted through its native-window contract" true
+    (W.validate_input_contract denied=Ok ());
+  check bool "raw typing cannot use the receipt-only contract" true
+    (Contract.contract Contract.Keyboard_type=Contract.Observed_native_window);
   let admitted=request [step "fill" ["selector",str "#editor";"text",str "replace"];
     step "keyboard.insertText" ["text",str "literal"];step "keyboard.paste" ["text",str "paste"];
     step "keyboard.press" ["key",str "Enter"];click] in
@@ -251,11 +249,11 @@ let download_cancel () =
   let receipt=obj ["downloadId",str id;"source",str "native_download";"cancelReturned",`Bool true] in
   let completed receipt=obj (snapshot @ result ~started:true ~completed_effect:true
     ~completed:[entry ~receipt 0 "download.cancel"] ~failure:`Null) in
-  (match ok (R.decode wanted (completed receipt)) with
+  (match ok (R.decode ~windows:None wanted (completed receipt)) with
    | R.Completed {input=Rel.No_hold;_} -> ()
-   | R.Completed {input=Rel.Released _;_}|R.Stopped _ -> fail "cancellation manufactured input release");
+   | R.Completed {input=Rel.Released (Rel.Released_by_receipts _|Rel.Completed_by_evidence _);_}|R.Stopped _ -> fail "cancellation manufactured input release");
   List.iter (fun receipt -> refused "cancel receipt must bind exact native identity and return"
-    (R.decode wanted (completed receipt)))
+    (R.decode ~windows:None wanted (completed receipt)))
     [`Null;obj [];obj ["downloadId",str "foreign";"source",str "native_download";"cancelReturned",`Bool true];
      obj ["downloadId",str id;"source",str "fetch";"cancelReturned",`Bool true];
      obj ["downloadId",str id;"source",str "native_download";"cancelReturned",`Bool false];
@@ -264,29 +262,30 @@ let download_cancel () =
     let req=request (steps @ [cancel]) in
     let pre=obj (result ~started:prior ~completed_effect:prior ~completed:entries
       ~failure:(failure (List.length entries) "downloadPreflight")) in
-    (match ok (R.decode req pre) with
+    (match ok (R.decode ~windows:None req pre) with
      | R.Stopped {effect_started;completed_effect;input;_} ->
        check bool "preflight preserves prior effects" true (effect_started=prior && completed_effect=prior);
        check bool "preflight did not press input" true (seen_input input=`No_hold)
      | R.Completed _ -> fail "cancel preflight was called completed"))
     [false,[],[];true,[step "fill" ["selector",str "#editor";"text",str "changed"]],[entry 0 "fill"]];
   refused "download preflight must name a pending cancellation"
-    (R.decode (request [click]) (obj (result ~started:false ~completed_effect:false ~completed:[]
+    (R.decode ~windows:None (request [click]) (obj (result ~started:false ~completed_effect:false ~completed:[]
       ~failure:(failure 0 "downloadPreflight"))));
   stopped "lost cancellation does not claim a pressed key" `No_hold
-    (R.decode wanted (obj (result ~started:true ~completed_effect:false ~completed:[]
+    (R.decode ~windows:None wanted (obj (result ~started:true ~completed_effect:false ~completed:[]
       ~failure:(failure 0 "download.cancel"))))
 let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true
     ~completed:[clicked 0;entry 1 "waitForURL"] ~failure:`Null) in
-  match ok (R.decode (request [click;wait]) value) with
+  match ok (R.decode ~windows:None (request [click;wait]) value) with
   | R.Completed {reply;input=Rel.Released (Rel.Released_by_receipts proven);_} ->
     check bool "native final URL and snapshot returned" true (reply=value);
     check (list int) "the click is the holding step the receipts prove" [0] proven
-  | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "a complete sequence did not release its click"
+  | R.Completed {input=Rel.Released (Rel.Completed_by_evidence _);_}
+      | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "a complete sequence did not release its click"
 let progress_and_uncertainty () =
   let assert_stopped request fields ~started ~completed_effect =
-    match ok (R.decode request (obj fields)) with
+    match ok (R.decode ~windows:None request (obj fields)) with
     | R.Stopped observed ->
       check bool "started effect" started observed.effect_started;
       check bool "completed effect" completed_effect observed.completed_effect
@@ -327,17 +326,17 @@ let observations () =
   List.iter (fun (method_,arguments,receipt) ->
     let expected=request [step method_ arguments] in
     check bool "an observation cannot claim a press selector preflight" true
-      (Result.is_error (R.decode expected (obj (result ~started:false ~completed_effect:false
+      (Result.is_error (R.decode ~windows:None expected (obj (result ~started:false ~completed_effect:false
         ~completed:[] ~failure:(failure 0 "inputPreflight")))));
     let consumes_events=method_="events" in
     let row=obj ["index",`Int 0;"method",str method_;"receipt",receipt] in
-    (match ok (R.decode expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
+    (match ok (R.decode ~windows:None expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
        ~completed:[row] ~failure:`Null))) with
      | R.Completed _ -> () | R.Stopped _ -> fail "native observation was stopped");
     let bad=if receipt=`Null then str "not void" else `Null in
     let row=obj ["index",`Int 0;"method",str method_;"receipt",bad] in
     check bool "native observation receipt shape is checked" true
-      (Result.is_error (R.decode expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
+      (Result.is_error (R.decode ~windows:None expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
         ~completed:[row] ~failure:`Null))))) methods
 let fetch_save_inputs () =
   List.iter (fun name ->
@@ -361,7 +360,7 @@ let fetch_save_receipts () =
     "url",str "https://example.test/binary";"headers",obj ["content-type",str "application/octet-stream"];
     "downloadId",str id;"suggestedFilename",str name;"source",str "fetch"] in
   let replace key value fields=(key,value)::List.remove_assoc key fields in
-  let decode fields = R.decode expected (obj (snapshot @ result ~started:true ~completed_effect:true
+  let decode fields = R.decode ~windows:None expected (obj (snapshot @ result ~started:true ~completed_effect:true
     ~completed:[obj ["index",`Int 0;"method",str "fetch";"receipt",obj fields]] ~failure:`Null)) in
   List.iter (fun fields ->
     match ok (decode fields) with R.Completed _ -> () | R.Stopped _ -> fail "a native saved response was stopped")
@@ -395,7 +394,7 @@ let evaluation_timeouts () =
     | None | Some (R.Navigation_timed_out _ | R.Popup_event_failed _ | R.Page_dialog_opened _) -> fail "native evaluation diagnostics are absent" in
   List.iter (fun fields ->
     let value=receipt "evaluate" ["nativeError",obj fields] in
-    match ok (R.decode expected value) with
+    match ok (R.decode ~windows:None expected value) with
     | R.Stopped {receipt=retained;native_error;effect_started;completed_effect;input;_} ->
       let detail=detail native_error in
       check bool "evaluation effect started" true effect_started;
@@ -409,20 +408,20 @@ let evaluation_timeouts () =
     | R.Completed _ -> fail "native evaluation timeout was marked complete")
     [native;replace "executionStopped" (`Bool false) native;
      native |> replace "executionStopped" (`Bool false) |> replace "pageResponsive" (`Bool false)];
-  (match ok (R.decode expected (receipt "evaluate" ["nativeError",obj (replace "timeoutMs" (`Int 0) native)])) with
+  (match ok (R.decode ~windows:None expected (receipt "evaluate" ["nativeError",obj (replace "timeoutMs" (`Int 0) native)])) with
    | R.Stopped {native_error;_} -> check (float 0.) "native zero timeout retained" 0. (detail native_error).timeout_ms
    | R.Completed _ -> fail "native zero timeout was marked complete");
-  (match ok (R.decode (request [click]) (receipt ~released:false "click" ["nativeError",obj native])) with
+  (match ok (R.decode ~windows:None (request [click]) (receipt ~released:false "click" ["nativeError",obj native])) with
    | R.Stopped {input;native_error;_} ->
      check bool "native execution stopped" true (detail native_error).execution_stopped;
      check bool "executionStopped cannot clear held input" true (seen_input input=not_released 0 Rel.Never_returned)
    | R.Completed _ -> fail "failed held-input step was marked complete");
-  (match ok (R.decode expected (receipt "evaluate" [])) with
+  (match ok (R.decode ~windows:None expected (receipt "evaluate" [])) with
    | R.Stopped {native_error=None;_} -> ()
    | R.Completed _|R.Stopped _ -> fail "ordinary failure acquired a native timeout");
   List.iter (fun fields ->
     check bool "invalid native timeout is an unknown receipt, never a default" true
-      (Result.is_error (R.decode expected (receipt "evaluate" ["nativeError",obj fields]))))
+      (Result.is_error (R.decode ~windows:None expected (receipt "evaluate" ["nativeError",obj fields]))))
     [replace "code" (str "other") native;replace "timeoutMs" (`Int (-1)) native;
      replace "timeoutMs" (`Float nan) native;replace "timeoutMs" (`Float infinity) native;
      replace "executionStopped" (str "true") native;replace "mayHaveLateEffects" `Null native;
@@ -439,7 +438,7 @@ let navigation_timeouts () =
   List.iter (fun (wait,kind) ->
     List.iter (fun fields ->
       let value=receipt (replace "waitUntil" (str wait) fields) in
-      match ok (R.decode expected value) with
+      match ok (R.decode ~windows:None expected value) with
       | R.Completed _ -> fail "native navigation timeout was marked complete"
       | R.Stopped {native_error;receipt=original;effect_started;completed_effect;input;_} ->
         let observed=match native_error with
@@ -459,7 +458,7 @@ let navigation_timeouts () =
        native |> replace "url" (str "") |> replace "readyState" (str "")])
     ["commit",R.Commit;"domcontentloaded",R.Dom_content_loaded;"load",R.Load;"networkidle",R.Network_idle];
   List.iter (fun fields -> check bool "malformed navigation observations are not defaulted" true
-    (Result.is_error (R.decode expected (receipt fields))))
+    (Result.is_error (R.decode ~windows:None expected (receipt fields))))
     [replace "committed" (str "true") native;replace "waitUntil" (str "ready") native;
      replace "url" `Null native;replace "readyState" (`Int 1) native;
      replace "timeoutMs" (`Int (-1)) native;replace "timeoutMs" (`Float nan) native;
@@ -467,7 +466,7 @@ let navigation_timeouts () =
      ("executionStopped",`Bool true)::native]
 let malformed_receipts () =
   let expected=request [click;wait] in
-  List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
+  List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode ~windows:None expected value)))
     [`Null;
      obj (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "inputPreflight"));
      obj (result ~started:true ~completed_effect:true ~completed:[clicked 0;entry 1 "waitForURL"] ~failure:`Null);
@@ -478,15 +477,15 @@ let pointer_release () =
   let drag=step "dragAndDrop" ["selector",str "#source";"destination",str "#target"] in
   let fields=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "dragAndDrop") in
   let fields=("inputReleased",`Bool false)::List.remove_assoc "inputReleased" fields in
-  stopped "lost release was called confirmed" (not_released 0 Rel.Never_returned) (R.decode (request [drag;click]) (obj fields));
+  stopped "lost release was called confirmed" (not_released 0 Rel.Never_returned) (R.decode ~windows:None (request [drag;click]) (obj fields));
   let paste_fields=("failure",failure 0 "keyboard.paste")::List.remove_assoc "failure" fields in
   stopped "paste lost its modifier release uncertainty" (not_released 0 Rel.Never_returned)
-    (R.decode (request [step "keyboard.paste" ["text",str "x"]]) (obj paste_fields))
+    (R.decode ~windows:None (request [step "keyboard.paste" ["text",str "x"]]) (obj paste_fields))
 let holding=["dragAndDrop",["selector",str "#source";"destination",str "#target"];
   "click",["selector",str "#source"];"dblclick",["selector",str "#source"];
   "mouse.click",["x",`Int 10;"y",`Int 20];
   "press",["selector",str "#editor";"key",str "Enter"];
-  "keyboard.press",["key",str "Enter"];"keyboard.type",["text",str "x"];"keyboard.paste",["text",str "x"]]
+  "keyboard.press",["key",str "Enter"];"keyboard.paste",["text",str "x"]]
 let release_needs_receipt_evidence () =
   List.iter (fun (method_,args) ->
     let expected=request [step method_ args;wait] in
@@ -495,10 +494,11 @@ let release_needs_receipt_evidence () =
     let success ?(released=true) receipt=
       let fields=result ~started:true ~completed_effect:true ~failure:`Null
         ~completed:[entry ~receipt 0 method_;entry 1 "waitForURL"] in
-      R.decode expected (obj (snapshot @ with_claim released fields)) in
+      R.decode ~windows:None expected (obj (snapshot @ with_claim released fields)) in
     List.iter (fun receipt -> match ok (success receipt) with
       | R.Completed {input=Rel.Released (Rel.Released_by_receipts proven);_} ->
         check (list int) (method_ ^ ": the receipt proves its holding step") [0] proven
+      | R.Completed {input=Rel.Released (Rel.Completed_by_evidence _);_}
       | R.Completed {input=Rel.No_hold;_} -> fail (method_ ^ ": the holding step was not counted")
       | R.Stopped _ -> fail (method_ ^ ": an object receipt without a dialog was stopped"))
       declared_clean;
@@ -509,9 +509,9 @@ let release_claim_on_stopped_replies () =
   List.iter (fun (method_,args) ->
     let alone=request [step method_ args] and then_wait=request [step method_ args;wait] in
     let never_returned=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 method_) in
-    refused (method_ ^ ": a step that never returned cannot report release") (R.decode alone (obj never_returned));
+    refused (method_ ^ ": a step that never returned cannot report release") (R.decode ~windows:None alone (obj never_returned));
     stopped (method_ ^ ": a step that never returned reports a held input") (not_released 0 Rel.Never_returned)
-      (R.decode alone (obj (unreleased never_returned)));
+      (R.decode ~windows:None alone (obj (unreleased never_returned)));
     let failed_later receipt=result ~started:true ~completed_effect:true ~failure:(failure 1 "waitForURL")
       ~completed:[entry ~receipt 0 method_] in
     let snapshot_failed receipt=result ~started:true ~completed_effect:true ~failure:(failure 1 "snapshot")
@@ -526,83 +526,85 @@ let release_claim_on_stopped_replies () =
         stopped (method_ ^ ": " ^ label ^ " without evidence reports a held input") (not_released 0 answer)
           (decode (obj (with_claim false (fields receipt)))))
         undeclared)
-      ["a later failure",R.decode then_wait,failed_later;"a failed snapshot",R.decode alone,snapshot_failed]) holding
+      ["a later failure",R.decode ~windows:None then_wait,failed_later;"a failed snapshot",R.decode ~windows:None alone,snapshot_failed]) holding
 let release_across_several_holding_steps () =
   let two=request [click;click] and hover_first=request [step "hover" ["selector",str "@3"];click] in
   let both first second=result ~started:true ~completed_effect:true ~failure:`Null
     ~completed:[entry ~receipt:first 0 "click";entry ~receipt:second 1 "click"] in
-  (match ok (R.decode two (obj (snapshot @ both (obj []) (obj [])))) with
+  (match ok (R.decode ~windows:None two (obj (snapshot @ both (obj []) (obj [])))) with
    | R.Completed {input=Rel.Released (Rel.Released_by_receipts proven);_} -> check (list int) "both holding steps are proven" [0;1] proven
-   | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "two proven holding steps were not released");
-  refused "a proven last step does not hide an unproven first one" (R.decode two (obj (snapshot @ both `Null (obj []))));
-  refused "a proven first step does not hide an unproven last one" (R.decode two (obj (snapshot @ both (obj []) `Null)));
+   | R.Completed {input=Rel.Released (Rel.Completed_by_evidence _);_}
+      | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "two proven holding steps were not released");
+  refused "a proven last step does not hide an unproven first one" (R.decode ~windows:None two (obj (snapshot @ both `Null (obj []))));
+  refused "a proven first step does not hide an unproven last one" (R.decode ~windows:None two (obj (snapshot @ both (obj []) `Null)));
   let first_unproven fields=result ~started:true ~completed_effect:true ~failure:(failure 2 "waitForURL") ~completed:fields in
   stopped "the first unreleased holding step is the one named" (not_released 0 Rel.Void_answer)
-    (R.decode (request [click;click;wait]) (obj (unreleased (first_unproven
+    (R.decode ~windows:None (request [click;click;wait]) (obj (unreleased (first_unproven
       [entry ~receipt:`Null 0 "click";entry ~receipt:(str "ok") 1 "click"]))));
   stopped "a later unreleased holding step is named when the first is proven" (not_released 1 Rel.Undeclared_answer)
-    (R.decode (request [click;click;wait]) (obj (unreleased (first_unproven
+    (R.decode ~windows:None (request [click;click;wait]) (obj (unreleased (first_unproven
       [clicked 0;entry ~receipt:(str "ok") 1 "click"]))));
-  (match ok (R.decode hover_first (obj (snapshot @ result ~started:true ~completed_effect:true ~failure:`Null
+  (match ok (R.decode ~windows:None hover_first (obj (snapshot @ result ~started:true ~completed_effect:true ~failure:`Null
       ~completed:[entry 0 "hover";clicked 1]))) with
    | R.Completed {input=Rel.Released (Rel.Released_by_receipts proven);_} ->
      check (list int) "a non-holding step is not listed as proven" [1] proven
-   | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "a hover followed by a proven click was not released");
+   | R.Completed {input=Rel.Released (Rel.Completed_by_evidence _);_}
+      | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "a hover followed by a proven click was not released");
   let void_then_failed=result ~started:true ~completed_effect:true ~completed:[entry ~receipt:`Null 0 "click"] ~failure:(failure 1 "click") in
   stopped "the earlier unreleased step is named before a later failed one" (not_released 0 Rel.Void_answer)
-    (R.decode two (obj (unreleased void_then_failed)));
+    (R.decode ~windows:None two (obj (unreleased void_then_failed)));
   let second_never_returned=result ~started:true ~completed_effect:true ~completed:[clicked 0] ~failure:(failure 1 "click") in
-  refused "a later holding step that never returned cannot report release" (R.decode two (obj second_never_returned));
+  refused "a later holding step that never returned cannot report release" (R.decode ~windows:None two (obj second_never_returned));
   stopped "a later holding step that never returned reports a held input" (not_released 1 Rel.Never_returned)
-    (R.decode two (obj (unreleased second_never_returned)));
+    (R.decode ~windows:None two (obj (unreleased second_never_returned)));
   let after_hover=result ~started:true ~completed_effect:true ~completed:[entry 0 "hover"] ~failure:(failure 1 "click") in
-  refused "a holding step after a non-holding one cannot report release unreturned" (R.decode hover_first (obj after_hover));
+  refused "a holding step after a non-holding one cannot report release unreturned" (R.decode ~windows:None hover_first (obj after_hover));
   stopped "a holding step after a non-holding one reports a held input" (not_released 1 Rel.Never_returned)
-    (R.decode hover_first (obj (unreleased after_hover)))
+    (R.decode ~windows:None hover_first (obj (unreleased after_hover)))
 let a_dialog_left_on_a_holding_step_is_unproven () =
   let named index method_=obj ["index",`Int index;"method",str method_;"message",str "answer";
     "dialog",obj ["type",str "alert";"message",str "m"]] in
   let on_click=result ~started:true ~completed_effect:true ~completed:[clicked 0] ~failure:(named 0 "click") in
-  refused "a dialog reported on a holding step cannot sit beside a release claim" (R.decode (request [click]) (obj on_click));
+  refused "a dialog reported on a holding step cannot sit beside a release claim" (R.decode ~windows:None (request [click]) (obj on_click));
   refused "a failure on a step that already returned needs a dialog to explain it"
-    (R.decode (request [click]) (obj (unreleased (result ~started:true ~completed_effect:true ~completed:[clicked 0]
+    (R.decode ~windows:None (request [click]) (obj (unreleased (result ~started:true ~completed_effect:true ~completed:[clicked 0]
       ~failure:(failure 0 "click")))));
   stopped "a dialog reported on a holding step reports a held input" (not_released 0 Rel.Receipt_with_dialog)
-    (R.decode (request [click]) (obj (unreleased on_click)));
+    (R.decode ~windows:None (request [click]) (obj (unreleased on_click)));
   let on_insert=result ~started:true ~completed_effect:true ~failure:(named 1 "keyboard.insertText")
     ~completed:[clicked 0;entry 1 "keyboard.insertText"] in
   stopped "a dialog on a later non-holding step leaves the earlier release proven" (`Released [0])
-    (R.decode (request [click;step "keyboard.insertText" ["text",str "x"]]) (obj on_insert))
+    (R.decode ~windows:None (request [click;step "keyboard.insertText" ["text",str "x"]]) (obj on_insert))
 let a_held_claim_needs_a_holding_effect () =
   let fill=step "fill" ["selector",str "#editor";"text",str "x"] in
   let failed_fill=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "fill") in
-  refused "a request with no holding step cannot hold input" (R.decode (request [fill]) (obj (unreleased failed_fill)));
+  refused "a request with no holding step cannot hold input" (R.decode ~windows:None (request [fill]) (obj (unreleased failed_fill)));
   let initial=result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "initialUrl") in
-  refused "a holding step that started no effect cannot hold input" (R.decode (request [click]) (obj (unreleased initial)))
+  refused "a holding step that started no effect cannot hold input" (R.decode ~windows:None (request [click]) (obj (unreleased initial)))
 let an_initial_url_failure_holds_nothing () =
   let initial=result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "initialUrl") in
-  (match R.decode (request [click]) (obj initial) with
+  (match R.decode ~windows:None (request [click]) (obj initial) with
    | Ok (R.Stopped {effect_started;input;_}) ->
      check bool "an unreadable starting URL starts no effect" false effect_started;
      check bool "an unreadable starting URL holds nothing" true (seen_input input=`No_hold)
    | Ok (R.Completed _) | Error _ -> fail "an unreadable starting URL did not stop before any input");
   refused "initialUrl only fails before the first step"
-    (R.decode (request [click;click]) (obj (result ~started:true ~completed_effect:true ~completed:[clicked 0]
+    (R.decode ~windows:None (request [click;click]) (obj (result ~started:true ~completed_effect:true ~completed:[clicked 0]
       ~failure:(failure 1 "initialUrl"))));
   refused "initialUrl only fails before any step completed"
-    (R.decode (request [step "url" [];click]) (obj (result ~started:false ~completed_effect:false
+    (R.decode ~windows:None (request [step "url" [];click]) (obj (result ~started:false ~completed_effect:false
       ~completed:[entry ~receipt:(str "https://example.test/start") 0 "url"] ~failure:(failure 0 "initialUrl"))))
 let a_workflow_that_never_held_input_has_nothing_to_release () =
   let fill=step "fill" ["selector",str "#editor";"text",str "x"] in
   let first_fails=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "fill") in
   stopped "a failure before the holding step leaves nothing to release" `No_hold
-    (R.decode (request [fill;click]) (obj first_fails));
+    (R.decode ~windows:None (request [fill;click]) (obj first_fails));
   stopped "a held claim with no holding step entered is only the script's" (`Unconfirmed Rel.Held_by_script_report)
-    (R.decode (request [fill;click]) (obj (unreleased first_fails)));
-  (match ok (R.decode (request [step "url" []]) (obj (snapshot @ result ~started:false ~completed_effect:false
+    (R.decode ~windows:None (request [fill;click]) (obj (unreleased first_fails)));
+  (match ok (R.decode ~windows:None (request [step "url" []]) (obj (snapshot @ result ~started:false ~completed_effect:false
       ~completed:[entry ~receipt:(str "https://example.test/start") 0 "url"] ~failure:`Null))) with
    | R.Completed {input=Rel.No_hold;_} -> ()
-   | R.Completed {input=Rel.Released _;_} | R.Stopped _ -> fail "a workflow with no holding step released something")
+   | R.Completed {input=Rel.Released (Rel.Released_by_receipts _|Rel.Completed_by_evidence _);_} | R.Stopped _ -> fail "a workflow with no holding step released something")
 let release_is_judged_from_declared_answers () =
   check bool "an empty receipt is the declared answer that releases" true (kind_of clean=None);
   List.iter (fun receipt ->
@@ -640,16 +642,16 @@ let a_failure_label_must_match_its_position () =
   List.iter (fun claim ->
     let shown fields=obj (with_claim claim fields) in
     refused "a snapshot failure while steps remain is not a step failure"
-      (R.decode two (shown (result ~started:true ~completed_effect:true ~completed:[clicked 0] ~failure:(failure 1 "snapshot"))));
+      (R.decode ~windows:None two (shown (result ~started:true ~completed_effect:true ~completed:[clicked 0] ~failure:(failure 1 "snapshot"))));
     refused "an observation failure before any step completed is not a step failure"
-      (R.decode two (shown (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "observation"))));
+      (R.decode ~windows:None two (shown (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "observation"))));
     refused "a dialog on a step that is not the last completed one does not explain the failure"
-      (R.decode three (shown (result ~started:true ~completed_effect:true ~completed:[clicked 0;clicked 1] ~failure:(named 0 "click")))))
+      (R.decode ~windows:None three (shown (result ~started:true ~completed_effect:true ~completed:[clicked 0;clicked 1] ~failure:(named 0 "click")))))
     [true;false]
 let proof path =
   let json=Yojson.Safe.from_file path in
   let request=ok (W.of_json (Yojson.Safe.Util.member "request" json)) in
-  (match ok (R.decode request (Yojson.Safe.Util.member "result" json)) with
+  (match ok (R.decode ~windows:None request (Yojson.Safe.Util.member "result" json)) with
    | R.Completed _ -> print_endline "Real Ego receipt decoded against its exact request"
    | R.Stopped _ -> fail "real browser fixture did not complete")
 let page_proof path =
@@ -657,7 +659,7 @@ let page_proof path =
   let json=Yojson.Safe.from_file path in
   List.iter (fun (request_key,result_key) ->
     let request=ok (W.of_json (Yojson.Safe.Util.member request_key json)) in
-    match ok (R.decode request (Yojson.Safe.Util.member result_key json)) with
+    match ok (R.decode ~windows:None request (Yojson.Safe.Util.member result_key json)) with
     | R.Stopped {effect_started=true;completed_effect=false;_} -> ()
     | R.Completed _ | R.Stopped _ -> fail "a failed Page call lost its uncertain-effect boundary")
     ["blockedRequest","blocked";"timeoutRequest","timedOut"];
@@ -679,11 +681,12 @@ let popup_progress () =
   let pages current transitions=obj ["source",source;"current",current;"transitions",`List transitions] in
   let completed=obj (("pages",pages child [transition true])::snapshot @
     result ~started:true ~completed_effect:true ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null) in
-  (match ok (R.decode wanted completed) with
+  (match ok (R.decode ~windows:None wanted completed) with
    | R.Completed {pages=Some pages;input=Rel.Released (Rel.Released_by_receipts proven);_} ->
      check string "final Page is the child" "p2" pages.current.label;
      check string "opener identity is retained" "p1" pages.source.label;
      check (list int) "native trigger receipt alone proves its input release" [0] proven
+   | R.Completed {input=Rel.Released (Rel.Completed_by_evidence _);_}
    | R.Completed {pages=None;input=Rel.Released (Rel.Released_by_receipts _);_}
    | R.Completed {input=Rel.No_hold;_}|R.Stopped _ -> fail "popup completion lost its typed Page/input observations");
   let pending_reply receipt released = obj (("pages",pages source [])::
@@ -691,7 +694,7 @@ let popup_progress () =
     with_claim released (result ~started:true ~completed_effect:true ~completed:[]
       ~failure:(obj ["index",`Int 0;"method",str "popupWait";"message",str "native wait failed";
         "eventError",obj ["name",str "TimeoutError";"code",str "native-code";"timeoutMs",`Int 9]]))) in
-  (match ok (R.decode wanted (pending_reply (obj []) true)) with
+  (match ok (R.decode ~windows:None wanted (pending_reply (obj []) true)) with
    | R.Stopped {completed_effect=true;input;native_error=Some (R.Popup_event_failed error);_} ->
      check bool "a failed popup wait retains the returned trigger and release proof" true (seen_input input=`Released [0]);
      check bool "native event diagnostics are data, not fabricated Page success" true
@@ -700,9 +703,9 @@ let popup_progress () =
    | R.Stopped {completed_effect=false;native_error=Some (R.Popup_event_failed _);_}
    | R.Completed _ -> fail "pending popup click was erased or called completed");
   stopped "void trigger never manufactures key release" (not_released 0 Rel.Void_answer)
-    (R.decode wanted (pending_reply `Null false));
+    (R.decode ~windows:None wanted (pending_reply `Null false));
   List.iter (fun value -> refused "foreign/missing/inconsistent Page transitions are refused"
-    (R.decode wanted value))
+    (R.decode ~windows:None wanted value))
     [obj (snapshot @ result ~started:true ~completed_effect:true
       ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null);
      obj (("pages",pages child [transition ~popup:(identity ~space_id:52 "p2" "T2") true])::snapshot @
@@ -710,13 +713,129 @@ let popup_progress () =
      obj (("pages",pages child [transition false])::snapshot @
        result ~started:true ~completed_effect:true ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null)]
 
+let native_window_workflow () =
+  let module Raw=Masc.Browser_ego_raw_type in
+  let module Window=Masc.Browser_ego_native_window in
+  let source:Window.page={space_id=51;native={Masc.Browser_surface.label=Some "p1";
+    target_id="T1";opened_by=Masc.Browser_surface.Agent_created}} in
+  let context=ok (Raw.prepare ~command_id:"actual-workflow-command" ~generation:"actual-pending-generation"
+    ~source ~indices:[0;1;2]) in
+  let directory=Filename.temp_dir ~perms:0o700 "masc-workflow-window-" "" in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    let arguments=Filename.concat directory "arguments.json" and outputs=Filename.concat directory "outputs.json" in
+    Yojson.Safe.to_file arguments (obj ["source",obj (("spaceId",`Int source.space_id)
+      ::Masc.Browser_surface.ego_page_fields source.native);"windows",Raw.arguments context;
+      "receiptContract",Rel.receipt_contract]);
+    let pid=Unix.create_process "node" [|"node";"test_browser_ego_workflow_window.cjs";arguments;outputs|]
+      Unix.stdin Unix.stdout Unix.stderr in
+    let _,status=Unix.waitpid [] pid in
+    (match status with Unix.WEXITED 0 -> ()
+     | WEXITED _|WSIGNALED _|WSTOPPED _ -> fail "combined native transport stand-in failed");
+    let open Yojson.Safe.Util in
+    let cases=Yojson.Safe.from_file outputs |> to_list in
+    check int "all combined producer/consumer scenarios returned" 15 (List.length cases);
+    let contains text fragment =
+      let n=String.length fragment in
+      let rec loop offset=offset+n<=String.length text &&
+        (String.sub text offset n=fragment || loop (offset+1)) in loop 0 in
+    List.iter (fun row ->
+      let mode=member "mode" row |> to_string in
+      let request=member "request" row |> W.of_json |> ok in
+      let original=member "result" row in
+      let decoded=ok (R.decode ~windows:(Some context) request original) in
+      let public,input=match decoded with
+        | R.Completed {reply;input;_} ->
+          check bool "only fully completed workflows are success" true
+            (List.mem mode ["normal";"popup";"two-raw"]);
+          reply,Rel.Settled input
+        | R.Stopped {receipt;input;effect_started;_} ->
+          check bool "every native interruption stops the workflow" false
+            (List.mem mode ["normal";"popup";"two-raw"]);
+          check bool "invoked native setup never claims a wholly effect-free command" true effect_started;
+          receipt,input in
+      let public_text=Yojson.Safe.to_string public in
+      List.iter (fun private_field -> check bool (mode ^ " hides " ^ private_field) false
+        (contains public_text private_field))
+        ["PRIVATE_WORKFLOW_NATIVE_HEADER_SENTINEL";"nativeInputWindow";"worldName";"bindingName";"nonce"];
+      (match mode with
+       | "normal"|"popup"|"two-raw"|"cleanup"|"cleanup-dialog"|"cleanup-malformed"|"info"|"snapshot" ->
+         (match input with
+          | Rel.Settled (Released proof) ->
+            check int "every returned raw tail remains distinct verified evidence"
+              (if mode="two-raw" then 2 else 1) (List.length (Rel.window_bindings proof))
+          | Rel.Settled No_hold|Rel.Unconfirmed _ -> fail (mode ^ " lost verified native completion"))
+       | "pre-raw" -> check bool "no holding step entered" true (seen_input input=`No_hold)
+       | "start-dialog" -> check bool "real SDK failure before raw call holds nothing" true (seen_input input=`No_hold)
+       | "prefix-pre-raw" -> check bool "earlier holding receipt is retained, not rolled back" true
+           (seen_input input=`Released [0])
+       | "dialog" -> check bool "swallowed dialog leaves raw input uncertain" true
+           (seen_input input=not_released 0 (Rel.Native_window_unconfirmed Window.Dialog_opened))
+       | "native-dialog" -> check bool "real thrown SDK failure during raw call remains uncertain" true
+           (seen_input input=not_released 0 (Rel.Native_window_unconfirmed Window.Native_failure))
+       | "missing-end" -> check bool "missing end cannot complete raw input" true
+           (seen_input input=not_released 0 (Rel.Native_window_unconfirmed Window.Bounds_missing_or_duplicated))
+       | "late-hold" -> check bool "later unreturned hold dominates earlier raw completion" true
+           (seen_input input=not_released 1 Rel.Never_returned)
+       | _ -> fail "unknown combined scenario");
+      if List.mem mode ["native-dialog";"start-dialog";"cleanup-dialog"] then (
+        match decoded with
+        | R.Stopped {native_error=Some (R.Page_dialog_opened error);_} ->
+          check string "actual native SDK session survives" "actual-error-session" error.session_id;
+          check string "actual native SDK method survives"
+            (if mode="start-dialog" then "Runtime.evaluate"
+             else if mode="cleanup-dialog" then "Runtime.removeBinding" else "Input.dispatchKeyEvent") error.method_;
+          check string "actual SDK dialog survives separately from native window uncertainty"
+            "owned native dialog" error.dialog.message;
+          check string "public typed native error remains present" "EGO_PAGE_DIALOG_OPENED"
+            (public |> member "failure" |> member "nativeError" |> member "code" |> to_string)
+        | R.Completed _|R.Stopped {native_error=None|Some (R.Evaluation_timed_out _|R.Navigation_timed_out _|R.Popup_event_failed _);_} ->
+          fail "genuine thrown SDK diagnostic was erased");
+      if mode="dialog" then check bool "swallowed void never manufactures an SDK exception" true
+        (public |> member "failure" |> member "nativeError" = `Null);
+      if mode="cleanup-malformed" then check bool "malformed cleanup-only diagnostic stays private" true
+        (public |> member "failure" |> member "nativeError" = `Null);
+      if List.mem mode ["cleanup";"cleanup-malformed"] then (
+        let popup_request=ok (W.of_json (obj (base [step "keyboard.type" ["text",str "a"];
+          step "clickAndWaitForPopup" ["selector",str "#popup"]]))) in
+        let fields=to_assoc original in
+        let pending=obj ["index",`Int 1;"method",str "clickAndWaitForPopup";"receipt",obj []] in
+        refused "cleanup failure cannot include a later holding trigger"
+          (R.decode ~windows:(Some context) popup_request (obj (("pendingAction",pending)::fields)));
+        let pages=member "pages" original |> to_assoc in
+        let source=List.assoc "source" pages in
+        let popup=obj ["spaceId",`Int 51;"label",str "p2";"targetId",str "T2";"openedBy",str "agent"] in
+        let transition=obj ["index",`Int 1;"source",source;"popup",popup;"selected",`Bool false] in
+        let pages=obj (("transitions",`List [transition])::List.remove_assoc "transitions" pages) in
+        refused "cleanup failure cannot include a later acquired popup"
+          (R.decode ~windows:(Some context) popup_request
+            (obj (("pages",pages)::List.remove_assoc "pages" fields))));
+      if mode="normal" then (
+        refused "raw progress cannot be authenticated without Host context" (R.decode ~windows:None request original);
+        let fields=to_assoc original in
+        let completed=member "completed" original |> to_list in
+        let raw=List.hd completed |> to_assoc in
+        let forged=obj (("receipt",obj [])::List.remove_assoc "receipt" raw) in
+        refused "an object receipt cannot substitute for the raw SDK-tail window"
+          (R.decode ~windows:(Some context) request
+            (obj (("completed",`List (forged::List.tl completed))::List.remove_assoc "completed" fields))));
+      if mode="popup" then (
+        let fields=to_assoc original in let pages=member "pages" original |> to_assoc in
+        let source=member "source" (member "pages" original) |> to_assoc in
+        let pages=obj (("source",obj (("targetId",str "replacement")::List.remove_assoc "targetId" source))
+          ::List.remove_assoc "source" pages) in
+        refused "popup windows remain bound to original Host source"
+          (R.decode ~windows:(Some context) request (obj (("pages",pages)::List.remove_assoc "pages" fields))))) cases)
+
 let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
     print_endline (Yojson.Safe.to_string Rel.receipt_contract)
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
+  test_case "shared native producer and Host decoder stop unsafe followups" `Quick native_window_workflow;
   test_case "popup acquisition retains identity, partial trigger and input guarantees" `Quick popup_progress;
-  test_case "native input admission rejects the entire raw-typing workflow" `Quick native_input_admission;
+  test_case "raw typing admission requires its native-window contract" `Quick native_input_admission;
   test_case "native methods preserve values" `Quick roundtrip;
   test_case "Download cancellation binds identity and exact effect progress" `Quick download_cancel;
   test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;

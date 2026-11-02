@@ -4,7 +4,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const file = path.join(__dirname, '../lib/browser_ego_peer.ml');
-const source = fs.readFileSync(file, 'utf8').split('let target_input_script = {js|')[1].split('|js}')[0];
+const peerSource = fs.readFileSync(file, 'utf8');
+const source = peerSource.split('let target_input_script = {js|')[1].split('|js}')[0];
 const run = vm.runInNewContext('(' + source + ')');
 const initial = 'https://fixture.test/';
 const args = {action:'drag_to',expectedUrl:initial,target:'@12',destination:'loc=css:#target',cursor:'MASC · fixture'};
@@ -65,3 +66,26 @@ for (const [action, method] of [['click', 'click'], ['double_click', 'dblclick']
     assert.deepEqual(calls,['url',method]);
   });
 }
+
+const guardSource = peerSource.split('let native_type_guard_script = {js|')[1].split('|js}')[0];
+const pageCall = JSON.parse(peerSource.split('let page_call =\n')[1].split('\nlet on_page')[0].trim());
+const guard = vm.runInNewContext(pageCall + '\n(' + guardSource + ')');
+test('the fixed ordinary raw guard rejects malformed observations before typing', async () => {
+  const args = {guard:'fixed host page guard', input:JSON.stringify({expectedUrl:initial, documentId:'d1'})};
+  const valid = {url:initial, title:'Fixture', scrollX:0, scrollY:0};
+  for (const checked of [null, {}, {pageError:'wrong document'}, {answer:'not JSON'},
+    {answer:'{}'}, {answer:JSON.stringify({...valid, url:'https://other.test/'})},
+    {answer:JSON.stringify({...valid, title:null})}, {answer:JSON.stringify({...valid, scrollX:null})},
+    {answer:JSON.stringify({...valid, private:'unrequested'})},
+    {answer:JSON.stringify(valid), private:'unrequested'}]) {
+    let types = 0;
+    const page = {evaluate:async () => checked, keyboard:{type:async () => { types++; }}};
+    await assert.rejects(async () => { await guard(page,args); await page.keyboard.type('a'); },
+      /native input guard refused/);
+    assert.equal(types,0,'malformed fixed-guard response cannot admit holding input');
+  }
+  let types = 0;
+  const page = {evaluate:async () => ({answer:JSON.stringify(valid)}), keyboard:{type:async () => { types++; }}};
+  await guard(page,args); await page.keyboard.type('a');
+  assert.equal(types,1,'the declared fixed-guard result permits the next producer stage');
+});

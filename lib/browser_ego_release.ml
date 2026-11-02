@@ -1,6 +1,9 @@
+module Window = Browser_ego_native_window
 type unreleased = Receipt_with_dialog | Void_answer | Undeclared_answer | Never_returned
-type answer = Receipt_without_dialog | Unreleased of unreleased
-type proof = Released_by_receipts of int list
+  | Native_window_unconfirmed of Window.unconfirmed | Conflicting_evidence
+type answer = Receipt_without_dialog | Native_window_tail of Window.completion | Unreleased of unreleased
+type evidence = Receipt_step of int | Window_step of {index:int;completion:Window.completion}
+type proof = Released_by_receipts of int list | Completed_by_evidence of evidence list
 type settled = No_hold | Released of proof
 type unconfirmed =
   | Step_not_released of { index : int; answer : unreleased }
@@ -42,27 +45,58 @@ let answer_of_json = function
   | `Null -> Unreleased Void_answer
   | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Unreleased Undeclared_answer
 let of_unreleased answer = Unreleased answer
+let answer_of_window ~expected completion =
+  if Window.matches completion expected then Ok (Native_window_tail completion)
+  else Error "native input completion belongs to another invocation"
+let window_bindings = function
+  | Released_by_receipts _ -> []
+  | Completed_by_evidence evidence -> List.filter_map (function
+      | Receipt_step _ -> None | Window_step {completion;_} -> Some (Window.binding completion)) evidence
 let one_answer_per_step answers =
   let keep_the_stricter kept later = match kept with
     | Unreleased _ -> kept
-    | Receipt_without_dialog -> later in
+    | Receipt_without_dialog -> (match later with
+        | Receipt_without_dialog | Unreleased _ -> later
+        | Native_window_tail _ -> Unreleased Conflicting_evidence)
+    | Native_window_tail original -> (match later with
+        | Unreleased _ -> later
+        | Receipt_without_dialog -> Unreleased Conflicting_evidence
+        | Native_window_tail next -> if Window.same_completion original next then kept
+          else Unreleased Conflicting_evidence) in
   List.fold_left (fun folded (index, answer) ->
     if List.mem_assoc index folded
     then List.map (fun (step, kept) -> if step = index then (step, keep_the_stricter kept answer) else (step, kept)) folded
     else folded @ [index, answer]) [] answers
 let judge answers =
-  let rec go proven = function
-    | [] -> Settled (Released (Released_by_receipts (List.rev proven)))
-    | (index, Receipt_without_dialog) :: rest -> go (index :: proven) rest
+  let rec go first_window proven = function
+    | [] ->
+      let evidence = List.rev proven in
+      let proof = match first_window with
+        | None -> Released_by_receipts (List.filter_map (function
+            | Receipt_step index -> Some index | Window_step _ -> None) evidence)
+        | Some _ -> Completed_by_evidence evidence in
+      Settled (Released proof)
+    | (index, Receipt_without_dialog) :: rest -> go first_window (Receipt_step index :: proven) rest
+    | (index, Native_window_tail completion) :: rest ->
+      let binding = Window.binding completion in
+      let compatible = match first_window with
+        | None -> true
+        | Some (first:Window.binding) -> first.command_id=binding.command_id
+          && first.generation=binding.generation && first.source=binding.source in
+      if binding.step_index<>index || not compatible then
+        Unconfirmed (Step_not_released {index;answer=Conflicting_evidence})
+      else go (Some binding) (Window_step {index;completion}::proven) rest
     | (index, Unreleased answer) :: _ -> Unconfirmed (Step_not_released {index; answer}) in
   match one_answer_per_step answers with
   | [] -> Settled No_hold
-  | _ :: _ as steps -> go [] steps
+  | _ :: _ as steps -> go None [] steps
 let unreleased_description = function
   | Receipt_with_dialog -> "a dialog that cut it short"
   | Void_answer -> "void"
   | Undeclared_answer -> "a value the SDK does not declare"
   | Never_returned -> "nothing"
+  | Native_window_unconfirmed _ -> "an unconfirmed native input window"
+  | Conflicting_evidence -> "contradictory input-completion evidence"
 let describe = function
   | Step_not_released {index; answer} -> Printf.sprintf "step %d answered %s" index (unreleased_description answer)
   | Held_by_script_report -> "the script reports a held input"

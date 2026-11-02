@@ -618,8 +618,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     | Some pending
       when pending.sir_generation = state.image_request_generation
            && pending.sir_view = state.view
-           && Masc_tui_types.image_keeper_is_current state
-                ~view:pending.sir_view ~keeper_name:pending.sir_keeper
+           && Masc_tui_types.image_request_keeper_is_current state pending
            && Masc_tui_types.image_reading_is_current state pending
            && not state.msx_open ->
         Some (Terminal_text.single_line

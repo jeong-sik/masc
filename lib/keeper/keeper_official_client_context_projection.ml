@@ -385,6 +385,7 @@ let carried_label = function
   | Session_store.Librarian_unread -> "librarian_unread"
   | Session_store.Historical_task_reference -> "historical_task_reference"
   | Session_store.Tool_result_receipts -> "tool_result_receipts"
+  | Session_store.Codex_system_prompt -> "codex_system_prompt"
 ;;
 
 let carried_sha256_prefix_length = 12
@@ -416,7 +417,8 @@ let is_block item =
      | Session_store.Context_carrier
      | Session_store.Librarian_working_state
      | Session_store.Librarian_unread
-     | Session_store.Historical_task_reference | Session_store.Tool_result_receipts -> false)
+     | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
+     | Session_store.Codex_system_prompt -> false)
 ;;
 
 let block_text item =
@@ -434,7 +436,8 @@ let block_id item = match item.held.Session_store.context with
   | Session_store.Context_section _ | Session_store.Context_section_row _
   | Session_store.Context_carrier
   | Session_store.Librarian_working_state | Session_store.Librarian_unread
-  | Session_store.Historical_task_reference | Session_store.Tool_result_receipts -> None
+  | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
+  | Session_store.Codex_system_prompt -> None
 
 let sections_notice key sections =
   Prompt_registry.render_prompt_template
@@ -504,7 +507,7 @@ let held_row_digests ~held section =
        | Session_store.(
            Context_section_row _ | Context_block _ | Context_section _ | Context_carrier
            | Librarian_working_state | Librarian_unread | Historical_task_reference
-           | Tool_result_receipts) -> None)
+           | Tool_result_receipts | Codex_system_prompt) -> None)
     held
 ;;
 
@@ -749,7 +752,8 @@ let resume_prompt ~goal ~held ?composed_context messages =
             | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread
-      | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) -> false
+      | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
+      | Session_store.Codex_system_prompt ) -> false
     | Whole_text, previous_context ->
       (not item.resent_when_held)
       && (match item.held.context, previous_context with
@@ -766,14 +770,16 @@ let resume_prompt ~goal ~held ?composed_context messages =
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
                | Session_store.Librarian_unread
-               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) as current_context)
+               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
+               | Session_store.Codex_system_prompt ) as current_context)
             , (( Session_store.Context_block _
                | Session_store.Context_section _
                | Session_store.Context_section_row _
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
                | Session_store.Librarian_unread
-               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) as previous_context) ) ->
+               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
+               | Session_store.Codex_system_prompt ) as previous_context) ) ->
             current_context = previous_context)
   in
   let held_context =

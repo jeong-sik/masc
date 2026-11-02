@@ -96,6 +96,12 @@ let check_effect outcome field expected =
     |> json_member "effect" |> json_string in
   check_string (field ^ " actual effect prefix") expected actual
 
+let check_diagnostic outcome field =
+  match I.outcome_to_yojson outcome |> json_member field |> json_member "diagnostics" with
+  | `List (_ :: _) -> ()
+  | `List [] -> Alcotest.fail "actual transaction diagnostic was discarded"
+  | _ -> Alcotest.fail "transaction diagnostics are not an array"
+
 let check_dependents_not_examined inspection =
   let actual = I.inspection_to_yojson inspection |> json_member "dependents"
     |> json_member "state" |> json_string in
@@ -301,6 +307,31 @@ let test_unrelated_dependents_not_examined base =
       (List.mem name (entries (workspace base)))) before;
   Unix.chmod (Paths.file_path ~workspace_masc_dir:(workspace base) Paths.Reactions) 0o750
 
+let test_leaf_bindings base =
+  prepare base "";
+  write_bytes (guard_path base) (guard_wire valid_generation);
+  List.iter (fun path ->
+    let original = read_bytes path in
+    let outside = Filename.concat base "external-leaf" in
+    Unix.rename path outside;
+    let before = state outside in
+    Unix.symlink outside path;
+    check_refused (inspect base);
+    check_bool "leaf alias target is untouched" true (before = state outside);
+    check_string "leaf alias remains in place" outside (Unix.readlink path);
+    Unix.unlink path;
+    Unix.link outside path;
+    check_refused (inspect base);
+    check_string "multiply-linked bytes are preserved" original (read_bytes outside);
+    Unix.unlink path;
+    Unix.rename outside path;
+    check_decision "restored unique leaf is readable" I.Ready_observed (inspect base);
+    Unix.unlink path;
+    Unix.symlink (Filename.concat base "missing-leaf-target") path;
+    check_refused (inspect base);
+    Unix.unlink path;
+    write_bytes path original) [posts_path base; guard_path base]
+
 let test_late_bootstrap_survivor base =
   let expected = token (inspect base) in
   Unix.mkdir (workspace base) 0o750;
@@ -315,6 +346,20 @@ let test_late_bootstrap_survivor base =
     (before = state survivor);
   check_strings "refused bootstrap creates no stable lock or stage"
     [Filename.basename survivor] (entries (workspace base))
+
+let test_raw_digest_is_not_mutation_intent base =
+  prepare base "";
+  let observed = inspect base in
+  let raw = match I.posts_source_sha256 observed with
+    | Some sha -> sha
+    | None -> Alcotest.fail "actual Present(empty) lacked its raw digest" in
+  check_bool "raw content evidence differs from rooted action intent" false
+    (String.equal raw (token observed));
+  let result = I.adopt_offline ~base_path:base ~expected_intent_sha256:raw in
+  check_incomplete result;
+  check_effect result "posts" "unchanged";
+  check_effect result "guard" "unchanged";
+  check_bool "raw digest never grants guard publication" true (absent (guard_path base))
 
 let test_bootstrap_and_generation base =
   let initial = inspect base in
@@ -383,8 +428,159 @@ let test_replaced_root_stales_intent base =
   check_bool "stale physical root did not create data" true (absent (posts_path root));
   check_bool "former physical root stayed untouched" true (absent (workspace saved))
 
+type fault_kind = Ordinary | Timeout | Nested_timeout
+type target = Posts | Guard
+type fault_site = Stable_lock_close | Rewrite_parent_sync
+
+let fault_exception = function
+  | Ordinary -> Failure "actual offline transaction fault"
+  | Timeout -> Eio.Time.Timeout
+  | Nested_timeout ->
+    let backtrace = Printexc.get_callstack 16 in
+    fst (Eio.Exn.combine
+      (Failure "ordinary nested transaction member", backtrace) (Eio.Time.Timeout, backtrace))
+
+let raise_captured exception_ captured =
+  try raise exception_ with actual ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    captured := Some backtrace;
+    Printexc.raise_with_backtrace actual backtrace
+
+let unix_io : Fs_compat.private_jsonl_transaction_io_for_testing = {
+  before_sync_parent = (fun _ -> ()); close_fd = Unix.close;
+}
+let unix_files : I.For_testing.file_io = { posts = unix_io; guard = unix_io }
+
+let fault_io ~base ~target ~site ~exception_ ~captured ~calls =
+  let path = match target with Posts -> posts_path base | Guard -> guard_path base in
+  match site with
+  | Rewrite_parent_sync -> { unix_io with before_sync_parent = (fun directory ->
+      check_string "hook receives the actual published parent" (workspace base) directory;
+      incr calls;
+      raise_captured exception_ captured) }
+  | Stable_lock_close -> { unix_io with close_fd = (fun descriptor ->
+      let actual = Unix.fstat descriptor in
+      let stable = Unix.stat (Fs_compat.private_jsonl_lock_path path) in
+      let is_stable = actual.Unix.st_dev = stable.Unix.st_dev
+        && actual.Unix.st_ino = stable.Unix.st_ino in
+      Unix.close descriptor;
+      if is_stable then (incr calls; raise_captured exception_ captured)) }
+
+let check_backtrace captured actual =
+  let original = match !captured with
+    | Some backtrace -> backtrace
+    | None -> Alcotest.fail "real fault did not capture its original raising frames" in
+  let length = Printexc.raw_backtrace_length original in
+  check_bool "actual raising origin has frames" true (length > 0);
+  check_bool "finish retains all original raising frames" true
+    (Printexc.raw_backtrace_length actual >= length);
+  for index = 0 to length - 1 do
+    check_bool "finish retains the original frame prefix" true
+      (Printexc.get_raw_backtrace_slot original index = Printexc.get_raw_backtrace_slot actual index)
+  done
+
+let expect_reserved exception_ captured finish =
+  let raised = try finish (); None
+    with actual -> Some (actual, Printexc.get_raw_backtrace ()) in
+  match raised with
+  | None -> Alcotest.fail "retained original reserved exception was swallowed"
+  | Some (actual, backtrace) ->
+    check_bool "original outer reserved exception is preserved" true (actual == exception_);
+    check_backtrace captured backtrace
+
+let test_write_fault target site kind base =
+  prepare base "";
+  let expected = token (inspect base) in
+  let exception_ = fault_exception kind in
+  let captured = ref None and calls = ref 0 in
+  let injected = fault_io ~base ~target ~site ~exception_ ~captured ~calls in
+  let write : I.For_testing.file_io = match target with
+    | Posts -> { unix_files with posts = injected }
+    | Guard -> { unix_files with guard = injected } in
+  let io : I.For_testing.io = { read = unix_files; write } in
+  let outcome = I.For_testing.adopt_offline ~base_path:base ~expected_intent_sha256:expected ~io in
+  check_int "exactly one real injected transaction boundary" 1 !calls;
+  let field = match target with Posts -> "posts" | Guard -> "guard" in
+  check_diagnostic outcome field;
+  let posts, guard, guard_present, completed, restart = match target, site, kind with
+    | (Posts | Guard), Stable_lock_close, Ordinary ->
+      "confirmed_now", "confirmed_now", true, I.Completed, I.Ready_observed
+    | Posts, Stable_lock_close, (Timeout | Nested_timeout) ->
+      "confirmed_now", "unchanged", false, I.Not_completed, I.Adoption_required
+    | Posts, Rewrite_parent_sync, (Ordinary | Timeout | Nested_timeout) ->
+      "effect_unknown", "unchanged", false, I.Not_completed, I.Adoption_required
+    | Guard, Stable_lock_close, (Timeout | Nested_timeout) ->
+      "confirmed_now", "confirmed_now", true, I.Not_completed, I.Ready_observed
+    | Guard, Rewrite_parent_sync, (Ordinary | Timeout | Nested_timeout) ->
+      "confirmed_now", "effect_unknown", true, I.Not_completed, I.Ready_observed in
+  check_effect outcome "posts" posts;
+  check_effect outcome "guard" guard;
+  check_bool "actual completion" true (I.completion outcome = completed);
+  check_bool "next effect follows the known prefix" guard_present (not (absent (guard_path base)));
+  check_string "all attempts retain exact adopted posts bytes" "" (read_bytes (posts_path base));
+  let before_posts = state (posts_path base) in
+  let before_guard = if absent (guard_path base) then None else Some (state (guard_path base)) in
+  (match kind with
+   | Ordinary -> check_bool "finish agrees" true (I.finish_outcome outcome = completed)
+   | Timeout | Nested_timeout ->
+     expect_reserved exception_ captured (fun () -> ignore (I.finish_outcome outcome)));
+  check_bool "pure finish does not touch posts" true (before_posts = state (posts_path base));
+  check_bool "pure finish does not create or rewrite guard" true
+    (before_guard = if absent (guard_path base) then None else Some (state (guard_path base)));
+  check_decision "restart observes only current bytes" restart (inspect base);
+  check_bool "restart cannot settle the earlier invocation" true (I.completion outcome = completed)
+
+let test_inspection_reserved kind base =
+  prepare base "";
+  let exception_ = fault_exception kind in
+  let captured = ref None and calls = ref 0 in
+  let posts : Fs_compat.private_jsonl_transaction_io_for_testing = {
+    before_sync_parent = (fun _ -> Alcotest.fail "noncreating inspection attempted a parent sync");
+    close_fd = (fun descriptor ->
+      Unix.close descriptor; incr calls; raise_captured exception_ captured);
+  } in
+  let io : I.For_testing.file_io = { unix_files with posts } in
+  let observed = I.For_testing.inspect ~base_path:base ~io in
+  check_int "one actual readonly descriptor settlement" 1 !calls;
+  check_strings "reserved inspection creates no lock or guard"
+    [Filename.basename (posts_path base)] (entries (workspace base));
+  expect_reserved exception_ captured (fun () -> I.finish_inspection observed)
+
+let test_reserved_guard_preparation kind base =
+  prepare base " \n";
+  let expected = token (inspect base) in
+  let before = state (posts_path base) in
+  let exception_ = fault_exception kind in
+  let captured = ref None and calls = ref 0 in
+  let guard = fault_io ~base ~target:Guard ~site:Stable_lock_close ~exception_ ~captured ~calls in
+  let read : I.For_testing.file_io = { unix_files with guard } in
+  let io : I.For_testing.io = { read; write = unix_files } in
+  let result = I.For_testing.adopt_offline ~base_path:base ~expected_intent_sha256:expected ~io in
+  check_int "fault belongs to actual guard stable-read settlement" 1 !calls;
+  check_incomplete result;
+  check_effect result "posts" "unchanged";
+  check_effect result "guard" "unchanged";
+  (match I.outcome_to_yojson result |> json_member "preparation"
+      |> json_member "guard" |> json_member "diagnostics" with
+   | `List (_ :: _) -> ()
+   | `List [] -> Alcotest.fail "actual preparation cleanup diagnostic was discarded"
+   | _ -> Alcotest.fail "preparation diagnostics are not an array");
+  check_bool "guard preparation settles before posts rewrite" true
+    (before = state (posts_path base));
+  check_bool "failed preparation does not publish guard" true (absent (guard_path base));
+  expect_reserved exception_ captured (fun () -> ignore (I.finish_outcome result))
+
 let () =
+  Printexc.record_backtrace true;
   let case name test = Alcotest.test_case name `Quick (with_fixture test) in
+  let fault_cases = List.concat_map (fun (target_name, target) ->
+    List.concat_map (fun (site_name, site) ->
+      List.map (fun (kind_name, kind) ->
+        case (target_name ^ " " ^ site_name ^ " " ^ kind_name)
+          (test_write_fault target site kind))
+        ["ordinary", Ordinary; "timeout", Timeout; "nested timeout", Nested_timeout])
+      ["stable close", Stable_lock_close; "published parent sync", Rewrite_parent_sync])
+    ["posts", Posts; "guard", Guard] in
   Alcotest.run "board_posts_initialization" [
     "noncreating observations", [
       case "absent root refuses and inspect creates no metadata" test_absent_root_and_noncreating_inspect;
@@ -397,9 +593,16 @@ let () =
       case "partial and torn posts have no mutation intent" test_rejected_posts;
       case "all dependent survivors forbid bootstrap" test_dependent_survivors;
       case "adoption and Ready skip unrelated families" test_unrelated_dependents_not_examined;
-      ];
+      case "both leaves refuse aliases and multiply linked files" test_leaf_bindings ];
     "explicit effects", [
       case "bootstrap writes once and preserves generation" test_bootstrap_and_generation;
       case "stale content refuses but same bytes use a fresh snapshot" test_stale_content_and_same_byte_replacement;
       case "physical root replacement stales intent" test_replaced_root_stales_intent;
-      case "apply rechecks a late bootstrap dependent survivor" test_late_bootstrap_survivor ] ]
+      case "apply rechecks a late bootstrap dependent survivor" test_late_bootstrap_survivor;
+      case "raw posts digest is not a rooted action token" test_raw_digest_is_not_mutation_intent ];
+    "actual interrupted publication", fault_cases;
+    "readonly reserved settlement", [
+      case "direct timeout preserves original exception and frames" (test_inspection_reserved Timeout);
+      case "nested timeout preserves original outer exception" (test_inspection_reserved Nested_timeout);
+      case "direct timeout in guard preparation precedes all writes" (test_reserved_guard_preparation Timeout);
+      case "nested timeout in guard preparation precedes all writes" (test_reserved_guard_preparation Nested_timeout) ] ]

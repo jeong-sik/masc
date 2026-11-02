@@ -21442,6 +21442,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           { sid_version = attested.Sse_wire.version;
             sid_binary_commit = Option.value attested.binary_commit ~default:"";
             sid_binary_commit_age_s = None;
+            sid_runtime_instance_id = None;
             sid_base_path = base_path;
             sid_masc_root = masc_root;
             sid_executable_in_worktree = None;
@@ -21874,7 +21875,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Planning, Planning_detail selected when String.equal selected goal_id ->
            state.goal_confirmation_identity_refresh <- Some (goal_id, authority.ra_workspace);
            resume_goal_confirmation_identity_refresh state ~mailbox
-       | _, _ -> ())
+       | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
+          | Board | Approvals | Planning | Schedules | Verification | Harness
+          | Fusion | Repositories | Code | Changes | Connectors | Runtime
+          | Config | Resources | Tools | System_logs),
+         (Planning_list | Planning_detail _) -> ())
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
@@ -21910,11 +21915,21 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
                 ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                 ~scoped_refresh_followup ~mailbox
-            | (Some _ | None), _, _ -> ());
+            | (Some _ | None),
+              (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
+               | Board | Approvals | Planning | Schedules | Verification | Harness
+               | Fusion | Repositories | Code | Changes | Connectors | Runtime
+               | Config | Resources | Tools | System_logs),
+              (Planning_list | Planning_detail _) -> ());
            (match credential_changed, current, state.view, state.planning_mode with
             | true, true, Planning, Planning_detail selected when String.equal goal_id selected ->
                 launch_goal_confirmation_read state ~mailbox ~goal_id
-            | _, _, _, _ -> ())
+            | _, _,
+              (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
+               | Board | Approvals | Planning | Schedules | Verification | Harness
+               | Fusion | Repositories | Code | Changes | Connectors | Runtime
+               | Config | Resources | Tools | System_logs),
+              (Planning_list | Planning_detail _) -> ())
        | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_exported (request, result) ->
       let progress = Atomic.get request.vex_progress in

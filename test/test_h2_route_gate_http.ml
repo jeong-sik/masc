@@ -243,7 +243,13 @@ let test_physical_skill_turn_evidence () =
     List.iter (fun action -> match Ledger.observe_async_action ~config ~trace_id:origin action with
       | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) (Ledger.async_actions canonical);
     let path = "/api/v1/dashboard/skill-activations/physical-turn" in
-    let target turn = Uri.with_query (Uri.of_string path) [ "turn_ref", [ turn ] ] |> Uri.to_string in
+    let target ?(workspace = []) turn =
+      Uri.with_query (Uri.of_string path) (("turn_ref", [ turn ]) :: workspace) |> Uri.to_string in
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+    let matching = [ "expected_base_path", [ base ]; "expected_masc_root", [ root ] ] in
+    let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
+    let admission = Masc.Workspace.read_precondition_admission_header in
     let receiving = "new-physical-trace#73" in
     strict None (fun () ->
       let code, body = request ~meth:`GET client path in
@@ -257,8 +263,9 @@ let test_physical_skill_turn_evidence () =
     strict (Some "1") (fun () ->
       check int "strict Public_read still requires a credential" 401
         (status ~meth:`GET client (target receiving));
-      let code, body = request ~token:player ~meth:`GET client (target receiving) in
+      let code, headers, body = request_with_headers ~token:player ~meth:`GET client (target receiving) in
       check int "authenticated physical lookup is served over H2" 200 code;
+      check bool "unbound lookup has no workspace admission receipt" false (List.mem admission headers);
       let json = Yojson.Safe.from_string body in
       let expected = match Server_skill_physical_turn.project_string ~config receiving with
         | Ok json -> json | Error detail -> fail detail in
@@ -272,6 +279,24 @@ let test_physical_skill_turn_evidence () =
         (observed |> member "async_result_deliveries" |> to_list |> List.length);
       check int "keeps all physical action links" 3
         (observed |> member "async_actions" |> to_list |> List.length);
+      let code, headers, body = request_with_headers ~token:player ~meth:`GET client
+        (target ~workspace:matching receiving) in
+      check int "matching workspace serves physical evidence" 200 code;
+      check bool "matching workspace is attested" true (List.mem admission headers);
+      check bool "workspace binding preserves the scoped evidence" true
+        (Yojson.Safe.equal json (Yojson.Safe.from_string body));
+      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client
+        (target ~workspace:foreign receiving) in
+      check int "foreign workspace is refused before projection" 409 code;
+      check bool "foreign workspace is not attested" false (List.mem admission headers);
+      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client
+        (target ~workspace:[ "expected_base_path", [ base ] ] receiving) in
+      check int "partial workspace binding is refused" 400 code;
+      check bool "partial workspace is not attested" false (List.mem admission headers);
+      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client
+        (target ~workspace:matching "trace#0") in
+      check int "matched workspace still rejects an invalid physical turn" 400 code;
+      check bool "matched workspace remains attested on owner rejection" true (List.mem admission headers);
       let code, body = request ~token:player ~meth:`GET client (target "new-physical-trace#74") in
       check int "adjacent physical turn remains readable" 200 code;
       check int "adjacent turn does not borrow the original's evidence" 0

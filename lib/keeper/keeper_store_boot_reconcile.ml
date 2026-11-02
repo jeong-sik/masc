@@ -1,4 +1,5 @@
 module D = Keeper_durable_store
+module M = Keeper_memory_os_current
 
 let store_to_string : D.Refusing.t -> string = function
   | D.Refusing.Keeper_meta -> "keeper_meta"
@@ -13,6 +14,7 @@ type undecodable =
   ; keeper : string
   ; path : string
   ; rejection : string
+  ; memory_snapshot_sha256 : string option
   }
 
 type discovery_failure =
@@ -71,33 +73,59 @@ let examine_keeper_meta (config : Workspace.config) examination =
              | Keeper_meta_store.Not_current rejection ) ->
            { examination with
              undecodable =
-               { store = D.Refusing.Keeper_meta; keeper; path; rejection } :: examination.undecodable
+               { store = D.Refusing.Keeper_meta; keeper; path; rejection;
+                 memory_snapshot_sha256 = None } :: examination.undecodable
            })
       examination
       names
+;;
+
+let snapshot_entry_exists ~keepers_dir ~path =
+  try
+    match Unix.lstat path with
+    | _ -> Ok true
+    | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
+      (match Unix.stat keepers_dir with
+       | stat when stat.Unix.st_kind=Unix.S_DIR -> Ok false
+       | _ -> Error (keepers_dir ^ ": not a directory"))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Printexc.to_string exn)
 ;;
 
 let examine_memory_current (config : Workspace.config) examination =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
   in
-  List.fold_left
+  match M.list_preflight_keeper_ids ~keepers_dir with
+  | Error rejection ->
+    { examination with discovery_failures =
+        {store=D.Refusing.Memory_current;path=keepers_dir;rejection} :: examination.discovery_failures }
+  | Ok keepers -> List.fold_left
     (fun examination keeper ->
-       match
-         Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper
-       with
-       | Ok None -> examination
-       | Ok (Some _) -> { examination with readable = examination.readable + 1 }
-       | Error rejection ->
-         let path =
-           Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper
-         in
-         { examination with
-           undecodable =
-             { store = D.Refusing.Memory_current; keeper; path; rejection } :: examination.undecodable
-         })
+       let path = M.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper in
+       match snapshot_entry_exists ~keepers_dir ~path with
+       | Error error ->
+         { examination with unreadable =
+             {store=D.Refusing.Memory_current;keeper;path;error} :: examination.unreadable }
+       | Ok false -> examination
+       | Ok true ->
+         (match M.inspect_for_boot ~keepers_dir ~keeper_id:keeper with
+          | M.Boot_absent -> examination
+          | M.Boot_readable -> { examination with readable = examination.readable + 1 }
+          | M.Boot_undecodable {rejection; snapshot_sha256} ->
+            { examination with
+              undecodable =
+                { store = D.Refusing.Memory_current; keeper; path; rejection;
+                  memory_snapshot_sha256 = Some snapshot_sha256 } :: examination.undecodable
+            }
+          | M.Boot_unreadable {detail} ->
+            { examination with
+              unreadable =
+                { store = D.Refusing.Memory_current; keeper; path; error = detail } :: examination.unreadable
+            }))
     examination
-    (Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir)
+    keepers
 ;;
 
 (* The traversal is the store's own, shared with the deploy preflight. A
@@ -141,6 +169,7 @@ let examine_official_client_session (config : Workspace.config) examination =
                ; keeper = binding.keeper_name
                ; path = binding.path
                ; rejection
+               ; memory_snapshot_sha256 = None
                }
                :: examination.undecodable
            })
@@ -169,7 +198,8 @@ let record_event_queue_failure ~keeper failure examination =
   | Start_quarantine | Resume_quarantine ->
     { examination with
       undecodable =
-        { store = D.Refusing.Event_queue; keeper; path; rejection = detail }
+        { store = D.Refusing.Event_queue; keeper; path; rejection = detail;
+          memory_snapshot_sha256 = None }
         :: examination.undecodable
     }
 ;;
@@ -249,6 +279,36 @@ let examine config =
   }
 ;;
 
+let recover_memory_publications_with ~recover (config : Workspace.config) =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  match M.list_preflight_keeper_ids ~keepers_dir with
+  | Error rejection -> [Discovery_failed {store=D.Refusing.Memory_current;path=keepers_dir;rejection}]
+  | Ok keepers ->
+    List.filter_map (fun keeper ->
+      let path = M.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper in
+      let recovered =
+        try
+          match snapshot_entry_exists ~keepers_dir ~path with
+          | Error _ as error -> error
+          | Ok true -> recover ~keepers_dir ~keeper_id:keeper
+          | Ok false ->
+            (* A first receipt with no snapshot was outside the old boot
+               recovery scope and remains the publication owner's work. *)
+            Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | (File_lock_eio.Flock_timeout _ | Unix.Unix_error _ | Sys_error _) as exn ->
+          Error (Printexc.to_string exn) in
+      match recovered with
+      | Ok () -> None
+      | Error error -> Some (Unreadable {store=D.Refusing.Memory_current;keeper;path;error})) keepers
+;;
+
+let recover_memory_publications config =
+  recover_memory_publications_with ~recover:M.recover_publication config
+;;
+
 let admit ~accept_quarantine examination =
   let discovery = List.map (fun failure -> Discovery_failed failure) examination.discovery_failures in
   let unreadable = List.map (fun failure -> Unreadable failure) examination.unreadable in
@@ -257,6 +317,28 @@ let admit ~accept_quarantine examination =
   | [], [], (true | false) | [], _ :: _, true -> Ok examination
   | [], _ :: _, false -> Error undecodable
   | (_ :: _ as mandatory), _, (true | false) -> Error (mandatory @ undecodable)
+;;
+
+let admit_after_recovery ~recovery_refusals ~accept_quarantine examination =
+  let admitted = admit ~accept_quarantine examination in
+  match recovery_refusals, admitted with
+  | [], result -> result
+  | _ :: _, Ok admitted ->
+    let undecodable = List.map (fun row -> Undecodable row) admitted.undecodable in
+    Error (recovery_refusals @ undecodable)
+  | _ :: _, Error refusals ->
+    let duplicated = function
+      | Unreadable failure ->
+        List.exists (function
+          | Unreadable original ->
+            original.store=failure.store && original.keeper=failure.keeper && original.path=failure.path
+          | Undecodable _ | Discovery_failed _ | Quarantine_failed _ -> false) recovery_refusals
+      | Discovery_failed failure ->
+        List.exists (function
+          | Discovery_failed original -> original.store=failure.store && original.path=failure.path
+          | Undecodable _ | Unreadable _ | Quarantine_failed _ -> false) recovery_refusals
+      | Undecodable _ | Quarantine_failed _ -> false in
+    Error (recovery_refusals @ List.filter (fun refusal -> not (duplicated refusal)) refusals)
 ;;
 
 let refusal_to_string undecodable =
@@ -345,13 +427,17 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
      | exception exn ->
        Error (Printexc.to_string exn ^ " (rejected: " ^ u.rejection ^ ")"))
   | D.Refusing.Memory_current ->
-    Keeper_memory_os_current.move_aside_for_keepers_dir
-      ~keepers_dir
-      ~keeper_id:u.keeper
-      ~now
-      ~rejection:u.rejection
-      ()
-    |> Result.map (fun rejected_path -> u.path, rejected_path, None)
+    (match u.memory_snapshot_sha256 with
+     | None -> Error "rejected snapshot has no observed digest; quarantine refused"
+     | Some expected_snapshot_sha256 ->
+       Keeper_memory_os_current.move_aside_for_keepers_dir
+         ~keepers_dir
+         ~keeper_id:u.keeper
+         ~now
+         ~rejection:u.rejection
+         ~expected_snapshot_sha256
+         ()
+       |> Result.map (fun rejected_path -> u.path, rejected_path, None))
   | D.Refusing.Official_client_session ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     Keeper_official_client_session_store.move_aside
@@ -436,5 +522,6 @@ let summary report =
 ;;
 
 module For_testing = struct
+  let recover_memory_publications_with = recover_memory_publications_with
   let record_event_queue_failure = record_event_queue_failure
 end

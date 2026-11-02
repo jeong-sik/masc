@@ -49,6 +49,7 @@ type undecodable =
   ; keeper : string
   ; path : string
   ; rejection : string
+  ; memory_snapshot_sha256 : string option
   }
 
 type discovery_failure =
@@ -80,8 +81,8 @@ type examination =
 val examine : Workspace.config -> examination
 (** Decode every file of each [Refuse_boot] store with this build, and read
     the [Degrade_typed] store once. [Preflight_only] stores are not read.
-    No file is created, renamed or written, so calling it twice gives the
-    same answer. Keeper metadata and official-client session I/O failures
+    No file is created, renamed or written; concurrent changes can still
+    change a later answer. Keeper metadata, Memory and official-client session I/O failures
     are [unreadable], as are event-queue operational read, owner, coherence,
     missing-state and cleanup failures. Invalid JSON or rejected content is
     [undecodable]; an observed queue quarantine journal also remains there
@@ -94,6 +95,13 @@ val examine : Workspace.config -> examination
     it. Every call logs that line again, so boot calls [examine] once and
     the line count equals the boot count (RFC-0444 criterion 3). *)
 
+val recover_memory_publications : Workspace.config -> refusal list
+(** The explicit boot recovery stage for the existing snapshot-owner scope.
+    A receipt-only first publication remains outside this boot recovery and
+    examination scope. Recovery failures and an unreadable inventory are mandatory refusals,
+    including when the quarantine flag is set. Success does not itself
+    authorize quarantine. *)
+
 val admit
   :  accept_quarantine:bool
   -> examination
@@ -103,6 +111,12 @@ val admit
     refuse boot, including when quarantine was accepted.
     [Error] names every store boot refuses to move;
     the files stay where they are. *)
+
+val admit_after_recovery :
+  recovery_refusals:refusal list -> accept_quarantine:bool -> examination ->
+  (examination, refusal list) result
+(** Preserve recovery failures as mandatory refusals even if a later read sees
+    a readable snapshot or a receipt disappeared after an uncertain unlink. *)
 
 val refusal_to_string : refusal list -> string
 (** The boot refusal: one line per store (kind, keeper, path, rejection) and
@@ -146,6 +160,9 @@ val summary : report -> string
 (** One line for the boot log. *)
 
 module For_testing : sig
+  val recover_memory_publications_with :
+    recover:(keepers_dir:string -> keeper_id:string -> (unit, string) result) ->
+    Workspace.config -> refusal list
   val record_event_queue_failure :
     keeper:string -> Keeper_event_queue_persistence.read_only_failure ->
     examination -> examination

@@ -48,9 +48,16 @@ val of_history :
 val latest : row -> sample option
 (** Most recent report in the answered window, not the answer's generation time. *)
 
+val dated_samples : t -> row -> (Unix.tm * sample option) list
+(** The row's samples paired with their UTC days, oldest first. *)
+
+val compact : width:int -> row -> bool
+(** Whether the plot uses its compact daily-level representation. *)
+
 val plot : width:int -> t -> row -> string list
-(** A five-row braille line plot over the fixed 0–100% scale, with UTC day
-    labels. Each cell draws a 2x4 dot matrix, so the scale has twenty
+(** A compact daily-level strip when the width cannot fit a full plot;
+    otherwise a five-row braille line plot over the fixed 0–100% scale, with
+    UTC day labels. Each cell draws a 2x4 dot matrix, so the scale has twenty
     dot-levels. Consecutive reported days are joined; a missing report, an
     empty report and an uncapped amount break the line and keep their
     baseline marks, so a gap is never interpolated. Reported zero draws the

@@ -140,10 +140,24 @@ let test_tool_choice_none () =
 
 let test_response_format_json () =
   let schema = `Assoc [ "type", `String "object" ] in
+  let annotated = `Assoc [ "type", `String "object"; "name", `String "annotation"
+                        ; "schema", `Assoc [ "type", `String "string" ] ] in
+  let named strict description =
+    Types.Named_schema { name = "answer"; schema; strict; description }
+  in
+  let named_format strict description =
+    let value = named strict description in
+    Types.JsonSchema value,
+    `Assoc [ "type", `String "named_json_schema"; "schema", Types.json_schema_to_json value ]
+  in
   let cases =
     [ Types.Off, `Assoc [ "type", `String "off" ]
     ; Types.JsonMode, `Assoc [ "type", `String "json_mode" ]
-    ; Types.JsonSchema schema, `Assoc [ "type", `String "json_schema"; "schema", schema ]
+    ; Types.JsonSchema (Types.Raw_schema schema), `Assoc [ "type", `String "raw_json_schema"; "schema", schema ]
+    ; Types.JsonSchema (Types.Raw_schema annotated),
+      `Assoc [ "type", `String "raw_json_schema"; "schema", annotated ]
+    ; named_format None None
+    ; named_format (Some true) (Some "Explicit named output")
     ]
   in
   List.iter
@@ -151,7 +165,9 @@ let test_response_format_json () =
        Alcotest.(check string)
          "response_format json"
          (Yojson.Safe.to_string expected)
-         (Types.response_format_to_json format |> Yojson.Safe.to_string))
+         (Types.response_format_to_json format |> Yojson.Safe.to_string);
+       Alcotest.(check bool) "response_format authority survives JSON roundtrip" true
+         (Types.response_format_of_json expected = Ok format))
     cases;
   Alcotest.(check bool)
     "boolean compatibility shape rejected"
@@ -160,7 +176,15 @@ let test_response_format_json () =
   Alcotest.(check bool)
     "null compatibility shape rejected"
     true
-    (Result.is_error (Types.response_format_of_json `Null))
+    (Result.is_error (Types.response_format_of_json `Null));
+  let invalid_named = `Assoc [ "type", `String "named_json_schema"
+    ; "schema", `Assoc [ "name", `String "answer"; "schema", schema
+                        ; "strict", `String "true" ] ] in
+  Alcotest.(check bool) "invalid named strict is not silently omitted" true
+    (Result.is_error (Types.response_format_of_json invalid_named));
+  Alcotest.(check bool) "ambiguous saved schema carrier is rejected" true
+    (Result.is_error (Types.response_format_of_json
+      (`Assoc [ "type", `String "json_schema"; "schema", annotated ])))
 ;;
 
 let test_add_usage () =

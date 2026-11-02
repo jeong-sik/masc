@@ -471,7 +471,7 @@ let test_output_schema () =
       ; "required", `List [ `String "answer" ]
       ]
   in
-  let config = gemini_config ~response_format:(Types.JsonSchema schema) () in
+  let config = gemini_config ~response_format:(Types.JsonSchema (Types.Raw_schema schema)) () in
   let messages = [ Types.user_msg "Return structured JSON." ] in
   let body = Backend_gemini.build_request ~config ~messages () in
   let json = parse_body body in

@@ -146,14 +146,13 @@ let structured_schema_of_config (config : Provider_config.t) =
   | JsonMode | Off -> None
 ;;
 
-let openai_json_schema_payload (schema : Yojson.Safe.t) : Yojson.Safe.t =
+let openai_json_schema_payload (schema : Types.json_schema) : Yojson.Safe.t =
   match schema with
-  | `Assoc fields when List.mem_assoc "name" fields && List.mem_assoc "schema" fields ->
-    schema
-  | _ ->
+  | Types.Named_schema _ -> Types.json_schema_to_json schema
+  | Types.Raw_schema domain_schema ->
     `Assoc
-      [ "name", `String (Provider_config.structured_output_name_of_schema schema)
-      ; "schema", schema
+      [ "name", `String (Provider_config.structured_output_name_of_schema domain_schema)
+      ; "schema", domain_schema
       ; "strict", `Bool true
       ]
 ;;
@@ -190,12 +189,7 @@ let response_format_of_config (config : Provider_config.t) =
      | Capabilities.Openai_json_schema ->
        response_format_to_openai_json (Types.JsonSchema schema)
      | Capabilities.Json_object_schema ->
-       let schema =
-         match schema with
-         | `Assoc fields when List.mem_assoc "name" fields && List.mem_assoc "schema" fields ->
-           List.assoc "schema" fields
-         | _ -> schema
-       in
+       let schema = Types.json_schema_domain schema in
        Some (`Assoc [ "type", `String "json_object"; "schema", schema ]))
   | None when config.response_format = JsonMode ->
     response_format_to_openai_json Types.JsonMode

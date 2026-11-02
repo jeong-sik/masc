@@ -81,7 +81,7 @@ let config
        unchanged, and [disable_parallel_tool_use] still nests in the object. *)
     ~tool_choice:Auto
     ~disable_parallel_tool_use:true
-    ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+    ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
     ?max_concurrent_requests
     ?model_capabilities_override
     ()

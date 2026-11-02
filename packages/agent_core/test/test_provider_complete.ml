@@ -238,7 +238,7 @@ let test_anthropic_output_schema () =
       ~kind:Anthropic
       ~model_id:"claude-sonnet-5"
       ~base_url:""
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       ()
   in
   let body = BA.build_request ~config ~messages:[ user_msg "hi" ] () in
@@ -264,7 +264,7 @@ let test_anthropic_json_schema_response_format () =
   in
   let config =
     { (PC.make ~kind:Anthropic ~model_id:"claude-sonnet-5" ~base_url:"" ()) with
-      response_format = JsonSchema schema
+      response_format = JsonSchema (Types.Raw_schema schema)
     }
   in
   let body = BA.build_request ~config ~messages:[ user_msg "hi" ] () in
@@ -617,7 +617,7 @@ let test_ollama_output_schema () =
       ~kind:Ollama
       ~model_id:"qwen3.5:9b"
       ~base_url:"http://localhost:11434"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       ()
   in
   let body = BOL.build_request ~config ~messages:[ user_msg "hi" ] () in
@@ -942,7 +942,7 @@ let test_openai_with_json_schema () =
       ~kind:OpenAI_compat
       ~model_id:"gpt-mini"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       ()
   in
   let body = BO.build_request ~config ~messages:[ user_msg "Return JSON." ] () in
@@ -981,7 +981,7 @@ let test_gemini_with_json_schema () =
       ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~api_key:"test-key"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       ()
   in
   let body = BGemini.build_request ~config ~messages:[ user_msg "Return JSON." ] () in
@@ -1730,7 +1730,7 @@ let test_complete_rejects_output_schema_for_glm () =
       ~kind:Glm
       ~model_id:"glm-5"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
-      ~response_format:(JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match
@@ -1759,7 +1759,7 @@ let test_complete_stream_rejects_output_schema_for_glm () =
       ~kind:Glm
       ~model_id:"glm-5"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
-      ~response_format:(JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match

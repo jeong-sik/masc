@@ -774,7 +774,8 @@ let build_request_artifact
   let text_response_format =
     match config.response_format with
     | Types.JsonSchema schema ->
-      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"; "schema", schema ])
+      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"
+                  ; "schema", Types.json_schema_domain schema ])
     | Types.JsonMode -> Some (`Assoc [ "mimeType", `String "APPLICATION_JSON" ])
     | Types.Off -> None
   in

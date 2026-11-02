@@ -322,7 +322,7 @@ let validate_thinking_controls wire (config : Provider_config.t) =
 let output_config_for_config _mode (config : Provider_config.t) =
   let output_format =
     match config.response_format with
-    | JsonSchema schema -> Some schema
+    | JsonSchema schema -> Some (Types.json_schema_domain schema)
     | JsonMode | Off -> None
   in
   let fields =

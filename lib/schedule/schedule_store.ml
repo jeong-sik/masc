@@ -564,6 +564,57 @@ let write_state config state =
   Ok ()
 ;;
 
+let change_observer : (base_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ -> ())
+
+let install_change_observer observer = Atomic.set change_observer observer
+
+let notify_change_observer config =
+  let base_path = config.Workspace_utils.base_path in
+  let report exn =
+    Log.Misc.warn "schedule_store: change observer failed for %s: %s"
+      base_path (Printexc.to_string exn)
+  in
+  match (Atomic.get change_observer) ~base_path with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    (match Fs_compat.execution_context () with
+     | Eio_fiber -> Eio.Fiber.check ()
+     | Non_eio -> ());
+    report exn
+  | exception exn -> report exn
+;;
+
+(* A publication can fail after landing. Remember an attempted write under the
+   lock, but notify only after releasing it: an observer may re-read the
+   ledger. A no-op runner tick and a rejected mutation do not notify. *)
+let with_observed_mutation config f =
+  let attempted = ref false in
+  let observed_write config state =
+    attempted := true;
+    write_state config state
+  in
+  let result =
+    try
+      Ok (Workspace_utils.with_file_lock config (schedules_path config)
+            (fun () -> f observed_write))
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  match result with
+  | Ok value ->
+    if !attempted then notify_change_observer config;
+    value
+  | Error (exn, backtrace) ->
+    if !attempted then (
+      match notify_change_observer config with
+      | () -> ()
+      | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+        (match exn with
+         | Eio.Cancel.Cancelled _ -> ()
+         | _ -> raise cancelled));
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 (* Terminal wake records are history, not state: the runner never reads a
    finished wake back, only [update_latest_running_wake] touches one, and it
    looks for a [Wake_running] row. Kept unbounded they grew to 6,534 records /
@@ -912,7 +963,7 @@ let note_count_per_schedule state schedule_id =
 ;;
 
 let append_note config ~schedule_id ~author_id ~author_kind ~body ~now =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
@@ -1049,7 +1100,7 @@ let interval_fires_as_declared ~runner_tick_sec (request : schedule_request) =
 ;;
 
 let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_request) =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     match find_schedule state ~schedule_id:request.schedule_id with
     | Some _ -> Error Schedule_already_exists
@@ -1113,7 +1164,7 @@ let authorize_mutation authority ~(current : schedule_request) ~target =
 
 let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Replace_timing)
     (request : Schedule_domain.schedule_request) =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     match find_schedule state ~schedule_id:request.schedule_id with
     | None -> Error Schedule_not_found
@@ -1163,7 +1214,7 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
    row active; the withdrawn occurrence stays cancelled in the queue, with the
    queue's own cancellation receipt, and the next occurrence fires as due. *)
 let cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued_wakes =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
@@ -1274,7 +1325,7 @@ let oldest_last_written state =
 ;;
 
 let refresh_due config ~now ~retention_days =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let schedules_rev, changed =
       List.fold_left
@@ -1322,7 +1373,7 @@ let refresh_due config ~now ~retention_days =
 
 let reschedule_due_recurring config ~now ~schedule_ids =
   let target_ids = Schedule_id_set.of_list schedule_ids in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let schedules_rev, changed =
       List.fold_left
@@ -1396,7 +1447,7 @@ let start_due_candidate ?started_at config ~now ~(candidate : schedule_request) 
      tick time reports that delay as zero. *)
   let started_at = Option.value started_at ~default:now in
   let schedule_id = candidate.schedule_id in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_authoritative config ~schedule_id in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
@@ -1470,7 +1521,7 @@ let terminal_evidence_valid (wake : wake_record) =
 
 let settle_running config ~now ~finished_at ~(attempt : running_attempt) verdict =
   let schedule_id = attempt.original.schedule_id in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* scope = attempt_scope config ~schedule_id in
     let* () = if same_scope scope attempt.scope then Ok ()
       else attempt_unavailable schedule_id "workspace or backend changed" in
@@ -1531,7 +1582,7 @@ let accept_running ?finished_at config ~now ~attempt ?detail () =
 ;;
 
 let cancel_matching config ~should_cancel =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let rec cancel schedules changed = function
       | [] -> Ok (List.rev schedules, changed)
@@ -1591,7 +1642,7 @@ let retry_running ?finished_at config ~now ~attempt ~reason =
 
 let recover_running_on_startup config ~now =
   let reason = Interrupted_by_process_restart in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let rec recover schedules_rev wakes recovered = function
       | [] -> Ok (List.rev schedules_rev, wakes, recovered)
@@ -1632,7 +1683,7 @@ let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request)
      starts and ends at the same instant: [attempted_at] (default [now]). *)
   let attempted_at = Option.value attempted_at ~default:now in
   let schedule_id = candidate.schedule_id in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_authoritative config ~schedule_id in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
@@ -1657,7 +1708,7 @@ let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request)
 ;;
 
 let prune_completed config =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let before_count = List.length state.schedules in
     let schedules =
@@ -1682,9 +1733,12 @@ let prune_completed config =
            Schedule_id_set.mem wake.schedule_id remaining_ids)
         state.wakes
     in
-    let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-    let* () = write_state config next_state in
-    Ok (next_state, pruned_count))
+    if pruned_count = 0 && List.length wakes = List.length state.wakes then
+      Ok (state, 0)
+    else
+      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
+      let* () = write_state config next_state in
+      Ok (next_state, pruned_count))
 ;;
 
 let due_wake_candidates state =

@@ -3,9 +3,81 @@ module Types = Masc_tui_types
 module Decode = Masc.Tui_decode
 module Layout = Masc_tui_message_layout
 module Render_metrics = Masc_tui_render_metrics
+module Render_prim = Masc_tui_render_prim
 
 let make_state () =
   Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+;;
+
+let test_compact_connection_priority () =
+  let module P = Types.Http_refresh_progress in
+  let state = make_state () in
+  state.connection_status <- Types.Connected;
+  state.workspace_identity <- Types.Workspace_identity_match;
+  let expect description expected =
+    check bool description true (Render_prim.compact_connection_state state = expected) in
+  let make_progress outcome =
+    P.start ~started_ns:1L
+    |> fun progress -> P.observe progress (Started (Overview, 1L))
+    |> fun progress -> P.observe progress (Completed (Overview, 2L, outcome))
+    |> P.finish ~finished_ns:3L in
+  let set progress = state.http_refresh_progress <- Some (state.workspace_authority, progress) in
+  expect "a connected HTTP observation remains distinct" (Compact_http Connected);
+  set (P.start ~started_ns:1L);
+  expect "an active read is not summarized as settled" Compact_reading;
+  set (make_progress Failed);
+  expect "a failed read takes priority over HTTP connectivity" Compact_read_failed;
+  set (make_progress (Composed (Runtime_parts { catalogue=Part_received; usage=Part_failed })));
+  expect "a partial read remains distinct from complete failure" Compact_read_partial;
+  state.connection_status <- Disconnected;
+  expect "HTTP failure is not weakened by a partial read" (Compact_http Disconnected);
+  state.connection_status <- Connected;
+  set (make_progress Interrupted);
+  expect "an interrupted read is not reported as complete" Compact_read_interrupted;
+  let pending_failure = P.start ~started_ns:1L
+    |> fun progress -> P.observe progress (Started (Surface_data Runtime_quota, 1L))
+    |> fun progress -> P.observe progress (Component_started (Provider_windows, 1L))
+    |> fun progress -> P.observe progress (Component_completed (Provider_windows, 2L,
+         Component_returned Part_failed)) in
+  set pending_failure;
+  expect "a failed component is noticed before the parent settles" Compact_read_failed;
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "unread";
+  expect "unconfirmed workspace takes priority" Compact_workspace_unconfirmed;
+  state.workspace_identity <- Workspace_identity_unread;
+  state.connection_status <- Degraded;
+  expect "a partial HTTP read does not hide an unread workspace" Compact_workspace_unread;
+  state.connection_status <- Disconnected;
+  state.http_refresh_progress <- None;
+  expect "before any workspace read, a failed HTTP refresh remains visible"
+    (Compact_http Disconnected);
+  state.connection_status <- Connected;
+  state.workspace_identity <- Workspace_identity_mismatch
+      { local_base_path="/local"; server_base_path="/other" };
+  expect "a workspace mismatch takes priority" Compact_workspace_mismatch;
+  state.workspace_identity <- Workspace_identity_match;
+  state.http_refresh_progress <- Some (Workspace_authority 99, make_progress Failed);
+  expect "another workspace's failure is not promoted" (Compact_http Connected)
+;;
+
+let test_metrics_scroll_tracks_card_reflow () =
+  let rebase scroll previous_cards current_cards =
+    Render_metrics.rebase_scroll_for_cards ~scroll ~previous_cards ~current_cards in
+  check int "a reading keeps its place when cards join the scroll" 17 (rebase 12 (Some 0) 5);
+  check int "a reading keeps its place when cards become fixed" 12 (rebase 17 (Some 5) 0);
+  check int "the beginning remains the beginning" 0 (rebase 0 (Some 0) 5);
+  check int "input before the first frame belongs to the new list" 1 (rebase 1 None 5);
+  check int "End remains a sentinel until the frame clamps it"
+    Types.clamped_scroll_end (rebase Types.clamped_scroll_end (Some 0) 5);
+  let state = make_state () in
+  Types.apply_clamped_scroll state
+    (Metrics_scroll { scroll = 17; content_height = 4; card_rows = Some 5 });
+  check int "the reported scroll is retained" 17 state.metrics_scroll;
+  check int "the reported content height is retained" 4 state.metrics_content_height;
+  check (option int) "the card prefix is retained for the next frame"
+    (Some 5) state.metrics_scroll_card_rows;
+  Types.reset_metrics_scroll state;
+  check int "a new list has no stale page height" 0 state.metrics_content_height;
+  check (option int) "a new list has no previous card prefix" None state.metrics_scroll_card_rows
 ;;
 
 let make_keeper ?(paused = false) name : Decode.keeper =
@@ -208,8 +280,8 @@ let test_scheduler_sample_availability () =
       state.metrics_section <- Types.Section_fleet;
       let lines = ref [] in
       let push line = lines := line :: !lines in
-      Render_metrics.render_metrics_body ~cols:200 ~budget:40 state
-        ~report_scroll:(fun _ -> ())
+      Render_metrics.render_metrics_body ~cols:200 ~budget:40 ~suffix_lines:[] state
+        ~report_scroll:(fun _ _ _ -> ())
         ~push ~push_styled:(fun ~style:_ line -> push line)
         ~push_selected:push ~push_divider:(fun () -> ())
         ~push_empty:(fun () -> ());
@@ -513,7 +585,13 @@ let test_the_fleet_section_escapes_the_probe_word () =
 
 let () =
   run "tui_render_metrics"
-    [ ( "kpis"
+    [ ( "connection"
+      , [ test_case "compact state preserves workspace and read failures" `Quick
+            test_compact_connection_priority ] )
+    ; ( "scroll"
+      , [ test_case "card reflow preserves the reading position" `Quick
+            test_metrics_scroll_tracks_card_reflow ] )
+    ; ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "a declared keeper is not counted as paused" `Quick

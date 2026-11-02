@@ -148,7 +148,10 @@ let clamped_scroll_now (state : state) = function
   | Repository_changes_diff_scroll _ ->
       Repository_changes_diff_scroll state.repository_changes_diff_scroll
   | Resource_scroll _ -> Resource_scroll state.resource_scroll
-  | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
+  | Metrics_scroll _ ->
+      Metrics_scroll { scroll = state.metrics_scroll;
+                       content_height = state.metrics_content_height;
+                       card_rows = state.metrics_scroll_card_rows }
   | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
   | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
@@ -199,7 +202,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
   | Repository_changes_diff_scroll value ->
       Some (Repository_changes_diff_scroll (step value))
-  | Metrics_scroll value -> Some (Metrics_scroll (step value))
+  | Metrics_scroll { scroll; content_height; card_rows } ->
+      Some (Metrics_scroll { scroll = step scroll; content_height; card_rows })
   | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
   | Patch_modal_scroll (vertical, horizontal) ->
       Some (Patch_modal_scroll (step vertical, horizontal))
@@ -1626,17 +1630,18 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
-let connection_status_badge (status : Masc_tui_types.connection_status) =
+let connection_status_parts (status : Masc_tui_types.connection_status) =
   (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
      can fail while the independent Recent event feed remains live. *)
-  let style, label =
-    match status with
-    | Connected -> Theme.ok (), "connected"
-    | Degraded -> Theme.warn (), "partial"
-    | Connecting -> Theme.warn (), "loading..."
-    | Booting -> Theme.warn (), "server booting..."
-    | Disconnected -> Theme.bad (), "refresh failed"
-  in
+  match status with
+  | Connected -> Theme.ok (), "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
+  | Degraded -> Theme.warn (), "partial", ["HTTP partial", false; "partial", true]
+  | Connecting -> Theme.warn (), "loading...", ["HTTP loading", false; "loading", true]
+  | Booting -> Theme.warn (), "server booting...", ["server booting", false; "booting", true]
+  | Disconnected -> Theme.bad (), "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
+
+let connection_status_badge status =
+  let style, label, _ = connection_status_parts status in
   "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
 
 ;;
@@ -1712,6 +1717,95 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
   connection ^ refresh_progress_badge state
+
+type compact_connection_state =
+  | Compact_workspace_mismatch
+  | Compact_workspace_unconfirmed
+  | Compact_workspace_unread
+  | Compact_read_failed
+  | Compact_read_partial
+  | Compact_read_interrupted
+  | Compact_read_unfinished
+  | Compact_reading
+  | Compact_http of connection_status
+
+let compact_connection_state (state : state) =
+  let progress = match state.http_refresh_progress with
+    | Some (authority, progress) when authority = state.workspace_authority -> Some progress
+    | Some _ | None -> None in
+  let failed, partial, interrupted, unfinished, in_flight =
+    match progress with
+    | None -> false, false, false, false, false
+    | Some progress ->
+        let counts = Http_refresh_progress.counts progress in
+        let failed, interrupted, unfinished =
+          Http_refresh_progress.unreturned_component_reads progress
+          |> List.fold_left (fun (failed, interrupted, unfinished) reading ->
+               match reading.Http_refresh_progress.cr_status with
+               | Component_pending | Component_settled (_, Component_returned Part_received) ->
+                   failed, interrupted, unfinished
+               | Component_settled (_, (Component_returned Part_failed | Component_exception)) ->
+                   true, interrupted, unfinished
+               | Component_settled (_, Component_interrupted) -> failed, true, unfinished
+               | Component_settled (_, Component_unfinished) -> failed, interrupted, true)
+               (false, false, false) in
+        failed || counts.failed > 0, counts.partial > 0,
+        interrupted || counts.interrupted > 0, unfinished,
+        (match progress.phase with In_flight -> true | Finished _ -> false) in
+  let scoped_reading = state.workspace_identity = Workspace_identity_match
+    && Surface_read_order.pending_scoped
+         ~needs:(surface_needs_of_surface state.view) state.http_surface_reads <> [] in
+  match state.workspace_identity with
+  | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
+  | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
+  | Workspace_identity_unread when state.connection_status = Connected
+                                   || state.connection_status = Degraded ->
+      Compact_workspace_unread
+  | Workspace_identity_unread | Workspace_identity_match ->
+      if state.connection_status = Disconnected then Compact_http Disconnected
+      else if failed then Compact_read_failed
+      else if partial then Compact_read_partial
+      else if interrupted then Compact_read_interrupted
+      else if unfinished then Compact_read_unfinished
+      else match state.connection_status with
+        | Connected when in_flight || scoped_reading -> Compact_reading
+        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
+
+let usage_connection_badge (state : state) =
+  let badge = connection_badge state in
+  match state.workspace_identity, state.connection_status with
+  | Workspace_identity_unread, (Connected | Degraded) ->
+      badge ^ " " ^ Theme.warn () ^ "[workspace not observed]" ^ Ansi.reset
+  | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _), _
+  | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
+
+(* A narrow Usage title keeps a textual state visible while its longer
+   workspace and refresh details remain available in the scrolled body. *)
+let compact_connection_badge (state : state) ~width =
+  let choose options =
+    match List.find_opt (fun (label, _) -> Message_layout.display_width label <= width) options with
+    | Some choice -> choice
+    | None -> List.hd (List.rev options)
+  in
+  let style, options, needs_context =
+    match compact_connection_state state with
+    | Compact_workspace_mismatch -> Theme.bad (), ["WS mismatch", true; "mismatch", true], true
+    | Compact_workspace_unconfirmed -> Theme.warn (), ["WS unconfirmed", true; "unconfirmed", true], true
+    | Compact_workspace_unread -> Theme.warn (), ["WS unread", true; "unread", true], true
+    | Compact_read_failed -> Theme.bad (), ["read failed", true; "failed", true], true
+    | Compact_read_partial -> Theme.warn (), ["read partial", true; "partial", true], true
+    | Compact_read_interrupted -> Theme.warn (), ["read interrupted", true; "interrupted", true], true
+    | Compact_read_unfinished -> Theme.warn (), ["read unfinished", true; "unfinished", true], true
+    | Compact_reading -> Theme.warn (), ["reading data", true; "reading", true], true
+    | Compact_http status ->
+        let style, _, options = connection_status_parts status in
+        style, options, false in
+  let label, needs_full_status = choose options in
+  let details =
+    if needs_context || needs_full_status then usage_connection_badge state
+    else refresh_progress_badge state in
+  style ^ label ^ Ansi.reset, (if String.equal details "" then None else Some details)
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives

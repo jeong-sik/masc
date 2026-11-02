@@ -66,6 +66,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_phase_changed',
   'keeper_composite_changed',
   'keeper_chat_appended',
+  'keeper_memory_journal_appended',
   'keeper_chat_operation_event',
   'keeper_waiting_inventory_changed',
   'agent_core_telemetry_sample',

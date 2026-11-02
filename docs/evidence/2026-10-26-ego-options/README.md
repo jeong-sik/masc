@@ -2,10 +2,15 @@
 
 Captured on 2026-10-26 with installed Ego 0.6.1.11 and skill guide v2.1.0,
 in continuing owned Space **32**, Page `p1`, against owned local HTTP fixtures.
-The production workflow JavaScript SHA-256 is
+These historical receipts bind to the workflow JavaScript in frozen schema-fix
+candidate `c530c671ce160996d216af172896d3f15a6715eb`, SHA-256
 `788d22efc9cfab3d84faea133f7c6a0becde9097f768b1dbeaca17091c89f6b6`.
-The source is unchanged between the option implementation and frozen schema-fix
-candidate `c530c671ce160996d216af172896d3f15a6715eb`.
+The [merged #46118 source](https://github.com/jeong-sik/masc/blob/878cb8bc9eb297ad7cdbe2347d86cbc1be4bee29/lib/browser_ego_workflow.ml)
+and [merged #46131 source](https://github.com/jeong-sik/masc/blob/7e080a6be2f28299b7c4069e127b34216cbf6b85/lib/browser_ego_workflow.ml)
+instead have SHA-256 `e6d9aecf6d7ab645f4135b7ab2d63d0ace84f10cb80b54c8ae47c56b3403a8a5`.
+Those scripts add selector-press preflight, retain uncertainty for paste failures
+and remove synthetic mouse-up after failure. These receipts do not verify those
+changes or the current Host-verified native typing path.
 
 ## What executed
 

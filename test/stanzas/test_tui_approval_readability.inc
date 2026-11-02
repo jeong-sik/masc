@@ -1,4 +1,4 @@
 (test
  (name test_tui_approval_readability)
  (modules test_tui_approval_readability)
- (libraries alcotest masc_tui_approval_detail))
+ (libraries alcotest masc_tui_approval_detail masc_tui_message_layout yojson))

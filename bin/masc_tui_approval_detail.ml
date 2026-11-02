@@ -110,7 +110,26 @@ let split_escaped_cells ?source ~syntax ~max_cells text =
               let preceding = String.sub row 0 limit in
               let before, after = safe_cut row limit (Message_layout.display_width preceding) in
               (match before, rest with
-               | "", _ | _, [] -> None
+               | _, [] -> None
+               | "", next :: rest ->
+                 (* An earlier correction can leave an escape at the start
+                    of a short row, with its end beyond the following row.
+                    Gather through that end before deciding it cannot fit. *)
+                 let needed = end_ - offset in
+                 let rec complete parts length remaining =
+                   if length >= needed then
+                     let text = String.concat "" (List.rev parts) in
+                     let reshaped = Message_layout.split_cells ~max_cells text in
+                     (match reshaped with
+                      | first :: _ when String.length first >= needed ->
+                        reflow offset (reshaped @ remaining) spans finished
+                      | [] | _ :: _ -> None)
+                   else match remaining with
+                     | [] -> None
+                     | part :: rest ->
+                       complete (part :: parts) (length + String.length part) rest
+                 in
+                 complete [ next; row ] (String.length row + String.length next) rest
                | _, next :: rest ->
                  let reshaped = Message_layout.split_cells ~max_cells (after ^ next) in
                  reflow (offset + String.length before) (reshaped @ rest) spans

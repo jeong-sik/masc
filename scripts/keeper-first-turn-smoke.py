@@ -230,6 +230,40 @@ def file_sha256(path):
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
+def checkpoint_evidence_span(messages, fixture):
+    """Return the ordered call-to-final span in one decoded checkpoint."""
+    if not isinstance(messages, list):
+        raise SmokeError('checkpoint inspection has no message list')
+    stage, start = 0, None
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or not isinstance(message.get('content'), list):
+            raise SmokeError('checkpoint inspection has an invalid message')
+        blocks = [block for block in message['content'] if isinstance(block, dict)]
+        if stage == 0 and message.get('role') == 'assistant' and any(
+                block.get('type') == 'tool_use' and block.get('id') == fixture.call_id
+                and block.get('name') == fixture.tool_name for block in blocks):
+            stage, start = 1, index
+        elif stage == 1 and message.get('role') == 'tool' and any(
+                block.get('type') == 'tool_result' and block.get('tool_use_id') == fixture.call_id
+                and block.get('is_error') is False
+                and proof_from(block.get('text_content', block.get('content')), fixture.marker) == fixture.proof
+                for block in blocks):
+            stage = 2
+        elif stage == 2 and message.get('role') == 'assistant' and any(
+                block.get('type') == 'text' and block.get('text') == fixture.final for block in blocks):
+            return start, index
+    return None
+
+
+def require_checkpoint_resume(data, initial_trace, initial_evidence, resumed_evidence):
+    messages = data['checkpoint']['messages']
+    initial = checkpoint_evidence_span(messages, initial_evidence)
+    resumed = checkpoint_evidence_span(messages, resumed_evidence)
+    if (data['trace_id'] != initial_trace or initial is None or resumed is None
+            or initial[1] >= resumed[0]):
+        raise SmokeError('resumed checkpoint did not preserve the original turn on the same trace')
+
+
 def checkpoint_proof(base, fixture, timeout):
     # The same pinned executable that ran the Keeper loads the canonical head
     # with the production checkpoint codec and session lock. Its JSON is a
@@ -282,27 +316,8 @@ def checkpoint_proof(base, fixture, timeout):
     if (not path.is_absolute() or path.name != trace + '.json'
             or path.parent.name != trace or not path.resolve().is_relative_to(base.resolve())):
         raise SmokeError('checkpoint inspection has an invalid canonical path')
-    messages = checkpoint.get('messages')
-    if not isinstance(messages, list):
-        raise SmokeError('checkpoint inspection has no message list')
-    stage = 0
-    for message in messages:
-        if not isinstance(message, dict) or not isinstance(message.get('content'), list):
-            raise SmokeError('checkpoint inspection has an invalid message')
-        blocks = [block for block in message['content'] if isinstance(block, dict)]
-        if stage == 0 and message.get('role') == 'assistant' and any(
-                block.get('type') == 'tool_use' and block.get('id') == fixture.call_id
-                and block.get('name') == fixture.tool_name for block in blocks):
-            stage = 1
-        elif stage == 1 and message.get('role') == 'tool' and any(
-                block.get('type') == 'tool_result' and block.get('tool_use_id') == fixture.call_id
-                and block.get('is_error') is False
-                and proof_from(block.get('text_content', block.get('content')), fixture.marker) == fixture.proof
-                for block in blocks):
-            stage = 2
-        elif stage == 2 and message.get('role') == 'assistant' and any(
-                block.get('type') == 'text' and block.get('text') == fixture.final for block in blocks):
-            return path, data
+    if checkpoint_evidence_span(checkpoint.get('messages'), fixture) is not None:
+        return path, data
     return None
 
 

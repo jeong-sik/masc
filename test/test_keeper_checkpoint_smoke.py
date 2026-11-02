@@ -109,6 +109,23 @@ class CheckpointProofTest(unittest.TestCase):
         self.messages[2]['content'][0]['text'] = self.fixture.final
         self.assertIsNotNone(self.read())
 
+    def test_resume_keeps_the_first_turn_on_the_same_trace(self):
+        initial = copy.copy(self.fixture)
+        resumed = copy.copy(self.fixture)
+        resumed.call_id, resumed.final = 'resumed-call', 'resumed-final'
+        later = copy.deepcopy(self.messages)
+        later[0]['content'][0]['id'] = resumed.call_id
+        later[1]['content'][0]['tool_use_id'] = resumed.call_id
+        later[2]['content'][0]['text'] = resumed.final
+        data = copy.deepcopy(self.inspection)
+        data['checkpoint']['messages'].extend(later)
+        smoke.require_checkpoint_resume(data, 'trace', initial, resumed)
+        for bad in (dict(data, trace_id='another-trace'),
+                    dict(data, checkpoint=dict(data['checkpoint'], messages=later)),
+                    dict(data, checkpoint=dict(data['checkpoint'], messages=later + self.messages))):
+            with self.subTest(bad=bad), self.assertRaises(smoke.SmokeError):
+                smoke.require_checkpoint_resume(bad, 'trace', initial, resumed)
+
 
 def check_real_fixture(binary, root):
     base = Path(root)

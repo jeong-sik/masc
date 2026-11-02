@@ -7,6 +7,7 @@ log in to GitHub, delete endpoints, or modify production configuration.
 Keep output private: .workspace contains the isolated server's admin token.
 """
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -15,6 +16,7 @@ from pathlib import Path, PurePosixPath
 import shlex
 import socket
 import subprocess
+from types import SimpleNamespace
 import urllib.error
 import uuid
 
@@ -417,6 +419,11 @@ def run(args):
                 raise smoke.SmokeError('Keeper did not finish the requested file workflow')
             checkpoint, data = smoke.wait_until('canonical final SSH checkpoint',
                 lambda remaining: smoke.checkpoint_proof(base, fixture, remaining), server)
+            initial_trace = data['trace_id']
+            initial_reference = data['reference']
+            initial_evidence = SimpleNamespace(call_id=fixture.call_id, tool_name=fixture.tool_name,
+                                               marker=fixture.marker, proof=copy.deepcopy(fixture.proof),
+                                               final=fixture.final)
             (output / 'checkpoint.json').write_text(json.dumps(data['checkpoint'], indent=2))
             (output / 'checkpoint-inspection.json').write_text(json.dumps(data, indent=2))
             if args.exercise_pin_rotation:
@@ -493,6 +500,7 @@ def run(args):
                 lambda remaining: smoke.checkpoint_proof(base, fixture, remaining), server)
             (output / 'checkpoint-after-restart.json').write_text(json.dumps(data['checkpoint'], indent=2))
             (output / 'checkpoint-inspection-after-restart.json').write_text(json.dumps(data, indent=2))
+            smoke.require_checkpoint_resume(data, initial_trace, initial_evidence, fixture)
             after_restart = json.loads(ssh(args, reread_argv))
             if after_restart != after_stop:
                 raise smoke.SmokeError('endpoint bytes or declared initial hashes changed after restart/resume')
@@ -502,6 +510,7 @@ def run(args):
                 runtime_instances=[initial_instance, resumed_instance],
                 checkpoint_relative_path=str(checkpoint.relative_to(base)),
                 checkpoint_reference=data['reference'],
+                checkpoint_reference_before_restart=initial_reference,
                 actual_remote_cwd=actual['cwd'], model_projected_cwd=fixture.proof['cwd'],
                 claims=['actual Keeper Execute/Write/Read/Edit/Grep over SSH',
                         'endpoint bytes match tool results', 'canonical final checkpoint',

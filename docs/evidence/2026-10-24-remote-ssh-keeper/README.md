@@ -68,6 +68,8 @@ Keeper's canonical checkpoint and its referenced objects using the binary's
 checkpoint reader. Its JSON is a decoded projection and can contain conversation
 context and tool results. The proof saves it in the private output directory;
 review its contents before sharing any evidence.
+The reader takes the checkpoint session lock and can create the lock file or its
+parent directory. It does not change the checkpoint contents.
 
 ## Exact-source candidate: long paths and pin recovery
 

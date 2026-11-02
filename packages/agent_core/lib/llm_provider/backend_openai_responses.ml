@@ -391,8 +391,9 @@ let responses_json_schema_payload schema =
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
     `Assoc
       [ "type", `String "json_schema"
-      ; "name", `String (Provider_config.structured_output_name_of_schema schema)
-      ; "schema", schema
+      ; "name", `String (Provider_config.structured_output_name_of_schema
+                            (Types.json_schema_domain schema))
+      ; "schema", Types.json_schema_domain schema
       ; "strict", `Bool true
       ]
 ;;

@@ -103,7 +103,10 @@ let rec canonical_json = function
 ;;
 
 let canonical_response_format = function
-  | Types.JsonSchema schema -> Types.JsonSchema (canonical_json schema)
+  | Types.JsonSchema (Types.Raw_schema schema) ->
+    Types.JsonSchema (Types.Raw_schema (canonical_json schema))
+  | Types.JsonSchema (Types.Named_schema named) ->
+    Types.JsonSchema (Types.Named_schema { named with schema = canonical_json named.schema })
   | (Types.Off | Types.JsonMode) as response_format -> response_format
 ;;
 

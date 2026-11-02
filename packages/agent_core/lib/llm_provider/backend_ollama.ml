@@ -148,7 +148,7 @@ let build_request_artifact
   in
   let body =
     match config.response_format with
-    | Types.JsonSchema schema -> ("format", schema) :: body
+    | Types.JsonSchema schema -> ("format", Types.json_schema_domain schema) :: body
     | Types.JsonMode -> ("format", `String "json") :: body
     | Types.Off -> body
   in

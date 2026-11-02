@@ -1442,7 +1442,7 @@ let test_anthropic_output_config_merges_format_and_effort () =
     anthropic_config
       ~enable_thinking:true
       ~reasoning_effort:RE.Max
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       "claude-opus-5-5"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in

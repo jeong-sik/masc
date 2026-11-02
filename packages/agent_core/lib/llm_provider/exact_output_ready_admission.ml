@@ -193,13 +193,14 @@ let schema_for_wire (target : request_target) (Domain_schema domain_schema) =
   let codec = Provider_http_codec.of_config target.config in
   match Provider_http_codec.json_schema_wire
           ~chat_dialect:target.capabilities.Caps.json_schema_dialect codec with
-  | Provider_http_codec.Raw_schema -> domain_schema
+  | Provider_http_codec.Raw_schema -> Types.Raw_schema domain_schema
   | Provider_http_codec.Openai_named_schema ->
-    `Assoc
-      [ "name", `String (PC.structured_output_name_of_schema domain_schema)
-      ; "schema", domain_schema
-      ; "strict", `Bool true
-      ]
+    Types.Named_schema
+      { name = PC.structured_output_name_of_schema domain_schema
+      ; schema = domain_schema
+      ; strict = Some true
+      ; description = None
+      }
 ;;
 
 let response_format (target : request_target) requirement =
@@ -239,7 +240,7 @@ let response_format (target : request_target) requirement =
        Ok
          ( Types.JsonSchema wire_schema
          , Provider_schema_requested
-         , Some (fingerprint_schema wire_schema) )
+         , Some (fingerprint_schema (Types.json_schema_to_json wire_schema)) )
      | Caps.Json_object_only | Caps.No_structured_output ->
        Error Provider_schema_unavailable)
 ;;

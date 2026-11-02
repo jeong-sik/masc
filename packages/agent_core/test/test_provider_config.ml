@@ -206,7 +206,7 @@ let test_make_with_all_options () =
       ~clear_thinking:false
       ~tool_stream:true
       ~disable_parallel_tool_use:true
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ~cache_system_prompt:true
       ()
   in
@@ -227,7 +227,7 @@ let test_make_with_all_options () =
   check_bool
     "json schema mode"
     true
-    (cfg.response_format = Types.JsonSchema expected_schema);
+    (cfg.response_format = Types.JsonSchema (Types.Raw_schema expected_schema));
   check_bool "cache prompt" true cfg.cache_system_prompt
 ;;
 
@@ -266,7 +266,7 @@ let test_validate_output_schema_openai_explicit_capability () =
       ~model_id:"gpt-4o"
       ~base_url:"https://api.openai.com/v1"
       ~model_capabilities_override:Capabilities.openai_compat_chat_capabilities
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -281,7 +281,7 @@ let test_validate_output_schema_openai_bare_model_not_inferred () =
       ~kind:OpenAI_compat
       ~model_id:"gpt-4o"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_anonymous_chat_schema_defaults cfg
@@ -294,7 +294,7 @@ let test_validate_output_schema_explicit_model_capability_is_host_independent ()
       ~model_id:"gpt"
       ~base_url:"https://openrouter.ai/api/v1"
       ~model_capabilities_override:Capabilities.openai_compat_chat_capabilities
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -310,7 +310,7 @@ let test_validate_output_schema_unknown_openai_compat_provider_rejected () =
       ~provider_id:"unknown-compatible"
       ~model_id:"generic"
       ~base_url:"https://openai-compatible.example.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -326,7 +326,7 @@ let test_validate_output_schema_ollama_cloud_minimax_rejected () =
       ~provider_id:"ollama_cloud"
       ~model_id:"minimax-m3"
       ~base_url:"https://ollama.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -346,7 +346,7 @@ let test_validate_output_schema_ollama_cloud_mistral_rejected () =
       ~provider_id:"ollama_cloud"
       ~model_id:"mistral-large-3:675b"
       ~base_url:"https://ollama.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -364,7 +364,7 @@ let test_validate_output_schema_native_ollama_ministral_rejected () =
       ~kind:Ollama
       ~model_id:"ministral-3:8b"
       ~base_url:"http://localhost:11434"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -383,7 +383,7 @@ let test_validate_output_schema_openai_compat_declared_endpoint_accepted () =
       ~kind:OpenAI_compat
       ~model_id:"qwen/qwen3.6-35b-a3b"
       ~base_url:"https://ma8xbr1kgbclkl-64411be1.proxy.runpod.net/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ~model_capabilities_override:Capabilities.openai_compat_chat_capabilities
       ()
   in
@@ -400,7 +400,7 @@ let test_validate_output_schema_ollama_cloud_minimax_output_schema_rejected () =
       ~provider_id:"ollama_cloud"
       ~model_id:"minimax-m3"
       ~base_url:"https://ollama.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -420,7 +420,7 @@ let test_validate_output_schema_ollama_cloud_rejects_unverified_model () =
       ~provider_id:"ollama_cloud"
       ~model_id:"mistral-large-3:675b"
       ~base_url:"https://ollama.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -438,7 +438,7 @@ let test_validate_output_schema_native_ollama_rejects_unverified_model () =
       ~kind:Ollama
       ~model_id:"ministral-3:8b"
       ~base_url:"http://localhost:11434"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -458,7 +458,7 @@ let test_validate_output_schema_unknown_model_is_rejected () =
       ~provider_id:"openai"
       ~model_id:"unknown-model-without-schema-capability"
       ~base_url:"https://schema-capable.example.test/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -473,7 +473,7 @@ let test_validate_output_schema_model_capability_override_can_fail_closed () =
       ~kind:OpenAI_compat
       ~model_id:"gpt-5.5"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ~model_capabilities_override:
         { Capabilities.openai_compat_chat_extended_capabilities with
           supports_structured_output = false
@@ -492,7 +492,7 @@ let test_validate_output_schema_glm_rejected () =
       ~kind:Glm
       ~model_id:"glm-5"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -507,7 +507,7 @@ let test_validate_output_schema_kimi_rejected () =
       ~kind:Kimi
       ~model_id:"kimi-for-coding"
       ~base_url:"https://api.kimi.com/coding"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -543,7 +543,7 @@ let test_validate_output_schema_direct_response_format_record () =
            }
          ())
       with
-      response_format = Types.JsonSchema schema
+      response_format = Types.JsonSchema (Types.Raw_schema schema)
     }
   in
   check_bool
@@ -561,7 +561,7 @@ let test_validate_output_schema_supported_non_openai () =
            ~kind
            ~model_id:"m"
            ~base_url:"https://api.example.test"
-           ~response_format:(Types.JsonSchema schema)
+           ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
            ()
        in
        check_bool
@@ -574,7 +574,7 @@ let test_validate_output_schema_supported_non_openai () =
       ~kind:Ollama
       ~model_id:"devstral-2:123b"
       ~base_url:"http://localhost:11434"
-      ~response_format:(Types.JsonSchema schema)
+      ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
       ~model_capabilities_override:
         { Capabilities.ollama_capabilities with supports_structured_output = true }
       ()
@@ -597,7 +597,7 @@ let test_validate_output_schema_is_capability_not_identity () =
       ~kind:Glm
       ~model_id:"glm-native-probe"
       ~base_url:"https://open.bigmodel.cn/api/paas/v4"
-      ~response_format:(Types.JsonSchema schema)
+      ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
       ~model_capabilities_override:
         { Capabilities.glm_capabilities with supports_structured_output = true }
       ()
@@ -611,7 +611,7 @@ let test_validate_output_schema_is_capability_not_identity () =
       ~kind:OpenAI_compat
       ~model_id:"compat-json-object-probe"
       ~base_url:"https://api.example.test/v1"
-      ~response_format:(Types.JsonSchema schema)
+      ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
       ~model_capabilities_override:
         { Capabilities.default_capabilities with
           supports_response_format_json = true
@@ -640,7 +640,7 @@ let test_validate_output_schema_projection_matrix () =
         ~kind:OpenAI_compat
         ~model_id:"matrix-probe"
         ~base_url:"https://api.example.test/v1"
-        ~response_format:(Types.JsonSchema schema)
+        ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
         ~model_capabilities_override:
           { Capabilities.default_capabilities with
             supports_structured_output = structured
@@ -660,7 +660,7 @@ let test_validate_output_schema_projection_matrix () =
       ~kind:Anthropic
       ~model_id:"claude-not-in-catalog-probe"
       ~base_url:"https://api.anthropic.com"
-      ~response_format:(Types.JsonSchema schema)
+      ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
       ()
   in
   check_bool
@@ -676,7 +676,7 @@ let test_validate_output_schema_capability_rejected () =
       ~provider_id:"openai"
       ~model_id:"unknown-model-without-schema-capability"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match Provider_config.validate_output_schema_request cfg with
@@ -916,7 +916,7 @@ let test_validate_responses_request_path_allows_structured_output () =
       ~model_id:"gpt-5.5"
       ~base_url:"https://api.openai.com/v1"
       ~request_path:"/v1/responses"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -1655,7 +1655,7 @@ let openai_chat_catalog_config ?provider_id ?reasoning_effort model_id base_url 
   Provider_config.make ~kind:OpenAI_compat ?provider_id ~model_id ~base_url
     ~request_path:"/chat/completions" ~max_tokens:128
     ~tool_choice:(Types.Tool "lookup")
-    ~response_format:(Types.JsonSchema openai_chat_catalog_schema)
+    ~response_format:(Types.JsonSchema (Types.Raw_schema openai_chat_catalog_schema))
     ?reasoning_effort ()
 ;;
 
@@ -1835,7 +1835,7 @@ let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
         ~kind:OpenAI_compat
         ~model_id:"gpt-4o"
         ~base_url:"https://api.openai.com/v1"
-        ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
         ()
     in
     check_anonymous_chat_schema_defaults cfg)
@@ -1849,7 +1849,7 @@ let test_validate_output_schema_ollama_cloud_catalog_minimax_rejected () =
         ~provider_id:"ollama_cloud"
         ~model_id:"minimax-m3"
         ~base_url:"https://ollama.com/v1"
-        ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
         ()
     in
     match Provider_config.validate_output_schema_request cfg with
@@ -1870,7 +1870,7 @@ let test_ollama_cloud_v1_vendor_models_admit_json_mode_only () =
            let response_format =
              Option.fold
                ~none:Types.JsonMode
-               ~some:(fun schema -> Types.JsonSchema schema)
+               ~some:(fun schema -> Types.JsonSchema (Types.Raw_schema schema))
                schema
            in
            Provider_config.make
@@ -1913,7 +1913,7 @@ let test_validate_output_schema_ollama_cloud_catalog_rejects_model_without_so ()
         ~provider_id:"ollama_cloud"
         ~model_id:"mistral-large-3:675b"
         ~base_url:"https://ollama.com/v1"
-        ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
         ()
     in
     match Provider_config.validate_output_schema_request cfg with
@@ -1932,7 +1932,7 @@ let test_validate_output_schema_native_ollama_catalog_rejects_model_without_so (
         ~kind:Ollama
         ~model_id:"ministral-3:8b"
         ~base_url:"http://localhost:11434"
-        ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
         ()
     in
     match Provider_config.validate_output_schema_request cfg with
@@ -1952,7 +1952,7 @@ let test_validate_output_schema_unknown_provider_not_inferred_from_host () =
       ~provider_id:"unknown-compatible"
       ~model_id:"generic"
       ~base_url:"https://openai-compatible.example.com/v1"
-      ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   check_bool
@@ -1969,7 +1969,7 @@ let test_validate_output_schema_mimo_json_schema_rejected () =
         ~provider_id:"mimo"
         ~model_id:"mimo-v2.5-pro"
         ~base_url:"https://token-plan-sgp.xiaomimimo.com/v1"
-        ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
         ()
     in
     match Provider_config.validate_output_schema_request cfg with
@@ -1989,7 +1989,7 @@ let test_validate_output_schema_endpoint_identity_does_not_establish_capability 
         ~kind:OpenAI_compat
         ~model_id:"gpt-4o"
         ~base_url:"https://api.ollama.com/v1"
-        ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
         ()
     in
     check_anonymous_chat_schema_defaults cfg)

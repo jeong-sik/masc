@@ -98,16 +98,44 @@ let tool_choice_to_json = function
   | None_ -> `Assoc [ "type", `String "none" ]
 ;;
 
+type json_schema =
+  | Raw_schema of Yojson.Safe.t
+  | Named_schema of
+      { name : string
+      ; schema : Yojson.Safe.t
+      ; strict : bool option
+      ; description : string option
+      }
+[@@deriving show]
+
+let json_schema_domain = function
+  | Raw_schema schema | Named_schema { schema; _ } -> schema
+;;
+
+let json_schema_to_json = function
+  | Raw_schema schema -> schema
+  | Named_schema { name; schema; strict; description } ->
+    `Assoc
+      ([ "name", `String name; "schema", schema ]
+       @ (match strict with None -> [] | Some value -> [ "strict", `Bool value ])
+       @ (match description with
+          | None -> []
+          | Some value -> [ "description", `String value ]))
+;;
+
 type response_format =
   | Off
   | JsonMode
-  | JsonSchema of Yojson.Safe.t
+  | JsonSchema of json_schema
 [@@deriving show]
 
 let response_format_to_json = function
   | Off -> `Assoc [ "type", `String "off" ]
   | JsonMode -> `Assoc [ "type", `String "json_mode" ]
-  | JsonSchema schema -> `Assoc [ "type", `String "json_schema"; "schema", schema ]
+  | JsonSchema (Raw_schema schema) ->
+    `Assoc [ "type", `String "raw_json_schema"; "schema", schema ]
+  | JsonSchema (Named_schema _ as schema) ->
+    `Assoc [ "type", `String "named_json_schema"; "schema", json_schema_to_json schema ]
 ;;
 
 (** {1 Content Types} *)

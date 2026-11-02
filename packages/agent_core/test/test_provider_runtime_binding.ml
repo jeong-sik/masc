@@ -408,7 +408,7 @@ let test_catalog_structured_output_capability_projects_to_provider_config () =
     in
     let schema = `Assoc [ "type", `String "object" ] in
     let cfg =
-      { cfg with Llm_provider.Provider_config.response_format = Types.JsonSchema schema }
+      { cfg with Llm_provider.Provider_config.response_format = Types.JsonSchema (Types.Raw_schema schema) }
     in
     Alcotest.(check bool)
       "catalog endpoint accepts declared structured output"
@@ -1047,7 +1047,7 @@ let test_projected_options_match_public_admission () =
     Alcotest.(check bool) "anonymous chat schema uses its retained wire protocol" true
       (Result.is_ok (Llm_provider.Complete_common.validate_all
         {config with response_format=Llm_provider.Types.JsonSchema
-          (`Assoc ["type",`String "object"])})))
+          (Llm_provider.Types.Raw_schema (`Assoc ["type",`String "object"]))})))
 ;;
 
 let test_anonymous_chat_defaults_do_not_restore_declared_missing_policy () =
@@ -1076,7 +1076,7 @@ let test_anonymous_chat_defaults_do_not_restore_declared_missing_policy () =
     Alcotest.(check bool) "declared missing schema policy refuses public admission" true
       (Result.is_error (Llm_provider.Complete_common.validate_all
         {declared with response_format=Llm_provider.Types.JsonSchema
-          (`Assoc ["type",`String "object"])}));
+          (Llm_provider.Types.Raw_schema (`Assoc ["type",`String "object"]))}));
     Alcotest.(check bool) "fallback does not invent model reasoning" false
       caps.supports_reasoning)
 ;;
@@ -1206,7 +1206,7 @@ base = "openai_chat"
     let binding = captured_binding catalog None in
     let config = expect_ok (Provider_runtime_binding.to_provider_config ~model binding) in
     let config = {config with response_format=Llm_provider.Types.JsonSchema
-      (`Assoc ["type",`String "object"])} in
+      (Llm_provider.Types.Raw_schema (`Assoc ["type",`String "object"]))} in
     let body = Llm_provider.Backend_openai.build_request ~config
       ~messages:[Llm_provider.Types.user_msg "Return an object"] ()
       |> Yojson.Safe.from_string in

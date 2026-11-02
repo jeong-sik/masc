@@ -294,7 +294,7 @@ let exact_provider_config () =
     ~clear_thinking:false
     ~tool_stream:true
     ~tool_choice:Types.Auto
-    ~response_format:(Types.JsonSchema schema)
+    ~response_format:(Types.JsonSchema (Types.Raw_schema schema))
     ~cache_system_prompt:true
     ~model_capabilities_override:capabilities
     ~keep_alive:"-1"

@@ -1032,6 +1032,27 @@ let test_provider_binding_persistence () =
     (Yojson.Safe.Util.keys binding_json |> List.sort String.compare)
 ;;
 
+let test_schema_carriers_survive_checkpoint () =
+  let domain = `Assoc [ "type", `String "object"; "name", `String "annotation"
+                      ; "schema", `Assoc [ "type", `String "string" ] ] in
+  let named = Types.Named_schema
+    { name = "answer"; schema = domain; strict = Some true; description = Some "Answer" }
+  in
+  List.iter (fun schema ->
+    let response_format = Types.JsonSchema schema in
+    let checkpoint = { (make_checkpoint ()) with response_format } in
+    let restored = Checkpoint.of_string (Checkpoint.to_string checkpoint) |> Result.get_ok in
+    check_response_format "checkpoint preserves raw/named authority"
+      response_format restored.response_format;
+    let ambiguous = `Assoc [ "type", `String "json_schema"
+                          ; "schema", Types.json_schema_to_json schema ] in
+    let saved = Checkpoint.to_json checkpoint
+      |> replace_json_field "response_format" ambiguous in
+    Alcotest.(check bool) "ambiguous saved schema is refused before resume" true
+      (Result.is_error (Checkpoint.of_json saved)))
+    [ Types.Raw_schema domain; named ]
+;;
+
 let () =
   let open Alcotest in
   run
@@ -1265,7 +1286,7 @@ let () =
               ; ( "response schema"
                 , { (make_checkpoint ()) with
                     response_format =
-                      Types.JsonSchema (`Assoc [ "nested", `Float value ])
+                      Types.JsonSchema (Types.Raw_schema (`Assoc [ "nested", `Float value ]))
                   } )
               ; "tool input schema", make_checkpoint ~tools:[ tool_schema ] ()
               ]
@@ -1329,7 +1350,7 @@ let () =
               ; ( "response schema"
                 , { (make_checkpoint ()) with
                     response_format =
-                      Types.JsonSchema (`Assoc [ "nested", duplicate ])
+                      Types.JsonSchema (Types.Raw_schema (`Assoc [ "nested", duplicate ]))
                   } )
               ; "ReasoningDetails.raw", reasoning_details
               ]
@@ -1462,7 +1483,8 @@ let () =
             | Ok _ -> fail "duplicate v6 version must be rejected")
         ] )
     ; ( "roundtrip_basic"
-      , [ test_case "empty checkpoint roundtrip" `Quick (fun () ->
+      , [ test_case "raw/named schema authority" `Quick test_schema_carriers_survive_checkpoint
+        ; test_case "empty checkpoint roundtrip" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
             let cp2 = Result.get_ok (Checkpoint.of_json json) in

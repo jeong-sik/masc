@@ -28,7 +28,7 @@ let inspect ~base_path ~keeper_name =
   let session_dir = Filename.concat
       (Masc.Keeper_fs.session_store_path_for_base_path base_path) trace_id in
   let* snapshot =
-    match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+    match Store.load_agent_core_exact_snapshot_with_boundary ~session_dir ~session_id:trace_id with
     | Ok snapshot -> Ok (Some snapshot)
     | Error Store.Ref_not_found -> Ok None
     | Error error -> Error (Store.checkpoint_ref_load_error_to_string error)
@@ -40,13 +40,15 @@ let inspect ~base_path ~keeper_name =
   in
   let* state = match snapshot with
     | None -> Ok ["status", `String "not_found"]
-    | Some snapshot ->
+    | Some (snapshot, boundary) ->
       let* checkpoint =
         Agent_core.Checkpoint.to_json_result (Store.exact_snapshot_checkpoint snapshot)
         |> Result.map_error Agent_core.Error.to_string
       in
       let reference = Store.exact_snapshot_reference snapshot in
       Ok ["status", `String "available";
+          "history_boundary", `Assoc ["closed_messages", `Int boundary.closed_messages;
+                                      "open_messages", `Int boundary.open_messages];
           "reference", `Assoc ["trace_id", `String trace_id;
                                "turn_count", `Int reference.turn_count;
                                "content_sha256", `String reference.sha256];

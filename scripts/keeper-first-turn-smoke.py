@@ -196,7 +196,38 @@ def request(url, token=None, body=None, timeout=30):
         return response.read()
 
 
-def chat_request(url, token, body, output):
+def require_chat_completion(output, expected_reply):
+    """A closed HTTP stream can still carry an unsuccessful Keeper run."""
+    state, run_id = 0, None
+    for line in output.read_text(encoding='utf-8').splitlines():
+        if not line.startswith('data:'):
+            continue
+        try:
+            event = json.loads(line[5:])
+        except ValueError as error:
+            raise SmokeError('chat stream contains invalid event JSON') from error
+        if not isinstance(event, dict):
+            raise SmokeError('chat stream contains a non-object event')
+        kind = event.get('type')
+        if kind == 'RUN_ERROR':
+            raise SmokeError('Keeper chat stream reported a failed run')
+        if state == 0 and kind == 'RUN_STARTED':
+            run_id = event.get('runId')
+            if not isinstance(run_id, str) or not run_id:
+                raise SmokeError('chat stream has no run identity')
+            state = 1
+        elif (state == 1 and kind == 'CUSTOM' and event.get('name') == 'KEEPER_REPLY_DETAILS'
+              and event.get('runId') == run_id and isinstance(event.get('value'), dict)
+              and event['value'].get('reply') == expected_reply
+              and event['value'].get('turn_outcome') == 'visible_reply'):
+            state = 2
+        elif state == 2 and kind == 'RUN_FINISHED' and event.get('runId') == run_id:
+            state = 3
+    if state != 3:
+        raise SmokeError('Keeper chat stream has no completed run with the expected reply')
+
+
+def chat_request(url, token, body, output, *, expected_reply):
     # SSE heartbeats reset a socket read timeout indefinitely. Bound the
     # acceptance process itself and preserve partial events on failure.
     with output.open('wb') as stream:
@@ -211,6 +242,7 @@ def chat_request(url, token, body, output):
             raise SmokeError('first-turn stream exceeded 180s; partial events saved') from error
     if result.returncode:
         raise SmokeError('first-turn stream failed: ' + result.stderr.decode())
+    require_chat_completion(output, expected_reply)
 
 
 def wait_until(description, action, server, timeout=60):
@@ -237,6 +269,15 @@ def require_checkpoint_inspector(fixture):
     command([fixture.checkpoint_binary, 'inspect-checkpoint', '--help'], fixture.checkpoint_env)
     if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
         raise SmokeError('checkpoint inspector binary changed during capability check')
+
+
+def pinned_binary_commit(fixture):
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed before commit lookup')
+    commit = command([fixture.checkpoint_binary, 'build-commit'], fixture.checkpoint_env).strip()
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed during commit lookup')
+    return commit
 
 
 def checkpoint_evidence_span(messages, fixture):
@@ -325,7 +366,15 @@ def checkpoint_proof(base, fixture, timeout):
     if (not path.is_absolute() or path.name != trace + '.json'
             or path.parent.name != trace or not path.resolve().is_relative_to(base.resolve())):
         raise SmokeError('checkpoint inspection has an invalid canonical path')
-    if checkpoint_evidence_span(checkpoint.get('messages'), fixture) is not None:
+    messages, boundary = checkpoint.get('messages'), data.get('history_boundary')
+    if (not isinstance(messages, list) or not isinstance(boundary, dict)
+            or type(boundary.get('closed_messages')) is not int
+            or type(boundary.get('open_messages')) is not int
+            or boundary['closed_messages'] < 0 or boundary['open_messages'] < 0
+            or boundary['closed_messages'] + boundary['open_messages'] != len(messages)):
+        raise SmokeError('checkpoint inspection has an invalid history boundary')
+    span = checkpoint_evidence_span(messages, fixture)
+    if span is not None and span[1] < boundary['closed_messages']:
         return path, data
     return None
 
@@ -609,7 +658,8 @@ def run(args):
                         raise SmokeError('tool approval mode was not applied')
                     chat_request(url + '/api/v1/keepers/chat/stream', token,
                         {'name': keeper, 'message': 'Run the isolated ' + args.backend + ' proof once, then report completion.',
-                         'request_id': 'kmsg-' + marker}, output / 'chat-stream.txt')
+                         'request_id': 'kmsg-' + marker}, output / 'chat-stream.txt',
+                        expected_reply=fixture.final)
                     if fixture.error:
                         raise SmokeError(fixture.error)
                     if fixture.proof is None or len(fixture.requests) != (3 if fixture.search_requested else 2):
@@ -648,8 +698,8 @@ def run(args):
                     (output / 'checkpoint.json').write_text(json.dumps(data['checkpoint'], indent=2))
                     (output / 'checkpoint-inspection.json').write_text(json.dumps(data, indent=2))
                     receipt = {'schema': 'masc.first_keeper_turn.v1', 'result': 'PASS',
-                        'binary_sha256': hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
-                        'binary_commit': command([binary, 'build-commit'], env).strip(),
+                        'binary_sha256': fixture.checkpoint_binary_sha256,
+                        'binary_commit': pinned_binary_commit(fixture),
                         'keeper': keeper, 'model': 'scripted loopback fixture', 'model_requests': len(fixture.requests),
                         'image': args.image, 'container_id': container_id, 'backend': args.backend,
                         'checkpoint_relative_path': str(checkpoint.relative_to(base)),

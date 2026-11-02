@@ -43,6 +43,7 @@ class CheckpointProofTest(unittest.TestCase):
             'schema': 'masc.checkpoint-inspection.v1', 'status': 'available',
             'keeper': 'keeper', 'trace_id': 'trace', 'canonical_path': str(self.path),
             'reference': {'trace_id': 'trace', 'turn_count': 1, 'content_sha256': 'a' * 64},
+            'history_boundary': {'closed_messages': 3, 'open_messages': 0},
             'checkpoint': {'session_id': 'trace', 'turn_count': 1, 'messages': self.messages},
         }
 
@@ -61,6 +62,19 @@ class CheckpointProofTest(unittest.TestCase):
         path, data = self.read()
         self.assertEqual(path, self.path)
         self.assertEqual(data['reference']['content_sha256'], 'a' * 64)
+
+    def test_final_must_be_closed_but_a_later_open_turn_is_allowed(self):
+        open_final = copy.deepcopy(self.inspection)
+        open_final['history_boundary'] = {'closed_messages': 2, 'open_messages': 1}
+        self.assertIsNone(self.read(open_final))
+        later_open = copy.deepcopy(self.inspection)
+        later_open['checkpoint']['messages'].append({'role': 'user', 'content': [{'type': 'text', 'text': 'later'}]})
+        later_open['history_boundary'] = {'closed_messages': 3, 'open_messages': 1}
+        self.assertIsNotNone(self.read(later_open))
+        invalid = copy.deepcopy(self.inspection)
+        invalid['history_boundary'] = {'closed_messages': 3, 'open_messages': 1}
+        with self.assertRaisesRegex(smoke.SmokeError, 'history boundary'):
+            self.read(invalid)
 
     def test_wrong_order_or_result_is_not_evidence(self):
         variants = []
@@ -153,8 +167,27 @@ class CheckpointProofTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(smoke.SmokeError):
                 smoke.require_checkpoint_resume(bad, 'trace', initial, resumed)
 
+    def test_chat_stream_requires_a_successful_matching_run(self):
+        stream = self.base / 'chat.sse'
+        events = [{'type': 'RUN_STARTED', 'runId': 'run'},
+                  {'type': 'CUSTOM', 'runId': 'run', 'name': 'KEEPER_REPLY_DETAILS',
+                   'value': {'reply': 'final', 'turn_outcome': 'visible_reply'}},
+                  {'type': 'RUN_FINISHED', 'runId': 'run'}]
+        def write(items):
+            stream.write_text(''.join('data: ' + json.dumps(item) + '\n\n' for item in items))
+        write(events)
+        smoke.require_chat_completion(stream, 'final')
+        variants = [events[:-1], events + [{'type': 'RUN_ERROR', 'runId': 'run'}],
+                    events[:2] + [dict(events[2], runId='other')],
+                    [events[0], dict(events[1], value={'reply': 'other', 'turn_outcome': 'visible_reply'}),
+                     events[2]]]
+        for variant in variants:
+            with self.subTest(variant=variant), self.assertRaises(smoke.SmokeError):
+                write(variant)
+                smoke.require_chat_completion(stream, 'final')
 
-def check_real_fixture(binary, root):
+
+def check_real_fixture(binary, root, *, expect_open=False):
     base = Path(root)
     fixture = SimpleNamespace(
         checkpoint_binary=binary, checkpoint_binary_sha256=smoke.file_sha256(binary),
@@ -163,15 +196,19 @@ def check_real_fixture(binary, root):
         proof={'marker': 'marker', 'cwd': '/sandbox', 'hostname': 'guest', 'uid': 1000},
         checkpoint_env={'HOME': root, 'MASC_BASE_PATH': root, 'PATH': str(Path(sys.executable).parent)})
     answer = smoke.checkpoint_proof(base, fixture, 30)
+    if expect_open:
+        if answer is not None:
+            raise AssertionError('an open final was accepted as a closed turn')
+        return
     if answer is None:
         raise AssertionError('the real canonical checkpoint was not accepted')
     path, data = answer
-    if not path.is_file() or data['reference']['turn_count'] != 1:
+    if not path.is_file() or data['reference']['turn_count'] < 1:
         raise AssertionError('the real canonical checkpoint reference is incorrect')
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 4 and sys.argv[1] == '--real-fixture':
-        check_real_fixture(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 4 and sys.argv[1] in ('--real-fixture', '--expect-open-fixture'):
+        check_real_fixture(sys.argv[2], sys.argv[3], expect_open=sys.argv[1] == '--expect-open-fixture')
     else:
         unittest.main()

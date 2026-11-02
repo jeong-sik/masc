@@ -348,7 +348,7 @@ def run(args):
         env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR')}
         env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true')
         fixture.checkpoint_env = env
-        commit = smoke.command([binary, 'build-commit'], env).strip().splitlines()[-1]
+        commit = smoke.pinned_binary_commit(fixture).splitlines()[-1]
         receipt['binary_commit'] = commit
         if commit != args.expected_commit:
             raise smoke.SmokeError('installed binary commit does not match --expected-commit')
@@ -413,7 +413,7 @@ def run(args):
                 raise smoke.SmokeError('isolated tool mode was not applied')
             smoke.chat_request(url + '/api/v1/keepers/chat/stream', token,
                 {'name': args.keeper, 'message': 'Run the remote file workflow and verify the resulting bytes.',
-                 'request_id': 'kmsg-' + marker}, output / 'chat-stream.txt')
+                 'request_id': 'kmsg-' + marker}, output / 'chat-stream.txt', expected_reply=fixture.final)
             if fixture.error:
                 raise smoke.SmokeError(fixture.error)
             if fixture.step != len(fixture.steps):
@@ -434,7 +434,8 @@ def run(args):
                     pins.write_bytes(b'')
                     smoke.chat_request(url + '/api/v1/keepers/chat/stream', token,
                         {'name': args.keeper, 'message': 'Attempt the isolated pin-rotation probe.',
-                         'request_id': 'kmsg-pin-denied-' + marker}, output / 'chat-pin-denied.txt')
+                         'request_id': 'kmsg-pin-denied-' + marker}, output / 'chat-pin-denied.txt',
+                        expected_reply=fixture.final)
                     if fixture.error or fixture.step != len(fixture.steps):
                         raise smoke.SmokeError(fixture.error or 'pin denial turn did not finish')
                     denied_dispatch = pin_observation(url, token, args, output, 'denied',
@@ -444,7 +445,8 @@ def run(args):
                 fixture.pin_phase(denied=False)
                 smoke.chat_request(url + '/api/v1/keepers/chat/stream', token,
                     {'name': args.keeper, 'message': 'Verify file bytes after explicit pin restoration.',
-                     'request_id': 'kmsg-pin-restored-' + marker}, output / 'chat-pin-restored.txt')
+                     'request_id': 'kmsg-pin-restored-' + marker}, output / 'chat-pin-restored.txt',
+                    expected_reply=fixture.final)
                 if fixture.error or fixture.step != len(fixture.steps):
                     raise smoke.SmokeError(fixture.error or 'pin restoration did not recover')
                 pin_observation(url, token, args, output, 'restored', previous=denied_dispatch)
@@ -492,7 +494,8 @@ def run(args):
             (output / 'keeper-resume.txt').write_text(resumed)
             smoke.chat_request(url + '/api/v1/keepers/chat/stream', token,
                 {'name': args.keeper, 'message': 'Read the persisted notes and verify the original proof after restart.',
-                 'request_id': 'kmsg-restart-' + marker}, output / 'chat-after-restart.txt')
+                 'request_id': 'kmsg-restart-' + marker}, output / 'chat-after-restart.txt',
+                expected_reply=fixture.final)
             if fixture.error:
                 raise smoke.SmokeError(fixture.error)
             if fixture.step != len(fixture.steps):

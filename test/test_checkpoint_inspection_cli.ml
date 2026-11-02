@@ -60,10 +60,10 @@ let run_cli root name =
   let executable = Sys.getenv "MASC_TEST_MASC_EXE" |> Unix.realpath in
   run_program root executable ["inspect-checkpoint"; "--base-path"; root; "--keeper"; name]
 
-let run_smoke_consumer root =
+let run_smoke_consumer root mode =
   let executable = Sys.getenv "MASC_TEST_MASC_EXE" |> Unix.realpath in
   let script = Sys.getenv "MASC_TEST_SMOKE_PY" |> Unix.realpath in
-  match run_program root "python3" [script; "--real-fixture"; executable; root] with
+  match run_program root "python3" [script; mode; executable; root] with
   | Unix.WEXITED 0, _, _ -> ()
   | _, stdout, stderr -> fail ("smoke consumer rejected the real checkpoint: " ^ stdout ^ stderr)
 
@@ -99,9 +99,18 @@ let test_canonical_objects () =
       let open Yojson.Safe.Util in
       let missing = require_json root keeper in
       check string "missing canonical" "not_found" (missing |> member "status" |> to_string);
-      ignore (Keeper_checkpoint_store.save_agent_core_classified
-        ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained:0
-        ~session_dir (checkpoint ()) |> require "save canonical");
+      let value = checkpoint () in
+      let save boundary value =
+        ignore (Keeper_checkpoint_store.save_agent_core_classified
+          ~boundary ~history_retained:0 ~session_dir value |> require "save canonical") in
+      save Agent_core.Checkpoint_objects.Turn_continues value;
+      let open_head = require_json root keeper in
+      check int "open checkpoint has no closed messages" 0
+        (open_head |> member "history_boundary" |> member "closed_messages" |> to_int);
+      check int "open checkpoint holds all messages" 4
+        (open_head |> member "history_boundary" |> member "open_messages" |> to_int);
+      run_smoke_consumer root "--expect-open-fixture";
+      save Agent_core.Checkpoint_objects.Turn_closes value;
       let head_path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
       let actual = require_json root keeper in
       check string "available canonical" "available" (actual |> member "status" |> to_string);
@@ -114,7 +123,23 @@ let test_canonical_objects () =
       let reference = actual |> member "reference" in
       check int "reference turn" 1 (reference |> member "turn_count" |> to_int);
       check int "content digest length" 64 (reference |> member "content_sha256" |> to_string |> String.length);
-      run_smoke_consumer root;
+      check string "closing a turn preserves the content digest"
+        (open_head |> member "reference" |> member "content_sha256" |> to_string)
+        (reference |> member "content_sha256" |> to_string);
+      check int "closed checkpoint holds all messages" 4
+        (actual |> member "history_boundary" |> member "closed_messages" |> to_int);
+      check int "closed checkpoint has no open messages" 0
+        (actual |> member "history_boundary" |> member "open_messages" |> to_int);
+      run_smoke_consumer root "--real-fixture";
+      let later = {value with Agent_core.Checkpoint.turn_count = 2;
+        messages = value.messages @ [message Agent_core.Types.User [Agent_core.Types.Text "later"]]} in
+      save Agent_core.Checkpoint_objects.Turn_continues later;
+      let with_later_open = require_json root keeper in
+      check int "old turn remains closed" 4
+        (with_later_open |> member "history_boundary" |> member "closed_messages" |> to_int);
+      check int "new turn remains open" 1
+        (with_later_open |> member "history_boundary" |> member "open_messages" |> to_int);
+      run_smoke_consumer root "--real-fixture";
       let original_head = In_channel.with_open_bin head_path In_channel.input_all in
       let head = Yojson.Safe.from_string original_head in
       let previous_version = match head with

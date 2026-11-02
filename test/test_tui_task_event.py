@@ -63,14 +63,22 @@ class TaskHandler(FixtureHandler):
             return
         server.observer_requested.set()
         server.release_observer.wait()
+        cursor = self.headers.get("Last-Event-ID")
+        instance = self.headers.get("x-masc-sse-instance-id")
+        if cursor is not None and instance != "task-event-fixture":
+            self.respond(400, {"error": "unexpected replay instance"})
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("x-masc-sse-instance-id", "task-event-fixture")
-        self.send_header("x-masc-sse-replay", "fresh")
+        self.send_header("x-masc-sse-replay", "resumed" if cursor else "fresh")
         self.send_header("x-masc-workspace-read", "matched-v1")
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.flush()
+        server.record("observer-opened")
+        if cursor is not None:
+            server.record(f"observer-resumed-{cursor}")
         server.observer_ready.set()
         while (event := server.events.get()) is not None:
             cursor, kind = event
@@ -295,6 +303,18 @@ class TaskEventTest(unittest.TestCase):
                 wait_until(
                     lambda: b"FULL-execution-snapshot-marker" in output,
                     "same-stat task replacement stayed stale after an event",
+                    timeout=6.0,
+                )
+                server.events.put(None)
+                write_task("RECO-execution-snapshot-marker", 7, preserve_stat=True)
+                wait_until(
+                    lambda: server.count("changed", "observer-resumed-5") >= 1,
+                    "observer did not resume from cursor 5 without a polling tick",
+                    timeout=8.0,
+                )
+                wait_until(
+                    lambda: b"RECO-execution-snapshot-marker" in output,
+                    "reconnect did not refresh a same-stat task replacement",
                     timeout=6.0,
                 )
                 self.assertIsNone(process.poll())

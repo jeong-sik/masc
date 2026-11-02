@@ -199,6 +199,7 @@ let sync_keeper_meta_current_task
               ~preferred_task_id
               ~backlog_revision:prepared.backlog.version
               ~desired
+              ()
           with
           | Error msg ->
             Otel_metric_store.inc_counter
@@ -809,7 +810,7 @@ let handle_keeper_task_tool_with_outcome
           ; message
           ; scope_widened = false
           }
-      | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) ->
+      | Error e when Masc_domain.is_task_not_found e ->
         Workspace.Claim_next_error
           (Printf.sprintf "unknown task_id: %s" requested_task_id)
       | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e)

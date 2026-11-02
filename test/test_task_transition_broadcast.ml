@@ -292,8 +292,10 @@ let test_auto_start_claim_and_idempotent_in_progress_retry () =
       (Workspace.read_backlog config).version;
     (* Verify concurrent claim_task_with_details_r ~auto_start:true grants exclusive ownership *)
     seed config (make_task ~id:"task-22" ~status:D.Todo);
+    (* [Fiber.both] runs both fibers for effect and returns unit; this test
+       needs both claim results, which [Fiber.pair] returns. *)
     let r_alice, r_bob =
-      Eio.Fiber.both
+      Eio.Fiber.pair
         (fun () ->
            Workspace.claim_task_with_details_r
              config ~agent_name:"alice" ~task_id:"task-22" ~auto_start:true ())

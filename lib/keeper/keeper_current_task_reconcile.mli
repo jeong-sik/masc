@@ -77,6 +77,7 @@ val apply_current_task_if_revision :
   ?preferred_task_id:Keeper_id.Task_id.t ->
   backlog_revision:int ->
   desired:Keeper_id.Task_id.t option ->
+  unit ->
   ( Keeper_id.Task_id.t option
     * (Keeper_meta_contract.keeper_meta option, Keeper_owner_registry.command_error) result
   , string ) result

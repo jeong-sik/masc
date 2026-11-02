@@ -166,9 +166,10 @@ let reconcile_mu = Cross_context_mutex.create ()
 let apply_current_task_if_revision
     ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta)
-    ?preferred_task_id
+    ?preferred_task_id:(preferred_task_id : Keeper_id.Task_id.t option)
     ~backlog_revision
     ~desired
+    ()
   =
   (Atomic.get between_ownership_read_and_apply_hook) ();
   let selection_meta =
@@ -227,6 +228,7 @@ let sync_observed_task_with_revision ~(config : Workspace.config)
            ~meta
            ~backlog_revision
            ~desired
+           ()
        with
        | Error err ->
          Log.Keeper.warn ~keeper_name:meta.name

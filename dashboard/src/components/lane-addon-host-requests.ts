@@ -25,6 +25,7 @@ function issueText(issue: NonNullable<LaneAddonHostRequestCycle['issue']>): stri
     case 'exact_record_failed': return `Recording request ${issue.request_id} failed: ${issue.detail}`
     case 'ask_record_failed': return `Recording question ${issue.request_id} failed: ${issue.detail}`
     case 'no_exact_runner': return 'This host has no exact-output runner'
+    case 'no_web_search_runner': return 'This host has no web-search runner'
   }
 }
 

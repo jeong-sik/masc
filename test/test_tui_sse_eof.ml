@@ -26,6 +26,7 @@ let identity workspace : Masc.Tui_decode.server_identity =
   { sid_version = "test"
   ; sid_binary_commit = "test"
   ; sid_binary_commit_age_s = None
+  ; sid_runtime_instance_id = None
   ; sid_base_path = Decode.Canonical_path.of_path (Unix.realpath workspace)
   ; sid_masc_root = Decode.Canonical_path.of_path
       (Unix.realpath (Filename.concat workspace ".masc"))

@@ -252,7 +252,7 @@ let test_nonwaiting_acquire_returns_while_fence_is_held () =
       Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve signal_resume ())) (fun () ->
         Eio.Promise.await entered;
         let result = Eio.Time.with_timeout clock 1. (fun () ->
-          Backend.FileSystem.try_acquire_lock (rival ()) ~key ~owner:"holder-b" ~ttl_seconds:60) in
+          Ok (Backend.FileSystem.try_acquire_lock (rival ()) ~key ~owner:"holder-b" ~ttl_seconds:60)) in
         (match result with
          | Ok (Ok false) -> ()
          | Ok (Ok true) -> fail "rival took a held lease"

@@ -787,6 +787,7 @@ let test_app_input_transport_parity () = with_gateway (fun ~base_path ~worker ~p
   let h1, h2 = both gateway ~token:admin app_path in
   List.iter (fun reply -> check string "refused app input write left data unchanged" "alice"
     (member "data" (json reply) |> field_string "answer")) [h1; h2];
+  let encode = Uri.pct_encode ~component:`Query_value in
   let query = "&expected_base_path=" ^ encode expected.base_path ^ "&expected_masc_root=" ^ encode expected.masc_root in
   let app_bound_h1, app_bound_h2 = both gateway ~token:admin (app_path ^ query) in
   List.iter (fun reply ->

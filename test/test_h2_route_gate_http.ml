@@ -18,6 +18,8 @@ let with_gateway ~make_routes run =
   let base_path = Filename.temp_dir "h2-route-gate-" "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
+    Masc.Board_dispatch.reset_for_test ();
+    Masc.Board.reset_global_for_test ();
     Server_auth.For_testing.restore_server_state previous_state;
     remove_tree base_path) (fun () ->
     Eio_main.run @@ fun env ->
@@ -176,9 +178,12 @@ let test_fusion_workspace_admission () =
       let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
       let receipt = Masc.Workspace.read_precondition_admission_header in
       let read path fields = request_with_headers ~token:player ~meth:`GET client (target path fields) in
+      Masc_test_deps.Board_test_preparation.prepare ~base_path:base
+        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
-      Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+      Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:base
+        ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
       let post = match Masc.Board_dispatch.create_post ~author:"fixture" ~content:"original"
           ~post_kind:Masc.Board.System_post () with
         | Ok post -> post

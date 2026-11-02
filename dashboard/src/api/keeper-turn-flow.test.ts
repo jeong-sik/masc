@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseKeeperRuntimeTrace } from './keeper-runtime-trace'
-import { decodeTraceSkillActivations, decodeTurnFlow, type TurnFlowTarget } from './keeper-turn-flow'
+import { decodeTurnFlow, type TurnFlowTarget } from './keeper-turn-flow'
 
 const target: TurnFlowTarget = { keeper: 'reviewer', traceId: 'trace-one', absoluteTurn: 7, turnRef: 'trace-one#7' }
 const source = {
@@ -104,36 +104,5 @@ describe('exact turn intake', () => {
     for (const invalid of [null, {}, [{ ...source, admitted_revision: 1 }], [{ ...source, first_admitted_at: 'now' }]]) {
       expect(() => decodeTurnFlow(trace({ intake_sources: invalid }), target)).toThrow()
     }
-  })
-})
-
-function emptySkills() {
-  const summary = Object.fromEntries([
-    'instruction_invocations', 'skill_bodies_served', 'skill_resources_served',
-    'instruction_provider_deliveries', 'instruction_official_client_handoffs', 'instruction_actions_observed',
-    'composition_invocations', 'composition_provider_deliveries', 'composition_official_client_handoffs',
-    'composition_actions_observed', 'invalid_transitions',
-  ].map(key => [key, 0]))
-  return {
-    schema: 'masc.dashboard.skill-activations/v1', status: 'available', trace_id: target.traceId,
-    summary, scoped_summaries: [], ledger: {
-      schema: 'masc.skill-activations/v8', workspace_key: 'a'.repeat(64), session_id: target.traceId,
-      revision: 'b'.repeat(64), activations: [], transition_rejections: [], async_result_deliveries: [], async_actions: [],
-    },
-  }
-}
-
-describe('trace Skill evidence', () => {
-  it('uses the canonical decoder and keeps a known empty ledger distinct from missing evidence', () => {
-    const known = decodeTraceSkillActivations(emptySkills(), target)
-    expect(known.status).toBe('available')
-    expect(decodeTraceSkillActivations({ schema: 'masc.dashboard.skill-activations/v1',
-      status: 'not_recorded', trace_id: target.traceId }, target).status).toBe('not_recorded')
-  })
-  it('rejects mismatched source or ledger identity', () => {
-    const raw = emptySkills()
-    expect(() => decodeTraceSkillActivations({ ...raw, trace_id: 'other' }, target)).toThrow()
-    expect(() => decodeTraceSkillActivations({ ...raw, ledger: { ...raw.ledger, session_id: 'other' } }, target)).toThrow()
-    expect(() => decodeTraceSkillActivations({ ...raw, ledger: { ...raw.ledger, activations: [{}] } }, target)).toThrow()
   })
 })

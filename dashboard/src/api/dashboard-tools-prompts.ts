@@ -1575,7 +1575,7 @@ function decodeScopedSummary(value: unknown, label: string): DashboardSkillScope
   }
 }
 
-function decodeSkillTurnRef(value: unknown, label: string): string {
+export function decodeSkillTurnRef(value: unknown, label: string): string {
   const text = skillActivationString(value, label)
   const separator = text.lastIndexOf('#')
   const trace = text.slice(0, separator)
@@ -1808,7 +1808,7 @@ export function skillAsyncOccurrenceIdentity(action: DashboardSkillAsyncAction):
   return JSON.stringify([action.physical_turn_ref, action.runtime_id, occurrence])
 }
 
-function validateAsyncOccurrenceFacts(asyncActions: readonly DashboardSkillAsyncAction[]): void {
+export function validateAsyncOccurrenceFacts(asyncActions: readonly DashboardSkillAsyncAction[]): void {
   const actionIdentities = new Set<string>()
   const occurrenceFacts = new Map<string, string>()
   for (const action of asyncActions) {
@@ -1835,6 +1835,11 @@ export function skillActivationFrameSha256(activation: DashboardSkillActivation)
   return asyncEvidenceHash({ ...activation, delivery: null, actions: [] })
 }
 
+export function skillAsyncResultDeliverySha256(delivery: DashboardSkillAsyncResultDelivery): string {
+  const { observed_at: _clock, ...identity } = delivery
+  return asyncEvidenceHash(identity)
+}
+
 function requireAsyncActionDelivery(action: DashboardSkillAsyncAction, deliveries: ReadonlyMap<string, DashboardSkillAsyncResultDelivery>): DashboardSkillAsyncResultDelivery {
   const delivery = deliveries.get(action.delivery_sha256)
   if (!delivery || delivery.presentation !== 'inline_result' || delivery.physical_turn_ref !== action.physical_turn_ref
@@ -1845,30 +1850,58 @@ function requireAsyncActionDelivery(action: DashboardSkillAsyncAction, deliverie
   return delivery
 }
 
-export function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): void {
-  if (projection?.status !== 'available' || projection.ledger.async_actions.length === 0) return
+export interface SkillActivationObservation {
+  activations: DashboardSkillActivation[]
+  async_result_deliveries: DashboardSkillAsyncResultDelivery[]
+  async_actions: DashboardSkillAsyncAction[]
+}
+
+function validateAsyncActionLinks(evidence: SkillActivationObservation): void {
   const deliveries = new Map<string, DashboardSkillAsyncResultDelivery>()
-  for (const delivery of projection.ledger.async_result_deliveries) {
-    const {observed_at: _clock, ...identity} = delivery
-    deliveries.set(asyncEvidenceHash(identity), delivery)
-  }
-  const activations = new Map(projection.ledger.activations.map(value => [value.skill_tool_use_id, value]))
+  const activations = new Map(evidence.activations.map(value => [value.skill_tool_use_id, value]))
+  if (activations.size !== evidence.activations.length) throw new Error('skill_activations repeats an original activation')
   const frameDigests = new Map<string, string>()
-  for (const action of projection.ledger.async_actions) {
-    const delivery = requireAsyncActionDelivery(action, deliveries)
+  for (const delivery of evidence.async_result_deliveries) {
+    const digest = skillAsyncResultDeliverySha256(delivery)
+    if (deliveries.has(digest)) throw new Error('skill_activations repeats a physical handoff')
+    deliveries.set(digest, delivery)
     for (const child of delivery.child_activations) {
-      let digest = frameDigests.get(child.skill_tool_use_id)
-      if (digest === undefined) {
-        const activation = activations.get(child.skill_tool_use_id)
-        if (!activation) throw new Error('skill_activations action original frame is absent')
-        digest = asyncEvidenceHash({...activation, delivery: null, actions: []})
-        frameDigests.set(child.skill_tool_use_id, digest)
+      const activation = activations.get(child.skill_tool_use_id)
+      if (!activation || activation.turn_ref !== delivery.original_turn_ref
+        || activation.invocation.kind !== 'nested_composition'
+        || activation.invocation.scope.composition_run_id !== delivery.composition_run_id
+        || activation.invocation.scope.parent_tool_use_id !== delivery.logical_parent_tool_use_id) {
+        throw new Error('skill_activations async handoff does not belong to original admitted child')
       }
-      if (digest !== child.activation_sha256) {
-        throw new Error('skill_activations action original frame differs')
+      let frame = frameDigests.get(child.skill_tool_use_id)
+      if (frame === undefined) {
+        frame = skillActivationFrameSha256(activation)
+        frameDigests.set(child.skill_tool_use_id, frame)
+      }
+      if (frame !== child.activation_sha256) {
+        throw new Error('skill_activations async original frame differs')
       }
     }
   }
+  for (const action of evidence.async_actions) requireAsyncActionDelivery(action, deliveries)
+}
+
+/** A scoped observation retains complete original frames without pretending
+ * to be a complete ledger or deriving a replacement ledger revision. */
+export function decodeSkillActivationObservation(value: unknown, label = 'skill observation'): SkillActivationObservation {
+  const record = exactSkillActivationObject(value, label,
+    ['activations', 'async_result_deliveries', 'async_actions'])
+  if (!Array.isArray(record.activations) || !Array.isArray(record.async_result_deliveries)
+    || !Array.isArray(record.async_actions)) throw new Error('skill_activations arrays are missing')
+  const evidence: SkillActivationObservation = {
+    activations: record.activations.map((value, index) => decodeSkillActivation(value, `${label}.activations[${index}]`)),
+    async_result_deliveries: record.async_result_deliveries.map((value, index) =>
+      decodeAsyncResultDelivery(value, `${label}.async_result_deliveries[${index}]`)),
+    async_actions: record.async_actions.map((value, index) => decodeAsyncAction(value, `${label}.async_actions[${index}]`)),
+  }
+  validateAsyncOccurrenceFacts(evidence.async_actions)
+  validateAsyncActionLinks(evidence)
+  return evidence
 }
 
 export function normalizeSkillActivationProjection(
@@ -1926,31 +1959,11 @@ export function normalizeSkillActivationProjection(
   ) {
     throw new Error('skill_activations arrays are missing')
   }
-  const activations = ledger.activations.map((activation, index) =>
-    decodeSkillActivation(activation, `available.ledger.activations[${index}]`))
-  const asyncDeliveries = ledger.async_result_deliveries.map((delivery, index) =>
-    decodeAsyncResultDelivery(delivery, `available.ledger.async_result_deliveries[${index}]`))
-  const asyncActions = ledger.async_actions.map((action, index) => decodeAsyncAction(action, `available.ledger.async_actions[${index}]`))
-  validateAsyncOccurrenceFacts(asyncActions)
-  const byId = new Map(activations.map(activation => [activation.skill_tool_use_id, activation]))
-  if (byId.size !== activations.length) throw new Error('skill_activations repeats an original activation')
-  const physicalHandoffs = new Set<string>()
-  for (const delivery of asyncDeliveries) {
-    const { observed_at: _clock, ...identity } = delivery
-    const physicalIdentity = JSON.stringify(identity)
-    if (physicalHandoffs.has(physicalIdentity)) throw new Error('skill_activations repeats a physical handoff')
-    physicalHandoffs.add(physicalIdentity)
-    for (const child of delivery.child_activations) {
-      const id = child.skill_tool_use_id
-      const activation = byId.get(id)
-      if (!activation || activation.turn_ref !== delivery.original_turn_ref
-        || activation.invocation.kind !== 'nested_composition'
-        || activation.invocation.scope.composition_run_id !== delivery.composition_run_id
-        || activation.invocation.scope.parent_tool_use_id !== delivery.logical_parent_tool_use_id) {
-        throw new Error('skill_activations async handoff does not belong to original admitted child')
-      }
-    }
-  }
+  const { activations, async_result_deliveries: asyncDeliveries, async_actions: asyncActions } =
+    decodeSkillActivationObservation({
+      activations: ledger.activations, async_result_deliveries: ledger.async_result_deliveries,
+      async_actions: ledger.async_actions,
+    }, 'available.ledger')
   return {
     status: 'available',
     keeper_name: skillActivationString(projection.keeper_name, 'available.keeper_name'),
@@ -1991,7 +2004,6 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
   const normalizedSkillActivations = normalizeSkillActivationProjection(raw.skill_activations)
-  validateAsyncActionLinks(normalizedSkillActivations)
   return {
     ...raw,
     tool_inventory: {

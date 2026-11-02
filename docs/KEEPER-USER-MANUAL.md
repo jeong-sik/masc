@@ -862,10 +862,12 @@ absolute turn together — rather than joining nearby timestamps.
   the complete submitted user packet. A request capture describes serialization,
   not provider acceptance.
 - **Skill calls and use** distinguishes invocation, delivery and observed action.
-  This view reads the original trace's activation ledger. Async results originating
-  in another trace are outside that lookup; zero matching rows do not establish
-  that the receiving turn had no such results. Physical actions and their causal
-  links are counted separately.
+  It looks up the physical receiving turn across retained activation ledgers,
+  including results whose original invocation belongs to another trace. Each
+  result retains its complete original activation frame and original ledger
+  revision. Physical actions and their causal links are counted separately.
+  Coverage gaps remain visible; an empty incomplete scan does not establish
+  that the turn received or used no results.
 - **Tool results** joins the turn's execution IDs to tool-call records. Missing,
   foreign or duplicate records remain unconfirmed. A tool's return status does
   not establish the success of an external PR review or merge.
@@ -875,6 +877,11 @@ The runtime trace API accepts an exact `trace_id` and `turn_id` at
 source references, not input bodies. Servers predating that projection show
 unavailable intake metadata in the inspector. Observing a source at turn entry
 also does not describe sources deferred before that turn.
+
+Skill receiving-turn evidence is read through
+`/api/v1/dashboard/skill-activations/physical-turn?turn_ref=<trace#absolute-turn>`.
+Its coverage describes the retained trace snapshot, not all historical activity.
+Original invocation and later receipt or action remain separate facts.
 
 ## When something is wrong
 

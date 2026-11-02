@@ -1293,7 +1293,7 @@ function isOwnerGap(gap: Record<string, unknown>): boolean {
   }
 }
 
-function isActivationGap(gap: Record<string, unknown>): boolean {
+export function isActivationGap(gap: Record<string, unknown>): boolean {
   if (!isString(gap.code)) return false
   switch (gap.code) {
     case 'trace_root_unavailable':

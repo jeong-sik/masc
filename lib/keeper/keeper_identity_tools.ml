@@ -157,7 +157,7 @@ let load ~base_path ~keeper_name ~provider_id =
   | exception Sys_error message -> Error message
 ;;
 
-let forget ~base_path ~keeper_name ~provider_id =
+let forget_catalog_file ~base_path ~keeper_name ~provider_id =
   let path = catalog_path ~base_path ~keeper_name ~provider_id in
   if not (Sys.file_exists path)
   then Ok false
@@ -180,7 +180,7 @@ let rec ensure_dir path =
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 ;;
 
-let save ~base_path ~keeper_name catalog =
+let save_catalog_file ~base_path ~keeper_name catalog =
   let path =
     catalog_path ~base_path ~keeper_name ~provider_id:catalog.provider_id
   in
@@ -195,6 +195,56 @@ let save ~base_path ~keeper_name catalog =
   | Unix.Unix_error (err, fn, arg) ->
     Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
   | Sys_error message -> Error message
+;;
+
+let save ~publication catalog =
+  let scope = Keeper_oauth_pending.catalog_scope publication in
+  if not (String.equal scope.provider_id catalog.provider_id) then
+    Keeper_oauth_pending.Publication_failed "catalog provider does not match its publication scope"
+  else
+    Keeper_oauth_pending.publish_catalog publication ~write:(fun () ->
+      save_catalog_file ~base_path:scope.base_path ~keeper_name:scope.keeper catalog)
+;;
+
+type local_detachment = {
+  refresh_token : string option;
+  tools_removed : bool;
+}
+
+let detach_local ~base_path ~keeper_name ~(provider : Provider.t) =
+  Keeper_oauth_pending.retire_scope (Keeper_oauth_pending.for_base_path base_path)
+    ~keeper:keeper_name ~provider_id:provider.id ~local_delete:(fun () ->
+      let scope = Keeper_secret_projection.Keeper_secret in
+      let* refresh_token =
+        Keeper_secret_projection.read_file_entry ~base_path ~keeper_name ~scope
+          ~container_path:provider.refresh_token_file
+      in
+      let* () =
+        Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name ~scope
+          ~container_path:provider.refresh_token_file
+      in
+      let* () =
+        Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
+          ~name:provider.access_token_env
+      in
+      let* () =
+        Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
+          ~name:provider.expires_at_env
+      in
+      let* tools_removed =
+        forget_catalog_file ~base_path ~keeper_name ~provider_id:provider.id
+      in
+      Ok {refresh_token; tools_removed})
+;;
+
+let attachment_matches attachment ~base_path ~keeper_name ~(provider : Provider.t) =
+  let scope = Keeper_oauth_pending.attachment_scope attachment in
+  String.equal scope.base_path base_path && String.equal scope.keeper keeper_name
+  && String.equal scope.provider_id provider.id
+;;
+
+let superseded_operation =
+  "this identity operation was superseded by disconnect or a newer publication"
 ;;
 
 (* The Keeper's own projection, which is the same array its runtime would be
@@ -244,9 +294,17 @@ let access_token_for ~(config : Workspace.config) ~keeper_name ~(provider : Prov
     |> Result.map_error Keeper_github_login_lane.stored_token_error_to_string
 ;;
 
-let refresh ~mcp_post ~(config : Workspace.config) ~keeper_name ~(provider : Provider.t)
+let refresh ~attachment ~mcp_post ~(config : Workspace.config) ~keeper_name ~(provider : Provider.t)
       ~now () =
   let base_path = config.Workspace.base_path in
+  let* publication =
+    if not (attachment_matches attachment ~base_path ~keeper_name ~provider) then
+      Error "attachment does not match this workspace, Keeper and provider"
+    else
+      match Keeper_oauth_pending.begin_catalog attachment with
+      | None -> Error superseded_operation
+      | Some publication -> Ok publication
+  in
   let* access_token = access_token_for ~config ~keeper_name ~provider in
   let* client =
     Result.map_error Mcp_client.error_to_string
@@ -262,8 +320,10 @@ let refresh ~mcp_post ~(config : Workspace.config) ~keeper_name ~(provider : Pro
     ; tools
     }
   in
-  let* () = save ~base_path ~keeper_name catalog in
-  Ok catalog
+  match save ~publication catalog with
+  | Keeper_oauth_pending.Published () -> Ok catalog
+  | Keeper_oauth_pending.Publication_superseded -> Error superseded_operation
+  | Keeper_oauth_pending.Publication_failed detail -> Error detail
 ;;
 
 (* -32601 read through the typed sum rather than the bare integer.  The code
@@ -492,6 +552,11 @@ type renewal_error =
   | Renew_transient of string
   | Renew_permanent of string
 
+type credential = {
+  access_token : string;
+  attachment : Keeper_oauth_pending.attachment;
+}
+
 let renewal_error_message = function
   | Renew_transient message | Renew_permanent message -> message
 ;;
@@ -500,8 +565,13 @@ let renewal_error_message = function
    [renew_if_needed] when the declared window has opened, and the reactive path
    in [run_call] when the endpoint answered 401 -- the only renewal a provider
    that issued no expiry ever gets. *)
-let force_refresh ~token_post ~discover ~base_path ~keeper_name
+let force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now () =
+  let current () =
+    attachment_matches attachment ~base_path ~keeper_name ~provider
+    && Keeper_oauth_pending.attachment_current attachment
+  in
+  let* () = if current () then Ok () else Error (Renew_permanent superseded_operation) in
   let* refresh_token =
     match
       Keeper_secret_projection.read_file_entry ~base_path ~keeper_name
@@ -552,6 +622,7 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
     | Ok None ->
       Error (Renew_permanent "this install has no registered client; attach a keeper first")
   in
+  let* () = if current () then Ok () else Error (Renew_permanent superseded_operation) in
   let* tokens =
     match
       Keeper_oauth_flow.refresh ~post:token_post ~discovered
@@ -573,53 +644,65 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
          | Keeper_oauth_flow.State_mismatch ) as err) ->
       Error (Renew_permanent (Keeper_oauth_flow.exchange_error_to_string err))
   in
-  let* () =
-    match store_tokens ~base_path ~keeper_name ~provider tokens with
-    | Ok () -> Ok ()
-    | Error message -> Error (Renew_permanent message)
-  in
-  Ok tokens.Keeper_oauth_flow.access_token
+  match Keeper_oauth_pending.publish_renewal attachment ~write:(fun () ->
+    store_tokens ~base_path ~keeper_name ~provider tokens) with
+  | Keeper_oauth_pending.Published attachment ->
+      Ok {access_token=tokens.Keeper_oauth_flow.access_token; attachment}
+  | Keeper_oauth_pending.Publication_superseded -> Error (Renew_permanent superseded_operation)
+  | Keeper_oauth_pending.Publication_failed message -> Error (Renew_permanent message)
 ;;
 
-let renew_if_needed ~token_post ~discover ~base_path ~keeper_name
+let renew_if_needed ~attachment ~token_post ~discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now ~access_token () =
+  let* () =
+    if attachment_matches attachment ~base_path ~keeper_name ~provider
+       && Keeper_oauth_pending.attachment_current attachment then Ok ()
+    else Error (Renew_permanent superseded_operation)
+  in
   match provider.Provider.credential_source with
   (* gh owns this credential: it minted the token, it rewrites the file it
      lives in, and masc holds no refresh token to spend. Renewing here would
      mean going to an authorization server about a grant masc never made. *)
-  | Provider.Github_cli _ -> Ok access_token
+  | Provider.Github_cli _ -> Ok {access_token; attachment}
   | Provider.Oauth_exchange ->
   match stored_expires_at ~base_path ~keeper_name ~provider with
   (* No stored expiry means nothing said this token is old. Renewing on a
      guess would spend a refresh token to replace a working credential; the
      reactive path in [run_call] covers a token that turns out to be stale. *)
-  | None -> Ok access_token
+  | None -> Ok {access_token; attachment}
   | Some expires_at ->
     if not (Keeper_oauth_flow.needs_renewal ~provider ~expires_at ~now)
-    then Ok access_token
-    else force_refresh ~token_post ~discover ~base_path ~keeper_name ~provider ~now ()
+    then Ok {access_token; attachment}
+    else force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name ~provider ~now ()
 ;;
 
-let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
+let run_call_once ~attachment ~transports ~(config : Workspace.config) ~keeper_name
       ~(provider : Provider.t) ~remote_name ~arguments ~catalog_authority () =
   let base_path = config.Workspace.base_path in
   let { mcp_post; token_post; discover } = transports in
-  match access_token_for ~config ~keeper_name ~provider with
-  | Error message -> Error (Precondition message)
-  | Ok stored_token -> (
-    match
-      renew_if_needed ~token_post ~discover ~base_path ~keeper_name ~provider
+  let credential =
+    let* stored_token =
+      Result.map_error (fun message -> Precondition message)
+        (access_token_for ~config ~keeper_name ~provider)
+    in
+    Result.map_error (function
+      | Renew_permanent message -> Precondition message
+      | Renew_transient message -> Transient_precondition message)
+      (renew_if_needed ~attachment ~token_post ~discover ~base_path ~keeper_name ~provider
         (* [Time_compat.now] rather than the raw clock: masc reads time
            through one module so a deterministic boundary has one place to
            look, and the determinism gate flags anything that goes around
            it. *)
-        ~now:(Time_compat.now ()) ~access_token:stored_token ()
-    with
-    | Error (Renew_permanent message) -> Error (Precondition message)
-    | Error (Renew_transient message) -> Error (Transient_precondition message)
-    | Ok access_token -> (
+        ~now:(Time_compat.now ()) ~access_token:stored_token ())
+  in
+  match credential with
+  | Error error -> Error error, attachment
+  | Ok credential ->
+    let attachment = credential.attachment in
+    let result =
       match
-        Mcp_client.connect ~post:mcp_post ~url:provider.Provider.mcp_url ~access_token ()
+        Mcp_client.connect ~post:mcp_post ~url:provider.Provider.mcp_url
+          ~access_token:credential.access_token ()
       with
       (* A session that never came up carries proof the call was not sent;
          an error after [call_tool] does not, and the two must stay apart
@@ -633,6 +716,9 @@ let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
           match load ~base_path ~keeper_name ~provider_id:provider.Provider.id with
           | Ok (Some previous_catalog)
             when catalog_contains previous_catalog.tools remote_name -> (
+            match Keeper_oauth_pending.begin_catalog attachment with
+            | None -> Error (Mcp { phase = Tool_call; error })
+            | Some publication ->
             match Mcp_client.list_tools ~post:mcp_post client with
             | Error rediscovery_error ->
               Log.Keeper.emit Log.Warn ~keeper_name
@@ -661,9 +747,10 @@ let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
                    provider.Provider.id remote_name
                    (List.length previous_catalog.tools) (List.length tools)
                    (List.length lost) (List.length gained) fresh.discovered_at);
-              (match save ~base_path ~keeper_name fresh with
-               | Ok () -> ()
-               | Error problem ->
+              (match save ~publication fresh with
+               | Keeper_oauth_pending.Published ()
+               | Keeper_oauth_pending.Publication_superseded -> ()
+               | Keeper_oauth_pending.Publication_failed problem ->
                  Log.Keeper.emit Log.Warn ~keeper_name
                    (Printf.sprintf
                       "keeper_identity_tools: rediscovered %s catalog could \
@@ -679,7 +766,9 @@ let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
             Error (Mcp { phase = Tool_call; error })
           | Ok None | Ok (Some _) -> Error (Mcp { phase = Tool_call; error }))
         | Error error -> Error (Mcp { phase = Tool_call; error })
-        | Ok result -> Ok result)))
+        | Ok result -> Ok result)
+    in
+    result, attachment
 ;;
 
 (* A 401 before the tool was sent can refresh and retry. A 401 from the tool
@@ -688,10 +777,15 @@ let run_call ~transports ~(config : Workspace.config) ~keeper_name
       ~(provider : Provider.t) ~remote_name ~arguments
       ?(catalog_authority = Mcp_client.Unbound) () =
   let base_path = config.Workspace.base_path in
-  match
-    run_call_once ~transports ~config ~keeper_name ~provider
+  let attachment =
+    Keeper_oauth_pending.capture_attachment (Keeper_oauth_pending.for_base_path base_path)
+      ~keeper:keeper_name ~provider_id:provider.id
+  in
+  let result, attachment =
+    run_call_once ~attachment ~transports ~config ~keeper_name ~provider
       ~remote_name ~arguments ~catalog_authority ()
-  with
+  in
+  match result with
   | (Error (Mcp { phase = Session_open; error = Mcp_client.Unauthorized _ })
     | Error (Mcp { error = Mcp_client.Before_tool_call (Mcp_client.Unauthorized _); _ })) as unauthorized -> (
     match provider.Provider.credential_source with
@@ -700,13 +794,13 @@ let run_call ~transports ~(config : Workspace.config) ~keeper_name
     | Provider.Github_cli _ -> unauthorized
     | Provider.Oauth_exchange -> (
       match
-        force_refresh ~token_post:transports.token_post ~discover:transports.discover
+        force_refresh ~attachment ~token_post:transports.token_post ~discover:transports.discover
           ~base_path ~keeper_name ~provider ~now:(Time_compat.now ()) ()
       with
       | Error _ -> unauthorized
-      | Ok _ ->
-        run_call_once ~transports ~config ~keeper_name ~provider
-          ~remote_name ~arguments ~catalog_authority ()))
+      | Ok credential ->
+        fst (run_call_once ~attachment:credential.attachment ~transports ~config ~keeper_name ~provider
+          ~remote_name ~arguments ~catalog_authority ())))
   | (Ok _ | Error (Precondition _ | Transient_precondition _)
     | Error (Mcp { phase = Tool_call; error = Mcp_client.Unauthorized _ })
     | Error (Mcp { phase = (Session_open | Tool_call)

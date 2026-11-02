@@ -37,20 +37,130 @@ type entry = {
   status : status;
 }
 
-(* [newest] keeps, for each Keeper and provider, the latest admission issued
-   to that scope. It is not derived from [entries]: a start that died during
-   discovery never registers, yet it still outranks the earlier start of its
-   own scope. A start for a different scope outranks nothing here. *)
+type scope_state = {
+  latest_start : admission;
+  epoch : unit ref;
+  credential_revision : unit ref;
+  catalog_revision : unit ref;
+}
+
+(* Start ordering and publication revisions belong to the same scope owner.
+   A start that dies during discovery still outranks earlier starts, without
+   changing the credential that was already attached. *)
 type t = {
+  base_path : string;
   mutex : Mutex.t;
   mutable entries : entry list;
   mutable admitted : admission;
-  mutable newest : ((string * string) * admission) list;
+  mutable scopes : ((string * string) * scope_state) list;
 }
-let create () = { mutex = Mutex.create (); entries = []; admitted = 0; newest = [] }
-let with_lock t f =
+type scope = { base_path : string; keeper : string; provider_id : string }
+type attachment = {
+  owner : t;
+  scope : scope;
+  epoch : unit ref;
+  credential_revision : unit ref;
+}
+type catalog_publication = { attachment : attachment; revision : unit ref }
+type 'a publication = Published of 'a | Publication_superseded | Publication_failed of string
+
+let create ~base_path () : t =
+  { base_path; mutex = Mutex.create (); entries = []; admitted = 0; scopes = [] }
+let with_lock (t : t) f =
   Mutex.lock t.mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
+
+let registry_mutex = Mutex.create ()
+let by_workspace = Hashtbl.create 1
+let for_base_path base_path =
+  Mutex.lock registry_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+    match Hashtbl.find_opt by_workspace base_path with
+    | Some owner -> owner
+    | None ->
+        let owner = create ~base_path () in
+        Hashtbl.add by_workspace base_path owner;
+        owner)
+
+let set_scope_state (t : t) key state =
+  t.scopes <- (key, state) :: List.remove_assoc key t.scopes
+
+let state_for_scope (t : t) key =
+  match List.assoc_opt key t.scopes with
+  | Some state -> state
+  | None ->
+      let state = {latest_start=0; epoch=ref (); credential_revision=ref (); catalog_revision=ref ()} in
+      set_scope_state t key state;
+      state
+
+let attachment_for (owner : t) ((keeper, provider_id) as key) =
+  let state = state_for_scope owner key in
+  {owner; scope={base_path=owner.base_path;keeper;provider_id};
+   epoch=state.epoch;credential_revision=state.credential_revision}
+
+let capture_attachment t ~keeper ~provider_id =
+  with_lock t (fun () -> attachment_for t (keeper, provider_id))
+let attachment_scope attachment = attachment.scope
+let catalog_scope publication = publication.attachment.scope
+
+let attachment_current_locked attachment =
+  match List.assoc_opt (attachment.scope.keeper, attachment.scope.provider_id) attachment.owner.scopes with
+  | None -> false
+  | Some state -> state.epoch == attachment.epoch
+      && state.credential_revision == attachment.credential_revision
+
+let attachment_current attachment =
+  with_lock attachment.owner (fun () -> attachment_current_locked attachment)
+
+let begin_catalog attachment =
+  with_lock attachment.owner (fun () ->
+    if not (attachment_current_locked attachment) then None
+    else
+      let key = attachment.scope.keeper, attachment.scope.provider_id in
+      let state = state_for_scope attachment.owner key in
+      let revision = ref () in
+      set_scope_state attachment.owner key {state with catalog_revision=revision};
+      Some {attachment;revision})
+
+let publish_catalog publication ~write =
+  let attachment = publication.attachment in
+  with_lock attachment.owner (fun () ->
+    let state = List.assoc_opt
+      (attachment.scope.keeper, attachment.scope.provider_id) attachment.owner.scopes in
+    match state with
+    | Some state when attachment_current_locked attachment
+        && state.catalog_revision == publication.revision ->
+        (match write () with Ok () -> Published () | Error detail -> Publication_failed detail)
+    | None | Some _ -> Publication_superseded)
+
+let advance_credentials t key =
+  let state = state_for_scope t key in
+  set_scope_state t key {state with credential_revision=ref (); catalog_revision=ref ()}
+
+let publish_renewal attachment ~write =
+  with_lock attachment.owner (fun () ->
+    if not (attachment_current_locked attachment) then Publication_superseded
+    else
+      let key = attachment.scope.keeper, attachment.scope.provider_id in
+      advance_credentials attachment.owner key;
+      match write () with
+      | Ok () -> Published (attachment_for attachment.owner key)
+      | Error detail -> Publication_failed detail)
+
+let retire_scope t ~keeper ~provider_id ~local_delete =
+  with_lock t (fun () ->
+    t.admitted <- t.admitted + 1;
+    set_scope_state t (keeper,provider_id)
+      {latest_start=t.admitted;epoch=ref ();credential_revision=ref ();catalog_revision=ref ()};
+    t.entries <- List.map (fun (entry : entry) ->
+      if entry.keeper=keeper && entry.provider_id=provider_id then
+        match entry.status with
+        | Awaiting_consent _ | Callback_admitted ->
+            {entry with in_flight=None;status=Superseded}
+        | Completed _ | Failed | Credential_publication_incomplete _ | Expired
+        | Superseded -> entry
+      else entry) t.entries;
+    local_delete ())
 
 let expire ~now entry = match entry.status with
   | Awaiting_consent deadline when deadline <= now ->
@@ -66,14 +176,15 @@ let terminal = function Completed _ | Failed | Credential_publication_incomplete
 let admit t ~keeper ~provider_id = with_lock t (fun () ->
   t.admitted <- t.admitted + 1;
   let scope = (keeper, provider_id) in
-  t.newest <- (scope, t.admitted) :: List.remove_assoc scope t.newest;
+  let state = state_for_scope t scope in
+  set_scope_state t scope {state with latest_start=t.admitted};
   t.admitted)
 
 let remember t admission ~now ~ttl_sec in_flight =
   let flow = in_flight.pending in
   let attempt_id = Random_id.hex ~bytes:16 in
   with_lock t (fun () ->
-    let same_scope entry = entry.keeper=flow.Keeper_oauth_flow.keeper
+    let same_scope (entry : entry) = entry.keeper=flow.Keeper_oauth_flow.keeper
       && entry.provider_id=flow.Keeper_oauth_flow.provider_id in
     let entries = List.map (expire ~now) t.entries in
     (* Starts are ordered by the admission issued when they began, not by
@@ -84,10 +195,7 @@ let remember t admission ~now ~ttl_sec in_flight =
        scope does not. This earlier one is refused rather than retiring the
        consent its operator was just shown. *)
     let newest_for_scope =
-      Option.value ~default:0
-        (List.assoc_opt
-           (flow.Keeper_oauth_flow.keeper, flow.Keeper_oauth_flow.provider_id)
-           t.newest) in
+      (state_for_scope t (flow.Keeper_oauth_flow.keeper, flow.Keeper_oauth_flow.provider_id)).latest_start in
     if newest_for_scope > admission then Error Newer_start_admitted
     else begin
       (* A new operator attempt retires the previous consent for the same
@@ -135,12 +243,17 @@ let status t ~now ~attempt_id ~keeper ~provider_id =
       && entry.keeper=keeper && entry.provider_id=provider_id) t.entries
     |> Option.map (fun entry -> entry.status))
 
+type settlement = Recorded | Not_admitted
+
 let finish t ~state outcome =
   with_lock t (fun () ->
+    let recorded = ref false in
     t.entries <- List.map (fun entry ->
       if entry.state=state && entry.status=Callback_admitted
-      then {entry with status=(match outcome with Ok completion -> Completed completion | Error () -> Failed)}
-      else entry) t.entries)
+      then (recorded := true;
+        {entry with status=(match outcome with Ok completion -> Completed completion | Error () -> Failed)})
+      else entry) t.entries;
+    if !recorded then Recorded else Not_admitted)
 
 let waiting t ~now = with_lock t (fun () ->
   t.entries <- List.map (expire ~now) t.entries;
@@ -152,9 +265,12 @@ let waiting t ~now = with_lock t (fun () ->
 
 let publish_credentials t ~state ~write =
   with_lock t (fun () ->
-    if List.exists (fun entry -> entry.state=state && entry.status=Callback_admitted)
-         t.entries
-    then
+    match List.find_opt (fun entry -> entry.state=state && entry.status=Callback_admitted)
+      t.entries with
+    | None -> Publication_superseded
+    | Some entry ->
+      let key = entry.keeper, entry.provider_id in
+      advance_credentials t key;
       let interrupted completed_writes interrupted_write =
         let progress = {completed_writes=List.rev completed_writes; interrupted_write} in
         t.entries <- List.map (fun entry ->
@@ -162,14 +278,13 @@ let publish_credentials t ~state ~write =
           then {entry with status=Credential_publication_incomplete progress}
           else entry) t.entries in
       let rec publish completed = function
-        | [] -> Ok ()
+        | [] -> Published (attachment_for t key)
         | stage :: rest ->
             (match write stage with
              | Ok () -> publish (stage :: completed) rest
-             | Error detail -> interrupted completed stage; Error detail
+             | Error detail -> interrupted completed stage; Publication_failed detail
              | exception exn ->
                  let backtrace = Printexc.get_raw_backtrace () in
                  interrupted completed stage;
                  Printexc.raise_with_backtrace exn backtrace) in
-      Some (publish [] [Refresh_token; Access_token; Expiry])
-    else None)
+      publish [] [Refresh_token; Access_token; Expiry])

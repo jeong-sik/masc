@@ -769,6 +769,30 @@ let test_a_removed_tool_is_not_called_twice () =
   | Ok None | Error _ -> Alcotest.fail "no catalog after rediscovery"
 ;;
 
+let test_method_not_found_rediscovery_cannot_reattach_after_disconnect () =
+  let base_path = temp_base () in
+  let keeper_name = "acme-daycare" in
+  let provider = provider () in
+  write_catalog ~base_path ~keeper_name [tool ~read_only:true "getJiraIssue"];
+  project_token ~base_path;
+  let normal_post, _, calls = drifting_transport () in
+  let post ~url ~headers ~body =
+    if Yojson.Safe.Util.member "method" (Yojson.Safe.from_string body) = `String "tools/list" then
+      (match Identity_tools.detach_local ~base_path ~keeper_name ~provider with
+       | Ok _ -> ()
+       | Error message -> Alcotest.fail message);
+    normal_post ~url ~headers ~body
+  in
+  (match execute_offered ~post ~base_path (single_offered ~base_path) (`Assoc []) with
+   | Ok _ -> Alcotest.fail "the original remote error became success"
+   | Error error -> check Alcotest.bool "the sent request remains unsafe to replay" false
+       error.Agent_core.Types.recoverable);
+  check Alcotest.int "the sent tool request was not replayed" 1 !calls;
+  match Identity_tools.load ~base_path ~keeper_name ~provider_id:provider.id with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "rediscovery restored the detached catalog"
+  | Error message -> Alcotest.fail message
+
 let test_an_expected_not_found_does_not_reach_for_the_catalog () =
   (* A name no catalog ever carried is the model guessing, not drift. The
      honest answer is the error itself; a rediscovery here would spend a
@@ -941,15 +965,20 @@ let store_expiry ~base_path ~provider ~at =
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not store an expiry: %s" message
 
+let attachment ~base_path =
+  Keeper_oauth_pending.capture_attachment (Keeper_oauth_pending.for_base_path base_path)
+    ~keeper:"attaching-fixture" ~provider_id:(provider ()).Provider.id
+
 let test_a_fresh_token_is_left_alone () =
   let base_path = temp_base () in
   let provider = provider () in
   store_expiry ~base_path ~provider ~at:10_000.0;
   match
-    Identity_tools.renew_if_needed ~token_post:never_token_post ~discover:never_discover ~base_path
+    Identity_tools.renew_if_needed ~attachment:(attachment ~base_path)
+      ~token_post:never_token_post ~discover:never_discover ~base_path
       ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"still-good" ()
   with
-  | Ok token -> check str "unchanged" "still-good" token
+  | Ok credential -> check str "unchanged" "still-good" credential.Identity_tools.access_token
   | Error err ->
     Alcotest.failf "renewed a fresh token: %s" (Identity_tools.renewal_error_message err)
 
@@ -958,11 +987,12 @@ let test_no_stored_expiry_renews_nothing () =
      gains nothing. *)
   let base_path = temp_base () in
   match
-    Identity_tools.renew_if_needed ~token_post:never_token_post ~discover:never_discover ~base_path
+    Identity_tools.renew_if_needed ~attachment:(attachment ~base_path)
+      ~token_post:never_token_post ~discover:never_discover ~base_path
       ~keeper_name:"attaching-fixture" ~provider:(provider ()) ~now:0.0
       ~access_token:"unknown-age" ()
   with
-  | Ok token -> check str "unchanged" "unknown-age" token
+  | Ok credential -> check str "unchanged" "unknown-age" credential.Identity_tools.access_token
   | Error err ->
     Alcotest.failf "renewed on a guess: %s" (Identity_tools.renewal_error_message err)
 
@@ -1013,14 +1043,14 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       }
   in
   match
-    Identity_tools.renew_if_needed ~token_post ~discover ~base_path
+    Identity_tools.renew_if_needed ~attachment:(attachment ~base_path) ~token_post ~discover ~base_path
       ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"about-to-expire"
       ()
   with
   | Error err ->
     Alcotest.failf "renewal failed: %s" (Identity_tools.renewal_error_message err)
-  | Ok token ->
-      check str "the call uses the new token" "the-new-one" token;
+  | Ok credential ->
+      check str "the call uses the new token" "the-new-one" credential.Identity_tools.access_token;
       check Alcotest.bool "and it was a refresh_token grant" true
         (match !sent with
         | body :: _ -> Str.string_match (Str.regexp ".*grant_type=refresh_token") body 0
@@ -1068,7 +1098,8 @@ let test_a_transient_renewal_failure_is_marked_transient () =
          { url = "https://auth.example.com"; detail = "connection refused" })
   in
   match
-    Identity_tools.renew_if_needed ~token_post:never_token_post ~discover ~base_path
+    Identity_tools.renew_if_needed ~attachment:(attachment ~base_path)
+      ~token_post:never_token_post ~discover ~base_path
       ~keeper_name:"attaching-fixture"
       ~provider ~now:0.0 ~access_token:"about-to-expire" ()
   with
@@ -1077,7 +1108,7 @@ let test_a_transient_renewal_failure_is_marked_transient () =
     Alcotest.failf "a network blip was marked permanent: %s" message
   | Ok _ -> Alcotest.fail "a failed renewal handed back a token as if it worked"
 
-let test_a_401_is_cleared_by_one_reactive_refresh () =
+let check_a_401_is_cleared_by_one_reactive_refresh ~proactive () =
   (* A provider that issues no expiry never renews proactively, so a token it
      rejects with 401 is the only signal to spend the refresh token. The call
      must refresh once and retry, not fail with "attach it again" while a
@@ -1085,6 +1116,7 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
   let base_path = temp_base () in
   let provider = provider () in
   let keeper_name = "attaching-fixture" in
+  if proactive then store_expiry ~base_path ~provider ~at:100.;
   (match
      Projection.set_env_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
        ~name:provider.Provider.access_token_env ~value:"stale-token"
@@ -1134,8 +1166,12 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
             {|{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"PK-1"}]}}|}
         }
   in
+  let renewals = ref 0 in
   let token_post ~url:_ ~headers:_ ~body:_ =
-    Ok (200, {|{"access_token":"the-new-one","refresh_token":"rotated","expires_in":28800}|})
+    incr renewals;
+    let access_token = if proactive && !renewals=1 then "proactively-renewed" else "the-new-one" in
+    Ok (200, Printf.sprintf
+      {|{"access_token":%S,"refresh_token":"rotated","expires_in":28800}|} access_token)
   in
   let discover ~mcp_url:_ =
     Ok
@@ -1157,8 +1193,82 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
   with
   | Ok result ->
     check str "the retry with the refreshed token succeeded" "PK-1"
-      result.Mcp_client.text
+      result.Mcp_client.text;
+    check Alcotest.int "only the admitted refreshes ran" (if proactive then 2 else 1) !renewals
   | Error _ -> Alcotest.fail "a 401 a refresh could clear was not retried"
+
+let test_a_401_is_cleared_by_one_reactive_refresh () =
+  check_a_401_is_cleared_by_one_reactive_refresh ~proactive:false ()
+
+let test_reactive_refresh_uses_the_proactive_credential_revision () =
+  check_a_401_is_cleared_by_one_reactive_refresh ~proactive:true ()
+
+let test_catalog_discovery_cannot_reattach_after_disconnect () =
+  let base_path = temp_base () in
+  let keeper_name = "attaching-fixture" in
+  let provider = provider () in
+  (match Projection.set_env_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+           ~name:provider.access_token_env ~value:"fixture-access" with
+   | Ok () -> ()
+   | Error message -> Alcotest.fail message);
+  write_catalog ~base_path ~keeper_name [tool "getJiraIssue"];
+  let initial = attachment ~base_path in
+  let normal_post, _ = recording_transport () in
+  let mcp_post ~url ~headers ~body =
+    if Yojson.Safe.Util.member "method" (Yojson.Safe.from_string body) = `String "tools/list" then (
+      (match Identity_tools.detach_local ~base_path ~keeper_name ~provider with
+       | Ok _ -> ()
+       | Error message -> Alcotest.fail message);
+      Ok {Masc_http_client.status=200;headers=[];
+          body=echo_request_id body {|{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}|}})
+    else normal_post ~url ~headers ~body
+  in
+  (match Identity_tools.refresh ~attachment:initial ~mcp_post
+           ~config:(Masc.Workspace.default_config base_path) ~keeper_name ~provider ~now:1. () with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "late discovery reported a published catalog");
+  (match Identity_tools.load ~base_path ~keeper_name ~provider_id:provider.id with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "late discovery restored the detached catalog"
+   | Error message -> Alcotest.fail message);
+  check Alcotest.bool "the earlier attachment remains retired" false
+    (Keeper_oauth_pending.attachment_current initial)
+
+let test_renewal_cannot_restore_detached_credentials () =
+  let base_path = temp_base () in
+  let keeper_name = "attaching-fixture" in
+  let provider = provider () in
+  let require = function Ok value -> value | Error message -> Alcotest.fail message in
+  store_expiry ~base_path ~provider ~at:100.;
+  Projection.set_env_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+    ~name:provider.access_token_env ~value:"fixture-access" |> require;
+  Projection.set_file_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+    ~container_path:provider.refresh_token_file ~value:"fixture-refresh" |> require;
+  Keeper_oauth_client_store.save
+    ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity") ~provider
+    {client_id="fixture-client";client_secret=None;secret_expires_at=Some 0.;scopes=[]} |> require;
+  let discover ~mcp_url:_ = Ok {
+    Keeper_oauth_discovery.resource="https://mcp.example.com";
+    issuer="https://auth.example.com";authorize_url="https://auth.example.com/authorize";
+    token_url="https://auth.example.com/token";registration_url=None;revocation_endpoint=None;
+    scopes_supported=[];supports_pkce_s256=true} in
+  let token_post ~url:_ ~headers:_ ~body:_ =
+    ignore (Identity_tools.detach_local ~base_path ~keeper_name ~provider |> require);
+    Ok (200, {|{"access_token":"late-access","refresh_token":"late-refresh","expires_in":3600}|}) in
+  (match Identity_tools.renew_if_needed ~attachment:(attachment ~base_path)
+           ~token_post ~discover ~base_path ~keeper_name ~provider ~now:0.
+           ~access_token:"fixture-access" () with
+   | Error (Identity_tools.Renew_permanent _) -> ()
+   | Error (Identity_tools.Renew_transient _) -> Alcotest.fail "retired publication became a network retry"
+   | Ok _ -> Alcotest.fail "late renewal restored detached credentials");
+  check (Alcotest.result (Alcotest.option str) str) "refresh token stays absent" (Ok None)
+    (Projection.read_file_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+       ~container_path:provider.refresh_token_file);
+  match Projection.local_env_for_keeper ~host_env:[||] ~base_path ~keeper_name () with
+  | Error message -> Alcotest.fail message
+  | Ok None -> ()
+  | Ok (Some entries) -> check Alcotest.bool "access token stays absent" false
+      (Array.exists (String.starts_with ~prefix:(provider.access_token_env ^ "=")) entries)
 
 let test_post_send_401_does_not_refresh_and_repeat () =
   let base_path = temp_base () in
@@ -1250,6 +1360,8 @@ let () =
             test_a_real_sized_token_is_storable;
           Alcotest.test_case "a real-sized token survives the projection"
             `Quick test_a_real_sized_token_survives_the_projection;
+          Alcotest.test_case "catalog discovery cannot reattach after disconnect" `Quick
+            test_catalog_discovery_cannot_reattach_after_disconnect;
         ] );
       ( "renewal",
         [ Alcotest.test_case "a fresh token is left alone" `Quick
@@ -1262,6 +1374,10 @@ let () =
             `Quick test_a_transient_renewal_failure_is_marked_transient;
           Alcotest.test_case "a 401 is cleared by one reactive refresh" `Quick
             test_a_401_is_cleared_by_one_reactive_refresh;
+          Alcotest.test_case "reactive refresh uses the proactive credential revision" `Quick
+            test_reactive_refresh_uses_the_proactive_credential_revision;
+          Alcotest.test_case "renewal cannot restore detached credentials" `Quick
+            test_renewal_cannot_restore_detached_credentials;
           Alcotest.test_case "post-send 401 does not repeat" `Quick
             test_post_send_401_does_not_refresh_and_repeat;
         ] );
@@ -1299,6 +1415,8 @@ let () =
             test_a_still_advertised_tool_is_not_retried;
           Alcotest.test_case "a removed tool is not called twice" `Quick
             test_a_removed_tool_is_not_called_twice;
+          Alcotest.test_case "method-not-found rediscovery cannot reattach after disconnect" `Quick
+            test_method_not_found_rediscovery_cannot_reattach_after_disconnect;
           Alcotest.test_case "tool error does not authorize retry" `Quick
             test_tool_error_does_not_authorize_retry;
           Alcotest.test_case "preflight failure proves no tool request" `Quick

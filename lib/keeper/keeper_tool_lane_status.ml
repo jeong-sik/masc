@@ -158,23 +158,45 @@ let with_profile ~(meta : keeper_meta) fields =
      :: fields)
 ;;
 
-let with_remote_report ~(meta : keeper_meta) = function
+(* What an unreachable report says next is the profile's, never the detail
+   string's. An OpenSSH endpoint is named by a declaration, so a missing one
+   is the operator's. A microVM endpoint is the keeper's own guest: this read
+   cannot start it, and the keeper's next Execute starts or prepares it
+   ({!Keeper_sandbox_remote_lane.guest_endpoint}). *)
+type unreachable_endpoint =
+  | Declared_endpoint
+  | Keeper_guest
+
+let unreachable_fields = function
+  | Declared_endpoint ->
+    [ ( "operator_action"
+      , `String
+          "The lane endpoint cannot be named from its declarations. Correcting \
+           the keeper's runtime or endpoint declaration is the operator's." )
+    ]
+  | Keeper_guest ->
+    [ "operator_action", `Null
+    ; ( "note"
+      , `String
+          "This status read cannot start your guest. Your next Execute starts or \
+           prepares it and reports a start failure as its own result." )
+    ]
+;;
+
+let with_remote_report ~(meta : keeper_meta) ~unreachable = function
   | Ok report ->
     (match json_of_report report with
      | `Assoc fields -> with_profile ~meta fields
      | other -> other)
   | Error detail ->
     with_profile ~meta
-      [ "lane", `Null
-      ; "endpoint", `Null
-      ; "probe", `Null
-      ; "last_dispatch", `Null
-      ; "unreachable", `String detail
-      ; ( "operator_action"
-        , `String
-            "The lane endpoint cannot be named from its declarations. Correcting \
-             the keeper's runtime or endpoint declaration is the operator's." )
-      ]
+      ([ "lane", `Null
+       ; "endpoint", `Null
+       ; "probe", `Null
+       ; "last_dispatch", `Null
+       ; "unreachable", `String detail
+       ]
+       @ unreachable_fields unreachable)
 ;;
 
 let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.Safe.t =
@@ -200,9 +222,9 @@ let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.S
       |> Keeper_sandbox_remote.report_openssh
            ~scope:(Keeper_sandbox_remote.Keeper_dispatch meta.name)
            ~base_path:config.base_path)
-    |> with_remote_report ~meta
+    |> with_remote_report ~meta ~unreachable:Declared_endpoint
   | Keeper_types_profile_sandbox.Micro_vm ->
     Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
     |> Result.map Keeper_sandbox_remote.report
-    |> with_remote_report ~meta
+    |> with_remote_report ~meta ~unreachable:Keeper_guest
 ;;

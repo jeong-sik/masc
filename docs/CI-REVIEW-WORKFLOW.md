@@ -4,11 +4,18 @@ The operator's policy in `docs/constitution.xml` owns this workflow. Work procee
 in stacked PRs: each later PR targets the preceding branch. Native Stack metadata
 names the trunk and the included parents.
 Review function, logic and code cleanliness independently; approve the current
-head when no P0/P1/P2 issue remains and collect P3 findings for later. Ordinary
-verdicts use `verdict: PASS|FAIL head: <40-hex SHA> by: <reviewer>` without a run ID.
-Release verdicts also cite the completed successful full run. Current independent
-approval, later blocking reviews, exact head and base changes remain admission
-checks; land parents first and review the changed child diff before integration.
+head when no P0/P1/P2 issue remains and collect P3 findings for later. A reviewer
+may submit GitHub APPROVE directly for the reviewed head; no fixed body or footer
+is required. Record the completed successful full run separately for Release.
+Before integration check the current independent review, head, base, complete
+diff and unresolved findings. A non-native branch chain lands parent first; a
+native stack lands whole through its top PR.
+
+Current-head GitHub approvals do not depend on a reviewer association or body
+format. Other accounts' change requests remain visible. A later formal approval replaces an earlier
+change request on the same account, but does not prove the original finding was
+resolved. Before merging, the integrator reads the review and comment text and
+checks the change or explanation that addresses each outstanding concern.
 
 There is no automatic PR, push or tag CI. The operator-authorized
 `main-minimal-build.yml` checks main at minutes 7 and 37: it builds the server,
@@ -20,8 +27,8 @@ repeated work. Builds are serialized without cancelling the active build.
 Scheduling may be delayed; this does not guarantee a build within 30 minutes.
 This observation does not approve a PR or replace full Release/Tag checks.
 
-Every merge head should also carry a merge-compile record: `merge-compile.yml`,
-dispatched explicitly on main right after review with the exact head SHA
+An optional merge-compile observation can be requested: `merge-compile.yml`,
+dispatched explicitly on main with the exact head SHA
 (top head for stacks, PR head for singles), builds the same four
 executables in one Dune invocation and settles a `merge-compile` commit
 status on that SHA. The executing toolchain (`.github/actions`, the two
@@ -31,31 +38,28 @@ in the settled status and receipt. Non-documentation inputs identical to an
 already built SHA settle instantly by input identity (docs-only heads build
 nothing — no dune rule in the four-executable closure reads `docs/`,
 `docs-site/` or `changelog.d/`); anything else builds asynchronously —
-dispatch fire-and-forget and merge once the head is fresh on its merge target
-with a success status. The record certifies the head tree, so the guard also
-requires `behind_by == 0` against the merge target (`stack.base` for native
-stacks, `base` for singles): only a head containing the target tip merges to
-the certified tree. A new head invalidates the record. The verdict is
-advisory until convention adoption: `merge-guard.sh` prints
-`ADVISORY #N: merge-compile ...` and merges proceed on operator judgment
-(`MASC_MERGE_COMPILE_ENFORCE=1` opts one invocation into fail-close); the
-refusal itself lands with the convention procedure, not this mechanism.
+dispatch fire-and-forget. The record describes the head that was built; a new
+head needs a separate record. The status and freshness against the merge target
+are advisory for ordinary stacks.
 A dispatch from any branch other than main is a proof run: it exercises the
 whole pipeline but writes no commit status, so only the workflow file on main
-can mint a record the guard reads.
+can mint that commit status.
 
 For an explicitly selected
 approved combination, use [the selection commands](../scripts/review/APPROVED-CI-SELECTION.md)
 to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with the
 exact candidate SHA, receipt and chosen scopes. Main's verifier rechecks source
 approvals and reconstructs that candidate before build or test jobs begin.
-Preparation and runner rechecks read `approve-guard.sh --source-receipt`:
-it requires current independent source approval, exact head, complete diff,
-review scope and no later blocking verdict or change request. This read-only,
-source-only receipt does not consult the selected run's own CI pin, so a pending
-or failed pin cannot prevent verification or an explicitly requested retry.
-It cannot publish approval or admit a release. Actual merge admission continues
-to check that pin and refuses pending or failed selected runs.
+Preparation and runner rechecks read current GitHub review states through
+`github-reviews.py`, require an accepted approval on each selected head and
+reject outstanding formal change requests. They also recheck the selected PR
+identities and candidate. GitHub review records alone do not prove the reviewed
+session's independence or the base and complete diff actually inspected. Review
+the actual change and any outstanding comments. This read-only
+review lookup does not consult the selected run's own CI pin, so a pending or
+failed pin cannot prevent verification or an explicitly requested retry. It cannot
+publish approval or admit a release. A pending or failed selected run remains
+visible as its actual status when considering integration.
 Ordinary compile builds only `lib/masc.cmxa` for the stack bottom. Ordinary behavior
 verification requires explicit suites. Prefer short, lightweight checks; about
 two minutes is an example of their size, not a fixed cap, job timeout or pass/fail

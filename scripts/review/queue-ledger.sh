@@ -34,7 +34,6 @@ if [ "$mode" = pairs ]; then
 fi
 
 source "$here/ci-checks.sh"
-source "$here/review-verdict.sh"
 rows=$("$GH" pr list --repo "$repo" --state open --limit "$limit" \
   --json number,author,baseRefName,headRefOid,headRefName,isDraft \
   --jq '.[] | [.number, .author.login, .baseRefName, .headRefOid, .headRefName, (.isDraft|tostring)] | @tsv')
@@ -42,41 +41,45 @@ rows=$("$GH" pr list --repo "$repo" --state open --limit "$limit" \
 [ "$fmt" != tsv ] || printf 'pr\tauthor\twaits_on\tevidence\tverdict\n'
 while IFS=$'\t' read -r pr author base head branch draft; do
   [ -n "$pr" ] || continue
-  review_identity=""; run=""; verdict="-"; evidence="source review"; waits="review"
+  review_identity=""; run=""; verdict="-"; evidence="GitHub reviews"; waits="review"
   if [ "$draft" = true ]; then waits=draft
-  elif value=$(verdict_for "$pr" "$head" "" "" json); then
-    state=$(printf '%s' "$value" | jq -r '.state // empty')
-    cited=$(printf '%s' "$value" | jq -r '.run // "-"')
-    by=$(printf '%s' "$value" | jq -r '.by // "-"')
-    verdict="${state:--}${by:+ by $by}"
-    if [ -n "$state" ] && [ "$state" != PASS ]; then
-      waits=$(printf '%s' "$value" | jq -r '[.blockers[] | "\(.state) by \(.actor // "unidentified") at \(.kind):\(.id // "unknown") since \(.decision_at)"] | join("; ")')
+  else
+    review_exit=0
+    value=$(python3 "$here/github-reviews.py" --repo "$repo" --pr "$pr" --head "$head" --gh "$GH") || review_exit=$?
+    if [ -n "$value" ]; then
+      verdict=$(printf '%s' "$value" | jq -r 'if (.approval_ids | length) > 0 then "APPROVED " + (.approval_ids | map(tostring) | join(",")) else "-" end')
+      earlier=$(printf '%s' "$value" | jq -r '[.superseded_change_requests[]? | (.id | tostring)] | join(",")')
+      [ -z "$earlier" ] || verdict="$verdict; earlier CR $earlier"
+      requests=$(printf '%s' "$value" | jq -r '[.change_requests[] | "open CHANGES_REQUESTED from \(.login) (review \(.id))"] | join("; ")')
+      [ -z "$requests" ] || waits="$requests"
     fi
-    if [ -z "$state" ] || [ "$state" = PASS ]; then
-      if check_current_ci; then
+    if [ "$review_exit" -eq 0 ]; then
+      # Ordinary source reviews do not wait for CI. Release verification is
+      # checked separately, without changing whether an approval may be sent.
+      if read_current_pr && { [ "$review_policy" != release ] || check_current_ci; }; then
         [ "$review_policy" != release ] || evidence="release run $release_run"
-        if { [ "$review_policy" = source ] && [ "$cited" != - ]; } ||
-           { [ "$review_policy" = release ] && [ "$cited" != "$release_run" ]; }; then waits=review
-        elif guard_note=$(GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" 2>&1); then
-          waits=merge
-          if [ "${pr_stack:-null}" != null ]; then
-            if accepted_scope=$(GUARD_GH="$GH" bash "$here/merge-guard.sh" --check --scope-json --repo "$repo" --pr "$pr" --head "$head"); then
-              target=$(printf '%s' "$accepted_scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
-              if [ "$(printf '%s' "$accepted_scope" | jq -r '.stack != null')" = true ]; then
-                waits="merge native stack through #$pr into $target"
-              else waits="merge into $target"; fi
-            else waits="native stack review, changed scope, or a layer below the stack's top PR"; fi
-          elif [ "$base" != main ]; then
-            parent=$(printf '%s\n' "$rows" | awk -F '\t' -v base="$base" '$5==base {print $1; exit}')
-            waits="parent ${parent:+#}${parent:-$base}"
-          fi
-        else
-          waits=$(printf '%s\n' "$guard_note" | awk 'NF {print; exit}')
-          [ -n "$waits" ] || waits="unknown:review admission failed without a diagnostic"
-        fi
-      else waits="release CI or changed PR"; fi
+        if [ "$pr_base" != "$base" ] || [ "$pr_branch" != "$branch" ]; then
+          waits="unknown:PR base or branch changed during read"
+        elif [ "${pr_stack:-null}" != null ]; then
+          if accepted_scope=$(GUARD_GH="$GH" python3 "$here/stack-scope.py" "$repo" "$pr" "$head"); then
+            target=$(printf '%s' "$accepted_scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
+            if [ "$(printf '%s' "$accepted_scope" | jq -r '.stack != null')" = true ]; then
+              waits="review native stack through #$pr into $target"
+            else waits="review scope into $target"; fi
+          else waits="unknown:native stack scope changed or is unavailable"; fi
+        elif [ "$base" != main ]; then
+          parent=$(printf '%s\n' "$rows" | awk -F '\t' -v base="$base" '$5==base {print $1; exit}')
+          waits="parent ${parent:+#}${parent:-$base}"
+        else waits=merge; fi
+      else
+        ci_exit=$?
+        if [ "$ci_exit" -eq 2 ]; then waits="release CI or changed PR"
+        else waits="unknown:CI or PR read failed"; fi
+      fi
+    elif [ "$review_exit" -ne 2 ] || [ -z "$value" ]; then
+      waits="unknown:review state unavailable or PR changed"
     fi
-  else waits="unknown:review"; fi
+  fi
   if [ "$fmt" = md ]; then
     waits=$(printf '%s' "$waits" | python3 -c 'import sys; print(sys.stdin.read().replace("\\", "\\\\").replace("|", "\\|").replace("\n", " "), end="")')
     printf '| #%s | %s | %s | %s | %s |\n' "$pr" "$author" "$waits" "$evidence" "$verdict"

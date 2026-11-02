@@ -3762,11 +3762,10 @@ status: reference
     base나 head가 바뀌어 diff가 달라지면 변경 범위를 독립 검토한다. 개별 PR 리뷰는 전체 스택 승인이 아니다.
     Native Stack 병합은 비동기 API 접수와 완료를 구분해 확인한다.
     → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
-  - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
+  - 검증과 승인: 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
     묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
-    없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`
-    형식을 쓰며, CI run ID를 요구하지 않는다. 사소한 P3(서식·단순 정리)는 승인을 막지 않고 모아서
-    일괄 수거한다.
+    없으면 검토한 head에 GitHub 일반 APPROVE를 직접 제출한다. 정해진 승인 본문 형식이나 CI run ID는
+    필요하지 않다. 사소한 P3(서식·단순 정리)는 승인을 막지 않고 모아서 일괄 수거한다.
   - 빌드와 릴리스 집약: 일반 PR이나 스택 바닥 PR은 명시적으로 요청한 짧고 가벼운 최소 검사(`pr-check.yml`의
     구문·자격증명 검사, `ci.yml`의 Core 라이브러리 빌드)만 확인하며, 전체 테스트 그래프는 돌리지 않는다.
     "2분 정도"는 검사 규모를 설명하는 예시이며 강제 종료 시간이나 성공·실패 판정 기준이 아니다.
@@ -3775,23 +3774,20 @@ status: reference
     Tag 단계에 집약하여 수행한다.
   → [docs/constitution.xml](../constitution.xml) ·
   [docs/AGENTIC-WORKFLOW.md](../AGENTIC-WORKFLOW.md) ·
-  [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
-  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+  [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md)
 
 **ROLL (롤 / 일괄 착지 규약)**
 : 여러 작업 또는 여러 PR을 단일 묶음 PR/커밋으로 묶어 검증한 뒤 한 건만 착지시키는 MASC 내부 일괄 병합 규약.
   GitHub 공식 기능인 Native Stack이나 수동 브랜치 체인과 구별되는 고유한 운영 프로토콜이다(세계 헌법 `a-34749e1e`·`a-213da42f`).
   - 고정과 합집합 영수증: BASE와 멤버 PR들의 head를 고정하고, 각 멤버의 필수 테스트 스위트 합집합과
     실행 결과를 영수증으로 대조한다. 멤버 누락, 빈 목록, tree 또는 main과의 불일치가 있으면 일괄 착지를 거절한다.
-  - 멤버 대체와 독립 검토: 멤버 PR들의 개별 CI·PASS·승인은 ROLL의 종합 영수증으로 대체할 수 있으나,
-    각 멤버는 고정 head·기준 SHA·범위·원문 좌표·검토자를 갖춘 독립적인 내용 검토(CR·FAIL 부재)를 반드시 거쳐야 한다.
-  - 착지와 원본 닫기: 현재 head의 PASS, 독립 승인, approve-guard 및 merge-guard 검증을 거쳐 ROLL PR 한 건만 main에
-    병합하며, 착지 직전 재확인과 도착 부모·tree·포함 증명을 확인한 뒤에만 원본 멤버 PR들을 병합 없이 닫는다.
+  - 멤버 검토: 멤버 PR의 변경을 각각 살피고, 조합 전체의 검증 결과와 개별 리뷰를 구분한다.
+  - 착지와 원본 닫기: 현재 head의 GitHub 리뷰와 승인 상태를 확인하고 ROLL PR 한 건만 main에 병합한다.
+    착지 결과와 도착 부모·tree·포함 범위를 확인한 뒤 원본 멤버 PR들을 병합 없이 닫는다.
   - Native Stack과의 경계: GitHub의 Native Stack(`stack != null`)은 각 층의 PR이 유지되면서 하위 층을 포함해
     비동기(`merge-async`)로 일괄 접수되는 외부 플랫폼 기능인 반면, ROLL은 복수 작업의 커밋/트리를 단일 PR로 묶어 착지시키고
     원본을 닫는 내부 운영 규약이다.
-  → [docs/constitution.xml](../constitution.xml) ·
-  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+  → [docs/constitution.xml](../constitution.xml)
 
 **가이드 없음 표기 (guideless marker)**
 : 릴리스 노트의 Added 불릿 끝에 달아, 그 기능을 다루는 사용 가이드가 아직 없음을
@@ -3816,14 +3812,12 @@ status: reference
   바이트까지 같은지 대조한 뒤 컴파일해 커밋 상태(commit status)로 남기는 기록.
   `trust-head-toolchain=true`면 이 대조를 생략하고 override를 영수증에 남긴다.
   `merge-compile.yml`은 workflow_dispatch로만 돌고 sha·pr 입력을 받는다(pr=0은
-  PR 없는 도달 가능 SHA, live-proof dispatch). merge-guard는 이 기록을
-  `ADVISORY #N: ...` 조언 줄로 기본 읽는데, `MASC_MERGE_COMPILE_ENFORCE=1`이면
-  fail-closed로 바뀐다. 기록이 승인을 대신하지도, 병합을 보증하지도 않는다.
+  PR 없는 도달 가능 SHA, live-proof dispatch). 결과는 GitHub 커밋 상태에서 확인한다.
+  이 기록은 승인을 대신하지도, 병합을 보증하지도 않는다.
   비-main ref proof run은 status를 쓰지 않는다. 병합자가 착지 보고에 남기는
   Main minimal build(main ref 제품 빌드)는 다른 검사다.
   → [.github/workflows/merge-compile.yml](../../.github/workflows/merge-compile.yml) ·
-  [scripts/review/README.md](../../scripts/review/README.md) ·
-  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+  [scripts/review/README.md](../../scripts/review/README.md)
 
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩

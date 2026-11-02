@@ -85,8 +85,15 @@ let read_json ~kept_reads ~address_of ~send ~decode ~host ~port ~path =
         |> (fun result -> Result.bind result validate_workspace_read_response)
         |> Result.map (fun { Masc_http_client.status; headers; body } ->
              { Masc_tui_kept_reads.status; headers; body }))
-      ~decode:(fun { Masc_tui_kept_reads.status; body; _ } ->
-        decode ~allow_empty:false ~status_code:status ~body)
+      ~decode:(fun { Masc_tui_kept_reads.status; headers; body } ->
+        let html_error =
+          if Masc.Tui_decode.is_success_http_status status then None
+          else Masc_tui_response_decode.run ~name:"http.html_error.decode_wait" (fun () ->
+            Masc_tui_http_error.html_response ~status_code:status ~headers ~body)
+        in
+        match html_error with
+        | Some error -> Error error
+        | None -> decode ~allow_empty:false ~status_code:status ~body)
   in
   validate_workspace_read_json json
 

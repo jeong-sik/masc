@@ -3267,6 +3267,7 @@
 (include stanzas/test_gate_rules_announce.inc)
 (include stanzas/test_keeper_tool_approval_announces.inc)
 (include stanzas/test_operator_asks_announce.inc)
+(include stanzas/test_keeper_async_requests_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

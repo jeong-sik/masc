@@ -100,6 +100,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // The TUI re-reads on them; the dashboard reads asks when the surface opens.
   'keeper_asks_changed',
   'lane_addon_asks_changed',
+  // A Keeper's durable async message requests changed
+  // (lib/keeper/keeper_msg_async_broadcast.ml). The TUI re-reads on it.
+  'keeper_async_requests_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

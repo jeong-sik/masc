@@ -48,6 +48,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('lane_addon_asks_changed')).toBe('lane_addon_asks_changed')
   })
 
+  it('accepts async request changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_async_requests_changed')).toBe('keeper_async_requests_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

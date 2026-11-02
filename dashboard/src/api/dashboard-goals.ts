@@ -560,10 +560,12 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
   return generatedAt ? { ...decoded, generated_at: generatedAt } : decoded
 }
 
-export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace, signal?: AbortSignal): Promise<DashboardGoalsTreeResponse> {
+export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace, signal?: AbortSignal,
+  onResponseStatus?: (status: number) => void): Promise<DashboardGoalsTreeResponse> {
   const raw = workspace === undefined ? await get<unknown>('/api/v1/dashboard/goals', signal ? { signal } : undefined) : await (async () => {
     const result = await getWithResponse<unknown>(`/api/v1/dashboard/goals?${artifactWorkspaceQuery(workspace)}`,
-      { consumeWithinTimeout: true, reportCredentialRefusal: false, ...(signal ? { signal } : {}) })
+      { consumeWithinTimeout: true, reportCredentialRefusal: false, ...(signal ? { signal } : {}),
+        ...(onResponseStatus ? { beforeResponseBody: response => onResponseStatus(response.status) } : {}) })
     requireArtifactWorkspaceRead(result.headers)
     if (result.headers.get('x-masc-goal-tree-read') !== 'direct-v1') {
       throw new Error('현재 Goal 목록을 직접 조회했는지 확인할 수 없습니다.')
@@ -577,12 +579,14 @@ export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace, sig
   return decoded
 }
 
-export async function fetchDashboardGoalDetail(goalId: string, workspace?: ArtifactWorkspace): Promise<DashboardGoalDetailResponse> {
+export async function fetchDashboardGoalDetail(goalId: string, workspace?: ArtifactWorkspace,
+  onResponseStatus?: (status: number) => void): Promise<DashboardGoalDetailResponse> {
   const params = workspace === undefined ? new URLSearchParams() : artifactWorkspaceQuery(workspace)
   params.set('goal_id', goalId)
   const path = `/api/v1/dashboard/goals/detail?${params}`
   const raw = workspace === undefined ? await get<unknown>(path) : await (async () => {
-    const result = await getWithResponse<unknown>(path, { consumeWithinTimeout: true, reportCredentialRefusal: false })
+    const result = await getWithResponse<unknown>(path, { consumeWithinTimeout: true, reportCredentialRefusal: false,
+      ...(onResponseStatus ? { beforeResponseBody: response => onResponseStatus(response.status) } : {}) })
     requireArtifactWorkspaceRead(result.headers)
     return result.data
   })()

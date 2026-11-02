@@ -40,7 +40,7 @@ import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 import { isRecord, asString, asNumber } from './components/common/normalize'
-import { currentCanonicalDashboardActor, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { currentCanonicalDashboardActor, managedCredentialNeedsRevalidation, managedDashboardRefusal, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { sanitizeDashboardActorName } from './lib/dashboard-actor'
 import {
   captureDashboardCredentialOwner,
@@ -903,7 +903,7 @@ function recoverFromRejectedShellAuth(
 
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
-  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner },
+  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner; recoverAuth?: boolean },
 ): boolean {
   const wantsLight = opts.light === true
   const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
@@ -916,15 +916,22 @@ export function hydrateShellSnapshot(
     const nextActor = sanitizeDashboardActorName(normalizedAuth?.token_valid
       ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent : null)
     const managedAuth = before.token !== null && getStoredTokenMeta()?.source === 'dev' && normalizedAuth?.token_present
-      ? { tokenRevision: before.tokenRevision, rejected: !normalizedAuth.token_valid } : undefined
+      ? { tokenRevision: before.tokenRevision, rejected: !normalizedAuth.token_valid,
+        verifiedAfterRefusal: normalizedAuth.token_valid && nextActor === 'dashboard'
+          && opts.authOwner !== undefined && opts.sentToken === before.token } : undefined
+    const alreadyRefused = managedDashboardRefusal.peek() === before.tokenRevision
+    const authChanges = managedAuth && ((managedAuth.rejected && !alreadyRefused)
+      || (managedAuth.verifiedAfterRefusal && managedCredentialNeedsRevalidation(before.tokenRevision))) ? 1 : 0
     setCanonicalDashboardActor(nextActor, managedAuth)
     const after = captureDashboardCredentialOwner()
     // The actor reset above belongs to this response. A separate token or
     // actor change triggered by a subscriber must not inherit its refusal.
     applyAuth = after.token === before.token && after.tokenRevision === before.tokenRevision
       && after.actorRevision === before.actorRevision + (previousActor === nextActor ? 0 : 1)
+      && (!before.managed || (after.managedAuthRevision === before.managedAuthRevision + authChanges
+        && after.managedRefusalObservation === before.managedRefusalObservation + (managedAuth?.rejected ? 1 : 0)))
       && currentCanonicalDashboardActor() === nextActor
-    if (applyAuth) recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
+    if (applyAuth && opts.recoverAuth !== false) recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
   }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   if (normalizedStatus) {
@@ -961,7 +968,7 @@ export function hydrateShellSnapshot(
   return admitted
 }
 
-export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
+export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boolean }): Promise<boolean> {
   const wantsLight = opts?.light === true
   if (inflightShellRefresh) {
     // A forced refresh must observe state established by the caller before
@@ -985,7 +992,7 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
     const authOwner = captureDashboardCredentialOwner()
     try {
       const data = await fetchDashboardShell({ light: wantsLight })
-      return hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner })
+      return hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner, recoverAuth: opts?.recoverAuth })
     } catch (err) {
       if (dashboardCredentialOwnerIsCurrent(authOwner)) {
         setCanonicalDashboardActor(null)

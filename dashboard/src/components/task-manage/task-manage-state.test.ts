@@ -72,7 +72,7 @@ describe('task-manage-state', () => {
     await createTask({ title: 't', description: '', goal_id: '\u00a0g-123\u00a0' }, goalDispatch)
     expect(mockCallMcpToolAtIdentity).toHaveBeenCalledWith('masc_add_task', expect.objectContaining({
       goal_id: '\u00a0g-123\u00a0', expected_workspace: { base_path: '/a', masc_root: '/a/.masc' },
-    }), goalDispatch.identity, goalDispatch.isCurrent)
+    }), goalDispatch.identity, goalDispatch.isCurrent, undefined, undefined)
   })
 
   it('refuses blank, padded, or stale Goal targets instead of making an unlinked Task', async () => {
@@ -118,6 +118,23 @@ describe('task-manage-state', () => {
     expect(await createTask({ title: 't', description: '', goal_id: 'g-123' }, goalDispatch)).toBe(false)
     expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('이전 요청'), 'warning')
     expect(JSON.stringify(mockShowToast.mock.calls)).not.toContain('private server detail')
+  })
+
+  it('does not present a late Goal Task creation as the current owner success', async () => {
+    let current = true
+    let resolveCreate!: () => void
+    const goalDispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => current }
+    mockCallMcpToolAtIdentity.mockImplementationOnce(() => new Promise<void>(resolve => { resolveCreate = resolve }))
+    showTaskCreate.value = true
+    const pending = createTask({ title: 't', description: '', goal_id: 'g-123' }, goalDispatch)
+    current = false
+    resolveCreate()
+    expect(await pending).toBe(true)
+    expect(showTaskCreate.value).toBe(true)
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('이전 요청'), 'warning')
+    expect(mockShowToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockRefreshGoals).not.toHaveBeenCalled()
   })
 
   it('sets taskCreating true while working and false after success', async () => {
@@ -183,7 +200,7 @@ describe('task-manage-state', () => {
     expect(await assignTaskToGoal('task-1', 'goal-1', dispatch)).toBe(true)
     expect(mockCallMcpToolAtIdentity).toHaveBeenCalledWith('masc_task_set_goal', {
       task_id: 'task-1', goal_id: 'goal-1', expected_workspace: { base_path: '/a', masc_root: '/a/.masc' },
-    }, dispatch.identity, dispatch.isCurrent)
+    }, dispatch.identity, dispatch.isCurrent, undefined, undefined)
     expect(mockCallMcpTool).not.toHaveBeenCalled()
     expect(dispatch.refreshAfterWrite).toHaveBeenCalledOnce()
     expect(mockShowToast).toHaveBeenCalledWith('목표에 배정 완료', 'success')

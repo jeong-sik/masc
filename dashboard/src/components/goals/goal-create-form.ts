@@ -14,7 +14,7 @@ import { goalStoreUnavailableSummary } from '../../lib/goal-store-unavailable-la
 import type { ArtifactWorkspace } from '../../api/published-artifacts'
 import { storedTokenRevision } from '../../api/token-revision'
 import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardAuthRevision,
-  managedDashboardRefusal } from '../../lib/dashboard-session-actor'
+  managedDashboardRefusal, managedDashboardUnverified } from '../../lib/dashboard-session-actor'
 import { getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { executionWorkspaceAuthority } from '../../store'
 import type { GoalStoreUnavailable } from '../../types/goal-store-unavailable'
@@ -127,7 +127,7 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
   const earlierDraftOutcomes = outcomes.filter(outcome => outcome.draft === currentGoalCreateDraft()
     && !goalCreateOutcomeIsCurrent(outcome))
   const managedRefused = getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
-    && managedDashboardRefusal.value === storedTokenRevision.value
+    && (managedDashboardRefusal.value === storedTokenRevision.value || managedDashboardUnverified.value === storedTokenRevision.value)
   const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
     || sourceUnavailable !== null || goalCreateDraftHasOutcome(outcomes) || managedRefused
   const error = goalCreateError.value

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { html } from 'htm/preact'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardGoalDetailResponse,
@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({
   post: vi.fn(),
   callMcpTool: vi.fn(),
   callIdentity: vi.fn(),
+  captureTaskDispatch: vi.fn(),
+  useRealMcp: false,
   refreshExecution: vi.fn(),
+  refreshShell: vi.fn(),
   readGoalCandle: vi.fn(),
   mcpCallFailureDisposition: vi.fn(() => 'known_tool_response'),
   mcpIdentityRequiresGoalRefresh: vi.fn(() => false),
@@ -66,22 +69,27 @@ vi.mock('../../api/core', async importOriginal => ({
 // neither is under test here.
 vi.mock('../../store', async () => {
   const { signal } = await import('@preact/signals')
-  return { refreshGoals: vi.fn(), executionWorkspaceAuthority: signal(null), executionError: signal(null), executionLoading: signal(false), refreshExecution: mocks.refreshExecution }
+  return { refreshGoals: vi.fn(), executionWorkspaceAuthority: signal(null), executionError: signal(null), executionLoading: signal(false),
+    refreshExecution: mocks.refreshExecution, refreshShell: mocks.refreshShell }
 })
 
 vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-vi.mock('../../api/mcp', () => ({
-  callMcpToolAtIdentity: (name: string, args: unknown, identity: unknown) => {
-    mocks.callIdentity(identity)
-    return mocks.callMcpTool(name, args)
-  },
-  mcpCallFailureDisposition: mocks.mcpCallFailureDisposition,
-  mcpStructuredContentFromError: () => null,
-  mcpIdentityRequiresGoalRefresh: mocks.mcpIdentityRequiresGoalRefresh,
-}))
+vi.mock('../../api/mcp', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../api/mcp')>()
+  return {
+    callMcpToolAtIdentity: (...args: Parameters<typeof actual.callMcpToolAtIdentity>) => {
+      const [name, toolArgs, identity] = args
+      mocks.callIdentity(identity)
+      return mocks.useRealMcp ? actual.callMcpToolAtIdentity(...args) : mocks.callMcpTool(name, toolArgs)
+    },
+    mcpCallFailureDisposition: mocks.mcpCallFailureDisposition,
+    mcpStructuredContentFromError: () => null,
+    mcpIdentityRequiresGoalRefresh: mocks.mcpIdentityRequiresGoalRefresh,
+  }
+})
 
 vi.mock('../../router', () => ({
   route: mocks.route,
@@ -89,18 +97,23 @@ vi.mock('../../router', () => ({
 }))
 
 vi.mock('../task-manage/task-create-form', () => ({
-  TaskCreateForm: () => html`<div data-testid="goal-task-create" />`,
+  TaskCreateForm: (props: { goalDispatch: unknown }) => {
+    mocks.captureTaskDispatch(props.goalDispatch)
+    return html`<div data-testid="goal-task-create" />`
+  },
 }))
 
 import { GoalTree, _testResetGoalActionReceipts, useGoalTreeDecisionObservation } from './goal-tree'
 import { _testResetConfirmationReceipts } from './goal-confirmation'
 import { executionError, executionWorkspaceAuthority } from '../../store'
-import { ApiRequestError, clearStoredToken, getStoredToken, setStoredToken } from '../../api/core'
-import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
+import { ApiRequestError, clearStoredToken, currentStoredTokenRevision, getStoredToken, setStoredToken } from '../../api/core'
+import { currentManagedRefusalObservation, recordManagedCredentialRefusal, resetDashboardSessionActorForTests,
+  setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 import { showToast } from '../common/toast'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { showGoalCreate } from './goal-create-state'
-import { fetchDashboardGoalsTree as decodeGoalTree, GoalSourceUnavailableError } from '../../api/dashboard-goals'
+import { fetchDashboardGoalDetail as decodeGoalDetail, fetchDashboardGoalsTree as decodeGoalTree,
+  GoalSourceUnavailableError } from '../../api/dashboard-goals'
 
 const measurementFixture = JSON.parse(readFileSync(
   resolve(__dirname, '../../api/fixtures/goal-measurement-tree.json'), 'utf8',
@@ -181,6 +194,7 @@ describe('GoalTree', () => {
     _testResetConfirmationReceipts()
     ;(executionError as { value: string | null }).value = null
     mocks.refreshExecution.mockResolvedValue(undefined)
+    mocks.refreshShell.mockResolvedValue(true)
     mocks.readGoalCandle.mockResolvedValue({ config: 'off', ledger: { state: 'missing' } })
     clearStoredToken()
     ;(executionWorkspaceAuthority as { value: unknown }).value =
@@ -204,7 +218,10 @@ describe('GoalTree', () => {
     resetGoalCreateFormLocal()
     mocks.callMcpTool.mockReset()
     mocks.callIdentity.mockReset()
+    mocks.captureTaskDispatch.mockReset()
+    mocks.useRealMcp = false
     mocks.refreshExecution.mockReset()
+    mocks.refreshShell.mockReset()
     mocks.readGoalCandle.mockReset()
     mocks.mcpCallFailureDisposition.mockReset().mockReturnValue('known_tool_response')
     mocks.mcpIdentityRequiresGoalRefresh.mockReset().mockReturnValue(false)
@@ -484,6 +501,250 @@ describe('GoalTree', () => {
     notice = screen.getByTestId('goal-operation-notice')
     expect(notice.textContent).toContain('서버가 Goal 변경 요청에 응답했습니다')
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides an in-flight transition notice and its late result after credential refusal', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-refused-notice', 'Refused notice')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementationOnce(() => new Promise(resolve => { resolveAction = resolve }))
+    vi.mocked(showToast).mockClear()
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    expect(screen.getByTestId('goal-operation-notice').textContent).toContain('처리 중')
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+    expect(screen.queryByTestId('goal-operation-notice')).toBeNull()
+    await act(async () => { resolveAction(transitionResponse(goal.id, 'request_complete')) })
+    expect(screen.queryByTestId('goal-operation-notice')).toBeNull()
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(JSON.stringify(vi.mocked(showToast).mock.calls)).not.toContain('applied')
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('withdraws a retained Goal observation owner immediately after credential refusal', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [], summary: emptySummary() })
+    let retainedCurrent = () => false
+    let retainedOwnerCurrent = () => false
+    let retainedRecoveryCurrent = () => false
+    function RetainedObservationProbe() {
+      const observed = useGoalTreeDecisionObservation()
+      return html`<div>
+        <span data-testid="retained-observation">${observed.isCurrent() ? 'ready' : 'pending'}</span>
+        <button type="button" onClick=${() => { retainedCurrent = observed.isCurrent; retainedOwnerCurrent = observed.isOwnerCurrent;
+          retainedRecoveryCurrent = observed.isRecoveryCurrent }}>capture</button>
+      </div>`
+    }
+    render(html`<${RetainedObservationProbe} />`)
+    await waitFor(() => expect(screen.getByTestId('retained-observation').textContent).toBe('ready'))
+    fireEvent.click(screen.getByRole('button', { name: 'capture' }))
+    expect(retainedCurrent()).toBe(true)
+    expect(retainedOwnerCurrent()).toBe(true)
+    expect(retainedRecoveryCurrent()).toBe(true)
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    expect(retainedCurrent()).toBe(false)
+    expect(retainedOwnerCurrent()).toBe(false)
+    expect(retainedRecoveryCurrent()).toBe(true)
+    const originalAuthority = executionWorkspaceAuthority.peek()
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    ;(executionWorkspaceAuthority as { value: unknown }).value = originalAuthority
+    expect(retainedRecoveryCurrent()).toBe(false)
+  })
+
+  it.each(['tree', 'detail'] as const)('records a %s 401 header only while its workspace is current', async kind => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-status-owner', 'Status owner')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    let onStatus: ((status: number) => void) | undefined
+    if (kind === 'tree') {
+      mocks.fetchDashboardGoalsTree.mockImplementationOnce((_workspace, _signal, callback) => {
+        onStatus = callback
+        return new Promise(() => {})
+      })
+    } else {
+      mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+      mocks.fetchDashboardGoalDetail.mockImplementationOnce((_id, _workspace, callback) => {
+        onStatus = callback
+        return new Promise(() => {})
+      })
+    }
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(onStatus).toBeTypeOf('function'))
+    const before = currentManagedRefusalObservation()
+    onStatus?.(401)
+    expect(currentManagedRefusalObservation()).toBeGreaterThan(before)
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    const afterRetirement = currentManagedRefusalObservation()
+    onStatus?.(401)
+    expect(currentManagedRefusalObservation()).toBe(afterRetirement)
+  })
+
+  it('does not recover a token for a 401 before the workspace is known', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    mocks.captureArtifactWorkspace.mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/health?full=1',
+      status: 401, authErrorCode: 'token_expired' }))
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    await screen.findByText(/인증 또는 권한이 거부되었습니다/)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(mocks.fetchDashboardGoalsTree).not.toHaveBeenCalled()
+    expect(getStoredToken()).toBe('dev-token')
+  })
+
+  it('ignores an earlier detail 401 after selection changes and returns', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const first = makeGoal('goal-status-first', 'First status goal')
+    const second = makeGoal('goal-status-second', 'Second status goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2 } })
+    let oldStatus: ((status: number) => void) | undefined
+    mocks.fetchDashboardGoalDetail.mockImplementation((id, _workspace, callback) => {
+      if (id === first.id && !oldStatus) oldStatus = callback
+      return new Promise(() => {})
+    })
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(oldStatus).toBeTypeOf('function'))
+    fireEvent.click(screen.getByRole('button', { name: /Second status goal/ }))
+    fireEvent.click(screen.getByRole('button', { name: /First status goal/ }))
+    const before = currentManagedRefusalObservation()
+    oldStatus?.(401)
+    expect(currentManagedRefusalObservation()).toBe(before)
+  })
+
+  it('keeps a Goal Task recovery owner through refusal but retires it across selection changes', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const first = makeGoal('goal-task-first', 'First Task goal')
+    const second = makeGoal('goal-task-second', 'Second Task goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2 } })
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({ goal: id === first.id ? first : second,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] }))
+    render(html`<${GoalTree} />`)
+    await screen.findByTestId('goal-task-create')
+    const original = mocks.captureTaskDispatch.mock.calls.at(-1)![0] as { isRecoveryCurrent: () => boolean }
+    expect(original.isRecoveryCurrent()).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /Second Task goal/ }))
+    fireEvent.click(screen.getByRole('button', { name: /First Task goal/ }))
+    expect(original.isRecoveryCurrent()).toBe(false)
+    await waitFor(() => expect(mocks.captureTaskDispatch.mock.calls.length).toBeGreaterThan(1))
+    const current = mocks.captureTaskDispatch.mock.calls.at(-1)![0] as { isCurrent: () => boolean; isRecoveryCurrent: () => boolean }
+    expect(current.isRecoveryCurrent()).toBe(true)
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    expect(current.isCurrent()).toBe(false)
+    expect(current.isRecoveryCurrent()).toBe(true)
+  })
+
+  it('lets the operator recheck refused authentication without replaying a Goal action', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-auth-retry', 'Auth retry')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    let resolveToken!: (response: Response) => void
+    const fetchMock = vi.fn((_path: string) => new Promise<Response>(resolve => { resolveToken = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    await screen.findByRole('button', { name: 'Request completion' })
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    const retry = await screen.findByRole('button', { name: '인증 다시 확인' })
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const renewal = new URL(fetchMock.mock.calls[0]![0], window.location.origin)
+    expect(renewal.searchParams.get('expected_base_path')).toBe('/workspace-a')
+    expect(renewal.searchParams.get('expected_masc_root')).toBe('/workspace-a/.masc')
+    resolveToken(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => expect(mocks.refreshShell).toHaveBeenCalledExactlyOnceWith({ force: true, recoverAuth: false }))
+    await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('does not apply an explicit authentication retry after the workspace changes and returns', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-auth-retry-aba', 'Auth retry ABA')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    let resolveToken!: (response: Response) => void
+    const fetchMock = vi.fn((_path: string) => new Promise<Response>(resolve => { resolveToken = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    await screen.findByRole('button', { name: 'Request completion' })
+    const originalAuthority = executionWorkspaceAuthority.peek()
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    fireEvent.click(await screen.findByRole('button', { name: '인증 다시 확인' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    ;(executionWorkspaceAuthority as { value: unknown }).value = originalAuthority
+    await act(async () => resolveToken(new Response(JSON.stringify({ token: 'stale-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    expect(getStoredToken()).toBe('dev-token')
+    expect(mocks.refreshShell).not.toHaveBeenCalled()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('only rechecks shell authentication when no Goal workspace has been observed', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: '인증 다시 확인' }))
+    await waitFor(() => expect(mocks.refreshShell).toHaveBeenCalledExactlyOnceWith({ force: true, recoverAuth: false }))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(getStoredToken()).toBe('dev-token')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('withholds Goal actions at an owned 401 header until shell authentication is rechecked', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = currentStoredTokenRevision()
+    const goal = makeGoal('goal-header-auth', 'Header auth')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    mocks.useRealMcp = true
+    let finishBody!: (body: string) => void
+    let bodyStarted!: () => void
+    const bodyPending = new Promise<void>(resolve => { bodyStarted = resolve })
+    const response = new Response('', { status: 401 })
+    response.text = () => { bodyStarted(); return new Promise(resolve => { finishBody = resolve }) }
+    const fetchMock = vi.fn(() => Promise.resolve(response))
+    vi.stubGlobal('fetch', fetchMock)
+    mocks.refreshShell.mockImplementation(async () => {
+      setCanonicalDashboardActor('dashboard', { tokenRevision: revision, rejected: false, verifiedAfterRefusal: true })
+      return true
+    })
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause' }))
+    await bodyPending
+    await screen.findByText('인증 상태를 확인할 수 없습니다. 인증을 다시 확인해 주세요.')
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(screen.queryByTestId('goal-operation-notice')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '인증 다시 확인' }))
+    await waitFor(() => expect(mocks.refreshShell).toHaveBeenCalledExactlyOnceWith({ force: true, recoverAuth: false }))
+    await screen.findByRole('button', { name: 'Pause' })
+    await act(async () => finishBody(JSON.stringify({ auth_error_code: 'actor_mismatch' })))
+    expect(getStoredToken()).toBe('dev-token')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('goal-operation-notice')).toBeNull()
   })
 
   it('keeps an uncertain tool response visible while the tree is being refreshed', async () => {
@@ -776,6 +1037,108 @@ describe('GoalTree', () => {
     }))
   })
 
+  it('recovers a managed credential refused by the initial confirmation evidence read', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal: GoalTreeNode = { ...makeGoal('goal-evidence-auth', 'Evidence auth'), phase: 'awaiting_confirmation',
+      goal_fsm: { state: 'awaiting_confirmation', source: 'goal.phase', next_actions: ['drop'], activity_observation: 'goal_metadata' } }
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    const core = await vi.importActual<typeof import('../../api/core')>('../../api/core')
+    mocks.getWithResponse.mockImplementationOnce(core.getWithResponse).mockImplementation(() => new Promise(() => {}))
+    let resolveRenewal!: (response: Response) => void
+    const fetchMock = vi.fn((path: string) => path.startsWith('/api/v1/goals/confirmation?')
+      ? Promise.resolve(new Response(JSON.stringify({ auth_error_code: 'token_expired' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      })) : new Promise<Response>(resolve => { resolveRenewal = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+    resolveRenewal(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const evidencePath = fetchMock.mock.calls.find(([path]) => path.startsWith('/api/v1/goals/confirmation?'))?.[0]
+    expect(evidencePath).toBeDefined()
+    const evidence = new URL(evidencePath!, window.location.origin)
+    expect(evidence.searchParams.get('goal_id')).toBe(goal.id)
+    expect(evidence.searchParams.get('expected_base_path')).toBe('/workspace-a')
+    const renewalPath = fetchMock.mock.calls.find(([path]) => path.startsWith('/api/v1/dashboard/dev-token?'))?.[0]
+    expect(renewalPath).toBeDefined()
+    const renewal = new URL(renewalPath!, window.location.origin)
+    expect(renewal.pathname).toBe('/api/v1/dashboard/dev-token')
+    expect(renewal.searchParams.get('expected_base_path')).toBe('/workspace-a')
+    expect(renewal.searchParams.get('expected_masc_root')).toBe('/workspace-a/.masc')
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('recovers a managed credential refused by a Goal detail read', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-detail-auth', 'Detail auth')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    const core = await vi.importActual<typeof import('../../api/core')>('../../api/core')
+    mocks.getWithResponse.mockImplementationOnce(core.getWithResponse)
+    mocks.fetchDashboardGoalDetail.mockImplementationOnce(decodeGoalDetail)
+      .mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    let resolveRenewal!: (response: Response) => void
+    const fetchMock = vi.fn((path: string) => path.startsWith('/api/v1/dashboard/goals/detail?')
+      ? Promise.resolve(new Response(JSON.stringify({ auth_error_code: 'token_expired' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      })) : new Promise<Response>(resolve => { resolveRenewal = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '인증 다시 확인' })) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mocks.refreshShell).not.toHaveBeenCalled()
+    resolveRenewal(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+    const renewalPath = fetchMock.mock.calls.find(([path]) => path.startsWith('/api/v1/dashboard/dev-token?'))?.[0]
+    expect(renewalPath).toBeDefined()
+    const renewal = new URL(renewalPath!, window.location.origin)
+    expect(renewal.searchParams.get('expected_base_path')).toBe('/workspace-a')
+    expect(renewal.searchParams.get('expected_masc_root')).toBe('/workspace-a/.masc')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('recovers a managed credential refused by a Goal transition without replaying it', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-transition-auth', 'Transition auth')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    mocks.useRealMcp = true
+    let resolveRenewal!: (response: Response) => void
+    const fetchMock = vi.fn((path: string) => path === '/mcp'
+      ? Promise.resolve(new Response(JSON.stringify({ error: 'refused', auth_error_code: 'token_expired' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      })) : new Promise<Response>(resolve => { resolveRenewal = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+    resolveRenewal(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+    expect(fetchMock.mock.calls.filter(([path]) => path === '/mcp')).toHaveLength(1)
+    const renewalPath = fetchMock.mock.calls.find(([path]) => path !== '/mcp')?.[0]
+    expect(renewalPath).toBeDefined()
+    const renewal = new URL(renewalPath!, window.location.origin)
+    expect(renewal.searchParams.get('expected_base_path')).toBe('/workspace-a')
+    expect(renewal.searchParams.get('expected_masc_root')).toBe('/workspace-a/.masc')
+  })
+
   it.each(['same', 'late-token', 'other', 'failed', 'retired', 'manual', 'replaced', 'selection-aba',
     'managed-hydration', 'recovery-hydration'] as const)(
     'settles confirmation recovery only after the %s workspace observation', async outcome => {
@@ -1035,7 +1398,7 @@ describe('GoalTree', () => {
     expect(screen.getAllByText('Child goal').length).toBeGreaterThan(0)
     await waitFor(() => {
       expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith('goal-child',
-        { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' })
+        { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, expect.any(Function))
     })
     fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching goal' } })
     await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
@@ -1158,7 +1521,7 @@ describe('GoalTree', () => {
     await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
     ;(executionWorkspaceAuthority as { value: unknown }).value =
       { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
-    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith({ basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }, expect.any(AbortSignal)))
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith({ basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }, expect.any(AbortSignal), expect.any(Function)))
     await screen.findByRole('button', { name: /Other workspace goal/ })
     expect(screen.queryByTestId('goal-detail-panel')).toBeNull()
     expect(mocks.readGoalCandle.mock.calls.filter(([id, workspace]) => id === other.id && workspace.basePath === '/workspace-b')).toHaveLength(0)
@@ -2175,7 +2538,7 @@ describe('GoalTree', () => {
       { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
     await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith(goal.id,
-      { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }))
+      { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }, expect.any(Function)))
     expect(screen.queryByTestId('goal-operation-notice')).toBeNull()
     const reads = mocks.fetchDashboardGoalDetail.mock.calls.length
     resolveAction(transitionResponse(goal.id, 'request_complete'))
@@ -2340,7 +2703,7 @@ describe('GoalTree', () => {
     ;(executionWorkspaceAuthority as { value: unknown }).value =
       { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
     await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith(
-      { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }, expect.any(AbortSignal)))
+      { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }, expect.any(AbortSignal), expect.any(Function)))
     await waitFor(() => expect(document.querySelector('[data-goal-drop-reason]')).toBeNull())
     fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
     expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('')
@@ -2477,7 +2840,7 @@ describe('GoalTree', () => {
     root = '/root-b'
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
     await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith(
-      { basePath: '/workspace-a', mascRoot: '/root-b' }, expect.any(AbortSignal)))
+      { basePath: '/workspace-a', mascRoot: '/root-b' }, expect.any(AbortSignal), expect.any(Function)))
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
     resolveAction(transitionResponse(goal.id, 'request_complete'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
@@ -2507,7 +2870,7 @@ describe('GoalTree', () => {
     root = '/root-b'
     fireEvent.click(screen.getByRole('button', { name: 'refresh' }))
     await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith(
-      { basePath: '/workspace-a', mascRoot: '/root-b' }, expect.any(AbortSignal)))
+      { basePath: '/workspace-a', mascRoot: '/root-b' }, expect.any(AbortSignal), expect.any(Function)))
     await waitFor(() => expect(screen.getByTestId('assignment-observation').textContent).toBe('ready'))
     const reads = mocks.fetchDashboardGoalsTree.mock.calls.length
     expect(oldOwnerCurrent()).toBe(false)

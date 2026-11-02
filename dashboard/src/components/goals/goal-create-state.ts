@@ -7,7 +7,7 @@ import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpStructuredContentF
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { storedTokenRevision } from '../../api/token-revision'
 import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardAuthRevision,
-  managedDashboardRefusal } from '../../lib/dashboard-session-actor'
+  managedDashboardRefusal, managedDashboardUnverified } from '../../lib/dashboard-session-actor'
 import { executionWorkspaceAuthority, refreshGoals, type ExecutionWorkspaceAuthority } from '../../store'
 import { isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
@@ -57,6 +57,7 @@ export function goalCreateOutcomeIsCurrent(outcome: GoalCreateOutcome): boolean 
       && outcome.actorRevision === managedDashboardActorRevision.peek()
       && outcome.managedAuthRevision === managedDashboardAuthRevision.peek()
       && managedDashboardRefusal.peek() !== outcome.authRevision
+      && managedDashboardUnverified.peek() !== outcome.authRevision
       : outcome.actorRevision === dashboardActorRevision.peek())
 }
 
@@ -141,7 +142,8 @@ export async function createGoal(input: GoalCreateInput, isStoreUnavailableNow: 
       && managedDashboardActorRevision.peek() === actorRevision
       : dashboardActorRevision.peek() === actorRevision)
   const decisionCurrent = () => sameConnection() && (!managed
-    || (managedDashboardAuthRevision.peek() === managedAuthRevision && managedDashboardRefusal.peek() !== authRevision))
+    || (managedDashboardAuthRevision.peek() === managedAuthRevision && managedDashboardRefusal.peek() !== authRevision
+      && managedDashboardUnverified.peek() !== authRevision))
   if (!decisionCurrent()) {
     goalCreateError.value = { kind: 'submit', message: '인증이 거부되었습니다. 인증을 확인한 뒤 다시 시도해 주세요.' }
     return false

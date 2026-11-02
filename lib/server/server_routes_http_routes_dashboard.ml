@@ -2008,45 +2008,52 @@ let add_routes ~sw ~clock router =
            "dev-token endpoint disabled (non-loopback bind or strict auth)"
        else
          with_public_read (fun state req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           let raw_result =
-             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_authority
-               ~request_authority:(Server_request_authority.current_exn ())
-               ~base_path
-           in
-           begin
-             match raw_result with
-             | Ok token ->
-               Http.Response.json_value ~request:req
-                 (`Assoc
-                    [ "token", `String token.raw
-                    ; "actor", `String token.actor
-                    ; ( "role"
-                      , `String (Masc_domain.agent_role_to_string token.role) )
-                    ]) reqd
-             | Error err ->
-               let status =
-                 Server_routes_http_dashboard_dev_token.request_error_status err
-               in
-               let error_code =
-                 Server_routes_http_dashboard_dev_token.request_error_code err
-               in
-               let message =
-                 Server_routes_http_dashboard_dev_token.request_error_to_string err
-               in
-               Log.Auth.error
-                 "dashboard dev-token denied code=%s detail=%s"
-                 error_code
-                 message;
-               Http.Response.json_value
-                 ~status
-                 ~request:req
-                 (`Assoc
-                    [ "error", `String message
-                    ; "error_code", `String error_code
-                    ])
-                 reqd
-           end) request reqd)
+           (* [with_public_read] checks a read precondition before this handler,
+              but the active scope can change between that check and the token
+              operation. Validate the same snapshot whose base path is used
+              for issuance. Unbound bootstrap requests remain supported. *)
+           let scope = Mcp_server.workspace_scope state in
+           match Server_auth.validate_read_workspace_precondition ~config:scope.config req with
+           | Error error -> respond_goal_tree_workspace_refusal req reqd error
+           | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
+             let raw_result =
+               Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_authority
+                 ~request_authority:(Server_request_authority.current_exn ())
+                 ~base_path:scope.config.base_path
+             in
+             begin
+               match raw_result with
+               | Ok token ->
+                 Http.Response.json_value ~request:req
+                   (`Assoc
+                      [ "token", `String token.raw
+                      ; "actor", `String token.actor
+                      ; ( "role"
+                        , `String (Masc_domain.agent_role_to_string token.role) )
+                      ]) reqd
+               | Error err ->
+                 let status =
+                   Server_routes_http_dashboard_dev_token.request_error_status err
+                 in
+                 let error_code =
+                   Server_routes_http_dashboard_dev_token.request_error_code err
+                 in
+                 let message =
+                   Server_routes_http_dashboard_dev_token.request_error_to_string err
+                 in
+                 Log.Auth.error
+                   "dashboard dev-token denied code=%s detail=%s"
+                   error_code
+                   message;
+                 Http.Response.json_value
+                   ~status
+                   ~request:req
+                   (`Assoc
+                      [ "error", `String message
+                      ; "error_code", `String error_code
+                      ])
+                   reqd
+             end) request reqd)
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/inventory" (fun state _agent_name req reqd ->
            let base_path=(Mcp_server.workspace_config state).base_path in
            match Runtime_setup_batch.observe_inventory ~base_path with

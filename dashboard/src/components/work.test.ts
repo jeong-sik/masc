@@ -16,6 +16,7 @@ const routeSignal = signal<{
 
 const navigateMock = vi.hoisted(() => vi.fn())
 const callMcpToolMock = vi.hoisted(() => vi.fn<(name: string, args: Record<string, unknown>) => Promise<string>>())
+const assignmentSourceMock = vi.hoisted(() => vi.fn())
 const refreshGoalTreeMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../api/mcp', () => ({
@@ -71,8 +72,17 @@ vi.mock('./goals/goal-tree', () => ({
     loading: fixtureTreeLoading.value, refresh: refreshGoalTreeMock,
     isStoreUnavailableNow: () => fixtureOwnedUnavailable.value !== null && !fixtureTreeLoading.value,
     isCurrent: () => fixtureTreeAvailable.value, isOwnerCurrent: () => fixtureAuthorityAvailable.value,
+    isRecoveryCurrent: () => fixtureTreeAvailable.value,
     refreshAfterWrite: () => true }),
 }))
+
+vi.mock('./goals/goal-assign-picker', async original => {
+  const actual = await original<typeof import('./goals/goal-assign-picker')>()
+  return { ...actual, GoalAssignPicker: (props: Parameters<typeof actual.GoalAssignPicker>[0]) => {
+    assignmentSourceMock(props.source)
+    return actual.GoalAssignPicker(props)
+  } }
+})
 
 vi.mock('./verification-requests-panel', () => ({
   VerificationRequestsPanel: () => html`<div data-testid="verification-panel">Verification</div>`,
@@ -96,6 +106,7 @@ import { goalStoreUnavailable, goalTreeData, goalTreeError } from '../goal-tree-
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
+import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 import type { GoalStoreUnavailable } from '../types/goal-store-unavailable'
 
@@ -211,6 +222,8 @@ describe('Work', () => {
     fixtureOwnedUnavailable.value = null
     goalStoreUnavailable.value = null
     refreshGoalTreeMock.mockClear()
+    assignmentSourceMock.mockClear()
+    setCanonicalDashboardActor(null)
   })
 
   beforeEach(() => {
@@ -368,6 +381,25 @@ describe('Work', () => {
       render(html`<${Work} />`)
       const select = screen.getByTestId('assign-goal') as HTMLSelectElement
       expect([...select.options].map(option => option.textContent)).toEqual(['goal에 배정', 'Current workspace Goal'])
+    })
+
+    it('passes the actual tokenless operator to a Goal assignment', () => {
+      setCanonicalDashboardActor('alice')
+      goalTreeData.value = { tree: [goalTreeNode({ id: 'G-1', title: 'Current workspace Goal' })],
+        summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }) }
+      tasks.value = [{ id: 'task-a', title: 'Unassigned Task', status: 'todo' }]
+      render(html`<${Work} />`)
+      const source = assignmentSourceMock.mock.lastCall?.[0]
+      expect(source?.identity).toEqual({ revision: 1, actor: 'alice' })
+      expect(source?.isCurrent()).toBe(true)
+      expect(source?.isRecoveryCurrent()).toBe(true)
+      const select = screen.getByTestId('assign-goal') as HTMLSelectElement
+      select.value = 'G-1'
+      // The Preact compat test helper maps fireEvent.change to input, while
+      // a select's real change handler listens to the native change event.
+      fireEvent(select, new Event('change', { bubbles: true }))
+      expect(select.value).toBe('')
+      expect(callMcpToolMock).toHaveBeenCalledWith('masc_task_set_goal', expect.objectContaining({ goal_id: 'G-1' }))
     })
 
     it('withholds partial Goal warning counts while keeping an independently identified option', () => {

@@ -12,10 +12,12 @@ import { isAbortError } from '../lib/async-state'
 import {
   currentCanonicalDashboardActor,
   currentDashboardActorName,
+  currentManagedRefusalObservation,
   dashboardActorRevision,
   managedDashboardActorRevision,
   managedDashboardAuthRevision,
   managedDashboardRefusal,
+  noteManagedCredentialRefusalObservation,
   recordManagedCredentialRefusal,
   setCanonicalDashboardActor,
 } from '../lib/dashboard-session-actor'
@@ -214,6 +216,7 @@ export interface DashboardCredentialOwner {
   actorRevision: number
   managed: boolean
   managedAuthRevision: number
+  managedRefusalObservation: number
 }
 
 export function captureDashboardCredentialOwner(): DashboardCredentialOwner {
@@ -225,6 +228,7 @@ export function captureDashboardCredentialOwner(): DashboardCredentialOwner {
     actorRevision: dashboardActorRevision.peek(),
     managed: token !== null && getStoredTokenMeta()?.source === 'dev',
     managedAuthRevision: managedDashboardAuthRevision.peek(),
+    managedRefusalObservation: currentManagedRefusalObservation(),
   }
 }
 
@@ -233,7 +237,8 @@ export function dashboardCredentialOwnerIsCurrent(owner: DashboardCredentialOwne
     && owner.tokenRevision === currentStoredTokenRevision()
     && owner.actor === currentDashboardActor()
     && owner.actorRevision === dashboardActorRevision.peek()
-    && (!owner.managed || owner.managedAuthRevision === managedDashboardAuthRevision.peek())
+    && (!owner.managed || (owner.managedAuthRevision === managedDashboardAuthRevision.peek()
+      && owner.managedRefusalObservation === currentManagedRefusalObservation()))
 }
 
 type HeaderOptions = {
@@ -400,6 +405,13 @@ async function reportRejectedCredential(
   if (response.status !== 401 || listener === null) return
   const token = sentBearerToken(init.headers)
   if (token === null || token !== owner.token) return
+  // A later 401 header makes an earlier shell validation stale even while
+  // this response's body is still being read. The body decides whether the
+  // token itself was refused; the observation alone does not block it.
+  if (managed && owner.token === dashboardBearerToken()
+    && owner.tokenRevision === currentStoredTokenRevision() && getStoredTokenMeta()?.source === 'dev'
+    && owner.actor === currentDashboardActor() && managedRevision === managedDashboardActorRevision.peek()
+    && owner.managedAuthRevision === managedDashboardAuthRevision.peek()) noteManagedCredentialRefusalObservation(owner.tokenRevision)
   // Cloned before this function first awaits, so the caller still owns the
   // original body.
   const info = await errorResponseInfoFromResponse(response.clone())

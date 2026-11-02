@@ -59,4 +59,14 @@ describe('dashboard session actor runtime', () => {
     expect(managedDashboardRefusal.peek()).toBe(17)
     expect(managedDashboardAuthRevision.peek()).toBe(authRevision + 1)
   })
+
+  it('retires old managed authority when a fresh shell revalidates the refused token', () => {
+    const revision = managedDashboardActorRevision.peek()
+    const authRevision = managedDashboardAuthRevision.peek()
+    setCanonicalDashboardActor(null, { tokenRevision: 18, rejected: true })
+    setCanonicalDashboardActor('dashboard', { tokenRevision: 18, rejected: false, verifiedAfterRefusal: true })
+    expect(managedDashboardRefusal.peek()).toBeNull()
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 2)
+    expect(managedDashboardAuthRevision.peek()).toBe(authRevision + 2)
+  })
 })

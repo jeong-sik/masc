@@ -4,7 +4,8 @@ import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from './dashboard-g
 import { devTokenBootstrapStatus, ensureDevToken, installRejectedCredentialRecovery, resetDevTokenBootstrap } from './dev-token'
 import { callMcpTool, callMcpToolAtIdentity, mcpCallFailureDisposition, resetMcpClientState } from './mcp'
 import { DEFAULT_GET_TIMEOUT_MS, DEFAULT_MCP_TIMEOUT_MS } from '../config/constants'
-import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
+import { currentManagedRefusalObservation, managedDashboardRefusal, noteManagedCredentialRefusalObservation, recordManagedCredentialRefusal,
+  setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 vi.mock('./tool-host-failure', () => ({
   // A stuck diagnostics endpoint must not hold the original operation receipt.
@@ -12,6 +13,7 @@ vi.mock('./tool-host-failure', () => ({
 }))
 
 const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
+const expectedWorkspace = { base_path: workspace.basePath, masc_root: workspace.mascRoot }
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -54,7 +56,7 @@ it('does not let an old Goal MCP 401 clear the current credential', async () => 
       return new Promise<Response>(resolve => { resolveResponse = resolve })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+    const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
       { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => current).catch(error => error)
     await started
     current = false
@@ -85,17 +87,44 @@ it('does not send a bound Goal detail refusal to global credential recovery', as
   }
 })
 
+it.each(['tree', 'detail'] as const)('observes a bound Goal %s status before reading its body', async kind => {
+  setStoredToken('manual-token', { source: 'manual' })
+  let finishBody!: (body: string) => void
+  let markBodyStarted!: () => void
+  const bodyStarted = new Promise<void>(resolve => { markBodyStarted = resolve })
+  const response = new Response('', { status: 401 })
+  response.text = () => { markBodyStarted(); return new Promise(resolve => { finishBody = resolve }) }
+  vi.stubGlobal('fetch', vi.fn(async () => response))
+  const onStatus = vi.fn()
+  const pending = (kind === 'tree' ? fetchDashboardGoalsTree(workspace, undefined, onStatus)
+    : fetchDashboardGoalDetail('goal-1', workspace, onStatus)).catch(error => error)
+  await bodyStarted
+  expect(onStatus).toHaveBeenCalledExactlyOnceWith(401)
+  finishBody(JSON.stringify({ auth_error_code: 'token_expired' }))
+  expect(await pending).toBeInstanceOf(ApiRequestError)
+})
+
 it('recovers a current Goal MCP 401 without replaying the write', async () => {
   setStoredToken('expired-test-token', { source: 'manual' })
   const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'refused', auth_error_code: 'token_expired' }), {
     status: 401, headers: { 'Content-Type': 'application/json' },
   }))
   vi.stubGlobal('fetch', fetchMock)
-  const result = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+  const result = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
     { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => true).catch(error => error)
   expect(await result).toBeInstanceOf(ApiRequestError)
   expect(getStoredToken()).toBeNull()
   expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+it('does not change a credential when a scoped refusal has no confirmed workspace', async () => {
+  setStoredToken('manual-token', { source: 'manual' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ auth_error_code: 'token_expired' }), {
+    status: 401, headers: { 'Content-Type': 'application/json' },
+  })))
+  await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+    { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => true)).rejects.toBeInstanceOf(ApiRequestError)
+  expect(getStoredToken()).toBe('manual-token')
 })
 
 it('does not treat a Goal tool error inside HTTP 200 as a refused credential', async () => {
@@ -113,23 +142,171 @@ it('does not treat a Goal tool error inside HTTP 200 as a refused credential', a
   expect(fetchMock).toHaveBeenCalledTimes(1)
 })
 
+it('does not bootstrap or send a Goal action after its managed credential was refused', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  const revision = currentStoredTokenRevision()
+  recordManagedCredentialRefusal(revision)
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+    { revision, actor: 'dashboard' }, () => true)).rejects.toThrow()
+  expect(fetchMock).not.toHaveBeenCalled()
+  expect(getStoredToken()).toBe('dev-token')
+})
+
+it('does not send a scoped action after an owned 401 header while its body is unverified', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  const revision = currentStoredTokenRevision()
+  noteManagedCredentialRefusalObservation(revision)
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
+    { revision, actor: 'dashboard' }, () => true)).rejects.toThrow()
+  expect(fetchMock).not.toHaveBeenCalled()
+  expect(getStoredToken()).toBe('dev-token')
+})
+
+it('does not start bootstrap when the scoped workspace retires before dispatch', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  let current = true
+  const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
+    { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => current).catch(error => error)
+  current = false
+  expect(await request).toBeInstanceOf(Error)
+  expect(fetchMock).not.toHaveBeenCalled()
+  expect(getStoredToken()).toBe('dev-token')
+})
+
+it('rechecks refusal after preparing the scoped request body', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  const revision = currentStoredTokenRevision()
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  const args = { expected_workspace: expectedWorkspace, get goal_id() {
+    recordManagedCredentialRefusal(revision)
+    return 'goal-1'
+  } }
+  await expect(callMcpToolAtIdentity('masc_goal_transition', args,
+    { revision, actor: 'dashboard' }, () => true)).rejects.toThrow()
+  expect(fetchMock).not.toHaveBeenCalled()
+})
+
+it('preserves caller arguments while preparing a workspace-bound request', async () => {
+  setCanonicalDashboardActor('alice')
+  const expected = Object.freeze({ ...expectedWorkspace })
+  const args = Object.freeze({ _agent_name: 'alice', goal_id: 'goal-1', expected_workspace: expected })
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    const { id } = JSON.parse(String(init.body))
+    return new Response(JSON.stringify({ id, result: { content: [{ type: 'text', text: 'ok' }] } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })
+  }))
+  await expect(callMcpToolAtIdentity('masc_goal_transition', args,
+    { revision: currentStoredTokenRevision(), actor: 'alice' }, () => true)).resolves.toBe('ok')
+  expect(args.expected_workspace).toBe(expected)
+})
+
+it('does not cancel a newer bootstrap when an old scoped call starts', async () => {
+  setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  const oldRevision = currentStoredTokenRevision()
+  setStoredToken('new-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  let resolveBootstrap!: (response: Response) => void
+  const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveBootstrap = resolve }))
+  vi.stubGlobal('fetch', fetchMock)
+  const bootstrap = ensureDevToken()
+  await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+    { revision: oldRevision, actor: 'dashboard' }, () => true)).rejects.toThrow()
+  resolveBootstrap(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  }))
+  await bootstrap
+  expect(getStoredToken()).toBe('fresh-dev-token')
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+it('observes a current Goal 401 header before its delayed response body', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  let finishBody!: (body: string) => void
+  let markBodyStarted!: () => void
+  const bodyStarted = new Promise<void>(resolve => { markBodyStarted = resolve })
+  const response = new Response('', { status: 401 })
+  response.text = () => {
+    markBodyStarted()
+    return new Promise(resolve => { finishBody = resolve })
+  }
+  vi.stubGlobal('fetch', vi.fn(async () => response))
+  const before = currentManagedRefusalObservation()
+  let current = true
+  const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
+    { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => current).catch(error => error)
+  await bodyStarted
+  expect(currentManagedRefusalObservation()).toBeGreaterThan(before)
+  current = false
+  finishBody(JSON.stringify({ auth_error_code: 'actor_mismatch' }))
+  expect(await request).toBeInstanceOf(ApiRequestError)
+  expect(getStoredToken()).toBe('dev-token')
+})
+
+it('records a later owned 401 header even after another request refused the same token', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  const revision = currentStoredTokenRevision()
+  let resolvePost!: (response: Response) => void
+  let markPostStarted!: () => void
+  const postStarted = new Promise<void>(resolve => { markPostStarted = resolve })
+  vi.stubGlobal('fetch', vi.fn(() => { markPostStarted(); return new Promise<Response>(resolve => { resolvePost = resolve }) }))
+  let recoveryOwned = true
+  const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
+    { revision, actor: 'dashboard' }, () => managedDashboardRefusal.peek() !== revision, () => recoveryOwned).catch(error => error)
+  await postStarted
+  recordManagedCredentialRefusal(revision)
+  const beforeHeader = currentManagedRefusalObservation()
+  let finishBody!: (body: string) => void
+  let markBodyStarted!: () => void
+  const bodyStarted = new Promise<void>(resolve => { markBodyStarted = resolve })
+  const response = new Response('', { status: 401 })
+  response.text = () => { markBodyStarted(); return new Promise(resolve => { finishBody = resolve }) }
+  resolvePost(response)
+  await bodyStarted
+  expect(currentManagedRefusalObservation()).toBeGreaterThan(beforeHeader)
+  recoveryOwned = false
+  finishBody(JSON.stringify({ auth_error_code: 'token_expired' }))
+  expect(await request).toBeInstanceOf(ApiRequestError)
+  expect(getStoredToken()).toBe('dev-token')
+})
+
+it('does not publish a scoped 401 header without a workspace owner guard', async () => {
+  setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ auth_error_code: 'token_expired' }), {
+    status: 401, headers: { 'Content-Type': 'application/json' },
+  })))
+  const before = currentManagedRefusalObservation()
+  await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
+    { revision: currentStoredTokenRevision(), actor: 'dashboard' })).rejects.toBeInstanceOf(ApiRequestError)
+  expect(currentManagedRefusalObservation()).toBe(before)
+  expect(getStoredToken()).toBe('dev-token')
+})
+
 it('recovers a Goal MCP refusal after the same managed actor is hydrated', async () => {
   setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
   let resolvePost!: (response: Response) => void
   let markPostStarted!: () => void
   const postStarted = new Promise<void>(resolve => { markPostStarted = resolve })
   let tokenRequests = 0
+  let tokenPath = ''
   const fetchMock = vi.fn((requestPath: string) => {
     if (requestPath === '/mcp') {
       markPostStarted()
       return new Promise<Response>(resolve => { resolvePost = resolve })
     }
     tokenRequests += 1
-    return Promise.resolve(new Response(JSON.stringify({ token: tokenRequests === 1 ? 'old-dev-token' : 'fresh-dev-token',
+    tokenPath = requestPath
+    return Promise.resolve(new Response(JSON.stringify({ token: 'fresh-dev-token',
       actor: 'dashboard', role: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
   })
   vi.stubGlobal('fetch', fetchMock)
-  const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+  const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1', expected_workspace: expectedWorkspace },
     { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => true).catch(error => error)
   await postStarted
   setCanonicalDashboardActor('dashboard')
@@ -139,7 +316,11 @@ it('recovers a Goal MCP refusal after the same managed actor is hydrated', async
   expect(await request).toBeInstanceOf(ApiRequestError)
   expect(getStoredToken()).toBe('fresh-dev-token')
   expect(fetchMock.mock.calls.filter(([requestPath]) => requestPath === '/mcp')).toHaveLength(1)
-  expect(tokenRequests).toBe(2)
+  expect(tokenRequests).toBe(1)
+  const renewal = new URL(tokenPath, window.location.origin)
+  expect(renewal.pathname).toBe('/api/v1/dashboard/dev-token')
+  expect(renewal.searchParams.get('expected_base_path')).toBe(workspace.basePath)
+  expect(renewal.searchParams.get('expected_masc_root')).toBe(workspace.mascRoot)
 })
 
 it('does not replay a generic MCP write when another owner replaces the dev credential during refresh', async () => {

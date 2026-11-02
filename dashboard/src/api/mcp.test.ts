@@ -162,12 +162,10 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(fetchWithTimeout).not.toHaveBeenCalled()
     getStoredToken.mockReturnValue(null)
     getStoredTokenMeta.mockReturnValue(null)
-    fetchWithTimeout.mockResolvedValueOnce(new Response('not found', { status: 404 }))
     const actorError: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
       { revision: 2, actor: 'previous-actor' }).catch(error => error)
     expect(mcpCallFailureDisposition(actorError)).toBe('known_pre_effect')
-    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
-    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/api/v1/dashboard/dev-token')
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
   })
 
   it('allows a bound bearer when only the actor hint changes before dispatch', async () => {
@@ -214,20 +212,17 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
   })
 
-  it('does not dispatch a Goal action under a credential installed by bootstrap', async () => {
-    let revision = 0
-    currentStoredTokenRevision.mockImplementation(() => revision)
+  it('does not start a global bootstrap for an already bound Goal action', async () => {
     getStoredTokenMeta.mockReturnValue({ source: 'dev', actor: 'dashboard', role: 'admin' })
-    setStoredToken.mockImplementation(() => { revision++ })
-    fetchWithTimeout.mockResolvedValueOnce(new Response(JSON.stringify({
-      token: 'replacement-token', actor: 'dashboard', role: 'admin',
-    }), { status: 200 }))
-    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
-    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
-      { revision: 0, actor: 'dashboard' }).catch(error => error)
-    expect(mcpCallFailureDisposition(error)).toBe('known_pre_effect')
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      return Promise.resolve(new Response(JSON.stringify({ id, result: { content: [{ type: 'text', text: 'ok' }] } })))
+    })
+    const { callMcpToolAtIdentity } = await import('./mcp')
+    await expect(callMcpToolAtIdentity('masc_goal_transition', {}, { revision: 0, actor: 'dashboard' })).resolves.toBe('ok')
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
-    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/api/v1/dashboard/dev-token')
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/mcp')
+    expect(setStoredToken).not.toHaveBeenCalled()
   })
 
   it('does not automatically replay a bound Goal action after an authentication refusal', async () => {
@@ -687,7 +682,6 @@ describe('MCP 2026-07-28 dashboard client', () => {
     currentStoredTokenRevision.mockImplementation(() => revision)
     setStoredToken.mockImplementation(next => { token = next; revision++ })
     fetchWithTimeout
-      .mockResolvedValueOnce(new Response(JSON.stringify({ token, actor: 'dashboard', role: 'admin' }), { status: 200 }))
       .mockImplementationOnce((_path: string, init: RequestInit) => {
         const { id } = JSON.parse(String(init.body))
         return Promise.resolve(new Response(`data: ${JSON.stringify({ id, result: { isError: true,
@@ -696,7 +690,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
       })
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), { status: 200 }))
     const { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpIdentityRequiresGoalRefresh } = await import('./mcp')
-    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition',
+      { expected_workspace: { base_path: '/workspace', masc_root: '/workspace/.masc' } },
       { revision: 0, actor: 'dashboard' }, () => true).catch(error => error)
     expect(mcpIdentityRequiresGoalRefresh(error)).toBe(false)
     expect(mcpCallFailureDisposition(error)).toBe('known_tool_response')

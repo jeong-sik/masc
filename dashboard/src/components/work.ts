@@ -31,6 +31,7 @@ import { GoalCreateForm, type GoalCreateSource } from './goals/goal-create-form'
 import { GoalAssignAvailability, GoalAssignPicker } from './goals/goal-assign-picker'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
+import { currentDashboardActor } from '../api/core'
 import { VerifyQueue } from './verification/verify-queue'
 import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
@@ -1384,8 +1385,9 @@ function WorkSurfaceV2() {
   const assignmentSource = identityObservation && goalTreeSnapshot && assignmentBinding
     ? { goals: treeGoals.map(goalFromGoalTreeNode), observation: identityObservation,
       rowsIncomplete: identityObservation.ids.length !== treeGoals.length, workspace: assignmentBinding.workspace,
-      identity: { revision: assignmentBinding.authRevision, actor: assignmentBinding.actor },
+      identity: { revision: assignmentBinding.authRevision, actor: currentDashboardActor() },
       isCurrent: () => goalObservation.isCurrent() && tasks.peek() === executionTasks,
+      isRecoveryCurrent: () => goalObservation.isRecoveryCurrent() && tasks.peek() === executionTasks,
       isOwnerCurrent: goalObservation.isOwnerCurrent, refreshAfterWrite: goalObservation.refreshAfterWrite } : null
   const goalTreeNodeById = useMemo(() => {
     const map = new Map<string, GoalTreeNode>()

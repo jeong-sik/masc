@@ -6,7 +6,7 @@ import { createGoal, showGoalCreate, resetGoalCreateForm, goalCreateError, goalC
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { executionWorkspaceAuthority } from '../../store'
 import { clearStoredToken, currentStoredTokenRevision, setStoredToken } from '../../api/core'
-import { recordManagedCredentialRefusal, resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
+import { noteManagedCredentialRefusalObservation, recordManagedCredentialRefusal, resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 
 const api = vi.hoisted(() => ({
   callMcpToolAtIdentity: vi.fn(),
@@ -313,6 +313,18 @@ describe('GoalCreateForm side panel', () => {
   it('does not dispatch a new draft with a refused managed credential', async () => {
     setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     recordManagedCredentialRefusal(currentStoredTokenRevision())
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'New draft')
+    fillField('goal-create-metric', 'metric')
+    fillField('goal-create-target', 'target')
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    await expect(createGoal({ title: 'New draft', metric: 'metric', targetValue: 'target', priority: 3 })).resolves.toBe(false)
+    expect(api.callMcpToolAtIdentity).not.toHaveBeenCalled()
+  })
+
+  it('withholds Goal creation while a managed 401 body is unclassified', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    noteManagedCredentialRefusalObservation(currentStoredTokenRevision())
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'New draft')
     fillField('goal-create-metric', 'metric')

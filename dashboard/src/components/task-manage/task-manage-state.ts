@@ -21,6 +21,8 @@ export type GoalTaskDispatch = {
   readonly workspace: ArtifactWorkspace
   readonly identity: { readonly revision: number; readonly actor: string }
   readonly isCurrent: () => boolean
+  readonly isRecoveryCurrent?: () => boolean
+  readonly waitForRecoveryCurrent?: () => Promise<boolean>
 }
 
 export type GoalAssignmentDispatch = GoalTaskDispatch & {
@@ -42,9 +44,14 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
     if (linkedGoalId !== null && goalDispatch) {
       args.goal_id = linkedGoalId
       args.expected_workspace = artifactWorkspaceBody(goalDispatch.workspace)
-      await callMcpToolAtIdentity('masc_add_task', args, goalDispatch.identity, goalDispatch.isCurrent)
+      await callMcpToolAtIdentity('masc_add_task', args, goalDispatch.identity, goalDispatch.isCurrent,
+        goalDispatch.isRecoveryCurrent, goalDispatch.waitForRecoveryCurrent)
     } else {
       await callMcpTool('masc_add_task', args)
+    }
+    if (linkedGoalId !== null && !goalDispatch?.isCurrent()) {
+      showToast('이전 요청의 태스크 생성 응답이 도착했습니다. 요청한 workspace에서 결과를 확인해 주세요.', 'warning')
+      return true
     }
     showToast('태스크 생성 완료', 'success')
     showTaskCreate.value = false
@@ -82,7 +89,8 @@ export async function assignTaskToGoal(taskId: string, goalId: string, dispatch:
   if (!taskId.trim() || !isCanonicalGoalId(goalId) || !dispatch.isCurrent()) return false
   try {
     const response = await callMcpToolAtIdentity('masc_task_set_goal', { task_id: taskId, goal_id: goalId,
-      expected_workspace: artifactWorkspaceBody(dispatch.workspace) }, dispatch.identity, dispatch.isCurrent)
+      expected_workspace: artifactWorkspaceBody(dispatch.workspace) }, dispatch.identity, dispatch.isCurrent,
+    dispatch.isRecoveryCurrent, dispatch.waitForRecoveryCurrent)
     const receipt: unknown = JSON.parse(response)
     if (!isRecord(receipt) || receipt.ok !== true || receipt.task_id !== taskId || receipt.goal_id !== goalId) {
       throw new Error('Assignment response does not match the request')

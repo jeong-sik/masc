@@ -733,6 +733,17 @@ let mark_proof_pending ?submitted_evidence config ~goal_id goal =
   |> Result.map_error (refuse Internal_error)
 ;;
 
+(* A Verifying retry can wake the existing request, but replacing its source
+   snapshot would create a new identity while the old review may still run. *)
+let preserve_pending_evidence config evidence_refs (record : Goal_verification.record) =
+  Result.bind (capture_goal_evidence config evidence_refs) (function
+    | None -> Ok ()
+    | Some submitted when submitted = record.submitted_evidence -> Ok ()
+    | Some _ ->
+      Error (refuse Conflict
+        "the active proof request has different evidence; its earlier review may still be active"))
+;;
+
 (* A refusal travels in the transaction's result with the goal unchanged, so
    [Goal_store.transact_goal] writes nothing and the refusal keeps its code
    instead of becoming [Goal_store.Rejected]'s string. *)
@@ -770,7 +781,9 @@ let proof_request_failure ~tool_name ~start_time = function
 type proof_request_mode = Require_executing | Allow_verifying
 
 let request_current_proof_bound ?evidence_refs ?expected_verification ~mode config ~goal_id =
-  transact_or_refuse config ~goal_id (fun goal ->
+  let effects goal (_, verdict) = match verdict with
+    | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
+  let result = transact_or_refuse ~effects config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* () = match expected_verification with
       | None -> Ok ()
@@ -783,14 +796,29 @@ let request_current_proof_bound ?evidence_refs ?expected_verification ~mode conf
       let* () = Goal_verification.check_authority_backend config
         |> Result.map_error (fun error ->
              refuse Internal_error (Goal_verification.authority_backend_error_to_string error)) in
-      Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
-        Result.map (fun record -> { goal with phase }, record)
-          (mark_proof_pending ?submitted_evidence config ~goal_id goal)) in
+      let* submitted_evidence = capture_goal_evidence config evidence_refs in
+      let* record = mark_proof_pending ?submitted_evidence config ~goal_id goal in
+      Ok ({ goal with phase }, (record, None)) in
     match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
     | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase)) -> request phase
-    | Ok (Goal_phase.Already (Goal_phase.Verifying as phase)) ->
+    | Ok (Goal_phase.Already Goal_phase.Verifying) ->
       (match mode with
-       | Allow_verifying -> request phase
+       | Allow_verifying ->
+         let* record = Goal_verification.get_record_authoritative config ~goal_id
+           |> Result.map_error (refuse Internal_error) in
+         (match Goal_verification.classify_verifying_record ~goal record with
+          | Goal_verification.Current_pending (record, _, _) ->
+            let* () = preserve_pending_evidence config evidence_refs record in
+            Ok (goal, (record, None))
+          | Goal_verification.Current_verdict (record, verdict) ->
+            if Option.is_some evidence_refs then
+              Error (refuse Validation_error
+                "proof result is already committed; reconcile it without evidence_refs before submitting new evidence")
+            else
+              let* updated = apply_committed_verdict goal verdict |> Result.map_error (refuse Conflict) in
+              Ok (updated, (record, Some verdict))
+          | Goal_verification.Unavailable_request issue ->
+            Error (refuse Conflict (Goal_verification.verifying_issue_to_string issue)))
        | Require_executing ->
          Error (refuse Conflict "The Goal changed before this completion request; refresh before retrying"))
     | Ok (Goal_phase.Move_to
@@ -800,7 +828,10 @@ let request_current_proof_bound ?evidence_refs ?expected_verification ~mode conf
              ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
              | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ ))
     | Error _ ->
-      Error (refuse Precondition_failed "goal is not requesting verification"))
+      Error (refuse Precondition_failed "goal is not requesting verification")) in
+  Result.map (fun (goal, (record, verdict)) ->
+    (match verdict with None -> () | Some _ -> ignore (deliver_goal_effects config));
+    goal, record) result
 ;;
 
 let request_current_proof ?evidence_refs config ~goal_id =
@@ -814,14 +845,13 @@ let recover_current_proof config ~goal_id =
     match goal.phase with
     | Goal_phase.Verifying ->
         Result.bind (Goal_verification.get_record_authoritative config ~goal_id) (fun record ->
-          match current_committed_verdict goal record with
-          | Some verdict ->
+          match Goal_verification.classify_verifying_record ~goal record with
+          | Goal_verification.Current_verdict (_, verdict) ->
               Result.map (fun updated -> updated, (false, Some verdict))
                 (apply_committed_verdict goal verdict)
-          | None ->
-              Result.map (fun _record -> goal, (true, None))
-                (Goal_verification.mark_proof_pending config ~goal_id
-                   ~criterion:(Goal_store.criterion_of_goal goal)))
+          | Goal_verification.Current_pending _ -> Ok (goal, (true, None))
+          | Goal_verification.Unavailable_request issue ->
+              Error (Goal_verification.verifying_issue_to_string issue))
     | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
     | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
         Ok (goal, (false, None)))
@@ -830,11 +860,9 @@ let recover_current_proof config ~goal_id =
        rearmed)
 ;;
 
-(* A repeated [request_complete] on [Verifying] is the explicit retry that
-   replaces wall-clock expiry (RFC-0387 §5). A missing durable request is
-   re-armed, a standing pending request is woken again, and a committed
-   verdict whose phase/event write was interrupted is reconciled from that
-   exact ledger row without another model call. *)
+(* A repeated [request_complete] on [Verifying] wakes the same pending request
+   or reconciles its committed verdict. An unavailable or inconsistent record
+   does not prove that an earlier review ended, so it cannot create a new ID. *)
 let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~start_time (ctx : context) ~goal_id ~action =
   let effects goal (_, reconciled) = match reconciled with
     | None -> no_goal_effects
@@ -859,10 +887,8 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
               Error (refuse Precondition_failed "this Goal has no active proof request that can accept evidence_refs")
             else Ok (goal, (record, None))
         | Ok (Goal_phase.Already Goal_phase.Verifying) ->
-          match record with
-          | Some ({ Goal_verification.completion =
-              (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ } as record)
-            when Goal_verification.relation_for_goal ~goal record = Goal_verification.Current ->
+          match Goal_verification.classify_verifying_record ~goal record with
+          | Goal_verification.Current_verdict (record, verdict) ->
               if Option.is_some evidence_refs then
                 Error
                   (refuse Validation_error
@@ -877,18 +903,11 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
                | Ok (Goal_phase.Already _) ->
                    Error (refuse Internal_error "proof reconciliation did not name a transition")
                | Error detail -> Error (refuse Conflict detail))
-          | Some
-              { Goal_verification.completion =
-                  ( Goal_verification.Completion_idle
-                  | Goal_verification.Proof_pending _
-                  | Goal_verification.Proof_proven _
-                  | Goal_verification.Proof_refuted _
-                  | Goal_verification.Human_confirmed _ )
-              ; _ }
-          | None ->
-              Result.bind (capture_goal_evidence ctx.config evidence_refs) (fun submitted_evidence ->
-                Result.map (fun record -> goal, (Some record, None))
-                  (mark_proof_pending ?submitted_evidence ctx.config ~goal_id goal)))) in
+          | Goal_verification.Current_pending (record, _, _) ->
+              Result.map (fun () -> goal, (Some record, None))
+                (preserve_pending_evidence ctx.config evidence_refs record)
+          | Goal_verification.Unavailable_request issue ->
+              Error (refuse Conflict (Goal_verification.verifying_issue_to_string issue)))) in
   match result with
   | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (goal, (record, reconciled)) ->

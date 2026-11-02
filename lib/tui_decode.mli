@@ -80,7 +80,7 @@ val keeper_trace_projection : keeper list -> keeper_trace_projection
     what it measured and how it compared is no use if the reason stops at the
     wire. *)
 type goal_proof =
-  | Proof_idle  (** No verdict on the ledger: nothing has been asked of it. *)
+  | Proof_idle  (** The current ledger has no proof request; prior execution is unknown. *)
   | Proof_pending  (** A completion request is durable and the judge has not answered. *)
   | Proof_proven of string option
       (** Approved. [Some] is what the judge measured; [None] is a verdict
@@ -106,7 +106,8 @@ type goal_retry_binding = {
   grb_request_id : string option;
 }
 (** The phase and readable verification shown with a Goal. [None] request ID
-    is the observed idle state; an unreadable proof supplies no binding. *)
+    is the observed idle state on an Executing Goal. Verifying with idle,
+    stale, confirmed or unreadable proof supplies no retry binding. *)
 (** The latest verifier scan could not settle this Verifying goal. It stays
     Verifying until [request_complete] retries it or a later scan settles it,
     or the operator takes it back or drops it. *)

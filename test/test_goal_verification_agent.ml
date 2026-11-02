@@ -852,16 +852,14 @@ let test_approve_without_a_stated_reason_does_not_commit () =
   | _ -> fail "a reasonless verdict must not consume the pending row"
 ;;
 
-(* (g) The P0-2 cross-check: a goal stuck in Verifying whose ledger row lost
-   the durable proof request is re-armed during the scan and drained in the
-   same pass. *)
-let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
+(* A missing request is reported for its Goal; the scan still admits a
+   different Goal whose pending request is intact. *)
+let test_missing_request_does_not_block_other_goals () =
   with_workspace
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Wedged goal" in
-  (* Simulate the crash window: the phase is Verifying but the ledger never
-     recorded the proof request. *)
+  (* Model a Verifying Goal whose original proof row is no longer available. *)
   (match
      Goal_store.update_goal_if_phase config ~goal_id
        ~expected_phase:Goal_phase.Executing
@@ -871,24 +869,33 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
    | Ok (Goal_store.Goal_phase_mismatch phase) ->
      fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
    | Error error -> fail (Goal_store.write_error_to_string error));
-  (* Creation writes no ledger row, so the wedge starts with none at all —
-     the same hole the scan re-arms, reached without a row to empty. *)
+  (* Creation has not written a ledger row for this Goal. *)
   (match Goal_verification.get_record config ~goal_id with
    | Ok None -> ()
    | Ok (Some _) -> fail "test setup: the wedge needs no durable request"
    | Error msg -> fail msg);
+  let other_goal = create_goal ctx "Independent pending goal" in
+  ignore (must_succeed "request independent goal" (transition ctx other_goal "request_complete"));
+  (match Agent.collect_pending config with
+   | Ok { Agent.collected; unreconciled } ->
+     check bool "the uncertain Goal is not admitted" false
+       (List.exists (fun (work : Agent.pending_work) -> work.goal_id = goal_id) collected);
+     check bool "the other Goal is admitted" true
+       (List.exists (fun (work : Agent.pending_work) -> work.goal_id = other_goal) collected);
+     check bool "the uncertain Goal is reported" true
+       (List.exists (fun (failure : Agent.reconcile_failure) -> failure.failed_goal_id = goal_id) unreconciled)
+   | Error failure -> fail (Agent.scan_failure_to_string failure));
+  let calls = ref [] in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
     ~reviewer:
-      (recording_reviewer (ref []) [ "verifier-a", Stub_approve "verified after re-arm" ])
+      (recording_reviewer calls [ "verifier-a", Stub_approve "independent proof" ])
     (fun () -> drain config);
-  check string "the re-armed gate completes" "awaiting_confirmation"
-    (stored_phase config goal_id);
-  match (ledger_record config goal_id).completion with
-  | Goal_verification.Proof_proven verdict ->
-    check string "the verdict rode the re-armed request" "verified after re-arm"
-      verdict.Goal_verification.evidence
-  | _ -> fail "ledger must hold the proven verdict"
+  check string "the uncertain Goal remains verifying" "verifying" (stored_phase config goal_id);
+  check string "the independent Goal proceeds" "awaiting_confirmation" (stored_phase config other_goal);
+  check (list string) "only the independent review ran" ["verifier-a"] !calls;
+  (match Goal_verification.get_record config ~goal_id with
+   | Ok None -> () | Ok (Some _) -> fail "scan recreated the missing request" | Error msg -> fail msg)
 ;;
 
 let set_up_committed_proof_crash config ~outcome ~evidence =
@@ -2807,9 +2814,9 @@ let () =
             "a clean scan replaces the unreconciled list"
             `Quick
             test_a_clean_scan_replaces_the_unreconciled_list
-        ; test_case "verifying goal with a missing request is rearmed and drained"
+        ; test_case "missing proof does not block other Goals"
             `Quick
-            test_verifying_goal_with_a_missing_request_is_rearmed_and_drained
+            test_missing_request_does_not_block_other_goals
         ] )
     ; ( "candle snapshot"
       , [ test_case

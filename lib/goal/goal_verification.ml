@@ -180,6 +180,35 @@ let relation_for_goal ~goal record =
       if Goal_store.criterion_equal criterion (Goal_store.criterion_of_goal goal)
       then Current else Stale_criterion
 
+type verifying_issue =
+  | Missing_proof_record
+  | Idle_proof_record
+  | Mismatched_proof_record
+  | Confirmed_proof_record
+
+type verifying_record =
+  | Current_pending of record * string * Goal_store.criterion
+  | Current_verdict of record * verdict
+  | Unavailable_request of verifying_issue
+
+let classify_verifying_record ~goal = function
+  | None -> Unavailable_request Missing_proof_record
+  | Some record ->
+    (match relation_for_goal ~goal record with
+     | Stale_criterion -> Unavailable_request Mismatched_proof_record
+     | Current ->
+       match record.completion with
+       | Completion_idle -> Unavailable_request Idle_proof_record
+       | Proof_pending pending -> Current_pending (record, pending.request_id, pending.criterion)
+       | Proof_proven verdict | Proof_refuted verdict -> Current_verdict (record, verdict)
+       | Human_confirmed _ -> Unavailable_request Confirmed_proof_record)
+
+let verifying_issue_to_string = function
+  | Missing_proof_record -> "the proof record is missing while the Goal is verifying; an earlier review may still be active"
+  | Idle_proof_record -> "the proof record is idle while the Goal is verifying; an earlier review may still be active"
+  | Mismatched_proof_record -> "the proof record does not match the current Goal criterion; an earlier review may still be active"
+  | Confirmed_proof_record -> "the proof is already confirmed while the Goal is verifying; inspect the Goal and proof record"
+
 let record_to_yojson_for_goal ~goal record =
   match relation_for_goal ~goal record with
   | Current -> `Assoc ["goal_id", `String record.goal_id;
@@ -721,14 +750,14 @@ let bind_review config ~goal_id =
       | Goal_phase.Verifying ->
         (match get_record_authoritative config ~goal_id with
          | Error detail -> Error (Binding_unavailable detail)
-         | Ok (Some { completion = Proof_pending pending; submitted_evidence; _ })
-           when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
-           Ok (pending.request_id, pending.criterion, submitted_evidence)
-         | Ok (Some { completion =
-                  ( Completion_idle | Proof_pending _ | Proof_proven _
-                  | Proof_refuted _ | Human_confirmed _ ); _ }
-              | None) ->
-           Error (No_current_review "goal has no pending proof for its current criterion")) in
+         | Ok record ->
+           match classify_verifying_record ~goal record with
+           | Current_pending (record, request_id, criterion) ->
+             Ok (request_id, criterion, record.submitted_evidence)
+           | Current_verdict _ ->
+             Error (No_current_review "goal has a committed proof verdict")
+           | Unavailable_request issue ->
+             Error (Binding_unavailable (verifying_issue_to_string issue))) in
     Ok (goal, binding)) with
   | Ok (goal, Ok binding) -> Ok (goal, binding)
   | Ok (_, Error error) -> Error error

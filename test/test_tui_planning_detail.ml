@@ -48,8 +48,6 @@ let test_a_stuck_goal_says_which_step_and_why () =
       ; vu_detail = "criterion already proven\x1b[2J"
       }
   in
-  check_string "the headline names the step" "verifier could not re-arm the request"
-    (List.hd (texts rows));
   check_bool "the block reads as refused" true
     (List.for_all (fun tone -> tone = Detail.Refused) (tones rows));
   check_bool "the reason follows" true
@@ -62,8 +60,8 @@ let test_a_stuck_goal_says_which_step_and_why () =
     "verifier could not apply the committed proof"
     (Detail.unreconciled_heading Goal_reconcile_step.Reconcile_proof)
 
-(* [c] on a stuck Verifying goal is the retry that applies a committed proof
-   or re-arms the request and says why when it cannot. The stuck hint used to
+(* [c] on a stuck Verifying goal applies a committed proof or retries a
+   matching pending request. The stuck hint used to
    drop it and lead with [o], which archives a committed proof. *)
 let test_a_stuck_goal_offers_the_retry_first () =
   let index_of needle text =

@@ -313,5 +313,5 @@ let to_yojson outcome = `Assoc [
   "generation", option string outcome.generation;
   "refusal", option refusal_json outcome.refusal;
   "reserved_retained", `Bool (Option.is_some outcome.reserved);
-  "live_posts_guard_enforced", `Bool Board_posts_source.live_guard_enforced;
+  "live_posts_guard_enforced", `Bool false;
 ]

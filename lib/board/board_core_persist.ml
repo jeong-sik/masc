@@ -43,10 +43,10 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io () =
+let create_store_with_posts_io ~base_path posts_io_for_testing () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
-  ; posts_source_io
+  ; posts_io_for_testing
   ; comments_load_result = Ok ()
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
@@ -81,9 +81,9 @@ let create_store_with_source_io ~base_path posts_source_io () =
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { guard = None; posts = None } ()
-let create_store_with_source_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path io ()
+  create_store_with_posts_io ~base_path None ()
+let create_store_with_posts_io_for_testing ~base_path ~io () =
+  create_store_with_posts_io ~base_path (Some io) ()
 
 let require_persisted_snapshot_readable = function
   | Ok () -> Ok ()
@@ -554,35 +554,14 @@ let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
 let ensure_masc_dir ~where store =
-  let check = Board_posts_source.check_initialization store in
-  let requested_result check =
-    match Board_posts_source.initialization_result check with
-    | Ok () -> Ok ()
-    | Error failure -> Error (Io_error (Printf.sprintf "%s: %s" where
-        (show_board_error (Board_posts_source.failure_to_board_error failure)))) in
-  let result = requested_result check in
-  match Board_posts_source.reserved_diagnostics
-      (Board_posts_source.initialization_diagnostics check) with
-  | Some _ ->
-    (* Do not invoke a logger after observing cancellation/another reserved
-       cause. Retain the single requested-operation error count and result. *)
-    (match result with Ok () -> () | Error _ -> Atomic.incr persist_errors);
-    Board_posts_source.finish_initialization ~result check;
-    result
-  | None ->
-    let check = try
-      (match Board_posts_source.initialization_result check with
-       | Error failure -> record_persist_error ~where
-           (show_board_error (Board_posts_source.failure_to_board_error failure))
-       | Ok () -> List.iter (fun diagnostic -> record_persist_error ~where
-           (Board_posts_source.diagnostic_to_string diagnostic))
-           (Board_posts_source.initialization_diagnostics check));
-      check
-    with exception_ ->
-      Board_posts_source.initialization_exception store check exception_
-        (Printexc.get_raw_backtrace ()) in
-    let result = requested_result check in
-    Board_posts_source.finish_initialization ~result check;
+  match Board_paths.ensure_masc_dir store with
+  | Ok () -> Ok ()
+  | Error rejection ->
+    let result = persist_io_error ~where
+        (Board_workspace_binding.rejection_to_string rejection) in
+    Option.iter (fun (exception_, backtrace) ->
+      Board_posts_source.defer_reserved ~result exception_ backtrace)
+      (Board_workspace_binding.raised rejection);
     result
 include Board_core_json
 

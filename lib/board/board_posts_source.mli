@@ -2,10 +2,6 @@
     owned by the caller; this module never recursively acquires them. *)
 open Board_types
 
-val live_guard_enforced : bool
-(** Built-in live admission policy, reported by offline tooling; not a switch
-    or evidence that any particular store was admitted. *)
-
 type reserved_settlement = {
   result : (unit, board_error) result;
   exception_ : exn;
@@ -22,7 +18,7 @@ val rewrite : store -> snapshot -> posts_write_outcome
 val read : store -> posts_source_read
 val publish_read : store -> posts_source_read -> unit
 val require_readable : store -> (unit, board_error) result
-(** Pure: guard-only, refused and unsettled phases never authorize posts.
+(** Pure: refused and unsettled phases never authorize posts.
     An unsettled store stays unauthorized until [settle] proves the unknown
     write's outcome; plain [read] never settles. *)
 val failure_to_board_error : posts_source_failure -> board_error
@@ -40,11 +36,11 @@ val settle_direction_for_testing :
 (** Pure settlement direction of one observation against retained
     unknown-write evidence. Test and diagnostic entry only: production
     verdicts run inside [settle] under persistence with a fresh locked
-    read, guard re-verification and a durability proof. This function
+    read, workspace re-verification and a durability proof. This function
     grants no authority. *)
 val settle : store -> posts_settle_outcome
 (** Settle the retained unknown write of an unsettled store. Caller owns
-    persistence; this function performs locked guard/posts reads and at most
+    persistence; this function performs locked posts reads and at most
     one durable proof rewrite, and never touches the in-memory post tables.
 
     The verdict jointly consults the recorded transaction failure, the
@@ -60,19 +56,6 @@ val fail_read : store -> posts_source_read -> stage:posts_source_stage ->
   exn -> Printexc.raw_backtrace -> posts_source_read * posts_source_failure
 (** Retain the current trace when later model publication or reporting raises.
     Caller owns persistence; this function performs no IO. *)
-
-type initialization_check
-val check_initialization : store -> initialization_check
-(** Real guard-only admission under persistence. It never loads posts or clears
-    a posts refusal. Unsettled returns before all workspace/file IO; use
-    [settle] to re-examine an unknown write with its retained evidence. *)
-val initialization_result : initialization_check -> (unit, posts_source_failure) result
-val initialization_diagnostics : initialization_check -> posts_source_diagnostic list
-val initialization_exception : store -> initialization_check ->
-  exn -> Printexc.raw_backtrace -> initialization_check
-val finish_initialization : result:(unit, board_error) result -> initialization_check -> unit
-(** Carry the caller's one actual requested-file precondition result through
-    enclosing Board locks; success is not a payload or publication receipt. *)
 
 val reserved_exception :
   exn * Printexc.raw_backtrace -> (exn * Printexc.raw_backtrace) option

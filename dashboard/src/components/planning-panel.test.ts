@@ -37,6 +37,7 @@ vi.mock('./goals/planning', () => ({
 vi.mock('./goals/goal-tree', () => ({
   GoalTree: () => html`<div data-testid="goal-tree">GoalTree</div>`,
 }))
+vi.mock('./task-manage/task-create-receipt-panel', () => ({ TaskCreateReceiptsPanel: () => null }))
 vi.mock('./goals/task-detail-state', () => ({
   openTaskDetail: openTaskDetailMock,
 }))

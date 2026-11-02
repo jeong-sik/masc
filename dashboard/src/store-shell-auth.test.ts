@@ -36,6 +36,7 @@ afterEach(async () => {
   vi.clearAllMocks()
   vi.resetModules()
   sessionStorage.clear()
+  localStorage.removeItem('masc_dashboard_agent_name')
 })
 
 describe('refreshShell auth failure handling', () => {
@@ -250,6 +251,76 @@ describe('rejected shell credential recovery', () => {
     expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 3)
     expect(actor.managedDashboardAuthRevision.peek()).toBe(authRevision + 3)
     expect(actor.managedDashboardRefusal.peek()).toBe(core.currentStoredTokenRevision())
+  })
+
+  it('hydrates a managed shell after an unused actor hint changes during its request', async () => {
+    window.history.replaceState({}, '', '/')
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const hints = await import('./lib/dashboard-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = actor.managedDashboardActorRevision.peek()
+    let resolveShell!: (value: unknown) => void
+    apiMocks.fetchDashboardShell.mockImplementationOnce(() => new Promise(resolve => { resolveShell = resolve }))
+    const pending = store.refreshShell({ force: true })
+    await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledOnce())
+
+    hints.persistDashboardActorName('alice')
+    resolveShell(shellBody({ ...rejected, token_valid: true, token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null }))
+
+    expect(await pending).toBe(true)
+    expect(store.shellAuthSummary.peek()?.token_valid).toBe(true)
+    expect(actor.currentCanonicalDashboardActor()).toBe('dashboard')
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision)
+  })
+
+  it('still recovers a managed refusal if a subscriber changes an unused hint', async () => {
+    window.history.replaceState({}, '', '/')
+    const { effect } = await import('@preact/signals')
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const hints = await import('./lib/dashboard-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = core.currentStoredTokenRevision()
+    const stop = effect(() => {
+      if (actor.managedDashboardRefusal.value === revision) hints.persistDashboardActorName('alice')
+    })
+    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody(rejected))
+    try {
+      expect(await store.refreshShell({ force: true })).toBe(true)
+      expect(devTokenMocks.recoverFromRejectedCredential).toHaveBeenCalledWith({
+        token: 'dev-token', authErrorCode: 'invalid_token',
+      })
+      expect(store.shellAuthSummary.peek()?.token_valid).toBe(false)
+    } finally {
+      stop()
+    }
+  })
+
+  it('does not recover a managed refusal after a subscriber changes the canonical actor and returns', async () => {
+    const { effect } = await import('@preact/signals')
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = core.currentStoredTokenRevision()
+    let changed = false
+    const stop = effect(() => {
+      if (!changed && actor.managedDashboardRefusal.value === revision) {
+        changed = true
+        actor.setCanonicalDashboardActor('other-actor')
+        actor.setCanonicalDashboardActor(null)
+      }
+    })
+    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody(rejected))
+    try {
+      expect(await store.refreshShell({ force: true })).toBe(false)
+      expect(devTokenMocks.recoverFromRejectedCredential).not.toHaveBeenCalled()
+    } finally {
+      stop()
+    }
   })
 
   it('does not hydrate an older valid shell response after the credential is refused', async () => {

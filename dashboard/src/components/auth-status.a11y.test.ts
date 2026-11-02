@@ -29,6 +29,7 @@ vi.mock('../lib/dashboard-actor', () => ({
   hasDashboardActorQueryParam: vi.fn().mockReturnValue(false),
   readStoredDashboardActorName: vi.fn().mockReturnValue('test'),
   resolveDashboardActorName: vi.fn().mockReturnValue('test'),
+  subscribeDashboardActorHintChanges: vi.fn(() => () => {}),
   syncDashboardActorName: vi.fn((s: string) => s),
 }))
 vi.mock('./common/toast', () => ({ showToast: vi.fn() }))

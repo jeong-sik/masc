@@ -3,11 +3,13 @@ import {
   ApiRequestError,
   apiRequestErrorFromResponse,
   authHeaders,
+  captureDashboardCredentialOwner,
   clearStoredToken,
   confirmOperatorAction,
   currentDashboardActor,
   currentStoredTokenRevision,
   dashboardBearerToken,
+  dashboardCredentialOwnerIsCurrent,
   defaultBoardVoter,
   extractApiError,
   get,
@@ -27,6 +29,7 @@ import {
   resetDashboardSessionActorForTests,
   setCanonicalDashboardActor,
 } from '../lib/dashboard-session-actor'
+import { DASHBOARD_AGENT_NAME_KEY, persistDashboardActorName, syncDashboardActorName } from '../lib/dashboard-actor'
 
 afterEach(() => {
   resetDashboardSessionActorForTests()
@@ -133,6 +136,180 @@ describe('stored token metadata', () => {
       Authorization: 'Bearer manual-token',
       'X-MASC-Agent': 'codex',
     })
+  })
+})
+
+describe('dashboard request actor ownership', () => {
+  afterEach(() => { window.localStorage.removeItem(DASHBOARD_AGENT_NAME_KEY) })
+
+  it('retires an uncredentialed request across same-tab actor A to B to A', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    const owner = captureDashboardCredentialOwner()
+
+    persistDashboardActorName('bob')
+    persistDashboardActorName('alice')
+
+    expect(currentDashboardActor()).toBe('alice')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
+  })
+
+  it('retires an uncredentialed request when the selected query actor changes and returns', () => {
+    window.history.replaceState({}, '', '/?agent=alice')
+    const owner = captureDashboardCredentialOwner()
+
+    syncDashboardActorName('bob', { rewriteQuery: true })
+    syncDashboardActorName('alice', { rewriteQuery: true })
+
+    expect(currentDashboardActor()).toBe('alice')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
+  })
+
+  it('retires an owner when browser history changes the query actor and returns', () => {
+    window.history.replaceState({}, '', '/?agent=alice')
+    syncDashboardActorName('alice', { rewriteQuery: true })
+    const owner = captureDashboardCredentialOwner()
+
+    window.history.replaceState({}, '', '/?agent=bob')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    window.history.replaceState({}, '', '/?agent=alice')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    expect(currentDashboardActor()).toBe('alice')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
+  })
+
+  it('retires the owner when cross-tab actor changes return to the original before delivery', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    const owner = captureDashboardCredentialOwner()
+
+    // Another tab already returned storage to alice before these events arrive.
+    window.dispatchEvent(new StorageEvent('storage', { key: DASHBOARD_AGENT_NAME_KEY,
+      oldValue: 'alice', newValue: 'bob', storageArea: window.localStorage }))
+    window.dispatchEvent(new StorageEvent('storage', { key: DASHBOARD_AGENT_NAME_KEY,
+      oldValue: 'bob', newValue: 'alice', storageArea: window.localStorage }))
+
+    expect(currentDashboardActor()).toBe('alice')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
+  })
+
+  it('keeps a request current when another tab changes an overridden actor hint', () => {
+    window.history.replaceState({}, '', '/?agent=alice')
+    const owner = captureDashboardCredentialOwner()
+
+    window.dispatchEvent(new StorageEvent('storage', { key: DASHBOARD_AGENT_NAME_KEY,
+      oldValue: 'alice', newValue: 'bob', storageArea: window.localStorage }))
+
+    expect(currentDashboardActor()).toBe('alice')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(true)
+  })
+
+  it('ignores unrelated or session-storage changes', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    const owner = captureDashboardCredentialOwner()
+
+    window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated',
+      oldValue: 'a', newValue: 'b', storageArea: window.localStorage }))
+    window.dispatchEvent(new StorageEvent('storage', { key: DASHBOARD_AGENT_NAME_KEY,
+      oldValue: 'alice', newValue: 'bob', storageArea: window.sessionStorage }))
+
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(true)
+  })
+
+  it('retires an owner when another tab clears local storage', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    const owner = captureDashboardCredentialOwner()
+
+    window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: window.localStorage }))
+
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
+  })
+
+  it('keeps a token-validated actor when its unused local hint changes', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    setStoredToken('manual-token', { source: 'manual' })
+    setCanonicalDashboardActor('verified-actor')
+    const owner = captureDashboardCredentialOwner()
+
+    persistDashboardActorName('bob')
+    persistDashboardActorName('alice')
+
+    expect(currentDashboardActor()).toBe('verified-actor')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(true)
+  })
+
+  it('keeps the managed token owner through unused hint changes and matching hydration', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    setStoredToken('managed-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const owner = captureDashboardCredentialOwner()
+
+    persistDashboardActorName('bob')
+    persistDashboardActorName('alice')
+    expect(currentDashboardActor()).toBe('dashboard')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(true)
+
+    setCanonicalDashboardActor('dashboard', { tokenRevision: owner.tokenRevision, rejected: false })
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(true)
+  })
+
+  it('keeps the managed token owner when cross-tab actor hints change', () => {
+    window.history.replaceState({}, '', '/')
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    setStoredToken('managed-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const owner = captureDashboardCredentialOwner()
+
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'bob')
+    window.dispatchEvent(new StorageEvent('storage', { key: DASHBOARD_AGENT_NAME_KEY,
+      oldValue: 'alice', newValue: 'bob', storageArea: window.localStorage }))
+    window.localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    window.dispatchEvent(new StorageEvent('storage', { key: DASHBOARD_AGENT_NAME_KEY,
+      oldValue: 'bob', newValue: 'alice', storageArea: window.localStorage }))
+
+    expect(currentDashboardActor()).toBe('dashboard')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(true)
+  })
+
+  it('retires a managed token owner when the canonical actor changes and returns', () => {
+    setStoredToken('managed-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const owner = captureDashboardCredentialOwner()
+
+    setCanonicalDashboardActor('other-actor')
+    setCanonicalDashboardActor(null)
+
+    expect(currentDashboardActor()).toBe('dashboard')
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
+  })
+
+  it('retires managed owners on refusal and later revalidation of the same token', () => {
+    setStoredToken('managed-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const beforeRefusal = captureDashboardCredentialOwner()
+
+    setCanonicalDashboardActor(null, { tokenRevision: beforeRefusal.tokenRevision, rejected: true })
+    expect(dashboardCredentialOwnerIsCurrent(beforeRefusal)).toBe(false)
+    const duringRefusal = captureDashboardCredentialOwner()
+    setCanonicalDashboardActor('dashboard', {
+      tokenRevision: beforeRefusal.tokenRevision, rejected: false, verifiedAfterRefusal: true,
+    })
+
+    expect(dashboardCredentialOwnerIsCurrent(beforeRefusal)).toBe(false)
+    expect(dashboardCredentialOwnerIsCurrent(duringRefusal)).toBe(false)
+    expect(dashboardCredentialOwnerIsCurrent(captureDashboardCredentialOwner())).toBe(true)
+  })
+
+  it('retires a managed owner when the token changes and returns', () => {
+    const meta = { source: 'dev', actor: 'dashboard', role: 'admin' } as const
+    setStoredToken('token-a', meta)
+    const owner = captureDashboardCredentialOwner()
+
+    setStoredToken('token-b', meta)
+    setStoredToken('token-a', meta)
+
+    expect(dashboardCredentialOwnerIsCurrent(owner)).toBe(false)
   })
 })
 

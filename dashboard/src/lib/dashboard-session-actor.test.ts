@@ -9,6 +9,7 @@ import {
   resetDashboardSessionActorForTests,
   setCanonicalDashboardActor,
 } from './dashboard-session-actor'
+import { persistDashboardActorName } from './dashboard-actor'
 
 afterEach(() => {
   resetDashboardSessionActorForTests()
@@ -58,6 +59,15 @@ describe('dashboard session actor runtime', () => {
     expect(managedDashboardActorRevision.peek()).toBe(revision + 2)
     expect(managedDashboardRefusal.peek()).toBe(17)
     expect(managedDashboardAuthRevision.peek()).toBe(authRevision + 1)
+  })
+
+  it('does not retire a managed actor when an unused hint changes before matching hydration', () => {
+    const revision = managedDashboardActorRevision.peek()
+    persistDashboardActorName('alice')
+    persistDashboardActorName('bob')
+    setCanonicalDashboardActor('dashboard', { tokenRevision: 19, rejected: false })
+
+    expect(managedDashboardActorRevision.peek()).toBe(revision)
   })
 
   it('retires old managed authority when a fresh shell revalidates the refused token', () => {

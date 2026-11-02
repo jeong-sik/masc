@@ -215,6 +215,7 @@ export interface DashboardCredentialOwner {
   actor: string
   actorRevision: number
   managed: boolean
+  managedActorRevision: number
   managedAuthRevision: number
   managedRefusalObservation: number
 }
@@ -227,6 +228,7 @@ export function captureDashboardCredentialOwner(): DashboardCredentialOwner {
     actor: currentDashboardActor(),
     actorRevision: dashboardActorRevision.peek(),
     managed: token !== null && getStoredTokenMeta()?.source === 'dev',
+    managedActorRevision: managedDashboardActorRevision.peek(),
     managedAuthRevision: managedDashboardAuthRevision.peek(),
     managedRefusalObservation: currentManagedRefusalObservation(),
   }
@@ -236,9 +238,12 @@ export function dashboardCredentialOwnerIsCurrent(owner: DashboardCredentialOwne
   return owner.token === dashboardBearerToken()
     && owner.tokenRevision === currentStoredTokenRevision()
     && owner.actor === currentDashboardActor()
-    && owner.actorRevision === dashboardActorRevision.peek()
-    && (!owner.managed || (owner.managedAuthRevision === managedDashboardAuthRevision.peek()
-      && owner.managedRefusalObservation === currentManagedRefusalObservation()))
+    && (owner.managed
+      ? getStoredTokenMeta()?.source === 'dev'
+        && owner.managedActorRevision === managedDashboardActorRevision.peek()
+        && owner.managedAuthRevision === managedDashboardAuthRevision.peek()
+        && owner.managedRefusalObservation === currentManagedRefusalObservation()
+      : owner.actorRevision === dashboardActorRevision.peek())
 }
 
 type HeaderOptions = {

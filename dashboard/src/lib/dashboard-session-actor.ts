@@ -1,9 +1,13 @@
-import { resolveDashboardActorName, sanitizeDashboardActorName } from './dashboard-actor'
+import { resolveDashboardActorName, sanitizeDashboardActorName, subscribeDashboardActorHintChanges } from './dashboard-actor'
 import { batch, signal, type ReadonlySignal } from '@preact/signals'
 
 let canonicalDashboardActor: string | null = null
 const actorRevision = signal(0)
 export const dashboardActorRevision: ReadonlySignal<number> = actorRevision
+subscribeDashboardActorHintChanges(() => {
+  // A validated actor, when present, takes precedence over the local hint.
+  if (canonicalDashboardActor === null) actorRevision.value++
+})
 // A managed dev credential already names dashboard. Confirming that same
 // actor adds information; withdrawal or another actor retires its authority.
 const managedActorRevision = signal(0)

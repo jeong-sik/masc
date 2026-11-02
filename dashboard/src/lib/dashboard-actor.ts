@@ -43,16 +43,62 @@ export function resolveDashboardActorName(
     || readStoredDashboardActorName(storage)
 }
 
+type ActorHintListener = () => void
+const actorHintListeners = new Set<ActorHintListener>()
+
+/** Observers retire work when the selected, unverified actor changes. */
+export function subscribeDashboardActorHintChanges(listener: ActorHintListener): () => void {
+  actorHintListeners.add(listener)
+  return () => { actorHintListeners.delete(listener) }
+}
+
+function currentActorHint(): string { return resolveDashboardActorName() ?? 'dashboard' }
+let lastObservedHint = currentActorHint()
+
+function publishActorHintChange(): void {
+  for (const listener of actorHintListeners) {
+    try { listener() } catch (error) {
+      console.warn('[dashboard-auth] actor hint listener failed', error)
+    }
+  }
+}
+
+function observeActorHintChange(previous: string): void {
+  const next = currentActorHint()
+  lastObservedHint = next
+  if (previous !== next) publishActorHintChange()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', event => {
+    const storage = safeStorage()
+    if (event.storageArea !== null && event.storageArea !== storage) return
+    if (event.key !== null && event.key !== DASHBOARD_AGENT_NAME_KEY) return
+    // A valid query actor takes precedence over the stored hint.
+    if (resolveDashboardActorName(window.location.search, null) !== null) return
+    const previous = sanitizeDashboardActorName(event.oldValue) ?? 'dashboard'
+    const next = sanitizeDashboardActorName(event.newValue) ?? 'dashboard'
+    if (event.key !== null && previous === next) return
+    // The backing storage may already contain a later value when the event
+    // arrives. Retire for each actual change, including A -> B -> A.
+    lastObservedHint = currentActorHint()
+    publishActorHintChange()
+  })
+  window.addEventListener('popstate', () => { observeActorHintChange(lastObservedHint) })
+}
+
 export function persistDashboardActorName(
   value: string,
   storage: Storage | null = safeStorage(),
 ): string {
   const normalized = sanitizeDashboardActorName(value) || 'dashboard'
+  const previous = currentActorHint()
   try {
     storage?.setItem(DASHBOARD_AGENT_NAME_KEY, normalized)
   } catch {
-    // Ignore storage write failures and keep the in-memory value.
+    // The resolved hint remains unchanged when storage is unavailable.
   }
+  observeActorHintChange(previous)
   return normalized
 }
 
@@ -70,12 +116,14 @@ export function replaceDashboardActorQueryParam(
 ): string {
   const normalized = sanitizeDashboardActorName(value) || 'dashboard'
   if (!location || !history) return normalized
+  const previous = currentActorHint()
   const params = new URLSearchParams(location.search)
   params.set('agent', normalized)
   params.delete('agent_name')
   const query = params.toString()
   const nextUrl = `${location.pathname}${query ? `?${query}` : ''}${location.hash}`
   history.replaceState(null, '', nextUrl)
+  observeActorHintChange(previous)
   return normalized
 }
 

@@ -922,12 +922,18 @@ export function hydrateShellSnapshot(
     const alreadyRefused = managedDashboardRefusal.peek() === before.tokenRevision
     const authChanges = managedAuth && ((managedAuth.rejected && !alreadyRefused)
       || (managedAuth.verifiedAfterRefusal && managedCredentialNeedsRevalidation(before.tokenRevision))) ? 1 : 0
+    const actorChanges = previousActor === nextActor ? 0 : 1
+    const sameManagedHydration = previousActor === null && nextActor === 'dashboard'
+    const managedActorChanges = (actorChanges === 1 && !sameManagedHydration) || authChanges === 1 ? 1 : 0
     setCanonicalDashboardActor(nextActor, managedAuth)
     const after = captureDashboardCredentialOwner()
     // The actor reset above belongs to this response. A separate token or
     // actor change triggered by a subscriber must not inherit its refusal.
     applyAuth = after.token === before.token && after.tokenRevision === before.tokenRevision
-      && after.actorRevision === before.actorRevision + (previousActor === nextActor ? 0 : 1)
+      && after.managed === before.managed
+      && (before.managed
+        ? after.managedActorRevision === before.managedActorRevision + managedActorChanges
+        : after.actorRevision === before.actorRevision + actorChanges)
       && (!before.managed || (after.managedAuthRevision === before.managedAuthRevision + authChanges
         && after.managedRefusalObservation === before.managedRefusalObservation + (managedAuth?.rejected ? 1 : 0)))
       && currentCanonicalDashboardActor() === nextActor

@@ -2175,18 +2175,19 @@ export function useGoalTreeDecisionObservation() {
 }
 
 export function GoalTree() {
-  const { authority, authorityError, authorityLoading, tokenRevision, actorRevision, managedActorRevision, authRefused, decisionBinding,
+  const { authority, authorityError, authorityLoading, tokenRevision, authRefused, decisionBinding,
     data, loading, error, unavailable, unconfirmed, isRecoveryCurrent } = useGoalTreeDecisionObservation()
   const query = filterQuery.value
   const activePhaseFilter = treePhaseFilter.value
   const selectedId = selectedGoalId.value
   const routeGoalId = cleanRouteGoalId(route.value.params.goal)
+  const decisionActor = goalDecisionActor()
   const [handledRoute, setHandledRoute] = useState<{
     id: string; found: boolean; authority: ExecutionWorkspaceAuthority | null; authRevision: number; actor: string
   } | null>(null)
   const routeOwned = Boolean(routeGoalId && handledRoute?.id === routeGoalId
     && handledRoute.authority === authority && handledRoute.authRevision === tokenRevision
-    && handledRoute.actor === goalDecisionActor())
+    && handledRoute.actor === decisionActor)
   useEffect(() => {
     setHandledRoute(null)
     if (routeGoalId) batch(() => {
@@ -2194,7 +2195,7 @@ export function GoalTree() {
       treePhaseFilter.value = 'all'
       setSelectedGoal(routeGoalId)
     })
-  }, [routeGoalId, authority, tokenRevision, actorRevision, managedActorRevision])
+  }, [routeGoalId, authority, tokenRevision, decisionActor])
 
   const visibleTree = useMemo(
     () => {
@@ -2237,12 +2238,12 @@ export function GoalTree() {
         if (expansionPath.some(id => !expandedNodes.value.has(id))) {
           expandedNodes.value = new Set([...expandedNodes.value, ...expansionPath])
         }
-        setHandledRoute({ id: routeGoalId, found: true, authority, authRevision: tokenRevision, actor: goalDecisionActor() })
+        setHandledRoute({ id: routeGoalId, found: true, authority, authRevision: tokenRevision, actor: decisionActor })
         return
       }
       if (!expansionPath) {
         setSelectedGoal(routeGoalId)
-        setHandledRoute({ id: routeGoalId, found: false, authority, authRevision: tokenRevision, actor: goalDecisionActor() })
+        setHandledRoute({ id: routeGoalId, found: false, authority, authRevision: tokenRevision, actor: decisionActor })
       }
       return
     }
@@ -2254,7 +2255,7 @@ export function GoalTree() {
       const expansionPath = goalExpansionPath(data.tree, nextId) ?? [nextId]
       expandedNodes.value = new Set([...expandedNodes.value, ...expansionPath])
     }
-  }, [allNodes, data, routeGoalId, routeOwned, authority, tokenRevision, actorRevision, visibleNodes])
+  }, [allNodes, data, routeGoalId, routeOwned, authority, tokenRevision, decisionActor, visibleNodes])
 
   useEffect(() => {
     if (!selectedId || !decisionBinding || decisionBinding.authority !== authority || decisionBinding.snapshot !== data) {

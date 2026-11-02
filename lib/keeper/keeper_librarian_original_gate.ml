@@ -17,6 +17,7 @@ module type Capture = sig
   val request_id : t -> string
   val to_json : t -> Yojson.Safe.t
   val request : t -> (Lane_addon_exact.request, string) result
+  val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t -> (Lane_addon_exact.final, string) result
   val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final -> (unit, string) result
   val gate_inputs : t -> Yojson.Safe.t -> (inputs, string) result
   (** Revalidate the complete original domain proposal and derive its original
@@ -88,22 +89,26 @@ let current_reading store = {
   records=(fun ~scope -> owned (Owner.load_scope ~store ~scope));
   successor=(fun ~scope successor -> owned (Owner.load_successor_request ~store ~scope successor));
 }
-let parent_final ~capture ~proposal (parent:Owner.retained) =
+let parent_final_with ~decode ~capture ~proposal (parent:Owner.retained) =
   let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
   let* judgment = parent_judgment parent in
-  let* exact = Capture.request capture in
-  let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
-  let* final = Exact.final_of_json ~schema judgment in
+  let* final = decode judgment in
   let* () = match final with
     | Exact.Call_final (Answered {output;_}) ->
       equal (Exact.checked_json output) proposal "Gate proposal differs from the original answered judgment"
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Gate requires the original answered proposal" in
   Ok final
+let parent_final ~capture ~proposal parent =
+  let decode judgment =
+    let* exact = Capture.request capture in
+    let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
+    Exact.final_of_json ~schema judgment in
+  parent_final_with ~decode ~capture ~proposal parent
 let load_parent_with ~read ~store ~owner ~capture ~proposal =
   let* parent = read.load ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture) in
   let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in
-  let* final = parent_final ~capture ~proposal parent in
+  let* final = parent_final_with ~decode:(Capture.decode_final ~store capture) ~capture ~proposal parent in
   let+ () = Capture.confirm_final ~store capture final in parent
 let load_parent ~store ~owner ~capture ~proposal =
   load_parent_with ~read:(current_reading store) ~store ~owner ~capture ~proposal

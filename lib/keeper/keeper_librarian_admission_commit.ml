@@ -59,7 +59,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
   let* exact=Capture.request capture in
   let* schema=Option.to_result ~none:"Original admission has no output schema" exact.schema in
   let accepted judgment =
-    let* final=Exact.final_of_json ~schema judgment in
+    let* final=Capture.decode_final ~store capture judgment in
     let* ()=Capture.confirm_final ~store capture final in
     match final with
     | Exact.Call_final (Answered {output;_}) -> Capture.validate_proposal capture (Exact.checked_json output)
@@ -126,9 +126,7 @@ let begin_gate ~store ~owner ~capture ~(record : Owner.retained) ~gate_root_id ~
     let* ()=same record.request (Capture.to_json capture) in
     let* ()=require (String.trim gate_root_id<>"") "Original gate root ID is blank" in
     let* original_judgment=judgment record in
-    let* exact=Capture.request capture in
-    let* schema=Option.to_result ~none:"Original admission has no schema" exact.schema in
-    let* final=Exact.final_of_json ~schema original_judgment in
+    let* final=Capture.decode_final ~store capture original_judgment in
     let* ()=Capture.confirm_final ~store capture final in
     let* proposal=match final with
       | Exact.Call_final (Answered {output;_}) ->
@@ -157,9 +155,7 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     | Progress.Judged _ | Committing _ | Commit_unknown _ | Finished _ -> Ok ()
     | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
     | Subdividing _ | Subdivided _ -> Error "Original gate has no retained disposition intent" in
-  let* exact=Capture.request capture in
-  let* schema=Option.to_result ~none:"Original admission has no output schema" exact.schema in
-  let* final=Exact.final_of_json ~schema original_judgment in
+  let* final=io (fun () -> Capture.decode_final ~store capture original_judgment) in
   let* proposal=match final with
     | Exact.Call_final (Answered {output;_}) -> Ok (Exact.checked_json output)
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)

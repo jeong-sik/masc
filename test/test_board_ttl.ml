@@ -2,6 +2,8 @@
 
 open Masc.Board
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 (* The store-level writers ask a recipient lookup; no name is declared here. *)
 let get_created = function
   | Ok value -> value
@@ -96,6 +98,8 @@ let test_sort_order_legacy_aliases_rejected () =
   rejected "garbage rejected" "definitely-not-an-order"
 
 let test_permanent_post () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -108,6 +112,8 @@ let test_permanent_post () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_expiring_post () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -120,6 +126,8 @@ let test_expiring_post () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_sweeper_skips_permanent () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -134,6 +142,8 @@ let test_sweeper_skips_permanent () =
 
 (* A post and its dependent rows leave together, in the pass that expires it. *)
 let test_sweep_removes_the_rows_of_an_expired_target () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -168,6 +178,8 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
    live board on 2026-09-19, because the next snapshot wrote the pruned
    tables to disk. *)
 let test_sweep_keeps_rows_whose_target_is_not_loaded () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -197,6 +209,8 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
 (* A reply the sweeper removes leaves the post's reply count with it, so a
    listing never announces a reply no read can return. *)
 let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -233,6 +247,8 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
 (* A swept post takes its comments with it, or they strand with a dangling
    post_id no read can reach. *)
 let test_sweep_cascades_an_expired_post_to_its_comments () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -270,6 +286,8 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
     (Hashtbl.length store.reactions)
 
 let test_sweep_drains_a_post_larger_than_two_comment_batches () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -518,6 +536,8 @@ let test_maybe_sweep_full_inbox_rolls_back_schedule () =
     (Eio.Stream.length store.flusher_inbox)
 
 let test_post_kind_direct_default () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -532,6 +552,8 @@ let test_post_kind_direct_default () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_post_kind_automation_contract () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -547,6 +569,8 @@ let test_post_kind_automation_contract () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_post_kind_system_contract () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;

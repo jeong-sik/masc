@@ -1,0 +1,9 @@
+colon
+go_usage
+enter
+x
+snapshot plan35top
+pagedown
+snapshot plan35more
+q
+q

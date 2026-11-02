@@ -281,6 +281,7 @@ let test_native_decode_rate_uses_current_field_only () =
     ; reasoning_effort = None
     ; canonical_model_id = None
     ; reported_model = None
+    ; reported_cache_usage = None
     ; reasoning_source = None
     ; reasoning_prefix = None
     ; inline_content_replay = None
@@ -339,6 +340,7 @@ let test_timings_cache_fields_land_on_payload () =
     ; reasoning_effort = None
     ; canonical_model_id = None
     ; reported_model = None
+    ; reported_cache_usage = None
     ; reasoning_source = None
     ; reasoning_prefix = None
     ; inline_content_replay = None
@@ -563,6 +565,303 @@ let test_an_attempt_reading_keys_apart_from_the_turn () =
   | None, _ | _, None -> fail "an auto row has no key"
 ;;
 
+let test_unreported_wire_cache_is_null_not_zero () =
+  let ollama_json =
+    {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":100,"eval_count":20}|}
+  in
+  let ollama_resp =
+    match Llm_provider.Backend_ollama.parse_ollama_response ollama_json with
+    | Ok resp -> resp
+    | Error err -> failf "ollama parse: %s" err
+  in
+  let ollama_usage = Option.get ollama_resp.usage in
+  let raw_ollama_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-ollama"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:ollama_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:ollama_usage.input_tokens
+      ~output_tokens:ollama_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens ollama_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens ollama_resp)
+      ?telemetry:ollama_resp.telemetry
+      ()
+  in
+  check int "ollama input tokens" 100 (int_field raw_ollama_payload "input_tokens");
+  check int "ollama output tokens" 20 (int_field raw_ollama_payload "output_tokens");
+  check_null_field raw_ollama_payload "cache_creation_tokens";
+  check_null_field raw_ollama_payload "cache_read_tokens";
+  check_null_field raw_ollama_payload "cache_miss_input_tokens";
+  check_null_field raw_ollama_payload "non_cached_input_tokens";
+  let settled_ollama_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-ollama"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:ollama_resp.model
+      ~usage_projection:Cost_ledger.Resolved_delta
+      ~input_tokens:ollama_usage.input_tokens
+      ~output_tokens:ollama_usage.output_tokens
+      ~cost_usd:0.0
+      ~cache_creation_input_tokens:ollama_usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:ollama_usage.cache_read_input_tokens
+      ?telemetry:ollama_resp.telemetry
+      ()
+  in
+  check_null_field settled_ollama_payload "cache_creation_tokens";
+  check_null_field settled_ollama_payload "cache_read_tokens";
+  check_null_field settled_ollama_payload "cache_miss_input_tokens";
+  check_null_field settled_ollama_payload "non_cached_input_tokens";
+  let openai_zero_json =
+    {|{"id":"c1","model":"glm-5.3","choices":[{"index":0,"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":0}}}|}
+  in
+  let openai_zero_resp =
+    match Llm_provider.Backend_openai_parse.parse_openai_response_result openai_zero_json with
+    | Ok resp -> resp
+    | Error _ -> fail "openai zero parse failed"
+  in
+  let openai_zero_usage = Option.get openai_zero_resp.usage in
+  let openai_zero_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-openai"
+      ~keeper_turn_id:2
+      ~agent_core_turn_ordinal:0
+      ~model:openai_zero_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:openai_zero_usage.input_tokens
+      ~output_tokens:openai_zero_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens openai_zero_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens openai_zero_resp)
+      ?telemetry:openai_zero_resp.telemetry
+      ()
+  in
+  check_null_field openai_zero_payload "cache_creation_tokens";
+  check int "reported zero cache read stays 0" 0
+    (int_field openai_zero_payload "cache_read_tokens");
+  check int "reported zero cache read yields 100 miss" 100
+    (int_field openai_zero_payload "cache_miss_input_tokens");
+  check int "reported zero cache read yields 100 non-cached" 100
+    (int_field openai_zero_payload "non_cached_input_tokens");
+  let muse_turn ?prompt_tokens ?cache_read_tokens ?cache_write_tokens ()
+      : Runtime_muse_serve.turn_result =
+    { session_id = "s-muse"
+    ; turn_id = "t-muse"
+    ; model = Some "claude-sonnet-4"
+    ; text = Some "ok"
+    ; usage =
+        Some
+          { Runtime_muse_msp.input_tokens = 120
+          ; output_tokens = 30
+          ; cached_tokens = 0
+          ; reasoning_tokens = 0
+          ; prompt_tokens
+          ; cache_read_tokens
+          ; cache_write_tokens
+          }
+    ; last_call_usage = None
+    ; tool_calls = 0
+    ; approvals_decided = 0
+    ; call_models = []
+    ; resumed = false
+    ; server_version = "1.4.0"
+    }
+  in
+  let muse_unreported_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~prompt_tokens:120 ())
+  in
+  let muse_unreported_usage = Option.get muse_unreported_resp.usage in
+  let muse_unreported_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-muse"
+      ~keeper_turn_id:3
+      ~agent_core_turn_ordinal:0
+      ~model:muse_unreported_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:muse_unreported_usage.input_tokens
+      ~output_tokens:muse_unreported_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens muse_unreported_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens muse_unreported_resp)
+      ?telemetry:muse_unreported_resp.telemetry
+      ()
+  in
+  check_null_field muse_unreported_payload "cache_creation_tokens";
+  check_null_field muse_unreported_payload "cache_read_tokens";
+  check_null_field muse_unreported_payload "cache_miss_input_tokens";
+  check_null_field muse_unreported_payload "non_cached_input_tokens";
+  let muse_terminal_only_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~cache_read_tokens:40 ~cache_write_tokens:10 ())
+  in
+  check (option int) "terminal-only muse cache creation is None" None
+    (Agent_core.Types.reported_cache_creation_input_tokens muse_terminal_only_resp);
+  check (option int) "terminal-only muse cache read is None" None
+    (Agent_core.Types.reported_cache_read_input_tokens muse_terminal_only_resp);
+  let muse_zero_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~prompt_tokens:120 ~cache_read_tokens:0 ~cache_write_tokens:0 ())
+  in
+  let muse_zero_usage = Option.get muse_zero_resp.usage in
+  let muse_zero_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-muse"
+      ~keeper_turn_id:4
+      ~agent_core_turn_ordinal:0
+      ~model:muse_zero_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:muse_zero_usage.input_tokens
+      ~output_tokens:muse_zero_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens muse_zero_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens muse_zero_resp)
+      ?telemetry:muse_zero_resp.telemetry
+      ()
+  in
+  check int "muse explicit zero cache creation stays 0" 0
+    (int_field muse_zero_payload "cache_creation_tokens");
+  check int "muse explicit zero cache read stays 0" 0
+    (int_field muse_zero_payload "cache_read_tokens");
+  check int "muse explicit zero cache yields 120 miss" 120
+    (int_field muse_zero_payload "cache_miss_input_tokens");
+  check int "muse explicit zero cache yields 120 non-cached" 120
+    (int_field muse_zero_payload "non_cached_input_tokens");
+  let claude_turn_resp ?cache_creation ?cache_read () =
+    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
+      ~latency_ms:10
+      ~turn_id:"turn-claude"
+      ~model:"claude-sonnet-4-6"
+      ~text:"ok"
+      ~turn_total:
+        (Some
+           { Runtime_claude_code.input_tokens = 120
+           ; output_tokens = 30
+           ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+           ; cache_read_input_tokens = Option.value cache_read ~default:0
+           ; reported_cache_creation_input_tokens = cache_creation
+           ; reported_cache_read_input_tokens = cache_read
+           })
+  in
+  let claude_unreported_resp = claude_turn_resp () in
+  let claude_unreported_usage = Option.get claude_unreported_resp.usage in
+  check int "claude accounting input stays 120 when cache is omitted" 120
+    claude_unreported_usage.input_tokens;
+  let claude_unreported_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-claude"
+      ~keeper_turn_id:5
+      ~agent_core_turn_ordinal:0
+      ~model:claude_unreported_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:claude_unreported_usage.input_tokens
+      ~output_tokens:claude_unreported_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens claude_unreported_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens claude_unreported_resp)
+      ?telemetry:claude_unreported_resp.telemetry
+      ()
+  in
+  check_null_field claude_unreported_payload "cache_creation_tokens";
+  check_null_field claude_unreported_payload "cache_read_tokens";
+  check_null_field claude_unreported_payload "cache_miss_input_tokens";
+  check_null_field claude_unreported_payload "non_cached_input_tokens";
+  let claude_zero_resp = claude_turn_resp ~cache_creation:0 ~cache_read:0 () in
+  let claude_zero_usage = Option.get claude_zero_resp.usage in
+  let claude_zero_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-claude"
+      ~keeper_turn_id:6
+      ~agent_core_turn_ordinal:0
+      ~model:claude_zero_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:claude_zero_usage.input_tokens
+      ~output_tokens:claude_zero_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens claude_zero_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens claude_zero_resp)
+      ?telemetry:claude_zero_resp.telemetry
+      ()
+  in
+  check int "claude explicit zero cache creation stays 0" 0
+    (int_field claude_zero_payload "cache_creation_tokens");
+  check int "claude explicit zero cache read stays 0" 0
+    (int_field claude_zero_payload "cache_read_tokens");
+  check int "claude explicit zero cache yields 120 miss" 120
+    (int_field claude_zero_payload "cache_miss_input_tokens");
+  let claude_positive_resp =
+    claude_turn_resp ~cache_creation:10 ~cache_read:40 ()
+  in
+  let claude_positive_usage = Option.get claude_positive_resp.usage in
+  check int "claude inclusive accounting input adds cache write and read" 170
+    claude_positive_usage.input_tokens;
+  let claude_positive_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-claude"
+      ~keeper_turn_id:7
+      ~agent_core_turn_ordinal:0
+      ~model:claude_positive_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:claude_positive_usage.input_tokens
+      ~output_tokens:claude_positive_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens claude_positive_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens claude_positive_resp)
+      ?telemetry:claude_positive_resp.telemetry
+      ()
+  in
+  check int "claude positive cache creation is 10" 10
+    (int_field claude_positive_payload "cache_creation_tokens");
+  check int "claude positive cache read is 40" 40
+    (int_field claude_positive_payload "cache_read_tokens");
+  check int "claude positive cache yields 120 miss" 120
+    (int_field claude_positive_payload "cache_miss_input_tokens");
+  check int "claude positive cache yields 130 non-cached" 130
+    (int_field claude_positive_payload "non_cached_input_tokens")
+;;
+
 let () =
   run "cost_token_decouple"
     [
@@ -598,6 +897,8 @@ let () =
             test_timings_cache_fields_land_on_payload;
           test_case "turn complete carries both cache counts" `Quick
             test_turn_complete_carries_both_cache_counts;
+          test_case "unreported wire cache is null, not zero" `Quick
+            test_unreported_wire_cache_is_null_not_zero;
         ] );
       ( "usage-scope",
         [

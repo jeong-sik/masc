@@ -518,24 +518,59 @@ let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
 ;;
 
 (* Same inclusive convention as [api_usage_of_turn_usage], for the input side
-   of the newest request only: the context it occupied. *)
+   of the newest request only: the context it occupied. The cache split is
+   reported only when the frame names both its reads and its writes. *)
 let request_context_of_request_input (input : Runtime_claude_code.request_input)
   : Runtime_observation.request_context
   =
   { input_tokens =
       input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
   ; cache =
-      Some
-        { Runtime_observation.cache_creation_input_tokens =
-            input.cache_creation_input_tokens
-        ; cache_read_input_tokens = input.cache_read_input_tokens
-        }
+      (match
+         ( input.reported_cache_creation_input_tokens
+         , input.reported_cache_read_input_tokens )
+       with
+       | Some cache_creation_input_tokens, Some cache_read_input_tokens ->
+         Some
+           { Runtime_observation.cache_creation_input_tokens
+           ; cache_read_input_tokens
+           }
+       | Some _, None | None, Some _ | None, None -> None)
   ; output_tokens = None (* an assistant frame's output is a streaming snapshot *)
+  }
+;;
+
+let reported_cache_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage)
+  : Agent_core.Types.reported_cache_usage
+  =
+  { cache_creation_input_tokens = usage.reported_cache_creation_input_tokens
+  ; cache_read_input_tokens = usage.reported_cache_read_input_tokens
+  }
+;;
+
+let completed_turn_response ~latency_ms ~turn_id ~model ~text ~turn_total
+  : Agent_core.Types.api_response
+  =
+  { Agent_core.Types.id = turn_id
+  ; model
+  ; stop_reason = EndTurn
+  ; content = [ Text text ]
+  ; usage = Option.map api_usage_of_turn_usage turn_total
+  ; telemetry =
+      Some
+        { Agent_core.Types.default_inference_telemetry with
+          request_latency_ms = Some latency_ms
+        ; canonical_model_id = Some model
+        ; reported_cache_usage =
+            Option.map reported_cache_usage_of_turn_usage turn_total
+        }
   }
 ;;
 
 module For_testing = struct
   let claude_error_to_core_error = claude_error_to_core_error
+  let request_context_of_request_input = request_context_of_request_input
+  let completed_turn_response = completed_turn_response
 
   let observe_stream_native_action ~turn_count ~observe event =
     match
@@ -1490,28 +1525,21 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
            (* The response usage is what the turn spent, from the result
               frame; the newest request's input rides apart as the context it
               occupied. *)
-           let usage, usage_scope =
+           let usage_scope =
              match turn.usage.turn_total with
-             | Some total ->
-               Some (api_usage_of_turn_usage total), Runtime_usage_scope.Turn_total
-             | None -> None, Runtime_usage_scope.Usage_scope_unavailable
+             | Some _ -> Runtime_usage_scope.Turn_total
+             | None -> Runtime_usage_scope.Usage_scope_unavailable
            in
            let request_context =
              Option.map request_context_of_request_input turn.usage.latest_request_input
            in
            let response =
-             { Agent_core.Types.id = turn.turn_id
-             ; model = turn.model
-             ; stop_reason = EndTurn
-             ; content = [ Text turn.text ]
-             ; usage
-             ; telemetry =
-                 Some
-                   { Agent_core.Types.default_inference_telemetry with
-                     request_latency_ms = Some latency_ms
-                   ; canonical_model_id = Some turn.model
-                   }
-             }
+             completed_turn_response
+               ~latency_ms
+               ~turn_id:turn.turn_id
+               ~model:turn.model
+               ~text:turn.text
+               ~turn_total:turn.usage.turn_total
            in
            let* () =
              Host.invoke_turn_completion_hooks

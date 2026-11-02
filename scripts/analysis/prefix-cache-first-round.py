@@ -3,8 +3,9 @@
 
 Reads, for the given UTC dates, the per-request costs ledger, every keeper's
 turn records, provider-input snapshots and execution receipts, and emits
-aggregates with source hashes. Prompt bodies never enter the report: a
-snapshot is compared by the SHA-256 the blob references already carry.
+aggregates with source hashes. Prompt bodies never enter the report. With
+--read-system-prefix, system blobs are read and verified to measure their raw
+byte prefix; otherwise snapshots are compared only by retained hashes.
 
 What it answers, per provider family:
   - how much of each request's input the provider read from its cache;
@@ -68,12 +69,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--masc-root', type=Path, required=True)
 parser.add_argument('--date', action='append', required=True,
                     help='UTC date, YYYY-MM-DD; repeat for several days')
-parser.add_argument('--deploy-at', required=True,
-                    help='ISO-8601 UTC instant that splits before/after, e.g. 2026-09-16T13:21:56Z')
+parser.add_argument('--keeper', action='append',
+                    help='Restrict keeper directories and cost-ledger agents; repeat to select several')
+parser.add_argument('--read-system-prefix', action='store_true',
+                    help='Verify system blobs and compare raw byte prefixes; never report prompt text')
+parser.add_argument('--deploy-at',
+                    help='Optional ISO-8601 UTC deployment instant for a before/after comparison')
 parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 
-deploy_at = datetime.datetime.fromisoformat(args.deploy_at.replace('Z', '+00:00')).timestamp()
+deploy_at = (datetime.datetime.fromisoformat(args.deploy_at.replace('Z', '+00:00')).timestamp()
+             if args.deploy_at else None)
+comparison_era = 'after_deploy' if deploy_at is not None else 'sample'
 sources, malformed = [], []
 
 
@@ -106,6 +113,8 @@ def day_paths(kind):
             yield args.masc_root / 'costs' / month / (stem + '.jsonl')
         else:
             for keeper in sorted((args.masc_root / 'keepers').glob('*')):
+                if args.keeper and keeper.name not in args.keeper:
+                    continue
                 yield keeper / kind / month / (stem + '.jsonl')
 
 
@@ -123,6 +132,8 @@ def family(runtime_id):
 
 
 def era(ts):
+    if deploy_at is None:
+        return 'sample'
     return 'after_deploy' if ts >= deploy_at else 'before_deploy'
 
 
@@ -157,20 +168,22 @@ requests = []
 # was one request is unknown, so it is counted apart, not read as a request.
 raw_rows_without_scope = 0
 for row in ledger:
+    if args.keeper and row.get('agent') not in args.keeper:
+        continue
     if row.get('usage_projection') == 'raw_observation' and 'usage_scope' not in row:
         raw_rows_without_scope += 1
     ts = seconds(row.get('timestamp'))
     tokens = count(row.get('input_tokens'))
-    miss = count(row.get('cache_miss_input_tokens'))
+    read = count(row.get('cache_read_tokens'))
     # Only a per-request raw row is one request; official-client rows count a
     # client turn or a whole conversation (usage_scope).
     if (row.get('usage_projection') != 'raw_observation'
             or row.get('usage_scope') != 'per_request'
-            or ts is None or not tokens or miss is None):
+            or ts is None or not tokens or read is None or read > tokens):
         continue
     requests.append({'agent': row.get('agent'), 'runtime_id': row.get('runtime_id'),
                      'turn': row.get('keeper_turn_id'), 'ordinal': row.get('agent_core_turn_ordinal'),
-                     'ts': ts, 'input': tokens, 'miss': miss})
+                     'ts': ts, 'input': tokens, 'miss': tokens - read})
 requests.sort(key=lambda r: (r['ts'], r['ordinal'] if isinstance(r['ordinal'], int) else 0))
 
 turns = collections.defaultdict(list)
@@ -251,7 +264,8 @@ for row in records:
         continue
     u.completed += 1
     tokens, read = count(row.get('input_tokens')), count(row.get('cache_read_input_tokens'))
-    if tokens is None or read is None:
+    if (row.get('usage_scope') != 'per_request'
+            or tokens is None or read is None or read > tokens):
         continue
     u.input_sum += tokens
     u.cache_read_sum += read
@@ -272,7 +286,7 @@ cross: dict[str, dict[tuple[str, str], list[float]]] = collections.defaultdict(l
 last_seen_ts, previous_turn = {}, {}
 for r in requests:
     pair = (r['agent'], r['runtime_id'])
-    if r['first'] and r['ts'] >= deploy_at and pair in last_seen_ts:
+    if r['first'] and era(r['ts']) == comparison_era and pair in last_seen_ts:
         gap = 'gap<15m' if r['ts'] - last_seen_ts[pair] < 900 else 'gap>=15m'
         before = surface_ref.get((r['agent'], r['runtime_id'], previous_turn.get(pair)))
         now = surface_ref.get((r['agent'], r['runtime_id'], r['turn']))
@@ -309,6 +323,56 @@ for snap in snapshots:
     if ts is None or not isinstance(snap.get('absolute_turn'), int):
         continue
     by_lane[(snap.get('keeper'), snap.get('runtime_profile'))].append(snap)
+
+
+system_blobs = {}
+
+
+def verified_system_blob(artifact):
+    sha = sha_of(artifact)
+    expected = count((artifact or {}).get('bytes'))
+    if sha is None or expected is None:
+        return None
+    key = (sha, expected)
+    if key in system_blobs:
+        return system_blobs[key]
+    path = args.masc_root / 'tool_blobs' / sha[:2] / sha
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        malformed.append({'path': str(path.relative_to(args.masc_root)),
+                          'error': 'system_blob_unavailable'})
+        system_blobs[key] = None
+        return None
+    sources.append({'path': str(path.relative_to(args.masc_root)),
+                    'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()})
+    if len(raw) != expected or hashlib.sha256(raw).hexdigest() != sha:
+        malformed.append({'path': str(path.relative_to(args.masc_root)),
+                          'error': 'system_blob_digest_or_length_mismatch'})
+        system_blobs[key] = None
+        return None
+    system_blobs[key] = raw
+    return raw
+
+
+def common_prefix_bytes(left, right):
+    return next((i for i, (a, b) in enumerate(zip(left, right)) if a != b),
+                min(len(left), len(right)))
+
+
+def tools_identity(snap):
+    if not isinstance(snap.get('tool_schemas'), list):
+        return None
+    tools = [(t.get('name'), sha_of(t.get('artifact')))
+             for t in snap.get('tool_schemas') or []]
+    return tools if all(name is not None and sha is not None for name, sha in tools) else None
+
+
+record_index = collections.defaultdict(list)
+for row in records:
+    record_index[(row.get('keeper'), row.get('trace_id'), row.get('absolute_turn'))].append(row)
+system_samples = []
+system_sample_by_snapshot = {}
 prefix_report = []
 tool_changes = collections.Counter()
 tool_added, tool_removed, tool_schema_changed = collections.Counter(), collections.Counter(), collections.Counter()
@@ -317,10 +381,34 @@ for (keeper, lane), snaps in sorted(by_lane.items()):
     per_era: dict[str, PrefixStats] = collections.defaultdict(PrefixStats)
     for snap in snaps:
         per_era[era(seconds(snap['captured_at']))].body.append(count((snap.get('wire') or {}).get('body_bytes')))
+        if args.read_system_prefix:
+            system = verified_system_blob(snap.get('system_prompt'))
+            settled = record_index[(keeper, snap.get('trace_id'), snap['absolute_turn'])]
+            reported = settled[0] if len(settled) == 1 else None
+            tokens = count(reported.get('input_tokens')) if reported else None
+            read = count(reported.get('cache_read_input_tokens')) if reported else None
+            scope = reported.get('usage_scope') if reported else None
+            system_samples.append({
+                'keeper': keeper, 'lane': lane, 'turn_ref': snap.get('turn_ref'),
+                'captured_at': snap['captured_at'], 'wire': snap.get('wire'),
+                'system_bytes': len(system) if system is not None else None,
+                'system_sha256': sha_of(snap.get('system_prompt')),
+                'last_reported_turn_usage': {
+                    'scope': scope,
+                    'runtime_profile': reported.get('runtime_profile') if reported else None,
+                    'selected_model': reported.get('selected_model') if reported else None,
+                    'input_tokens': tokens, 'cache_read_input_tokens': read,
+                    'cache_read_share': read / tokens if (scope == 'per_request' and tokens
+                                                          and read is not None and read <= tokens) else None,
+                    'binding': 'same_turn_not_proof_of_same_serialized_request'},
+                'previous_system': None})
+            system_sample_by_snapshot[id(snap)] = system_samples[-1]
     for a, b in zip(snaps, snaps[1:]):
         # A pair belongs to an era only when both snapshots do; a pair that
         # straddles the deploy would credit one era with the other's cut.
-        if b['absolute_turn'] != a['absolute_turn'] + 1 or era(seconds(a['captured_at'])) != era(seconds(b['captured_at'])):
+        if (b['absolute_turn'] != a['absolute_turn'] + 1
+                or a.get('trace_id') != b.get('trace_id')
+                or era(seconds(a['captured_at'])) != era(seconds(b['captured_at']))):
             continue
         when = era(seconds(b['captured_at']))
         e = per_era[when]
@@ -328,15 +416,31 @@ for (keeper, lane), snaps in sorted(by_lane.items()):
         ma = [sha_of(m.get('artifact')) for m in a.get('messages') or []]
         mb = [sha_of(m.get('artifact')) for m in b.get('messages') or []]
         i = 0
-        while i < len(ma) and i < len(mb) and ma[i] == mb[i]:
+        while i < len(ma) and i < len(mb) and ma[i] is not None and ma[i] == mb[i]:
             i += 1
         e.lcp.append(i / len(ma) if ma else None)
         e.first_diff.append(i)
         e.prev_is_prefix += int(i >= len(ma))
-        if when != 'after_deploy':
+        if args.read_system_prefix:
+            sa, sb = verified_system_blob(a.get('system_prompt')), verified_system_blob(b.get('system_prompt'))
+            ta, tb = tools_identity(a), tools_identity(b)
+            # Identify this exact capture, not a later row with the same turn.
+            sample = system_sample_by_snapshot[id(b)]
+            sample['previous_system'] = {
+                'turn_ref': a.get('turn_ref'),
+                'bytes': len(sa) if sa is not None else None,
+                'common_prefix_bytes': common_prefix_bytes(sa, sb) if sa is not None and sb is not None else None,
+                'identical': sa == sb if sa is not None and sb is not None else None,
+                'same_provider_model_codec': all(isinstance((a.get('wire') or {}).get(k), str)
+                                               and (a.get('wire') or {}).get(k) == (b.get('wire') or {}).get(k)
+                                               for k in ['provider', 'model', 'http_codec']),
+                'same_tool_schemas': ta == tb if ta is not None and tb is not None else None}
+        if when != comparison_era:
             continue
-        ta = [(t.get('name'), sha_of(t.get('artifact'))) for t in a.get('tool_schemas') or []]
-        tb = [(t.get('name'), sha_of(t.get('artifact'))) for t in b.get('tool_schemas') or []]
+        ta, tb = tools_identity(a), tools_identity(b)
+        if ta is None or tb is None:
+            tool_changes['unknown'] += 1
+            continue
         if ta == tb:
             tool_changes['identical'] += 1
             continue
@@ -358,7 +462,8 @@ for (keeper, lane), snaps in sorted(by_lane.items()):
                               'pairs': e.pairs, 'prev_is_prefix_of_next': e.prev_is_prefix,
                               'lcp_share': summary(e.lcp), 'first_diff_index': summary(e.first_diff),
                               'body_bytes': summary(e.body)})
-tool_report = {'pairs_after_deploy': sum(v for k, v in tool_changes.items() if k != 'pure_append_at_end'),
+tool_report = {'era': comparison_era,
+               'pairs': sum(v for k, v in tool_changes.items() if k != 'pure_append_at_end'),
                'kinds': dict(tool_changes), 'added': tool_added.most_common(10),
                'removed': tool_removed.most_common(10), 'schema_changed': tool_schema_changed.most_common(10)}
 
@@ -375,7 +480,12 @@ receipt_report = [{'selected_model': model, 'receipts': sum(c.values()), 'termin
                   for model, c in sorted(ends.items(), key=lambda kv: -sum(kv[1].values()))]
 
 report = {'generated_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
-          'dates': args.date, 'deploy_at': args.deploy_at,
+          'dates': args.date, 'deploy_at': args.deploy_at, 'keepers': args.keeper,
+          'evidence_limits': [
+              'Raw common-prefix bytes are not a provider tokenizer or measured KV-cache reuse.',
+              'First round means first observed ledger row in the sample; ordinal zero may be absent.',
+              'Missed input means input minus cache reads, including any new cache writes.',
+              'Turn usage has no response-to-capture digest; it cannot certify a serialized snapshot cache hit.'],
           'sources': sources, 'malformed': malformed,
           'raw_rows_without_scope': raw_rows_without_scope,
           'requests_read': len(requests), 'turn_records_read': len(records),
@@ -383,9 +493,10 @@ report = {'generated_at': datetime.datetime.now(datetime.timezone.utc).isoformat
           'settled_usage_by_family': usage_report,
           'rounds_by_family_and_era': rounds_report,
           'first_round_miss_by_gap': gap_report,
-          'first_round_after_deploy_by_gap_and_tools': cross_report,
+          'first_round_by_gap_and_tools': cross_report,
           'consecutive_snapshot_prefix': prefix_report,
-          'tool_list_changes_after_deploy': tool_report,
+          'system_prompt_cache_samples': system_samples,
+          'tool_list_changes': tool_report,
           'oversized_requests': oversized_report,
           'turn_ends_by_selected_model': receipt_report}
 args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')

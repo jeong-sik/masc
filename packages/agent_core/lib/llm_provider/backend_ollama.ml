@@ -447,7 +447,12 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
                    | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces)
           @ tool_blocks
       ; usage
-      ; telemetry = Some (Types.with_reported_model ~model telemetry)
+      ; telemetry =
+          Some
+            (Types.with_reported_cache_usage
+               ~cache_creation_input_tokens:None
+               ~cache_read_input_tokens:None
+               (Some (Types.with_reported_model ~model telemetry)))
       }
 ;;
 

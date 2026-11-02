@@ -147,18 +147,25 @@ let parse_response json =
     in
     loop [] content_list
   in
+  let u = json |> member "usage" in
+  let raw_cache_creation, raw_cache_read =
+    if u = `Null
+    then None, None
+    else
+      ( u |> member "cache_creation_input_tokens" |> to_int_option
+      , u |> member "cache_read_input_tokens" |> to_int_option )
+  in
   let usage =
-    let u = json |> member "usage" in
     if u = `Null
     then None
     else (
       let input_tokens = u |> member "input_tokens" |> to_int in
       let output_tokens = u |> member "output_tokens" |> to_int in
       let cache_creation_input_tokens =
-        Cli_common_json.member_int "cache_creation_input_tokens" u
+        Option.value raw_cache_creation ~default:0
       in
       let cache_read_input_tokens =
-        Cli_common_json.member_int "cache_read_input_tokens" u
+        Option.value raw_cache_read ~default:0
       in
       Some
         (usage_of_wire_counts
@@ -189,7 +196,12 @@ let parse_response json =
   ; stop_reason
   ; content
   ; usage
-  ; telemetry = Some (Types.with_reported_model ~model None)
+  ; telemetry =
+      Some
+        (Types.with_reported_cache_usage
+           ~cache_creation_input_tokens:raw_cache_creation
+           ~cache_read_input_tokens:raw_cache_read
+           (Some (Types.with_reported_model ~model None)))
   }
 ;;
 

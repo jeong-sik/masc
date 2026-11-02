@@ -75,6 +75,18 @@ module For_testing : sig
       refused as a context overflow is [Vendor_session_full], carrying whether
       a response or tool effect was observed first; everything else is
       {!recovery_failure_of_client_error}. *)
+
+  val request_context_of_request_input
+    :  Runtime_claude_code.request_input
+    -> Runtime_observation.request_context
+
+  val completed_turn_response
+    :  latency_ms:int
+    -> turn_id:string
+    -> model:string
+    -> text:string
+    -> turn_total:Runtime_claude_code.turn_usage option
+    -> Agent_core.Types.api_response
 end
 
 val run :

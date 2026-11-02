@@ -928,8 +928,13 @@ let parse_response json =
         content
     in
     let stop_reason = stop_reason_of_finish_reason ~has_tool_use finish_reason in
+    let um = json |> member "usageMetadata" in
+    let raw_cache_read =
+      if um = `Null
+      then None
+      else um |> member "cachedContentTokenCount" |> to_int_option
+    in
     let usage =
-      let um = json |> member "usageMetadata" in
       if um = `Null
       then None
       else
@@ -937,14 +942,18 @@ let parse_response json =
           { input_tokens = Cli_common_json.member_int "promptTokenCount" um
           ; output_tokens = Cli_common_json.member_int "candidatesTokenCount" um
           ; cache_creation_input_tokens = 0
-          ; cache_read_input_tokens =
-              Cli_common_json.member_int "cachedContentTokenCount" um
+          ; cache_read_input_tokens = Option.value raw_cache_read ~default:0
           ; cost_usd = None
           }
     in
     let model_str = Cli_common_json.member_str "modelVersion" json in
     { id = ""; model = model_str; stop_reason; content; usage
-    ; telemetry = Some (Types.with_reported_model ~model:model_str None) }
+    ; telemetry =
+        Some
+          (Types.with_reported_cache_usage
+             ~cache_creation_input_tokens:None
+             ~cache_read_input_tokens:raw_cache_read
+             (Some (Types.with_reported_model ~model:model_str None))) }
   | err ->
     let msg =
       err

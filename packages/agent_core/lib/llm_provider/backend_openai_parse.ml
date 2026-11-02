@@ -447,13 +447,26 @@ let parse_openai_response_result_json_raw
       |> Stop_reason_wire.with_refusal ~has_refusal
     in
     let model = Cli_common_json.member_str "model" json in
+    let delta_usage = delta_usage_of_openai_json json in
+    let cache_creation_input_tokens =
+      Option.bind delta_usage (fun (u : Types.delta_usage) ->
+        u.cache_creation_input_tokens)
+    in
+    let cache_read_input_tokens =
+      Option.bind delta_usage (fun (u : Types.delta_usage) -> u.cache_read_input_tokens)
+    in
     Ok
       { id = Cli_common_json.member_str "id" json
       ; model
       ; stop_reason
       ; content
       ; usage = usage_of_openai_json json
-      ; telemetry = Some (Types.with_reported_model ~model telemetry)
+      ; telemetry =
+          Some
+            (Types.with_reported_cache_usage
+               ~cache_creation_input_tokens
+               ~cache_read_input_tokens
+               (Some (Types.with_reported_model ~model telemetry)))
       }
   | err ->
     (match Openai_error_envelope.of_error_value err with

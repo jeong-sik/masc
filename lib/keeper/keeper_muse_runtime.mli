@@ -175,4 +175,12 @@ module For_testing : sig
   val recovery_failure_of_runtime_error : ?current:Keeper_official_client_session_store.recovery_failure ->
     Runtime_muse_serve.error -> Keeper_official_client_session_store.recovery_failure
 
+  val completed_turn_response :
+    runtime_id:string ->
+    configured_model:string option ->
+    latency_ms:int ->
+    Runtime_muse_serve.turn_result ->
+    Agent_core.Types.api_response
+  (** Build the completion-hook [api_response] for a completed Muse turn,
+      retaining exact wire cache provenance in [telemetry.reported_cache_usage]. *)
 end

@@ -490,6 +490,14 @@ let replace_keeper_rows ~preserve_on_error (state : state)
        state.keeper_message_return <- return_keeper;
        state.view <- Keepers Keeper_message);
 
+  (* A partial roster may have clamped the cursor to another Keeper while a
+     Skill image owned the terminal. Restore its captured owner on recovery. *)
+  if Option.is_none keepers_error && state.workspace_identity=Workspace_identity_match then
+    Option.iter (fun (keeper_name, _) ->
+      List.find_index (String.equal keeper_name) next_keeper_ids
+      |> Option.iter (fun cursor -> state.keeper_cursor <- cursor))
+      (tools_skill_cell_image_owner state);
+
   let selected_keeper_name_after_refresh =
     Option.map (fun keeper -> keeper.k_name) (selected_keeper state)
   in

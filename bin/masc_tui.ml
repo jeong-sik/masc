@@ -11190,7 +11190,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
   observe_msx_carts state ~mailbox;
@@ -11212,7 +11213,8 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Msx;
   state.msx_open <- true;
@@ -11238,7 +11240,8 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Dos;
   state.msx_open <- true;
@@ -11477,6 +11480,7 @@ let draw_inspected_image ?(fresh=true) state inspected =
       ^ "\027[2;1H" ^ image
       ^ Printf.sprintf "\027[%d;1H\027[2K%s" rows
           (Message_layout.fit_width footer (max 1 (columns-1))));
+    state.image_cell_view <- None;
     state.image_inspection <- Some {inspected with ii_frame=frame};
     state.image_open <- true
   | (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
@@ -11566,6 +11570,7 @@ let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = 
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width footer (max 1 (columns - 1))));
+      state.image_cell_view <- None;
       state.image_open <- true)
   end
 
@@ -11575,37 +11580,80 @@ let character_images_available () =
      | Masc_tui_terminal_palette.True_color | Ansi256 -> true
      | Ansi16 | Unknown -> false
 
-let draw_prepared_image ?scene ?origin state ~refuse ~title = function
-  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ?origin ~refuse ~title png
+(* Use the actual size even when another asynchronous completion has already
+   refreshed the shared cache. Its normalized width can exceed a tiny tty. *)
+let cell_image_terminal_size () =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some (rows, columns) when rows > 0 && columns > 0 -> Some (rows, columns)
+  | Some _ | None -> None
+
+let cell_image_fits (view : image_cell_frame) (rows, columns) =
+  view.ic_columns <= columns - 2 && List.length view.ic_lines <= rows - 3
+
+let cell_image_notice ~columns ~short ~long =
+  let notice = if columns <= 4 then "!" else if columns <= 9 then "key"
+    else if columns <= 20 then short else long in
+  "\x1b[1;1H" ^ Message_layout.fit_width notice (columns - 1)
+
+let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_frame) =
+  let contents =
+    if cell_image_fits view (rows, columns) then
+      let body = List.mapi (fun index line ->
+        Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) view.ic_lines
+        |> String.concat "" in
+      let footer = if view.ic_unconfirmed then "! source unconfirmed · any key: back"
+        else "  colour-cell preview · any key: back" in
+      "\x1b[1;1H" ^ Message_layout.fit_width view.ic_title (columns - 1) ^ body
+      ^ Printf.sprintf "\x1b[%d;1H%s" rows
+          (Message_layout.fit_width footer (columns - 1))
+    else cell_image_notice ~columns ~short:"key:close"
+      ~long:"Window too small · resize larger or press any key to close"
+  in
+  let retire_pixels = match !active_graphics_protocol, state.image_open, state.image_cell_view with
+    | Masc_tui_graphics.Kitty_protocol, true, None -> Masc_tui_graphics.delete_all
+    | (Kitty_protocol | ITerm2_protocol | Unsupported_protocol), (true | false), (Some _ | None) -> "" in
+  Masc_tui_msx.invalidate ();
+  write_to_terminal (Ansi.clear ^ retire_pixels ^ contents);
+  state.browser_viewport <- None;
+  state.image_inspection <- None;
+  browser_image_region := None;
+  browser_pointer_press := None;
+  state.image_cell_view <- Some (Image_cells {view with ic_terminal_size=(rows, columns)});
+  state.image_open <- true
+
+let draw_withdrawn_cell_image state ~terminal_size:(_, columns as terminal_size) =
+  let notice = cell_image_notice ~columns ~short:"key:close"
+    ~long:"Image preview no longer available · press any key to close" in
+  write_to_terminal (Ansi.clear ^ notice);
+  state.image_cell_view <- Some (Image_cells_withdrawn (Some terminal_size))
+
+let draw_prepared_image ?scene ~origin state ~refuse ~title = function
+  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ~origin ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
     withdraw_resource_diagram_pending state;
-    let rows, columns = Masc_tui_ansi.get_terminal_size () in
     if state.msx_open then
       refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
     else if not (character_images_available ()) then
       refuse "this terminal has no colour image presentation"
-    else if image_columns > columns - 2 || pixel_rows / 2 > rows - 3 then
-      refuse "terminal size changed; reopen the image preview"
-    else
+    else match cell_image_terminal_size () with
+    | None -> refuse "terminal size is unavailable; reopen the image preview"
+    | Some (rows, columns) when image_columns > columns - 2 || pixel_rows / 2 > rows - 3 ->
+        refuse "terminal size changed; reopen the image preview"
+    | Some _ ->
       let lines = Masc_tui_image_mosaic.render_rgba
         ~project:Masc_tui_terminal_palette.best_color
         ~cols:image_columns ~rows:pixel_rows bytes in
       match lines with
       | [] -> refuse "image preview has no character frame"
       | _ :: _ ->
-        state.browser_viewport <- None;
-        browser_image_region := None;
-        browser_pointer_press := None;
         let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
-        let body = List.mapi (fun index line ->
-          Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) lines
-          |> String.concat "" in
-        Masc_tui_msx.invalidate ();
-        write_to_terminal (Ansi.clear ^ "\x1b[1;1H"
-          ^ Message_layout.fit_width title (max 1 (columns - 1)) ^ body
-          ^ Printf.sprintf "\x1b[%d;1H%s" rows
-              (Message_layout.fit_width "  colour-cell preview · any key: back" (max 1 (columns - 1))));
-        state.image_open <- true
+        match cell_image_terminal_size () with
+        | None -> refuse "terminal size is unavailable; reopen the image preview"
+        | Some (rows, columns) ->
+            draw_cell_image state ~terminal_size:(rows, columns)
+              {ic_title=title;ic_lines=lines;ic_columns=image_columns;
+               ic_terminal_size=(rows, columns);ic_workspace=state.workspace_authority;
+               ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin}
 
 let download_remote_image ?(force_fetch = false) url =
   Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
@@ -11864,15 +11912,26 @@ let withdraw_pending_image_open state =
 let settle_retired_sent_image state =
   match state.sent_image_read with
   | Some pending when not (image_reading_is_current state pending) ->
+    if Option.is_none (retired_skill_image_notice state) then begin
       cancel_board_image_read state;
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
-         && image_keeper_is_current state ~view:pending.sir_view ~keeper_name:pending.sir_keeper then
+         && image_request_keeper_is_current state pending then
         image_notice state ~view:pending.sir_view ~keeper_name:pending.sir_keeper ~kind:Notice_failure
           (Printf.sprintf "Image %s: source changed; reopen its preview"
              pending.sir_name)
+    end
   | Some _ | None -> ()
+
+let announce_retired_skill_image state =
+  match retired_skill_image_notice state with
+  | Some pending ->
+      state.sent_image_read <- None;
+      image_notice state ~view:Tools ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+        "Skill image preview interrupted after the workspace reading changed; reopen it";
+      true
+  | None -> false
 
 (* Draft payloads are local even while disconnected. Peer readings retain
    their original authority envelope; both paths capture the UI generation
@@ -11939,7 +11998,13 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       | Board_image_read _ -> Some board_preview_worker
       | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let port = state.port in
-    let keeper_name = if state.view = Resources || state.view = Board then None else state.msg_target_keeper_name in
+    let keeper_name = match state.view, skill_reference with
+      | Tools, Some _ -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+      | (Resources | Board), (Some _ | None) -> None
+      | Tools, None
+      | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+        | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+        | Connectors | Runtime | Config | System_logs), (Some _ | None) -> state.msg_target_keeper_name in
     let generation = state.image_request_generation in
     let view = state.view in
     let request = {sir_generation=generation; sir_view=view;
@@ -11951,11 +12016,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let admit_vector () =
       let exact_request = Option.exists (fun pending -> pending == request) state.sent_image_read in
       if not exact_request || state.msx_open || generation <> state.image_request_generation
-         || view <> state.view || not (image_keeper_is_current state ~view ~keeper_name)
-         || not (image_reading_is_current state request) then begin
-        ignore (Masc_tui_types.take_image_read state request);
+         || view <> state.view || not (image_request_keeper_is_current state request)
+         || not (image_reading_is_current state request) then
         Error "vector image request is no longer current"
-      end
       else match Masc_tui_board_preview_work.reserve vector_inspection_worker with
         | None -> Error "Previous vector image is still rendering; retry when it finishes"
         | Some admission -> Ok (vector_inspection_worker,admission) in
@@ -12020,7 +12083,7 @@ let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
         Masc.Keeper_image_dimensions.image_dimensions inspected.ii_data with
      | Some scene, Some origin, Some (width,height)
          when origin.sir_view=state.view
-           && image_keeper_is_current state ~view:state.view ~keeper_name:origin.sir_keeper
+           && image_request_keeper_is_current state origin
            && image_reading_is_current state origin ->
        let geometry = Masc_tui_ansi.get_terminal_size () in
        let window = inspection_window ~cell_pixels inspected.ii_viewport in
@@ -12055,7 +12118,7 @@ let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
               Once admitted, a later close withdraws the result, not the work. *)
            let current = Option.exists (fun request -> request == pending) state.sent_image_read
              && state.image_open && not state.msx_open && pending.sir_view=state.view
-             && image_keeper_is_current state ~view:pending.sir_view ~keeper_name:pending.sir_keeper
+             && image_request_keeper_is_current state pending
              && image_reading_is_current state pending
              && (match state.image_inspection, !image_cell_pixels with
                  | Some current, Some pixels -> current.ii_identity == inspected.ii_identity
@@ -12432,6 +12495,7 @@ let close_image state =
   browser_image_region := None;
   state.browser_viewport <- None;
   state.image_inspection <- None;
+  state.image_cell_view <- None;
   match state.image_open with
   | false -> ()
   | true ->
@@ -23117,13 +23181,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Sent_image_ready { request; result } ->
       let {sir_generation=generation; sir_view=view; sir_keeper=keeper_name;
            sir_name=name;_} = request in
+      let request_was_pending = Option.exists (fun pending -> pending == request) state.sent_image_read in
       let pending = Masc_tui_types.take_image_read state request in
       (match result with
        | Image_worker_busy -> ()
        | Image_prepared result -> match pending with
        | Some {sir_purpose=Inspect_image {identity;window};_}
            when state.image_open && not state.msx_open && view=state.view
-             && image_keeper_is_current state ~view ~keeper_name ->
+             && image_request_keeper_is_current state request ->
          (match state.image_inspection, !image_cell_pixels with
           | Some inspected, Some cell_pixels
               when identity == inspected.ii_identity
@@ -23142,7 +23207,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           | (Some _ | None), (Some _ | None) -> ())
        | Some ({sir_purpose=Open_image;_} as origin)
            when not state.msx_open && generation = state.image_request_generation
-         && view = state.view && image_keeper_is_current state ~view ~keeper_name -> begin
+         && view = state.view && image_request_keeper_is_current state request -> begin
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
           let opened_original = match origin.sir_owner with
@@ -23156,13 +23221,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Error reason -> refuse reason
         | Ok (presentation,scene) -> draw_prepared_image ?scene ~origin state ~refuse ~title:name presentation
       end
+       | (Some {sir_purpose=Open_image;_} | None)
+           when request_was_pending && view=Tools && view=state.view && not state.msx_open
+             && generation=state.image_request_generation && Option.is_some request.sir_skill_reference
+             && (match request.sir_purpose with Open_image -> true | Inspect_image _ -> false) ->
+           image_notice state ~view ~keeper_name ~kind:Notice_failure
+             "Keeper or Skill source is unconfirmed or changed; reopen the image preview"
        | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
   | Image_render_ready { request; title; caption; page_url; image_url; result } ->
       let current = match Masc_tui_types.take_image_read state request with
         | Some _ ->
           not state.msx_open && request.sir_generation = state.image_request_generation
           && request.sir_view = state.view
-          && (request.sir_view = Resources || request.sir_keeper = state.msg_target_keeper_name)
+          && image_keeper_is_current state ~view:request.sir_view ~keeper_name:request.sir_keeper
         | None -> false in
       if current then begin
       let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
@@ -24151,13 +24222,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          && Option.equal String.equal keeper_name selected_name then (
       match result with
       | Ok snapshot ->
-          let selected = selected_tools_skill_profile state in
+          let selected = tools_skill_reference_for_refresh state ~keeper_name in
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None;
           (match selected with
            | None -> ()
-           | Some selected ->
-               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference selected.esp_reference)
+           | Some reference ->
+               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference reference)
                  (tools_skill_profiles state)
                |> Option.iter (fun index -> state.tools_skill_cursor <- index));
           normalize_tools_skill_cursor state
@@ -25126,6 +25197,13 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
   in
   let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || credential_changed) in
   reset_input_sensitive_sweeps ();
+  (* One already-retired notice is bounded work.  Do not starve it behind a
+     busy mailbox, but let an operator gesture cancel its marker first. *)
+  let retired_image_changed =
+    if not (share_input_pending ()) then
+      announce_retired_skill_image state
+    else false in
+  let changed = changed || retired_image_changed in
   match state.resource_copy_ready with
   | Some copy when !copy_sweep_complete && not (over_budget ()) && not (share_input_pending ()) ->
     if not (resource_public_copy_is_current state copy) then begin
@@ -27286,7 +27364,12 @@ Use relative paths for resources already held in the package. -->
          launch_tools_async_detail state ~mailbox:async_messages)
   in
   let handle_skill_diagram () =
-    match selected_tools_skill_profile state with
+    if not (tools_keeper_observation_confirmed state) then
+      report_action state "error" "Keeper roster is unconfirmed; refresh before opening the Skill diagram"
+    else if not (tools_skill_inventory_matches_keeper state
+      (Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state))) then
+      report_action state "error" "Skill inventory is not confirmed for the selected Keeper; refresh before opening the diagram"
+    else match selected_tools_skill_profile state with
     | None -> report_action state "error" "No published Skill selected"
     | Some { esp_flow = None; _ } ->
         report_action state "system" "Normal Skill: the model orchestrates tools; no declared execution graph"
@@ -27773,8 +27856,10 @@ Use relative paths for resources already held in the package. -->
     let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
     reconcile_keeper_message_focus state ~cols
   in
+  let cell_image_redraw_pending = ref false in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then begin
+      cell_image_redraw_pending := true;
       withdraw_resource_diagram_pending state;
       state.resource_copy_pending <- None;
       state.resource_copy_ready <- None;
@@ -28064,6 +28149,7 @@ Use relative paths for resources already held in the package. -->
       (* Console writes damage whichever surface owns the terminal, including
          the spectator whose output bypasses the ordinary frame presenter. *)
       if Terminal_write_repair.consume_damage () then begin
+        cell_image_redraw_pending := true;
         Masc_tui_msx.invalidate ();
         Frame_presenter.invalidate frame_presenter;
         Render_schedule.request render_schedule Render_schedule.Force;
@@ -28127,7 +28213,7 @@ Use relative paths for resources already held in the package. -->
       (* One direct ioctl snapshot owns both this interaction's bounds and its
          eventual frame. This also observes resizes from terminals that omit
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
-      (match refresh_terminal_size () with
+      let resized = match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            withdraw_resource_diagram_pending state;
            ignore (Atomic.fetch_and_add resize_generation 1);
@@ -28151,8 +28237,47 @@ Use relative paths for resources already held in the package. -->
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ());
            if state.image_open && not state.msx_open then
-             Option.iter (draw_inspected_image state) state.image_inspection
-       | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+             Option.iter (draw_inspected_image state) state.image_inspection;
+           true
+       | Render_schedule.Terminal_size_cache.Unchanged _ -> false in
+      (match state.image_cell_view with
+       | Some (Image_cells view) when state.image_open && not state.msx_open ->
+           (match image_cell_origin_for_redraw state ~workspace:view.ic_workspace view.ic_origin with
+           | None ->
+             (match cell_image_terminal_size () with
+              | Some terminal_size ->
+                  draw_withdrawn_cell_image state ~terminal_size;
+                  cell_image_redraw_pending := false
+              | None ->
+                  write_to_terminal Ansi.clear;
+                  state.image_cell_view <- Some (Image_cells_withdrawn None);
+                  cell_image_redraw_pending := true)
+           | Some origin ->
+             let view = if origin == view.ic_origin then view else {view with ic_origin=origin} in
+             state.image_cell_view <- Some (Image_cells view);
+             let unconfirmed = image_cell_source_unconfirmed state origin in
+             (match cell_image_terminal_size () with
+              | Some terminal_size ->
+                  if !cell_image_redraw_pending || resized || terminal_size <> view.ic_terminal_size
+                     || unconfirmed <> view.ic_unconfirmed then
+                    draw_cell_image state ~terminal_size {view with ic_unconfirmed=unconfirmed};
+                  cell_image_redraw_pending := false
+              | None ->
+                  if unconfirmed && not view.ic_unconfirmed then begin
+                    (* Do not leave a confirmed-looking footer on screen when
+                       the source became uncertain and geometry is unknown. *)
+                    write_to_terminal Ansi.clear;
+                    state.image_cell_view <- Some (Image_cells {view with ic_unconfirmed=true});
+                    cell_image_redraw_pending := true
+                  end))
+       | Some (Image_cells_withdrawn last_size) when state.image_open && not state.msx_open ->
+           (match cell_image_terminal_size () with
+            | Some terminal_size ->
+                if !cell_image_redraw_pending || resized || last_size <> Some terminal_size then
+                  draw_withdrawn_cell_image state ~terminal_size;
+                cell_image_redraw_pending := false
+            | None -> ())
+       | Some (Image_cells _ | Image_cells_withdrawn _) | None -> cell_image_redraw_pending := false);
       (* Decide from the hold captured before reading: the final event is
          rejected even when reading it emptied the last input buffer. *)
       let rejected, rejected_paste, was_reported, paste_was_reported =

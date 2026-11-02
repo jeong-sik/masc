@@ -20,6 +20,9 @@ let parts () =
      rc_mime_type = Some "image/png";
      rc_kind = Mcp.Resource_blob {base64="QUJDRA=="} }]
 let state () = Types.create_state ~workspace:"resource-test" ~port:0 ~refresh_interval:0. ()
+let keeper_row name : Types.keeper =
+  {k_origin=Masc.Tui_decode.Persisted_keeper;k_name=name;k_paused=false;
+   k_identity=Error "not observed";k_activity=None}
 let saved state =
   match state.Types.resource_content with
   | Some (_, parts) -> parts
@@ -102,32 +105,84 @@ let test_skill_image_owner () =
     esp_reference; esp_name="diagram"; esp_kind="composition"; esp_execution="inline";
     esp_body_bytes=0; esp_discovery_bytes=0; esp_load_reasons=[]; esp_node_count=0;
     esp_batch_count=0; esp_max_parallelism=0; esp_flow=None; esp_io=Model_orchestrated } in
-  let inventory selected : Tools.tool_snapshot = {
+  let inventory ?(left_out=[]) selected : Tools.tool_snapshot = {
     ts_tools=[]; ts_count=0; ts_freshness=Settled; ts_skill_activations=None;
     ts_effective=Some (Effective_surface_available {
-      ets_keeper_name="keeper"; ets_runtime_id="runtime"; ets_official_client_kind="client";
+      ets_keeper_name="keeper-a"; ets_runtime_id="runtime"; ets_official_client_kind="client";
       ets_tool_delivery=Effective_tools_delivered; ets_native_posture=None;
       ets_skill_snapshot_revision="snapshot"; ets_skill_resource_read_max_bytes=None;
-      ets_instruction_skills=[]; ets_skills_left_out=[]; ets_unavailable_skill_names=[];
+      ets_instruction_skills=[]; ets_skills_left_out=left_out; ets_unavailable_skill_names=[];
       ets_composition_skills=[]; ets_skill_profiles=List.map profile selected;
       ets_tool_surface_bytes=None; ets_skill_tool_surface_bytes=None; ets_skill_discovery_bytes=0;
       ets_skill_body_bytes=None; ets_tools=[]; ets_tool_surface_sha256=None }) } in
   let state=state () in
   state.view <- Types.Tools;
+  state.local_keepers <- Types.Local_workspace_read;
+  state.keepers <- [keeper_row "keeper-a"];
   let image={ (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_keeper=Some "keeper-a";
     sir_skill_reference=Some original } in
+  state.image_open <- true;
+  state.image_cell_view <- Some (Types.Image_cells {
+    ic_title="diagram";ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_workspace=state.workspace_authority;ic_origin=image;ic_unconfirmed=false });
   let window : Masc_tui_image_viewport.window = {x=0;y=0;width=1;height=1;columns=1;rows=1} in
   let inspection={image with sir_purpose=Inspect_image {identity=ref ();window}} in
   state.tools_inventory <- Some (inventory [original]);
   check bool "exact skill revision owns the open" true (Types.image_reading_is_current state image);
   check bool "inspection retains that owner" true (Types.image_reading_is_current state inspection);
+  let displayed () = Option.is_some
+    (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority image) in
+  check bool "displayed skill image retains its source" true (displayed ());
+  state.keepers <- [keeper_row "keeper-b"];
+  let wrongly_rebound = {image with sir_keeper=Some "keeper-b"} in
+  check bool "keeper A inventory cannot authorize a keeper B request" false
+    (Types.image_reading_is_current state wrongly_rebound);
+  check bool "A inventory does not match B" false
+    (Types.tools_skill_inventory_matches_keeper state (Some "keeper-b"));
+  state.keepers <- [keeper_row "keeper-a"];
+  state.tools_error <- Some "temporary failure";
+  check bool "failed skill refresh retains displayed source" true (displayed ());
+  check bool "failed skill refresh is indicated" true (Types.image_cell_source_unconfirmed state image);
+  state.tools_error <- None;
+  state.tools_read_inflight <- Some {tri_generation=state.tools_request_generation;
+    tri_keeper=None;tri_pending=[Tools_inventory_read]};
+  check bool "pending skill refresh retains the last confirmed observation" false
+    (Types.image_cell_source_unconfirmed state image);
+  state.tools_read_inflight <- None;
+  state.tools_inventory <- Some (inventory ~left_out:["one document unavailable"] [reference "other" 'a']);
+  check bool "a partial inventory retains the absent displayed skill" true (displayed ());
+  check bool "a partial inventory marks the absent skill unconfirmed" true
+    (Types.image_cell_source_unconfirmed state image);
+  check bool "refresh restores the captured Skill instead of the temporary cursor" true
+    (Option.exists (Skill_reference.equal original)
+      (Types.tools_skill_reference_for_refresh state ~keeper_name:(Some "keeper-a")));
+  state.tools_inventory <- Some (inventory [reference "other" 'a'; original]);
+  state.tools_skill_cursor <- 0;
+  check bool "recovery keeps the original even after automatic cursor reconciliation" true (displayed ());
+  check bool "a different Skill selection is unconfirmed" true
+    (Types.image_cell_source_unconfirmed state image);
+  state.tools_skill_cursor <- 1;
+  check bool "recovered original is confirmed" false (Types.image_cell_source_unconfirmed state image);
+  state.tools_skill_cursor <- 0;
+  state.tools_inventory <- Some (inventory ~left_out:["unrelated advisory"] [original]);
+  check bool "a still-present skill stays confirmed despite another diagnostic" false
+    (Types.image_cell_source_unconfirmed state image);
+  state.tools_inventory <- Some (inventory ~left_out:["unrelated advisory"] [reference "diagram" 'b']);
+  check bool "a confirmed replacement is retired despite another diagnostic" false (displayed ());
   state.tools_inventory <- Some (inventory [reference "diagram" 'b']);
   check bool "a replacement revision retires the open" false (Types.image_reading_is_current state image);
   check bool "a replacement revision retires inspection" false (Types.image_reading_is_current state inspection);
+  check bool "replacement revision retires the displayed image" false (displayed ());
   state.tools_inventory <- Some (inventory [reference "other" 'a']);
   check bool "a different skill retires the open" false (Types.image_reading_is_current state image);
+  check bool "a confirmed missing skill retires the displayed image" false (displayed ());
   state.tools_inventory <- None;
   check bool "a missing skill retires the open" false (Types.image_reading_is_current state image);
+  check bool "an unavailable skill inventory retains the displayed image" true (displayed ());
+  check bool "unavailable skill inventory is indicated" true (Types.image_cell_source_unconfirmed state image);
+  state.tools_inventory <- Some (inventory []);
+  check bool "a confirmed empty inventory retires the displayed image" false (displayed ());
   let local=pending state (Types.Local_file_image_read state.workspace_authority) in
   let draft=attachment () in
   state.msg_attachments <- [draft];
@@ -389,6 +444,186 @@ let test_board_attachment_ownership () =
   state.view <- Types.Board;
   Types.suspend_workspace_readings state;
   check bool "withdrawn workspace reading retires preview" false (current ())
+
+let test_displayed_cell_resource_owner () =
+  let state = state () and original = parts () in
+  state.view <- Types.Resources;
+  state.resource_content <- Some (uri, original);
+  let workspace = state.workspace_authority in
+  let origin = { (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_resource = state.resource_content } in
+  let retained origin = Types.image_cell_origin_for_redraw state ~workspace origin in
+  check bool "displayed resource is retained" true (Option.is_some (retained origin));
+  check bool "original resource is confirmed" false (Types.image_cell_source_unconfirmed state origin);
+  Types.suspend_workspace_readings state;
+  state.workspace_identity <- Types.Workspace_identity_match_unconfirmed "temporarily unread";
+  state.resource_pending_key <- Some uri;
+  check bool "unconfirmed workspace and pending reread retain the displayed observation" true
+    (Option.is_some (retained origin));
+  check bool "unconfirmed workspace is indicated" true (Types.image_cell_source_unconfirmed state origin);
+  state.workspace_identity <- Types.Workspace_identity_match;
+  state.resource_pending_key <- None;
+  state.resource_content_error <- Some (uri, "temporary failure");
+  check bool "failed same-source reread retains the displayed observation" true
+    (Option.is_some (retained origin));
+  check bool "failed reread is indicated" true (Types.image_cell_source_unconfirmed state origin);
+  state.resource_content_error <- None;
+  let equal_parts = parts () in
+  state.resource_content <- Some (uri, equal_parts);
+  let rebound = match retained origin with Some origin -> origin | None -> fail "equal reread retired image" in
+  check bool "equal completed reread is confirmed" false (Types.image_cell_source_unconfirmed state rebound);
+  check bool "equal reread rebinds to the new snapshot" true
+    (match rebound.sir_resource with Some (_, current) -> current == equal_parts | None -> false);
+  state.resource_pending_key <- Some (Catalog.Mcp_uri "masc://other");
+  check bool "a different selection retires the displayed image" true (Option.is_none (retained rebound));
+  state.resource_pending_key <- None;
+  let changed = [{Mcp.rc_uri=Some "masc://drawing";rc_mime_type=Some "image/svg+xml";
+    rc_kind=Mcp.Resource_text "changed"}] in
+  state.resource_content <- Some (uri, changed);
+  check bool "confirmed different bytes retire the displayed image" true (Option.is_none (retained rebound));
+  state.resource_pending_key <- Some uri;
+  check bool "a later pending reread cannot hide already changed bytes" true (Option.is_none (retained rebound));
+  state.resource_pending_key <- None;
+  state.resource_content_error <- Some (uri, "later reread failed");
+  check bool "a later failed reread cannot hide already changed bytes" true (Option.is_none (retained rebound));
+  state.resource_content_error <- None;
+  state.resource_content <- Some (uri, equal_parts);
+  let owner = Updates.begin_listing state in
+  Updates.listed state ~owner (Ok {Catalog.entries=[];notes=["MCP listing incomplete"];reports_complete=true});
+  check bool "partial inventory cannot prove the MCP source absent" true (Option.is_some (retained rebound));
+  check bool "cleared reading remains visibly unconfirmed" true (Types.image_cell_source_unconfirmed state rebound);
+  let owner = Updates.begin_listing state in
+  Updates.listed state ~owner (Ok {Catalog.entries=[];notes=[];reports_complete=true});
+  check bool "MCP inventory alone cannot prove the captured source absent" true (Option.is_some (retained rebound));
+  state.resource_content <- Some (uri, equal_parts);
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "another workspace retires even equal bytes" true (Option.is_none (retained rebound))
+
+let test_displayed_cell_board_owner () =
+  let post = board_post "post-a" and comment = board_comment "comment-a" "original" in
+  let state = board_state post [comment] in
+  state.board_comments_focused <- true;
+  state.board_comment_cursor <- Some comment.bc_id;
+  let subject = Types.Board_diagram (Board_comment_diagram
+    {post_id=post.bp_id;comment_id=comment.bc_id;body=comment.bc_content}) in
+  let origin = pending state (Types.Board_image_read (state.workspace_read_authority,subject,ref ())) in
+  let workspace = state.workspace_authority in
+  let retained () = Option.is_some (Types.image_cell_origin_for_redraw state ~workspace origin) in
+  check bool "displayed Board comment retained" true (retained ());
+  check bool "Board comment begins confirmed" false (Types.image_cell_source_unconfirmed state origin);
+  let module Detail = Masc_tui_board_detail in
+  let loading, request = match Detail.start state.board_detail ~post_id:post.bp_id with
+    | Started (loading, request) -> loading, request
+    | Already_loading -> fail "unexpected Board refresh" in
+  state.board_detail <- loading;
+  check bool "refresh in flight retains Board image" true (retained ());
+  state.board_detail <- Detail.complete loading request (Error "temporary failure");
+  check bool "failed refresh retains Board image" true (retained ());
+  check bool "failed Board refresh is indicated" true (Types.image_cell_source_unconfirmed state origin);
+  Types.suspend_workspace_readings state;
+  state.workspace_identity <- Types.Workspace_identity_match_unconfirmed "temporarily unread";
+  check bool "unconfirmed workspace retains Board image" true (retained ());
+  board_detail state post [comment];
+  check bool "same source reconfirmed" true (retained ());
+  state.workspace_identity <- Types.Workspace_identity_match;
+  check bool "reconfirmed Board observation is indicated" false (Types.image_cell_source_unconfirmed state origin);
+  board_detail state post [];
+  check bool "comment absent from a partial page stays retained" true (retained ());
+  check bool "comment outside the page is unconfirmed" true (Types.image_cell_source_unconfirmed state origin);
+  board_detail state post [{comment with bc_content="replacement"}];
+  check bool "confirmed changed comment retires Board image" false (retained ())
+
+let test_displayed_cell_attachment_uncertain () =
+  let attachment : Types.board_attachment =
+    {ba_kind=Ak_image;ba_source=As_artifact {sha256=String.make 64 'a';bytes=4};
+     ba_name=Some "image.png"} in
+  let post=board_post ~attachments:[Ok attachment] "post-a" in
+  let state=board_state post [] in
+  let subject=Types.Board_attachment_image {post_id=post.bp_id;attachment} in
+  let origin=pending state (Types.Board_image_read (state.workspace_read_authority,subject,ref ())) in
+  let retained () = Option.is_some
+    (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority origin) in
+  check bool "observed attachment is confirmed" false (Types.image_cell_source_unconfirmed state origin);
+  board_detail state {post with bp_attachments=[Error "unreadable attachment"]} [];
+  check bool "malformed attachment retains captured image" true (retained ());
+  check bool "malformed attachment is indicated as unconfirmed" true
+    (Types.image_cell_source_unconfirmed state origin);
+  board_detail state {post with bp_attachments=[]} [];
+  check bool "unidentified attachment absence stays unconfirmed" true
+    (retained () && Types.image_cell_source_unconfirmed state origin);
+  board_detail state post [];
+  check bool "observed original attachment is confirmed again" false
+    (Types.image_cell_source_unconfirmed state origin)
+
+let test_displayed_chat_cell_is_captured () =
+  let state=state () in
+  state.view <- Types.Keepers Keeper_message;
+  let origin=pending state (Types.Peer_image_read state.workspace_read_authority) in
+  check bool "chat image is retained for the same workspace" true
+    (Option.is_some (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority origin));
+  check bool "chat image without a source anchor is marked unconfirmed" true
+    (Types.image_cell_source_unconfirmed state origin)
+
+let test_tools_image_keeper_owner () =
+  let state=state () in
+  state.view <- Types.Tools;
+  state.local_keepers <- Types.Local_workspace_read;
+  state.keepers <- [keeper_row "keeper-a"];
+  let reference = Skill_reference.of_yojson (`Assoc [
+    "identity", `Assoc ["source_id", `String "workspace"; "package_id", `String "diagram";
+      "name", `String "diagram"];
+    "content_revision", `String (String.make 64 'a')]) |> Result.get_ok in
+  let origin={ (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_keeper=Some "keeper-a";sir_skill_reference=Some reference } in
+  state.image_open <- true;
+  state.image_cell_view <- Some (Types.Image_cells {
+    ic_title="diagram";ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_workspace=state.workspace_authority;ic_origin=origin;ic_unconfirmed=false });
+  state.msx_open <- true;
+  check bool "a hidden image cannot restore Tools selection" true
+    (Option.is_none (Types.tools_skill_cell_image_owner state));
+  state.msx_open <- false;
+  let current () = Types.image_request_keeper_is_current state origin in
+  let retained () = Option.is_some
+    (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority origin) in
+  check bool "Tools request captures the selected keeper" true (origin.sir_keeper=Some "keeper-a");
+  check bool "the selected keeper can accept completion" true (current ());
+  state.keepers <- [];
+  state.keepers_error <- Some "roster unavailable";
+  check bool "an unconfirmed keeper cannot accept completion" false (current ());
+  check bool "an open image survives a missing keeper observation" true (retained ());
+  check bool "missing keeper is indicated" true (Types.image_cell_source_unconfirmed state origin);
+  let local=pending state (Types.Local_file_image_read state.workspace_authority) in
+  check bool "local image is independent of the Tools keeper roster" true
+    (Types.image_request_keeper_is_current state local
+     && Option.is_some (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority local));
+  state.keepers_error <- None;
+  check bool "confirmed removal retires the open image" false (retained ());
+  let a=keeper_row "keeper-a" and b=keeper_row "keeper-b" in
+  state.keepers <- [a;b];
+  state.keeper_cursor <- 0;
+  Masc_tui_loader.replace_keeper_rows ~preserve_on_error:true state
+    ~keepers:[b] ~error:(Some "partial roster");
+  check bool "partial roster cannot replace the captured keeper" true (retained ());
+  check bool "partial roster is indicated" true (Types.image_cell_source_unconfirmed state origin);
+  Masc_tui_loader.replace_keeper_rows ~preserve_on_error:true state
+    ~keepers:[a;b] ~error:None;
+  check bool "reconciliation restores the displayed Keeper" true
+    (Option.map (fun (keeper : Types.keeper) -> keeper.k_name) (Types.selected_keeper state) = Some "keeper-a");
+  check bool "recovered captured keeper retains the displayed image" true (retained ());
+  Masc_tui_loader.replace_keeper_rows ~preserve_on_error:true state
+    ~keepers:[b] ~error:None;
+  check bool "another keeper cannot accept the old completion" false (current ());
+  check bool "another keeper retires the open image" false (retained ());
+  state.sent_image_read <- Some origin;
+  check bool "current workspace read has no retired notice" true
+    (Option.is_none (Types.retired_skill_image_notice state));
+  state.workspace_read_authority <- ref ();
+  check bool "retired read is held only for an input-sensitive notice" true
+    (Option.exists (fun pending -> pending == origin) (Types.retired_skill_image_notice state));
+  ignore (Types.withdraw_image_open state);
+  check bool "operator input cancels the retired preview notice" true
+    (Option.is_none (Types.retired_skill_image_notice state))
 
 let test_image_preview_input_barrier () =
   let module Protocol = Masc_tui_async_protocol in
@@ -913,6 +1148,11 @@ let () =
   test_case "image results bypass a full shared mailbox" `Quick test_image_result_with_full_mailbox;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
   test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
+  test_case "displayed cell resource survives failed rereads" `Quick test_displayed_cell_resource_owner;
+  test_case "displayed cell Board source survives failed rereads" `Quick test_displayed_cell_board_owner;
+  test_case "displayed cell attachment treats malformed absence as unconfirmed" `Quick test_displayed_cell_attachment_uncertain;
+  test_case "displayed chat cell names its unconfirmed source" `Quick test_displayed_chat_cell_is_captured;
+  test_case "Tools image owns the selected keeper" `Quick test_tools_image_keeper_owner;
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;

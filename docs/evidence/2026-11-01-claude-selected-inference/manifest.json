@@ -1,0 +1,188 @@
+{
+  "workflow": "Test",
+  "ref": "fix/claude-selected-inference-20261101",
+  "minimal": true,
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41286449774,
+      "job_id": 124788616210,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41286449774",
+      "head": "6b8c71081af784c48e84db28aba46d945c15e4c6",
+      "ref": "fix/claude-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "6b8c71081af784c48e84db28aba46d945c15e4c6",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/claude-selected-inference/baseline-124788616210.raw.log",
+      "raw_bytes": 146792,
+      "raw_sha256": "4364be6238cec3e4b6106de7628369df7a758b7275264f915aa54fc8c9ce9079",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 3088,
+      "selected_sha256": "907d7942f0aed7e1ae668d76043075ae1977bfb1ec63fc8df4f3951a59385223",
+      "actual_pass": 4,
+      "actual_fail": 6,
+      "retained_case_pass": 4,
+      "retained_case_fail": 6,
+      "summaries": [
+        "2026-11-01T08:00:17.8263929Z 6 failures! in 28.573s. 10 tests run."
+      ],
+      "selected_case_passes": 4,
+      "selected_case_failures": 6,
+      "selected_cases_with_completed_rows": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "selected_case_count": 10,
+      "selected_cases_without_completed_rows": [],
+      "scope": "ten selected-inference cases",
+      "suite_timeout_sec": 600,
+      "timeout_source": "existing workflow default",
+      "phase_rows": [
+        "2026-11-01T07:52:51.9469237Z [targeted] @runtest-test_keeper_claude_selected_inference: start 2026-11-01T07:52:51Z (dune alias)",
+        "2026-11-01T07:59:49.2461584Z Testing `keeper_claude_code_runtime'.",
+        "2026-11-01T08:00:17.8263929Z 6 failures! in 28.573s. 10 tests run.",
+        "2026-11-01T08:00:18.0017008Z [targeted] @runtest-test_keeper_claude_selected_inference: FAIL exit 1 in 447s"
+      ]
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41287458749,
+      "job_id": 124791559258,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41287458749",
+      "head": "842685433e1142e9458a0f38674a31e283bf8965",
+      "ref": "fix/claude-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "842685433e1142e9458a0f38674a31e283bf8965",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/claude-selected-inference/candidate-124791559258.raw.log",
+      "raw_bytes": 124805,
+      "raw_sha256": "b3544456a318f57fcd9b3f9e28b8f832b45344278f26f401f0bcde96fc059e16",
+      "selected_capture": "interrupted.txt",
+      "selected_bytes": 2648,
+      "selected_sha256": "3d1368f42c48342889922c4c3844d519ecfb9c6983d856503e0eae3333c44e89",
+      "actual_pass": 13,
+      "actual_fail": 0,
+      "retained_case_pass": 13,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T08:18:27.7628508Z Test Successful in 0.050s. 12 tests run."
+      ],
+      "selected_case_passes": 1,
+      "selected_case_failures": 0,
+      "selected_cases_with_completed_rows": [
+        0
+      ],
+      "selected_case_count": 10,
+      "selected_cases_without_completed_rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "scope": "partial selected case plus separate claim-cause target",
+      "suite_timeout_sec": 600,
+      "timeout_source": "existing workflow default",
+      "phase_rows": [
+        "2026-11-01T08:08:12.9359079Z [targeted] @runtest-test_keeper_claude_selected_inference: start 2026-11-01T08:08:12Z (dune alias)",
+        "2026-11-01T08:18:05.1773920Z Testing `keeper_claude_code_runtime'.",
+        "2026-11-01T08:18:13.1541503Z [targeted] @runtest-test_keeper_claude_selected_inference: TIMEOUT exit 124 after 601s"
+      ]
+    },
+    {
+      "name": "recheck",
+      "workflow": "Test",
+      "run_id": 41289637725,
+      "job_id": 124797996880,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41289637725",
+      "head": "d2c96d510d21fa393191e10611f66ef92637513c",
+      "ref": "fix/claude-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "d2c96d510d21fa393191e10611f66ef92637513c",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/claude-selected-inference/recheck-124797996880.raw.log",
+      "raw_bytes": 148789,
+      "raw_sha256": "53feb65f0da0879b5c09c2a739bab35c767cc71e8af0246fbc2f4d8e464b48ed",
+      "selected_capture": "recheck.txt",
+      "selected_bytes": 1859,
+      "selected_sha256": "d1161d07b0e6f6a7fa856e1b63deb6a353aa7e27c3f47704dcdcaa49034a3dfc",
+      "actual_pass": 10,
+      "actual_fail": 0,
+      "retained_case_pass": 10,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T08:49:37.4577009Z Test Successful in 41.343s. 10 tests run."
+      ],
+      "selected_case_passes": 10,
+      "selected_case_failures": 0,
+      "selected_cases_with_completed_rows": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "selected_case_count": 10,
+      "selected_cases_without_completed_rows": [],
+      "scope": "ten selected-inference cases",
+      "suite_timeout_sec": 900,
+      "timeout_source": "explicit existing workflow input",
+      "phase_rows": [
+        "2026-11-01T08:38:49.9801698Z [targeted] @runtest-test_keeper_claude_selected_inference: start 2026-11-01T08:38:49Z (dune alias)",
+        "2026-11-01T08:48:56.1080737Z Testing `keeper_claude_code_runtime'.",
+        "2026-11-01T08:49:37.4577009Z Test Successful in 41.343s. 10 tests run.",
+        "2026-11-01T08:49:37.6722946Z [targeted] @runtest-test_keeper_claude_selected_inference: OK in 648s"
+      ]
+    }
+  ],
+  "all_completed_case_rows_retained": true,
+  "selected_case_key_sha256": "64cdc856f2d684dff06f8ac837315a751d5907256ddcc914857f105e623b75c9",
+  "full_regression": {
+    "candidate_status": "not_run",
+    "latest_prior_scheduled_observation": {
+      "workflow": "Test",
+      "query": "latest event=schedule; no watch",
+      "runs": [
+        {
+          "id": 41225921334,
+          "name": "Test",
+          "head_sha": "1abd207e3e2a73cda5423e0ccd18cc85e2e21438",
+          "head_branch": "main",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "failure",
+          "html_url": "https://github.com/jeong-sik/masc/actions/runs/41225921334",
+          "created_at": "2026-10-31T17:43:41Z"
+        }
+      ],
+      "TARGET_SUITES": "inferred empty for schedule from checked workflow, not a downloaded job-log receipt",
+      "not_a_current_candidate_full_regression": true
+    }
+  },
+  "limits": [
+    "controlled native child, not real account/model entitlement",
+    "completed recheck selects ten cases, not the large runtime suite",
+    "interrupted run remains FAILURE; claim-cause 12 PASS is separate",
+    "lower pipeline repair is a disclosed production delta",
+    "no local Dune/typecheck, installed runtime, restart, integration, deployment or issue closure"
+  ]
+}

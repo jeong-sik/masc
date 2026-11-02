@@ -1,0 +1,35 @@
+2026-11-01T07:51:52.1842106Z 6b8c71081af784c48e84db28aba46d945c15e4c6
+2026-11-01T07:51:54.2427589Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T07:51:54.2445045Z 6b8c71081af784c48e84db28aba46d945c15e4c6
+2026-11-01T07:52:51.9141055Z   TARGET_SUITES: test_keeper_claude_selected_inference
+2026-11-01T07:52:51.9345019Z   TARGET_SUITES: test_keeper_claude_selected_inference
+2026-11-01T07:52:51.9447878Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T07:52:51.9469237Z [targeted] @runtest-test_keeper_claude_selected_inference: start 2026-11-01T07:52:51Z (dune alias)
+2026-11-01T07:59:51.2967221Z   [FAIL]        selected inference           0   selected high survives a rep...
+2026-11-01T07:59:53.3250165Z   [FAIL]        selected inference           1   selected high survives remov...
+2026-11-01T07:59:55.3557040Z   [FAIL]        selected inference           2   selected absence survives ad...
+2026-11-01T07:59:57.3840081Z   [FAIL]        selected inference           3   selected explicit none survi...
+2026-11-01T07:59:59.4126920Z   [FAIL]        selected inference           4   selected high survives remov...
+2026-11-01T08:00:01.4643314Z   [FAIL]        selected inference           5   selected unbounded idle surv...
+2026-11-01T08:00:05.5312926Z   [OK]          selected inference           6   a hook overrides selected hi...
+2026-11-01T08:00:09.6209805Z   [OK]          selected inference           7   a hook clears the selected e...
+2026-11-01T08:00:13.6814101Z   [OK]          selected inference           8   native minimal is still admi...
+2026-11-01T08:00:17.8195903Z   [OK]          selected inference           9   native ultra is still admitt...
+2026-11-01T08:00:17.8230571Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:00:17.8230782Z    Expected: `Some "high"'
+2026-11-01T08:00:17.8230971Z    Received: `Some "low"'
+2026-11-01T08:00:17.8236375Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:00:17.8236574Z    Expected: `Some "high"'
+2026-11-01T08:00:17.8236746Z    Received: `None'
+2026-11-01T08:00:17.8242068Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:00:17.8242260Z    Expected: `None'
+2026-11-01T08:00:17.8242416Z    Received: `Some "low"'
+2026-11-01T08:00:17.8248256Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:00:17.8248448Z    Expected: `None'
+2026-11-01T08:00:17.8248602Z    Received: `Some "low"'
+2026-11-01T08:00:17.8253745Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:00:17.8254012Z    Expected: `Some "high"'
+2026-11-01T08:00:17.8254173Z    Received: `None'
+2026-11-01T08:00:17.8259640Z FAIL Internal error: [masc_agent_core_error] {"kind":"provider_attempt_effect_fenced","runtime_id":"claude.claude","effect_disposition":"observation_unavailable","cause":{"kind":"fenced_core","core":{"category":"api","message":"Timeout: Claude Code turn timed out after 0.025s"}}}
+2026-11-01T08:00:17.8263929Z 6 failures! in 28.573s. 10 tests run.
+2026-11-01T08:00:18.0017008Z [targeted] @runtest-test_keeper_claude_selected_inference: FAIL exit 1 in 447s

@@ -208,6 +208,16 @@ val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t
     original-scope serializer as publication and known-ID reads. This is not an
     atomic multi-record transaction; callers retain their process lease and
     serialization and revalidate the original record before effects. *)
+type owner_metadata_observation =
+  | Published_owner_metadata of string * Yojson.Safe.t
+  | Malformed_owner_json
+val observe_tool_request_owner_metadata :
+  t -> scope:string -> (owner_metadata_observation list, string) result
+(** Observe the same scope through the same owned, durable file and directory
+    checks as {!tool_request_owner_inventory}. Only a JSON parse failure after
+    a verified read is represented as an individual [Malformed_owner_json];
+    filesystem, sync, ownership, unknown-entry and membership failures reject
+    the whole observation. This partial view grants no execution authority. *)
 val fold_tool_request_owner_inventory_all :
   t ->
   init:'a ->
@@ -363,6 +373,10 @@ module For_testing : sig
     after_listing:(string -> unit) -> sync_file:(Unix.file_descr -> unit) ->
     sync_parent:(Unix.file_descr -> unit) -> t -> scope:string ->
     ((string * Yojson.Safe.t) list, string) result
+  val observe_tool_request_owner_metadata :
+    after_listing:(string -> unit) -> sync_file:(Unix.file_descr -> unit) ->
+    sync_parent:(Unix.file_descr -> unit) -> t -> scope:string ->
+    (owner_metadata_observation list, string) result
   val remove_binding : sync_parent:(string -> unit) -> t -> instance_id:string -> (unit, string) result
   val binding_inventory : sync_parent:(string -> unit) -> root:string -> binding_inventory
   val issue_detail : Fs_compat.owned_regular_file_read_error -> string

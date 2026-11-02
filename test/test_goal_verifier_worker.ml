@@ -100,6 +100,12 @@ let prepared config store =
   } in
   let retained = checked (W.retain ~store ~installation_id ~package_id ~run original) in
   authority, retained
+let observe_request ~store ~installation_id ~package_id ~config authority =
+  let subject = A.goal_review_subject authority in
+  let binding : W.observation_binding = {base_path=config.Workspace.base_path;
+    goal_id=subject.goal_id; request_id=subject.request_id; criterion=subject.criterion;
+    submitted_evidence=A.goal_review_evidence authority} in
+  W.observe_for_request ~store ~installation_id ~package_id ~binding
 let load store original =
   let subject = V.subject original in
   match checked (W.load ~store ~installation_id ~package_id ~goal_id:subject.goal_id
@@ -306,6 +312,19 @@ let test_unknown_and_cancellation_never_redispatch () =
       pending (); pending ();
       let original = W.original retained in
       let subject = V.subject original in
+      let observation = checked (observe_request ~store ~installation_id ~package_id ~config authority) in
+      Alcotest.(check bool) "original observation has no discovery issues" true
+        (observation.issues = []);
+      (match observation.observed_records with
+       | [observed] ->
+         Alcotest.(check string) "observation retains the original run" (W.run_identity retained).run_id
+           (W.run_identity observed).run_id;
+         (match P.phase (W.progress observed) with
+          | Dispatch_pending (Some (Outcome_unknown _)) -> ()
+          | Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Absent _))
+          | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+          | Subdividing _ | Subdivided _ -> Alcotest.fail "unknown original observation changed phase")
+       | [] | _::_::_ -> Alcotest.fail "observation did not retain the one original");
       (match checked (W.frontier ~store ~installation_id ~package_id ~goal_id:subject.goal_id
           ~request_id:subject.request_id ~new_run:(fun () -> Alcotest.fail "unknown allocated a new run")) with
        | Some restored -> Alcotest.(check int) "unknown frontier retains the original attempt" 0
@@ -779,6 +798,76 @@ let retain_noncanonical_metadata store ~goal_id ~request_id ~attempt =
     ~package_id:W.host_package_id ~tool:"goal_proof_review"
     ~summary:(`Assoc []) ~request:(`Assoc [])
     |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
+
+let test_request_observation_reports_ambiguous_metadata () =
+  let exercise expected_issue add_invalid = with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let subject = V.subject (W.original retained) in
+    let observe () = checked (observe_request ~store ~installation_id:W.host_installation_id
+      ~package_id:W.host_package_id ~config authority) in
+    (match (observe ()).observed_records with
+     | [observed] -> Alcotest.(check string) "the valid observation names the fixed run"
+         (W.run_identity retained).run_id (W.run_identity observed).run_id
+     | [] | _::_::_ -> Alcotest.fail "fixture did not expose one original");
+    ignore (retain_noncanonical_metadata store ~goal_id:"other-goal"
+      ~request_id:"other-request" ~attempt:0);
+    Alcotest.(check bool) "attributable metadata for another Goal is isolated" true
+      ((observe ()).issues = []);
+    add_invalid store subject;
+    let observation = observe () in
+    Alcotest.(check int) "a known original survives an incomplete discovery" 1
+      (List.length observation.observed_records);
+    Alcotest.(check bool) "ambiguous metadata remains an explicit issue" true
+      (observation.issues = [expected_issue])) in
+  exercise W.Noncanonical_request_metadata (fun store subject ->
+    ignore (retain_noncanonical_metadata store ~goal_id:subject.A.goal_id
+      ~request_id:subject.request_id ~attempt:1));
+  exercise W.Unattributable_metadata (fun store _ -> ignore (retain_unattributable_metadata store));
+  exercise W.Unattributable_metadata (fun store _ ->
+    ignore (retain_unattributable_metadata store);
+    let path = Filename.concat (Lane_addon_store.root store)
+      (Filename.concat Lane_addon_store.tool_request_owners_directory
+         (Filename.concat (Lane_addon_store.digest "goal-proof-reviews")
+            (Lane_addon_store.digest "malformed" ^ ".json"))) in
+    get (Fs_compat.save_file_atomic_strict path "{invalid JSON"))
+;;
+
+let test_request_observation_refuses_unsafe_original_read () =
+  with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let assert_damaged = corrupt_host_original_body store retained in
+    (match observe_request ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id ~config authority with
+     | Error (W.Store_unavailable _) -> ()
+     | Error (Original_invalid _ | Authority_changed _ | Execution_pending _) | Ok _ ->
+       Alcotest.fail "an unsafe original read became a partial success");
+    assert_damaged ())
+;;
+
+let test_request_observation_requires_original_binding () =
+  with_workspace (fun config store _ ->
+    let authority, _ = host_prepared config store in
+    let subject = A.goal_review_subject authority in
+    let evidence = A.goal_review_evidence authority in
+    let observe ~base_path ~criterion ~submitted_evidence =
+      let binding : W.observation_binding = {base_path; criterion; submitted_evidence;
+        goal_id=subject.goal_id; request_id=subject.request_id} in
+      checked (W.observe_for_request ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id ~binding) in
+    let expect_mismatch observation =
+      (match observation.W.observed_records, observation.issues with
+       | [], [W.Original_binding_mismatch] -> ()
+       | [], ([] | [W.Unattributable_metadata | W.Noncanonical_request_metadata] | _::_::_)
+       | _::_, _ -> Alcotest.fail "a different binding was presented as this request's original") in
+    expect_mismatch (observe ~base_path:(config.Workspace.base_path ^ "-other")
+      ~criterion:subject.criterion ~submitted_evidence:evidence);
+    let changed_criterion = match subject.criterion with
+      | Goal_store.Criterion fields -> Goal_store.Criterion {fields with title=fields.title ^ " changed"} in
+    expect_mismatch (observe ~base_path:config.Workspace.base_path
+      ~criterion:changed_criterion ~submitted_evidence:evidence);
+    expect_mismatch (observe ~base_path:config.Workspace.base_path
+      ~criterion:subject.criterion ~submitted_evidence:[]))
+;;
 
 let test_actual_pending_goal_survives_unattributable_foreign_metadata () =
   with_workspace (fun config store _ ->
@@ -1398,6 +1487,12 @@ let () = match restart_probe with
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;
+  Alcotest.test_case "request observation reports ambiguous metadata" `Quick
+    test_request_observation_reports_ambiguous_metadata;
+  Alcotest.test_case "request observation refuses unsafe original read" `Quick
+    test_request_observation_refuses_unsafe_original_read;
+  Alcotest.test_case "request observation requires the original binding" `Quick
+    test_request_observation_requires_original_binding;
   Alcotest.test_case "actual pending Goal survives unattributable foreign metadata" `Quick
     test_actual_pending_goal_survives_unattributable_foreign_metadata;
   Alcotest.test_case "unattributable metadata never starts a new review" `Quick

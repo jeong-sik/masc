@@ -24,8 +24,10 @@ val handle :
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> Yojson.Safe.t
-(** The tool. A docker keeper hears that it has no remote lane; a microvm or
-    remote_ssh keeper whose endpoint cannot be named from its declarations
-    hears that as [unreachable] with the operator
-    action; otherwise {!json_of_report} of the endpoint's report, with the
-    keeper's [profile] added. *)
+(** The tool. A docker keeper hears that it has no remote lane. A remote_ssh
+    keeper whose endpoint cannot be named from its declarations hears that as
+    [unreachable] with the operator action. A microvm keeper whose guest
+    cannot be attached hears [unreachable] with a [note] that its next Execute
+    starts or prepares the guest, and no operator action. Otherwise
+    {!json_of_report} of the endpoint's report, with the keeper's [profile]
+    added. *)

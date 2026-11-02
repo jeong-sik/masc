@@ -3022,6 +3022,7 @@
 (include stanzas/test_tui_approval_readability.inc)
 (include stanzas/test_tui_observer_reopen_revalidate.inc)
 (include stanzas/test_tui_chat_owed_history.inc)
+(include stanzas/test_tui_chat_memory_journal_signal.inc)
 (include stanzas/test_tui_waiting_event.inc)
 (include stanzas/test_tui_observer_epoch.inc)
 (include stanzas/test_tui_task_event.inc)

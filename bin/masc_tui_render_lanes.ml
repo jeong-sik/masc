@@ -1661,19 +1661,29 @@ let measurement_input_lines ~width ~sha256 (measurement : Measurement.snapshot) 
   @ lane_run_payload_lines ~width
       (`List (List.map (fun (sample : R.sample) -> R.case_to_yojson sample.case) report.samples))
 
+type measurement_output_part =
+  | Measurement_text of (string * string)
+  | Measurement_json of string
+
 (* Apply the same byte ceiling as exact lane payloads before wrapping. The
    report and its full score distribution remain intact; only text is a preview. *)
-let measurement_output_preview ~width ~output_path lines =
+let measurement_output_preview ~width ~output_path parts =
+  let text = function
+    | Measurement_text (_, value) | Measurement_json value -> value in
+  let with_text part value = match part with
+    | Measurement_text (style, _) -> Measurement_text (style, value)
+    | Measurement_json _ -> Measurement_json value in
   let rec take remaining reversed = function
     | [] -> List.rev reversed, false
-    | (style, text) :: rest ->
-      let bytes = String.length text + 1 in
-      if bytes <= remaining then take (remaining - bytes) ((style, text) :: reversed) rest
+    | part :: rest ->
+      let value = text part in
+      let bytes = String.length value + 1 in
+      if bytes <= remaining then take (remaining - bytes) (part :: reversed) rest
       else
-        let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) text in
-        List.rev ((style, prefix) :: reversed), true
+        let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) value in
+        List.rev (with_text part prefix :: reversed), true
   in
-  let preview, truncated = take lane_run_preview_source_max_bytes [] lines in
+  let preview, truncated = take lane_run_preview_source_max_bytes [] parts in
   let notice =
     if truncated then
       [ Theme.warn (), Printf.sprintf
@@ -1681,7 +1691,22 @@ let measurement_output_preview ~width ~output_path lines =
           lane_run_preview_source_max_bytes output_path ]
     else []
   in
-  measurement_text_lines ~width (notice @ preview)
+  let render = function
+    | Measurement_text line -> measurement_text_lines ~width [line]
+    | Measurement_json "" -> []
+    | Measurement_json value ->
+      (* A grapheme can be wider than the row allotted to it. Keep the whole
+         pane for the JSON so a decorative gutter cannot make a character
+         that otherwise fits disappear at the outer frame. *)
+      let palette =
+        { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+      value
+      |> Masc.Tui_terminal_text.sanitize_terminal_lines
+      |> fenced_document_text ~language:"json"
+      |> Masc_tui_markdown.render ~palette ~width
+      |> List.map (fun line -> Ansi.reset, line)
+  in
+  measurement_text_lines ~width notice @ List.concat_map render preview
 
 let measurement_output_lines ~width (report : Continuity_report.t) =
   let module R = Continuity_report in
@@ -1751,7 +1776,8 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
       [ Ansi.dim, ""; style, sample.case.id ^ "  ·  " ^ status ]
       @ List.map (fun line -> Ansi.reset, line) lines) report.samples
   in
-  measurement_output_preview ~width ~output_path:report.output_path (probabilities @ samples)
+  measurement_output_preview ~width ~output_path:report.output_path
+    (List.map (fun line -> Measurement_text line) (probabilities @ samples))
 
 module Temporal = Masc.Tui_decode_temporal_continuity
 
@@ -1828,11 +1854,16 @@ let temporal_output_lines ~width (report : Temporal.t) =
       value.criterion_id ^ " (" ^ scope ^ ")  " ^ observation) step.judgments in
     let working_state = match step.working_state with
       | None | Some [] -> []
-      | Some messages -> ["W IN LAST PREPARED REQUEST"; Yojson.Safe.pretty_to_string (`List messages)] in
-    [Ansi.dim, ""] @ List.map (fun value -> Ansi.reset, value)
-      (identity @ readiness @ omitted @ working_state
-       @ (if step.reply = [] then [] else "ORIGINAL REPLY" :: step.reply) @ judgments)) report.timeline in
-  let errors = match report.error with None -> [] | Some value -> [Theme.warn (), value] in
+      | Some messages ->
+        [ Measurement_text (Ansi.reset, "W IN LAST PREPARED REQUEST")
+        ; Measurement_json (Yojson.Safe.pretty_to_string (`List messages)) ] in
+    [Measurement_text (Ansi.dim, "")]
+    @ List.map (fun value -> Measurement_text (Ansi.reset, value)) (identity @ readiness @ omitted)
+    @ working_state
+    @ List.map (fun value -> Measurement_text (Ansi.reset, value))
+        ((if step.reply = [] then [] else "ORIGINAL REPLY" :: step.reply) @ judgments)) report.timeline in
+  let errors = match report.error with
+    | None -> [] | Some value -> [Measurement_text (Theme.warn (), value)] in
   measurement_output_preview ~width ~output_path:report.report_path (errors @ steps)
 
 let inspection_summary_lines ~cols = function

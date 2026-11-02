@@ -2156,6 +2156,9 @@ let test_raised_review_is_announced () =
      | None -> fail "stall notice lacks its disposition");
     check bool "the notice names the forward path" true
       (String_util.string_contains_substring ~needle:"request_complete" post.body);
+    check bool "the notice does not promise another review" true
+      (String_util.string_contains_substring
+         ~needle:"Whether a later request_complete starts a new review depends" post.body);
     check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id)
   | posts ->
     fail (Printf.sprintf "expected one stall notice, got %d" (List.length posts))

@@ -124,9 +124,11 @@ val notify_stalled_verification :
     [submit_for_verification] (a legal transition from
     [AwaitingVerification] that supersedes this verification), or an
     operator HITL verdict — and the sweep that reviews it again without
-    either; a Goal post reports its retry or names [request_complete] when none is armed. A Task caller passes, inside [Task_review], the disposition the
-    scheduling owner reported after it acted, so the post follows the
-    timer, never the other way round.
+    either. A Goal post with [No_retry_armed] describes [request_complete] as
+    conditional on the current Goal and retained review state. A Task caller
+    passes, inside [Task_review], the disposition the scheduling owner
+    reported after it acted, so the post follows the timer, never the other
+    way round.
 
     One post per disposition change: for a (subject, gate) the notice
     compares against the disposition of the latest post on the Board

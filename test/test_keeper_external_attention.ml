@@ -469,24 +469,35 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
       ~history_start_boundary_line:range.history_start_boundary_line ~atom:0 ~message_in_atom:0
       ~messages ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> get in
     {range with unread_messages=[hole]} in
+  let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
+  let official : Current.official_range_id =
+    {receipt_scope=runtime_keepers_dir;after_boundary_line=0;
+     turns=[1,Ids.Turn_ref.make ~trace_id:"cursor-official" ~absolute_turn:1];unread_messages=[]} in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2
     ~atom:(Some range) ~official:None |> get;
   Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
-  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range
+  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range ~official_range_id:official
     ~absorbed:[] ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~now:1.
     ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
   (* No acknowledge call: simulate interruption after the real Memory WAL
      committed but before the external cursor and ordinary progress wrote. *)
   let pending_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
   let pending_bytes = Fs_compat.load_file pending_path in
-  List.iter (fun (label,through,atom) ->
+  List.iter (fun (label,through,atom,official,expected_error) ->
     (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial
-       ~through ~atom ~official:None with
-     | Error _ -> ()
+       ~through ~atom ~official with
+     | Error detail -> Alcotest.(check string) (label ^ " refuses for its actual reason") expected_error detail
      | Ok () -> Alcotest.fail (label ^ " preparation was accepted"));
     Alcotest.(check string) (label ^ " leaves the pending cursor unchanged") pending_bytes
       (Fs_compat.load_file pending_path))
-    ["backwards", -1, Some range; "missing identity", 3, None];
+    ["backwards", -1, Some range, None, "external attention log shrank behind its read cursor";
+     "missing identity", 3, None, None, "external read has no Memory commit identity";
+     "already committed atom", 3, Some range, None,
+       "a committed Memory range cannot acknowledge a new external snapshot";
+     "already committed official", 3, None, Some official,
+       "a committed Memory range cannot acknowledge a new external snapshot";
+     "new atom with already committed official", 3, Some next, Some official,
+       "a committed Memory range cannot acknowledge a new external snapshot"];
   let observed = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
   Alcotest.(check int) "observation does not recover a committed Memory receipt" 0
     (Cursor.observation_offset observed);
@@ -506,6 +517,17 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
     match previous_ledger with
     | Some bytes -> Fs_compat.save_file ledger_path bytes
     | None -> Sys.remove ledger_path);
+  if not with_unread then (
+    (* A valid new preparation still recovers an older committed pending read.
+       Its old token must be rejected, and the caller can retry at the new offset. *)
+    (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial
+       ~through:3 ~atom:(Some next) ~official:None with
+     | Error detail -> Alcotest.(check string) "recovery reports the stale token"
+         "external admission cursor changed before preparation" detail
+     | Ok () -> Alcotest.fail "preparation used a token from before recovery");
+    let recovered = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+    Alcotest.(check int) "valid preparation recovers the old committed cursor" 2
+      (Cursor.observation_offset recovered));
   Alcotest.(check int) "continuity-scoped Memory receipt recovers exact cursor" 2
     (Cursor.offset (read ()));
   if with_unread then (
@@ -521,7 +543,6 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
    | Error _ -> ()
    | Ok () -> Alcotest.fail "old committed range admitted a new external snapshot");
   Alcotest.(check int) "reused receipt did not consume new rows" 2 (Cursor.offset (read ()));
-  let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ()) ~through:3
     ~atom:(Some next) ~official:None |> get;
   Alcotest.(check int) "older receipt cannot acknowledge newer source" 2 (Cursor.offset (read ()));

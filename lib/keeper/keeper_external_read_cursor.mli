@@ -37,8 +37,13 @@ val prepare : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_
   atom:Keeper_memory_os_current.durable_range_id option ->
   official:Keeper_memory_os_current.official_range_id option -> (unit, string) result
 (** Reject a backwards [through] or an advancing request without a Memory
-    identity before reading or recovering an existing pending cursor. Valid
-    preparations can still recover a previously committed pending cursor. *)
+    identity before reading or recovering an existing pending cursor. When a
+    preparation is pending, also reject a requested range already observed as
+    committed before recovering the pending cursor. Memory receipt reads can
+    still recover a publication, reconcile evidence and dispatch its commit
+    notification. A concurrent Memory commit after that observation is not
+    fenced. Valid preparations can still recover a previously committed pending
+    cursor. The caller serializes this Keeper. *)
 val acknowledge : runtime_keepers_dir:string -> keeper_name:string -> (unit, string) result
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string

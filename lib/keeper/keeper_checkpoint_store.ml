@@ -1629,7 +1629,7 @@ let exact_snapshot_of_head_bytes ~session_dir ~expected_session_id head_bytes =
       ~expected_session_id ~content:(Objects.head_content_digest head) checkpoint
 ;;
 
-let load_ref_locked ~session_dir ~expected_session_id =
+let load_ref_and_head_locked ~session_dir ~expected_session_id =
   let canonical_path =
     agent_core_checkpoint_path
       ~session_dir
@@ -1663,7 +1663,11 @@ let load_ref_locked ~session_dir ~expected_session_id =
          ~objects:Objects_seen
          head;
        exact_snapshot_of_checkpoint
-         ~expected_session_id ~content:(Objects.head_content_digest head) checkpoint)
+         ~expected_session_id ~content:(Objects.head_content_digest head) checkpoint
+       |> Result.map (fun snapshot -> snapshot, head))
+
+let load_ref_locked ~session_dir ~expected_session_id =
+  load_ref_and_head_locked ~session_dir ~expected_session_id |> Result.map fst
 
 (* What the canonical file holds, against the reference a candidate claims to
    advance. *)
@@ -1726,6 +1730,27 @@ let with_agent_core_exact_snapshot ~session_dir ~session_id f =
 
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   with_agent_core_exact_snapshot ~session_dir ~session_id Fun.id
+
+type canonical_history_boundary =
+  { closed_messages : int
+  ; open_messages : int
+  }
+
+let load_agent_core_exact_snapshot_with_boundary ~session_dir ~session_id =
+  match Keeper_id.Trace_id.of_string session_id with
+  | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
+  | Ok expected_session_id ->
+    (match
+       with_session_lock ~session_dir (fun session_dir ->
+         match load_ref_and_head_locked ~session_dir ~expected_session_id with
+         | Error _ as error -> error
+         | Ok (snapshot, (head : Objects.head)) ->
+           let open_messages = List.length head.history.open_messages in
+           let closed_messages = Objects.message_count head.history - open_messages in
+           Ok (snapshot, {closed_messages; open_messages}))
+     with
+     | Ok result -> result
+     | Error detail -> Error (Ref_lock_failed detail))
 
 (* Only an exact snapshot names its source. Its digest is the content digest
    of the head it read; its value, trace and turn are the load of that head,

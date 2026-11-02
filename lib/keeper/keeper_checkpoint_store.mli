@@ -510,6 +510,19 @@ val load_agent_core_exact_snapshot :
   session_id:string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
+type canonical_history_boundary =
+  { closed_messages : int
+  ; open_messages : int
+  }
+
+(** Load the canonical snapshot and its closed/open message counts from the
+    same locked head. This is an observation of that head: the snapshot's
+    content digest does not identify how its messages are split into turns. *)
+val load_agent_core_exact_snapshot_with_boundary :
+  session_dir:string ->
+  session_id:string ->
+  (exact_checkpoint_snapshot * canonical_history_boundary, checkpoint_ref_load_error) result
+
 (** The content one exact snapshot read, named by its digest. It is made only
     from an exact snapshot, never from a stored record. *)
 type exact_source

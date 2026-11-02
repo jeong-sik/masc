@@ -756,8 +756,10 @@ type apple_volume_claim_helper_report =
   | Report_unrecognized of string
 
 val volume_claim_helper_report_of_output : string -> apple_volume_claim_helper_report
-(** Strict decode of the release helper's stdout protocol: one outcome word,
-    then the remaining marker content for [Kept_with_claimants]. *)
+(** Strict decode of the release helper's stdout protocol. The [absent],
+    [not-claimed] and [released-last] reports must be exactly the outcome
+    word followed by a newline. For [Kept_with_claimants], [kept] is followed
+    by a newline and the remaining marker content. *)
 
 val add_apple_work_volume_claim :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)

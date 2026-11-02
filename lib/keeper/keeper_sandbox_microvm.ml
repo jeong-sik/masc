@@ -2341,21 +2341,23 @@ type apple_volume_claim_helper_report =
   | Report_unrecognized of string
 
 let volume_claim_helper_report_of_output output =
-  match String.index_opt output '\n' with
-  | None -> Report_unrecognized (String.trim output)
-  | Some index ->
-    let first = String.sub output 0 index in
-    let rest = String.sub output (index + 1) (String.length output - index - 1) in
-    match first with
-    | "absent" -> Claims_marker_absent
-    | "not-claimed" -> Claimant_not_present
-    | "released-last" -> Released_last_claim
-    | "kept" ->
-      (match volume_claims_of_output rest with
-       | Claims_read claimants -> Kept_with_claimants claimants
-       | Marker_absent | Claims_invalid _ ->
-         Report_unrecognized "kept without a readable claims array")
-    | other -> Report_unrecognized other
+  match output with
+  | "absent\n" -> Claims_marker_absent
+  | "not-claimed\n" -> Claimant_not_present
+  | "released-last\n" -> Released_last_claim
+  | _ ->
+    (match String.index_opt output '\n' with
+     | None -> Report_unrecognized (String.trim output)
+     | Some index ->
+       let first = String.sub output 0 index in
+       let rest = String.sub output (index + 1) (String.length output - index - 1) in
+       match first with
+       | "kept" ->
+         (match volume_claims_of_output rest with
+          | Claims_read claimants -> Kept_with_claimants claimants
+          | Marker_absent | Claims_invalid _ ->
+            Report_unrecognized "kept without a readable claims array")
+       | other -> Report_unrecognized other)
 ;;
 
 (* One container listing answers every presence question here. The strict

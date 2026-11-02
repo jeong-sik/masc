@@ -1887,10 +1887,23 @@ let test_volume_claim_helper_report_decode_is_strict () =
     (match report "kept\nnope\n" with
      | M.Report_unrecognized _ -> true
      | _ -> false);
+  Alcotest.(check bool) "kept with extra output is unrecognized" true
+    (match report "kept\n[\"/ws/other\"]\nextra\n" with
+     | M.Report_unrecognized _ -> true
+     | M.Claims_marker_absent | M.Claimant_not_present | M.Released_last_claim
+     | M.Kept_with_claimants _ -> false);
   Alcotest.(check bool) "an unknown outcome word is unrecognized" true
     (match report "bogus\n" with
      | M.Report_unrecognized "bogus" -> true
      | _ -> false);
+  List.iter
+    (fun word ->
+       Alcotest.(check bool) (word ^ " with extra output is unrecognized") true
+         (match report (word ^ "\nextra\n") with
+          | M.Report_unrecognized _ -> true
+          | M.Claims_marker_absent | M.Claimant_not_present | M.Released_last_claim
+          | M.Kept_with_claimants _ -> false))
+    [ "absent"; "not-claimed"; "released-last" ];
   Alcotest.(check bool) "output without a line is unrecognized" true
     (match report "added" with
      | M.Report_unrecognized "added" -> true
@@ -2191,6 +2204,28 @@ let test_release_removes_both_volumes_when_the_claim_was_sole () =
     "the keeper's work and build volumes are deleted"
     [ "masc-keeper-work-retired"; "masc-keeper-build-retired" ]
     (deleted_volume_names sent)
+;;
+
+let test_release_does_not_delete_on_extra_helper_output () =
+  List.iter
+    (fun stdout ->
+       let outcome, sent =
+         run_claim_release
+           ~keeper_name:"retired"
+           ~containers:(Unix.WEXITED 0, "[]", "")
+           ~helper:(Unix.WEXITED 0, stdout, "")
+           ~volumes:(Unix.WEXITED 0, "[]", "")
+           ()
+       in
+       (match outcome with
+        | M.Skipped_unverified detail ->
+          Alcotest.(check bool) "the unrecognized report is named" true
+            (Astring.String.is_infix ~affix:"microvm_volume_claims_unrecognized" detail)
+        | M.Removed | M.Kept_for_claimants _ | M.Kept_for_containers _ ->
+          Alcotest.fail "extra helper output must not authorize volume deletion");
+       Alcotest.(check (list string)) "no volume delete is sent" []
+         (deleted_volume_names sent))
+    [ "released-last\nextra\n"; "released-last\n\n" ]
 ;;
 
 let test_release_keeps_volumes_for_the_remaining_claimants () =
@@ -5909,6 +5944,8 @@ let () =
             test_claims_read_argv_and_claimant_validation
         ; Alcotest.test_case "release removes both volumes when the claim was sole" `Quick
             test_release_removes_both_volumes_when_the_claim_was_sole
+        ; Alcotest.test_case "release does not delete on extra helper output" `Quick
+            test_release_does_not_delete_on_extra_helper_output
         ; Alcotest.test_case "release keeps volumes for the remaining claimants" `Quick
             test_release_keeps_volumes_for_the_remaining_claimants
         ; Alcotest.test_case "release skips on legacy, foreign and failed reads" `Quick

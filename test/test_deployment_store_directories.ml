@@ -447,6 +447,54 @@ let test_a_record_settled_while_it_is_checked_is_absent () = with_lane_store (fu
     check (list string) "the record whose body went under it is refused, the settled one is not"
       [path "kept"] (List.map (fun (refusal : P.refusal) -> refusal.path) report.P.refusals))
 
+let test_body_reuse_observes_current_bytes () =
+  let module Reader=Lane_addon_tool_request_owner.Published_reader in
+  let scope="scope" in
+  let request_digest=Lane_addon_store.digest owner_request_bytes in
+  let current=ref (Ok (Some owner_request_bytes)) and reads=ref 0 in
+  let reader=Reader.create ~read_body:(fun ~scope:read_scope ~request_digest:read_digest ->
+    incr reads;
+    if read_scope=scope && read_digest=request_digest then !current else Ok None) in
+  let request ()=Reader.request reader ~scope ~request_digest in
+  let first=Result.get_ok (request ()) in
+  (* A fresh string containing identical bytes can reuse the checked JSON,
+     but must still go through the current read port. *)
+  current:=Ok (Some (Bytes.to_string (Bytes.of_string owner_request_bytes)));
+  let again=Result.get_ok (request ()) in
+  check bool "unchanged bytes reuse the verified request" true (first==again);
+  check int "reuse still reads current bytes" 2 !reads;
+  List.iter (fun observed ->
+    current:=observed;
+    check bool "a previous success cannot mask changed/missing/unreadable bytes" true
+      (Result.is_error (request ())))
+    [Ok (Some "{\"query\":\"changed\"}");Ok None;Error "fixture read failure"];
+  current:=Ok (Some owner_request_bytes);
+  check bool "a recovered body is checked again" true (Result.is_ok (request ()));
+  check bool "another scope cannot borrow the checked body" true
+    (Result.is_error (Reader.request reader ~scope:"other" ~request_digest))
+
+let test_body_changed_between_records_is_refused () =
+  List.iter (fun remove -> with_lane_store (fun base root ->
+    let scope="scope" in
+    let request_digest=Lane_addon_store.digest owner_request_bytes in
+    let body=Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest) in
+    Fs_compat.mkdir_p (Filename.dirname body);
+    write body owner_request_bytes;
+    List.iter (fun request_id ->
+      put (grouped root Lane_addon_store.tool_request_owners_directory ~group:scope ~id:request_id)
+        (tool_request_owner ~scope ~request_id ~schema:"lane.addon.tool-request-owner.v4" ~request_digest))
+      ["first";"second"];
+    let reads=ref 0 in
+    let after_read _ =
+      incr reads;
+      if !reads=2 then (if remove then Sys.remove body else write body "{}") in
+    match P.For_testing.scan ~after_read P.Store.Tool_request_owners ~base_path:base with
+    | Error detail -> fail detail
+    | Ok report ->
+      check int "both remaining records are checked" 2 report.P.rows;
+      check int "changed body cannot borrow the first record's verdict" 1 (List.length report.P.refusals)))
+    [false;true]
+
 (* The deploy gate itself: a refused Lane Add-on record stops validate-stores. *)
 let test_lane_addon_record_refuses_deploy exe () = with_lane_store (fun base root ->
   let path = grouped root Lane_addon_store.actions_directory ~group:"instance" ~id:"string-executor" in
@@ -773,6 +821,8 @@ let () =
       test_case "action receipts" `Quick test_lane_addon_actions;
       test_case "exact requests" `Quick test_lane_addon_exact_requests;
       test_case "tool request owners" `Quick test_lane_addon_tool_request_owners;
+      test_case "body reuse observes current bytes" `Quick test_body_reuse_observes_current_bytes;
+      test_case "a body changed between records is refused" `Quick test_body_changed_between_records_is_refused;
       test_case "a record settled while it is checked is absent" `Quick
         test_a_record_settled_while_it_is_checked_is_absent;
       test_case "a refused record stops validate-stores" `Quick

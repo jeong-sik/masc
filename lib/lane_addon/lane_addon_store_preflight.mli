@@ -38,7 +38,7 @@ type decoder =
           key it is stored under. *)
   | Exact_record  (** {!Lane_addon_exact.check_retained_record} *)
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
-  | Tool_request_owner  (** {!Lane_addon_tool_request_owner.check_published} *)
+  | Tool_request_owner  (** {!Lane_addon_tool_request_owner.Published_reader.read} *)
   | Tool_request_payload (** The consumer's current pure payload decoder. *)
 
 type tool_request_reader = scope:string -> request_id:string ->

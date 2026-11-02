@@ -203,7 +203,7 @@ type keeper_lane = {
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_conditions : keeper_lane_conditions;
+  kl_conditions : keeper_lane_conditions option;
 }
 
 type keeper_lanes_snapshot = {
@@ -3369,15 +3369,17 @@ let decode_keeper_lane json =
         Ok (Some decoded)
     | Some bad -> field_type_error "last_outcome" "an object or null" bad
   in
-  let* diagnosis = required_object_field json "phase_diagnosis" in
-  let* conditions = required_object_field diagnosis "conditions" in
-  let* klc_launch_pending = required_bool_field conditions "launch_pending" in
-  let* klc_heartbeat_healthy =
-    required_bool_field conditions "heartbeat_healthy"
-  in
-  let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
-  let kl_conditions =
-    { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy }
+  let* kl_conditions =
+    match Json_util.assoc_member_opt "phase_diagnosis" json with
+    | None -> Ok None
+    | Some diagnosis ->
+      let* conditions = required_object_field diagnosis "conditions" in
+      let* klc_launch_pending = required_bool_field conditions "launch_pending" in
+      let* klc_heartbeat_healthy =
+        required_bool_field conditions "heartbeat_healthy"
+      in
+      let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
+      Ok (Some { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy })
   in
   Ok
     { kl_keeper
@@ -3858,6 +3860,17 @@ let decode_keeper_secret_projection ~keeper json =
     ; ksp_values_validated
     ; ksp_error
     }
+
+let decode_keeper_composite json =
+  let* lane = decode_keeper_lane json in
+  let* secret =
+    match Json_util.assoc_member_opt "secret_projection" json with
+    | None | Some `Null -> Ok None
+    | Some projection ->
+      let* decoded = decode_keeper_secret_projection ~keeper:lane.kl_keeper projection in
+      Ok (Some decoded)
+  in
+  Ok (lane, secret)
 
 let decode_keeper_secret_projections json =
   let* items = required_list_field json "snapshots" in

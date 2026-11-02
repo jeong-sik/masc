@@ -858,7 +858,10 @@ type keeper_lane = {
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_conditions : keeper_lane_conditions;
+  kl_conditions : keeper_lane_conditions option;
+      (** [None] when the producer sent no phase diagnosis, as it does for a
+          Keeper with no registry entry. A diagnosis that is sent carries all
+          three conditions. *)
 }
 
 type keeper_lanes_snapshot = {
@@ -1055,6 +1058,11 @@ type keeper_secret_projection = {
   ksp_values_validated : bool;
   ksp_error : string option;
 }
+
+val decode_keeper_composite :
+  Yojson.Safe.t -> (keeper_lane * keeper_secret_projection option, string) result
+(** Decode one Keeper's [/api/v1/keepers/<name>/composite] body: its lane row
+    and, when the producer projected one, its secret projection. *)
 
 val decode_keeper_secret_projections :
   Yojson.Safe.t -> (keeper_secret_projection list, string) result

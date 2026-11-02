@@ -6943,28 +6943,6 @@ let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) 
     ~deliver:(fun result -> Fusion_launched (generation, result))
     (fun () -> Masc_tui_loader.launch_fusion_run ~host ~port ~request)
 
-let launch_keeper_lanes_load state ~mailbox =
-  if server_authority_ready state then
-  let authority = state.detail_read_authority in
-  let enqueue_async = workspace_enqueue state in
-  if state.keeper_lanes_inflight then ()
-  else begin
-    state.keeper_lanes_inflight <- true;
-    state.keeper_lanes_resume <- false;
-    let host = server_peer_host in
-    let port = state.port in
-    Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> if authority == state.detail_read_authority then state.keeper_lanes_inflight <- false)
-      ~deliver:(fun keeper_result ->
-        enqueue_async mailbox (Lanes_loaded (authority, keeper_result)))
-      (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
-  end
-
-let launch_keeper_lanes_reread state ~mailbox =
-  if state.keeper_lanes_inflight
-  then state.keeper_lanes_reread_pending <- true
-  else launch_keeper_lanes_load state ~mailbox
-
 let launch_lanes_load state ~mailbox =
   if server_authority_ready state then begin
   if state.standalone_lanes_inflight then ()
@@ -8349,6 +8327,85 @@ let launch_owed_fusion state ~mailbox =
     ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
     ~historical:(fun reference ->
       launch_fusion_historical_detail_load state ~mailbox ~reference)
+
+(* The Keeper detail's composite reading: Info's execution facts and the
+   Secrets tab read one Keeper's [/api/v1/keepers/<name>/composite]. It is
+   read when a tab opens or [r] asks, when [keeper_composite_changed] names
+   the Keeper, and again after a failed read (RFC-0480 §3.1). *)
+let current_composite_owed state ~keeper_name =
+  match state.keeper_composite_owed with
+  | Some owed
+    when String.equal owed.kco_keeper keeper_name
+         && owed.kco_reading == state.detail_read_authority ->
+      Some owed
+  | Some _ | None -> None
+
+(* A record of another Keeper or detail reading is replaced. *)
+let update_composite_owed state ~keeper_name transition =
+  let owed =
+    match current_composite_owed state ~keeper_name with
+    | Some owed -> owed
+    | None ->
+        { kco_keeper = keeper_name
+        ; kco_reading = state.detail_read_authority
+        ; kco_read = Masc_tui_owed_read.settled }
+  in
+  state.keeper_composite_owed <- Some { owed with kco_read = transition owed.kco_read }
+
+(* An answer moves only the record it was read for. *)
+let settle_composite_owed state ~keeper_name transition =
+  match current_composite_owed state ~keeper_name with
+  | Some owed ->
+      state.keeper_composite_owed <- Some { owed with kco_read = transition owed.kco_read }
+  | None -> ()
+
+let keeper_composite_on_screen state ~keeper_name =
+  state.view = Keepers Keeper_detail
+  && (match state.detail_tab with
+      | Detail_info | Detail_secrets -> true
+      | Detail_items | Detail_sandbox | Detail_instructions | Detail_github
+      | Detail_identity | Detail_channels | Detail_automation | Detail_runs
+      | Detail_terminal -> false)
+  && (match selected_keeper state with
+      | Some keeper -> String.equal keeper.k_name keeper_name
+      | None -> false)
+
+let launch_keeper_composite_load state ~mailbox ~keeper_name =
+  if server_authority_ready state && Option.is_none state.keeper_composite_inflight then begin
+    let authority = state.detail_read_authority in
+    let enqueue_async = workspace_enqueue state in
+    state.keeper_composite_inflight <- Some keeper_name;
+    settle_composite_owed state ~keeper_name Masc_tui_owed_read.started;
+    let host = server_peer_host in
+    let port = state.port in
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () ->
+        if authority == state.detail_read_authority then begin
+          state.keeper_composite_inflight <- None;
+          settle_composite_owed state ~keeper_name Masc_tui_owed_read.abandoned
+        end)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Keeper_composite_loaded (authority, keeper_name, result)))
+      (fun () -> Masc_tui_loader.load_keeper_composite ~host ~port ~keeper_name)
+  end
+
+(* Runs on every loop iteration; it reads only the Keeper on screen whose
+   read is due. *)
+let launch_owed_keeper_composite state ~mailbox =
+  match state.keeper_composite_owed with
+  | None -> ()
+  | Some owed ->
+      if owed.kco_reading != state.detail_read_authority
+      then state.keeper_composite_owed <- None
+      else if
+        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.kco_read
+        && keeper_composite_on_screen state ~keeper_name:owed.kco_keeper
+        && Option.is_none state.keeper_composite_inflight
+      then launch_keeper_composite_load state ~mailbox ~keeper_name:owed.kco_keeper
+
+let owe_keeper_composite_read state ~mailbox ~keeper_name =
+  update_composite_owed state ~keeper_name Masc_tui_owed_read.changed;
+  launch_owed_keeper_composite state ~mailbox
 
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
@@ -15158,12 +15215,10 @@ let revoke_detail_readings state =
   state.keeper_sandbox_logs_inflight <- None;
   state.keeper_sandbox_logs <- None;
   state.keeper_sandbox_logs_error <- None;
-  state.keeper_lanes_inflight <- false;
-  state.keeper_lanes_reread_pending <- false;
-  state.keeper_lanes_resume <- false;
-  state.lanes <- None;
-  state.keeper_secrets <- [];
-  state.lanes_error <- None;
+  state.keeper_composite_inflight <- None;
+  state.keeper_composite_owed <- None;
+  state.keeper_composite <- None;
+  state.keeper_composite_error <- None;
   clear_connectors_read state;
   state.connectors <- None;
   state.connectors_error <- None;
@@ -15424,12 +15479,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turn_finishes <- [];
   state.keeper_turns_observed_at <- None;
   state.keeper_observed_interrupts <- [];
-  state.keeper_lanes_inflight <- false;
-  state.keeper_lanes_reread_pending <- false;
-  state.keeper_lanes_resume <- false;
-  state.lanes <- None;
-  state.lanes_error <- None;
-  state.keeper_secrets <- [];
+  state.keeper_composite_inflight <- None;
+  state.keeper_composite_owed <- None;
+  state.keeper_composite <- None;
+  state.keeper_composite_error <- None;
   state.keeper_deletions_loading <- false;
   state.keeper_deletions_retry_receipt <- None;
   state.keeper_deletions_open <- false;
@@ -16568,7 +16621,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       (* Runtime Stats reads the composite snapshot. Entry and explicit [r]
          both request a current reading, including after a failed refresh;
          the shared launcher retains its single-flight and authority guards. *)
-      launch_keeper_lanes_reread state ~mailbox;
+      owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name;
       launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_items ->
       launch_keeper_items state ~mailbox keeper.k_name
@@ -16589,11 +16642,10 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.keeper_config_view_error <- None;
       launch_keeper_config_view state ~mailbox keeper.k_name
   | Detail_secrets ->
-      (* The projection arrives with the composite body the Keeper lanes read
-         carries. The list no longer refreshes that body, so a reading cached
-         before the operator went back to the list can be arbitrarily old:
-         entry and [r] ask for a current one, as Info does. *)
-      launch_keeper_lanes_reread state ~mailbox
+      (* The projection arrives with the Keeper's composite body. A reading
+         taken before the operator went back to the list can be arbitrarily
+         old: entry and [r] ask for a current one, as Info does. *)
+      owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;
@@ -17441,7 +17493,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          (fun keeper_name ->
            update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
            launch_owed_history state ~mailbox)
-         state.msg_target_keeper_name
+         state.msg_target_keeper_name;
+       Option.iter
+         (fun (keeper : keeper) ->
+           owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name)
+         (selected_keeper state)
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -20570,7 +20626,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
         | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
         | Context_inspector_part_loaded (_, _)
-        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Lanes_loaded (_, _)
+        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Keeper_composite_loaded (_, _, _)
         | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
         | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
@@ -21372,6 +21428,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
       let open_chat_memory_grew = ref false in
+      let selected_composite_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21443,6 +21500,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Some keeper when state.msg_target_keeper_name = Some keeper ->
                    open_chat_memory_grew := true
                | Some _ | None -> ());
+              (match Masc_tui_observer.composite_changed_keeper event, selected_keeper state with
+               | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
+                   selected_composite_changed := true
+               | Some _, (Some _ | None) | None, _ -> ());
               (match event with
                | Masc_tui_observer.Keeper_chat_stream_frame { keeper; operation_id; seq; at; _ } ->
                    observe_journal keeper (Keeper_chat_log.Operation operation_id) seq at
@@ -21609,6 +21670,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          it can (RFC-0480 §3.1). *)
       (* A loss in this batch already owes the chat an audited read that
          starts after these turns were appended. *)
+      (if !selected_composite_changed && not !observer_source_loss_seen then
+         Option.iter
+           (fun (keeper : keeper) ->
+             owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name)
+           (selected_keeper state));
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
@@ -25604,23 +25670,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
         | Error detail -> state.changes_tree_diff_error <- Some detail)
-  | Lanes_loaded (authority, result) ->
+  | Keeper_composite_loaded (authority, keeper_name, result) ->
       if authority == state.detail_read_authority && server_authority_ready state then begin
-        state.keeper_lanes_inflight <- false;
+        state.keeper_composite_inflight <- None;
         (match result with
-        | Ok (snapshot, secrets) ->
-            state.lanes <- Some snapshot;
-            state.keeper_secrets <- secrets;
-            state.lanes_error <- None
+        | Ok (lane, secret) ->
+            state.keeper_composite <-
+              Some { kcr_keeper = keeper_name; kcr_lane = lane; kcr_secret = secret };
+            state.keeper_composite_error <- None;
+            settle_composite_owed state ~keeper_name Masc_tui_owed_read.succeeded
         | Error detail ->
-            (* Keep the previous rows visible. The error says that they are
-               stale; clearing them would turn a failed refresh into an empty
+            (* Keep the previous reading visible. The error says that it is
+               stale; clearing it would turn a failed refresh into an empty
                reading. *)
-            state.lanes_error <- Some detail);
-        if state.keeper_lanes_reread_pending then begin
-          state.keeper_lanes_reread_pending <- false;
-          launch_keeper_lanes_load state ~mailbox
-        end
+            state.keeper_composite_error <- Some (keeper_name, detail);
+            settle_composite_owed state ~keeper_name
+              (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+                 ~max_retry_s:keeper_execute_stream_max_reconnect_s
+                 ~now:(monotonic_now_s ())));
+        launch_owed_keeper_composite state ~mailbox
       end
   | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
@@ -30708,6 +30776,7 @@ Use relative paths for resources already held in the package. -->
       ensure_acting_pane_changes state ~mailbox:async_messages;
       launch_owed_history state ~mailbox:async_messages;
       launch_owed_fusion state ~mailbox:async_messages;
+      launch_owed_keeper_composite state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration
@@ -39233,17 +39302,10 @@ Use relative paths for resources already held in the package. -->
             below keeps Info and Secrets current while they are on screen. *)
          | Keepers Keeper_list -> launch_tools_async_observation_load state ~mailbox:async_messages
          | Keepers (Keeper_logs | Keeper_detail) ->
-             ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll);
-             (* Info's execution facts and Secrets share the composite
-                reading. Keep a visible pane current without leaving it,
-                and let the next cadence retry a failed request. *)
-             if state.view = Keepers Keeper_detail then
-               (match state.detail_tab with
-                | Detail_info | Detail_secrets ->
-                    launch_keeper_lanes_load state ~mailbox:async_messages
-                | Detail_items | Detail_sandbox | Detail_instructions
-                | Detail_github | Detail_identity | Detail_channels
-                | Detail_automation | Detail_runs | Detail_terminal -> ())
+             (* Info's execution facts and Secrets re-read on
+                [keeper_composite_changed] and retry a failed read
+                ([launch_owed_keeper_composite]). *)
+             ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll)
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->

@@ -1269,6 +1269,24 @@ let no_fusion_retries =
     to one Keeper under one workspace reading; any other drops it. [kho_audit]
     has the owed read recheck child content and native tasks as well, because
     events were lost rather than announced. *)
+(* One Keeper's [/api/v1/keepers/<name>/composite] reading. Info shows its
+   execution row and Secrets its secret projection; a Keeper the producer has
+   not projected has [kcr_secret = None], which Secrets shows as "no
+   projection" rather than as an empty credential set. *)
+type keeper_composite_reading = {
+  kcr_keeper : string;
+  kcr_lane : Tui_decode.keeper_lane;
+  kcr_secret : Tui_decode.keeper_secret_projection option;
+}
+
+(* The composite read the Keeper detail owes, under the detail reading it was
+   owed in (RFC-0480 §3.1). *)
+type keeper_composite_owed = {
+  kco_keeper : string;
+  kco_reading : unit ref;
+  kco_read : Masc_tui_owed_read.t;
+}
+
 type keeper_history_owed = {
   kho_keeper : string;
   kho_authority : workspace_authority;
@@ -10407,10 +10425,10 @@ type state = {
   (* The latest refused create/modify form, kept on the Schedules surface for
      the last-action window. *)
   mutable schedule_form_refusal: schedule_form_refusal option;
-  mutable lanes: Tui_decode.keeper_lanes_snapshot option;
-  mutable keeper_lanes_inflight: bool;
-  mutable keeper_lanes_reread_pending: bool;
-  mutable keeper_lanes_resume: bool;
+  mutable keeper_composite: keeper_composite_reading option;
+  (* The Keeper whose composite read is in flight. *)
+  mutable keeper_composite_inflight: string option;
+  mutable keeper_composite_owed: keeper_composite_owed option;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable lanes_selection: Masc_tui_lane_inventory.identity option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -10460,11 +10478,8 @@ type state = {
   mutable lane_run_preflight_details: bool;
   (* A projection of the last rendered payload, not another layout formula. *)
   mutable lane_run_detail_content_height: int;
-  (* Read from the same composite body as [lanes]. A Keeper the producer has
-     not projected is simply absent from this list, which the Secrets tab
-     shows as "no projection" rather than as an empty credential set. *)
-  mutable keeper_secrets: Tui_decode.keeper_secret_projection list;
-  mutable lanes_error: string option;
+  (* The Keeper whose read failed, and why. *)
+  mutable keeper_composite_error: (string * string) option;
   mutable lanes_action_error: string option;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
@@ -14449,12 +14464,10 @@ let suspend_workspace_readings state =
   state.keeper_schedules_pending <- None;
   state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
   state.keeper_sandbox_logs_inflight <- None;
-  (* A reread queued behind the retired read is satisfied by the replacement
-     read that reconfirmation launches; keep only its demand. *)
-  state.keeper_lanes_resume <-
-    state.keeper_lanes_resume || state.keeper_lanes_inflight || state.keeper_lanes_reread_pending;
-  state.keeper_lanes_inflight <- false;
-  state.keeper_lanes_reread_pending <- false;
+  (* The retired read's owed record belongs to the retired detail reading;
+     the visible tab reads again when the detail is recovered. *)
+  state.keeper_composite_inflight <- None;
+  state.keeper_composite_owed <- None;
   state.connectors_read <- Connector_read.suspend state.connectors_read;
   state.memory_health_inflight <- false;
   suspend_runtime_catalog_read state;
@@ -19566,10 +19579,9 @@ let create_state
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   schedule_form_refusal = None;
-  lanes = None;
-  keeper_lanes_inflight = false;
-  keeper_lanes_reread_pending = false;
-  keeper_lanes_resume = false;
+  keeper_composite = None;
+  keeper_composite_inflight = None;
+  keeper_composite_owed = None;
   lane_inventory = None;
   lanes_selection = None;
   standalone_lanes = None;
@@ -19605,8 +19617,7 @@ let create_state
   lane_run_detail_scroll = 0;
   lane_run_preflight_details = false;
   lane_run_detail_content_height = 0;
-  keeper_secrets = [];
-  lanes_error = None;
+  keeper_composite_error = None;
   lanes_action_error = None;
   system_logs = System_logs_view.empty;
   tools_inventory = None;

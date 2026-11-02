@@ -368,6 +368,85 @@ describe('CostDashboard route-backed focus behavior', () => {
   })
 
 
+  it.each([null, 0])('preserves runtime measurements reported as %s', async value => {
+    const lane = 'runtime-reading'
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValue({
+      ...modelMetrics({ latency_buckets: [] }),
+      models: [{
+        model_id: lane,
+        total_cost_usd: value,
+        total_input_tokens: value,
+        total_output_tokens: value,
+        total_cache_read_tokens: value,
+        total_cache_creation_tokens: value,
+        total_reasoning_tokens: value,
+        p50_latency_ms: value,
+        p95_latency_ms: value,
+      }],
+    })
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring', params: { section: 'runtime', view: 'cost' }, postId: null,
+    }
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes(lane) ?? false, 'runtime measurements')
+
+    expect(tile(container, 'Total Cost').value).toBe(value === null ? '미보고' : '$0')
+    expect(tile(container, 'Tokens In / Out').value).toBe(value === null ? '미보고 / 미보고' : '0 / 0')
+    for (const label of ['p50 Latency (avg)', 'p95 Latency (max)']) {
+      expect(tile(container, label).value).toBe(value === null ? '—' : '0ms')
+    }
+    if (value === null) expect(tile(container, 'p95 Latency (max)').note).toBe('no latency read')
+    const row = container.querySelector('table[aria-label$="비용 / 지연"] tbody tr')
+    expect(Array.from(row?.querySelectorAll('td') ?? []).slice(0, 2).map(td => td.textContent?.trim()))
+      .toEqual(value === null ? ['미보고', '미보고'] : ['0', '0'])
+    if (value === null) expect(row?.textContent).not.toContain('$0')
+    else expect(row?.textContent).toContain('$0')
+    expect(container.querySelector('table[aria-label="Runtime lane cost matrix"] tbody td')?.textContent?.trim())
+      .toBe(value === null ? '미보고' : '$0')
+  })
+
+  it('keeps partial runtime measurements out of complete totals independently', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValue({
+      ...modelMetrics({ latency_buckets: [] }),
+      models: [
+        { model_id: 'reported-lane', total_cost_usd: 1, total_input_tokens: 10, total_output_tokens: 20 },
+        { model_id: 'missing-lane', total_cost_usd: null, total_input_tokens: null, total_output_tokens: 30 },
+      ],
+    })
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring', params: { section: 'runtime', view: 'cost' }, postId: null,
+    }
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('missing-lane') ?? false, 'partial runtime measurements')
+
+    expect(tile(container, 'Total Cost').value).toBe('미보고')
+    expect(tile(container, 'Tokens In / Out').value).toBe('미보고 / 50')
+    expect(Array.from(container.querySelectorAll('table[aria-label="Runtime lane cost matrix"] tbody td'))
+      .map(td => td.textContent?.trim())).toEqual(['$1.00', '미보고'])
+  })
+
+  it('keeps runtime measurements unknown when the window has no lanes', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValue(modelMetrics({ models: [], latency_buckets: [] }))
+    const { route } = await import('../router')
+    const { modelState } = await import('./cost/cost-store')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring', params: { section: 'runtime', view: 'cost' }, postId: null,
+    }
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => modelState.value.status === 'loaded' && container.querySelector('.kpi-cell') !== null,
+      'empty runtime measurements')
+
+    expect(tile(container, 'Total Cost').value).toBe('미보고')
+    expect(tile(container, 'Tokens In / Out').value).toBe('미보고 / 미보고')
+    expect(tile(container, 'p50 Latency (avg)').value).toBe('—')
+    expect(tile(container, 'p95 Latency (max)').value).toBe('—')
+  })
+
   it('says a subscription keeper cost was not reported instead of showing $0', async () => {
     apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
       keepers: [

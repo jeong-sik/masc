@@ -271,11 +271,10 @@ model/protocol-specific conformance fixtures that carry these fields through
 production parse → history → request paths. The OpenAI phase portion is already
 implemented and must not be repeated as unfinished work.
 
-The inline carrier repair #45772 is merged: original scalar content has a
-typed wire witness across sync/SSE, persistence, projection and matching Chat
-serialization. Native family activation and structured replay in #45859 have
-a separate 121-case Chat execution receipt; that PR remains unmerged. Its
-fixtures and source identity limits do not certify MiniMax Responses. Historical
+The inline carrier repair #45772 and native Chat activation #45859 are merged.
+Original scalar content has a typed wire witness across sync/SSE, persistence,
+projection and matching Chat serialization. The native M3.1 Chat depth/default
+control repair #45972 is also merged. Historical
 [inline gap evidence](../../../../docs/evidence/2026-10-24-minimax-inline-replay-gap/README.md)
 records the earlier failure, not the current implementation state.
 
@@ -284,13 +283,20 @@ request `tool_choice` enum contains only `auto`; the Chat schema does not list
 that field. This confirms the documented Responses policy without establishing
 Chat rejection or live acceptance. The Responses reasoning output uses
 `content` / `reasoning_text` as well as `summary`, while its input reasoning
-carrier is `summary` / `summary_text`. Current sync decoding reads only summary
-or encrypted content and therefore omits the documented content-only reasoning
-shape. Streaming reasoning-text deltas already have a decoder and require a
-separate terminal/replay audit.
+carrier is `summary` / `summary_text`. The sync repair #45932, SSE/delivery
+repairs #45950/#45962 and explicit native Responses binding #45969 are merged,
+as is the [configuration guide](../../../../docs/guides/minimax-responses.md)
+from #46035. The current decoder preserves content-only reasoning; the shipped
+`minimax_responses` binding declares plaintext replay for M3 and M3.1-Flash.
 
 The [2026-10-25 source/schema comparison](../../../../docs/evidence/2026-10-25-minimax-responses-contract/README.md)
 retains exact official-source hashes, selected schemas, current source hashes
-and the remaining public-codec execution requirements. It does not change
-capabilities or claim an executed failure, MiniMax HTTP success, Responses
-activation, installed runtime or whole-issue completion.
+and the earlier public-codec execution requirements. The
+[binding run](../../../../docs/evidence/2026-10-25-minimax-responses-binding/README.md)
+records 42 selected cases on its executed source, not vendor HTTP or a full
+Agent restart. The [2026-11-01 refresh](../../../../docs/evidence/2026-11-01-minimax-contract-refresh/README.md)
+records integration on main and distinguishes the vendor's configurable M3
+provider-verifier expectations from native endpoint observations. Chat
+tool-choice support and exact M2 Responses availability still need endpoint
+evidence. These residuals keep #27924 open; they are not missing sync/SSE
+implementations to recreate.

@@ -33,6 +33,7 @@ let resolver_snapshot ~base_url ~system_prompt =
   let contents =
     Printf.sprintf
       "[[providers]]\n\
+       capabilities_base = \"models_only\"\n\
        id = \"stagehand-fixture\"\n\
        kind = \"openai_compat\"\n\
        base_url = %S\n\

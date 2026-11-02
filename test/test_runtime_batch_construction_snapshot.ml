@@ -175,17 +175,17 @@ let test_replacement_thinking () =
 
 let with_rejected_http_catalog run = with_catalog_state (fun () ->
   let previous = Declarations.current () in
-  let invalid = parsed_catalog {|[[providers]]
+  let invalid = Catalog.of_toml_string ~source:"missing capability declaration"
+    {|[[providers]]
 id = "missing-capability-base"
 kind = "openai_compat"
 base_url = "https://invalid.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
 |} in
-  (match Declarations.of_catalogs ~models:(Some invalid) ~providers:None with
-   | Error (Declarations.Unknown_capability_base _) -> ()
-   | Ok _ | Error (Declarations.Conflicting_identity _) ->
-     fail "negative control requires rejected HTTP declarations");
+  (match invalid with
+   | Error _ -> ()
+   | Ok _ -> fail "negative control requires rejected provider decoding");
   check bool "rejected input cannot replace the prior publication" true
     (Declarations.current () == previous);
   run ())

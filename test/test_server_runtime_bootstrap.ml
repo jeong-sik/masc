@@ -287,20 +287,21 @@ let test_model_catalog_configuration_rejects_before_publication () =
   let module Snapshot = Llm_provider.Catalog_snapshot in
   let previous = Snapshot.current () in
   Fun.protect ~finally:(fun () -> Snapshot.publish previous) (fun () ->
-    let invalid = match Llm_provider.Model_catalog.of_toml_string
+    let invalid = Llm_provider.Model_catalog.of_toml_string
       ~source:"bootstrap rejected fixture" {|[[providers]]
 id = "unmapped-bootstrap-provider"
 kind = "openai_compat"
 base_url = "https://bootstrap.example.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
-|} with
-      | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+|} in
+    Alcotest.(check bool) "missing capability declaration fails decoding" true
+      (Result.is_error invalid);
     let env = function
       | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/rejected-catalog.toml"
       | _ -> None in
     (match Server_runtime_bootstrap.configure_agent_core_model_catalog_env
-       ~env ~load_catalog:(fun _ -> Ok invalid) () with
+       ~env ~load_catalog:(fun _ -> invalid) () with
      | _ -> Alcotest.fail "invalid provider admission must stop bootstrap"
      | exception Env_config_core.Config_error detail ->
        Alcotest.(check bool) "diagnostic retains the catalog path" true
@@ -6307,6 +6308,7 @@ let test_main_eio_uncatalogued_runtime_serves_setup_without_fallback () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
+            ("AGENT_CORE_MODEL_CATALOG", "");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
@@ -6352,6 +6354,7 @@ let test_main_eio_partial_catalog_excludes_uncatalogued_optional_runtime () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
+            ("AGENT_CORE_MODEL_CATALOG", "");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
@@ -6409,6 +6412,7 @@ let test_main_eio_uncatalogued_default_never_selects_catalogued_alternative () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
+            ("AGENT_CORE_MODEL_CATALOG", "");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());

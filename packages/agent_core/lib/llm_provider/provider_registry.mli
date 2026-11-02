@@ -25,7 +25,9 @@ type entry =
   { name : string
   ; defaults : provider_defaults
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capabilities.capabilities option
+    (** [None] means no provider-wide policy. Model-only providers remain
+        discoverable by identity but cannot satisfy a capability predicate. *)
   ; is_available : unit -> bool
   }
 
@@ -51,7 +53,7 @@ val all : t -> entry list
 (** Providers where [is_available()] returns [true]. *)
 val available : t -> entry list
 
-(** Providers whose capabilities satisfy the given predicate. *)
+(** Providers with an explicit provider-wide policy satisfying the predicate. *)
 val find_capable : t -> (Capabilities.capabilities -> bool) -> entry list
 
 (** Check whether a command is discoverable from PATH without shelling out. *)

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Require an explicit typed capability policy on TOML provider rows. The
+  `models_only` choice preserves exact model policy and prices while unknown
+  models receive no provider preset; provider identity no longer fills a
+  missing declaration (#27898).
+
 - Repair three startup catalog fixtures to reach model admission and check HTTP
   health/settings, optional-model exclusion and refusal to replace a rejected
   default. A child startup failure now fails these cases instead of skipping

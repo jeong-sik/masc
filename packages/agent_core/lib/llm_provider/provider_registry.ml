@@ -13,7 +13,7 @@ type entry = Provider_registry_state.entry =
   { name : string
   ; defaults : provider_defaults
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capabilities.capabilities option
   ; is_available : unit -> bool
   }
 
@@ -32,7 +32,7 @@ let unregister t name = apply t (Provider_registry_state.Unregister name)
 let find t name = Provider_registry_state.find name (Atomic.get t)
 let all t = Provider_registry_state.all (Atomic.get t)
 let available t = all t |> List.filter (fun e -> e.is_available ())
-let find_capable t pred = all t |> List.filter (fun e -> pred e.capabilities)
+let find_capable t pred = all t |> List.filter (fun e -> Option.fold ~none:false ~some:pred e.capabilities)
 
 (* ── Default registry ─────────────────────────────────── *)
 

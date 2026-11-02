@@ -23,7 +23,7 @@ type t =
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : capabilities
+  ; capabilities : capabilities option
   ; available : bool
   ; credential_scope : string option
   ; declarations : PD.t

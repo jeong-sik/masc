@@ -1284,6 +1284,7 @@ let prompt_only_snapshot base_url =
   let contents =
     Printf.sprintf
       "[[providers]]\n\
+       capabilities_base = \"models_only\"\n\
        id = \"hitl-incapable-provider\"\n\
        kind = \"openai_compat\"\n\
        base_url = %S\n\

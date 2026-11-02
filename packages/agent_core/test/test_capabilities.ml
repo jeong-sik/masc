@@ -3100,6 +3100,7 @@ let test_a_named_provider_still_refuses_the_bare_row () =
 let test_declared_bare_models_bind_original_rows () =
   let catalog = Model_catalog.of_toml_string ~source:"served bare families"
     {|[[providers]]
+capabilities_base = "models_only"
 id = "native"
 aliases = ["gemini"]
 kind = "anthropic"

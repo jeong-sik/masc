@@ -104,12 +104,12 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       let protocol = protocol_of_catalog_kind entry.kind in
       let task =
         match entry.default_model with
-        | None -> entry.capabilities.task
+        | None -> Option.bind entry.capabilities (fun capabilities -> capabilities.Llm_provider.Capabilities.task)
         | Some model_id ->
           (match Llm_provider.Capabilities.resolve_snapshot_request_policy
                    ~snapshot:entry.declarations ~wire:entry.kind ~provider_id:entry.id ~model_id
                    |> Llm_provider.Capabilities.request_policy_capabilities with
-           | None -> entry.capabilities.task
+           | None -> Option.bind entry.capabilities (fun capabilities -> capabilities.Llm_provider.Capabilities.task)
            | Some capabilities -> capabilities.task)
       in
       let supported = protocol <> None && task = None in

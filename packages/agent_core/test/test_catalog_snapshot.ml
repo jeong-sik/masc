@@ -36,7 +36,7 @@ let test_exact_replacement () =
   Alcotest.(check string) "overlay codec path" "/v1/responses" selected.request_path;
   Alcotest.(check (option string)) "overlay default" (Some "overlay-model") selected.default_model;
   Alcotest.(check (option int)) "explicit context" (Some 8192) selected.max_context;
-  Alcotest.(check bool) "overlay capability" true selected.capabilities.supports_reasoning;
+  Alcotest.(check bool) "overlay capability" true (Option.fold ~none:false ~some:(fun capabilities -> capabilities.Capability_profile.supports_reasoning) selected.capabilities);
   Alcotest.(check bool) "old seed alias loses authority" true (D.find declarations "old-alias"=None);
   Alcotest.(check bool) "environment auth is explicit data" true
     (selected.authentication=D.Api_key_env "MASC_TEST_PROVIDER_SNAPSHOT_KEY")
@@ -65,7 +65,7 @@ let test_cross_source_collision alias =
     Alcotest.(check string) "conflicting exact identity" alias identity;
     Alcotest.(check (list string)) "both declarations retained in error"
       ["snapshot-provider";"other-provider"] provider_ids
-  | Ok _ | Error (D.Unknown_capability_base _) -> Alcotest.fail "collision must fail typed admission"
+  | Ok _ -> Alcotest.fail "collision must fail typed admission"
 
 let test_distinct_providers_keep_independent_policy () =
   let declarations = snapshot ~providers:(overlay ~id:"other-provider" ~alias:"other-alias" ()) () in
@@ -98,18 +98,18 @@ let test_distinct_providers_keep_independent_policy () =
     (B.capabilities_for_provider_config second).supports_reasoning
 
 let test_missing_preset_fails_closed () =
-  let invalid = models {|[[providers]]
-id = "unmapped-fixture"
+  List.iter (fun id ->
+    match Model_catalog.of_toml_string ~source:"missing provider policy"
+      (Printf.sprintf {|[[providers]]
+id = %S
 kind = "openai_compat"
 base_url = "https://example.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
-|} in
-  match D.of_catalogs ~models:(Some invalid) ~providers:None with
-  | Error (D.Unknown_capability_base {provider_id;label}) ->
-    Alcotest.(check string) "provider error identity" "unmapped-fixture" provider_id;
-    Alcotest.(check string) "missing base is not a generic fallback" "unmapped-fixture" label
-  | Ok _ | Error (D.Conflicting_identity _) -> Alcotest.fail "missing preset must fail closed"
+|} id) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "a provider id cannot supply a missing capability declaration")
+    ["unmapped-fixture"; "openai"; "anthropic"]
 
 let test_snapshot_survives_source_replacement () =
   let previous = D.current () in
@@ -164,7 +164,7 @@ let test_admission_rejects_invalid_combination () = with_publication (fun () ->
   (match D.of_catalogs ~models:(Some seed)
       ~providers:(Some (overlay ~id:"other-provider" ~alias:"old-alias" ())) with
    | Error (D.Conflicting_identity _) -> ()
-   | Ok _ | Error (D.Unknown_capability_base _) ->
+   | Ok _ ->
      Alcotest.fail "invalid complete pair must fail before publication");
   Alcotest.(check bool) "failed admission retains the exact publication" true
     (D.current () == selected);
@@ -475,6 +475,147 @@ thinking_control_token = "<|bare|>"
     ["token-provider", Model_catalog.Declared_provider "token-provider";
      "ollama", Model_catalog.Anonymous_wire Provider_kind.Ollama])
 
+let test_provider_required_fields () =
+  let fields = [
+    "id", "\"openai\"";
+    "kind", "\"openai_compat\"";
+    "base_url", "\"https://required.example.invalid\"";
+    "request_path", "\"/v1/chat/completions\"";
+    "auth", "\"none\"";
+    "capabilities_base", "\"models_only\"" ] in
+  let decode fields =
+    "[[providers]]\n" ^ String.concat "\n"
+      (List.map (fun (key, value) -> key ^ " = " ^ value) fields)
+    |> Model_catalog.of_toml_string ~source:"required provider declarations" in
+  (match decode fields with Ok _ -> ()
+    | Error detail -> Alcotest.fail detail);
+  List.iter (fun (omitted, _) ->
+    match decode (List.filter (fun (key, _) -> not (String.equal key omitted)) fields) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "provider admitted without required %s" omitted) fields;
+  List.iter (fun value ->
+    match decode (List.map (fun (key, prior) -> key,
+      if String.equal key "capabilities_base" then value else prior) fields) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "invalid capability declaration admitted: %s" value)
+    ["true"; "12"; "\"\""; "\"unknown-preset\""; "\" models_only \"";
+      "\"openai_compat_typo\""];
+  (match Model_catalog.of_toml_string ~source:"model row cannot name provider policy"
+    {|[[models]]
+model_id = "invalid-model-base"
+base = "models_only"
+|} with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "provider-only models_only choice accepted as a model preset")
+
+let test_models_only_selected_and_raw_policy () = with_publication (fun () ->
+  let catalog = models {|[[providers]]
+id = "openai"
+aliases = ["fixture-alias"]
+kind = "openai_compat"
+base_url = "https://models-only.example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "models_only"
+[[models]]
+model_id = "declared-model"
+provider_name = "openai"
+base = "openai_chat"
+supports_structured_output = true
+input_per_million = 2.0
+output_per_million = 3.0
+|} in
+  let snapshot = D.of_catalogs ~models:(Some catalog) ~providers:None |> admitted in
+  D.publish snapshot;
+  Alcotest.(check bool) "provider identity supplies no capability profile" true
+    ((entry snapshot "openai").capabilities = None);
+  let registry = Provider_registry.of_declarations snapshot in
+  Alcotest.(check int) "model-only provider remains discoverable" 1
+    (List.length (Provider_registry.all registry));
+  Alcotest.(check int) "no invented provider capability satisfies a predicate" 0
+    (List.length (Provider_registry.find_capable registry (fun _ -> true)));
+  let binding = match B.find_in_declarations snapshot "fixture-alias" with
+    | Some binding -> binding | None -> Alcotest.fail "missing model-only binding" in
+  List.iter (fun id ->
+    let policy = Capabilities.resolve_snapshot_request_policy ~snapshot
+      ~wire:Provider_kind.OpenAI_compat ~provider_id:id ~model_id:"unknown-model" in
+    Alcotest.(check bool) "selected unknown model retains absent policy" true
+      (Capabilities.request_policy_capabilities policy = None);
+    Alcotest.(check bool) "raw unknown model retains absent policy" true
+      (Capabilities.for_provider_model_id ~wire:(Some Provider_kind.OpenAI_compat)
+        ~provider:(Model_catalog.Declared_provider id) ~model_id:"unknown-model" = None))
+    ["openai"; "fixture-alias"];
+  let config model = match B.to_provider_config ~model binding with
+    | Ok config -> config | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+  Alcotest.(check bool) "captured unknown-model config gains no preset" true
+    (Provider_config.capabilities_for_config_model (config "unknown-model") = None);
+  let known = config "declared-model" in
+  Alcotest.(check bool) "exact declared model retains its own structured policy" true
+    (Option.fold ~none:false ~some:(fun capabilities -> capabilities.Capabilities.supports_structured_output)
+      (Provider_config.capabilities_for_config_model known));
+  Alcotest.(check (option (float 0.000001))) "exact model retains selected pricing"
+    (Some 2.)
+    (Option.map (fun (pricing : Pricing.pricing) -> pricing.input_per_million)
+      (Pricing.pricing_for_model (Provider_config.pricing_source known) "declared-model")))
+
+let test_packaged_openai_is_models_only () =
+  let catalog = Model_catalog.load_default () |> ok in
+  let snapshot = D.of_catalogs ~models:(Some catalog) ~providers:None |> admitted in
+  Alcotest.(check bool) "packaged OpenAI has no provider-wide policy" true
+    ((entry snapshot "openai").capabilities = None);
+  let policy model_id = Capabilities.resolve_snapshot_request_policy ~snapshot
+      ~wire:Provider_kind.OpenAI_compat ~provider_id:"openai" ~model_id
+    |> Capabilities.request_policy_capabilities in
+  Alcotest.(check bool) "packaged exact GPT-4o policy remains available" true
+    (Option.fold ~none:false ~some:(fun capabilities -> capabilities.Capabilities.supports_structured_output)
+      (policy "gpt-4o"));
+  Alcotest.(check bool) "undeclared GPT-4o variant inherits no provider policy" true
+    (policy "gpt-4o-unlisted-fixture" = None)
+
+let test_models_only_refuses_provider_wide_wire_override () =
+  match Model_catalog.of_toml_string ~source:"contradictory models-only provider"
+    {|[[providers]]
+id = "contradictory"
+kind = "openai_compat"
+identity_kinds = ["openai_compat", "ollama"]
+base_url = "https://models-only.example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "models_only"
+capabilities_base_by_identity_kind = { ollama = "ollama" }
+|} with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "models-only provider admitted a provider-wide wire preset"
+
+let test_typed_view_cannot_retain_wire_policy_after_models_only () =
+  let catalog = models {|[[providers]]
+id = "typed-view"
+kind = "anthropic"
+identity_kinds = ["anthropic", "openai_compat"]
+base_url = "https://typed-view.example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+capabilities_base = "anthropic"
+capabilities_base_by_identity_kind = { openai_compat = "openai_chat_extended" }
+|} in
+  let admit catalog = D.of_catalogs ~models:(Some catalog) ~providers:None |> admitted in
+  let policy snapshot wire = Capabilities.resolve_snapshot_request_policy
+    ~snapshot ~wire ~provider_id:"typed-view" ~model_id:"unknown-model"
+    |> Capabilities.request_policy_capabilities in
+  Alcotest.(check bool) "explicit wire default is a real positive control" true
+    (Option.is_some (policy (admit catalog) Provider_kind.OpenAI_compat));
+  let provider = match Model_catalog.provider_entries catalog with
+    | [provider] -> provider | _ -> Alcotest.fail "expected one typed provider" in
+  let models_only = {provider with
+    capability_policy=Model_provider_catalog.Models_only} in
+  let view = Model_catalog.with_provider_entry catalog models_only in
+  let snapshot = admit view in
+  Alcotest.(check bool) "typed view exposes no provider-wide record" true
+    ((entry snapshot "typed-view").capabilities = None);
+  List.iter (fun wire ->
+    Alcotest.(check bool) "typed models-only state retains no hidden wire preset" true
+      (policy snapshot wire = None)) [Provider_kind.Anthropic;OpenAI_compat]
+
 let () = Alcotest.run "catalog snapshot"
   ["admission",[
     "exact overlay replacement",`Quick,test_exact_replacement;
@@ -482,10 +623,15 @@ let () = Alcotest.run "catalog snapshot"
     "alias versus canonical id",`Quick,(fun () -> test_cross_source_collision "snapshot-provider");
     "alias versus alias",`Quick,(fun () -> test_cross_source_collision "old-alias");
     "missing capability base",`Quick,test_missing_preset_fails_closed;
+    "provider fields require explicit declarations",`Quick,test_provider_required_fields;
+    "models-only forbids provider-wide wire policy",`Quick,test_models_only_refuses_provider_wide_wire_override;
+    "typed view cannot retain wire policy in models-only state",`Quick,test_typed_view_cannot_retain_wire_policy_after_models_only;
     "invalid complete pair retains prior publication",`Quick,test_admission_rejects_invalid_combination];
    "consumers",[
     "immutable captured selection",`Quick,test_snapshot_survives_source_replacement;
     "credential observation",`Quick,test_credential_observation_edge;
+    "models-only selected and raw request policy",`Quick,test_models_only_selected_and_raw_policy;
+    "packaged OpenAI retains only exact model policy",`Quick,test_packaged_openai_is_models_only;
     "independent declared provider requests",`Quick,test_distinct_providers_keep_independent_policy];
    "publication",[
     "complete provider model auth price replacement",`Quick,test_complete_replacement;

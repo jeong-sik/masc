@@ -102,6 +102,7 @@ let catalog_entry
 let catalog_fixture_toml entry =
   Printf.sprintf
     "[[providers]]\n\
+     capabilities_base = \"models_only\"\n\
      id = %S\n\
      kind = %S\n\
      base_url = %S\n\

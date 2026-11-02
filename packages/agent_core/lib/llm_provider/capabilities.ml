@@ -422,13 +422,19 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   }
 ;;
 
-let provider_base_label ~catalog ~wire provider =
-  match Model_catalog.provider_entry_for_reference catalog provider with
-  | None -> None
-  | Some provider ->
-    (match Option.bind wire (fun kind -> List.assoc_opt kind provider.capabilities_base_by_identity_kind) with
-     | Some _ as base -> base
-     | None -> provider.capabilities_base)
+let provider_wire_preset ~wire (provider : Model_catalog.provider_entry) =
+  match provider.capability_policy, wire with
+  | Model_provider_catalog.Models_only, _ | Provider_defaults _, None -> None
+  | Provider_defaults {base=_;by_identity_kind}, Some wire ->
+    List.assoc_opt wire by_identity_kind
+;;
+
+let provider_preset ~wire (provider : Model_catalog.provider_entry) =
+  match provider.capability_policy with
+  | Model_provider_catalog.Models_only -> None
+  | Provider_defaults {base;by_identity_kind} ->
+    Some (match Option.bind wire (fun kind -> List.assoc_opt kind by_identity_kind) with
+      | Some preset -> preset | None -> base)
 ;;
 
 let apply_catalog_entry ?base ~provider_entry ~wire
@@ -437,16 +443,15 @@ let apply_catalog_entry ?base ~provider_entry ~wire
     | None -> None, None, None
     | Some _ -> base, provider_entry, wire in
   let overrides = overrides_of_catalog_entry entry in
-  let wire_base = Option.bind provider_entry
-    (fun (provider : Model_catalog.provider_entry) ->
-      Option.bind wire (fun kind ->
-        List.assoc_opt kind provider.capabilities_base_by_identity_kind)) in
-  let base_label = match wire_base, overrides.base_label with
-    | (Some _ as base), _ -> base
-    | None, (Some _ as base) -> base
-    | None, None -> Option.bind provider_entry
-        (fun (provider : Model_catalog.provider_entry) -> provider.capabilities_base)
-  in
+  let wire_base = Option.bind provider_entry (provider_wire_preset ~wire)
+    |> Option.map capabilities_of_preset in
+  let base, base_label = match wire_base, overrides.base_label with
+    | Some capabilities, _ -> Some capabilities, None
+    | None, Some label -> base, Some label
+    | None, None ->
+      let provider_base = Option.bind provider_entry (provider_preset ~wire:None)
+        |> Option.map capabilities_of_preset in
+      (match provider_base with Some _ -> provider_base | None -> base), None in
   let capabilities = apply_declarative_capability_overrides ?base
       { overrides with base_label } in
   { capabilities with
@@ -499,9 +504,8 @@ let for_provider_reference_base ~catalog ~wire ~provider =
   match catalog with
   | None -> None
   | Some catalog ->
-    Option.bind
-      (provider_base_label ~catalog ~wire provider)
-      capabilities_for_provider_label
+    Option.bind (Model_catalog.provider_entry_for_reference catalog provider)
+      (fun provider -> Option.map capabilities_of_preset (provider_preset ~wire provider))
 ;;
 
 let for_provider_model_id_from_catalog ~catalog ~wire ~provider ~model_id =
@@ -546,21 +550,19 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
 let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provider_entry)
     ~capabilities ~model_id =
   let pricing_source = Pricing.of_provider_entry ~catalog ~provider in
-  let capabilities = match Option.bind
-      (List.assoc_opt wire provider.capabilities_base_by_identity_kind)
-      capabilities_for_provider_label with
-    | Some capabilities -> capabilities
+  let capabilities = match provider_wire_preset ~wire:(Some wire) provider with
+    | Some preset -> Some (capabilities_of_preset preset)
     | None -> capabilities in
   let row = match Model_identifiers.Model_id.of_string model_id with
     | Error _ -> None
     | Ok model_id -> Option.bind catalog (fun catalog ->
         Model_catalog.lookup_model_for_provider_entry catalog ~provider ~model_id) in
   match row with
-  | None -> {model_capabilities=Some capabilities;anthropic_thinking_control=None;pricing_source}
+  | None -> {model_capabilities=capabilities;anthropic_thinking_control=None;pricing_source}
   | Some row ->
     let scoped_provider = match row.Model_catalog.provider_name with
       | None -> None | Some _ -> Some provider in
-    let model_capabilities = Some (apply_catalog_entry ~base:capabilities
+    let model_capabilities = Some (apply_catalog_entry ?base:capabilities
         ~provider_entry:scoped_provider ~wire:(Some wire) row) in
     let anthropic_thinking_control = match wire with
       | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value

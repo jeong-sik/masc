@@ -27,7 +27,9 @@ type t = private
   ; discovery_timeout_s : float option
     (** Explicit total deadline for one discovery HTTP request. *)
   ; max_context : int option
-  ; capabilities : capabilities
+  ; capabilities : capabilities option
+    (** [None] is an explicitly models-only provider: inspect the selected exact
+        model policy rather than inventing a provider-wide capability record. *)
   ; available : bool
   ; credential_scope : string option
   ; declarations : Llm_provider.Catalog_snapshot.t

@@ -43,6 +43,11 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_tool_approval_mode_changed')).toBe('keeper_tool_approval_mode_changed')
   })
 
+  it('accepts operator question changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_asks_changed')).toBe('keeper_asks_changed')
+    expect(SSEEventTypeSchema.parse('lane_addon_asks_changed')).toBe('lane_addon_asks_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

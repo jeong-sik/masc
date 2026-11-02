@@ -95,6 +95,11 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // the dashboard follows held calls on the chat stream.
   'keeper_tool_approval_waits_changed',
   'keeper_tool_approval_mode_changed',
+  // A Keeper's or an installation's questions to the operator changed
+  // (lib/keeper/keeper_ask_broadcast.ml, lib/lane_addon/lane_addon_ask_broadcast.ml).
+  // The TUI re-reads on them; the dashboard reads asks when the surface opens.
+  'keeper_asks_changed',
+  'lane_addon_asks_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

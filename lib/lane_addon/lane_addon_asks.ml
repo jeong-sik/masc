@@ -194,7 +194,7 @@ let declarations store =
     in
     Ok (List.sort_uniq String.compare ids)
 
-let append store ~declaration_id event =
+let append_durable store ~declaration_id event =
   let path = log_path store ~declaration_id in
   try
     Fs_compat.mkdir_p (directory store);
@@ -212,6 +212,13 @@ let append store ~declaration_id event =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Unix.Unix_error _ | Sys_error _ | Failure _) as exn -> Error (Printexc.to_string exn)
+
+let append store ~declaration_id event =
+  let appended = append_durable store ~declaration_id event in
+  (match appended with
+   | Ok () -> Lane_addon_ask_broadcast.asks_changed ~declaration_id
+   | Error _ -> ());
+  appended
 
 let find rows ask_id = List.find_map (fun (id, row) -> if String.equal id ask_id then Some row else None) rows
 

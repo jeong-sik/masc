@@ -43,6 +43,8 @@ export type SSEEventType =
   | 'approval_rules_changed'
   | 'keeper_tool_approval_waits_changed'
   | 'keeper_tool_approval_mode_changed'
+  | 'keeper_asks_changed'
+  | 'lane_addon_asks_changed'
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'

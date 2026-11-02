@@ -130,6 +130,7 @@ let summary = function
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
   | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
+  | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
     ->
       Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
@@ -500,6 +501,13 @@ let test_schedule_change_is_read_by_the_servers_name () =
        (decode_all
           [ "data: " ^ Yojson.Safe.to_string Masc.Schedule_invalidation_event.json ^ "\n\n" ]))
 
+let test_pending_confirm_change_is_read_by_the_servers_name () =
+  check (list string) "the pending confirmation invalidation has a typed event"
+    [ "pending_confirm_invalidated" ]
+    (List.map summary
+       (decode_all
+          [ "data: " ^ Yojson.Safe.to_string Masc.Pending_confirm_invalidation_event.json ^ "\n\n" ]))
+
 (* The frame the bridge makes of the event the lane runtime publishes, so the
    test reads what the wire carries rather than a hand-built copy of it. *)
 module Lane_events = Masc.Lane_addon_resource_events
@@ -822,6 +830,8 @@ let () =
             test_the_internal_runs_push_is_read_by_the_servers_name
         ; test_case "the schedule change is read by the server's name" `Quick
             test_schedule_change_is_read_by_the_servers_name
+        ; test_case "the pending confirmation change is read by the server's name" `Quick
+            test_pending_confirm_change_is_read_by_the_servers_name
         ; test_case "every lane resource lifecycle is read with its payload"
             `Quick test_every_lane_resource_lifecycle_is_read_with_its_payload
         ; test_case "a lane resource without a reason says so" `Quick

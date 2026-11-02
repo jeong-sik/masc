@@ -111,6 +111,8 @@ class WaitingHandler(FixtureHandler):
                     }
                 elif keeper == "__schedule__":
                     payload = {"type": "schedule_store_invalidated"}
+                elif keeper == "__pending_confirm__":
+                    payload = {"type": "operator_pending_confirm_invalidated"}
                 else:
                     payload = {
                         "type": "keeper_waiting_inventory_changed",
@@ -177,6 +179,7 @@ class WaitingHandler(FixtureHandler):
                 "collision-follow": "collision-recovered",
                 "collision-during": "collision-ignored",
                 "schedule": "schedule-refreshed",
+                "confirm": "confirm-refreshed",
                 "schedule-held": "obsolete-schedule",
                 "schedule-follow": "final-schedule",
                 "reconnect": "reconnected-waiting",
@@ -573,6 +576,21 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 drain_for(0.5)
                 self.assertEqual(server.count("agenda-after", SCHEDULE_PATH), 0)
+                server.set_phase("confirm")
+                confirm_output_start = len(output)
+                server.events.put((11, "__pending_confirm__"))
+                wait_until(
+                    lambda: server.response_count("confirm", TURNS_PATH) == 1,
+                    "pending confirmation invalidation did not re-read waiting inventory",
+                )
+                wait_until(
+                    lambda: rendered_row_contains(
+                        confirm_output_start, b"analyst", b"confirm-refreshed"
+                    ),
+                    "pending confirmation invalidation did not refresh the waiting row",
+                )
+                drain_for(0.5)
+                self.assertEqual(server.count("confirm", SCHEDULE_PATH), 0)
                 server.set_phase("reconnect")
                 reconnect_output_start = len(output)
                 server.events.put(None)

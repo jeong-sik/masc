@@ -1,6 +1,6 @@
-(** Wake full-health when an operator confirmation expires, without periodic
-    store reads. The worker follows workspace generations and observes store
-    publications after their lock has been released. *)
+(** Wake full-health and invalidate the workspace waiting inventory on store
+    attempts, source transitions and confirmation expiry, without periodic
+    store reads. *)
 val start :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> state:Mcp_server.server_state -> unit
 

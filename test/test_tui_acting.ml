@@ -262,7 +262,12 @@ let test_the_internal_runs_push_is_not_a_keepers_act () =
   check bool "schedule changes are not keeper actions" false
     (Acting.visible Acting.Actions schedule_push);
   check bool "schedule changes remain visible under everything" true
-    (Acting.visible Acting.Everything schedule_push)
+    (Acting.visible Acting.Everything schedule_push);
+  let confirm_push = Observer.Pending_confirm_invalidated in
+  check bool "pending confirmation changes are not keeper actions" false
+    (Acting.visible Acting.Actions confirm_push);
+  check bool "pending confirmation changes remain visible under everything" true
+    (Acting.visible Acting.Everything confirm_push)
 
 module Lane_events = Masc.Lane_addon_resource_events
 

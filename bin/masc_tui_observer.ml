@@ -148,6 +148,7 @@ type event =
      shows internal runs re-fetches them. *)
   | Internal_agent_runs_changed
   | Schedule_store_invalidated
+  | Pending_confirm_invalidated
   (* A Lane Add-on container was acquired, failed to start, was removed, or
      could not be shown removed. It rides the agent-core family on the wire,
      but it is the lane runtime's fact, not an agent's. *)
@@ -179,7 +180,7 @@ let chat_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Lane_resource _
   | Snapshot _ | Other _ ->
       None
 
@@ -566,6 +567,8 @@ let reading_of_type type_name =
       Named Internal_agent_runs_changed
   | type_name when String.equal type_name Masc.Schedule_invalidation_event.event_type ->
       Named Schedule_store_invalidated
+  | type_name when String.equal type_name Masc.Pending_confirm_invalidation_event.event_type ->
+      Named Pending_confirm_invalidated
   | "keeper_chat_appended" as event ->
       From_fields
         (fun fields ->

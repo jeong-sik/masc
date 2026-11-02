@@ -30,7 +30,7 @@ let expiry_plan ~now entries =
     { expired = Expiry_set.empty; next = None } entries
 ;;
 
-let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
+let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate ~restore =
   let wake = Eio.Stream.create 1 in
   let wake_mu = Stdlib.Mutex.create () in
   let signal () =
@@ -48,7 +48,7 @@ let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
   Operator_pending_confirm.install_change_observer observer;
   Eio.Switch.on_release sw (fun () ->
     ignore (Operator_pending_confirm.replace_change_observer_if_current
-      ~current:observer ~replacement:invalidate));
+      ~current:observer ~replacement:restore));
   let is_current scope =
     Mcp_server.Workspace_scope_epoch.equal scope.Mcp_server.epoch
       (Mcp_server.workspace_scope state).epoch in
@@ -104,10 +104,18 @@ let read_storage config =
 ;;
 
 let start ~sw ~clock ~state =
-  start_with ~sw ~clock ~state ~read:read_storage
-    ~invalidate:Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace
+  let publish ~base_path =
+    let authority = Sse.runtime_authority_exn ~base_path in
+    Sse.broadcast_to_sse_runtime_observers authority Pending_confirm_invalidation_event.json in
+  let enqueue = Server_workspace_invalidation.start ~sw ~publish in
+  let restore = Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace in
+  let invalidate ~base_path =
+    enqueue ~base_path;
+    restore ~base_path in
+  start_with ~sw ~clock ~state ~read:read_storage ~invalidate ~restore
 ;;
 
 module For_testing = struct
-  let start = start_with
+  let start ~sw ~clock ~state ~read ~invalidate =
+    start_with ~sw ~clock ~state ~read ~invalidate ~restore:invalidate
 end

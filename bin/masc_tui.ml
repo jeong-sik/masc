@@ -4337,7 +4337,7 @@ let launch_goal_candle_load state ~mailbox goal_id =
               (match Masc_tui_http.fetch_goal_candle ~credential ~expected_instance:expected ~host ~port ~goal_id with
                | Error _ as error -> error
                | Ok (instance, _) when not (String.equal instance expected) ->
-                 Error Goal_candle_authority_changed
+                 Error (Goal_candle_authority_changed None)
                | Ok (instance, json) -> Candle_goal_observation.of_yojson ~goal_id json
                  |> Result.map (fun observation -> instance, observation)
                  |> Result.map_error (fun detail -> Goal_candle_read_failed detail)) in
@@ -21946,9 +21946,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       let current = Masc_tui_fetched.is_current ~equal:String.equal state.goal_candle request in
       let goal_id = Masc_tui_fetched.request_key request in
       let server_changed = match result with
-        | Ok (owner, Error Goal_candle_authority_changed)
+        | Ok (owner, Error (Goal_candle_authority_changed _))
           when current && Masc_tui_http.credential_owner_is_current owner -> Some owner
-        | Ok (_, (Ok _ | Error (Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed _)))
+        | Ok (_, (Ok _ | Error (Goal_candle_access_denied _ | Goal_candle_authority_changed _ | Goal_candle_http_status _ | Goal_candle_read_failed _)))
         | Error _ -> None in
       let accepted = current && (match result with
         | Ok (owner, Ok (instance, _)) when Masc_tui_http.credential_owner_is_current owner ->

@@ -326,10 +326,8 @@ let test_confirmation_retains_the_displayed_proof () =
   check_bool "evidence keeps its second line" true
     (List.mem "  Observed result retained" rendered)
 
-(* The block is one decision read in layers: the instruction, the promise,
-   the binding fine print, then the evidence. The evidence stays the last
-   group because the presented-frame receipt that arms [a] means the whole
-   proof was scrolled through. *)
+(* The confirmation block includes the candidate-coverage limit before the
+   evidence, preserving the existing last-evidence-row presentation check. *)
 let test_confirmation_reads_in_layers () =
   let read = confirmation_exn (confirmation_fixture ()) in
   let ko_rows = Detail.confirmation_lines ~width:80 ~ko:true read in
@@ -361,15 +359,13 @@ let test_confirmation_reads_in_layers () =
           && String.sub row.Detail.text 0 18 = "CONFIRM THIS PROOF")
        en_rows);
   let last = List.nth ko_rows (List.length ko_rows - 1) in
-  check_bool "the evidence ends the block, so a presented frame proves it was read" true
+  check_bool "the evidence remains the last group" true
     (last.Detail.tone = Detail.Plain
      && last.Detail.text = "  Observed result retained")
 
 (* The submitted originals arrive as metadata -- identity, size, integrity,
    no contents. They draw as one labelled list under the evidence paragraph,
-   a kind this build does not know stays on screen, and the list ends the
-   block, so the presented-frame receipt still covers everything the operator
-   was shown. *)
+   and a kind this build does not know stays on screen. *)
 let test_confirmation_lists_submitted_originals () =
   let read = confirmation_exn (confirmation_fixture ~submitted:submitted_originals_json ()) in
   let rows = Detail.confirmation_lines ~width:80 ~ko:false read in
@@ -388,12 +384,11 @@ let test_confirmation_lists_submitted_originals () =
          && String.sub row.Detail.text 0 10 = Printf.sprintf "%-10s" "Submitted:"
          && row.Detail.tone = Detail.Plain) rows);
   let last = List.nth rows (List.length rows - 1) in
-  check_bool "the list ends the block" true
+  check_bool "the list remains the last group" true
     (last.Detail.tone = Detail.Plain
      && last.Detail.text = "          unknown kind hologram")
 
-(* No originals, no list: the group itself is absent and the evidence
-   paragraph still ends the block. *)
+(* No originals means no list; the evidence remains the final group. *)
 let test_confirmation_without_originals_draws_no_list () =
   let rows = Detail.confirmation_lines ~width:80 ~ko:false
       (confirmation_exn (confirmation_fixture ())) in

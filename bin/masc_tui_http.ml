@@ -3230,12 +3230,10 @@ let fetch_goal_confirmation ~credential ~expected_instance ~host ~port ~goal_id 
   with Goal_confirmation_header_refused failure -> Error (convert failure)
 
 let decode_goal_candle_response = function
-  | { Masc_http_client.status=(401 | 403); _ } -> Error Masc_tui_types.Goal_candle_access_denied
-  | { Masc_http_client.status=409; _ } -> Error Masc_tui_types.Goal_candle_authority_changed
-  | { Masc_http_client.status; body; _ } when status < 200 || status >= 300 ->
-    (match decode_json ~allow_empty:false ~status_code:status ~body with
-     | Error detail -> Error (Masc_tui_types.Goal_candle_read_failed detail)
-     | Ok _ -> Error (Masc_tui_types.Goal_candle_read_failed "Unexpected non-success Candle response"))
+  | { Masc_http_client.status=((401 | 403) as status); _ } -> Error (Masc_tui_types.Goal_candle_access_denied status)
+  | { Masc_http_client.status=409; _ } -> Error (Masc_tui_types.Goal_candle_authority_changed (Some 409))
+  | { Masc_http_client.status; _ } when status < 200 || status >= 300 ->
+    Error (Masc_tui_types.Goal_candle_http_status status)
   | { Masc_http_client.status; body; headers } ->
     let instances = List.filter_map (fun (key, value) ->
       if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
@@ -3249,9 +3247,9 @@ let decode_goal_candle_response = function
 
 let goal_candle_header_failure ~expected_instance ~status ~headers =
   let open Masc_tui_types in
-  if status = 401 || status = 403 then Some Goal_candle_access_denied
-  else if status = 409 then Some Goal_candle_authority_changed
-  else if status < 200 || status >= 300 then None
+  if status = 401 || status = 403 then Some (Goal_candle_access_denied status)
+  else if status = 409 then Some (Goal_candle_authority_changed (Some status))
+  else if status < 200 || status >= 300 then Some (Goal_candle_http_status status)
   else if not (workspace_read_attested headers) then
     Some (Goal_candle_read_failed "Server did not attest the requested workspace read")
   else
@@ -3259,7 +3257,7 @@ let goal_candle_header_failure ~expected_instance ~status ~headers =
       if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
     match instances with
     | [instance] when String.trim instance <> "" ->
-      if String.equal instance expected_instance then None else Some Goal_candle_authority_changed
+      if String.equal instance expected_instance then None else Some (Goal_candle_authority_changed None)
     | [] | [_] | _ :: _ :: _ ->
       Some (Goal_candle_read_failed "Candle response has no unique server instance identity")
 

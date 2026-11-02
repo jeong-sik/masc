@@ -53,21 +53,38 @@ let test_goal_candle_read_rejects_stale_authority_and_refusals () =
   let old = start () in
   (match view () with Masc_tui_fetched.Loading -> () | _ -> Alcotest.fail "refresh retained the prior admin reading");
   let current = start () in
-  complete old (Ok (owner, Error Goal_candle_access_denied));
+  complete old (Ok (owner, Error (Goal_candle_access_denied 403)));
   (match view () with Masc_tui_fetched.Loading -> () | _ -> Alcotest.fail "retired refusal changed the current read");
-  complete current (Ok (owner, Error Goal_candle_authority_changed));
+  complete current (Ok (owner, Error (Goal_candle_authority_changed (Some 409))));
   (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "authority change retained old value");
   let retry = start () in
   Alcotest.(check bool) "retry is visibly in flight" true (Masc_tui_fetched.in_flight state.goal_candle);
   (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "retry lost its previous failure");
-  complete retry (Ok (owner, Error (Goal_candle_read_failed "response body interrupted")));
-  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "interrupted response retained admin data");
+  complete retry (Ok (owner, Error (Goal_candle_read_failed "private-alpha")));
+  let first_failure = match view () with
+    | Masc_tui_fetched.Failed detail -> detail
+    | _ -> Alcotest.fail "interrupted response retained admin data" in
+  Alcotest.(check bool) "first failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
+  Alcotest.(check bool) "first unowned detail is absent from state" false
+    (Astring.String.is_infix ~affix:"private-alpha" first_failure);
+  let another = start () in
+  complete another (Ok (owner, Error (Goal_candle_read_failed "secret-beta")));
+  (match view () with
+   | Masc_tui_fetched.Failed detail ->
+     Alcotest.(check bool) "second failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
+     Alcotest.(check bool) "second unowned detail is absent from state" false
+       (Astring.String.is_infix ~affix:"secret-beta" detail);
+     Alcotest.(check string) "unowned details do not alter retained failure" first_failure detail
+   | _ -> Alcotest.fail "another failure retained admin data");
   state.server_identity <- Some (instance "server-b");
   let replacement = start () in
   complete replacement (Ok (owner, Ok ("server-b", observation)));
   let denied = start () in
-  complete denied (Ok (owner, Error Goal_candle_access_denied));
+  complete denied (Ok (owner, Error (Goal_candle_access_denied 403)));
   (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "access refusal retained old value");
+  let unauthenticated = start () in
+  complete unauthenticated (Ok (owner, Error (Goal_candle_access_denied 401)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "authentication failure retained old value");
   let late = start () in
   state.server_identity <- Some (instance "server-c");
   complete late (Ok (owner, Ok ("server-b", observation)));
@@ -81,18 +98,18 @@ let test_goal_candle_http_status_and_instance_classification () =
   let admission_name, admission_value = Masc.Workspace.read_precondition_admission_header in
   let headers instance = [admission_name, admission_value; "x-masc-runtime-instance-id", instance] in
   let early status headers = Masc_tui_http.goal_candle_header_failure ~expected_instance:"server-a" ~status ~headers in
-  Alcotest.(check bool) "forbidden headers stop before body" true (early 403 [] = Some Goal_candle_access_denied);
-  Alcotest.(check bool) "conflict headers stop before body" true (early 409 [] = Some Goal_candle_authority_changed);
-  Alcotest.(check bool) "new process headers stop before body" true (early 200 (headers "server-b") = Some Goal_candle_authority_changed);
+  Alcotest.(check bool) "authentication headers stop before body" true (early 401 [] = Some (Goal_candle_access_denied 401));
+  Alcotest.(check bool) "forbidden headers stop before body" true (early 403 [] = Some (Goal_candle_access_denied 403));
+  Alcotest.(check bool) "conflict headers stop before body" true (early 409 [] = Some (Goal_candle_authority_changed (Some 409)));
+  Alcotest.(check bool) "rate limit stops before body and keeps status" true (early 429 [] = Some (Goal_candle_http_status 429));
+  Alcotest.(check bool) "new process headers stop before body" true (early 200 (headers "server-b") = Some (Goal_candle_authority_changed None));
   Alcotest.(check bool) "matching headers permit the body" true (early 200 (headers "server-a") = None);
   (match early 200 ["x-masc-runtime-instance-id", "server-b"] with
    | Some (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "unattested headers claimed authority change");
-  Alcotest.(check bool) "forbidden withdraws access" true (decode 403 [] = Error Goal_candle_access_denied);
-  Alcotest.(check bool) "workspace conflict requires authority refresh" true (decode 409 [] = Error Goal_candle_authority_changed);
-  (match decode 429 [] with
-   | Error (Goal_candle_read_failed detail) ->
-     Alcotest.(check bool) "rate limit status survives" true (String.length detail > 0)
-   | _ -> Alcotest.fail "rate limit was misclassified");
+  Alcotest.(check bool) "forbidden withdraws access" true (decode 403 [] = Error (Goal_candle_access_denied 403));
+  Alcotest.(check bool) "workspace conflict requires authority refresh" true (decode 409 [] = Error (Goal_candle_authority_changed (Some 409)));
+  Alcotest.(check bool) "rate limit status survives without body" true
+    (decode 429 [] = Error (Goal_candle_http_status 429));
   (match decode 200 [] with Error (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "missing instance accepted");
   (match decode 200 ["x-masc-runtime-instance-id", "server-a"] with
    | Ok ("server-a", `Assoc _) -> () | _ -> Alcotest.fail "instance-bound response rejected");

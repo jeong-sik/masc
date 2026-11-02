@@ -25,8 +25,11 @@ function milliCandle(amount: string): string {
   const digits = amount.padStart(4, '0')
   return `${digits.slice(0, -3)}.${digits.slice(-3)}`
 }
-function refusalText(error: ApiRequestError, message = error.message): string {
-  return message + (error.status === 401 ? ' 인증을 확인한 뒤 다시 조회하세요.' : '')
+function refusalText(error: ApiRequestError): string {
+  if (error.status !== undefined && error.status >= 200 && error.status < 300)
+    return `HTTP ${error.status} 응답 본문을 읽거나 해석할 수 없습니다.`
+  const status = error.status === undefined ? '서버 응답을 확인할 수 없습니다.' : `서버 응답 HTTP ${error.status}.`
+  return status + (error.status === 401 ? ' 인증을 확인한 뒤 다시 조회하세요.' : '')
 }
 function payoutText(payout: GoalCandlePayout): string {
   switch (payout.state) {
@@ -65,12 +68,12 @@ export function GoalCandlePanel({ owner, isCurrent, refreshKey }: {
     // while its body stalls. Until the whole response is checked, do not keep
     // drawing administrator-only data from the prior read.
     setView({ loading: true, value: null, error: null })
-    const observed = { refusal: null as ApiRequestError | null }
+    const observed = { refusal: null as ApiRequestError | null, successStatus: null as number | null }
     try {
       const value = await readGoalCandle(owner.goalId, owner.workspace, owner.executionEpoch, error => {
         observed.refusal = error
         if (current()) setView({ loading: false, value: null, error: refusalText(error) })
-      })
+      }, status => { observed.successStatus = status })
       if (current()) {
         automaticRecoveryAttempted.delete(owner.recoveryKey)
         setView({ loading: false, value, error: null })
@@ -78,18 +81,20 @@ export function GoalCandlePanel({ owner, isCurrent, refreshKey }: {
     } catch (error) {
       if (current()) {
         if (observed.refusal) {
-          // A stalled or interrupted error body cannot erase a refusal that
-          // has already arrived in this request's headers.
-          const complete = error instanceof ApiRequestError && error.status === observed.refusal.status ? error : null
-          const message = complete?.detail
-            ? `${observed.refusal.message} — ${complete.detail}`
-            : complete?.message ?? `${observed.refusal.message} (응답 내용을 끝까지 받지 못했습니다)`
-          setView({ loading: false, value: null, error: refusalText(observed.refusal, message) })
+          setView({ loading: false, value: null, error: refusalText(observed.refusal) })
+          return
+        }
+        if (observed.successStatus !== null) {
+          setView({ loading: false, value: null,
+            error: `HTTP ${observed.successStatus} 응답 본문을 읽거나 해석할 수 없습니다.` })
           return
         }
         const workspaceChanged = error instanceof ApiRequestError && error.status === 409
           && error.errorCode === 'workspace_precondition_failed'
-        setView({ loading: false, value: null, error: error instanceof Error ? error.message : String(error) })
+        const detail = error instanceof GoalCandleEpochMismatchError || error instanceof GoalCandleWorkspaceRefusalError
+          ? error.message : error instanceof ApiRequestError ? refusalText(error)
+            : '서버 응답을 확인할 수 없습니다. 연결을 확인한 뒤 다시 조회하세요.'
+        setView({ loading: false, value: null, error: detail })
         if ((error instanceof GoalCandleEpochMismatchError || error instanceof GoalCandleWorkspaceRefusalError || workspaceChanged)
           && !automaticRecoveryAttempted.has(owner.recoveryKey)) {
           automaticRecoveryAttempted.add(owner.recoveryKey)
@@ -118,6 +123,8 @@ export function GoalCandlePanel({ owner, isCurrent, refreshKey }: {
     </div>
     ${view.loading ? html`<p role="status">지급 기록을 확인하는 중...</p>` : null}
     ${view.error ? html`<p role="alert">지급 기록을 조회할 수 없습니다: ${view.error}</p>` : null}
+    ${payout && 'request_id' in payout ? html`
+      <p class="mt-1 text-xs text-text-muted">현재 후보 생성은 검증 기록 과정에서 저장한 Snapshot의 연결 작업만 읽습니다. 연결·삭제 이력 전체와 Snapshot 밖의 누락은 이 원장만으로 확인할 수 없습니다.</p>` : null}
     ${view.value ? html`<div class="mt-2 text-sm break-words">
       <p>마지막 조회 시 설정: ${{ enabled: '켜짐', off: '꺼짐', disabled: '설정 확인 불가' }[view.value.config]}</p>
       ${ledger?.state === 'missing' ? html`<p>원장 파일이 없습니다. 과거 기록의 삭제 또는 이동 여부는 미관측입니다.</p>` : null}

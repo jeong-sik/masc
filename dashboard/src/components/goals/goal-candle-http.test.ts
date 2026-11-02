@@ -40,6 +40,7 @@ describe('Goal Candle response boundaries', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     await screen.findByRole('alert')
     if (status === 401) expect(screen.getByRole('alert').textContent).toContain('인증을 확인한 뒤 다시 조회하세요')
+    if (status !== 200) expect(screen.getByRole('alert').textContent).toContain(`HTTP ${status}`)
     expect(screen.queryByText(/keeper-a:/)).toBeNull()
     expect(generation.resetExecutionSnapshotGeneration).toHaveBeenCalledTimes(status === 409 || status === 200 ? 1 : 0)
     stream.error(new Error('response body interrupted'))
@@ -48,7 +49,7 @@ describe('Goal Candle response boundaries', () => {
 
   it.each([[401, 'abort'], [401, 'network'], [403, 'abort'], [403, 'network'],
     [429, 'abort'], [429, 'network'], [503, 'abort'], [503, 'network']] as const)(
-    'retains the %i refusal when body reading fails (%s)', async (status, failure) => {
+    'retains the %i refusal without waiting for the body (%s)', async (status, failure) => {
       let stream!: ReadableStreamDefaultController<Uint8Array>
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
         new ReadableStream<Uint8Array>({ start(controller) { stream = controller } }), { status },
@@ -58,9 +59,9 @@ describe('Goal Candle response boundaries', () => {
       render(html`<${GoalCandlePanel} owner=${owner} isCurrent=${() => true} refreshKey="completed" />`)
       await screen.findByRole('alert')
       stream.error(failure === 'abort' ? new DOMException('request timed out', 'AbortError') : new Error('network failed'))
-      await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('응답 내용을 끝까지 받지 못했습니다'))
       expect(screen.getByRole('alert').textContent).toContain(String(status))
       expect(screen.getByRole('alert').textContent).not.toContain('timeout after')
+      expect(screen.getByRole('alert').textContent).not.toContain('network failed')
     })
 
   it('does not let this workspace-bound 401 mutate the shared credential', async () => {
@@ -98,13 +99,31 @@ describe('Goal Candle response boundaries', () => {
     uninstall()
   })
 
-  it.each([401, 503])('shows the detailed message when the %i error body completes', async status => {
+  it.each([401, 503])('withholds the %i error body while retaining its status', async status => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'repair the server setting' }), { status })))
     const owner = { key: `complete-${status}`, recoveryKey: `complete-${status}`, goalId: 'goal-1',
       workspace: { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, executionEpoch: 'epoch-a' }
     render(html`<${GoalCandlePanel} owner=${owner} isCurrent=${() => true} refreshKey="completed" />`)
-    await screen.findByText(/repair the server setting/)
+    await screen.findByRole('alert')
     expect(screen.getByRole('alert').textContent).toContain(String(status))
-    expect(screen.getByRole('alert').textContent).not.toContain('응답 내용을 끝까지 받지 못했습니다')
+    expect(screen.queryByText(/repair the server setting/)).toBeNull()
+  })
+
+  it.each([
+    new Error('private response detail'),
+    new DOMException('private response detail', 'AbortError'),
+  ])('reports an interrupted successful response as a body failure: %s', async failure => {
+    let stream!: ReadableStreamDefaultController<Uint8Array>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      new ReadableStream<Uint8Array>({ start(controller) { stream = controller } }),
+      { status: 200, headers: { 'x-masc-workspace-read': 'matched-v1', 'x-masc-execution-publication-epoch': 'epoch-a' } },
+    )))
+    const owner = { key: 'interrupted-success', recoveryKey: 'interrupted-success', goalId: 'goal-1',
+      workspace: { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, executionEpoch: 'epoch-a' }
+    render(html`<${GoalCandlePanel} owner=${owner} isCurrent=${() => true} refreshKey="completed" />`)
+    await screen.findByText('지급 기록을 확인하는 중...')
+    stream.error(failure)
+    await screen.findByText(/HTTP 200 응답 본문을 읽거나 해석할 수 없습니다/)
+    expect(screen.queryByText(/private response detail/)).toBeNull()
   })
 })

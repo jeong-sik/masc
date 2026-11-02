@@ -184,6 +184,22 @@ val prepare_presentation :
     belong to this attempt and are removed on success or failure. Blocking: call
     only from the image acquisition worker. Original bytes are never replaced. *)
 
+type remote_image =
+  | Remote_unfetched
+  | Remote_png of string
+  | Remote_cells of { png : string; cells : (presentation, string) result }
+
+type remote_action =
+  | Fetch_remote
+  | Prepare_remote_cells of string
+  | Draw_remote_png of string
+  | Draw_remote_cells of presentation
+  | Open_remote_page of string
+
+val decide_remote : graphics:bool option -> colour:bool -> remote_image -> remote_action
+(** Choose using the latest capability, which may have changed while the
+    worker ran. [None] preserves the native-first attempt. *)
+
 val invalidate_download : cache_dir:string -> string -> unit
 (** Explicit user refresh only: remove this URL's input and derived frames so
     a previously refused body can be fetched again. *)

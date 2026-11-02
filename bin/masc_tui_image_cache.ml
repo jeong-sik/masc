@@ -516,3 +516,29 @@ let prepare_presentation ~run ~cache_dir display png =
           if String.length bytes <> columns * pixel_rows * 4 then
             Error "image decoder returned an incomplete or unexpected RGBA frame"
           else Ok (Rgba {columns;pixel_rows;bytes})))
+
+type remote_image =
+  | Remote_unfetched
+  | Remote_png of string
+  | Remote_cells of { png : string; cells : (presentation, string) result }
+
+type remote_action =
+  | Fetch_remote
+  | Prepare_remote_cells of string
+  | Draw_remote_png of string
+  | Draw_remote_cells of presentation
+  | Open_remote_page of string
+
+let decide_remote ~graphics ~colour image =
+  match graphics, colour, image with
+  | (None | Some true), (true | false), Remote_unfetched -> Fetch_remote
+  | (None | Some true), (true | false), (Remote_png png | Remote_cells {png;_}) ->
+      Draw_remote_png png
+  | Some false, false, (Remote_unfetched | Remote_png _ | Remote_cells _) ->
+      Open_remote_page "terminal does not support pixel or colour-cell images"
+  | Some false, true, Remote_unfetched -> Fetch_remote
+  | Some false, true, Remote_png png -> Prepare_remote_cells png
+  | Some false, true, Remote_cells {cells=Ok (Rgba _ as cells);_} -> Draw_remote_cells cells
+  | Some false, true, Remote_cells {cells=Ok (Png _);_} ->
+      Open_remote_page "colour-cell renderer did not return a character frame"
+  | Some false, true, Remote_cells {cells=Error detail;_} -> Open_remote_page detail

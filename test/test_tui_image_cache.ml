@@ -351,6 +351,31 @@ let test_character_frame_keeps_output_reserved () =
     check (list string) "exception cleans owned attempt files" ["output-path"]
       (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
 
+let test_remote_capability_changes () =
+  let png = "png" in
+  let rgba = Cache.Rgba {columns=2;pixel_rows=2;bytes=String.make 16 '\000'} in
+  let frame = Cache.Remote_cells {png;cells=Ok rgba} in
+  check bool "unknown capability tries native PNG" true
+    (Cache.decide_remote ~graphics:None ~colour:true (Cache.Remote_png png) = Cache.Draw_remote_png png);
+  check bool "confirmed non-pixel terminal prepares cells" true
+    (Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_png png) = Cache.Prepare_remote_cells png);
+  check bool "prepared cells are used on a colour terminal" true
+    (Cache.decide_remote ~graphics:(Some false) ~colour:true frame = Cache.Draw_remote_cells rgba);
+  check bool "late native support uses the original PNG even after cell failure" true
+    (Cache.decide_remote ~graphics:(Some true) ~colour:true
+       (Cache.Remote_cells {png;cells=Error "decoder failed"}) = Cache.Draw_remote_png png);
+  check bool "late support resumes a previously unfetched request" true
+    (Cache.decide_remote ~graphics:(Some true) ~colour:false Cache.Remote_unfetched = Cache.Fetch_remote);
+  check bool "no pixel or colour capability falls back" true
+    (match Cache.decide_remote ~graphics:(Some false) ~colour:false frame with
+     | Cache.Open_remote_page _ -> true
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _ | Cache.Draw_remote_cells _ -> false);
+  check bool "failed cell decoding falls back" true
+    (match Cache.decide_remote ~graphics:(Some false) ~colour:true
+       (Cache.Remote_cells {png;cells=Error "decoder failed"}) with
+     | Cache.Open_remote_page _ -> true
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _ | Cache.Draw_remote_cells _ -> false)
+
 let test_mosaic_failure_retains_input_and_can_recover () =
   List.iter (fun code -> with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/preview.png" in
@@ -851,6 +876,8 @@ let () =
             test_character_frame_protocol_and_cleanup
         ; test_case "character decoder retains output reservation" `Quick
             test_character_frame_keeps_output_reserved
+        ; test_case "remote preview follows current terminal capability" `Quick
+            test_remote_capability_changes
         ; test_case "a delete during the fetch does not take the download" `Quick
             test_a_delete_during_the_fetch_does_not_take_the_download
         ; test_case "a delete during the conversion does not take the frame" `Quick

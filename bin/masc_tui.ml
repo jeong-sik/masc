@@ -11709,16 +11709,34 @@ let retry_image_mosaic img =
    why they could not be produced. Pure of the render loop: no terminal writes,
    so it is safe to run on a systhread. *)
 let prepare_remote_image_bytes url =
-  Masc_tui_image_cache.prepare_png ~run:Unix.system
+  Masc_tui_image_cache.prepare_png
+    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
     ~cache_dir:(ensure_img_cache_dir ()) url
 
-(* [v] on a link preview, and /image with an HTTP(S) URL: download and
-   convert the image OFF the render loop, then hand the PNG bytes back through
-   the mailbox so [draw_image] runs on the render fiber, not here. The
-   blocking curl/sips live inside run_in_systhread so the domain keeps
-   rendering; the loading line is shown at once so the keypress is not silent.
-   terminal_draws_images = false skips the download and opens the page in a
-   browser instead. *)
+let launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url work =
+  Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
+    ~boundary_error:Fun.id
+    ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
+    work
+
+let remote_image_fetch image_url () =
+  Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
+    Result.map (fun png -> Masc_tui_image_cache.Remote_png png)
+      (prepare_remote_image_bytes image_url))
+
+let remote_image_cells ~display png () =
+  let cells = match display with
+    | Error detail -> Error detail
+    | Ok display ->
+        Eio_guard.run_in_systhread ~label:"tui-remote-image-cells" (fun () ->
+          Masc_tui_image_cache.prepare_presentation
+            ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
+            ~cache_dir:(ensure_img_cache_dir ()) display png) in
+  Ok (Masc_tui_image_cache.Remote_cells {png;cells})
+
+(* A remote preview retains one input-cancellable owner across download and,
+   when needed, colour-cell conversion.  Each blocking stage runs off the
+   render loop; the completion chooses with the latest terminal capability. *)
 let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_url =
   state.image_request_generation <- state.image_request_generation + 1;
   let view = state.view in
@@ -11728,17 +11746,12 @@ let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_u
     sir_resource=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
   state.sent_image_read <- Some request;
-  let unsupported = !terminal_draws_images = Some false in
-  if not unsupported then
+  let unavailable = !terminal_draws_images = Some false && not (character_images_available ()) in
+  if not unavailable then
     notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
-  Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
-    ~boundary_error:Fun.id
-    ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
-    (fun () ->
-      if unsupported then Error "terminal does not support inline images"
-      else
-        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
-            prepare_remote_image_bytes image_url))
+  launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+    (if unavailable then (fun () -> Ok Masc_tui_image_cache.Remote_unfetched)
+     else remote_image_fetch image_url)
 
 let image_request_is_active state entry =
   let matches request =
@@ -12451,6 +12464,7 @@ let withdraw_pending_music_editor state =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  let cell_was_open = Option.is_some state.image_cell_view in
   state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
@@ -12462,7 +12476,7 @@ let close_image state =
   | true ->
       state.image_open <- false;
       Masc_tui_msx.invalidate ();
-      write_to_terminal Masc_tui_graphics.delete_all
+      if not cell_was_open then write_to_terminal Masc_tui_graphics.delete_all
 
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   let failed = ref false in
@@ -22912,13 +22926,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | None -> false in
       if current then begin
       let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
-      (match result with
-       | Ok data ->
-           let refuse reason =
-             notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason)
-           in
-           draw_image state ~caption ~refuse ~title data
-       | Error e -> (
+      let open_page e =
            let url =
              Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
            in
@@ -22929,7 +22937,31 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                     e opener url)
            | Error opener_err ->
                notice ~kind:Notice_failure
-                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
+                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err) in
+      let refuse reason =
+        notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason) in
+      (match result with
+       | Error e -> open_page e
+       | Ok prepared ->
+           match Masc_tui_image_cache.decide_remote ~graphics:!terminal_draws_images
+               ~colour:(character_images_available ()) prepared with
+           | Fetch_remote ->
+               state.sent_image_read <- Some request;
+               notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
+               launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+                 (remote_image_fetch image_url)
+           | Prepare_remote_cells png ->
+               let display = match cell_image_terminal_size () with
+                 | None -> Error "terminal size is unavailable"
+                 | Some (rows, columns) -> Ok (Masc_tui_image_cache.Character_cells {
+                     columns=max 0 (columns - 2);rows=max 0 (rows - 3 - List.length caption)}) in
+               state.sent_image_read <- Some request;
+               launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+                 (remote_image_cells ~display png)
+           | Draw_remote_png png -> draw_image state ~caption ~refuse ~title png
+           | Draw_remote_cells cells ->
+               draw_prepared_image ~caption ~origin:request state ~refuse ~title cells
+           | Open_remote_page reason -> open_page reason)
       end
   | Msx_tick_withdrawn (request, detail) ->
       (match !msx_pending_poll with

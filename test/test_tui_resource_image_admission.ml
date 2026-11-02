@@ -753,8 +753,8 @@ let test_image_result_with_full_mailbox () =
       check int "only an admitted result can draw" expected_draw !draw;
       check int "only an admitted failure can open the browser" expected_open !open_browser;
       Results.close results)
-      [Ok "png",false,1,0; Error "unavailable",false,0,1;
-       Ok "png",true,0,0; Error "unavailable",true,0,0]))
+      [Ok (Masc_tui_image_cache.Remote_png "png"),false,1,0; Error "unavailable",false,0,1;
+       Ok (Masc_tui_image_cache.Remote_png "png"),true,0,0; Error "unavailable",true,0,0]))
 
 let test_board_svg_and_original_reader () =
   let module Payload = Masc_tui_image_payload in

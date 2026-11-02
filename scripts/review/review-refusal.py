@@ -29,7 +29,7 @@ def expected_footer(head, policy, base_sha, current_diff, release_run=""):
 
 def verdict_pattern(head, policy):
     if policy == "release":
-        return re.compile(rf"^verdict: PASS head: {head} run: [1-9][0-9]* by: [A-Za-z0-9._-]+$")
+        return re.compile(rf"^verdict: PASS head: {head} run: ([1-9][0-9]*) by: [A-Za-z0-9._-]+$")
     return re.compile(rf"^verdict: PASS head: {head} by: [A-Za-z0-9._-]+$")
 
 
@@ -50,39 +50,66 @@ def diagnose(review, *, head, policy, base_sha, current_diff, release_run=""):
             f"author_association is {assoc}; approval needs OWNER, MEMBER or COLLABORATOR")
     lines = body.split("\n")
     first = lines[0]
-    if not verdict_pattern(head, policy).fullmatch(first):
+    verdict = verdict_pattern(head, policy).fullmatch(first)
+    if not verdict:
         want = (f"verdict: PASS head: {head} run: <run> by: <keeper>" if policy == "release"
                 else f"verdict: PASS head: {head} by: <keeper>")
         reasons.append(f"first line is not the exact-head verdict; expected `{want}`, got `{short(first)}`")
     nonempty = [line for line in lines if line]
     last = nonempty[-1] if nonempty else ""
+    binding_line = last
+    # A head-only last line must follow the complete review binding as the
+    # preceding non-empty line. Existing approvals with that binding last
+    # remain valid.
+    head_only = re.fullmatch(r"approve-guard: head ([0-9a-f]{40})", last)
+    if head_only:
+        if head_only[1] != head:
+            reasons.append(f"last line names head {head_only[1]}, not current head {head}")
+        binding_line = nonempty[-2] if len(nonempty) > 1 else ""
+    if policy == "release":
+        if not re.fullmatch(r"[1-9][0-9]*", release_run):
+            reasons.append("selected release run is unavailable")
+        else:
+            if verdict and verdict[1] != release_run:
+                reasons.append(f"verdict cites release run {verdict[1]}, not selected run {release_run}")
+            binding = re.match(
+                rf"^approve-guard: head `{head}` · release review · release run ([1-9][0-9]*)(?: · |$)",
+                binding_line)
+            if not binding:
+                reasons.append("binding line does not identify a release review and run")
+            elif binding[1] != release_run:
+                reasons.append(f"binding line cites release run {binding[1]}, not selected run {release_run}")
+    elif policy == "source":
+        source_prefix = f"approve-guard: head `{head}` · source review · "
+        if not binding_line.startswith(source_prefix) or " · release run " in binding_line:
+            reasons.append("binding line does not identify a source review without a release run")
     prefix = f"approve-guard: head `{head}` · "
     tail_re = re.compile(rf" · reviewed base `[0-9a-f]{{40}}` · diff sha256 `{current_diff}`$")
     # Independent checks: one footer can miss both parts, and the refusal must
     # name each failing part, not only the first (P2 5439285101).
-    if not last.startswith(prefix):
+    if not binding_line.startswith(prefix):
         reasons.append(
-            f"last non-empty line must start with `{prefix}` (backticked head, ' · ' separator); got `{short(last)}`")
-    if not tail_re.search(last):
-        found = re.search(r"diff sha256 `([0-9a-f]{64})`", last)
-        if "reviewed base" not in last and "diff sha256" not in last:
+            f"review binding line must start with `{prefix}` (backticked head, ' · ' separator); got `{short(binding_line)}`")
+    if not tail_re.search(binding_line):
+        found = re.search(r"diff sha256 `([0-9a-f]{64})`", binding_line)
+        if "reviewed base" not in binding_line and "diff sha256" not in binding_line:
             reasons.append("footer lacks the ' · reviewed base `<40hex>` · diff sha256 `<64hex>`' tail")
         elif found and found.group(1) != current_diff:
             reasons.append(
                 f"footer diff sha256 `{found.group(1)}` is not the current complete diff `{current_diff}`; the diff changed after the review")
-        elif not re.search(r" · reviewed base `[0-9a-f]{40}` · ", last):
+        elif not re.search(r" · reviewed base `[0-9a-f]{40}` · ", binding_line):
             reasons.append("footer reviewed base is missing or not a 40-hex commit")
         else:
             tail_msg = ("footer tail must end with ' · reviewed base `<40hex>` · diff sha256 `<current diff>`'; "
-                        f"got `{short(last)}`")
+                        f"got `{short(binding_line)}`")
             # A trailing CR satisfies every visible char yet still fails the
             # anchor, so the reason must name it instead of staying silent.
-            if last.endswith("\r"):
+            if binding_line.endswith("\r"):
                 tail_msg += " (trailing carriage return)"
             reasons.append(tail_msg)
     if reasons:
         reasons.append(
-            "expected last line (copy): " + expected_footer(head, policy, base_sha, current_diff, release_run))
+            "expected guard-generated footer: " + expected_footer(head, policy, base_sha, current_diff, release_run))
     return reasons
 
 

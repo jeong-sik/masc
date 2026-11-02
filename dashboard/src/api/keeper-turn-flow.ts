@@ -25,6 +25,7 @@ export interface TurnIntakeSource {
 export type TurnIntake =
   | { state: 'observed'; channel: string | null; sources: TurnIntakeSource[] }
   | { state: 'not_recorded'; reason: string }
+  | { state: 'unavailable'; reason: string }
   | { state: 'ambiguous'; starts: number }
 
 export interface TurnFlowEvent {
@@ -85,10 +86,25 @@ export function decodeTurnFlow(trace: KeeperRuntimeTraceResponse, target: TurnFl
     }
   }
   const starts = trace.manifest_rows.filter(row => row.event === 'turn_started')
+  const scannedStarts = trace.runtime_lens.axes.lifecycle.turn_started_count
+  const validCount = Number.isSafeInteger(scannedStarts) && scannedStarts >= 0
+  const observedStarts = Math.max(starts.length, validCount ? scannedStarts : 0)
+  const diagnostics = trace.manifest_scan_diagnostics
   let intake: TurnIntake
-  if (starts.length > 1) {
-    // Repeated attempts must not silently borrow the last attempt's intake.
-    intake = { state: 'ambiguous', starts: starts.length }
+  if (observedStarts > 1) {
+    // The scan counts starts beyond the bounded returned page. Even a partial
+    // scan can prove repetition; its absence cannot prove a single attempt.
+    intake = { state: 'ambiguous', starts: observedStarts }
+  } else if (trace.manifest_total_rows_exact !== true) {
+    intake = { state: 'unavailable', reason: trace.manifest_total_rows_exact === false
+      ? '전체 manifest를 읽지 못해 같은 턴의 다른 시작 여부를 확정할 수 없습니다'
+      : 'manifest 조회 범위의 완전성이 기록되지 않았습니다' }
+  } else if (diagnostics.state !== 'available'
+    || diagnostics.invalid_manifest_row_count > 0 || diagnostics.invalid_json_row_count > 0
+    || diagnostics.unsupported_event_unattributed_count > 0) {
+    intake = { state: 'unavailable', reason: '읽지 못한 manifest 행이 있어 턴 시작 횟수를 확정할 수 없습니다' }
+  } else if (!validCount || scannedStarts !== starts.length) {
+    intake = { state: 'unavailable', reason: '전체 조회의 시작 횟수와 반환된 시작 기록이 일치하지 않습니다' }
   } else {
     const decision = starts[0]?.decision
     if (!isRecord(decision) || !Object.hasOwn(decision, 'intake_sources')) {

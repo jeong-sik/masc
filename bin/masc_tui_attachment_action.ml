@@ -162,11 +162,11 @@ let display_name ~(sha256 : string) = function
       then String_util.utf8_prefix ~max_bytes:digest_display_bytes sha256 ^ "…"
       else sha256
 
-let open_external ~name ~path =
+let open_external ~open_url ~name ~path =
   if not (allows_external_open ~name) then
     { name; result = Saved path; midi_summary = None }
   else
-    match Masc_tui_browser.open_url path with
+    match open_url path with
     | Ok _ -> { name; result = Opened; midi_summary = None }
     | Error _ -> { name; result = Saved path; midi_summary = None }
 
@@ -216,16 +216,21 @@ let midi_path = function
   | Prepared_file {action=(Play_local | Open_external | Save_only); _}
   | Prepared_url _ -> None
 
-let perform prepared ~midi_soundfont =
+let external_file = function
+  | Prepared_file {name;path;action=Open_external;_} when allows_external_open ~name -> Some (name,path)
+  | Prepared_file {action=(Play_midi | Play_local | Open_external | Save_only);_}
+  | Prepared_url _ -> None
+
+let perform ?(open_url=Masc_tui_browser.open_url) prepared ~midi_soundfont =
   match prepared with
   | Prepared_url url ->
-      (match Masc_tui_browser.open_url url with
+      (match open_url url with
        | Ok _ -> { name = url; result = Opened; midi_summary = None }
        | Error reason -> { name = url; result = Failed reason; midi_summary = None })
   | Prepared_file { name; path; action; midi_summary } ->
       match action with
       | Save_only -> { name; result = Saved path; midi_summary }
-      | Open_external -> open_external ~name ~path
+      | Open_external -> open_external ~open_url ~name ~path
       | Play_local ->
           (match player_argvs ~path () with
            | [] ->

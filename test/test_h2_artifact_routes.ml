@@ -87,6 +87,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                 let authority = match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with
                   | Ok value -> value | Error `Malformed -> fail "invalid test authority" in
                 let router = Http.Router.create ()
+                  |> Server_routes_http_routes_artifacts.add_routes
                   |> Server_routes_http_routes_published_artifacts.add_routes
                   |> Server_routes_http_routes_artifact_app_data.add_routes
                   |> Server_routes_http_routes_artifact_drafts.add_routes
@@ -276,6 +277,28 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
   pair_status "incomplete workspace headers" 400 incomplete;
   let encode = Uri.pct_encode ~component:`Query_value in
   let query base root = "?expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in
+  let raw = "/api/v1/artifact-bytes/" ^ digest in
+  let raw_unbound = both gateway ~token:admin raw in
+  pair_status "unbound original bytes" 200 raw_unbound;
+  let raw_matched = both gateway ~token:admin (raw ^ query expected.base_path expected.masc_root) in
+  pair_status "workspace-bound original bytes" 200 raw_matched;
+  List.iter (fun reply ->
+    check string "workspace-bound original bytes are exact" "version one" reply.body;
+    check (option string) "original bytes carry workspace receipt" (Some "matched-v1")
+      (header "x-masc-workspace-read" reply)) [fst raw_matched; snd raw_matched];
+  List.iter (fun reply ->
+    check (option string) "unbound bytes carry no workspace receipt" None
+      (header "x-masc-workspace-read" reply)) [fst raw_unbound; snd raw_unbound];
+  let raw_foreign = both gateway ~token:admin (raw ^ query "/foreign-workspace" expected.masc_root) in
+  pair_status "foreign workspace cannot read original bytes" 409 raw_foreign;
+  List.iter (fun reply ->
+    check bool "refusal excludes original bytes" false (String.equal reply.body "version one");
+    check (option string) "refusal carries no workspace receipt" None
+      (header "x-masc-workspace-read" reply)) [fst raw_foreign; snd raw_foreign];
+  pair_status "incomplete original-byte workspace" 400
+    (both gateway ~token:admin (raw ^ "?expected_base_path=" ^ encode expected.base_path));
+  pair_status "original bytes still require Admin" 403
+    (both gateway ~token:worker (raw ^ query expected.base_path expected.masc_root));
   let matched_h1, matched_h2 = both gateway ~token:admin (doc ^ query expected.base_path expected.masc_root) in
   List.iter (fun reply ->
     check_status "matching GET workspace" 200 reply;

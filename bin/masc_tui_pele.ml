@@ -3,10 +3,28 @@ type scene = { format : format; source : string; max_width : int;
   font_size : int; now_ms : int64; colors : (string * string) option }
 type crop = { left : float; top : float; right : float; bottom : float }
 type raster = { width : int; height : int; crop : crop option }
+type runner = input:string -> output:string -> errors:string -> Unix.process_status
 let scene ~format ~max_width ~font_size ~now_ms ~colors source =
   {format;source;max_width;font_size;now_ms;colors}
 
-let render ~cache_dir ?raster {format;source;max_width;font_size;now_ms;colors} =
+let command_runner ~run ~input ~output ~errors =
+  run (Printf.sprintf "masc-pele < %s > %s 2> %s"
+    (Filename.quote input) (Filename.quote output) (Filename.quote errors))
+
+let default_runner ~input ~output ~errors =
+  let with_file path flags fn =
+    let descriptor = Unix.openfile path flags 0o600 in
+    Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () -> fn descriptor) in
+  let pid = with_file input [Unix.O_RDONLY] (fun stdin ->
+    with_file output [Unix.O_WRONLY; Unix.O_TRUNC] (fun stdout ->
+      with_file errors [Unix.O_WRONLY; Unix.O_TRUNC] (fun stderr ->
+        Unix.create_process "masc-pele" [|"masc-pele"|] stdin stdout stderr))) in
+  let rec wait () = match Unix.waitpid [] pid with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
+  wait ()
+
+let render ~cache_dir ?raster ?(runner=default_runner) {format;source;max_width;font_size;now_ms;colors} =
   let paths = ref [] in
   let temporary suffix =
     let path = Filename.temp_file ~temp_dir:cache_dir "pele-" suffix in
@@ -40,19 +58,7 @@ let render ~cache_dir ?raster {format;source;max_width;font_size;now_ms;colors} 
                               "background", `String background]) :: fields in
       Out_channel.with_open_bin input (fun channel ->
         Yojson.Safe.to_channel channel (`Assoc fields));
-      let with_file path flags fn =
-        let descriptor = Unix.openfile path flags 0o600 in
-        Fun.protect ~finally:(fun () -> Unix.close descriptor)
-          (fun () -> fn descriptor) in
-      let pid = with_file input [Unix.O_RDONLY] (fun stdin ->
-        with_file output [Unix.O_WRONLY; Unix.O_TRUNC] (fun stdout ->
-          with_file errors [Unix.O_WRONLY; Unix.O_TRUNC] (fun stderr ->
-            Unix.create_process "masc-pele" [|"masc-pele"|] stdin stdout stderr))) in
-      let rec wait () =
-        match Unix.waitpid [] pid with
-        | _, status -> status
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
-      match wait () with
+      match runner ~input ~output ~errors with
       | Unix.WEXITED 0 ->
           let png = read output in
           if String.length png = 0 then Error "Pele produced no image" else Ok png

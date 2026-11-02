@@ -209,6 +209,45 @@ let app_data = "/api/v1/artifact-app-data"
 let drafts = "/api/v1/artifact-drafts"
 let checkpoints = "/api/v1/artifact-draft-checkpoints"
 
+let test_goal_planning_workspace_read_h1_h2 () =
+  with_gateway (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
+    let config = Masc.Workspace.default_config base_path in
+    let goal, _ = match Goal_store.upsert_goal config
+      ~title:"Workspace-bound planning" ~metric:"proof" ~target_value:"1" () with
+      | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
+    let root = Filename.concat base_path ".masc" in
+    let endpoint = "/api/v1/dashboard/planning" in
+    let query base root = "?expected_base_path=" ^ Uri.pct_encode base
+      ^ "&expected_masc_root=" ^ Uri.pct_encode root in
+    let bound_h1, bound_h2 = both gateway ~token:admin (endpoint ^ query base_path root) in
+    pair_status "matching planning workspace" 200 (bound_h1, bound_h2);
+    List.iter (fun reply ->
+      let receipts = List.filter_map (fun (key, value) ->
+        if String.equal (String.lowercase_ascii key) "x-masc-workspace-read"
+        then Some value else None) reply.headers in
+      check (Alcotest.list string) "exactly one workspace admission receipt" ["matched-v1"] receipts;
+      match member "goals" (json reply) with
+      | `List goals ->
+        check bool "planning includes the workspace's Goal" true
+          (List.exists (fun item -> member "id" item = `String goal.id) goals)
+      | _ -> fail "planning response did not contain the Goal list") [bound_h1; bound_h2];
+    let unbound_h1, unbound_h2 = both gateway ~token:admin endpoint in
+    pair_status "unbound planning" 200 (unbound_h1, unbound_h2);
+    List.iter (fun reply ->
+      check (option string) "unbound read has no admission receipt" None
+        (header "x-masc-workspace-read" reply)) [unbound_h1; unbound_h2];
+    let wrong = both gateway ~token:admin (endpoint ^ query base_path (root ^ "-other")) in
+    pair_status "foreign planning workspace" 409 wrong;
+    pair_code "foreign planning workspace" "workspace_precondition_failed" wrong;
+    let incomplete = both gateway ~token:admin
+      (endpoint ^ "?expected_base_path=" ^ Uri.pct_encode base_path) in
+    pair_status "partial planning workspace" 400 incomplete;
+    pair_code "partial planning workspace" "invalid_workspace_precondition" incomplete;
+    let duplicate = both gateway ~token:admin
+      (endpoint ^ query base_path root ^ "&expected_base_path=" ^ Uri.pct_encode base_path) in
+    pair_status "duplicate planning workspace" 400 duplicate;
+    pair_code "duplicate planning workspace" "invalid_workspace_precondition" duplicate)
+
 let test_goal_candle_access_and_fresh_read () =
   with_gateway (fun ~base_path ~worker ~player:_ ~admin gateway ->
     let root = Filename.concat base_path ".masc" in
@@ -1057,6 +1096,7 @@ let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_s
   run ~argv "H2 artifact gateway"
     ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
        "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity;
+       "Goal planning binds workspace reads on H1 and H2", `Quick, test_goal_planning_workspace_read_h1_h2;
        "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read;
        "Goal confirmation shares H1 and H2 authority and completion", `Quick, test_goal_confirmation_h1_h2];
      "synthetic transformer transport", ["checkpoint and SSE reset", `Quick,

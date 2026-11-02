@@ -1414,11 +1414,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/planning" ->
           h2_gate_state h2_reqd (fun state ->
-            let json =
-              dashboard_planning_http_json
-                ~config:(Mcp_server.workspace_config state)
-            in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+              let json = dashboard_planning_http_json ~config in
+              h2_respond_json_value h2_reqd json ~extra_headers:(workspace_headers @ cors)))
 
       | `GET, "/api/v1/dashboard/bootstrap" ->
           (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees

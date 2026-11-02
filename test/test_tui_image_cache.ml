@@ -28,6 +28,21 @@ let decode_failure =
 let png_header = "\x89PNG\r\n\x1a\n\000\000\000\rIHDR"
 let jpeg_header = "\xff\xd8\xff\xe0\000\x10JFIF"
 let bmp_header = "BM\x36\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00"
+let animated_gif =
+  "\x47\x49\x46\x38\x39\x61\x02\x00\x02\x00\xf0\x00\x00\xff\x00\x00\
+   \x00\x00\x00\x21\xff\x0b\x4e\x45\x54\x53\x43\x41\x50\x45\x32\x2e\
+   \x30\x03\x01\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00\x2c\x00\
+   \x00\x00\x00\x02\x00\x02\x00\x00\x02\x02\x84\x51\x00\x21\xf9\x04\
+   \x00\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x02\x00\x02\x00\x80\x00\
+   \x00\xff\x00\x00\x00\x02\x02\x84\x51\x00\x3b"
+let offset_gif =
+  let bytes = Bytes.of_string animated_gif in
+  let descriptor = String.index animated_gif '\x2c' in
+  Bytes.set bytes 6 '\004';
+  Bytes.set bytes 8 '\004';
+  Bytes.set bytes (descriptor + 1) '\001';
+  Bytes.set bytes (descriptor + 3) '\001';
+  Bytes.to_string bytes
 let avif_header = "\000\000\000\x1cftypavif\000\000\000\000avifmif1"
 let rate_limit_notice = "Too many requests, please try again later."
 let html_page = "<!doctype html><html><head><title>403</title></head><body></body></html>"
@@ -427,6 +442,34 @@ let test_partial_converter_failure_uses_next_converter () =
     check string "fallback retains source without refetch" "x"
       (read_file (Filename.concat cache_dir "fetches")))
 
+let first_frame_ffmpeg cache_dir frame =
+  executable cache_dir "ffmpeg" (Printf.sprintf
+    "single=0\nprevious=\nfor argument do\n  if [ \"$previous\" = '-frames:v' ] && [ \"$argument\" = 1 ]; then single=1; fi\n  previous=$argument\n  output=$argument\ndone\n[ \"$single\" -eq 1 ] || exit 1\nprintf %%b %s > \"$output\""
+    (shell_bytes frame))
+
+let test_multiframe_image_after_imagemagick () =
+  with_cache (fun cache_dir run ->
+    let source = Filename.concat cache_dir "animated.gif" in
+    let full_frame = png_header ^ "\000\000\000\004\000\000\000\004" in
+    write_file source offset_gif;
+    executable cache_dir "sips" "exit 127";
+    executable cache_dir "convert"
+      "for output do :; done\nprintf first > \"${output%.png}-0.png\"\nprintf second > \"${output%.png}-1.png\"";
+    first_frame_ffmpeg cache_dir full_frame;
+    check string "ffmpeg prepares the complete first-frame canvas" full_frame
+      (unwrap (Cache.prepare_file ~run ~cache_dir source));
+    check string "the original animation remains intact" offset_gif (read_file source))
+
+let test_multiframe_image_with_ffmpeg () =
+  with_cache (fun cache_dir run ->
+    let source = Filename.concat cache_dir "animated.gif" in
+    write_file source animated_gif;
+    List.iter (fun name -> executable cache_dir name "exit 127") ["sips";"convert"];
+    first_frame_ffmpeg cache_dir png_header;
+    check string "ffmpeg prepares one frame" png_header
+      (unwrap (Cache.prepare_file ~run ~cache_dir source));
+    check string "the original animation remains intact" animated_gif (read_file source))
+
 let test_published_frame_is_a_snapshot () =
   with_cache (fun cache_dir _ ->
     let source = Filename.concat cache_dir "original.bmp" in
@@ -594,6 +637,10 @@ let () =
             test_clear_pending_keeps_claim_and_discards_completion
         ; test_case "partial converter failure uses next converter" `Quick
             test_partial_converter_failure_uses_next_converter
+        ; test_case "a multiframe image falls back after ImageMagick" `Quick
+            test_multiframe_image_after_imagemagick
+        ; test_case "a multiframe image uses one ffmpeg frame" `Quick
+            test_multiframe_image_with_ffmpeg
         ; test_case "the published frame is a snapshot" `Quick
             test_published_frame_is_a_snapshot
         ; test_case "explicit refresh replaces refused body" `Quick

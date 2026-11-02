@@ -189,8 +189,8 @@ let prepare_state (state : state) : prepared_state =
   let goals_by_id =
     List.fold_left
       (fun acc (goal : goal) ->
-        (* Preserve first-row precedence so [Goal_id_map.find_opt] agrees with
-           [find_goal_in] when [state.goals] contains duplicate goal IDs. *)
+        (* Preserve first-row precedence when [state.goals] contains duplicate
+           goal IDs. *)
         Goal_id_map.update
           goal.id
           (function

@@ -16749,21 +16749,6 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
          launch_keeper_child_content_load state ~mailbox ~keeper_name;
          launch_keeper_chat_schedules_load state ~mailbox ~keeper_name)
        state.msg_target_keeper_name);
-  (* The chat pane's history comes down its own generation-guarded path, not
-     in the surface bundle, so the tick asks for it here. Without this the
-     pane read once on open and a message that arrived after that waited for
-     the operator to leave and come back. *)
-  (if
-     needs.Masc_tui_types.needs_keeper_chat
-     (* Not while reading back: the reload replaces the transcript with the
-        newest window, which throws away every older page the operator
-        fetched and snaps the view to the bottom mid-read. The next tick
-        after scroll returns to 0 catches the pane up. *)
-     && state.msg_scroll = 0
-   then
-     match state.msg_target_keeper_name with
-     | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
-     | None -> ());
   (* An operator who consented in a browser is standing in front of a tab
      that does not know it happened: the callback lands on the server, not
      here. So while a login this TUI started is still outstanding, the tick
@@ -17473,6 +17458,21 @@ let log_http_surface_read_finished state context =
 
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  (* The chat pane's history comes down its own generation-guarded path, not
+     in the surface bundle. A revalidation owes it a read; the cadence does
+     not, because an appended turn announces itself (RFC-0480 §4 L2). Owed,
+     so a pane scrolled into older rows or a read in flight takes it when it
+     can. *)
+  (match intent with
+   | Revalidate ->
+       Option.iter
+         (fun keeper_name ->
+           update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
+           launch_owed_history state ~mailbox;
+           if state.view = Keepers Keeper_message then
+             launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name)
+         state.msg_target_keeper_name
+   | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
       ~full_refresh_inflight:!refresh_inflight

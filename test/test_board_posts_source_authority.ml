@@ -392,7 +392,15 @@ let test_present_disappearance_is_retained base_path _workspace =
   refuse_load store;
   refuse_load store;
   require_pre_effect (create store "repeated Missing is not fresh authority");
-  Alcotest.(check bool) "no payload was recreated" false (Sys.file_exists path)
+  Alcotest.(check bool) "no payload was recreated" false (Sys.file_exists path);
+  let comments = Board.comments_path store in
+  let comment_bytes () = if Sys.file_exists comments then Some (read_bytes comments) else None in
+  let before_comments = comment_bytes () in
+  require_io_refusal (Board.add_comment store ~lookup:Recipient_lookup.none_declared
+    ~post_id:(Board.Post_id.to_string post.id) ~author:"source-reader"
+    ~content:"refused while the source is missing" ~ttl_hours:0 ());
+  Alcotest.(check (option string)) "a refused comment leaves the comments file as it was"
+    before_comments (comment_bytes ())
 
 let test_retained_snapshot_is_stale base_path _workspace =
   let store = make_store base_path in

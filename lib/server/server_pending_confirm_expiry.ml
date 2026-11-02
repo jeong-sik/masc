@@ -103,11 +103,11 @@ let read_storage config =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let start ~sw ~clock ~state =
+let start ~sw ~clock ~mono_clock ~state =
   let publish ~base_path =
     let authority = Sse.runtime_authority_exn ~base_path in
     Sse.broadcast_to_sse_runtime_observers authority Pending_confirm_invalidation_event.json in
-  let enqueue = Server_workspace_invalidation.start ~sw ~publish in
+  let enqueue = Server_workspace_invalidation.start ~sw ~mono_clock ~publish in
   let restore = Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace in
   let invalidate ~base_path =
     enqueue ~base_path;

@@ -241,7 +241,7 @@ let test_persisted_deadline_wakes_full_health () =
           let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
           Domain_pool_ref.set pool;
           Eio.Switch.on_release sw Domain_pool_ref.clear_for_tests;
-          Expiry.start ~sw ~clock ~state;
+          Expiry.start ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~state;
           Eio.Fiber.yield ();
           check bool "persisted future entry does not wake early" false
             (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
@@ -295,7 +295,7 @@ let test_store_and_deadline_publish_scoped_sse () =
           let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
           Domain_pool_ref.set pool;
           Eio.Switch.on_release sw Domain_pool_ref.clear_for_tests;
-          Expiry.start ~sw ~clock ~state;
+          Expiry.start ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~state;
           Store.write_pending_confirms other [] |> Result.get_ok;
           let foreign = receive other_stream in
           check bool "foreign store event is scoped" true

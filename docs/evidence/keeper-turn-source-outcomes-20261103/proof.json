@@ -1,0 +1,29 @@
+{
+  "observedAt": "2026-11-02T15:04:22.450Z",
+  "sourceHead": "7177cd820a2100c910edfc84172e8f537c738eb8",
+  "scope": "Actual full Turn Inspector and API decoders with intercepted synthetic GET responses. No backend execution, provider acceptance, external review success or deployment proof.",
+  "keeper": "alpha",
+  "turnRef": "trace-1780648779957-00000#4071",
+  "requests": [
+    "/api/v1/dashboard/dev-token",
+    "/api/v1/keepers/alpha/tool-calls?limit=200",
+    "/api/v1/keepers/alpha/turn-records?limit=50",
+    "/api/v1/keepers/alpha/provider-input?turn_ref=trace-1780648779957-00000%234071",
+    "/api/v1/keepers/alpha/runtime-trace?trace_id=trace-1780648779957-00000&turn_id=4071&limit=500",
+    "/api/v1/dashboard/skill-activations/physical-turn?turn_ref=trace-1780648779957-00000%234071",
+    "/api/v1/keepers/alpha/provider-input/part?turn_ref=trace-1780648779957-00000%234071&index=1",
+    "/api/v1/keepers/alpha/runtime-trace?trace_id=trace-1780648779957-00000&turn_id=4071&limit=500",
+    "/api/v1/dashboard/skill-activations/physical-turn?turn_ref=trace-1780648779957-00000%234071",
+    "/api/v1/keepers/alpha/provider-input/part?turn_ref=trace-1780648779957-00000%234071&index=0",
+    "/api/v1/keepers/alpha/provider-input/part?turn_ref=trace-1780648779957-00000%234071&index=2",
+    "/api/v1/dashboard/dev-token",
+    "/api/v1/keepers/alpha/tool-calls?limit=200",
+    "/api/v1/keepers/alpha/turn-records?limit=50",
+    "/api/v1/keepers/alpha/provider-input?turn_ref=trace-1780648779957-00000%234071",
+    "/api/v1/keepers/alpha/runtime-trace?trace_id=trace-1780648779957-00000&turn_id=4071&limit=500",
+    "/api/v1/dashboard/skill-activations/physical-turn?turn_ref=trace-1780648779957-00000%234071"
+  ],
+  "errors": [],
+  "flowText": "turn_record·ok·latest 0s\nMemory OS recall\ndisabled·latest block 4B b6fbd675f98e\nrevision 0facts 0/0+0 / −0retained 0support invalidated 0\nlatest revision memory change 없음\ncurrent snapshot\nT4071오후 03:14:19ollama_cloud.deepseek-v4-flash18000→412 tok · 요청별t=0.3 p=0.9 tok=8192블록 3 · 도구 2턴 상세\n턴 상세\ntrace-1780648779957-00000#4071\n⎘ ID\n✕\nkeeper\nalpha\nkeeper turn\nT4071\nagent subturns\n—\nthinking\non\nfinish\ncompleted\nruntime\nollama_cloud.deepseek-v4-flash\n실측\n1.2s\n입력\n18.0k\n출력\n412\n도구\n2\n추정비용\n$0.00\n토큰 사용량 · 요청별\n설정 기준 컨텍스트 13.7% / 131K\n설정 131,072 · 클라이언트 보고 미측정\n입력\n18,000\n출력\n412\n타임라인\n입력과 실행\n메시지\n컨텍스트\n메타\n\ntrace-1780648779957-00000#4071\n\n입력 자극\n\n선택 채널: reactive · 2개\n\n처리 원장 조회 9/20/2026, 3:14:29 PM · 3행 읽음 · 손상 0행\n\n종류\nkeeper_delegate_completed\n자극 ID\nfixture-review-return\n원본 참조\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n선택 버전\n9007199254740993\n최초 선택\n2026-09-20T06:13:19.543Z\n큐 처리\n턴 완료 후 ACK · 9/20/2026, 3:14:24 PM\nfixture-terminal-transition · fixture-terminal-event\n종류\nschedule_due\n자극 ID\nfixture-next-review\n원본 참조\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n선택 버전\n9007199254740994\n최초 선택\n2026-09-20T06:13:49.543Z\n큐 처리\n일치하는 처리 기록 관측 없음. 현재 대기 상태인지는 확정할 수 없습니다.\n\nACK는 큐 처리 기록입니다. 실제 요청 전송과 PR 승인 같은 업무 결과는 해당 증거에서 확인하세요.\n\n프롬프트와 실제 입력\n\n이 턴의 프롬프트 블록 3개. 요청 캡처의 메시지와 도구 스키마를 같은 턴 기준으로 확인합니다.\n\n실제 메시지 열기SYSTEM·도구 스키마 열기\n런타임 선택과 진행\n\n반환 2행 / 관측 2행 · partial\n\n지원하지 않는 행 0개 · 손상 행 0개\n\nturn_started · ok\nturn_finished · ok\n\n모델 내부 판단은 추정하지 않습니다. 여기에는 런타임이 기록한 선택과 실행 경계만 표시합니다.\n\nSkill 호출과 사용\n\n보존된 모든 원장 확인 · trace 0개 조회 · 원장 0개 읽음\n\n이 턴의 호출 0개 · 이 턴에서 받은 비동기 결과 0개 · 비동기 결과 사용 0건 · 인과 연결 0개\n\n도구 실행 결과\n\n이 턴의 실행 ID 2개 · 일치하는 도구 기록 2개\n\nExecute · ok · exec-1781200000000-0001\nExecute · ok · exec-1781200000001-0002\n\n도구 반환 상태입니다. PR 승인·병합 같은 외부 결과의 성공을 대신하지 않습니다.",
+  "partialText": "turn_record·ok·latest 0s\nMemory OS recall\ndisabled·latest block 4B b6fbd675f98e\nrevision 0facts 0/0+0 / −0retained 0support invalidated 0\nlatest revision memory change 없음\ncurrent snapshot\nT4071오후 03:14:19ollama_cloud.deepseek-v4-flash18000→412 tok · 요청별t=0.3 p=0.9 tok=8192블록 3 · 도구 2턴 상세\n턴 상세\ntrace-1780648779957-00000#4071\n⎘ ID\n✕\nkeeper\nalpha\nkeeper turn\nT4071\nagent subturns\n—\nthinking\non\nfinish\ncompleted\nruntime\nollama_cloud.deepseek-v4-flash\n실측\n1.2s\n입력\n18.0k\n출력\n412\n도구\n2\n추정비용\n$0.00\n토큰 사용량 · 요청별\n설정 기준 컨텍스트 13.7% / 131K\n설정 131,072 · 클라이언트 보고 미측정\n입력\n18,000\n출력\n412\n타임라인\n입력과 실행\n메시지\n컨텍스트\n메타\n\ntrace-1780648779957-00000#4071\n\n입력 자극\n\n선택 채널: reactive · 2개\n\n처리 원장 조회 9/20/2026, 3:14:29 PM · 4행 읽음 · 손상 1행 · 저장소 읽기 오류 · 일부 기록만 확인\n\n종류\nkeeper_delegate_completed\n자극 ID\nfixture-review-return\n원본 참조\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n선택 버전\n9007199254740993\n최초 선택\n2026-09-20T06:13:19.543Z\n큐 처리\n턴 완료 후 ACK · 9/20/2026, 3:14:24 PM\nfixture-terminal-transition · fixture-terminal-event\n종류\nschedule_due\n자극 ID\nfixture-next-review\n원본 참조\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n선택 버전\n9007199254740994\n최초 선택\n2026-09-20T06:13:49.543Z\n큐 처리\n일치하는 처리 기록 관측 없음. 현재 대기 상태인지는 확정할 수 없습니다.\n\nACK는 큐 처리 기록입니다. 실제 요청 전송과 PR 승인 같은 업무 결과는 해당 증거에서 확인하세요.\n\n프롬프트와 실제 입력\n\n이 턴의 프롬프트 블록 3개. 요청 캡처의 메시지와 도구 스키마를 같은 턴 기준으로 확인합니다.\n\n실제 메시지 열기SYSTEM·도구 스키마 열기\n런타임 선택과 진행\n\n반환 2행 / 관측 2행 · partial\n\n지원하지 않는 행 0개 · 손상 행 0개\n\nturn_started · ok\nturn_finished · ok\n\n모델 내부 판단은 추정하지 않습니다. 여기에는 런타임이 기록한 선택과 실행 경계만 표시합니다.\n\nSkill 호출과 사용\n\n보존된 모든 원장 확인 · trace 0개 조회 · 원장 0개 읽음\n\n이 턴의 호출 0개 · 이 턴에서 받은 비동기 결과 0개 · 비동기 결과 사용 0건 · 인과 연결 0개\n\n도구 실행 결과\n\n이 턴의 실행 ID 2개 · 일치하는 도구 기록 2개\n\nExecute · ok · exec-1781200000000-0001\nExecute · ok · exec-1781200000001-0002\n\n도구 반환 상태입니다. PR 승인·병합 같은 외부 결과의 성공을 대신하지 않습니다."
+}

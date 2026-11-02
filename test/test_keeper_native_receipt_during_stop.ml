@@ -201,11 +201,14 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
     let hook_context, resolve_hook_context = Eio.Promise.create () in
     let hook_done, resolve_hook_done = Eio.Promise.create () in
     let hook_returned = ref false in
+    let owner_stop_completed = ref false in
     (* Core can publish its terminal while its final checkpoint waits on this
        real store lock. Cancel only the shutdown hook at that boundary, as the
        server's cleanup timeout does; the Owner itself is still alive. *)
     Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ ->
-      Shutdown_hooks.register_keeper_shutdown stop;
+      Shutdown_hooks.register_keeper_shutdown (fun () ->
+        stop ();
+        owner_stop_completed := true);
       Eio.Fiber.fork ~sw (fun () ->
         let previous_base = Sys.getenv_opt "MASC_BASE_PATH" in
         Fun.protect ~finally:(fun () ->
@@ -223,7 +226,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
               false
             with Eio.Cancel.Cancelled Eio.Time.Timeout -> true in
           hook_returned := true;
-          Eio.Promise.resolve resolve_hook_done cancelled));
+          Eio.Promise.resolve resolve_hook_done (cancelled, !owner_stop_completed)));
       let context = Eio.Promise.await hook_context in
       let rec terminal () =
         let projection = Agent.open_execution_projection ~runtime ~dir call.locator
@@ -247,9 +250,12 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
       check bool "hook cancellation cannot abandon the original Owner settlement"
         false !hook_returned)
     |> require "hold the final checkpoint boundary";
-    check bool "the original hook cancellation remains observable" true
-      (Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
-         (fun () -> Eio.Promise.await hook_done)));
+    let cancelled, owner_stop_completed =
+      Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+        (fun () -> Eio.Promise.await hook_done) in
+    check bool "the original hook cancellation remains observable" true cancelled;
+    check bool "the Owner stop completed before the hook returned" true
+      owner_stop_completed);
   check int "shutdown does not dispatch another provider request"
     (if settled_tools then 2 else 1) (Exact_output_fixture.post_count server);
   check int "shutdown does not repeat any settled tool effect"
@@ -305,6 +311,57 @@ let with_root f =
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root)))
     (fun () -> f root)
 
+let test_hook_cancellation_waits_for_callback () =
+  with_root (fun root ->
+    let previous_base = Sys.getenv_opt "MASC_BASE_PATH" in
+    Fun.protect ~finally:(fun () ->
+      (match previous_base with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      Shutdown_hooks.register_keeper_shutdown (fun () -> ())) (fun () ->
+      Unix.putenv "MASC_BASE_PATH" root;
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let hook_context, resolve_hook_context = Eio.Promise.create () in
+      let hook_done, resolve_hook_done = Eio.Promise.create () in
+      let completed = ref false in
+      let release_pending = ref true in
+      let release_callback () =
+        if !release_pending then (
+          release_pending := false;
+          Eio.Promise.resolve resolve_release ()) in
+      Fun.protect ~finally:release_callback (fun () ->
+        Shutdown_hooks.register_keeper_shutdown (fun () ->
+          Eio.Promise.resolve resolve_entered ();
+          Eio.Promise.await release;
+          completed := true);
+        Eio.Fiber.fork ~sw (fun () ->
+          let cancelled =
+            try
+              Eio.Cancel.sub (fun context ->
+                Eio.Promise.resolve resolve_hook_context context;
+                Shutdown_hooks.run_all ();
+                Eio.Fiber.check ());
+              false
+            with Eio.Cancel.Cancelled Eio.Time.Timeout -> true in
+          Eio.Promise.resolve resolve_hook_done cancelled);
+        let context = Eio.Time.with_timeout_exn env#clock
+            Exact_output_fixture.fixture_wait_seconds (fun () ->
+              let context = Eio.Promise.await hook_context in
+              Eio.Promise.await entered;
+              context) in
+        (* Resolving [entered] does not yield: when the parent resumes, the
+           callback has suspended on [release] in its cancellation context. *)
+        Eio.Cancel.cancel context Eio.Time.Timeout;
+        release_callback ();
+        let cancelled = Eio.Time.with_timeout_exn env#clock
+            Exact_output_fixture.fixture_wait_seconds
+            (fun () -> Eio.Promise.await hook_done) in
+        check bool "the callback finished after cancellation" true !completed;
+        check bool "the hook cancellation remains observable" true cancelled)))
+
 let test_stop_records_the_cancelled_terminal ?(cancel_hook=false) ?(settled_tools=false) () =
   with_root (fun root ->
     let stopped, restarted = run_case ~cancel_hook ~settled_tools root in
@@ -355,4 +412,6 @@ let () =
          (fun () -> test_stop_records_the_cancelled_terminal ~cancel_hook:true ());
        test_case "hook cancellation preserves two settled effects without replay" `Quick
          (fun () -> test_stop_records_the_cancelled_terminal
-           ~cancel_hook:true ~settled_tools:true ())]]
+           ~cancel_hook:true ~settled_tools:true ());
+       test_case "hook cancellation waits for a suspended callback" `Quick
+         test_hook_cancellation_waits_for_callback]]

@@ -29,9 +29,11 @@ val bind : Workspace.config -> goal_id:string ->
     after the authoritative commit is returned as a committed result. *)
 type unbinding = { removed : t option; mirror_error : string option }
 val unbind : Workspace.config -> goal_id:string -> (unbinding, error) result
-(** Removes the Goal's binding so a wrong one can be replaced. Holds the Goal
-    lock before the binding-store lock, as [bind] does. [removed = None] means
-    the Goal had no binding and nothing was written. A mirror error after the
+(** Removes the exact Goal ID's binding, including after that Goal was deleted.
+    Holds the Goal lock before the binding-store lock, as [bind] does, and
+    refuses an unavailable Goal source or an unreadable binding store.
+    [removed = None] means the ID had no binding and nothing was written.
+    Does not change Goals or browser state. A mirror error after the
     authoritative commit is returned as a committed result. *)
 val resolve : t -> installation:Lane_addon_tool_request_owner.installation ->
   Browser_lane.client_info list ->

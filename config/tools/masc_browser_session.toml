@@ -24,7 +24,7 @@ description = "Exact observed live connection UUID. Required for bind_goal; it i
 [[params]]
 name = "goalId"
 type = "string"
-description = "Existing shared workspace Goal ID; accepted only for bind_goal, goal_status and unbind_goal."
+description = "Shared workspace Goal ID, required for bind_goal, goal_status and unbind_goal. bind_goal and goal_status require an existing Goal; unbind_goal also accepts a deleted Goal's ID to release its stored binding."
 
 [[params]]
 name = "headless"

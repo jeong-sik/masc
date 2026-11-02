@@ -283,7 +283,37 @@ let test_goal_space_default () =
     check bool "unbind does not delete a store its current decoder cannot read" true
       (Result.is_error (G.unbind config ~goal_id:first));
     check bool "hard-cut evidence remains for its operator" true
-      (Masc.Workspace.read_json_doc config store=Ok (Some earlier)))
+      (Masc.Workspace.read_json_doc config store=Ok (Some earlier));
+    let retained=`Assoc ["bindings",`List [G.to_json readback]] in
+    Masc.Workspace.write_json config store retained;
+    (match Goal_store.delete_goal config ~goal_id:first with
+     | Ok Goal_store.Deleted | Ok (Deleted_with_orphaned_links _) -> ()
+     | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+    check bool "Goal deletion leaves the binding for explicit cleanup" true
+      (Masc.Workspace.read_json_doc config store=Ok (Some retained));
+    check bool "the retained binding still reserves its Space" true
+      (Result.is_error (bind second space));
+    check bool "a deleted Goal cannot create another binding" true
+      (Result.is_error (bind first {space with id=52}));
+    Masc.Workspace.write_json config store corrupt;
+    check bool "deleted-Goal cleanup also refuses a corrupt binding store" true
+      (Result.is_error (G.unbind config ~goal_id:first));
+    check bool "failed cleanup retains corrupt evidence" true
+      (Masc.Workspace.read_json_doc config store=Ok (Some corrupt));
+    Masc.Workspace.write_json config store retained;
+    let removed=ok (G.unbind config ~goal_id:first) in
+    check (option string) "cleanup removes exactly the deleted Goal's binding"
+      (Some first) (Option.map (fun (binding:G.t) -> binding.goal_id) removed.removed);
+    let after_cleanup=Masc.Workspace.read_json_doc config store in
+    check bool "cleanup of an absent binding is idempotent" true
+      ((ok (G.unbind config ~goal_id:first)).removed=None);
+    check bool "cleanup retry retains the store" true
+      (Masc.Workspace.read_json_doc config store=after_cleanup);
+    check bool "another Goal can now bind the same Space" true (ok (bind second space)).created;
+    check bool "metadata cleanup never recreates the deleted Goal" true
+      (match Goal_store.find_goal config ~goal_id:first with
+       | Goal_store.Goal_absent -> true
+       | Goal_found _ | Store_unavailable _ -> false))
 
 let test_multi_worker_inventory () =
   let module I=Masc.Browser_connection_inventory in

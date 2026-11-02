@@ -216,6 +216,10 @@ the same assignment is idempotent; changing the assignment or assigning the same
 Space to a different Goal is refused. Names are observations, not identity.
 `{"action":"goal_status","goalId":"<existing-goal-id>"}` reads the stored
 binding only; it does not establish that the Space is connected or visible.
+Use `{"action":"unbind_goal","goalId":"<original-goal-id>"}` to remove the
+binding, including after deleting the Goal, before assigning the Space again.
+This changes only the stored binding. An unavailable Goal source or unreadable
+binding store is still refused; an ID with no binding succeeds without writing.
 
 For a Keeper's initial automatic tab discovery or session open, the host reads
 its authoritative current Task and Goal links. One linked Goal with a binding
@@ -229,7 +233,7 @@ never consult this default or gain authority from it.
 An Ego Space is already open: discover its Pages with BrowserTabs. A Goal pin
 does not turn BrowserSession open into a native Space-creation operation. This
 binding does not yet create missing Spaces, manage several simultaneous Goal
-Spaces in one worker, reassign/delete bindings, or finish them on Goal completion.
+Spaces in one worker, automatically reassign bindings, or finish them on Goal completion.
 User-held and delegated Spaces retain their existing admission rules; the stored
 binding is no takeover authorization or proof of visible UI/login completion.
 

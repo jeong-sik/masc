@@ -82,7 +82,11 @@ let bind config ~goal_id ~installation ~space ~actor =
     | Error error -> Error (Unavailable (Masc_domain.masc_error_to_string error)))
 type unbinding = { removed : t option; mirror_error : string option }
 let unbind config ~goal_id =
-  with_goal config ~goal_id (fun () ->
+  if String.trim goal_id = "" then Error (Invalid "goalId must be nonblank text") else
+  match Workspace.with_file_lock_r config (Goal_store.goals_path config) (fun () ->
+    match Goal_store.load_source config with
+    | Goal_store.Unavailable error -> Error (Goal_reference (Goal_store.Goal_source_unavailable error))
+    | Uninitialized | Available _ ->
     match Workspace.with_file_lock_r config (path config) (fun () ->
       let* bindings = read config in
       match List.partition (fun binding -> binding.goal_id = goal_id) bindings with
@@ -94,7 +98,9 @@ let unbind config ~goal_id =
         Ok {removed=Some existing;mirror_error=committed.mirror_error}
       | _ :: _ :: _, _ -> Error (Invalid "duplicate Goal in binding store")) with
     | Ok result -> result
-    | Error error -> Error (Unavailable (Masc_domain.masc_error_to_string error)))
+    | Error error -> Error (Unavailable (Masc_domain.masc_error_to_string error))) with
+  | Ok result -> result
+  | Error error -> Error (Goal_reference (Goal_store.Goal_lock_failed error))
 let resolve binding ~installation clients =
   if installation <> binding.installation then
     Error (Conflict "Goal Space belongs to a different browser Add-on; no browser command was dispatched")

@@ -482,7 +482,7 @@ let invalidate_execution_cache_with_hooks_for_testing
       exn
 ;;
 
-let invalidate_execution_cache () =
+let invalidate_execution_cache_with ~before_broadcast () =
   let invalidate () =
   let invalidated_generation = ref None in
   invalidate_execution_cache_with_hooks_for_testing
@@ -495,6 +495,7 @@ let invalidate_execution_cache () =
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate_prefix "execution:")
     ();
+  before_broadcast ();
   Option.iter
     (fun generation ->
        try
@@ -520,15 +521,29 @@ let invalidate_execution_cache () =
   | Eio_guard.Non_eio -> invalidate ()
 ;;
 
+let invalidate_execution_cache () =
+  invalidate_execution_cache_with ~before_broadcast:(fun () -> ()) ()
+;;
+
 let invalidate_task_mutation_caches ~invalidate_full_health_snapshot () =
-  invalidate_execution_cache ();
-  try invalidate_full_health_snapshot () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    record_invalidation_failure
-      ~callback:"full_health_snapshot_invalidate"
-      ~message:"Failed to invalidate full-health snapshot"
-      exn
+  (* Wake health after invalidating execution, but before the SSE fanout can
+     wait on a subscriber. Preserve the old cancellation order: an exception
+     from health is re-raised only after execution's broadcast is attempted. *)
+  let cancellation = ref None in
+  invalidate_execution_cache_with
+    ~before_broadcast:(fun () ->
+      try invalidate_full_health_snapshot () with
+      | Eio.Cancel.Cancelled _ as exn ->
+        cancellation := Some (exn, Printexc.get_raw_backtrace ())
+      | exn ->
+        record_invalidation_failure
+          ~callback:"full_health_snapshot_invalidate"
+          ~message:"Failed to invalidate full-health snapshot"
+          exn)
+    ();
+  match !cancellation with
+  | None -> ()
+  | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot () =

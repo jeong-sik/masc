@@ -15,6 +15,7 @@ open Masc
 module Native = Keeper_direct_native_continuation
 module Registry = Keeper_owner_registry
 module Agent = Agent_core.Agent
+module Identity = Keeper_chat_delivery_identity
 
 let keeper_name = "native-stop-receipt"
 let session_id = "native-stop-receipt-session"
@@ -92,10 +93,22 @@ let context_for_operation () =
 
 (* Runs the operation through [prepare] until its provider request is open,
    then stops the inventory the way the server shutdown hook does. *)
-let stop_while_dispatching env ~root ~workspace ~session_dir =
+let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settled_tools =
   Eio.Switch.run @@ fun sw ->
+  let tool_calls = Atomic.make 0 in
+  let second_request, resolve_second_request = Eio.Promise.create () in
+  let tool_reply =
+    {|{"id":"stop-tools","model":"native-stop-receipt-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"stop-effect-1","type":"function","function":{"name":"record_effect","arguments":"{}"}},{"id":"stop-effect-2","type":"function","function":{"name":"record_effect","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+  in
+  let behavior =
+    if settled_tools then Exact_output_fixture.Reply_with (fun index _ ->
+      if index = 0 then `OK, tool_reply
+      else (
+        Eio.Promise.resolve resolve_second_request ();
+        Eio.Fiber.await_cancel ()))
+    else Exact_output_fixture.Incomplete_reply "{" in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
-      (Exact_output_fixture.Incomplete_reply "{") in
+      behavior in
   let provider_cfg = Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
       ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
@@ -109,8 +122,14 @@ let stop_while_dispatching env ~root ~workspace ~session_dir =
     (match Native.load ~binding |> require "load native admission" with
      | Native.No_pending -> ()
      | Native.Resume _ | Native.Terminal_pending _ -> fail "a fresh operation has a native call");
+    let tools = if not settled_tools then [] else
+      [Agent_core.Tool.create ~name:"record_effect" ~description:"Record one fixture effect"
+         ~parameters:[] (fun _ ->
+           let ordinal = Atomic.fetch_and_add tool_calls 1 + 1 in
+           Ok {Agent_core.Types.content=Printf.sprintf "original effect %d" ordinal;
+               content_blocks=None; _meta=None})] in
     let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
-        ~system_prompt:"Answer once." ~tools:[] in
+        ~system_prompt:"Answer once." ~tools in
     let config = {config with context=Some (context_for_operation ())} in
     let agent_ref = ref None in
     let input = [Agent_core.Types.Text goal] in
@@ -122,7 +141,23 @@ let stop_while_dispatching env ~root ~workspace ~session_dir =
        [reconcile_after_dispatch] does. *)
     let read_back () = Eio.Cancel.protect (fun () ->
       child_receipt := Some
-          (Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id)) in
+          (Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id);
+      if settled_tools then (
+        let call = match !child_receipt with
+          | Some (Ok (Keeper_native_call.Terminal_unacknowledged (call, _))) -> call
+          | Some (Ok (No_native_call | Active _)) | Some (Error _) | None ->
+            fail "cancelled child lost its original native receipt" in
+        let checkpoint = Keeper_checkpoint_store.load_retained_exact_snapshot
+            ~session_dir ~reference:call.checkpoint |> require "retained terminal checkpoint"
+          |> Keeper_checkpoint_store.exact_snapshot_checkpoint in
+        let results = checkpoint.messages
+          |> List.concat_map (fun (message : Agent_core.Types.message) -> message.content)
+          |> List.filter_map (function
+            | Agent_core.Types.ToolResult {tool_use_id; content; _} -> Some (tool_use_id, content)
+            | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+            | Image _ | Document _ | Audio _ -> None) in
+        check (list (pair string string)) "Owner's final checkpoint preserves both original results"
+          ["stop-effect-1", "original effect 1"; "stop-effect-2", "original effect 2"] results)) in
     match
       Native.reconcile_after_dispatch binding (fun () ->
         Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config ~agent_ref
@@ -146,16 +181,96 @@ let stop_while_dispatching env ~root ~workspace ~session_dir =
   let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
       ~turn_instructions:None ~surface_context:None ~attachments:[]
     |> Keeper_chat_operation.canonical_json |> require "canonical input" in
+  let thread_id = "keeper:" ^ keeper_name in
+  let channel = Keeper_continuation_channel.dashboard ~thread_id
+    |> require "continuation channel" in
+  let source = Keeper_chat_operation_payload.source_to_json ~submitted_by:"operator"
+      ~thread_id ~continuation_channel:channel
+      ~surface:(Surface_ref.Dashboard {session_id=None})
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+      ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append
+    |> require "operation source" in
   Registry.submit_operation ~base_path:root ~keeper_name ~operation_id
-    ~source:(`Assoc ["kind", `String "fixture"]) ~input |> require "submit operation" |> ignore;
+    ~source ~input |> require "submit operation" |> ignore;
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
-    (fun () -> Eio.Promise.await server.first_request_arrived);
-  (match
-     Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
-       (fun () -> Registry.begin_stopping_all ~base_path:root)
-   with
-   | Ok results -> List.iter (require "Owner stop") results
-   | Error _ -> fail "the inventory did not stop");
+    (fun () -> Eio.Promise.await
+      (if settled_tools then second_request else server.first_request_arrived));
+  let stop () =
+    match Registry.begin_stopping_all ~base_path:root with
+    | Ok results -> List.iter (require "Owner stop") results
+    | Error _ -> fail "the inventory did not stop" in
+  if not cancel_hook then
+    Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds stop
+  else (
+    let call = match Keeper_owner.direct_native_call owner ~operation_id
+        |> require "read original native call" with
+      | Keeper_native_call.Active call -> call
+      | No_native_call | Terminal_unacknowledged _ -> fail "original call is not active" in
+    let runtime = Runtime_agent_execution_runtime.get () |> Option.get in
+    let dir = Eio.Path.(env#fs / session_dir / "native-executions" / call.call_id) in
+    let hook_context, resolve_hook_context = Eio.Promise.create () in
+    let hook_done, resolve_hook_done = Eio.Promise.create () in
+    let hook_returned = ref false in
+    let owner_stop_completed = ref false in
+    (* Core can publish its terminal while its final checkpoint waits on this
+       real store lock. Cancel only the shutdown hook at that boundary, as the
+       server's cleanup timeout does; the Owner itself is still alive. *)
+    Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ ->
+      Shutdown_hooks.register_keeper_shutdown (fun () ->
+        stop ();
+        owner_stop_completed := true);
+      Eio.Fiber.fork ~sw (fun () ->
+        let previous_base = Sys.getenv_opt "MASC_BASE_PATH" in
+        Fun.protect ~finally:(fun () ->
+          (match previous_base with
+           | Some value -> Unix.putenv "MASC_BASE_PATH" value
+           | None -> Unix.unsetenv "MASC_BASE_PATH");
+          Shutdown_hooks.register_keeper_shutdown (fun () -> ())) (fun () ->
+          Unix.putenv "MASC_BASE_PATH" root;
+          let cancelled =
+            try
+              Eio.Cancel.sub (fun context ->
+                Eio.Promise.resolve resolve_hook_context context;
+                Shutdown_hooks.run_all ();
+                Eio.Fiber.check ());
+              false
+            with Eio.Cancel.Cancelled Eio.Time.Timeout -> true in
+          hook_returned := true;
+          Eio.Promise.resolve resolve_hook_done (cancelled, !owner_stop_completed)));
+      let context = Eio.Promise.await hook_context in
+      let rec terminal () =
+        let projection = Agent.open_execution_projection ~runtime ~dir call.locator
+          |> require "open canonical native journal" in
+        match Agent.read_execution_terminal projection |> require "read canonical terminal" with
+        | Some terminal -> terminal
+        | None -> Eio.Fiber.yield (); terminal () in
+      let terminal = Eio.Time.with_timeout_exn env#clock
+          Exact_output_fixture.fixture_wait_seconds terminal in
+      check bool "Core cancelled the exact original before the hook deadline" true
+        (terminal.disposition.outcome = Agent.Terminal_cancelled);
+      check int "canonical journal retains every original settled result"
+        (if settled_tools then 2 else 0) (List.length terminal.settled_tool_results);
+      check bool "the Owner receipt still waits on its final checkpoint" true
+        (match Keeper_owner.direct_native_call owner ~operation_id
+           |> require "read blocked receipt" with
+         | Keeper_native_call.Active current -> current.call_id = call.call_id
+         | No_native_call | Terminal_unacknowledged _ -> false);
+      Eio.Cancel.cancel context Eio.Time.Timeout;
+      Eio.Fiber.yield ();
+      check bool "hook cancellation cannot abandon the original Owner settlement"
+        false !hook_returned)
+    |> require "hold the final checkpoint boundary";
+    let cancelled, owner_stop_completed =
+      Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+        (fun () -> Eio.Promise.await hook_done) in
+    check bool "the original hook cancellation remains observable" true cancelled;
+    check bool "the Owner stop completed before the hook returned" true
+      owner_stop_completed);
+  check int "shutdown does not dispatch another provider request"
+    (if settled_tools then 2 else 1) (Exact_output_fixture.post_count server);
+  check int "shutdown does not repeat any settled tool effect"
+    (if settled_tools then 2 else 0) (Atomic.get tool_calls);
   let operation = Keeper_owner.exact_operation owner operation_id
     |> require "read stopped operation" |> Option.get in
   let native_call = Keeper_owner.direct_native_call owner ~operation_id
@@ -176,7 +291,27 @@ let after_restart ~root ~workspace =
   Registry.exact_operation ~base_path:root ~keeper_name operation_id
   |> require "read restarted operation" |> Option.get
 
-let run_case root =
+let check_failure_projection ~root =
+  let request_id = Keeper_chat_operation.Operation_id.to_string operation_id
+    |> Identity.Request_id.of_string |> require "failure request ID" in
+  let key = Identity.Operation request_id in
+  let rows = Keeper_chat_store.load_result ~base_dir:root ~keeper_name
+    |> require "load failure transcript"
+    |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+      match row.delivery_provenance with
+      | Some provenance -> Identity.delivery_key_equal provenance.delivery_key key
+          && Identity.transcript_slot_equal provenance.transcript_slot Identity.Settled_failure
+      | None -> false) in
+  match rows with
+  | [row] ->
+    check bool "the operation has a failure transcript" true
+      (Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure);
+    check bool "the failure retains its dashboard route" true
+      (Option.fold ~none:false
+         ~some:(Surface_ref.equal (Surface_ref.Dashboard {session_id=None})) row.surface)
+  | [] | _::_::_ -> fail "failure transcript is missing or duplicated"
+
+let run_case ?(cancel_hook=false) ?(settled_tools=false) root =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -196,8 +331,10 @@ let run_case root =
       (Keeper_fs.session_store_path_for_runtime_root (Workspace.masc_dir workspace))
       session_id in
   mkdir_p session_dir;
-  let stopped = stop_while_dispatching env ~root ~workspace ~session_dir in
+  let stopped = stop_while_dispatching env ~root ~workspace ~session_dir
+      ~cancel_hook ~settled_tools in
   let restarted = after_restart ~root ~workspace in
+  check_failure_projection ~root;
   stopped, restarted
 
 let with_root f =
@@ -206,9 +343,60 @@ let with_root f =
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root)))
     (fun () -> f root)
 
-let test_stop_records_the_cancelled_terminal () =
+let test_hook_cancellation_waits_for_callback () =
   with_root (fun root ->
-    let stopped, restarted = run_case root in
+    let previous_base = Sys.getenv_opt "MASC_BASE_PATH" in
+    Fun.protect ~finally:(fun () ->
+      (match previous_base with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      Shutdown_hooks.register_keeper_shutdown (fun () -> ())) (fun () ->
+      Unix.putenv "MASC_BASE_PATH" root;
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let hook_context, resolve_hook_context = Eio.Promise.create () in
+      let hook_done, resolve_hook_done = Eio.Promise.create () in
+      let completed = ref false in
+      let release_pending = ref true in
+      let release_callback () =
+        if !release_pending then (
+          release_pending := false;
+          Eio.Promise.resolve resolve_release ()) in
+      Fun.protect ~finally:release_callback (fun () ->
+        Shutdown_hooks.register_keeper_shutdown (fun () ->
+          Eio.Promise.resolve resolve_entered ();
+          Eio.Promise.await release;
+          completed := true);
+        Eio.Fiber.fork ~sw (fun () ->
+          let cancelled =
+            try
+              Eio.Cancel.sub (fun context ->
+                Eio.Promise.resolve resolve_hook_context context;
+                Shutdown_hooks.run_all ();
+                Eio.Fiber.check ());
+              false
+            with Eio.Cancel.Cancelled Eio.Time.Timeout -> true in
+          Eio.Promise.resolve resolve_hook_done cancelled);
+        let context = Eio.Time.with_timeout_exn env#clock
+            Exact_output_fixture.fixture_wait_seconds (fun () ->
+              let context = Eio.Promise.await hook_context in
+              Eio.Promise.await entered;
+              context) in
+        (* Resolving [entered] does not yield: when the parent resumes, the
+           callback has suspended on [release] in its cancellation context. *)
+        Eio.Cancel.cancel context Eio.Time.Timeout;
+        release_callback ();
+        let cancelled = Eio.Time.with_timeout_exn env#clock
+            Exact_output_fixture.fixture_wait_seconds
+            (fun () -> Eio.Promise.await hook_done) in
+        check bool "the callback finished after cancellation" true !completed;
+        check bool "the hook cancellation remains observable" true cancelled)))
+
+let test_stop_records_the_cancelled_terminal ?(cancel_hook=false) ?(settled_tools=false) () =
+  with_root (fun root ->
+    let stopped, restarted = run_case ~cancel_hook ~settled_tools root in
     let receipt = match stopped.child_receipt with
       | Some (Ok (Keeper_native_call.Terminal_unacknowledged (call, disposition))) ->
         Some (call, disposition)
@@ -219,7 +407,7 @@ let test_stop_records_the_cancelled_terminal () =
     check (option string) "the stop ended the provider call as cancelled"
       (Some "cancelled")
       (Option.map (fun (_, disposition) -> outcome_label disposition) receipt);
-    check (option string) "the receipt retires the call, which attempted no tool"
+    check (option string) "the receipt retires the call with no unsettled tool"
       (Some "retire")
       (Option.map (fun (_, disposition) -> recovery_label disposition) receipt);
     check bool "the receipt advanced to the terminal checkpoint past the seed" true
@@ -251,4 +439,11 @@ let () =
   run "native receipt during stop"
     ["owner stop", [
        test_case "a stop records the cancelled call's terminal" `Quick
-         test_stop_records_the_cancelled_terminal]]
+         (fun () -> test_stop_records_the_cancelled_terminal ());
+       test_case "hook cancellation waits for the original native terminal" `Quick
+         (fun () -> test_stop_records_the_cancelled_terminal ~cancel_hook:true ());
+       test_case "hook cancellation preserves two settled effects without replay" `Quick
+         (fun () -> test_stop_records_the_cancelled_terminal
+           ~cancel_hook:true ~settled_tools:true ());
+       test_case "hook cancellation waits for a suspended callback" `Quick
+         test_hook_cancellation_waits_for_callback]]

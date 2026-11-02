@@ -1079,17 +1079,24 @@ let policy_network_list_argv_for backend =
 let policy_network_present ~keeper_name ~listing =
   match Yojson.Safe.from_string listing with
   | `List entries ->
-    Ok
-      (List.exists
-         (fun entry ->
-            match entry with
-            | `Assoc fields ->
-              (match List.assoc_opt "id" fields with
-               | Some (`String id) ->
-                 String.equal id (policy_network_name ~keeper_name)
-               | Some _ | None -> false)
-            | _ -> false)
-         entries)
+    let expected = policy_network_name ~keeper_name in
+    List.fold_left
+      (fun result entry ->
+        Result.bind result (fun present ->
+          match entry with
+          | `Assoc fields ->
+            (match List.filter_map
+                     (fun (key, value) -> if String.equal key "id" then Some value else None)
+                     fields with
+             | [ `String id ] when String.trim id <> "" ->
+               Ok (present || String.equal id expected)
+             | [] -> Error "container network list: row has no id"
+             | [ `String _ ] -> Error "container network list: row has a blank id"
+             | [ _ ] -> Error "container network list: row id is not a string"
+             | _ :: _ :: _ -> Error "container network list: row repeats id")
+          | _ -> Error "container network list: expected an object row"))
+      (Ok false)
+      entries
   | _ -> Error "container network list: expected a JSON array"
   | exception Yojson.Json_error detail ->
     Error ("container network list: unparseable JSON: " ^ detail)

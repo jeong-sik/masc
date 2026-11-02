@@ -47,10 +47,12 @@ val policy_network_present : keeper_name:string -> listing:string -> (bool, stri
     how the CLI spaces a column, and a network whose name contains this one's
     cannot answer for it.
 
-    Unparseable output is an error rather than "absent": reading a failed
-    decode as absence would drive a create against a network that may already
-    exist, and the guest would then be refused with a message about creation
-    rather than about the listing that could not be read. *)
+    Every row must be an object with exactly one nonblank string [id]. A
+    malformed row refuses the listing, including one beside a matching row.
+    Unreadable output cannot establish absence: treating it as absent would
+    drive a create against a network that may already exist, and the guest
+    would then be refused with a message about creation rather than about
+    the listing that could not be read. *)
 
 val policy_network_inspect_argv_for :
   Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result

@@ -24,6 +24,10 @@ type view
 val events : view -> Candle_event.t list
 (** In file order. *)
 
+val is_missing : view -> bool
+(** Whether the ledger file was absent in the same locked observation that
+    produced [events]. A present empty file is different from an absent file. *)
+
 type read_error =
   | Store_failed of
       { path : string

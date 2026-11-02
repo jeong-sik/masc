@@ -14,6 +14,7 @@ type view =
   }
 
 let events view = view.events
+let is_missing view = Fs_compat.Private_jsonl_cursor.is_missing view.cursor
 
 type read_error =
   | Store_failed of

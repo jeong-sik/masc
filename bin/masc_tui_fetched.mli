@@ -93,6 +93,10 @@ val complete
     A failure for a revalidation of a value already shown settles as
     {!Stale}; a failure with nothing before it settles as {!Failed}. *)
 
+val refuse : equal:('k -> 'k -> bool) -> ('k, 'a, 'error) source -> 'k request -> 'error -> ('k, 'a, 'error) source
+(** Complete a current read with an authoritative refusal and discard its
+    prior value. A late refusal cannot affect a newer request. *)
+
 val view_for : equal:('k -> 'k -> bool) -> ('k, 'a, 'error) source -> key:'k -> ('a, 'error) observation
 
 val current : ('k, 'a, 'error) source -> ('k * ('a, 'error) observation) option

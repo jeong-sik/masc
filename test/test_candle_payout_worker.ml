@@ -770,13 +770,38 @@ let test_duplicate_payout_fields_retain_each_observation () =
      | _ -> fail "the alternatives were not retained in the hold")) [false;true]
 ;;
 
+let test_goal_observation_reads_off_and_ledger_independently () =
+  with_workspace @@ fun _env config ->
+  let read () = Candle_goal_observation_reader.read ~base_path:config.base_path ~goal_id:"goal-observed" in
+  (match read () with
+   | {Candle_goal_observation.configuration=Off; ledger=Missing} -> ()
+   | _ -> fail "absent ledger and off config should be independent observations");
+  enable_candle config;
+  seed_payout config ~goal_id:"goal-observed";
+  ignore (Candle_candidates.drain_once ~now:(fun () -> 1_790_000_000.) config |> ok_or_fail);
+  let path = Candle_ledger.path ~base_path:config.base_path in
+  let before = In_channel.with_open_bin path In_channel.input_all in
+  let config_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+  Sys.remove config_path;
+  (match read () with
+   | {Candle_goal_observation.configuration=Off; ledger=Observed (Unattributed {reason=No_candidates;_})} -> ()
+   | _ -> fail "off config must not hide a recorded unattributed payout");
+  check string "observation does not change the ledger" before (In_channel.with_open_bin path In_channel.input_all);
+  Out_channel.with_open_gen [Open_append; Open_binary] 0o600 path (fun channel ->
+    Out_channel.output_string channel "{\"broken\":true}\n");
+  (match read () with
+   | {Candle_goal_observation.ledger=Unavailable Invalid_row;_} -> ()
+   | _ -> fail "a corrupt row is unavailable, not an empty payout")
+;;
+
 let test_a_wake_with_no_worker_running_does_nothing () = Candle_payout_worker.wake ()
 
 let () =
   run
     "candle_payout_worker"
     [ ( "worker"
-      , [ test_case "unreadable contributor waits for repair" `Quick test_unreadable_contributor_waits_for_repair
+      , [ test_case "Goal observation separates config and ledger" `Quick test_goal_observation_reads_off_and_ledger_independently
+        ; test_case "unreadable contributor waits for repair" `Quick test_unreadable_contributor_waits_for_repair
         ; test_case "partial real Task read retains a boundary observation" `Quick
             test_partial_real_task_read_retains_a_boundary_observation
         ; test_case "partial archive survives an unreadable links file and row" `Quick

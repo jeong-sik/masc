@@ -3184,6 +3184,75 @@ let fetch_goal_confirmation ~credential ~host ~port ~goal_id =
   | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) -> Error detail
   | Ok { Masc_http_client.status; body; _ } -> decode_json ~allow_empty:false ~status_code:status ~body
 
+let decode_goal_candle_response = function
+  | { Masc_http_client.status=(401 | 403); _ } -> Error Masc_tui_types.Goal_candle_access_denied
+  | { Masc_http_client.status=409; _ } -> Error Masc_tui_types.Goal_candle_authority_changed
+  | { Masc_http_client.status; body; _ } when status < 200 || status >= 300 ->
+    (match decode_json ~allow_empty:false ~status_code:status ~body with
+     | Error detail -> Error (Masc_tui_types.Goal_candle_read_failed detail)
+     | Ok _ -> Error (Masc_tui_types.Goal_candle_read_failed "Unexpected non-success Candle response"))
+  | { Masc_http_client.status; body; headers } ->
+    let instances = List.filter_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
+    (match instances with
+     | [instance] when String.trim instance <> "" ->
+       decode_json ~allow_empty:false ~status_code:status ~body
+       |> Result.map (fun json -> instance, json)
+       |> Result.map_error (fun detail -> Masc_tui_types.Goal_candle_read_failed detail)
+     | [] | [_] | _ :: _ :: _ ->
+       Error (Masc_tui_types.Goal_candle_read_failed "Candle response has no unique server instance identity"))
+
+let goal_candle_header_failure ~expected_instance ~status ~headers =
+  let open Masc_tui_types in
+  if status = 401 || status = 403 then Some Goal_candle_access_denied
+  else if status = 409 then Some Goal_candle_authority_changed
+  else if status < 200 || status >= 300 then None
+  else if not (workspace_read_attested headers) then
+    Some (Goal_candle_read_failed "Server did not attest the requested workspace read")
+  else
+    let instances = List.filter_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
+    match instances with
+    | [instance] when String.trim instance <> "" ->
+      if String.equal instance expected_instance then None else Some Goal_candle_authority_changed
+    | [] | [_] | _ :: _ :: _ ->
+      Some (Goal_candle_read_failed "Candle response has no unique server instance identity")
+
+exception Goal_candle_header_refused of Masc_tui_types.goal_candle_failure
+
+let fetch_goal_candle ~credential ~expected_instance ~host ~port ~goal_id =
+  let path = "/api/v1/dashboard/goals/candle?goal_id=" ^ percent_encode_query_value goal_id in
+  let send ~path =
+    let url = url_of ~host ~port ~path in
+    match request_clock () with
+    | None -> Error "Candle request clock is unavailable"
+    | Some clock ->
+      (* [get_stream] exposes headers before a body that may never finish.
+         Run the short read on the request domain with the same total deadline
+         as other GETs, and close the connection when a header refuses it. *)
+      let result = on_io_domain (fun () ->
+        let body = Buffer.create 1024 in
+        let on_response ~status ~headers =
+          match goal_candle_header_failure ~expected_instance ~status ~headers with
+          | None -> ()
+          | Some failure -> raise (Goal_candle_header_refused failure) in
+        match Eio.Time.with_timeout clock (request_timeout_sec ()) (fun () ->
+          Ok (Masc_http_client.get_stream ~clock ~idle_timeout_sec:(request_timeout_sec ())
+            ~url ~headers:credential.bound_headers ~on_response ~on_chunk:(Buffer.add_string body) ())) with
+        | Error `Timeout -> Error "Candle response timed out"
+        | Ok (Error detail) -> Error detail
+        | Ok (Ok (Masc_http_client.Pool.Buffered {status; headers; body})) ->
+          Ok Masc_http_client.{status; headers; body}
+        | Ok (Ok (Masc_http_client.Pool.Streamed {status; headers; _})) ->
+          Ok Masc_http_client.{status; headers; body=Buffer.contents body}) in
+      Result.map_error (fun detail -> Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) result in
+  try
+    match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
+    | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) ->
+      Error (Masc_tui_types.Goal_candle_read_failed detail)
+    | Ok response -> decode_goal_candle_response response
+  with Goal_candle_header_refused failure -> Error failure
+
 let post_goal_confirmation ~host ~port confirmation =
   post_json_bound ~credential:{bound_headers=confirmation.Masc_tui_planning_detail.credential_headers;
                                bound_owner=confirmation.credential_owner}

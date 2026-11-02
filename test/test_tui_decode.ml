@@ -9636,6 +9636,7 @@ let health_probe =
       ("build", `Assoc [
         ("binary_commit", `String "030fa9043aafc5c2003f830c86720afff8e8e2ff");
         ("binary_commit_age_seconds", `Float 1106.0);
+        ("runtime_instance_id", `String "process-a");
       ]);
       ("paths", `Assoc [
         ("cwd", `String "/Users/worker/ws");
@@ -9657,12 +9658,15 @@ let test_decode_server_identity_reads_a_probe () =
     Alcotest.(check string) "masc root" "/Users/worker/ws/.masc"
       (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_masc_root);
     Alcotest.(check (option (float 0.001))) "binary age" (Some 1106.0)
-      identity.Tui_decode.sid_binary_commit_age_s
+      identity.Tui_decode.sid_binary_commit_age_s;
+    Alcotest.(check (option string)) "process identity" (Some "process-a")
+      identity.Tui_decode.sid_runtime_instance_id
 
 let test_decode_server_identity_survives_a_bare_health () =
   match Tui_decode.decode_server_identity (`Assoc [ ("status", `String "ok") ]) with
   | Error detail -> Alcotest.fail detail
   | Ok identity ->
+    Alcotest.(check (option string)) "process identity is unknown" None identity.Tui_decode.sid_runtime_instance_id;
     Alcotest.(check string) "no version reads empty rather than failing" ""
       identity.Tui_decode.sid_version;
     Alcotest.(check string) "no base path either" ""

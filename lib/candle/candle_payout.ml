@@ -165,7 +165,9 @@ let pass_of (waiting : waiting) events =
    within the same second. The same identity can then have different linked
    Tasks or Goal facts. Older settled history still replays against its recorded
    first Snapshot, but a new decision must not choose between conflicting facts. *)
-let current_pass_of (waiting : waiting) events =
+type pass_observation = Missing_snapshot | Conflicting_snapshots | Matching_snapshot of pass
+
+let observe_current_pass (waiting : waiting) events =
   let passes = List.filter_map (fun (event : Candle_event.t) ->
     match event.body with
     | Candle_event.Snapshot snapshot
@@ -177,11 +179,22 @@ let current_pass_of (waiting : waiting) events =
             goal = {Candle_appraisal.title = snapshot.title; metric = snapshot.metric;
                     target_value = snapshot.target_value};
             due_date = snapshot.due_date; linked_task_ids = snapshot.linked_task_ids}
-    | _ -> None) events in
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _
+    | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _
+    | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events in
   match passes with
-  | [] -> Error "no Snapshot names the confirmed verifier run and pass time"
-  | pass :: rest when List.for_all ((=) pass) rest -> Ok pass
-  | _ :: _ -> Error "conflicting Snapshots name the same confirmed verifier run and pass time"
+  | [] -> Missing_snapshot
+  | pass :: rest when List.for_all ((=) pass) rest -> Matching_snapshot pass
+  | _ :: _ -> Conflicting_snapshots
+;;
+
+let current_pass_of waiting events =
+  match observe_current_pass waiting events with
+  | Missing_snapshot -> Error "no Snapshot names the confirmed verifier run and pass time"
+  | Conflicting_snapshots -> Error "conflicting Snapshots name the same confirmed verifier run and pass time"
+  | Matching_snapshot pass -> Ok pass
 ;;
 
 let candidates_of (waiting : waiting) events =
@@ -263,15 +276,26 @@ let window_issues ~goal_created_at ~confirmed_at tasks =
         | Awaiting_verification | Cancelled); _} -> []) tasks
 ;;
 
-let observation_issues ~provenance ~goal_created_at ~confirmed_at tasks =
-  let incomplete = match provenance with
+let unfenced_nonterminal_issues ~provenance tasks =
+  match provenance with
     | Backlog_fenced -> []
     | Unfenced -> List.filter_map (fun (task_id, lookup) -> match lookup with
         | Candle_event.Found {status=(Candle_event.Todo | Claimed | In_progress | Awaiting_verification);_} ->
           Some (Unfenced_nonterminal {task_id})
         | Candle_event.Found _ | Candle_event.Found_uncertain _
-        | Candle_event.Deleted | Candle_event.Unobserved -> None) tasks in
-  window_issues ~goal_created_at ~confirmed_at tasks @ incomplete
+        | Candle_event.Deleted | Candle_event.Unobserved -> None) tasks
+;;
+
+let snapshot_independent_issues ~provenance tasks =
+  let unavailable = List.filter_map (fun (task_id, lookup) -> match lookup with
+    | Candle_event.Deleted -> Some (Task_missing {task_id})
+    | Candle_event.Unobserved | Candle_event.Found_uncertain _ -> Some (Task_unobserved {task_id})
+    | Candle_event.Found _ -> None) tasks in
+  unavailable @ unfenced_nonterminal_issues ~provenance tasks
+;;
+
+let observation_issues ~provenance ~goal_created_at ~confirmed_at tasks =
+  window_issues ~goal_created_at ~confirmed_at tasks @ unfenced_nonterminal_issues ~provenance tasks
 ;;
 
 let window_issue_to_string = function

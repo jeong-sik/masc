@@ -3184,6 +3184,16 @@ let add_routes ~sw ~clock router =
            let body, status = Server_auth.read_workspace_precondition_error_response error in
            respond_json_value_with_cors ~status req reqd body
        )
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/candle" (fun state _actor req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let status, json = Server_dashboard_goal_candle.response ~config req in
+         let status = Http.Response.timeout_envelope_status_override ~status json in
+         (* This live, credential-bound observation must not be converted to a
+            conditional 304 by the general JSON responder. *)
+         Http.Response.bytes ~status
+           ~headers:(["cache-control", "private, no-store"] @ Server_dashboard_goal_candle.generation_headers @ public_read_cors_headers req)
+           ~content_type:"application/json; charset=utf-8" (Yojson.Safe.to_string json) reqd
+       )
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/measurements" (fun state actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let answer =

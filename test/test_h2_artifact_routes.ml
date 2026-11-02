@@ -96,7 +96,8 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                   |> Server_routes_http_routes_published_artifacts.add_routes
                   |> Server_routes_http_routes_artifact_app_data.add_routes
                   |> Server_routes_http_routes_artifact_drafts.add_routes
-                  |> Server_routes_http_routes_artifact_draft_live.add_routes in
+                  |> Server_routes_http_routes_artifact_draft_live.add_routes
+                  |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock:(Eio.Stdenv.clock env) in
                 let handler = Server_h2_gateway.make_request_handler ~routes:router ~trust_policy ~sw
                   ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
                 let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
@@ -206,6 +207,42 @@ let shares = "/api/v1/published-artifact-shares"
 let app_data = "/api/v1/artifact-app-data"
 let drafts = "/api/v1/artifact-drafts"
 let checkpoints = "/api/v1/artifact-draft-checkpoints"
+
+let test_goal_candle_access_and_fresh_read () =
+  with_gateway (fun ~base_path ~worker ~player:_ ~admin gateway ->
+    let root = Filename.concat base_path ".masc" in
+    let path = "/api/v1/dashboard/goals/candle?goal_id=goal-1&expected_base_path="
+      ^ Uri.pct_encode base_path ^ "&expected_masc_root=" ^ Uri.pct_encode root in
+    pair_status "anonymous Candle" 401 (both gateway path);
+    pair_status "worker Candle" 403 (both gateway ~token:worker path);
+    pair_status "unbound Candle" 400
+      (both gateway ~token:admin "/api/v1/dashboard/goals/candle?goal_id=goal-1");
+    let wrong = "/api/v1/dashboard/goals/candle?goal_id=goal-1&expected_base_path="
+      ^ Uri.pct_encode base_path ^ "&expected_masc_root=" ^ Uri.pct_encode (root ^ "-other") in
+    pair_status "wrong workspace Candle" 409 (both gateway ~token:admin wrong);
+    let first_h1, first_h2 = both gateway ~token:admin path in
+    List.iter (fun reply ->
+      check_status "admin Candle" 200 reply;
+      check (option string) "workspace admission receipt" (Some "matched-v1") (header "x-masc-workspace-read" reply);
+      check (option string) "Candle is never cached" (Some "private, no-store") (header "cache-control" reply);
+      check bool "runtime instance is attached" true (Option.is_some (header "x-masc-runtime-instance-id" reply));
+      check bool "execution epoch is attached" true (Option.is_some (header "x-masc-execution-publication-epoch" reply));
+      check string "exact requested Goal" "goal-1" (field_string "goal_id" (json reply));
+      check string "execution is not inferred" "not_observed" (member "execution" (json reply) |> field_string "state"))
+      [first_h1; first_h2];
+    check_json "same Goal observation over H1 and H2" (json first_h1) (json first_h2);
+    check (option string) "same server instance over both transports"
+      (header "x-masc-runtime-instance-id" first_h1) (header "x-masc-runtime-instance-id" first_h2);
+    check (option string) "same execution epoch over both transports"
+      (header "x-masc-execution-publication-epoch" first_h1) (header "x-masc-execution-publication-epoch" first_h2);
+    let ledger = Filename.concat root "candle-ledger.jsonl" in
+    Out_channel.with_open_bin ledger (fun channel -> Out_channel.output_string channel "{\"broken\":true}\n");
+    let after_h1, after_h2 = both gateway ~token:admin ~headers:["if-none-match", "*"] path in
+    List.iter (fun reply ->
+      check_status "fresh read after ledger corruption" 200 reply;
+      check string "corrupt ledger is unavailable" "unavailable" (member "ledger" (json reply) |> field_string "state");
+      check string "corrupt row reason" "invalid_row" (member "ledger" (json reply) |> field_string "reason"))
+      [after_h1; after_h2])
 
 let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~player ~admin gateway ->
   let created = request H2 gateway ~token:admin ~meth:`POST ~body:(publication_body "version one") list in
@@ -895,7 +932,8 @@ let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_s
     else [], Sys.argv in
   run ~argv "H2 artifact gateway"
     ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
-      "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity];
+       "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity;
+       "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read];
      "synthetic transformer transport", ["checkpoint and SSE reset", `Quick,
        (fun () -> with_synthetic_transformer test_live_checkpoint);
        "SSE response capacity exhaustion resets the stream", `Quick,

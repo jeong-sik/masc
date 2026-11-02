@@ -62,6 +62,12 @@ val current_pass_of : waiting -> Candle_event.t list -> (pass, string) result
 (** The confirmed Snapshot for a new decision. Identical repeated facts are
     accepted; conflicting Snapshots with the same run and pass time are refused. *)
 
+type pass_observation = Missing_snapshot | Conflicting_snapshots | Matching_snapshot of pass
+
+val observe_current_pass : waiting -> Candle_event.t list -> pass_observation
+(** The same decision as [current_pass_of], with distinct typed reasons for an
+    absent Snapshot and conflicting Snapshots. *)
+
 type candidates =
   { candidate_task_ids : string list
   ; candidate_keepers : string list
@@ -99,6 +105,11 @@ val observation_issues :
   -> window_issue list
 (** Also refuses historical nonterminal observations whose order against Task
     commits was not protected by the backlog fence. *)
+
+val snapshot_independent_issues :
+  provenance:observation_provenance -> (string * Candle_event.task_lookup) list -> window_issue list
+(** Issues that remain observable even if the matching Snapshot is absent or
+    conflicting. Time-boundary issues cannot be decided by this function. *)
 
 type held_window =
   { passed_at : Candle_time.t

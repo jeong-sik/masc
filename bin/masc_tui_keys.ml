@@ -338,6 +338,7 @@ let global =
 
 (* The plain-listing tail every converted footer shares. *)
 let listing_refresh = b Meta "r" "refresh"
+let goal_candle_refresh_key = "z"
 let listing_next = b Meta "Tab" "next"
 let listing_quit = b Meta "q" "quit"
 let listing_meta = [ listing_refresh; listing_next; listing_quit ]
@@ -832,6 +833,8 @@ let for_surface = function
       ; b Act "x" "drop"
           ~help:"type why the goal is dropped; Enter drops it and cancels its unclaimed tasks"
       ; b Act "o" "reopen"
+      ; b Act goal_candle_refresh_key "Candle read" ~detail:Detail_only
+          ~help:"read the selected Goal's Candle payout record again without changing the Goal"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
@@ -1238,6 +1241,15 @@ let answers_in_state ?detail_open binding =
 let footer_hints ?detail_open surface =
   hints_of_bindings
     (List.filter (answers_in_state ?detail_open) (for_surface surface))
+
+(* [r] is Resume for a paused Goal, so the generic refresh label must not
+   advertise it as a read in this detail. The Candle read has its own key. *)
+let footer_hints_planning_goal_detail =
+  let bindings = for_surface Planning
+    |> List.filter (answers_in_state ~detail_open:true)
+    |> List.filter (fun binding -> not (String.equal binding.key "r")) in
+  let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
+  hints_in_order (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
 let footer_hints_tools ~pane =
   let bracket = tools_bracket_binding ~pane in

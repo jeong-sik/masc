@@ -167,10 +167,24 @@ let test_cancellation_keeps_the_existing_observation () =
     (F.complete ~equal retained_stale old_stale (Error "late failure") == retained_stale)
 ;;
 
+let test_authoritative_refusal_discards_prior_value () =
+  let loading, first = started (F.start ~equal F.initial ~key:"a") in
+  let ready = F.complete ~equal loading first (Ok "private") in
+  let old, old_request = started (F.refresh ~equal ready ~key:"a") in
+  let current, request = started (F.refresh ~equal old ~key:"a") in
+  let unchanged = F.refuse ~equal current old_request "old refusal" in
+  check bool "retired refusal cannot clear current observation" true
+    (view unchanged ~key:"a" = F.Ready "private");
+  let refused = F.refuse ~equal unchanged request "forbidden" in
+  check bool "current refusal discards prior private observation" true
+    (view refused ~key:"a" = F.Failed "forbidden")
+;;
+
 let () =
   run "tui_fetched"
     [ ( "states"
-      , [ test_case "suspended reader retains its key" `Quick test_suspension_keeps_reader_key_and_refuses_retired_answers
+      , [ test_case "authoritative refusal discards prior value" `Quick test_authoritative_refusal_discards_prior_value
+        ; test_case "suspended reader retains its key" `Quick test_suspension_keeps_reader_key_and_refuses_retired_answers
         ; test_case "current key tracks every request state" `Quick test_current_key_tracks_every_request_state
         ; test_case "cancelled refresh retains the existing observation" `Quick
             test_cancellation_keeps_the_existing_observation

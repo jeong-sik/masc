@@ -645,6 +645,8 @@ type async_msg =
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
+  | Goal_candle_loaded of
+      string Masc_tui_fetched.request * (unit ref * (string * Candle_goal_observation.t, Masc_tui_types.goal_candle_failure) result, string) result
   | Task_history_loaded of
       string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome

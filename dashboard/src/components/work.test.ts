@@ -1932,7 +1932,8 @@ describe('Work', () => {
         expect(text).not.toContain('2154748')
         expect(dossier.querySelector('[data-goal-detail-row="created"]')).toBeNull()
         expect(dossier.querySelector('[data-goal-detail-row="updated"]')).toBeNull()
-        expect(dossier.querySelectorAll('[data-goal-detail-row]')).toHaveLength(1)
+        expect(dossier.querySelectorAll('[data-goal-detail-row]')).toHaveLength(2)
+        expect(dossier.querySelector('[data-goal-detail-row="candle"]')).not.toBeNull()
       })
 
       it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {

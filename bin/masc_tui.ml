@@ -4320,8 +4320,32 @@ let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
    log: the answer names the row it is for, so a load that returns after the
    operator moved on is discarded, not drawn under another item. *)
 
+let launch_goal_candle_load state ~mailbox goal_id =
+  if server_authority_ready state then
+    match begin_goal_candle_read state ~goal_id with
+    | None -> ()
+    | Some request ->
+      let host = server_peer_host and port = state.port in
+      let expected_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
+      launch_workspace_json_read state ~mailbox
+        ~deliver:(fun result -> Goal_candle_loaded (request, result))
+        (fun () ->
+          let credential = Masc_tui_http.bind_credential () in
+          let result = match expected_instance with
+            | None -> Error (Goal_candle_read_failed "Server process identity is unavailable; refresh health")
+            | Some expected ->
+              (match Masc_tui_http.fetch_goal_candle ~credential ~expected_instance:expected ~host ~port ~goal_id with
+               | Error _ as error -> error
+               | Ok (instance, _) when not (String.equal instance expected) ->
+                 Error Goal_candle_authority_changed
+               | Ok (instance, json) -> Candle_goal_observation.of_yojson ~goal_id json
+                 |> Result.map (fun observation -> instance, observation)
+                 |> Result.map_error (fun detail -> Goal_candle_read_failed detail)) in
+          Ok (credential.bound_owner, result))
+
 let launch_goal_timeline_load state ~mailbox goal_id =
   if server_authority_ready state then begin
+  launch_goal_candle_load state ~mailbox goal_id;
   match begin_goal_timeline_read state ~goal_id with
   | None -> ()
   | Some request ->
@@ -15781,7 +15805,8 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
    matches again. Only a read that names a workspace goes on to compare it. *)
 let apply_server_identity_reading state ~mailbox reading =
   withdraw_resource_diagram_pending state;
-  match
+  let previous_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
+  (match
     Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
       ~local_paths:state.local_workspace_paths reading
   with
@@ -15807,7 +15832,19 @@ let apply_server_identity_reading state ~mailbox reading =
        state.detail_read_authority <- ref ()
      | ( Workspace_identity_unread | Workspace_identity_match
        | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ), _ -> ());
-    apply_confirmed_server_identity_reading state ~mailbox reading
+    apply_confirmed_server_identity_reading state ~mailbox reading);
+  let current_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
+  if previous_instance <> current_instance then begin
+    state.goal_candle <- Masc_tui_fetched.clear state.goal_candle;
+    match state.view, state.planning_mode with
+    | Planning, Planning_detail goal_id when server_authority_ready state ->
+      launch_goal_candle_load state ~mailbox goal_id
+    | Planning, (Planning_list | Planning_detail _)
+    | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+      | Approvals | Schedules | Verification | Harness | Fusion | Repositories
+      | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+      | System_logs), (Planning_list | Planning_detail _) -> ()
+  end
 
 let apply_refused_workspace_identity state ~mailbox ~detail latest =
   withdraw_resource_diagram_pending state;
@@ -20169,7 +20206,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
         | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
-        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
         | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
         | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
         | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -21810,6 +21847,26 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            refresh Cancellation_unconfirmed)
   | Goal_timeline_loaded (request, result) ->
       complete_goal_timeline_read state request result
+  | Goal_candle_loaded (request, result) ->
+      let current = Masc_tui_fetched.is_current ~equal:String.equal state.goal_candle request in
+      let goal_id = Masc_tui_fetched.request_key request in
+      let server_changed = match result with
+        | Ok (owner, Error Goal_candle_authority_changed)
+          when current && Masc_tui_http.credential_owner_is_current owner -> Some owner
+        | Ok (_, (Ok _ | Error (Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed _)))
+        | Error _ -> None in
+      let accepted = current && (match result with
+        | Ok (owner, Ok (instance, _)) when Masc_tui_http.credential_owner_is_current owner ->
+          Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity
+        | Ok (_, (Ok _ | Error _)) | Error _ -> false) in
+      complete_goal_candle_read state ~credential_is_current:Masc_tui_http.credential_owner_is_current request result;
+      if accepted then clear_goal_candle_revalidation state ~goal_id;
+      (match server_changed with
+       | Some owner when take_goal_candle_revalidation state ~goal_id ~owner ->
+         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+           ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+           ~scoped_refresh_followup ~mailbox
+       | Some _ | None -> ())
   | Task_history_loaded (request, result) ->
       let task_id=Masc_tui_fetched.request_key request.thr_ticket in
       let followup =
@@ -35751,6 +35808,16 @@ Use relative paths for resources already held in the package. -->
                 report_action state "system"
                   (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
+       | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key
+           && (match state.planning_mode with Planning_detail _ -> true | Planning_list -> false) ->
+           start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+             ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages;
+           (match state.planning_mode with
+            | Planning_detail goal_id ->
+              clear_goal_candle_revalidation state ~goal_id;
+              launch_goal_candle_load state ~mailbox:async_messages goal_id
+            | Planning_list -> ())
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
            && Option.exists

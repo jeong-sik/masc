@@ -77,6 +77,19 @@ let test_volume_names_parse_back_to_their_keeper () =
     ; "masc-keeper-work-../escape" ]
 ;;
 
+(* The CLI lists volume objects, not the names-only fixture inputs below. *)
+let volume_listing names =
+  Yojson.Safe.to_string
+    (`List
+      (List.map
+         (fun name ->
+            `Assoc
+              [ "id", `String name
+              ; "configuration", `Assoc [ "name", `String name; "format", `String "ext4" ]
+              ])
+         names))
+;;
+
 (* A scripted runtime for the reclamation. The volume listing is live: a
    [volume delete] that answers 0 removes its name from what later listings
    show, so a candidate's removal settles the way the real runtime settles
@@ -89,7 +102,11 @@ let scripted_gc ~volumes ~containers ~claims ~delete_answers () =
   let initial =
     match Yojson.Safe.from_string volumes with
     | `List entries ->
-      List.filter_map (function `String name -> Some name | _ -> None) entries
+      List.map
+        (function
+          | `String name -> name
+          | _ -> Alcotest.fail "the fixture's volume names must be strings")
+        entries
     | _ -> Alcotest.fail "the fixture's volume listing must be a JSON array"
   in
   let remaining = ref initial in
@@ -100,7 +117,7 @@ let scripted_gc ~volumes ~containers ~claims ~delete_answers () =
     else if adjacent ~flag:"volume" ~value:"list" argv
     then
       Unix.WEXITED 0,
-      Yojson.Safe.to_string (`List (List.map (fun name -> `String name) !remaining)),
+      volume_listing !remaining,
       ""
     else if List.exists (String.equal "run") argv
     then (
@@ -257,7 +274,7 @@ let test_build_only_cleanup_does_not_delete_a_new_work_volume () =
     if List.exists (String.equal "--all") argv
     then Unix.WEXITED 0, "[]", ""
     else if adjacent ~flag:"volume" ~value:"list" argv
-    then Unix.WEXITED 0, Yojson.Safe.to_string (`List (List.map (fun n -> `String n) !remaining)), ""
+    then Unix.WEXITED 0, volume_listing !remaining, ""
     else if adjacent ~flag:"volume" ~value:"delete" argv
     then (
       (* A peer creates its work volume after the first listing. *)
@@ -282,7 +299,7 @@ let test_build_only_cleanup_does_not_delete_a_new_work_volume () =
 ;;
 
 let test_without_an_image_there_is_no_claim_evidence () =
-  let volumes = {|["masc-keeper-work-retired"]|} in
+  let volumes = volume_listing [ "masc-keeper-work-retired" ] in
   let sent = ref [] in
   let run ~timeout_sec:_ argv =
     sent := argv :: !sent;
@@ -351,6 +368,59 @@ let test_a_failed_volume_listing_is_an_error_and_nothing_runs () =
   Alcotest.(check int) "only the listing was attempted" 1 (List.length !sent)
 ;;
 
+let test_a_malformed_initial_listing_never_starts_reclamation () =
+  let sent = ref [] in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if adjacent ~flag:"volume" ~value:"list" argv
+    then Unix.WEXITED 0, {|[{"id":"masc-keeper-build-retired"},{"configuration":{}}]|}, ""
+    else Alcotest.failf "nothing else may run: %s" (String.concat " " argv)
+  in
+  let result =
+    Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
+      ~registered_keeper:(fun _ -> false)
+      ~claims_image:(Some "masc-test-minimal:image")
+      ~execute:true
+  in
+  Alcotest.(check bool) "a partial inventory is refused" true (Result.is_error result);
+  Alcotest.(check int) "only the listing was attempted" 1 (List.length !sent);
+  Alcotest.(check (list string)) "no volume deletion was attempted" []
+    (deleted_volume_names !sent)
+;;
+
+let test_a_malformed_settling_listing_does_not_prove_reclamation () =
+  let sent = ref [] in
+  let listings = ref 0 in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if List.exists (String.equal "--all") argv
+    then Unix.WEXITED 0, "[]", ""
+    else if adjacent ~flag:"volume" ~value:"list" argv
+    then (
+      incr listings;
+      if !listings = 1
+      then Unix.WEXITED 0, volume_listing [ "masc-keeper-build-retired" ], ""
+      else Unix.WEXITED 0, {|[{"id":42}]|}, "")
+    else if adjacent ~flag:"volume" ~value:"delete" argv
+    then Unix.WEXITED 0, "", ""
+    else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
+  in
+  let report =
+    ok_exn
+      (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
+         ~registered_keeper:(fun _ -> false)
+         ~claims_image:(Some "masc-test-minimal:image")
+         ~execute:true)
+  in
+  (match report.Gc.keepers with
+   | [ { Gc.outcome = Gc.Reclaim_failed _; _ } ] -> ()
+   | keepers ->
+     Alcotest.failf "expected unconfirmed reclamation, got %d keepers" (List.length keepers));
+  Alcotest.(check (list string)) "only the listed build volume was attempted"
+    [ "masc-keeper-build-retired" ] (deleted_volume_names (List.rev !sent));
+  Alcotest.(check int) "both inventories were read" 2 !listings
+;;
+
 let () =
   Alcotest.run
     "keeper_volume_gc"
@@ -371,6 +441,10 @@ let () =
             test_an_unreadable_claims_marker_keeps_the_volumes
         ; Alcotest.test_case "a failed volume listing is an error" `Quick
             test_a_failed_volume_listing_is_an_error_and_nothing_runs
+        ; Alcotest.test_case "a malformed initial listing starts nothing" `Quick
+            test_a_malformed_initial_listing_never_starts_reclamation
+        ; Alcotest.test_case "a malformed settling listing does not prove reclamation" `Quick
+            test_a_malformed_settling_listing_does_not_prove_reclamation
         ] )
     ]
 ;;

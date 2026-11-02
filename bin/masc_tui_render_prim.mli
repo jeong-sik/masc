@@ -84,6 +84,9 @@ val frame_acting_pane :
 (** The candidate for the synchronous draw. Input must use the copy accepted
     by the terminal, not this temporary construction cell. *)
 
+val frame_tools_task : tools_task_frame option ref
+(** Task viewport from the current draw; commit only after presentation. *)
+
 val frame_panes : Masc_tui_pane_selection.layout ref
 (** Where each pane of the frame being drawn sits, set by the surface ends
     ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only

@@ -275,6 +275,11 @@ let surface_rows (state : state) =
   let terminal_rows, _columns = get_terminal_size () in
   Masc_tui_types.surface_body_rows state ~terminal_rows
 
+let tools_scroll_viewport state =
+  tools_task_presented_viewport state ~fallback:(fun () ->
+    let scrolled = Masc_tui_render.tools_scrolled state in
+    scrolled.sc_count, surface_body_height ~rows:(surface_rows state) scrolled)
+
 (* Page keys move almost one visible body, leaving a few rows of overlap so
    the reader keeps their place across the jump. Individual renderers clamp
    the result against their exact wrapped-line count. *)
@@ -3794,7 +3799,7 @@ let close_tools_async_task state =
     state.tools_async_task_history_request;
   suspend_tools_async_task state;
   state.tools_async_task_source <- None;
-  state.tools_scroll <- 0
+  tools_task_user_scroll state 0
 
 let reconcile_task_documents state ~mailbox =
   (match state.task_history_request with
@@ -3838,7 +3843,7 @@ let close_tools_async_detail state =
     state.tools_async_detail_request;
   suspend_tools_async_detail state;
   state.tools_async_detail_open <- false;
-  state.tools_scroll <- 0
+  tools_task_user_scroll state 0
 
 let launch_tools_async_detail ?(force=false) state ~mailbox =
   if server_authority_ready state && state.view=Tools && state.tools_pane=Tools_async
@@ -3895,7 +3900,7 @@ let open_tools_async_source_task state ~mailbox =
         state.tools_async_detail_request;
       suspend_tools_async_detail state;
       state.tools_async_task_source <- Some source;
-      state.tools_scroll <- 0;
+      tools_task_user_scroll state 0;
       launch_tools_async_task ~force:true state ~mailbox
     | Async_source_has_no_task -> report_action state "system" "The original run records no source Task"
     | Async_source_not_composition -> report_action state "system" "This request is not a Composition source"
@@ -3980,7 +3985,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.keeper_cursor <- next;
     state.tools_inventory <- None;
     state.tools_error <- None;
-    state.tools_scroll <- 0;
+    tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;
     launch_tools_load state ~mailbox
   end
@@ -14565,7 +14570,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_evidence_run_id <- None;
   state.browser_lane_read_resume <- None;
   state.tools_skill_cursor <- 0;
-  state.tools_scroll <- 0;
+  tools_task_user_scroll state 0;
   state.msg_loaded_pages <- [];
   state.item_account <- None;
   state.item_account_error <- None;
@@ -16005,7 +16010,7 @@ let enter_metrics_section state section =
 let enter_tools_pane state pane =
   if pane <> Tools_async then close_tools_async_detail state;
   state.tools_pane <- pane;
-  state.tools_scroll <- 0
+  tools_task_user_scroll state 0
 ;;
 
 (* The cursor restarts because the row under it belongs to the listing being
@@ -24748,6 +24753,9 @@ let main
   let move_task_detail offset =
     if not (task_detail_relative_scroll state offset) then
       report_action state "system" "Wait for the Task to appear before scrolling" in
+  let move_tools_task offset =
+    if not (tools_task_relative_scroll state offset) then
+      report_action state "system" "Wait for the Task to appear before scrolling" in
   let presented_peer_owner = ref None in
   let presented_peer_target = ref None in
   let presented_chat_row_actions :
@@ -25116,7 +25124,7 @@ let main
     | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
   in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
-      ~drawn_detail_reading ~input_pending ~write ~flush reader =
+      ~drawn_detail_reading ~drawn_tools_task ~input_pending ~write ~flush reader =
     (* Read once: each call copies the whole screen into a fresh list. *)
     let presented_rows = Frame_presenter.presented_rows frame_presenter in
     let panel_owner = Masc_tui_render.panel_input_owner state
@@ -25215,6 +25223,15 @@ let main
                    let _, terminal_cols = Masc_tui_render_prim.get_terminal_size () in
                    let cols = task_document_columns state ~terminal_cols in
                    not (task_detail_waiting state ~task_id ~cols))) in
+    let tools_task_needs_present =
+      String.equal frame.Frame_presenter.surface_key "tools"
+      && match drawn_tools_task with
+         | Some drawn ->
+           tools_task_viewport_changed state drawn
+           || (tools_task_following_end state
+               && not (tools_task_waiting state ~source:drawn.ttf_owner.tto_source
+                         ~cols:drawn.ttf_cols))
+         | None -> Option.is_some state.tools_task_presented in
     (* Approval, Help, Queue, Play and relationship page ownership can change
        while clipped terminal text stays byte-identical. Those changes force
        presentation. Activity, chat row action and repository change authority
@@ -25224,7 +25241,7 @@ let main
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
         ~force_present:(activity_authority_changed || chat_actions_changed || change_authority_changed
-                        || task_detail_needs_present)
+                        || task_detail_needs_present || tools_task_needs_present)
         ~write ~flush frame
     with
     | Frame_presenter.Presented _ as frame_result ->
@@ -25237,6 +25254,10 @@ let main
            let cols = task_document_columns state ~terminal_cols in
            task_detail_presented_frame state ~task_id ~count ~height ~offset ~cols
          | (Some _ | None), (Some _ | None) -> task_detail_forget_frame state);
+        (match drawn_tools_task with
+         | Some drawn when String.equal frame.surface_key "tools" && not frame.compact_frame ->
+           tools_task_presented_frame state drawn
+         | Some _ | None -> tools_task_forget_frame state);
         (match Option.bind reader resource_scroll_position, state.resource_share_recovery_prompt with
          | Some position, Some prompt
            when not frame.Frame_presenter.compact_frame
@@ -26345,13 +26366,13 @@ Use relative paths for resources already held in the package. -->
        | Some origin -> edit_new_skill ~origin ~composition ~source_id ~check ~port ())
     | Ok sources ->
       state.search <- None;
-      state.tools_scroll <- 0;
+      tools_task_user_scroll state 0;
       state.tools_skill_source_picker <- Some
         { ssp_sources = sources; ssp_composition = composition; ssp_list = Masc_tui_pick_list.closed
         ; ssp_authority = state.workspace_authority; ssp_identity = state.server_identity; ssp_port = port }
   in
   let handle_skill_source_key key =
-    state.tools_scroll <- 0;
+    tools_task_user_scroll state 0;
     match state.tools_skill_source_picker with
     | None -> ()
     | Some picker ->
@@ -27362,7 +27383,8 @@ Use relative paths for resources already held in the package. -->
               | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
               | Mouse_wheel _ -> Presented.Action in
             Presented.decide_unpresented_input
-              ~frame_presented:(not (task_detail_reader_withdrawn state (!presented).reader))
+              ~frame_presented:(not (task_detail_reader_withdrawn state (!presented).reader
+                                     || tools_task_reader_withdrawn state))
               ~external_surface:(state.image_open || state.msx_open) kind in
       (match task_reader_decision with
        | Presented.Reject_paste when Option.is_some interrupted_paste ->
@@ -32774,14 +32796,14 @@ Use relative paths for resources already held in the package. -->
             | Some (index, _) ->
                 state.tools_skill_cursor <- index;
                 state.tools_pane <- Tools_surface;
-                state.tools_scroll <- 0;
+                tools_task_user_scroll state 0;
                 handle_skill_evidence ())
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->
            if Option.is_some state.tools_async_selection then begin
              state.tools_async_detail_open <- true;
-             state.tools_scroll <- 0;
+             tools_task_user_scroll state 0;
              launch_tools_async_detail state ~mailbox:async_messages
            end
        | Some "\r" when state.view = Tools -> handle_skill_evidence ()
@@ -34005,11 +34027,12 @@ Use relative paths for resources already held in the package. -->
              Metrics_tail.maximum_scroll
                ~entry_count:(keeper_log_row_count state)
                ~content_height:(keeper_log_content_height state)
-       | Some "home" when state.view = Tools -> state.tools_scroll <- 0
+       | Some "home" when state.view = Tools -> tools_task_user_scroll state 0
        | Some "end" when state.view = Tools ->
-           state.tools_scroll <-
-             move_surface_to_end state ~rows:(surface_rows state)
-               ~current:state.tools_scroll
+           if not (tools_task_select_end state) then
+             tools_task_user_scroll state
+               (move_surface_to_end state ~rows:(surface_rows state)
+                  ~current:state.tools_scroll)
        | Some ("home" | "end")
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_items ->
@@ -34362,19 +34385,12 @@ Use relative paths for resources already held in the package. -->
                           ~rows:(surface_rows state) in
                       move_list_by_rows state ~delta:(direction * entries))
              | Tools ->
-                 (match scrolled_surface state Tools with
-                  | None -> ()
-                  | Some scrolled ->
-                      let height =
-                        surface_body_height ~rows:(surface_rows state) scrolled
-                      in
-                      state.tools_scroll <-
-                        (if direction > 0 then
-                           Masc_tui_scroll.page_down
-                             ~count:scrolled.sc_count ~height state.tools_scroll
-                         else
-                           Masc_tui_scroll.page_up
-                             ~count:scrolled.sc_count ~height state.tools_scroll))
+                 let count, height = tools_scroll_viewport state in
+                 move_tools_task
+                   (if direction > 0 then
+                      Masc_tui_scroll.page_down ~count ~height state.tools_scroll
+                    else
+                      Masc_tui_scroll.page_up ~count ~height state.tools_scroll)
              (* Overview's two panes and Activity's ring have no counted row
                 list to page; Config's panes carry cursors of their own. *)
              | Overview | Acting | Config -> ())
@@ -35269,9 +35285,9 @@ Use relative paths for resources already held in the package. -->
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
-            | Tools -> state.tools_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows state) ~delta:(1)
-                    ~current:state.tools_scroll
+            | Tools ->
+                let count, height = tools_scroll_viewport state in
+                move_tools_task (Masc_tui_scroll.down ~count ~height state.tools_scroll)
             | Config when state.config_pane = Config_models ->
                 (* A cursor, not a bare scroll: [e] acts on a row, so the
                    reader has to be able to say which one. *)
@@ -35590,10 +35606,10 @@ Use relative paths for resources already held in the package. -->
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools ->
-                if state.tools_scroll > 0 then
-                  state.tools_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows state) ~delta:(-1)
-                    ~current:state.tools_scroll
+                if state.tools_scroll > 0 || tools_task_following_end state then begin
+                  let count, height = tools_scroll_viewport state in
+                  move_tools_task (Masc_tui_scroll.up ~count ~height state.tools_scroll)
+                end
             | Config when state.config_pane = Config_models ->
                 state.config_models_cursor <-
                   max 0 (state.config_models_cursor - 1);
@@ -37265,6 +37281,7 @@ Use relative paths for resources already held in the package. -->
       let transition_input_pending = ready_input || Option.is_some interrupted_paste
         || granted_search_paste in
       reconcile_task_detail_scroll state;
+      reconcile_tools_task_scroll state;
       let terminal_rows, _ = get_terminal_size () in
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
       let owned_frame = match frame_choice with
@@ -37321,9 +37338,9 @@ Use relative paths for resources already held in the package. -->
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
            let drawn_detail_reading = ref None in
-           let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions =
+           let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions, drawn_tools_task =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
-               ~tag:(fun (frame, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
+               ~tag:(fun (frame, _, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  Masc_tui_message_layout.begin_frame ();
                  (* Event folding is frame preparation, so its cost belongs
@@ -37403,7 +37420,7 @@ Use relative paths for resources already held in the package. -->
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
              (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
-                ~drawn_detail_reading:!drawn_detail_reading
+                ~drawn_detail_reading:!drawn_detail_reading ~drawn_tools_task
                 ~input_pending:asynchronous_input_pending clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done

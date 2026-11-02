@@ -173,7 +173,8 @@ val render :
   Masc_tui_press.press_target Masc_tui_hit.zones *
   Masc_tui_pane_selection.layout *
   Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame *
-  (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t
+  (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t *
+  Masc_tui_types.tools_task_frame option
 (** The frame without press marks, where each marked text landed in it, and
     where each of its panes sits. Commit the zones, panes, and Activity
     input authority and chat row actions only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy

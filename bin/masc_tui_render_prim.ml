@@ -92,6 +92,7 @@ let acting_pane_reserved_cols = ref 0
 (* A synchronous draw constructs one candidate. Only the main loop can
    publish it after the terminal accepts its frame. *)
 let frame_acting_pane = ref Masc_tui_acting_pane.empty_frame
+let frame_tools_task : tools_task_frame option ref = ref None
 
 (* Context insertion changes the screen row for every Activity target below
    it. Keep focus inside the pane on its stable header when that happens. *)

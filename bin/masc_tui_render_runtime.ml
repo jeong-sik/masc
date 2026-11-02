@@ -1090,7 +1090,11 @@ let render_tools (state : state) =
       ~overflow_takes_row:layout.sc_overflow_takes_row
   in
   let max_scroll = max 0 (drawable - content_height) in
-  let scroll = max 0 (min state.tools_scroll max_scroll) in
+  let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
+  frame_tools_task := Option.map (fun owner ->
+    {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
+     ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
+     ttf_cols=cols}) (tools_task_display_owner state);
   let display_lines_window = Rows.of_list ~first:scroll ~height:content_height display_lines in
   for i = 0 to content_height - 1 do
     match Rows.at display_lines_window (i + scroll) with

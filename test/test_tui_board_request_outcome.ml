@@ -432,6 +432,35 @@ let test_workspace_return_cannot_revive_original_request_authority () = with_fix
          (Publication.same_request original (Publication.outcome_request archived))
      | _ -> fail "workspace withdrawal lost the original terminal result"))
 
+let test_detail_read_binds_the_original_workspace () = with_fixture
+  (fun ~env:_ ~sw:_ ~base_path ~port ~posts:_ -> with_results @@ fun results ->
+    let publisher = state base_path port in
+    start publisher results;
+    let _, response = returned (take_outcome results) in
+    let post_id = check_committed response in
+    let read ~expected_base ~full_history =
+      let reader = state base_path port in
+      reader.server_identity <- Some (identity expected_base);
+      reader.board_mode <- Types.Board_read post_id;
+      reader.board_history_post_id <- if full_history then Some post_id else None;
+      let launch ~deliver read =
+        Results.launch ~observation:true reader ~results ~boundary_error:Fun.id
+          ~deliver read in
+      Requests.start_board_post_refresh reader ~host:"127.0.0.1" ~port ~post_id ~launch;
+      let rec take_detail () = match Results.take_ready results with
+        | [] -> Eio.Fiber.yield (); take_detail ()
+        | [{ Results.message = Masc_tui_async_protocol.Board_post_refresh_done (_, result); _ }] -> result
+        | _ -> fail "expected one Board detail completion" in
+      take_detail () in
+    List.iter (fun full_history ->
+      (match read ~expected_base:base_path ~full_history with
+       | Ok (post, _, _) ->
+         check string "the admitted post retains its real body" "original body" post.bp_body
+       | Error error -> fail ("same-workspace detail failed: " ^ error));
+      check bool "another workspace cannot supply the same post" true
+        (Result.is_error (read ~expected_base:(base_path ^ "/foreign") ~full_history)))
+      [false; true])
+
 let () = run "TUI Board request outcomes" ["actual request and registered routes", [
   test_case "committed HTTP400 preserves payload and late input" `Quick
     test_real_committed_error_keeps_payload_and_late_input;
@@ -444,5 +473,7 @@ let () = run "TUI Board request outcomes" ["actual request and registered routes
   test_case "old outcomes archive without settling a successor" `Quick
     test_old_outcome_archives_without_settling_successor;
   test_case "returning to workspace A cannot revive old request authority" `Quick
-    test_workspace_return_cannot_revive_original_request_authority
+    test_workspace_return_cannot_revive_original_request_authority;
+  test_case "detail requests bind normal and full-history reads to the original workspace" `Quick
+    test_detail_read_binds_the_original_workspace
 ]]

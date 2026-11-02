@@ -1148,16 +1148,7 @@ type lane_run_prepared_field =
   }
 
 let json_preview_lines ~width text =
-  (* A grapheme can be wider than the row allotted to it. Keep the whole
-     pane for the JSON so a decorative gutter cannot make a character
-     that otherwise fits disappear at the outer frame. *)
-  let palette =
-    { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
-  text
-  |> Masc.Tui_terminal_json.sanitize_canonical_preview
-  |> fenced_document_text ~language:"json"
-  |> Masc_tui_markdown.render ~palette ~width
-  |> List.map (fun line -> Ansi.reset, line)
+  document_json ~width text |> List.map (fun line -> Ansi.reset, line)
 
 let lane_run_payload_lines ~width json =
   let fence = fenced_document_text ~language:"json" in

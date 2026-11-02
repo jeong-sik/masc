@@ -340,6 +340,16 @@ let chat_markdown_palette = Masc_tui_markdown_theme.palette
 let markdown_with_closing = Masc_tui_markdown_theme.render
 let document_markdown = Masc_tui_markdown_theme.document
 
+(* [text] must be canonical Yojson output, or a prefix starting at byte zero.
+   Leave out the gutter so it cannot clip a wide grapheme at the frame edge. *)
+let document_json ~width text =
+  let palette =
+    { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+  text
+  |> Masc.Tui_terminal_json.sanitize_canonical_preview
+  |> Masc_tui_markdown_theme.fenced ~language:"json"
+  |> Masc_tui_markdown.render ~palette ~width
+
 (* A level meter, only while a capture is running.
 
    A dead input device and a quiet room both end the same way — an empty draft

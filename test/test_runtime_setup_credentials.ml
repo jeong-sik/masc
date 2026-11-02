@@ -2,7 +2,8 @@ open Alcotest
 open Masc
 
 let provider_config_for_binding config binding =
-  Runtime_adapter.materialize_provider_binding config binding
+  Runtime_adapter.materialize_provider_binding
+    ~construction:(Runtime_adapter.create_construction ()) config binding
   |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
 ;;
 

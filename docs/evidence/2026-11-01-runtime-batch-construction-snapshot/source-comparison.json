@@ -1,0 +1,82 @@
+{
+  "baseline": "c2aa90ab8b376b7b8c3d418083e3a389b00af355",
+  "candidate": "995f8a4176ff8ec9f72a63437e2572600c2451f9",
+  "complete_baseline_candidate_delta": [
+    "changelog.d/runtime-batch-snapshot.md",
+    "lib/runtime/runtime_adapter.ml",
+    "lib/runtime/runtime_adapter.mli",
+    "lib/runtime/runtime_instance.ml",
+    "lib/runtime/runtime_instance.mli",
+    "test/test_runtime_account_declaration.ml",
+    "test/test_runtime_config_validity.ml",
+    "test/test_runtime_per_keeper_routing.ml",
+    "test/test_runtime_provider_auth_headers.ml",
+    "test/test_runtime_setup_credentials.ml",
+    "test/test_runtime_setup_spec.ml",
+    "test/test_runtime_verification.ml"
+  ],
+  "changed_named_inputs": [
+    "lib/runtime/runtime_adapter.ml",
+    "lib/runtime/runtime_adapter.mli",
+    "lib/runtime/runtime_instance.ml",
+    "lib/runtime/runtime_instance.mli",
+    "test/test_runtime_provider_auth_headers.ml",
+    "test/test_runtime_account_declaration.ml",
+    "test/test_runtime_config_validity.ml",
+    "test/test_runtime_per_keeper_routing.ml",
+    "test/test_runtime_setup_credentials.ml",
+    "test/test_runtime_setup_spec.ml",
+    "test/test_runtime_verification.ml"
+  ],
+  "unchanged_named_inputs": [
+    "lib/runtime/runtime_credential_selection.ml",
+    "lib/runtime/runtime_credential_selection.mli",
+    "lib/fs_compat/fs_compat.ml",
+    "lib/fs_compat/fs_compat.mli",
+    "packages/agent_core/lib/llm_provider/capabilities.ml",
+    "packages/agent_core/lib/llm_provider/capabilities.mli",
+    "packages/agent_core/lib/llm_provider/model_catalog.ml",
+    "packages/agent_core/lib/llm_provider/model_catalog.mli",
+    "packages/agent_core/lib/llm_provider/provider_config.ml",
+    "packages/agent_core/lib/llm_provider/provider_config.mli",
+    "packages/agent_core/lib/llm_provider/provider_declarations.ml",
+    "packages/agent_core/lib/llm_provider/provider_declarations.mli",
+    "packages/agent_core/lib/provider_runtime_binding.ml",
+    "packages/agent_core/lib/provider_runtime_binding.mli",
+    "packages/agent_core/lib/llm_provider/pricing.ml",
+    "packages/agent_core/lib/llm_provider/pricing.mli",
+    "test/test_runtime_construction_snapshot.ml",
+    "test/stanzas/test_runtime_construction_snapshot.inc",
+    "test/test_runtime_adapter_credential_requirement.ml",
+    "test/dune",
+    "packages/agent_core/test/test_model_catalog_composition.ml",
+    "packages/agent_core/test/test_provider_declarations.ml",
+    "packages/agent_core/test/test_provider_runtime_binding.ml",
+    "packages/agent_core/test/dune",
+    ".github/workflows/test.yml",
+    "scripts/ci-run-tests.sh",
+    "scripts/ci/stanza_env.py",
+    "scripts/ci-run-targeted-tests.sh",
+    "test/test_runtime_batch_construction_snapshot.ml",
+    "test/stanzas/test_runtime_batch_construction_snapshot.inc"
+  ],
+  "common_fixture_and_stanza_identical": true,
+  "runner_inputs_and_test_dune_identical": true,
+  "identical_complete_trees": [
+    "config",
+    "packages/agent_core"
+  ],
+  "changed_complete_trees": [
+    "lib",
+    "test"
+  ],
+  "common_cases": {
+    "maintained": 7,
+    "fixed": 5,
+    "regressed": 0
+  },
+  "candidate_only_controls": 286,
+  "common_case_key_sha256": "aad0edd9bc457f3851cb0b03ef55e52e0a1c3da40422aeac044dfcb1ef1868a3",
+  "all_candidate_case_key_sha256": "04a5afb1c0d4be024f9e86af744c07e27dd8181749b7786025398506a4a03d2b",
+  "limits": "Only the twelve batch-fixture cases are baseline/candidate counterparts. The other 286 cases execute only in the candidate. Existing caller files change to supply the mandatory construction owner; complete root lib/test trees differ. Two-source global publication, full startup admission, real providers and whole-stack integration are not established."
+}

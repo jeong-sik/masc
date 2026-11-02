@@ -19,6 +19,16 @@
 module Declarations = Llm_provider.Provider_declarations
 module Provider_binding = Runtime_provider_binding
 
+type construction = Declarations.t Lazy.Mutexed.t
+
+let create_construction () =
+  (* Declaration capture only reads immutable/atomic catalogs and parses the
+     embedded source; it performs no I/O or fiber suspension. Mutexed lazy
+     selects once across domains and also works outside Eio. Credential I/O
+     happens after forcing, without holding this initialization lock. *)
+  Lazy.Mutexed.from_fun Declarations.current
+;;
+
 type provider_materialization =
   { provider_config : Llm_provider.Provider_config.t
   ; credential_admission : Runtime_credential_selection.admission
@@ -807,7 +817,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
 ;;
 
 (* Materialize the exact HTTP binding and its credential authority together. *)
-let materialize_provider_binding (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+let materialize_provider_binding ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (provider_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
@@ -815,7 +825,7 @@ let materialize_provider_binding (cfg : Runtime_schema.config) (binding : Runtim
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
-       let declarations = Declarations.current () in
+       let declarations = Lazy.Mutexed.force construction in
        (* [provider_config_from_declared_provider] already returns the concrete
           reason (e.g. "provider ... uses protocol messages-http, which the
           runtime adapter cannot build a provider_config for ..."); propagate it
@@ -1055,7 +1065,7 @@ let refuse_anthropic_thinking_control_on_official_client
   | Runtime_schema.Vertex_gemini_api -> Ok ()
 ;;
 
-let materialize_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+let materialize_execution ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (execution_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
@@ -1087,5 +1097,5 @@ let materialize_execution (cfg : Runtime_schema.config) (binding : Runtime_schem
             (fun (selected : provider_materialization) ->
               {execution=Runtime_execution.Agent_core selected.provider_config;
                credential_admission=Some selected.credential_admission})
-            (materialize_provider_binding cfg binding)))
+            (materialize_provider_binding ~construction cfg binding)))
 ;;

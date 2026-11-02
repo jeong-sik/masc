@@ -1,5 +1,6 @@
 let execution_for_binding config binding =
-  Runtime_adapter.materialize_execution config binding
+  Runtime_adapter.materialize_execution
+    ~construction:(Runtime_adapter.create_construction ()) config binding
   |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
 ;;
 

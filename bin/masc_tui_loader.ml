@@ -298,8 +298,8 @@ let load_active_tasks ~fresh (base_path : string) :
                      })))
       , goal_task_links )
 
-(* The Goals the verifier proved, each waiting on the operator's confirmation.
-   Read from the goal store the way the tasks above are read from the backlog,
+(* Goals whose stored phase awaits the operator's confirmation. This query does
+   not read their proof ledger. Read the goal store as the tasks above read the backlog,
    so the agenda has the answer on every surface and not only on Planning. A
    store that does not read is said as such rather than as an empty list.
    Titles and the failure are made one printable row here, as every other

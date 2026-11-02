@@ -161,6 +161,8 @@ let confirmation_read_error_message ~credential_is_current = function
   | Read_failed (Some owner, _) when credential_is_current owner -> "Goal confirmation read failed; check the connection and permissions"
   | Read_failed (Some _, _) -> "Goal confirmation credential changed; read the proof again"
   | Read_failed (None, _) -> "Goal confirmation read unavailable; read the proof again"
+  | Read_http_error (owner, 503) when credential_is_current owner ->
+      "Goal confirmation unavailable (HTTP 503); check server availability, storage and runtime"
   | Read_http_error (owner, status) when credential_is_current owner -> Printf.sprintf "Goal confirmation read failed (HTTP %d)" status
   | Read_http_error _ -> "Goal confirmation credential changed; read the proof again"
   | Server_changed owner when credential_is_current owner -> "Goal confirmation server changed; rechecking server identity"
@@ -459,7 +461,7 @@ let unreconciled_heading = function
 let verifying_next_step ~can_retry unreconciled =
   if not can_retry then
     ( Unreadable
-    , "the verification binding is unavailable - refresh before retrying; [o] takes it back, [x] drops it" )
+    , "verification binding unavailable - check connection, server storage and runtime, then [r] refresh; [x] requests drop" )
   else match unreconciled with
   | Some (_ : Tui_decode.verifier_unreconciled) ->
     ( Refused

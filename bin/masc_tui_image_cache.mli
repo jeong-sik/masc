@@ -97,14 +97,27 @@ val input_path : cache_dir:string -> string -> string
     renaming its own attempt over it rather than writing it in place. *)
 
 val png_path : cache_dir:string -> string -> string
-(** Where a downloaded input's converted frame lives, derived from the input
-    path the same way and published the same way. *)
+(** Where [convert_to_png] stores a converted frame, derived from its input
+    path. Remote downloads use a separate source-bound cache. *)
+
+type download
+(** The nonempty bytes captured by one download, independent of later cache
+    replacement or invalidation. *)
+
+val download_bytes : download -> string
+
+val with_download_snapshot :
+  cache_dir:string -> download -> (string -> 'a) -> ('a, string) result
+(** Write the captured bytes to an attempt-owned input file for the duration of
+    the callback. Remove that file after the callback returns or raises. *)
 
 val download :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
-  (string, download_error) result
+  ?force_fetch:bool -> run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  (download, download_error) result
 (** Fetch or reuse nonempty input bytes. Failed fetches and empty bodies are
-    removed; unknown signatures remain eligible for a decoder. *)
+    removed; unknown signatures remain eligible for a decoder. The result owns
+    the bytes read, rather than naming the shared URL cache file. [force_fetch]
+    bypasses the cache for an explicit retry. *)
 
 val run_bounded : deadline_seconds:float -> string -> Unix.process_status
 (** A [run] for the functions below that cannot hang the caller. [command] is
@@ -172,5 +185,5 @@ val prepare_presentation :
     only from the image acquisition worker. Original bytes are never replaced. *)
 
 val invalidate_download : cache_dir:string -> string -> unit
-(** Explicit user refresh only: remove this URL's input and derived PNG so
+(** Explicit user refresh only: remove this URL's input and derived frames so
     a previously refused body can be fetched again. *)

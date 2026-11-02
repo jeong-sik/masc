@@ -362,23 +362,26 @@ let wrap_tokens ?on_row palette ~width tokens =
     let remaining = width - !current_cells in
     if word_cells <= remaining then append token ~start_byte ~word_cells token.word
     else begin
-      let prefix, tail = Layout.split_at_cells token.word remaining in
+      let prefix, chunks =
+        Layout.split_cells_after_prefix ~prefix_cells:remaining
+          ~max_cells:width token.word in
+      let chunks = match chunks with [] -> [""] | _ -> chunks in
       if prefix <> "" then
-        append token ~start_byte ~word_cells:(Layout.display_width prefix) prefix;
+        append token ~start_byte ~word_cells:(Layout.display_width_for_wrapping prefix) prefix;
       (* Split the remaining word once at the full row width, preserving
          graphemes, source bytes and styling. *)
       let next_byte = ref (start_byte + String.length prefix) in
       List.iter (fun word ->
         if Buffer.length current > 0 then flush ();
-        append token ~start_byte:!next_byte ~word_cells:(Layout.display_width word) word;
+        append token ~start_byte:!next_byte ~word_cells:(Layout.display_width_for_wrapping word) word;
         next_byte := !next_byte + String.length word)
-        (Layout.split_cells ~max_cells:width tail)
+        chunks
     end
   in
   List.iter (fun token ->
     let separator_cells = if token.space_before then 1 else 0 in
     let start_byte = !source_byte + separator_cells in
-    let word_cells = Layout.display_width token.word in
+    let word_cells = Layout.display_width_for_wrapping token.word in
     let wrapped = !current_has_word
       && !current_cells + separator_cells + word_cells > width in
     if wrapped then flush ();
@@ -584,7 +587,7 @@ let wrap_pieces ~max_cells pieces =
       let rec place text =
         if String.length text = 0 then ()
         else
-          let cells = Layout.display_width text in
+          let cells = Layout.display_width_for_wrapping text in
           let room = max_cells - !used in
           if cells <= room then begin
             row := (text, kind) :: !row;
@@ -619,7 +622,7 @@ let wrap_pieces ~max_cells pieces =
               | [] -> ()
               | [last] ->
                   row := [(last, kind)];
-                  used := Layout.display_width last
+                  used := Layout.display_width_for_wrapping last
               | chunk :: rest ->
                   row := [(chunk, kind)];
                   flush ();
@@ -644,7 +647,7 @@ let diff_row_span palette pieces =
   | _ -> None
 
 let fill_styled_row ~width (opening, closing) text =
-  let remaining = max 0 (width - Layout.display_width text) in
+  let remaining = max 0 (width - Layout.display_width_for_wrapping text) in
   opening ^ text ^ String.make remaining ' ' ^ closing
 
 (* A diff row with token colours underneath: the first run carries the row's
@@ -687,7 +690,7 @@ let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
                       piece_opening ^ text ^ piece_closing ^ opening)
                   row)
          in
-         let remaining = max 0 (width - Layout.display_width plain) in
+         let remaining = max 0 (width - Layout.display_width_for_wrapping plain) in
          let text = opening ^ styled ^ String.make remaining ' ' ^ closing in
          let length = List.fold_left (fun total (text, _) -> total + String.length text) 0 row in
          Option.iter (fun emit -> emit {text;
@@ -723,10 +726,10 @@ let styled_code_rows ?on_row palette ~width pieces =
   match diff_row_span palette pieces with
   | Some span ->
       let plain = String.concat "" (List.map fst pieces) in
-      let cells = Layout.display_width plain in
+      let cells = Layout.display_width_for_wrapping plain in
       let chunks =
         if cells <= body_width then [ plain ]
-        else Layout.split_cells ~max_cells:body_width plain
+        else snd (Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:body_width plain)
       in
       List.map (fun chunk -> mapped chunk (fill_styled_row ~width span (gutter ^ chunk))) chunks
   | None -> (
@@ -784,15 +787,15 @@ let code_header ?on_language palette ~width language =
   let prefix = "\xe2\x94\x8c\xe2\x94\x80 " in
   let stem = prefix ^ language ^ " " in
   let stem =
-    if Layout.display_width stem <= width then stem
+    if Layout.display_width_for_wrapping stem <= width then stem
     else
-      match Layout.split_cells ~max_cells:width stem with
+      match snd (Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:width stem) with
       | first :: _ -> first
       | [] -> ""
   in
   Option.iter (fun emit -> emit (max 0 (min (String.length language)
     (String.length stem - String.length prefix)))) on_language;
-  let remaining = max 0 (width - Layout.display_width stem) in
+  let remaining = max 0 (width - Layout.display_width_for_wrapping stem) in
   styled_span palette.code_header (stem ^ horizontal remaining)
 
 let code_footer palette ~width =
@@ -813,7 +816,9 @@ let code_rows ?on_row palette ~width line =
     source_byte := end_byte;
     text in
   if String.length line = 0 then [mapped ""]
-  else Layout.split_cells ~max_cells:body_width line |> List.map mapped
+  else
+    let _, chunks = Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:body_width line in
+    List.map mapped chunks
 
 (* {1 Tables} *)
 
@@ -910,8 +915,7 @@ let table_row_positions ~columns ~source_start line =
     Array.concat (intersperse parts) in
   normalise_cells ~empty:[||] ~join ~columns positions
 
-let pad ~alignment ~cells text =
-  let missing = max 0 (cells - Layout.display_width text) in
+let pad ~alignment ~missing text =
   match alignment with
   | Left -> text ^ String.make missing ' '
   | Right -> String.make missing ' ' ^ text
@@ -927,7 +931,7 @@ let column_widths ~width ~gutter_cells ~columns rows =
     List.init columns (fun index ->
       List.fold_left
         (fun widest row ->
-          max widest (Layout.display_width (List.nth row index)))
+          max widest (Layout.display_width_for_wrapping (List.nth row index)))
         1 rows)
   in
   let spacing = gutter_cells * max 0 (columns - 1) in
@@ -1001,7 +1005,7 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
            before allocating those rows; use the lower estimate. Word wrapping
            can make either actual height greater than its estimate. *)
         let lines text cells =
-          let content = Layout.display_width text in
+          let content = Layout.display_width_for_wrapping text in
           if content = 0 then 1 else 1 + ((content - 1) / cells) in
         let stacked_width = max 1 (width - frame_cells) in
         let grid_lines, stacked_lines = List.fold_left (fun (grid, stacked) row ->
@@ -1069,8 +1073,9 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
         let text, ranges = Option.value fragment ~default:("", []) in
         (* A grapheme wider than the whole pane cannot be drawn in that pane.
            Fit it and report only the source bytes that remain visible. *)
-        let text, ranges =
-          if Layout.display_width text <= cells then text, ranges
+        let content_width = Layout.display_width_for_wrapping text in
+        let text, ranges, content_width =
+          if content_width <= cells then text, ranges, content_width
           else
             let ranges = match semantic with
               | None -> []
@@ -1079,8 +1084,9 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
                     String.sub cell_text range.start_byte (range.end_byte - range.start_byte)) ranges
                     |> String.concat "" in
                   prefix_ranges (Layout.fitted_source_bytes plain cells) ranges in
-            Layout.fit_width text cells, ranges in
-        let missing = max 0 (cells - Layout.display_width text) in
+            let text = Layout.fit_width text cells in
+            text, ranges, Layout.display_width_for_wrapping text in
+        let missing = max 0 (cells - content_width) in
         let padding = match alignment with Left -> 0 | Right -> missing | Centre -> missing / 2 in
         (match fragments, semantic, fragment with
          | Some fragments, Some _, Some _ ->
@@ -1090,7 +1096,7 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
                  visible_ranges = ranges } :: fragments.(slot)
          | (Some _, Some _, None) | (Some _, None, _) | (None, _, _) -> ());
         cell_start := !cell_start + cells + (if stacked then 0 else gutter_cells);
-        pad ~alignment ~cells text) wrapped
+        pad ~alignment ~missing text) wrapped
       |> String.concat gutter) in
     (match on_cell, fragments with
      | Some emit, Some fragments ->

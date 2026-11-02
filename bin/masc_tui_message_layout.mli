@@ -473,6 +473,9 @@ val display_width : string -> int
     one. A cluster opening with any other scalar sums its parts, so a joiner
     inside a Devanagari conjunct changes nothing. *)
 
+val display_width_for_wrapping : string -> int
+(** The same width, retaining ASCII runs as spans in the frame cache. *)
+
 val widest_grapheme_cells : string -> int
 (** Maximum display-cell width of one grapheme; ANSI controls contribute zero. *)
 

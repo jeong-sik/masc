@@ -17128,6 +17128,12 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
   refresh_visible_detail_after_authority_recovery state ~mailbox
     ~previous_authority:before.read_detail;
   if moved && server_authority_ready state then begin
+    (* Read withdrawal also stops the Observer and Fleet streams. A later
+       confirmed identity can arrive through a discarded bundle or a scoped
+       read, so restore both under that authority without a cadence tick. *)
+    open_observer_if_due state ~retry_closed:false
+      ~host:server_peer_host ~port:state.port ~mailbox;
+    open_fleet_stream_if_due state ~host:server_peer_host ~port:state.port ~mailbox;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);

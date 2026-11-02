@@ -16,9 +16,15 @@ let value_rows ~width value =
   | lines ->
     List.concat_map
       (fun line ->
-        match Message_layout.wrap_words ~max_cells:budget line with
-        (* [wrap_words] answers nothing for an empty line; the blank is part
-           of how the ask was written, so it is kept. *)
+        (* A whole source line that already fits needs no word wrapping:
+           wrapping it would discard indentation and other leading spaces. *)
+        let wrapped =
+          if Message_layout.fits_within_cells ~max_cells:budget line then [ line ]
+          else Message_layout.wrap_words ~max_cells:budget line
+        in
+        match wrapped with
+        (* The existing wrapper can answer nothing for a line of spaces;
+           keep a blank row rather than dropping the source line entirely. *)
         | [] -> [ { label = None; text = value_indent } ]
         | wrapped ->
           List.map (fun text -> { label = None; text = value_indent ^ text }) wrapped)

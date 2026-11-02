@@ -476,6 +476,10 @@ val display_width : string -> int
 val display_width_for_wrapping : string -> int
 (** The same width, retaining ASCII runs as spans in the frame cache. *)
 
+val fits_within_cells : max_cells:int -> string -> bool
+(** Whether the display width fits the budget. Stops measuring once it cannot
+    fit, without retaining a long input's pieces in the frame cache. *)
+
 val widest_grapheme_cells : string -> int
 (** Maximum display-cell width of one grapheme; ANSI controls contribute zero. *)
 

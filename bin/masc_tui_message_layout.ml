@@ -366,6 +366,22 @@ let display_width_for_wrapping text =
   | Some cells -> cells
   | None -> wrapping_pieces_width 0 (wrapping_pieces text)
 
+let fits_within_cells ~max_cells text =
+  if max_cells < 0 then false
+  else
+    let exception Too_wide in
+    let used = ref 0 in
+    let add cells =
+      if cells > max_cells - !used then raise Too_wide;
+      used := !used + cells
+    in
+    try
+      iter_display_pieces text
+        ~piece:(fun _ _ cells _ -> add cells)
+        ~ascii:(fun start_offset end_offset -> add (end_offset - start_offset));
+      true
+    with Too_wide -> false
+
 let widest_grapheme_cells text =
   match ascii_display_width text with
   | Some cells -> min 1 cells

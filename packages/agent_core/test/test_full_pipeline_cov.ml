@@ -297,7 +297,23 @@ let test_streaming_sse () =
     Eio.Switch.run
     @@ fun sw ->
     let url = start_sse ~sw ~net:env#net ~port:21004 (openai_sse "streamed text") in
-    let agent = make_agent ~net:env#net url in
+    let provider_config =
+      (* Turn projection retains this declaration only for the agent's model. *)
+      Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_config.OpenAI_compat
+        ~provider_id:"test"
+        ~model_id:"test-model"
+        ~base_url:url
+        ~api_key:""
+        ~headers:[ "Content-Type", "application/json" ]
+        ~request_path:"/v1/chat/completions"
+        ~model_capabilities_override:
+          { Llm_provider.Capabilities.default_capabilities with
+            supports_native_streaming = true
+          }
+        ()
+    in
+    let agent = make_agent ~net:env#net ~provider_config url in
     let events = ref [] in
     match
       Agent.run_stream ~sw ~on_event:(fun e -> events := e :: !events) agent "stream"

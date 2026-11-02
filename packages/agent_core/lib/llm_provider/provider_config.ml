@@ -81,6 +81,7 @@ type t =
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
+  ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
   ; model_capabilities_override : Capabilities.capabilities option
   ; model_anthropic_thinking_control_override : Capabilities.anthropic_thinking_control option
@@ -126,6 +127,7 @@ let make
       ?(disable_parallel_tool_use = false)
       ?(response_format = Types.Off)
       ?(cache_system_prompt = false)
+      ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
       ?model_capabilities_override
       ?model_anthropic_thinking_control_override
@@ -188,6 +190,7 @@ let make
   ; disable_parallel_tool_use
   ; response_format
   ; cache_system_prompt
+  ; system_prompt_cache_prefix
   ; cache_extended_ttl
   ; model_capabilities_override
   ; model_anthropic_thinking_control_override

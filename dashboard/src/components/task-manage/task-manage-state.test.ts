@@ -14,12 +14,21 @@ const mockRefreshShell = vi.fn()
 const mockCaptureWorkspace = vi.fn()
 const mockRetryRejectedDevToken = vi.fn()
 const mockAuthority = { peek: vi.fn() }
+const mockExecutionError = { peek: vi.fn() }
+const mockTasks = { peek: vi.fn() }
 const authorityA = { epoch: 'epoch-a', workspaceRoot: '/a', connectionGeneration: 1 }
 const identity = () => ({ revision: currentStoredTokenRevision(), actor: currentDashboardActor() })
 const created = (args: Record<string, unknown>) => JSON.stringify({ ok: true,
   creation_request_id: args.creation_request_id, goal_id: args.goal_id ?? null, task_id: 'task-1' })
+function firstCallArgs(): Record<string, unknown> {
+  const args: unknown = mockCallMcpToolAtIdentity.mock.calls[0]?.[1]
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Missing MCP call arguments')
+  return args as Record<string, unknown>
+}
 
 vi.mock('../../api/mcp', () => ({ callMcpToolAtIdentity: (...args: any[]) => mockCallMcpToolAtIdentity(...args),
+  callMcpTaskCreationAtIdentity: (args: unknown, identity: unknown, current: unknown, recovery: unknown, wait: unknown) =>
+    mockCallMcpToolAtIdentity('masc_add_task', args, identity, current, recovery, wait),
   mcpCallFailureDisposition: (error: unknown) => mockFailureDisposition(error) }))
 vi.mock('../../api/dev-token', () => ({ retryRejectedDevToken: (...args: any[]) => mockRetryRejectedDevToken(...args) }))
 vi.mock('../../api/published-artifacts', () => ({
@@ -30,6 +39,8 @@ vi.mock('../../api/published-artifacts', () => ({
 vi.mock('../common/toast', () => ({ showToast: (...args: any[]) => mockShowToast(...args) }))
 vi.mock('../../store', () => ({
   executionWorkspaceAuthority: { peek: () => mockAuthority.peek() },
+  executionError: { peek: () => mockExecutionError.peek() },
+  tasks: { peek: () => mockTasks.peek() },
   refreshExecution: (...args: any[]) => mockRefreshExecution(...args),
   refreshGoals: () => mockRefreshGoals(),
   refreshShell: (...args: any[]) => mockRefreshShell(...args),
@@ -51,6 +62,8 @@ describe('task-manage-state', () => {
     mockCaptureWorkspace.mockReset()
     mockRetryRejectedDevToken.mockReset()
     mockAuthority.peek.mockReturnValue(authorityA)
+    mockExecutionError.peek.mockReturnValue(null)
+    mockTasks.peek.mockReturnValue([{ id: 'task-1' }])
     mockCaptureWorkspace.mockResolvedValue({ basePath: '/a', mascRoot: '/a/.masc' })
     mockRetryRejectedDevToken.mockResolvedValue(false)
     mockRefreshShell.mockResolvedValue(true)
@@ -178,7 +191,7 @@ describe('task-manage-state', () => {
     })
     expect(await createTask({ title: 't', description: '' })).toBe(false)
     expect(mockCallMcpToolAtIdentity).toHaveBeenCalledOnce()
-    expect(mockShowToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
   })
 
   it('createTask preserves a canonical Goal ID and binds the observed workspace', async () => {
@@ -248,11 +261,11 @@ describe('task-manage-state', () => {
     showTaskCreate.value = true
     const pending = createTask({ title: 't', description: '', goal_id: 'g-123' }, goalDispatch)
     current = false
-    resolveCreate(created(mockCallMcpToolAtIdentity.mock.calls[0][1]))
+    resolveCreate(created(firstCallArgs()))
     expect(await pending).toBe(true)
     expect(showTaskCreate.value).toBe(true)
     expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('이전 요청'), 'warning')
-    expect(mockShowToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
     expect(mockRefreshGoals).not.toHaveBeenCalled()
   })
 
@@ -262,7 +275,7 @@ describe('task-manage-state', () => {
     const promise = createTask({ title: 't', description: '' })
     await new Promise<void>((r) => setTimeout(() => r(), 5))
     expect(taskCreating.value).toBe(true)
-    resolveMcp!(created(mockCallMcpToolAtIdentity.mock.calls[0][1]))
+    resolveMcp!(created(firstCallArgs()))
     await promise
     expect(taskCreating.value).toBe(false)
   })
@@ -270,7 +283,7 @@ describe('task-manage-state', () => {
   it('shows success and finishes the current presentation', async () => {
     const finish = vi.fn(() => true)
     await createTask({ title: 't', description: '' }, undefined, { finish })
-    expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료 · task-1', 'success')
     expect(finish).toHaveBeenCalledOnce()
   })
 
@@ -280,7 +293,7 @@ describe('task-manage-state', () => {
       return true
     })
     expect(await createTask({ title: 't', description: '' }, undefined, { finish })).toBe(true)
-    expect(mockShowToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
     expect(mockRefreshExecution).not.toHaveBeenCalled()
     expect(mockRefreshGoals).not.toHaveBeenCalled()
   })
@@ -316,7 +329,7 @@ describe('task-manage-state', () => {
     const result = await createTask({ title: 'created once', description: '' })
     expect(result).toBe(true)
     expect(mockCallMcpToolAtIdentity).toHaveBeenCalledOnce()
-    expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료 · task-1', 'success')
     expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('생성 실패'), 'error')
     expect(showTaskCreate.value).toBe(true)
     expect(taskCreating.value).toBe(false)

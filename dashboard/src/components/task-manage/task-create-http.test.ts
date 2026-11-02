@@ -5,17 +5,20 @@ import { resetDevTokenBootstrap } from '../../api/dev-token'
 import { resetMcpClientState } from '../../api/mcp'
 import { DEFAULT_MCP_TIMEOUT_MS } from '../../config/constants'
 import { managedDashboardUnverified, resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
-import { _testResetTaskCreateState, createTask, recheckTaskCreation, taskCreateReceipts, taskCreating } from './task-manage-state'
+import { _testResetTaskCreateState, beginSeparateTaskDraft, createTask, recheckTaskCreation,
+  taskCreateReceipts, taskCreating } from './task-manage-state'
 
 const mocks = vi.hoisted(() => ({
   authority: { peek: vi.fn() },
+  executionError: { peek: vi.fn() },
+  tasks: { peek: vi.fn() },
   refreshExecution: vi.fn(),
   refreshGoals: vi.fn(),
   refreshShell: vi.fn(),
   showToast: vi.fn(),
 }))
 
-vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority,
+vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority, executionError: mocks.executionError, tasks: mocks.tasks,
   refreshExecution: mocks.refreshExecution, refreshGoals: mocks.refreshGoals, refreshShell: mocks.refreshShell }))
 vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
 vi.mock('../../api/tool-host-failure', () => ({ reportToolHostFailure: async () => {} }))
@@ -48,6 +51,8 @@ beforeEach(() => {
   resetMcpClientState()
   _testResetTaskCreateState()
   mocks.authority.peek.mockReturnValue(authority)
+  mocks.executionError.peek.mockReturnValue(null)
+  mocks.tasks.peek.mockReturnValue([{ id: 'task-1' }])
   mocks.refreshExecution.mockResolvedValue(undefined)
   mocks.refreshGoals.mockResolvedValue(undefined)
   mocks.refreshShell.mockResolvedValue(true)
@@ -81,6 +86,34 @@ it('sends a goalless Task once with the observed workspace and identity', async 
   expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)
 })
 
+it.each([401, 403])('does not authorize restored evidence when the current credential receives HTTP %i', async status => {
+  setStoredToken('actor-a-token', { source: 'manual' })
+  let creating = true
+  const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+    if (url === '/health?full=1') return health()
+    expect(url).toBe('/mcp')
+    const request = JSON.parse(String(init.body))
+    if (!creating) return new Response('denied', { status })
+    expect(request.params.name).toBe('masc_add_task')
+    const text = JSON.stringify({ ok: true, creation_request_id: request.params.arguments.creation_request_id,
+      goal_id: null, task_id: 'task-private' })
+    return new Response(JSON.stringify({ id: request.id, result: { content: [{ type: 'text', text }] } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  expect(await createTask({ title: 't', description: '' }, undefined, { finish: () => false })).toBe(true)
+  const requestId = taskCreateReceipts.attempts.peek()[0]?.requestId
+  if (!requestId) throw new Error('Missing Task creation attempt')
+  creating = false
+  setStoredToken('actor-b-token', { source: 'manual' })
+  _testResetTaskCreateState({ preserveStorage: true })
+  await recheckTaskCreation(requestId)
+  expect(taskCreateReceipts.attempts.peek()[0]).toMatchObject({ originalCurrent: false, latestReadCurrent: false,
+    latestReadFailureCurrent: true, original: { kind: 'created', taskId: 'task-private' },
+    reads: [{ kind: 'error', reason: 'lookup_failed' }] })
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(2)
+})
+
 it('does not present a late response as success after the workspace changes', async () => {
   setStoredToken('manual-token', { source: 'manual' })
   let finishBody!: (body: string) => void
@@ -107,9 +140,82 @@ it('does not present a late response as success after the workspace changes', as
   finishBody(JSON.stringify({ id: requestId, result: { content: [{ type: 'text', text }] } }))
   expect(await pending).toBe(true)
   expect(finish).not.toHaveBeenCalled()
-  expect(mocks.showToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+  expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
   expect(mocks.refreshExecution).not.toHaveBeenCalled()
   expect(mocks.refreshGoals).not.toHaveBeenCalled()
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)
+})
+
+it('retains a validated stale success only on its original reservation after a token change', async () => {
+  setStoredToken('actor-a-token', { source: 'manual' })
+  let finishOld!: (body: string) => void
+  let markStarted!: () => void
+  const started = new Promise<void>(resolve => { markStarted = resolve })
+  let oldRpcId = ''
+  let oldCreationId = ''
+  let postCount = 0
+  const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+    if (url === '/health?full=1') return health()
+    expect(url).toBe('/mcp')
+    const request = JSON.parse(String(init.body))
+    expect(request.params.name).toBe('masc_add_task')
+    postCount++
+    if (postCount === 1) {
+      oldRpcId = request.id
+      oldCreationId = request.params.arguments.creation_request_id
+      const response = new Response('', { status: 200 })
+      response.text = () => { markStarted(); return new Promise(resolve => { finishOld = resolve }) }
+      return response
+    }
+    const text = JSON.stringify({ ok: true, creation_request_id: request.params.arguments.creation_request_id,
+      goal_id: null, task_id: 'task-b' })
+    return new Response(JSON.stringify({ id: request.id, result: { content: [{ type: 'text', text }] } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const oldRequest = createTask({ title: 'old', description: '' })
+  await started
+  setStoredToken('actor-b-token', { source: 'manual' })
+  beginSeparateTaskDraft()
+  expect(await createTask({ title: 'new', description: '' })).toBe(true)
+  const newAttempt = taskCreateReceipts.attempts.peek().find(item => item.requestId !== oldCreationId)
+  expect(newAttempt?.original).toEqual({ kind: 'created', taskId: 'task-b' })
+  const text = JSON.stringify({ ok: true, creation_request_id: oldCreationId, goal_id: null, task_id: 'task-a' })
+  finishOld(JSON.stringify({ id: oldRpcId, result: { content: [{ type: 'text', text }] } }))
+  expect(await oldRequest).toBe(false)
+  expect(taskCreateReceipts.attempts.peek().find(item => item.requestId === oldCreationId)).toMatchObject({
+    original: { kind: 'created', taskId: 'task-a' }, originalCurrent: false, presented: false,
+  })
+  expect(taskCreateReceipts.attempts.peek().find(item => item.requestId === newAttempt?.requestId)?.original)
+    .toEqual({ kind: 'created', taskId: 'task-b' })
+  expect(postCount).toBe(2)
+  _testResetTaskCreateState({ preserveStorage: true })
+  expect(taskCreateReceipts.attempts.peek().find(item => item.requestId === oldCreationId)?.original)
+    .toEqual({ kind: 'created', taskId: 'task-a' })
+})
+
+it('keeps an uncertain outcome when a stale success names another creation request', async () => {
+  setStoredToken('actor-a-token', { source: 'manual' })
+  let finishBody!: (body: string) => void
+  let markStarted!: () => void
+  const started = new Promise<void>(resolve => { markStarted = resolve })
+  let rpcId = ''
+  const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+    if (url === '/health?full=1') return health()
+    const request = JSON.parse(String(init.body))
+    rpcId = request.id
+    const response = new Response('', { status: 200 })
+    response.text = () => { markStarted(); return new Promise(resolve => { finishBody = resolve }) }
+    return response
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const pending = createTask({ title: 'old', description: '' })
+  await started
+  setStoredToken('actor-b-token', { source: 'manual' })
+  const text = JSON.stringify({ ok: true, creation_request_id: 'different-request', goal_id: null, task_id: 'foreign' })
+  finishBody(JSON.stringify({ id: rpcId, result: { content: [{ type: 'text', text }] } }))
+  expect(await pending).toBe(false)
+  expect(taskCreateReceipts.attempts.peek()[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
   expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)
 })
 
@@ -126,7 +232,7 @@ it('handles a typed 401 without replaying the Task', async () => {
   expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)
   expect(fetchMock).toHaveBeenCalledTimes(2)
   expect(getStoredToken()).toBeNull()
-  expect(mocks.showToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+  expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
 })
 
 it.each([200, 401])('bounds a stalled %s response body and never replays the Task', async status => {
@@ -149,14 +255,16 @@ it.each([200, 401])('bounds a stalled %s response body and never replays the Tas
   expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)
   expect(fetchMock).toHaveBeenCalledTimes(2)
   expect(getStoredToken()).toBe('dev-token')
-  expect(mocks.showToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+  expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
 
   if (status === 401) {
     mocks.refreshShell.mockImplementationOnce(async () => {
       setCanonicalDashboardActor('dashboard', { tokenRevision: revision, rejected: false, verifiedAfterRefusal: true })
       return true
     })
-    await recheckTaskCreation(taskCreateReceipts.attempts.peek()[0].requestId)
+    const attempt = taskCreateReceipts.attempts.peek()[0]
+    if (!attempt) throw new Error('Missing Task creation attempt')
+    await recheckTaskCreation(attempt.requestId)
     expect(mocks.refreshShell).toHaveBeenCalledWith({ force: true, recoverAuth: false })
     expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(1)
   }

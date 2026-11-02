@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   failureDisposition: vi.fn(),
   captureWorkspace: vi.fn(),
   authority: { peek: vi.fn() },
+  executionError: { peek: vi.fn() },
+  tasks: { peek: vi.fn() },
   showToast: vi.fn(),
   refreshExecution: vi.fn(),
   refreshGoals: vi.fn(),
@@ -16,6 +18,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../api/mcp', () => ({
   callMcpToolAtIdentity: mocks.callMcpToolAtIdentity,
+  callMcpTaskCreationAtIdentity: (args: unknown, identity: unknown, current: unknown, recovery: unknown, wait: unknown) =>
+    mocks.callMcpToolAtIdentity('masc_add_task', args, identity, current, recovery, wait),
   mcpCallFailureDisposition: mocks.failureDisposition,
 }))
 vi.mock('../../api/published-artifacts', () => ({
@@ -24,13 +28,13 @@ vi.mock('../../api/published-artifacts', () => ({
     ({ base_path: workspace.basePath, masc_root: workspace.mascRoot }),
 }))
 vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
-vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority,
+vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority, executionError: mocks.executionError, tasks: mocks.tasks,
   refreshExecution: mocks.refreshExecution, refreshGoals: mocks.refreshGoals, refreshShell: mocks.refreshShell }))
 
 import { TaskCreateForm, resetForm } from './task-create-form'
 import { TaskCreateReceiptsPanel } from './task-create-receipt-panel'
 import { _testResetTaskCreateState, showTaskCreate, taskCreateReceipts, taskCreating } from './task-manage-state'
-import { currentDashboardActor, currentStoredTokenRevision } from '../../api/core'
+import { clearStoredToken, currentDashboardActor, currentStoredTokenRevision, setStoredToken } from '../../api/core'
 
 function created(args: Record<string, unknown>): string {
   return JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
@@ -38,6 +42,18 @@ function created(args: Record<string, unknown>): string {
 }
 
 function identity() { return { revision: currentStoredTokenRevision(), actor: currentDashboardActor() } }
+
+function callArgs(index: number): Record<string, unknown> {
+  const args: unknown = mocks.callMcpToolAtIdentity.mock.calls[index]?.[1]
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error(`Missing MCP call arguments at ${index}`)
+  return args as Record<string, unknown>
+}
+
+function requiredAt<T>(items: readonly T[], index: number): T {
+  const value = items[index]
+  if (value === undefined) throw new Error(`Missing item at ${index}`)
+  return value
+}
 
 function inputDraft(title: string, description: string, priority: string) {
   const titleInput = screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement
@@ -54,8 +70,11 @@ describe('Task creation draft ownership', () => {
     showTaskCreate.value = false
     resetForm()
     vi.resetAllMocks()
+    clearStoredToken()
     _testResetTaskCreateState()
     mocks.authority.peek.mockReturnValue({ epoch: 'epoch-a', workspaceRoot: '/a', connectionGeneration: 1 })
+    mocks.executionError.peek.mockReturnValue(null)
+    mocks.tasks.peek.mockReturnValue([{ id: 'task-1' }])
     mocks.captureWorkspace.mockResolvedValue({ basePath: '/a', mascRoot: '/a/.masc' })
     mocks.refreshExecution.mockResolvedValue(undefined)
     mocks.refreshGoals.mockResolvedValue(undefined)
@@ -68,6 +87,7 @@ describe('Task creation draft ownership', () => {
     cleanup()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    clearStoredToken()
     showTaskCreate.value = false
     resetForm()
   })
@@ -82,13 +102,43 @@ describe('Task creation draft ownership', () => {
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
 
     await waitFor(() => expect(showTaskCreate.value).toBe(false))
+    await waitFor(() => expect(taskCreateReceipts.attempts.value).toHaveLength(0))
     expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce()
-    expect(mocks.showToast).toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mocks.showToast).toHaveBeenCalledWith('태스크 생성 완료 · task-1', 'success')
     fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
     await screen.findByPlaceholderText('예: runtime config introspection 정리')
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('')
     expect((screen.getByPlaceholderText(/배경, 재현 조건/) as HTMLTextAreaElement).value).toBe('')
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('3')
+  })
+
+  it('shows the Task ID and retains a confirmed receipt when post-write refresh fails', async () => {
+    mocks.refreshExecution.mockRejectedValueOnce(new Error('refresh unavailable'))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    render(html`<div><${TaskCreateForm} /><${TaskCreateReceiptsPanel} /></div>`)
+    fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
+    inputDraft('Created task', 'Detail', '2')
+    fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
+    await screen.findByText('task-1 생성 응답을 받았습니다.')
+    await waitFor(() => expect(mocks.refreshExecution).toHaveBeenCalledOnce())
+    expect(mocks.showToast).toHaveBeenCalledWith('태스크 생성 완료 · task-1', 'success')
+    expect(taskCreateReceipts.attempts.value[0]).toMatchObject({ original: { kind: 'created', taskId: 'task-1' }, presented: false })
+    expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '이 결과 확인' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
+  })
+
+  it.each(['missing task', 'store error'])('keeps the receipt when refresh resolves with %s', async condition => {
+    if (condition === 'missing task') mocks.tasks.peek.mockReturnValue([])
+    else mocks.executionError.peek.mockReturnValue('projection unavailable')
+    render(html`<div><${TaskCreateForm} /><${TaskCreateReceiptsPanel} /></div>`)
+    fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
+    inputDraft('Created task', 'Detail', '2')
+    fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
+    await screen.findByText('task-1 생성 응답을 받았습니다.')
+    await waitFor(() => expect(mocks.refreshExecution).toHaveBeenCalledOnce())
+    expect(taskCreateReceipts.attempts.value[0]).toMatchObject({ original: { kind: 'created', taskId: 'task-1' }, presented: false })
+    expect(mocks.showToast).toHaveBeenCalledWith('태스크 생성 완료 · task-1', 'success')
   })
 
   it('keeps the new Goal draft when an earlier Goal creation succeeds late', async () => {
@@ -108,7 +158,7 @@ describe('Task creation draft ownership', () => {
     firstIsCurrent = false
     view.rerender(html`<${TaskCreateForm} goalId="goal-b" goalDispatch=${second} />`)
     inputDraft('New draft', 'New detail', '2')
-    resolveCreate(created(mocks.callMcpToolAtIdentity.mock.calls[0][1]))
+    resolveCreate(created(callArgs(0)))
     await waitFor(() => expect(taskCreating.value).toBe(false))
 
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('New draft')
@@ -135,7 +185,7 @@ describe('Task creation draft ownership', () => {
     fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
     await screen.findByPlaceholderText('예: runtime config introspection 정리')
     inputDraft('Same text', 'Same detail', '1')
-    resolveCreate(created(mocks.callMcpToolAtIdentity.mock.calls[0][1]))
+    resolveCreate(created(callArgs(0)))
     await waitFor(() => expect(taskCreating.value).toBe(false))
 
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('Same text')
@@ -161,7 +211,7 @@ describe('Task creation draft ownership', () => {
       identity: identity(), isCurrent: () => true }
     render(html`<${TaskCreateForm} goalId="goal-a" goalDispatch=${dispatch} />`)
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('Planning task')
-    resolveCreate(created(mocks.callMcpToolAtIdentity.mock.calls[0][1]))
+    resolveCreate(created(callArgs(0)))
     await waitFor(() => expect(taskCreating.value).toBe(false))
 
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('Planning task')
@@ -183,13 +233,13 @@ describe('Task creation draft ownership', () => {
     await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
 
     mocks.authority.peek.mockReturnValue({ epoch: 'epoch-b', workspaceRoot: '/b', connectionGeneration: 1 })
-    resolveCreate(created(mocks.callMcpToolAtIdentity.mock.calls[0][1]))
+    resolveCreate(created(callArgs(0)))
     await waitFor(() => expect(taskCreating.value).toBe(false))
     expect(showTaskCreate.value).toBe(true)
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('Workspace A task')
     expect((screen.getByPlaceholderText(/배경, 재현 조건/) as HTMLTextAreaElement).value).toBe('Original detail')
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('2')
-    expect(mocks.showToast).not.toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mocks.showToast).not.toHaveBeenCalledWith(expect.stringContaining('태스크 생성 완료'), 'success')
     expect(mocks.refreshExecution).not.toHaveBeenCalled()
     expect(mocks.refreshGoals).not.toHaveBeenCalled()
   })
@@ -228,11 +278,11 @@ describe('Task creation draft ownership', () => {
     inputDraft('Second request', 'Second detail', '2')
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await waitFor(() => expect(resolvers).toHaveLength(2))
-    const firstArgs = mocks.callMcpToolAtIdentity.mock.calls[0][1]
-    const secondArgs = mocks.callMcpToolAtIdentity.mock.calls[1][1]
+    const firstArgs = callArgs(0)
+    const secondArgs = callArgs(1)
     expect(firstArgs.creation_request_id).not.toBe(secondArgs.creation_request_id)
 
-    resolvers[0](created(firstArgs))
+    requiredAt(resolvers, 0)(created(firstArgs))
     await screen.findByText('task-1 생성 응답을 받았습니다.')
     expect(taskCreating.value).toBe(true)
     expect(screen.getByRole('button', { name: '추가 중...' }).hasAttribute('disabled')).toBe(true)
@@ -240,7 +290,7 @@ describe('Task creation draft ownership', () => {
       .toEqual({ kind: 'pending' })
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('Second request')
 
-    resolvers[1](created(secondArgs))
+    requiredAt(resolvers, 1)(created(secondArgs))
     await waitFor(() => expect(taskCreating.value).toBe(false))
     expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledTimes(2)
   })
@@ -254,32 +304,62 @@ describe('Task creation draft ownership', () => {
     inputDraft('First request', 'First detail', '1')
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
-    const args = mocks.callMcpToolAtIdentity.mock.calls[0][1]
+    const args = callArgs(0)
     fireEvent.click(screen.getByRole('button', { name: '별도 새 태스크 작성' }))
     inputDraft('New draft', 'New detail', '2')
     resolveCreate(created(args))
     await screen.findByText('task-1 생성 응답을 받았습니다.')
-    expect(taskCreateReceipts.attempts.value[0].presented).toBe(false)
+    expect(taskCreateReceipts.attempts.value[0]?.presented).toBe(false)
 
     view.unmount()
     _testResetTaskCreateState({ preserveStorage: true })
     const restored = render(html`<${TaskCreateReceiptsPanel} />`)
     expect(screen.queryByText(new RegExp(String(args.creation_request_id)))).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '현재 작업 공간 확인' }))
-    await screen.findByText(new RegExp(String(args.creation_request_id)))
-    expect(screen.getByText(/Goal goal-a/)).toBeTruthy()
     expect(screen.getByText(/이전 요청이 있습니다/)).toBeTruthy()
     mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
       workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
       creation_receipt: { state: 'recorded', task_ids: ['task-1'] } }))
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
     await screen.findByText('task-1 생성 응답을 받았습니다.')
+    expect(screen.getByText(new RegExp(String(args.creation_request_id)))).toBeTruthy()
+    expect(screen.getByText(/Goal goal-a/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '이 결과 확인' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
+    await waitFor(() => expect(taskCreateReceipts.attempts.value[0]?.presented).toBe(true))
     restored.unmount()
     _testResetTaskCreateState({ preserveStorage: true })
     render(html`<${TaskCreateReceiptsPanel} />`)
-    expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull()
+    expect(screen.queryByText(/task-1|goal-a/)).toBeNull()
+    mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
+      workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+      creation_receipt: { state: 'recorded', task_ids: ['task-1'] } }))
+    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+    await screen.findByText('task-1 생성 응답을 받았습니다.')
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 중복 조회 오류 정리' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
+  })
+
+  it('allows a restored definite refusal to be authenticated and removed', async () => {
+    mocks.failureDisposition.mockReturnValue('known_pre_effect')
+    mocks.callMcpToolAtIdentity.mockRejectedValueOnce(new Error('refused before dispatch'))
+    vi.spyOn(taskCreateReceipts, 'forgetDefinite').mockReturnValue(false)
+    const view = render(html`<${TaskCreateForm} />`)
+    fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
+    inputDraft('Refused task', 'Detail', '2')
+    fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
+    await waitFor(() => expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('생성 전에'), 'warning'))
+    const args = callArgs(0)
+    view.unmount()
+    _testResetTaskCreateState({ preserveStorage: true })
+    render(html`<${TaskCreateReceiptsPanel} />`)
+    expect(screen.queryByText(new RegExp(String(args.creation_request_id)))).toBeNull()
+    mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
+      workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+      creation_receipt: { state: 'not_observed', task_ids: [] } }))
+    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+    await screen.findByText('태스크 생성 전에 요청이 거부되었습니다.')
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 중복 조회 오류 정리' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
+    expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
   })
 
   it('keeps an ambiguous read visible after a late success is acknowledged', async () => {
@@ -290,7 +370,7 @@ describe('Task creation draft ownership', () => {
     inputDraft('First request', 'First detail', '1')
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
-    const args = mocks.callMcpToolAtIdentity.mock.calls[0][1]
+    const args = callArgs(0)
     fireEvent.click(screen.getByRole('button', { name: '별도 새 태스크 작성' }))
     resolveCreate(created(args))
     await screen.findByText('task-1 생성 응답을 받았습니다.')
@@ -303,6 +383,82 @@ describe('Task creation draft ownership', () => {
     expect(screen.getByText(/생성 기록이 여러 건입니다/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: '이 결과 확인' })).toBeNull()
     expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
+  })
+
+  it.each(['401', '403', 'invalid'])('does not reveal restored evidence to another credential after %s', async (failure) => {
+    setStoredToken('actor-a-token', { source: 'manual' })
+    let resolveCreate!: (value: string) => void
+    mocks.callMcpToolAtIdentity.mockImplementationOnce(() => new Promise<string>(resolve => { resolveCreate = resolve }))
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' }, identity: identity(), isCurrent: () => true }
+    const view = render(html`<div><${TaskCreateForm} goalId="goal-private" goalDispatch=${dispatch} /><${TaskCreateReceiptsPanel} /></div>`)
+    fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
+    inputDraft('Private request', 'Private detail', '1')
+    fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
+    await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
+    const args = callArgs(0)
+    fireEvent.click(screen.getByRole('button', { name: '별도 새 태스크 작성' }))
+    resolveCreate(created(args))
+    await screen.findByText('task-1 생성 응답을 받았습니다.')
+    mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
+      workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+      creation_receipt: { state: 'ambiguous', task_ids: ['task-1', 'task-2'] } }))
+    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+    await screen.findByText(/task-2/)
+    view.unmount()
+
+    setStoredToken('actor-b-token', { source: 'manual' })
+    _testResetTaskCreateState({ preserveStorage: true })
+    render(html`<${TaskCreateReceiptsPanel} />`)
+    const assertHidden = () => {
+      expect(screen.queryByText(/task-1|task-2|goal-private/)).toBeNull()
+      expect(screen.queryByText(new RegExp(String(args.creation_request_id)))).toBeNull()
+      expect(screen.queryByRole('button', { name: '이 결과 확인' })).toBeNull()
+    }
+    assertHidden()
+    if (failure === 'invalid') {
+      mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: 'another',
+        workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+        creation_receipt: { state: 'recorded', task_ids: ['task-1'] } }))
+    } else mocks.callMcpToolAtIdentity.mockRejectedValueOnce(new Error(`HTTP ${failure}`))
+    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+    await screen.findByText(/생성 기록을 확인하지 못했습니다/)
+    assertHidden()
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 중복 조회 오류 정리' }))
+    expect(taskCreateReceipts.attempts.value).toHaveLength(1)
+    assertHidden()
+
+    setStoredToken('actor-a-token', { source: 'manual' })
+    await waitFor(() => expect(screen.queryByText(/생성 기록을 확인하지 못했습니다/)).toBeNull())
+    assertHidden()
+    mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
+      workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+      creation_receipt: { state: 'recorded', task_ids: ['task-1'] } }))
+    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+    await screen.findByText('task-1 생성 응답을 받았습니다.')
+    expect(screen.getByText(/Goal goal-private/)).toBeTruthy()
+    expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
+  })
+
+  it('withdraws previously visible evidence when the same credential is refused a later read', async () => {
+    let resolveCreate!: (value: string) => void
+    mocks.callMcpToolAtIdentity.mockImplementationOnce(() => new Promise<string>(resolve => { resolveCreate = resolve }))
+    render(html`<div><${TaskCreateForm} /><${TaskCreateReceiptsPanel} /></div>`)
+    fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
+    inputDraft('First request', 'First detail', '1')
+    fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
+    await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
+    const args = callArgs(0)
+    fireEvent.click(screen.getByRole('button', { name: '별도 새 태스크 작성' }))
+    resolveCreate(created(args))
+    await screen.findByText('task-1 생성 응답을 받았습니다.')
+    mocks.callMcpToolAtIdentity.mockRejectedValueOnce(new Error('HTTP 403'))
+    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+    await screen.findByText(/생성 기록을 확인하지 못했습니다/)
+    expect(screen.queryByText(/task-1/)).toBeNull()
+    expect(screen.queryByText(new RegExp(String(args.creation_request_id)))).toBeNull()
+    expect(screen.queryByRole('button', { name: '이 결과 확인' })).toBeNull()
+    expect(taskCreateReceipts.attempts.value[0]).toMatchObject({ originalCurrent: true,
+      latestReadCurrent: false, latestReadFailureCurrent: true })
   })
 
   it('checks an uncertain request without replaying it and requires a separate draft for another Task', async () => {
@@ -326,7 +482,7 @@ describe('Task creation draft ownership', () => {
     inputDraft('Original task', 'Original detail', '1')
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await screen.findByText(/태스크 생성 결과가 미확인입니다/)
-    const originalId = mocks.callMcpToolAtIdentity.mock.calls[0][1].creation_request_id
+    const originalId = callArgs(0).creation_request_id
     expect(screen.getByRole('button', { name: 'backlog에 추가' }).hasAttribute('disabled')).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
@@ -345,7 +501,7 @@ describe('Task creation draft ownership', () => {
     inputDraft('Separate task', 'Separate detail', '2')
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await waitFor(() => expect(creationCalls).toBe(2))
-    const newId = mocks.callMcpToolAtIdentity.mock.calls[3][1].creation_request_id
+    const newId = callArgs(3).creation_request_id
     expect(newId).not.toBe(originalId)
     expect(taskCreateReceipts.attempts.value.find(item => item.requestId === originalId)?.reads).toHaveLength(2)
   })
@@ -357,6 +513,7 @@ describe('Task creation draft ownership', () => {
       removeItem: () => {},
     })
     _testResetTaskCreateState()
+    mocks.tasks.peek.mockReturnValue([])
     render(html`<div><${TaskCreateForm} /><${TaskCreateReceiptsPanel} /></div>`)
     fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
     inputDraft('Memory only task', 'Private detail', '1')
@@ -368,7 +525,7 @@ describe('Task creation draft ownership', () => {
     expect(mocks.callMcpToolAtIdentity).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
-    expect(taskCreateReceipts.attempts.value[0].persistence).toBe('memory')
+    expect(taskCreateReceipts.attempts.value[0]?.persistence).toBe('memory')
   })
 
   it('allows the same draft to be retried after a proven pre-effect refusal', async () => {
@@ -384,7 +541,7 @@ describe('Task creation draft ownership', () => {
     expect(screen.getByRole('button', { name: 'backlog에 추가' }).hasAttribute('disabled')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
     await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledTimes(2))
-    expect(mocks.callMcpToolAtIdentity.mock.calls[0][1].creation_request_id)
-      .not.toBe(mocks.callMcpToolAtIdentity.mock.calls[1][1].creation_request_id)
+    expect(callArgs(0).creation_request_id)
+      .not.toBe(callArgs(1).creation_request_id)
   })
 })

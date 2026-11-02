@@ -2,6 +2,7 @@ import { effect, signal, type ReadonlySignal } from '@preact/signals'
 import { v4 as randomUuid } from 'uuid'
 import { callMcpToolAtIdentity } from '../../api/mcp'
 import { artifactWorkspaceBody, type ArtifactWorkspace } from '../../api/published-artifacts'
+import { parseUniqueJson } from '../../lib/json-unique'
 import { isRecord } from '../common/normalize'
 
 export const TASK_CREATE_RECEIPT_STORAGE_KEY = 'masc.dashboard.task-create-receipts.v1'
@@ -39,7 +40,10 @@ export interface TaskCreateAttempt {
   readonly checking: boolean
   /** False after owner change or restoration, even when paths later match. */
   readonly originalCurrent: boolean
+  /** A valid, workspace-bound receipt read under the current owner. */
   readonly latestReadCurrent: boolean
+  /** The latest current-owner read failed; never authorizes stored evidence. */
+  readonly latestReadFailureCurrent: boolean
 }
 
 /** The caller must publish a new immutable owner whenever authority, actor,
@@ -84,6 +88,8 @@ export interface TaskCreateReceiptStore {
   readonly settleOriginal: (requestId: string, result: TaskCreateSettledOriginal) => TaskCreateSettleResult
   /** Marks an already-confirmed response as presented; it never creates a Task. */
   readonly markPresented: (requestId: string) => boolean
+  /** Removes only this current owner's definite, unambiguous outcome. */
+  readonly forgetDefinite: (requestId: string) => boolean
   /** A deliberate read only. No creation or lookup request is replayed. */
   readonly observe: (requestId: string) => Promise<TaskCreateObserveResult>
   readonly retryStorage: () => boolean
@@ -121,53 +127,16 @@ function canonicalTimestamp(value: unknown): value is string {
   return Number.isFinite(date.getTime()) && date.toISOString() === value
 }
 
-/** JSON.parse keeps only the last duplicate member; receipts must not. */
-function parseUniqueJson(raw: string): unknown {
-  const value: unknown = JSON.parse(raw)
-  let offset = 0
-  const whitespace = () => { while (offset < raw.length && ' \t\r\n'.includes(raw[offset])) offset++ }
-  const readString = (): string => {
-    const start = offset++
-    while (offset < raw.length) {
-      if (raw[offset] === '\\') offset += 2
-      else if (raw[offset++] === '"') return JSON.parse(raw.slice(start, offset)) as string
-    }
-    throw new Error('unterminated JSON string')
+function sameObservation(a: TaskCreationRead, b: TaskCreationRead): boolean {
+  if (a.kind === 'error' && b.kind === 'error') return a.reason === b.reason
+  if (a.kind === 'error' || b.kind === 'error' || a.kind !== b.kind) return false
+  if (a.backlogVersion !== b.backlogVersion) return false
+  if (a.kind === 'not_observed' && b.kind === 'not_observed') return true
+  if (a.kind === 'recorded' && b.kind === 'recorded') return a.taskId === b.taskId
+  if (a.kind === 'ambiguous' && b.kind === 'ambiguous') {
+    return a.taskIds.length === b.taskIds.length && a.taskIds.every((id, index) => id === b.taskIds[index])
   }
-  const readValue = (): void => {
-    whitespace()
-    if (raw[offset] === '{') {
-      offset++
-      whitespace()
-      const keys = new Set<string>()
-      if (raw[offset] === '}') { offset++; return }
-      for (;;) {
-        whitespace()
-        const key = readString()
-        if (keys.has(key)) throw new Error('duplicate JSON member')
-        keys.add(key)
-        whitespace()
-        offset++ // colon; JSON.parse already validated the syntax
-        readValue()
-        whitespace()
-        if (raw[offset++] === '}') return
-      }
-    }
-    if (raw[offset] === '[') {
-      offset++
-      whitespace()
-      if (raw[offset] === ']') { offset++; return }
-      for (;;) {
-        readValue()
-        whitespace()
-        if (raw[offset++] === ']') return
-      }
-    }
-    if (raw[offset] === '"') { readString(); return }
-    while (offset < raw.length && !',]} \t\r\n'.includes(raw[offset])) offset++
-  }
-  readValue()
-  return value
+  return false
 }
 
 /** Decode the exact original request and workspace, with state cardinality. */
@@ -184,7 +153,8 @@ export function decodeTaskCreationReceipt(raw: string, requestId: string,
   if (!Array.isArray(ids) || !ids.every(nonblank)) return null
   const backlogVersion = value.backlog_version
   if (state === 'not_observed' && ids.length === 0) return { kind: 'not_observed', backlogVersion }
-  if (state === 'recorded' && ids.length === 1) return { kind: 'recorded', taskId: ids[0], backlogVersion }
+  const taskId: unknown = ids[0]
+  if (state === 'recorded' && ids.length === 1 && nonblank(taskId)) return { kind: 'recorded', taskId, backlogVersion }
   if (state === 'ambiguous' && ids.length >= 2) return { kind: 'ambiguous', taskIds: [...ids], backlogVersion }
   return null
 }
@@ -255,7 +225,8 @@ function decodeStored(raw: string): TaskCreateAttempt[] | null {
     seen.add(item.requestId)
     attempts.push({ requestId: item.requestId, workspace, goalId: item.goalId, createdAt: item.createdAt,
       persistence: 'session', original, presented: item.presented,
-      reads: reads as TaskCreationRead[], checking: false, originalCurrent: false, latestReadCurrent: false })
+      reads: reads as TaskCreationRead[], checking: false, originalCurrent: false, latestReadCurrent: false,
+      latestReadFailureCurrent: false })
   }
   return attempts
 }
@@ -321,8 +292,9 @@ export function createTaskCreateReceiptStore(options: {
     ownerEpoch += 1
     reads.clear()
     const existing = attempts.peek()
-    if (existing.some(item => item.checking || item.originalCurrent || item.latestReadCurrent)) {
-      attempts.value = existing.map(item => ({ ...item, checking: false, originalCurrent: false, latestReadCurrent: false }))
+    if (existing.some(item => item.checking || item.originalCurrent || item.latestReadCurrent || item.latestReadFailureCurrent)) {
+      attempts.value = existing.map(item => ({ ...item, checking: false, originalCurrent: false, latestReadCurrent: false,
+        latestReadFailureCurrent: false }))
     }
   })
 
@@ -342,6 +314,20 @@ export function createTaskCreateReceiptStore(options: {
     try { return owner.isCurrent() } catch { return false }
   }
 
+  const canManage = (item: TaskCreateAttempt): boolean => {
+    const owner = options.owner.peek()
+    return Boolean(owner && sameWorkspace(owner.workspace, item.workspace)
+      && ownerGuard(owner, ownerEpoch, item.workspace, owner.identity)()
+      && !item.latestReadFailureCurrent && (item.originalCurrent || item.latestReadCurrent))
+  }
+
+  const definite = (item: TaskCreateAttempt): boolean =>
+    item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
+      || (item.original.kind === 'created' && item.presented)
+
+  const canForget = (item: TaskCreateAttempt): boolean =>
+    canManage(item) && definite(item) && !item.checking && !item.reads.some(read => read.kind === 'ambiguous')
+
   const reserveWith = (persistence: 'session' | 'memory', goalId: string | null = null): TaskCreateReserveResult => {
     if (disposed) return { kind: 'disposed' }
     if (persistence === 'session' && storageState.peek() !== 'ready') return { kind: 'storage_unavailable' }
@@ -358,7 +344,7 @@ export function createTaskCreateReceiptStore(options: {
     if (attempts.peek().some(item => item.requestId === requestId)) return { kind: 'duplicate_request_id' }
     const attempt: TaskCreateAttempt = { requestId, workspace, goalId, createdAt: new Date().toISOString(), persistence,
       original: { kind: 'pending' }, presented: false, reads: [],
-      checking: false, originalCurrent: true, latestReadCurrent: false }
+      checking: false, originalCurrent: true, latestReadCurrent: false, latestReadFailureCurrent: false }
     const next = [...attempts.peek(), attempt]
     if (persistence === 'session' && !save(next)) return { kind: 'storage_unavailable' }
     originalGuards.set(requestId, isCurrent)
@@ -389,6 +375,17 @@ export function createTaskCreateReceiptStore(options: {
     if (!existing || existing.original.kind !== 'created') return false
     attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, presented: true } : item)
     if (existing.persistence === 'session') save(attempts.peek())
+    return true
+  }
+
+  const forgetDefinite = (requestId: string): boolean => {
+    if (disposed) return false
+    const item = attempts.peek().find(attempt => attempt.requestId === requestId)
+    if (!item || !canForget(item)) return false
+    const next = attempts.peek().filter(attempt => attempt.requestId !== requestId)
+    // Keep the in-memory evidence if a session-backed deletion cannot persist.
+    if (item.persistence === 'session' && !save(next)) return false
+    attempts.value = next
     return true
   }
 
@@ -431,7 +428,8 @@ export function createTaskCreateReceiptStore(options: {
     // No await occurs between the final owner check and admitting this read.
     if (!ownerIsCurrent()) return { kind: 'stale' }
     const next = attempts.peek().map(item => item.requestId === requestId
-      ? { ...item, reads: [...item.reads, result], checking: false, latestReadCurrent: true } : item)
+      ? { ...item, reads: [...item.reads.filter(read => !sameObservation(read, result)), result], checking: false,
+        latestReadCurrent: result.kind !== 'error', latestReadFailureCurrent: result.kind === 'error' } : item)
     attempts.value = next
     const persisted = existing.persistence === 'session' && save(attempts.peek())
     return { kind: 'observed', result, persisted }
@@ -455,9 +453,8 @@ export function createTaskCreateReceiptStore(options: {
     let removedErrors = 0
     const next: TaskCreateAttempt[] = []
     for (const item of attempts.peek()) {
-      const definite = item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
-        || (item.original.kind === 'created' && item.presented)
-      if (definite && !item.checking && !item.reads.some(read => read.kind === 'ambiguous')) {
+      if (!canManage(item)) { next.push(item); continue }
+      if (canForget(item)) {
         removedAttempts++
         continue
       }
@@ -483,8 +480,10 @@ export function createTaskCreateReceiptStore(options: {
     ownerEpoch += 1
     reads.clear()
     stopOwnerEffect()
-    attempts.value = attempts.peek().map(item => ({ ...item, checking: false, originalCurrent: false, latestReadCurrent: false }))
+    attempts.value = attempts.peek().map(item => ({ ...item, checking: false, originalCurrent: false, latestReadCurrent: false,
+      latestReadFailureCurrent: false }))
   }
 
-  return { attempts, storageState, reserve, reserveMemoryOnly, settleOriginal, markPresented, observe, retryStorage, compact, dispose }
+  return { attempts, storageState, reserve, reserveMemoryOnly, settleOriginal, markPresented, forgetDefinite,
+    observe, retryStorage, compact, dispose }
 }

@@ -126,7 +126,7 @@ describe('Task creation receipts', () => {
     storage.value = null
     expect(store.retryStorage()).toBe(true)
     expect(store.attempts.value).toHaveLength(1)
-    expect(store.attempts.value[0].persistence).toBe('memory')
+    expect(store.attempts.value[0]?.persistence).toBe('memory')
     store.dispose()
   })
 
@@ -136,11 +136,11 @@ describe('Task creation receipts', () => {
     storage.failWrite = true
     expect(store.settleOriginal(request.requestId, { kind: 'created', taskId: 'task-1' }))
       .toEqual({ kind: 'settled', persisted: false })
-    expect(store.attempts.value[0].original).toEqual({ kind: 'created', taskId: 'task-1' })
+    expect(store.attempts.value[0]?.original).toEqual({ kind: 'created', taskId: 'task-1' })
     expect(store.storageState.value).toBe('write_failed')
     storage.failWrite = false
     const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
-    expect(restored.attempts.value[0].original).toEqual({ kind: 'unconfirmed', reason: 'interrupted' })
+    expect(restored.attempts.value[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'interrupted' })
     expect(store.retryStorage()).toBe(true)
     expect(JSON.parse(storage.value!).attempts[0].original).toEqual({ kind: 'created', taskId: 'task-1' })
     restored.dispose()
@@ -157,7 +157,7 @@ describe('Task creation receipts', () => {
     unread.dispose()
     expect(store.markPresented(request.requestId)).toBe(true)
     const presented = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
-    expect(presented.attempts.value[0].presented).toBe(true)
+    expect(presented.attempts.value[0]?.presented).toBe(true)
     expect(mocks.call).not.toHaveBeenCalled()
     presented.dispose()
     store.dispose()
@@ -176,17 +176,20 @@ describe('Task creation receipts', () => {
       .mockRejectedValueOnce(new Error('read failed again'))
       .mockResolvedValueOnce(response(unknown.requestId, 'ambiguous', ['task-a', 'task-b']))
       .mockRejectedValueOnce(new Error('still unavailable'))
+      .mockResolvedValueOnce(response(unknown.requestId, 'not_observed', [], workspaceA, 8))
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
-    expect(store.compact()).toEqual({ removedAttempts: 2, removedErrors: 2, persisted: true })
+    await store.observe(unknown.requestId)
+    expect(store.compact()).toEqual({ removedAttempts: 2, removedErrors: 0, persisted: true })
     expect(store.attempts.value).toHaveLength(1)
     expect(store.attempts.value[0]).toMatchObject({ requestId: unknown.requestId,
       original: { kind: 'unconfirmed', reason: 'response_unknown' },
-      reads: [{ kind: 'ambiguous', taskIds: ['task-a', 'task-b'] }, { kind: 'error', reason: 'lookup_failed' }] })
+      reads: [{ kind: 'ambiguous', taskIds: ['task-a', 'task-b'] }, { kind: 'error', reason: 'lookup_failed' },
+        { kind: 'not_observed', backlogVersion: 8 }] })
     const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
-    expect(restored.attempts.value[0].reads).toEqual(store.attempts.value[0].reads)
+    expect(restored.attempts.value[0]?.reads).toEqual(store.attempts.value[0]?.reads)
     restored.dispose()
     store.dispose()
   })
@@ -210,6 +213,31 @@ describe('Task creation receipts', () => {
     store.dispose()
   })
 
+  it('forgets only the requested definite result and retains it when deletion cannot be saved', async () => {
+    const { store, storage } = setup()
+    const confirmed = reserve(store)
+    store.settleOriginal(confirmed.requestId, { kind: 'created', taskId: 'task-1' })
+    store.markPresented(confirmed.requestId)
+    const unknown = reserve(store)
+    store.settleOriginal(unknown.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+    const ambiguous = reserve(store)
+    store.settleOriginal(ambiguous.requestId, { kind: 'created', taskId: 'task-a' })
+    store.markPresented(ambiguous.requestId)
+    mocks.call.mockResolvedValueOnce(response(ambiguous.requestId, 'ambiguous', ['task-a', 'task-b']))
+    await store.observe(ambiguous.requestId)
+    expect(store.forgetDefinite(unknown.requestId)).toBe(false)
+    expect(store.forgetDefinite(ambiguous.requestId)).toBe(false)
+    storage.failWrite = true
+    expect(store.forgetDefinite(confirmed.requestId)).toBe(false)
+    expect(store.attempts.value).toHaveLength(3)
+    storage.failWrite = false
+    expect(store.retryStorage()).toBe(true)
+    expect(store.forgetDefinite(confirmed.requestId)).toBe(true)
+    expect(store.attempts.value.map(item => item.requestId)).toEqual([unknown.requestId, ambiguous.requestId])
+    expect(store.attempts.value[1]?.reads[0]).toMatchObject({ kind: 'ambiguous' })
+    store.dispose()
+  })
+
   it('keeps the original transport unknown when an exact creation fact is observed', async () => {
     const { store } = setup()
     const request = reserve(store)
@@ -217,8 +245,8 @@ describe('Task creation receipts', () => {
     mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-17']))
     const outcome = await store.observe(request.requestId)
     expect(outcome).toEqual({ kind: 'observed', result: { kind: 'recorded', taskId: 'task-17', backlogVersion: 5 }, persisted: true })
-    expect(store.attempts.value[0].original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
-    expect(store.attempts.value[0].latestReadCurrent).toBe(true)
+    expect(store.attempts.value[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
+    expect(store.attempts.value[0]?.latestReadCurrent).toBe(true)
     expect(mocks.call).toHaveBeenCalledOnce()
     expect(mocks.call).toHaveBeenCalledWith('masc_tasks', { creation_request_id: request.requestId,
       expected_workspace: { base_path: workspaceA.basePath, masc_root: workspaceA.mascRoot } },
@@ -235,11 +263,11 @@ describe('Task creation receipts', () => {
       .mockResolvedValueOnce(response(request.requestId, 'ambiguous', ['task-1', 'task-2'], workspaceA, 7))
       .mockRejectedValueOnce(new Error('private server output'))
     await store.observe(request.requestId)
-    expect(store.attempts.value[0].original.kind).toBe('unconfirmed')
+    expect(store.attempts.value[0]?.original.kind).toBe('unconfirmed')
     await store.observe(request.requestId)
     await store.observe(request.requestId)
     await store.observe(request.requestId)
-    expect(store.attempts.value[0].reads).toEqual([
+    expect(store.attempts.value[0]?.reads).toEqual([
       { kind: 'not_observed', backlogVersion: 5 },
       { kind: 'recorded', taskId: 'task-1', backlogVersion: 6 },
       { kind: 'ambiguous', taskIds: ['task-1', 'task-2'], backlogVersion: 7 },
@@ -250,20 +278,82 @@ describe('Task creation receipts', () => {
     store.dispose()
   })
 
+  it('does not accumulate identical recorded or not-observed facts, and retains distinct observations', async () => {
+    const { store, storage } = setup()
+    const request = reserve(store)
+    store.settleOriginal(request.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+    mocks.call.mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+      .mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+      .mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-1'], workspaceA, 6))
+      .mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-1'], workspaceA, 6))
+      .mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-1'], workspaceA, 7))
+      .mockResolvedValueOnce(response(request.requestId, 'ambiguous', ['task-1', 'task-2'], workspaceA, 8))
+      .mockResolvedValueOnce(response(request.requestId, 'ambiguous', ['task-1', 'task-2'], workspaceA, 8))
+      .mockResolvedValueOnce(response(request.requestId, 'ambiguous', ['task-1', 'task-3'], workspaceA, 8))
+    for (let i = 0; i < 8; i++) await store.observe(request.requestId)
+    expect(store.attempts.value[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
+    expect(store.attempts.value[0]?.reads).toEqual([
+      { kind: 'not_observed', backlogVersion: 5 },
+      { kind: 'recorded', taskId: 'task-1', backlogVersion: 6 },
+      { kind: 'recorded', taskId: 'task-1', backlogVersion: 7 },
+      { kind: 'ambiguous', taskIds: ['task-1', 'task-2'], backlogVersion: 8 },
+      { kind: 'ambiguous', taskIds: ['task-1', 'task-3'], backlogVersion: 8 },
+    ])
+    expect(JSON.parse(storage.value!).attempts[0].reads).toHaveLength(5)
+    store.dispose()
+  })
+
+  it('coalesces repeated read failures without losing distinct errors or original evidence', async () => {
+    const { store } = setup()
+    const request = reserve(store)
+    store.settleOriginal(request.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+    mocks.call.mockRejectedValueOnce(new Error('HTTP 403'))
+      .mockRejectedValueOnce(new Error('HTTP 403 again'))
+      .mockResolvedValueOnce('invalid JSON')
+      .mockResolvedValueOnce('still invalid JSON')
+      .mockResolvedValueOnce(response(request.requestId, 'not_observed', []))
+    for (let i = 0; i < 5; i++) await store.observe(request.requestId)
+    expect(store.attempts.value[0]).toMatchObject({ original: { kind: 'unconfirmed', reason: 'response_unknown' },
+      reads: [{ kind: 'error', reason: 'lookup_failed' }, { kind: 'error', reason: 'invalid_response' },
+        { kind: 'not_observed', backlogVersion: 5 }] })
+    store.dispose()
+  })
+
+  it.each(['denied', 'invalid'])('does not authorize stored evidence or compaction on a %s read after owner change', async (kind) => {
+    const { store, ownerSignal, storage } = setup()
+    const request = reserve(store, 'goal-a')
+    store.settleOriginal(request.requestId, { kind: 'created', taskId: 'task-a' })
+    store.markPresented(request.requestId)
+    ownerSignal.value = owner()
+    if (kind === 'denied') mocks.call.mockRejectedValueOnce(new Error('HTTP 403'))
+    else mocks.call.mockResolvedValueOnce(response('another-request', 'recorded', ['task-a']))
+    const result = await store.observe(request.requestId)
+    expect(result).toMatchObject({ kind: 'observed', result: { kind: 'error' } })
+    expect(store.attempts.value[0]).toMatchObject({ originalCurrent: false, latestReadCurrent: false,
+      latestReadFailureCurrent: true })
+    expect(store.compact()).toEqual({ removedAttempts: 0, removedErrors: 0, persisted: true })
+    expect(store.attempts.value[0]?.original).toEqual({ kind: 'created', taskId: 'task-a' })
+    const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
+    expect(restored.attempts.value[0]).toMatchObject({ originalCurrent: false, latestReadCurrent: false,
+      latestReadFailureCurrent: false })
+    restored.dispose()
+    store.dispose()
+  })
+
   it('does not admit a read that returned after owner A → B → A', async () => {
     let resolveRead!: (value: string) => void
     const { store, ownerSignal } = setup({ lookup: () => new Promise(resolve => { resolveRead = resolve }) })
     const request = reserve(store)
     const originalOwner = ownerSignal.peek()!
     const pending = store.observe(request.requestId)
-    expect(store.attempts.value[0].checking).toBe(true)
+    expect(store.attempts.value[0]?.checking).toBe(true)
     ownerSignal.value = owner(workspaceB)
     ownerSignal.value = originalOwner
     expect(request.isCurrent()).toBe(false)
-    expect(store.attempts.value[0].checking).toBe(false)
+    expect(store.attempts.value[0]?.checking).toBe(false)
     resolveRead(response(request.requestId, 'recorded', ['task-a']))
     expect(await pending).toEqual({ kind: 'stale' })
-    expect(store.attempts.value[0].reads).toEqual([])
+    expect(store.attempts.value[0]?.reads).toEqual([])
     store.settleOriginal(request.requestId, { kind: 'created', taskId: 'task-a' })
     expect(store.attempts.value[0]).toMatchObject({ original: { kind: 'created', taskId: 'task-a' },
       originalCurrent: false, latestReadCurrent: false })
@@ -279,9 +369,9 @@ describe('Task creation receipts', () => {
     ownerSignal.value = owner(workspaceB)
     expect(await store.observe(request.requestId)).toEqual({ kind: 'workspace_mismatch' })
     ownerSignal.value = originalOwner
-    expect(store.attempts.value[0].latestReadCurrent).toBe(false)
+    expect(store.attempts.value[0]?.latestReadCurrent).toBe(false)
     expect((await store.observe(request.requestId)).kind).toBe('observed')
-    expect(store.attempts.value[0].latestReadCurrent).toBe(true)
+    expect(store.attempts.value[0]?.latestReadCurrent).toBe(true)
     expect(mocks.call).toHaveBeenCalledTimes(2)
     store.dispose()
   })

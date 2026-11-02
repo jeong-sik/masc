@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
 import { acknowledgeTaskCreateResult, compactTaskCreateReceipts, recheckTaskCreation, retryTaskCreateStorage,
-  taskCreateReceiptOwner, taskCreateReceipts, verifyTaskReceiptWorkspace } from './task-manage-state'
+  taskCreateReceiptOwner, taskCreateReceipts } from './task-manage-state'
 import type { TaskCreateAttempt, TaskCreationRead } from './task-create-receipt'
 
 function readText(read: TaskCreationRead): string {
@@ -28,6 +28,8 @@ export function TaskCreateReceiptsPanel() {
   const owner = taskCreateReceiptOwner.value
   const attempts = taskCreateReceipts.attempts.value.filter(item => item.original.kind === 'pending'
     || item.original.kind === 'unconfirmed' || (item.original.kind === 'created' && !item.presented)
+    || (!item.originalCurrent && (item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
+      || (item.original.kind === 'created' && item.presented)))
     || item.reads.some(read => read.kind === 'ambiguous'))
   const storageState = taskCreateReceipts.storageState.value
   if (attempts.length === 0 && storageState !== 'write_failed') return null
@@ -37,15 +39,15 @@ export function TaskCreateReceiptsPanel() {
       요청 기록을 저장하지 못했습니다. 저장을 다시 확인해 주세요.
       <${ActionButton} variant="ghost" size="sm" onClick=${retryTaskCreateStorage}>저장 다시 확인<//>
     </div>` : null}
-    ${attempts.length > 0 ? html`<${ActionButton} variant="ghost" size="sm"
-      onClick=${() => { void verifyTaskReceiptWorkspace() }}>현재 작업 공간 확인<//>` : null}
     ${attempts.map((attempt, index) => {
-      const canIdentify = Boolean(owner && owner.isCurrent() && owner.workspace.basePath === attempt.workspace.basePath
+      const sameOwner = Boolean(owner && owner.isCurrent() && owner.workspace.basePath === attempt.workspace.basePath
         && owner.workspace.mascRoot === attempt.workspace.mascRoot)
-      const canShow = canIdentify && (attempt.originalCurrent || attempt.latestReadCurrent)
+      const canShow = sameOwner && !attempt.latestReadFailureCurrent && (attempt.originalCurrent || attempt.latestReadCurrent)
+      const latestRead = attempt.reads[attempt.reads.length - 1]
       return html`<div key=${attempt.requestId} role="status" class="mt-2 text-xs text-text-muted">
-        <p>요청 ${index + 1}${canIdentify ? ` · ${attempt.requestId} · ${attempt.createdAt}${attempt.goalId ? ` · Goal ${attempt.goalId}` : ''}` : ''}</p>
+        <p>요청 ${index + 1}${canShow ? ` · ${attempt.requestId} · ${attempt.createdAt}${attempt.goalId ? ` · Goal ${attempt.goalId}` : ''}` : ''}</p>
         <p>${attemptText(attempt, canShow)}</p>
+        ${sameOwner && attempt.latestReadFailureCurrent && latestRead?.kind === 'error' ? html`<p>${readText(latestRead)}</p>` : null}
         ${canShow && attempt.latestReadCurrent && attempt.reads.length > 0 ? html`<ol>
           ${attempt.reads.map((read, readIndex) => html`<li key=${readIndex}>${readText(read)}</li>`)}
         </ol>` : null}

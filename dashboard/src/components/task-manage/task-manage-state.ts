@@ -1,9 +1,9 @@
 import { computed, effect, signal, type ReadonlySignal } from '@preact/signals'
-import { callMcpToolAtIdentity, mcpCallFailureDisposition } from '../../api/mcp'
+import { callMcpTaskCreationAtIdentity, callMcpToolAtIdentity, mcpCallFailureDisposition } from '../../api/mcp'
 import { currentDashboardActor, currentStoredTokenRevision, getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { retryRejectedDevToken } from '../../api/dev-token'
 import { showToast } from '../common/toast'
-import { executionWorkspaceAuthority, refreshExecution, refreshGoals, refreshShell } from '../../store'
+import { executionError, executionWorkspaceAuthority, refreshExecution, refreshGoals, refreshShell, tasks } from '../../store'
 import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardAuthRevision,
   managedDashboardRefusal, managedDashboardUnverified } from '../../lib/dashboard-session-actor'
 import { storedTokenRevision } from '../../api/token-revision'
@@ -152,9 +152,6 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskRec
   }
 }
 
-/** Verify current scope to reveal local request identifiers, without reading a receipt. */
-export async function verifyTaskReceiptWorkspace(): Promise<void> { await verifyReceiptOwner() }
-
 /** Explicit receipt lookup; it never resends the creation request. */
 export async function recheckTaskCreation(requestId: string): Promise<void> {
   const attempt = taskCreateReceipts.attempts.peek().find(item => item.requestId === requestId)
@@ -169,13 +166,16 @@ export function acknowledgeTaskCreateResult(requestId: string): void {
   const item = taskCreateReceipts.attempts.peek().find(attempt => attempt.requestId === requestId)
   const owner = receiptOwner.peek()
   if (!item || !owner || !owner.isCurrent() || item.workspace.basePath !== owner.workspace.basePath
-    || item.workspace.mascRoot !== owner.workspace.mascRoot || !(item.originalCurrent || item.latestReadCurrent)) return
+    || item.workspace.mascRoot !== owner.workspace.mascRoot || item.latestReadFailureCurrent
+    || !(item.originalCurrent || item.latestReadCurrent)) return
   taskCreateReceipts.markPresented(requestId)
 }
 
 export function compactTaskCreateReceipts(): void {
   const result = taskCreateReceipts.compact()
-  if (result.persisted) showToast('확인된 기록과 중복 조회 오류를 정리했습니다.', 'success')
+  if (result.persisted && result.removedAttempts + result.removedErrors === 0) {
+    showToast('정리할 수 있는 기록이 없습니다. 현재 인증으로 결과를 확인해 주세요.', 'warning')
+  } else if (result.persisted) showToast('확인된 기록과 중복 조회 오류를 정리했습니다.', 'success')
   else showToast('기록을 정리했지만 저장하지 못했습니다. 저장 상태를 다시 확인해 주세요.', 'warning')
 }
 
@@ -243,6 +243,7 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
       && managedDashboardUnverified.peek() !== authRevision))
   let dispatch = linkedGoalId === null ? null : goalDispatch ?? null
   let reservation: TaskCreateReservation | null = null
+  const receipts = taskCreateReceipts
   preparingDrafts.value = new Set([...preparingDrafts.peek(), draft])
   try {
     if (linkedGoalId === null && planningAuthority) {
@@ -276,7 +277,7 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
       return false
     }
     const reserved = memoryOnlyDraft.peek() === draft
-      ? taskCreateReceipts.reserveMemoryOnly(linkedGoalId) : taskCreateReceipts.reserve(linkedGoalId)
+      ? receipts.reserveMemoryOnly(linkedGoalId) : receipts.reserve(linkedGoalId)
     if (reserved.kind !== 'reserved') {
       if (reserved.kind === 'storage_unavailable') {
         taskCreateStorageNotice.value = draft
@@ -296,7 +297,8 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
     const canSend = () => reservation?.isCurrent() === true && dispatch?.isCurrent() === true
       && presentationCurrent() && currentTaskDraft.peek() === draft
     if (!canSend()) {
-      taskCreateReceipts.settleOriginal(reservation.requestId, { kind: 'not_sent' })
+      receipts.settleOriginal(reservation.requestId, { kind: 'not_sent' })
+      receipts.forgetDefinite(reservation.requestId)
       return false
     }
     const args: Record<string, unknown> = { title: input.title.trim(), description: input.description.trim() }
@@ -304,15 +306,18 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
     if (linkedGoalId !== null) args.goal_id = linkedGoalId
     args.expected_workspace = artifactWorkspaceBody(dispatch.workspace)
     args.creation_request_id = reservation.requestId
-    const response = await callMcpToolAtIdentity('masc_add_task', args, dispatch.identity, canSend,
-      dispatch.isRecoveryCurrent, dispatch.waitForRecoveryCurrent)
+    const originalRequestId = reservation.requestId
+    const response = await callMcpTaskCreationAtIdentity(args, dispatch.identity, canSend,
+      dispatch.isRecoveryCurrent, dispatch.waitForRecoveryCurrent, result => {
+        receipts.settleOriginal(originalRequestId, result)
+      })
     const created = decodeTaskCreationResponse(response, reservation.requestId, linkedGoalId)
     if (!created) {
-      taskCreateReceipts.settleOriginal(reservation.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+      receipts.settleOriginal(reservation.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
       showToast('태스크 생성 응답을 확인할 수 없습니다. 이전 요청의 결과를 확인해 주세요.', 'warning')
       return false
     }
-    taskCreateReceipts.settleOriginal(reservation.requestId, created)
+    receipts.settleOriginal(reservation.requestId, created)
     if (!dispatch.isCurrent()) {
       showToast('이전 요청의 태스크 생성 응답이 도착했습니다. 요청한 workspace에서 결과를 확인해 주세요.', 'warning')
       return true
@@ -334,22 +339,31 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
       showToast('이전 요청의 태스크 생성 응답이 도착했습니다. 요청한 workspace에서 결과를 확인해 주세요.', 'warning')
       return true
     }
-    showToast('태스크 생성 완료', 'success')
-    taskCreateReceipts.markPresented(reservation.requestId)
-    const observations: Promise<void>[] = []
-    if (linkedGoalId !== null || planningDecisionCurrent()) observations.push(refreshExecution({ force: true }))
-    if (linkedGoalId !== null) observations.push(refreshGoals())
-    await Promise.all(observations).catch(error => {
-      // The write already committed; its refresh error is visible in the store.
+    showToast(`태스크 생성 완료 · ${created.taskId}`, 'success')
+    try {
+      const observations: Promise<void>[] = []
+      if (linkedGoalId !== null || planningDecisionCurrent()) observations.push(refreshExecution({ force: true }))
+      if (linkedGoalId !== null) observations.push(refreshGoals())
+      await Promise.all(observations)
+      if (reservation.isCurrent() && executionError.peek() === null
+        && tasks.peek().some(task => task.id === created.taskId)) {
+        receipts.markPresented(reservation.requestId)
+        receipts.forgetDefinite(reservation.requestId)
+      }
+    } catch (error) {
+      // The write already committed; keep its receipt visible if refresh failed.
       console.warn('[Tasks] post-write observation refresh failed:', error)
-    })
+    }
     return true
   } catch (err) {
     if (dispatch) {
       const disposition = mcpCallFailureDisposition(err)
-      if (reservation) taskCreateReceipts.settleOriginal(reservation.requestId,
-        disposition === 'known_pre_effect' ? { kind: 'rejected_before_effect' }
-          : { kind: 'unconfirmed', reason: disposition === 'known_tool_response' ? 'server_error' : 'response_unknown' })
+      if (reservation) {
+        const settled = receipts.settleOriginal(reservation.requestId,
+          disposition === 'known_pre_effect' ? { kind: 'rejected_before_effect' }
+            : { kind: 'unconfirmed', reason: disposition === 'known_tool_response' ? 'server_error' : 'response_unknown' })
+        if (disposition === 'known_pre_effect' && settled.kind === 'settled') receipts.forgetDefinite(reservation.requestId)
+      }
       if (!dispatch.isCurrent()) {
         showToast('이전 요청의 결과가 도착했습니다. 요청한 workspace에서 Task 상태를 확인해 주세요.', 'warning')
       } else if (disposition === 'known_pre_effect') {

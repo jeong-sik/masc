@@ -27,20 +27,21 @@ let register_ws_cleanup (f : unit -> int * int) =
 (** Call all registered shutdown hooks with per-hook timing. *)
 let run_all () =
   let t0 = Unix.gettimeofday () in
-  (* Stop Keeper owners and workspace observation first. *)
-  (match Atomic.get keeper_shutdown_ref with
-   | Some cancel ->
-     let t_start = Unix.gettimeofday () in
-     Log.Server.info "Stopping Keeper owners and workspace observation...";
-     (* The phase timeout must not release the server switch while a child
-        is still publishing its terminal receipt through its Owner. The
-        process watchdog still bounds a stuck drain; an expired cleanup
-        phase continues after the original settlement attempt finishes. *)
-     Eio.Cancel.protect cancel;
-     Log.Server.info
-       "[Shutdown] Keeper owners and workspace observation stopped (%.2fs)"
-       (Unix.gettimeofday () -. t_start)
-   | None -> Log.Server.info "[Shutdown] no Keeper shutdown registered, skipping");
+  (* The phase timeout must not release the server switch while a child is
+     still publishing its terminal receipt through its Owner. Protect the
+     whole mandatory prefix, including the log before stop admission. The
+     process watchdog still bounds a stuck drain; an expired cleanup phase
+     continues after the original settlement attempt finishes. *)
+  Eio.Cancel.protect (fun () ->
+    match Atomic.get keeper_shutdown_ref with
+    | Some cancel ->
+      let t_start = Unix.gettimeofday () in
+      Log.Server.info "Stopping Keeper owners and workspace observation...";
+      cancel ();
+      Log.Server.info
+        "[Shutdown] Keeper owners and workspace observation stopped (%.2fs)"
+        (Unix.gettimeofday () -. t_start)
+    | None -> Log.Server.info "[Shutdown] no Keeper shutdown registered, skipping");
   (* Close all SSE clients *)
   let t_sse = Unix.gettimeofday () in
   let sse_count, remaining_sse =

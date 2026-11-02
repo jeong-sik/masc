@@ -1064,7 +1064,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
        if queue_len >= stream_capacity then begin
          (* Tier-A perf fix: queue overflow is now a {b disconnect}
             signal, not a silent drop.  The session is added to
-            [failed] (so [unregister] runs below); the disconnect hook
+            [failed] (so [unregister_if_current] runs below); the disconnect hook
             installed at register-time wakes the drain fiber via
             [stop_sse_session], closing the HTTP writer.  The client's
             EventSource will reconnect with [Last-Event-Id]; the bumped
@@ -1076,7 +1076,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
             saw "WS events stop arriving" with no error indication and
             had to manually refresh.  See plan
             [planning/claude-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
-         failed := (session_id, `Full queue_len) :: !failed
+         failed := (session_id, client.id, `Full queue_len) :: !failed
        end else
          try
            Eio.Stream.add client.event_stream delivery;
@@ -1085,13 +1085,13 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | e ->
-             failed := (session_id, `Raised e) :: !failed)
+             failed := (session_id, client.id, `Raised e) :: !failed)
     end
   ) clients_entries;
   delivery, !failed)
   in
   List.iter
-    (fun (session_id, failure) ->
+    (fun (session_id, _, failure) ->
        Transport_metrics.inc_broadcast_failure ~target:target_label ();
        match failure with
        | `Full queue_len ->
@@ -1102,8 +1102,10 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
          Log.Server.error "Broadcast enqueue failed for session %s: %s"
            session_id (Printexc.to_string e))
     failed;
-  (* Remove failed connections *)
-  List.iter (fun (session_id, _) -> unregister session_id) failed;
+  (* A session can reconnect after the fan-out snapshot. Retire only the
+     client whose queue failed, not a successor using the same session id. *)
+  List.iter (fun (session_id, client_id, _) ->
+    unregister_if_current session_id client_id) failed;
   (* The replay buffer owns the delivery and every live queue was either
      enqueued or unregistered. Later metrics and external subscribers do not
      undo that publication. The callback is a non-yielding receipt. *)
@@ -1192,7 +1194,7 @@ let send_to session_id json =
       | Some client ->
           let queue_len = Eio.Stream.length client.event_stream in
           if queue_len >= stream_capacity then
-            `Full queue_len
+            `Full (client.id, queue_len)
           else
             try
               Eio.Stream.add client.event_stream delivery;
@@ -1201,7 +1203,7 @@ let send_to session_id json =
               `Enqueued
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
-            | e -> `Raised e)
+            | e -> `Raised (client.id, e))
   in
   match outcome with
   | `Absent -> ()
@@ -1215,17 +1217,17 @@ let send_to session_id json =
         "Targeted JSON-RPC delivery rejected for non-agent session %s (%s)"
         session_id kind_label
   | `Enqueued -> sync_transport_snapshot ()
-  | `Full queue_len ->
+  | `Full (client_id, queue_len) ->
       Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
       Log.Server.warn
         "Targeted enqueue skip: session %s stream full (%d/%d) — disconnecting"
         session_id queue_len stream_capacity;
-      unregister session_id
-  | `Raised e ->
+      unregister_if_current session_id client_id
+  | `Raised (client_id, e) ->
       Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
       Log.Server.error "Enqueue to %s failed: %s — disconnecting"
         session_id (Printexc.to_string e);
-      unregister session_id
+      unregister_if_current session_id client_id
 
 (** Pop the next event from a client's stream.
     Blocks the calling fiber until an event is available.

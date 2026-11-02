@@ -71,6 +71,53 @@ let test_email_search_keeps_exact_target () =
     (List.exists (fun (_,action) -> action=Masc_tui_palette.Palette_usage_scope (Some "B"))
        (Masc_tui_palette.palette_matches state))
 
+let test_workspace_replacement_retires_usage () =
+  let state = state () in
+  state.overview_quota <- Quota_read [];
+  state.keeper_usage <- Keeper_usage_read Usage.Keeper_usage_loading;
+  state.overview_account_emails <- Account_emails_read
+      {emails=["provider-B", "fictional@example.test"]; unreadable_rows=0};
+  state.usage_section <- Usage_trend;
+  state.provider_history_days <- 7;
+  state.metrics_scroll <- 42;
+  state.metrics_content_height <- 12;
+  state.metrics_scroll_card_rows <- Some 3;
+  let previous_history = state.provider_history in
+  let previous_providers = state.overview_providers in
+  let previous_emails = state.overview_account_emails in
+  let previous_reading = state.workspace_read_authority in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "temporarily unavailable";
+  suspend_workspace_readings state;
+  check bool "an unconfirmed identity preserves the last observations" true
+    (state.provider_history == previous_history
+     && state.overview_providers == previous_providers
+     && state.overview_account_emails == previous_emails
+     && state.overview_quota = Quota_read []
+     && state.keeper_usage = Keeper_usage_read Usage.Keeper_usage_loading);
+  check bool "an unconfirmed identity retires old read authority" true
+    (state.workspace_read_authority != previous_reading);
+  withdraw_usage_workspace state;
+  check bool "replacement retires every workspace usage observation" true
+    (state.overview_quota = Quota_unread
+     && state.overview_providers = Providers_unread
+     && state.keeper_usage = Keeper_usage_unread
+     && state.provider_history = Provider_history_unread
+     && state.overview_account_emails = Account_emails_unread);
+  check bool "replacement clears the old selection and scroll" true
+    (state.usage_scope_id = None && state.metrics_scroll = 0
+     && state.metrics_content_height = 0 && state.metrics_scroll_card_rows = None);
+  check bool "the reader's view and period survive" true
+    (state.usage_section = Usage_trend && state.provider_history_days = 7);
+  state.provider_history <- Provider_history_read
+      {days=7;generated_at=789.;unreadable_reports=0;rows=[history_row "new-workspace"]};
+  check bool "a new history can arrive without restoring old account data" true
+    (state.overview_providers = Providers_unread
+     && state.overview_account_emails = Account_emails_unread
+     && match usage_history_reading state with
+        | Provider_history_read trend ->
+            List.map (fun row -> row.Trend.scope_id) trend.rows = ["new-workspace"]
+        | Provider_history_unread | Provider_history_error _ -> false)
+
 let test_window_change_replaces_only_its_history_request () =
   let state = state () in
   let module Order = Surface_read_order in
@@ -108,4 +155,5 @@ let () = run "usage account continuity"
              test_case "refresh and window continuity" `Quick test_refresh_does_not_choose_another_account;
              test_case "source failures" `Quick test_failed_and_unread_sources_stay_failed_and_unread;
              test_case "email search target" `Quick test_email_search_keeps_exact_target;
+             test_case "workspace replacement retires usage" `Quick test_workspace_replacement_retires_usage;
              test_case "period change requests its own history" `Quick test_window_change_replaces_only_its_history_request]]

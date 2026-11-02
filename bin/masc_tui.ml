@@ -14411,7 +14411,7 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation ~draft =
   state.followed_from <- None;
-  state.usage_scope_id <- None;
+  withdraw_usage_workspace state;
   withdraw_voice_capture state;
   (* Retire action authority immediately. A missing identity quarantines its
      cards; only a confirmed different workspace discards them. Old replies
@@ -14795,7 +14795,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
    | Some refusal, Some current when refusal.sfr_workspace <> Some current ->
      state.schedule_form_refusal <- None
    | Some _, (Some _ | None) | None, (Some _ | None) -> ());
-  state.keeper_usage <- Keeper_usage_unread;
   state.github_identity_view <- None;
   state.github_identity_view_error <- None;
   Option.iter (fun (view : Masc_tui_account_login.t) ->

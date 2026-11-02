@@ -17597,6 +17597,18 @@ let reset_metrics_scroll (state : state) =
   state.metrics_content_height <- 0;
   state.metrics_scroll_card_rows <- None
 
+(* When workspace presentation is withdrawn, retire its usage observations
+   together. A matched workspace that becomes unconfirmed suspends reads
+   without withdrawing this presentation. *)
+let withdraw_usage_workspace (state : state) =
+  state.overview_quota <- Quota_unread;
+  state.overview_providers <- Providers_unread;
+  state.keeper_usage <- Keeper_usage_unread;
+  state.provider_history <- Provider_history_unread;
+  state.overview_account_emails <- Account_emails_unread;
+  state.usage_scope_id <- None;
+  reset_metrics_scroll state
+
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)

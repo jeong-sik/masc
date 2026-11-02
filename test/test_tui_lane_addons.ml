@@ -381,33 +381,44 @@ let action_identity_and_uncertainty () =
 let metric_fields_and_receipts_remain_readable () =
   let module Row = Masc.Lane_addon_types in
   let digest = String.make 192 'a' in
+  let evidence_digest = String.make 192 'c' in
+  let receipt_digest = String.make 191 'b' in
   let note = String.concat "" (List.init 48 (fun _ -> "지표")) in
+  let control = "inside\027]52;c;unsafe\007value" in
   let row : Row.row = {
     id="metric/2/statistics";lane_id="metric/statistics";kind=Row.Value;
     title="Supplied \027[31m row statistics";observed_at=1.;subject_id="guest";
     clock=None;actor=None;
     fields=["source_id",`String digest;"incarnation",`String digest;
       "observed_row_count",`Int 1;"input_complete",`Bool true;
-      "note",`String note];
-    evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
+      "note",`String note;"control",`String control];
+    evidence=[{uri="lane-evidence:" ^ evidence_digest;sha256=Some evidence_digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
   let view = {UI.initial with presentation=UI.Technical;focus=UI.Timeline;snapshot=Some snapshot;
-    receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
+    receipt=Some (`Assoc ["uri",`String receipt_digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
     check bool "every printable row fits the actual terminal width" true
       (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
+    let plain = List.map Masc_tui_theme.strip_sgr lines in
     check bool "external terminal controls are escaped before measuring" true
-      (List.for_all (fun line -> not (String.contains line '\027')) lines);
-    let visible = String.concat "" lines in
+      (List.for_all (fun line -> not (String.contains line '\027')) plain);
+    let visible = plain
+      |> List.map (fun line ->
+        if String.starts_with ~prefix:"│ " line then
+          String.sub line (String.length "│ ") (String.length line - String.length "│ ")
+        else line)
+      |> String.concat "" in
     let contains text =
       let n = String.length text in
       let rec at i = i+n <= String.length visible
         && (String.sub visible i n=text || at (i+1)) in
       at 0 in
     List.iter (fun text -> check bool "scrollable rows retain complete field and receipt text" true (contains text))
-      ["\"observed_row_count\": 1";digest;note;"lane-evidence:" ^ digest;"last receipt value"])
+      ["\\x1B[31m";"\"observed_row_count\": 1";digest;note;
+       Yojson.Safe.to_string (`String control);"lane-evidence:" ^ evidence_digest;
+       receipt_digest;"last receipt value"])
     [40;80;200]
 
 let guided_actions () =
@@ -1255,10 +1266,10 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     check bool "every Results row fits the terminal width" true
       (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width)
         (UI.lines ~width detail @ UI.lines ~width long_titles))) [40; 80; 120; 200];
-  let raw_lines = UI.lines ~width:100 {detail with presentation=UI.Technical} in
-  check bool "raw coordinates remain under details with the JSON formatter's layout" true
-    (List.for_all (fun line -> List.mem line raw_lines)
-      (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))));
+  let raw_detail = {detail with presentation=UI.Technical} in
+  check bool "the technical reading keeps the selected report's original fields" true
+    (Option.exists (fun (selected : UI.Row.row) -> selected.fields = row.fields)
+      (UI.selected_row raw_detail));
   let second = {row with id="second-report";title="Another analysis";observed_at=2.;
     fields=["body",`String "Other first finding\nOther second finding";
       "complete",`Bool true;"delivery",`String "not attempted"]} in

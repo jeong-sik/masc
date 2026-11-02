@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { clearStoredToken, currentDashboardActor, currentStoredTokenRevision, getStoredToken, setStoredToken } from './core'
-import { callMcpTaskCreationAtIdentity, callMcpToolAtIdentity, mcpCallFailureDisposition, resetMcpClientState } from './mcp'
+import { callMcpTaskCreationAtIdentity, callMcpTaskReceiptAtIdentity, callMcpToolAtIdentity,
+  mcpCallFailureDisposition, resetMcpClientState } from './mcp'
 import { resetDashboardSessionActorForTests } from '../lib/dashboard-session-actor'
 import { DEFAULT_MCP_TIMEOUT_MS } from '../config/constants'
 
@@ -125,6 +126,7 @@ it.each([
   ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
   ['duplicate error flag', (id: string) => responseBody(id).replace('"result":{', '"result":{"isError":true,"isError":false,')],
   ['non-text content', (id: string) => JSON.stringify({ id, result: { content: [{ type: 'image', text: successText() }] } })],
+  ['non-array content', (id: string) => JSON.stringify({ id, result: { content: { 0: { type: 'text', text: successText() } } } })],
 ] as const)('does not accept a current %s response as Task success', async (_name, makeBody) => {
   const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
     const request = JSON.parse(String(init.body))
@@ -137,6 +139,36 @@ it.each([
   expect(error).toBeInstanceOf(Error)
   expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
   expect(retained).not.toHaveBeenCalled()
+  expect(fetchMock).toHaveBeenCalledOnce()
+})
+
+it('reads a scoped Task receipt without replaying it', async () => {
+  const receipt = JSON.stringify({ ok: true, creation_request_id: 'create-a' })
+  const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+    const request = JSON.parse(String(init.body))
+    expect(request.params.name).toBe('masc_tasks')
+    expect(request.params.arguments.expected_workspace).toEqual({ base_path: '/a', masc_root: '/a/.masc' })
+    return new Response(responseBody(request.id, receipt), { status: 200 })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const readArgs = { creation_request_id: 'create-a', expected_workspace: { base_path: '/a', masc_root: '/a/.masc' } }
+  await expect(callMcpTaskReceiptAtIdentity(readArgs, identity(), () => true)).resolves.toBe(receipt)
+  expect(fetchMock).toHaveBeenCalledOnce()
+})
+
+it.each([
+  ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
+  ['duplicate error flag', (id: string) => responseBody(id).replace('"result":{', '"result":{"isError":true,"isError":false,')],
+  ['non-text content', (id: string) => JSON.stringify({ id, result: { content: [{ type: 'image', text: successText() }] } })],
+  ['non-array content', (id: string) => JSON.stringify({ id, result: { content: { 0: { type: 'text', text: successText() } } } })],
+] as const)('rejects a malformed scoped Task receipt with %s', async (_name, makeBody) => {
+  const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+    const request = JSON.parse(String(init.body))
+    return new Response(makeBody(request.id), { status: 200 })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const readArgs = { creation_request_id: 'create-a', expected_workspace: { base_path: '/a', masc_root: '/a/.masc' } }
+  await expect(callMcpTaskReceiptAtIdentity(readArgs, identity(), () => true)).rejects.toThrow()
   expect(fetchMock).toHaveBeenCalledOnce()
 })
 

@@ -291,10 +291,10 @@ class McpPreDispatchIdentityChangedError extends Error {
   }
 }
 
-class McpTaskCreationBindingError extends Error {
+class McpScopedTaskBindingError extends Error {
   constructor() {
-    super('Task creation requires an original request ID and workspace')
-    this.name = 'McpTaskCreationBindingError'
+    super('Task request requires an original request ID and workspace')
+    this.name = 'McpScopedTaskBindingError'
   }
 }
 
@@ -325,7 +325,7 @@ export type McpCallFailureDisposition =
 
 export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposition {
   if (mcpIdentityRequiresGoalRefresh(error)) return 'known_pre_effect'
-  if (error instanceof McpTaskCreationBindingError) return 'known_pre_effect'
+  if (error instanceof McpScopedTaskBindingError) return 'known_pre_effect'
   if (error instanceof McpToolCallError) return 'known_tool_response'
   if (error instanceof McpProtocolError && error.code === -32001) {
     return 'known_pre_effect'
@@ -453,6 +453,7 @@ async function callMcpToolInternal(
   recoveryIsCurrent?: () => boolean,
   waitForRecoveryCurrent?: () => Promise<boolean>,
   taskCapture?: TaskCreationCapture,
+  strictTaskResult = false,
 ): Promise<string> {
   const requestId = randomUuid()
   let explicitActor: string | null = null
@@ -522,11 +523,12 @@ async function callMcpToolInternal(
         noteManagedCredentialRefusalObservation(expectedIdentity.revision)
       }
     }, taskCapture ? text => { retainStaleTaskCreation(text, requestId, taskCapture) } : undefined)
-    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined, taskCapture !== undefined)
-    if (taskCapture && parsed.error === undefined && parsed.result?.isError !== true) {
+    const strictResult = taskCapture !== undefined || strictTaskResult
+    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined, strictResult)
+    if (strictResult && parsed.error === undefined && parsed.result?.isError !== true) {
       const content = parsed.result?.content?.[0]
-      if (!content || content.type !== 'text' || typeof content.text !== 'string') {
-        throw new Error('Invalid MCP Task creation result')
+      if (!Array.isArray(parsed.result?.content) || !content || content.type !== 'text' || typeof content.text !== 'string') {
+        throw new Error('Invalid MCP Task result')
       }
     }
     return extractMcpText(parsed)
@@ -605,11 +607,28 @@ export async function callMcpTaskCreationAtIdentity(
   const goalId = args.goal_id ?? null
   if (!workspace || typeof requestId !== 'string' || requestId.trim() === ''
     || !(goalId === null || (typeof goalId === 'string' && goalId.trim() !== ''))
-    || typeof onStaleSuccess !== 'function') throw new McpTaskCreationBindingError()
+    || typeof onStaleSuccess !== 'function') throw new McpScopedTaskBindingError()
   const capturedArgs = { ...args, creation_request_id: requestId,
     expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot } }
   return callMcpToolInternal('masc_add_task', capturedArgs, false, { ...expectedIdentity }, isCurrent,
     recoveryIsCurrent, waitForRecoveryCurrent, { requestId, goalId, onStaleSuccess })
+}
+
+/** Read one Task creation receipt under its original workspace and current identity. */
+export async function callMcpTaskReceiptAtIdentity(
+  args: Record<string, unknown>,
+  expectedIdentity: { revision: number; actor: string },
+  isCurrent: () => boolean,
+): Promise<string> {
+  const workspace = scopedWorkspace(args)
+  const requestId = args.creation_request_id
+  if (!workspace || typeof requestId !== 'string' || requestId.trim() === '') {
+    throw new McpScopedTaskBindingError()
+  }
+  const capturedArgs = { ...args, creation_request_id: requestId,
+    expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot } }
+  return callMcpToolInternal('masc_tasks', capturedArgs, false, { ...expectedIdentity }, isCurrent,
+    undefined, undefined, undefined, true)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

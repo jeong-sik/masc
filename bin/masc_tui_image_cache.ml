@@ -309,20 +309,28 @@ let download ~run ~cache_dir url =
     match read_cached () with Ok path -> Ok path | Error _ -> fetch ()
   else fetch ()
 
-let run_decoder_bytes ~run ~output_path command =
-  discard output_path;
+let collect_decoder_bytes ~run ~output_path command =
   match run_checked ~run command with
-  (* Public callers may share [output_path]. The caller must own the path to
-     remove it after an exception or runner failure. *)
   | Error failure -> Error (Decoder_runner_failed failure)
   | Ok status ->
     match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
-    | Some failure -> discard output_path; Error failure
+    | Some failure -> Error failure
     | None ->
       match read_bytes output_path with
-      | Error detail -> discard output_path; Error (Frame_unreadable { detail })
-      | Ok "" -> discard output_path; Error No_frame_written
+      | Error detail -> Error (Frame_unreadable { detail })
+      | Ok "" -> Error No_frame_written
       | Ok bytes -> Ok bytes
+
+let run_decoder_bytes ~run ~output_path command =
+  discard output_path;
+  match collect_decoder_bytes ~run ~output_path command with
+  (* Public callers may share [output_path]. The caller must own the path to
+     remove it after an exception or runner failure. *)
+  | Error (Decoder_runner_failed _ as failure) -> Error failure
+  | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
+           | Decoder_stopped _ | No_frame_written | Frame_unreadable _) as failure) ->
+    discard output_path; Error failure
+  | Ok bytes -> Ok bytes
 
 let run_decoder ~run ~output_path command =
   Result.map (fun _ -> output_path) (run_decoder_bytes ~run ~output_path command)
@@ -451,8 +459,10 @@ let prepare_presentation ~run ~cache_dir display png =
           let command = Printf.sprintf
             "ffmpeg -v error -nostdin -y -i %s -vf scale=%d:%d -frames:v 1 -f rawvideo -pix_fmt rgba %s >/dev/null 2>&1"
             (Filename.quote input) columns pixel_rows (Filename.quote output) in
-          let* _ = Result.map_error decode_failure_text (run_decoder ~run ~output_path:output command) in
-          let* bytes = read_bytes output in
+          (* [output] is an exclusively reserved empty file. Keep the name
+             occupied until this attempt finishes and read its bytes once. *)
+          let* bytes = Result.map_error decode_failure_text
+            (collect_decoder_bytes ~run ~output_path:output command) in
           if String.length bytes <> columns * pixel_rows * 4 then
             Error "image decoder returned an incomplete or unexpected RGBA frame"
           else Ok (Rgba {columns;pixel_rows;bytes})))

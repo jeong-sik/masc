@@ -13,12 +13,16 @@ type range =
       (** When true this bounded range does not certify the final custom projection. *)
   }
 
-val to_json : unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range ->
+val to_json : keeper:string -> turn_ref:Ids.Turn_ref.t option ->
+  unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range option ->
   wire:Llm_provider.Request_wire_observer.observation -> Yojson.Safe.t
 
-val record_best_effort : config:Workspace.config -> keeper_name:string ->
-  unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range ->
+val record_best_effort : config:Workspace.config -> keeper_name:string -> turn_ref:Ids.Turn_ref.t option ->
+  unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range option ->
   wire:Llm_provider.Request_wire_observer.observation -> unit
-(** Append request identity and selection/range metadata at the existing
-    pre-dispatch boundary. Missing capture identity is explicitly unbound.
+(** Append each serialization's turn identity and selection/range metadata at
+    the existing pre-dispatch boundary. Missing turn/capture identity or a
+    projection not paired with this serialization remains explicitly unbound.
     Ordinary storage failures are diagnostic; reserved exceptions propagate. *)
+
+val selection_to_json : selection -> Yojson.Safe.t

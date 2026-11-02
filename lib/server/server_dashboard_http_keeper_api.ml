@@ -1782,6 +1782,12 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
          reqd)
+  else if ends_with keeper_suffix_provider_input_continuity then
+    handle_provider_input_get state req reqd
+      ~name:(extract_name keeper_suffix_provider_input_continuity)
+      ~surface:("/api/v1/keepers/:name" ^ keeper_suffix_provider_input_continuity)
+      ~read:(fun ~config ~keeper ~turn_ref ->
+        Ok (fun () -> Keeper_continuity_evidence.read ~config ~keeper ~turn_ref))
   else if ends_with "/provider-input/part" then
     handle_provider_input_get
       state

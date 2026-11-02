@@ -12,6 +12,10 @@ module Message_layout = Masc_tui_message_layout
 module Render_schedule = Masc_tui_render_schedule
 module Rows = Masc_tui_rows
 
+type approval_line =
+  | Field_line of Approval_detail.line
+  | Gate_line of Approval_detail.gate_line
+
 (** Render the Approvals surface (pending confirmations). *)
 (* The ask, whole. The list row is one line through [single_line], which
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
@@ -101,14 +105,18 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
       ], None)
   in
   let lines =
-    Approval_detail.of_fields ~width fields
+    List.map (fun line -> Field_line line) (Approval_detail.of_fields ~width fields)
     @ (match gate_fields with
        | None -> []
-       | Some fields -> Approval_detail.of_gate_fields ~width:gate_width fields)
+       | Some fields ->
+         Approval_detail.of_gate_fields ~width:gate_width fields
+         |> List.map (fun line -> Gate_line line))
   in
   let input_unreadable =
     List.exists
-      (fun (line : Approval_detail.line) -> line.origin = Approval_detail.Gate_unreadable)
+      (function
+        | Field_line _ -> false
+        | Gate_line line -> line.gate_origin = Approval_detail.Gate_unreadable)
       lines
   in
   box_top buf cols;
@@ -141,11 +149,14 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
     lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
   in
   List.iter
-    (fun (line : Approval_detail.line) ->
-      let text = line.Approval_detail.text in
-      let prefix = Approval_detail.prefix line.Approval_detail.origin in
+    (fun line ->
+      let label, text, prefix =
+        match line with
+        | Field_line line -> line.label, line.text, ""
+        | Gate_line line -> line.gate_label, line.gate_text, Approval_detail.prefix line.gate_origin
+      in
       let content_width = max 0 (framed_inner_width cols - 2 - String.length prefix) in
-      match line.Approval_detail.label with
+      match label with
       | Some label ->
         (* The name is bold, what sits beside it is not: the row carries both
            now, and bolding the whole of it would weight the value too. *)

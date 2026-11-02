@@ -10,20 +10,13 @@
     These rows keep the newlines the ask was written with and wrap the rest,
     so what is approved is what was read. *)
 
-type origin =
-  | Ordinary | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
-
 type line = private
   { label : string option
         (** The field name this row opens with, when it has one. A short value
             sits beside its name on the same row; a long or multi-line one
             keeps the name a row of its own. *)
   ; text : string
-  ; origin : origin
   }
-
-val prefix : origin -> string
-(** A renderer-owned marker. It is never taken from a field key or value. *)
 
 val of_fields : width:int -> (string * string) list -> line list
 (** [of_fields ~width fields] is [(label, value)] pairs laid out for a pane
@@ -35,9 +28,22 @@ val of_fields : width:int -> (string * string) list -> line list
     every value through [Masc.Tui_terminal_text.sanitize_terminal_lines] first: a
     value's newlines stay line breaks, and every other control character is
     drawn as its visible escape ([\x1B], [\x09]), so no field can carry an
-    escape sequence to the terminal and none is hidden as a space. *)
+    escape sequence to the terminal and none is hidden as a space. [line] is
+    private, so only this module can make a row. *)
 
-val of_gate_fields : width:int -> (string * Yojson.Safe.t) list -> line list
+type gate_origin =
+  | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
+
+type gate_line = private
+  { gate_label : string option
+  ; gate_text : string
+  ; gate_origin : gate_origin
+  }
+
+val prefix : gate_origin -> string
+(** A renderer-owned marker. It is never taken from a field key or value. *)
+
+val of_gate_fields : width:int -> (string * Yojson.Safe.t) list -> gate_line list
 (** Keep object field order and distinguish string from other JSON values on
     every row. Each field's text is made terminal-safe before markers are
     attached. If a field cannot fit at this width, the input is replaced by

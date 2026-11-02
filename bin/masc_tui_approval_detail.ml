@@ -1,21 +1,9 @@
 module Message_layout = Masc_tui_message_layout
 
-type origin =
-  | Ordinary | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
-
 type line =
   { label : string option
   ; text : string
-  ; origin : origin
   }
-
-let prefix = function
-  | Ordinary -> ""
-  | Gate_key -> "[key] "
-  | Gate_key_continuation -> "[key+] "
-  | Gate_string -> "[str] "
-  | Gate_json -> "[json] "
-  | Gate_unreadable -> "!"
 
 (* The value is indented under its label, so the label column does not eat
    into the width every continuation line gets. *)
@@ -31,9 +19,9 @@ let value_rows ~width value =
         match Message_layout.wrap_words ~max_cells:budget line with
         (* [wrap_words] answers nothing for an empty line; the blank is part
            of how the ask was written, so it is kept. *)
-        | [] -> [ { label = None; text = value_indent; origin = Ordinary } ]
+        | [] -> [ { label = None; text = value_indent } ]
         | wrapped ->
-          List.map (fun text -> { label = None; text = value_indent ^ text; origin = Ordinary }) wrapped)
+          List.map (fun text -> { label = None; text = value_indent ^ text }) wrapped)
       lines
 
 (* As wide as the longest field name, and no wider than this: a pane whose
@@ -91,9 +79,25 @@ let of_fields ~width fields =
   List.concat_map
     (fun (label, value) ->
       if beside label value then
-        [ { label = Some label; text = pad label ^ value_indent ^ value; origin = Ordinary } ]
-      else { label = Some label; text = label; origin = Ordinary } :: value_rows ~width value)
+        [ { label = Some label; text = pad label ^ value_indent ^ value } ]
+      else { label = Some label; text = label } :: value_rows ~width value)
     fields
+
+type gate_origin =
+  | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
+
+type gate_line =
+  { gate_label : string option
+  ; gate_text : string
+  ; gate_origin : gate_origin
+  }
+
+let prefix = function
+  | Gate_key -> "[key] "
+  | Gate_key_continuation -> "[key+] "
+  | Gate_string -> "[str] "
+  | Gate_json -> "[json] "
+  | Gate_unreadable -> "!"
 
 (* A visible control/JSON escape must not be cut between rows. The input is
    already terminal-safe; recognizing a literal escape too only changes its
@@ -187,7 +191,7 @@ let of_gate_fields ~width fields =
     let room = width - String.length (prefix Gate_unreadable) in
     let rows = if room < 1 then [ "" ]
       else Message_layout.split_cells ~max_cells:room "WIDEN" in
-    List.map (fun text -> { label = None; text; origin = Gate_unreadable }) rows
+    List.map (fun text -> { gate_label = None; gate_text = text; gate_origin = Gate_unreadable }) rows
   in
   let value_rows origin syntax text =
     let room = width - String.length (prefix origin) in
@@ -202,7 +206,7 @@ let of_gate_fields ~width fields =
       in
       match collect [] (String.split_on_char '\n' text) with
       | None -> unreadable ()
-      | Some rows -> List.map (fun text -> { label = None; text; origin }) rows
+      | Some rows -> List.map (fun text -> { gate_label = None; gate_text = text; gate_origin = origin }) rows
   in
   if fields <> [] && width <= String.length (prefix Gate_key_continuation) then unreadable ()
   else
@@ -226,12 +230,12 @@ let of_gate_fields ~width fields =
       | Some key_rows ->
         List.mapi
           (fun index text ->
-            { label = Some text; text;
-              origin = if index = 0 then Gate_key else Gate_key_continuation })
+            { gate_label = Some text; gate_text = text;
+              gate_origin = if index = 0 then Gate_key else Gate_key_continuation })
           key_rows
         @ value_rows origin syntax text)
       fields
     in
-    if List.exists (fun line -> line.origin = Gate_unreadable) rows
+    if List.exists (fun line -> line.gate_origin = Gate_unreadable) rows
     then unreadable ()
     else rows

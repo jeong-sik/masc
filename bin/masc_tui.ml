@@ -8338,7 +8338,7 @@ let launch_owed_history state ~mailbox =
         && keeper_available_for_new_message state owed.kho_keeper
         && Option.is_none state.msg_history_inflight
       then
-        launch_keeper_history_load ~load_file_changes:false ~force:owed.kho_audit state
+        launch_keeper_history_load ~force:owed.kho_audit state
           ~mailbox ~keeper_name:owed.kho_keeper
 
 (* Runs on every loop iteration; it reads only a visible Fusion reading whose
@@ -17434,15 +17434,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
      in the surface bundle. A revalidation owes it a read; the cadence does
      not, because an appended turn announces itself (RFC-0480 §4 L2). Owed,
      so a pane scrolled into older rows or a read in flight takes it when it
-     can. *)
+     can; the owed read brings the tool details with it. *)
   (match intent with
    | Revalidate ->
        Option.iter
          (fun keeper_name ->
            update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
-           launch_owed_history state ~mailbox;
-           if state.view = Keepers Keeper_message then
-             launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name)
+           launch_owed_history state ~mailbox)
          state.msg_target_keeper_name
    | Cadence -> ());
   scoped_refresh_followup :=

@@ -864,19 +864,6 @@ type keeper_lane = {
           three conditions. *)
 }
 
-type keeper_lanes_snapshot = {
-  kls_generated_at : float;
-  kls_count : int;
-  kls_lanes : keeper_lane list;
-}
-
-val decode_keeper_lanes_snapshot :
-  Yojson.Safe.t -> (keeper_lanes_snapshot, string) result
-(** Decode the fields the Lanes table reads from
-    [GET /api/v1/keepers/composite]. Missing or wrongly typed fields reject
-    the reading; additional producer fields are outside this light
-    projection and do not. *)
-
 (** Read-only standalone LLM lane observation. These rows describe existing
     admission and run registries; they never carry a control action. *)
 type standalone_lane_status =
@@ -1063,14 +1050,6 @@ val decode_keeper_composite :
   Yojson.Safe.t -> (keeper_lane * keeper_secret_projection option, string) result
 (** Decode one Keeper's [/api/v1/keepers/<name>/composite] body: its lane row
     and, when the producer projected one, its secret projection. *)
-
-val decode_keeper_secret_projections :
-  Yojson.Safe.t -> (keeper_secret_projection list, string) result
-(** Read every Keeper's secret projection out of the same
-    [GET /api/v1/keepers/composite] body the Lanes table reads. A snapshot
-    without a [secret_projection] object is skipped rather than rejected:
-    the endpoint serves several screens and a Keeper the producer has not
-    projected yet is absence, not a malformed reading. *)
 
 (** One tool call a keeper is holding for an operator's answer, from
     [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server

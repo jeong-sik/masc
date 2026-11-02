@@ -174,12 +174,13 @@ val note_timed_out :
   base_path:string ->
   keeper_name:string ->
   tool_call_id:string ->
+  approval_id:string ->
   tool_name:string ->
   args:Yojson.Safe.t ->
   unit ->
   unit
 (** Record what a wait that ended unanswered was asking about, so a late
-    answer can be attributed to it. Called by the gate when
+    answer can be attributed to its exact [approval_id]. Called by the gate when
     {!Keeper_tool_approval_registry.await} returns [Timed_out]; the
     description is taken from the ask itself, never from the answering
     client, so a late answer cannot attach itself to a call it was not
@@ -213,6 +214,7 @@ val remember_late :
   base_path:string ->
   keeper_name:string ->
   tool_call_id:string ->
+  approval_id:string ->
   actor:string ->
   Keeper_tool_approval_registry.decision ->
   unit ->
@@ -222,9 +224,8 @@ val remember_late :
     is no older than {!ttl_sec}
     matches, so the remembered decision always descends from a question the
     operator was really shown. Timed-out asks
-    are matched newest-first: if
-    a provider recycles a call id, the answer attaches to the most recent
-    ask that carried it, which is the prompt the operator saw last. When
+    additionally require the immutable [approval_id] of the question shown
+    to the operator, even when provider call IDs are reused. When
     bound, the decision is journaled before it
     stands; an append failure reports [No_matching_ask] so the caller tells
     the operator the answer could not be kept rather than silently dropping

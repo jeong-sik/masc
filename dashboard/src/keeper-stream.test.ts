@@ -1379,7 +1379,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
-      value: {
+      value: { approval_id: 'approval-1',
         tool_call_id: 'call-1',
         tool_call_name: 'Execute',
         args: '{}',
@@ -1401,7 +1401,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
-      value: {
+      value: { approval_id: 'approval-1',
         tool_call_id: 'call-approve-1',
         tool_call_name: 'Execute',
         args: '{"argv":["ls","-la"]}',
@@ -1425,7 +1425,7 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
-      value: {
+      value: { approval_id: 'approval-1',
         tool_call_id: 'call-settle-1',
         tool_call_name: 'Execute',
         args: '{}',
@@ -1437,7 +1437,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_SETTLED',
-      value: { tool_call_id: 'call-settle-1', outcome: 'Approved' },
+      value: { approval_id: 'approval-1', tool_call_id: 'call-settle-1', outcome: 'Approved' },
     })).toBeNull()
     expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeUndefined()
   })
@@ -1449,9 +1449,35 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_SETTLED',
-      value: { tool_call_id: 'call-unknown-1', outcome: 'Denied' },
+      value: { approval_id: 'approval-1', tool_call_id: 'call-unknown-1', outcome: 'Denied' },
     })).toBeNull()
     expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toBeDefined()
+  })
+
+  it('does not let settled A retire replacement B with the same call ID', () => {
+    assistantEntry()
+    const request = (approvalId: string, toolCallId = 'reused-call') => applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: { approval_id: approvalId, tool_call_id: toolCallId,
+        tool_call_name: 'Execute', args: '{}', question: 'run?' },
+    })
+    request('approval-a')
+    request('approval-b')
+    request('other-approval', 'other-call')
+    const replacement = keeperToolApprovals.value.sangsu?.['reused-call']
+    const other = keeperToolApprovals.value.sangsu?.['other-call']
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: 'approval-a', tool_call_id: 'reused-call', outcome: 'Denied' },
+    })).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['reused-call']).toBe(replacement)
+    expect(keeperToolApprovals.value.sangsu?.['other-call']).toBe(other)
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: 'approval-b', tool_call_id: 'reused-call', outcome: 'Approved' },
+    })
+    expect(keeperToolApprovals.value.sangsu?.['reused-call']).toBeUndefined()
+    expect(keeperToolApprovals.value.sangsu?.['other-call']).toBe(other)
   })
 
   it('projects queued acceptance without a receipt or queue revision', () => {

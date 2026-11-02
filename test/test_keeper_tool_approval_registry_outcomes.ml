@@ -24,7 +24,7 @@ let test_an_answer_counted_once () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await registry ~clock ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-1" ~timeout_sec:5.0)
           (fun () ->
@@ -35,9 +35,10 @@ let test_an_answer_counted_once () =
               end
             in
             wait_for_registration 100;
+            let approval_id = (List.hd (Registry.pending registry)).approval_id in
             ignore
               (Registry.settle registry ~keeper_name:keeper
-                 ~tool_call_id:"call-1" Registry.Approve))
+                 ~tool_call_id:"call-1" ~approval_id Registry.Approve))
         |> fst
       in
       check (option string) "the wait was answered" (Some "approved")
@@ -51,7 +52,7 @@ let test_a_timeout_counted_as_a_timeout () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let result =
-        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await registry ~clock ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-2" ~timeout_sec:0.05
       in
@@ -67,14 +68,15 @@ let test_a_settle_racing_the_timeout_is_the_answer_it_counts () =
       Eio.Switch.run (fun sw ->
           let waited =
             Eio.Fiber.fork_promise ~sw (fun () ->
-                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                Registry.await registry ~clock ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                   ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-3" ~timeout_sec:1.0)
           in
+          let approval_id = (List.hd (Registry.pending registry)).approval_id in
           Eio_mock.Clock.set_time clock 1.0;
           check bool "the late answer applies" true
             (Registry.settle registry ~keeper_name:keeper
-               ~tool_call_id:"call-3" Registry.Approve);
+               ~tool_call_id:"call-3" ~approval_id Registry.Approve);
           ignore (Eio.Promise.await_exn waited);
           (* The operator's decision reached the call even though the timer
              fired first: the answered count is where this lands, never
@@ -87,6 +89,7 @@ let test_a_failed_settle_counts_nothing () =
       let registry = Registry.create () in
       check bool "nothing was waiting" false
         (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"nope"
+           ~approval_id:(Random_id.uuid_v7 ())
            Registry.Approve);
       check outcome_totals "an answer to nobody counts nothing"
         { Registry.answered_total = 0; timed_out_total = 0 } (totals registry))

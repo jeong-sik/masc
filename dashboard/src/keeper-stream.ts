@@ -1330,6 +1330,8 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {
+        const approvalId = event.value.approval_id
+        if (typeof approvalId !== 'string' || approvalId.trim() === '') return 'KEEPER_TOOL_APPROVAL_REQUESTED missing approval_id'
         const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_id'
         const toolName = event.value.tool_call_name
@@ -1337,6 +1339,7 @@ export function applyKeeperStreamEvent(
         if (!toolName) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_name'
         if (!question) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing question'
         upsertKeeperToolApproval(keeperName, {
+          approvalId,
           toolCallId,
           toolName,
           args: event.value.args,
@@ -1352,6 +1355,8 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_TOOL_APPROVAL_SETTLED') {
+        const approvalId = event.value.approval_id
+        if (typeof approvalId !== 'string' || approvalId.trim() === '') return 'KEEPER_TOOL_APPROVAL_SETTLED missing approval_id'
         const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
         const outcome = event.value.outcome
@@ -1359,7 +1364,7 @@ export function applyKeeperStreamEvent(
         // A settle for a call this view never drew (e.g. answered from another
         // window, or a re-hydrated wait whose REQUESTED predates this view)
         // still retires nothing here; dropping is the no-op it should be.
-        dropKeeperToolApproval(keeperName, toolCallId)
+        dropKeeperToolApproval(keeperName, toolCallId, approvalId)
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {

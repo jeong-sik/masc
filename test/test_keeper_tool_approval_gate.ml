@@ -62,12 +62,17 @@ let rec drain events acc =
   | Some event -> drain events (event :: acc)
 
 let event_labels events =
+  let requested = Hashtbl.create 4 in
   drain events []
   |> List.filter_map (function
-       | Events.Tool_approval_requested { tool_call_id; question; because; _ } ->
+       | Events.Tool_approval_requested { tool_call_id; approval_id; question; because; _ } ->
+           check bool "the gate publishes a fresh approval identity" true (approval_id <> "");
+           Hashtbl.replace requested tool_call_id approval_id;
            Some
              (Printf.sprintf "requested(%s,%s,%s)" tool_call_id question because)
-       | Events.Tool_approval_settled { tool_call_id; outcome } ->
+       | Events.Tool_approval_settled { tool_call_id; approval_id; outcome } ->
+           check (option string) "the answer names the published approval"
+             (Some approval_id) (Hashtbl.find_opt requested tool_call_id);
            Some (Printf.sprintf "settled(%s,%s)" tool_call_id outcome)
        | _ -> None)
 
@@ -130,9 +135,14 @@ let settle_when_pending registry ~clock decision =
     end
   in
   wait 100;
+  let pending =
+    Registry.pending registry
+    |> List.find (fun (p : Registry.pending) ->
+           p.keeper_name = keeper && p.tool_call_id = "call-1")
+  in
   ignore
     (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-1"
-       decision)
+       ~approval_id:pending.approval_id decision)
 
 let test_an_approval_lets_the_call_through () =
   with_gate ~timeout_sec:5.0 (fun ~clock ~registry ~events ~gate ->

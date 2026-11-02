@@ -245,6 +245,7 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
 // public-read, so a dashboard opened after the gate fired still draws the
 // card instead of discovering the wait only as a 180s timeout.
 export async function hydrateKeeperToolApprovals(): Promise<void> {
+  const beforeRead = keeperToolApprovals.value
   let rows
   try {
     rows = await fetchKeeperToolApprovals()
@@ -253,11 +254,20 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     // the primary source. A failed poll must not surface as an error row.
     return
   }
+  const afterRead = keeperToolApprovals.value
   for (const row of rows) {
-    // A row the stream already drew carries fresher askedAt semantics; only
-    // fill gaps, never overwrite an in-flight answer with a re-hydration.
-    if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]) continue
+    const currentKeeper = afterRead[row.keeper]
+    const beforeKeeper = beforeRead[row.keeper]
+    const current = currentKeeper?.[row.tool_call_id]
+    // A concurrent stream/answer owns its newer observation. Otherwise the
+    // listing can replace an unchanged older ask with the current exact ask.
+    if (current !== beforeKeeper?.[row.tool_call_id]) continue
+    // An ask may have appeared and settled while this read was in flight.
+    // Two absent rows do not prove that its observation is still current.
+    if (!current && currentKeeper !== beforeKeeper) continue
+    if (current?.approvalId === row.approval_id) continue
     upsertKeeperToolApproval(row.keeper, {
+      approvalId: row.approval_id,
       toolCallId: row.tool_call_id,
       toolName: row.tool,
       args: row.args,
@@ -276,28 +286,33 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
 export async function answerHeldKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
+  approvalId: string,
   decision: 'approve' | 'deny',
 ): Promise<boolean> {
   const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
-  if (!existing || existing.settled) return false
+  if (typeof approvalId !== 'string' || approvalId.trim() === ''
+    || !existing || existing.approvalId !== approvalId || existing.settled) return false
   if (existing.answering) return false
-  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
     ...approval,
     answering: true,
     answeredDecision: decision,
   }))
   try {
-    const result = await answerKeeperToolApproval(keeperName, toolCallId, decision)
-    // settled=false (late answer) still retires the card: the call is gone,
-    // and the row would otherwise promise an interaction that no longer
-    // exists. The SETTLED stream event, when it comes, is a no-op drop.
-    settleKeeperToolApproval(keeperName, toolCallId, result.decision)
+    const result = await answerKeeperToolApproval(keeperName, toolCallId, approvalId, decision)
+    if (keeperToolApprovals.value[keeperName]?.[toolCallId]?.approvalId !== approvalId) return false
+    const accepted = result.settled || result.remembered
+    if (accepted) settleKeeperToolApproval(keeperName, toolCallId, approvalId, result.decision)
+    else updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
+      ...approval, answering: false, answeredDecision: null,
+    }))
     setRecordValue(keeperActionErrors, keeperName, null)
-    return result.settled
+    return accepted
   } catch (err) {
+    if (keeperToolApprovals.value[keeperName]?.[toolCallId]?.approvalId !== approvalId) return false
     const message = err instanceof Error ? err.message : String(err)
     console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
-    updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+    updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
       ...approval,
       answering: false,
       answeredDecision: null,

@@ -247,6 +247,7 @@ export type {
 // the re-hydration path for waits whose owning stream watcher is gone and the
 // fallback when the REQUESTED event predates this view.
 export interface KeeperToolApprovalRow {
+  approval_id: string
   keeper: string
   tool_call_id: string
   tool: string
@@ -265,11 +266,18 @@ export async function fetchKeeperToolApprovals(
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('GET', path, resp)
   }
-  const data = (await resp.json()) as Record<string, unknown>
-  const rows = Array.isArray(data.pending) ? data.pending : []
+  const data: unknown = await resp.json()
+  if (!isRecord(data) || !Array.isArray(data.pending)) {
+    throw new Error('Invalid tool approval listing: pending must be an array')
+  }
+  const rows = data.pending
   return rows.map((row): KeeperToolApprovalRow => {
     const record = isRecord(row) ? row : {}
+    if (typeof record.approval_id !== 'string' || record.approval_id.trim() === '') {
+      throw new Error('Invalid tool approval listing: approval_id must be a non-empty string')
+    }
     return {
+      approval_id: record.approval_id,
       keeper: asString(record.keeper) ?? '',
       tool_call_id: asString(record.tool_call_id) ?? '',
       tool: asString(record.tool) ?? '',
@@ -282,23 +290,25 @@ export async function fetchKeeperToolApprovals(
   }).filter(row => row.keeper && row.tool_call_id)
 }
 
-// Answers a held tool call. `settled: false` on a 200 means the wait was
-// already gone (timed out, or answered elsewhere) — the POST still succeeds,
-// so the caller reads the flag rather than treating absence of a throw as
-// "approved".
+// The displayed ask owns this answer. Neither success status alone nor a
+// reused tool call ID proves that this particular approval was accepted.
 export async function answerKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
+  approvalId: string,
   decision: 'approve' | 'deny',
   opts: { signal?: AbortSignal } = {},
-): Promise<{ settled: boolean; decision: string }> {
+): Promise<{ settled: boolean; remembered: boolean; decision: string }> {
+  if (typeof approvalId !== 'string' || approvalId.trim() === '') {
+    throw new Error('approval_id must be a non-empty string')
+  }
   const path = '/api/v1/keepers/tool-approval'
   const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ name: keeperName.trim(), tool_call_id: toolCallId, decision }),
+      body: JSON.stringify({ name: keeperName.trim(), tool_call_id: toolCallId, approval_id: approvalId, decision }),
       signal: opts.signal,
     },
   )
@@ -306,9 +316,14 @@ export async function answerKeeperToolApproval(
     throw await apiRequestErrorFromResponse('POST', path, resp)
   }
   const data = (await resp.json()) as Record<string, unknown>
+  if (!isRecord(data) || typeof data.settled !== 'boolean' || typeof data.remembered !== 'boolean'
+    || typeof data.decision !== 'string' || data.decision.trim() === '') {
+    throw new Error('Invalid tool approval answer receipt')
+  }
   return {
-    settled: data.settled === true,
-    decision: asString(data.decision) ?? decision,
+    settled: data.settled,
+    remembered: data.remembered,
+    decision: data.decision,
   }
 }
 

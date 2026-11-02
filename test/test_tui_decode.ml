@@ -8163,6 +8163,7 @@ let keeper_tool_approvals_json =
           [ `Assoc
               [ ("keeper", `String "orbiter")
               ; ("tool_call_id", `String "call-1")
+              ; ("approval_id", `String "waiter-1")
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
               ; ("question", `String "Run Execute on git status?")
@@ -8179,6 +8180,7 @@ let test_decode_keeper_tool_approvals () =
   | Ok [ held ] ->
       Alcotest.(check string) "keeper" "orbiter" held.Tui_decode.kta_keeper;
       Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
+      Alcotest.(check string) "approval id" "waiter-1" held.kta_approval_id;
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
         held.kta_question;
@@ -8195,6 +8197,28 @@ let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   match Tui_decode.decode_keeper_tool_approvals thin with
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
   | Error _ -> ()
+
+let test_decode_keeper_tool_approvals_requires_waiter_identity () =
+  let fields =
+    keeper_tool_approvals_json
+    |> Yojson.Safe.Util.member "pending"
+    |> Yojson.Safe.Util.to_list
+    |> List.hd
+    |> Yojson.Safe.Util.to_assoc
+    |> List.remove_assoc "approval_id"
+  in
+  List.iter
+    (fun identity ->
+      let fields =
+        match identity with
+        | None -> fields
+        | Some value -> ("approval_id", value) :: fields
+      in
+      let json = `Assoc [ "pending", `List [ `Assoc fields ] ] in
+      match Tui_decode.decode_keeper_tool_approvals json with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a pending row without a waiter identity decoded")
+    [ None; Some `Null; Some (`Int 7); Some (`String " ") ]
 
 let keeper_turns_json =
   `Assoc
@@ -13641,6 +13665,8 @@ let () =
 
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ; Alcotest.test_case "requires the waiter identity" `Quick
+          test_decode_keeper_tool_approvals_requires_waiter_identity
       ] );
     ( "decode_keeper_turns",
       [ Alcotest.test_case "running, idle, and unavailable rows" `Quick

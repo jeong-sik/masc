@@ -2301,7 +2301,7 @@ type tool_approval_answer =
    always supply the verified server identity. *)
 let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(tool_call_id : string) ~(allow : bool) :
+    ~(tool_call_id : string) ~(approval_id : string) ~(allow : bool) :
     (tool_approval_answer, string) result =
   let expected_fields =
     [ ("expected_workspace", `Assoc
@@ -2313,6 +2313,7 @@ let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_iden
       (`Assoc
          ([ ("name", `String keeper_name)
           ; ("tool_call_id", `String tool_call_id)
+          ; ("approval_id", `String approval_id)
           ; ("decision", `String (if allow then "approve" else "deny"))
           ] @ expected_fields))
   in

@@ -4676,6 +4676,7 @@ let render_keeper_message (state : state) =
        | None -> ());
     (match status_frame.kmsf_source with
      | Message_status (live, status) ->
+         let request_id = turn_log_request_id live in
          let live = live.tl_transcript in
          (* The streaming turn is the row the eye waits on: drawn in the
             accent rather than dimmed, behind the mark a running turn wears
@@ -4803,6 +4804,18 @@ let render_keeper_message (state : state) =
                  kind now, rather than by being first among the Attention
                  rows and hoping the order holds. *)
               | Keeper_chat_transcript.Answer_needed ->
+                  Option.iter
+                    (fun (awaiting : Keeper_chat_transcript.awaiting_approval) ->
+                      frame_chat_row_actions :=
+                        Masc_tui_chat_row_actions.with_approval
+                          { scope = (state.workspace_authority, state.workspace_read_authority)
+                          ; keeper = keeper_name
+                          ; request_id
+                          ; tool_call_id = awaiting.call_id
+                          ; approval_id = awaiting.approval_id
+                          }
+                          !frame_chat_row_actions)
+                    (Keeper_chat_transcript.awaiting_approval live);
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
                     ("  " ^ text ^ gate_note)
               | Keeper_chat_transcript.Attention ->

@@ -549,6 +549,7 @@ type async_msg =
   | Surface_tool_approval_answered of
       string
       * string
+      * string
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
       * Masc_tui_operator_projection.Flow.generation

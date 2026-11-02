@@ -209,7 +209,8 @@ let test_a_held_tool_call_is_an_attention_row () =
         Eio.Fiber.both
           (fun () ->
             ignore
-              (Masc.Keeper_tool_approval_registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+              (Masc.Keeper_tool_approval_registry.await registry ~clock
+                ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask"
                  ~keeper_name:"keeper.one" ~tool_call_id:"call-attention"
                  ~timeout_sec:5.0
@@ -227,9 +228,13 @@ let test_a_held_tool_call_is_an_attention_row () =
             wait 100;
             check int "the held call is one row to answer" 1
               (held_call_rows (namespace_truth_json ~state ~sw ~clock));
+            let pending = Masc.Keeper_tool_approval_registry.pending registry
+              |> List.find (fun (p : Masc.Keeper_tool_approval_registry.pending) ->
+                   p.keeper_name = "keeper.one" && p.tool_call_id = "call-attention") in
             ignore
               (Masc.Keeper_tool_approval_registry.settle registry
                  ~keeper_name:"keeper.one" ~tool_call_id:"call-attention"
+                 ~approval_id:pending.approval_id
                  Masc.Keeper_tool_approval_registry.Approve
                : bool));
         check int "answered, so the row is gone" 0

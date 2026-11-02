@@ -414,6 +414,7 @@ type goal_source_failure =
 type keeper_tool_approval = {
   kta_keeper : string;
   kta_tool_call_id : string;
+  kta_approval_id : string;
   kta_tool : string;
   kta_args : string;
   kta_question : string;
@@ -3741,6 +3742,12 @@ let decode_keeper_secret_projections json =
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in
   let* kta_tool_call_id = required_string_field json "tool_call_id" in
+  let* kta_approval_id = required_string_field json "approval_id" in
+  let* () =
+    if String.trim kta_approval_id = "" then
+      Error "approval_id must not be empty"
+    else Ok ()
+  in
   let* kta_tool = required_string_field json "tool" in
   let* kta_args = required_string_field json "args" in
   let* kta_question = required_string_field json "question" in
@@ -3750,6 +3757,7 @@ let decode_keeper_tool_approval json =
   Ok
     { kta_keeper
     ; kta_tool_call_id
+    ; kta_approval_id
     ; kta_tool
     ; kta_args
     ; kta_question

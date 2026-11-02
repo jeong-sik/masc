@@ -1025,6 +1025,8 @@ export function upsertKeeperToolApproval(
   approval: KeeperToolApprovalPending,
 ): void {
   const byKeeper = keeperToolApprovals.value[keeperName] ?? {}
+  if (typeof approval.approvalId !== 'string' || approval.approvalId.trim() === '') return
+  if (byKeeper[approval.toolCallId]?.approvalId === approval.approvalId) return
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
     [keeperName]: { ...byKeeper, [approval.toolCallId]: approval },
@@ -1034,11 +1036,12 @@ export function upsertKeeperToolApproval(
 export function updateKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
+  approvalId: string,
   updater: (approval: KeeperToolApprovalPending) => KeeperToolApprovalPending,
 ): void {
   const byKeeper = keeperToolApprovals.value[keeperName]
   const existing = byKeeper?.[toolCallId]
-  if (!existing) return
+  if (!existing || existing.approvalId !== approvalId) return
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
     [keeperName]: { ...byKeeper, [toolCallId]: updater(existing) },
@@ -1048,9 +1051,10 @@ export function updateKeeperToolApproval(
 export function settleKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
+  approvalId: string,
   outcome: string,
 ): void {
-  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
     ...approval,
     settled: true,
     answering: false,
@@ -1058,9 +1062,9 @@ export function settleKeeperToolApproval(
   }))
 }
 
-export function dropKeeperToolApproval(keeperName: string, toolCallId: string): void {
+export function dropKeeperToolApproval(keeperName: string, toolCallId: string, approvalId: string): void {
   const byKeeper = keeperToolApprovals.value[keeperName]
-  if (!byKeeper || !(toolCallId in byKeeper)) return
+  if (!byKeeper || byKeeper[toolCallId]?.approvalId !== approvalId) return
   const next = { ...byKeeper }
   delete next[toolCallId]
   keeperToolApprovals.value = { ...keeperToolApprovals.value, [keeperName]: next }

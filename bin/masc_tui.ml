@@ -12082,7 +12082,9 @@ let resource_surface_visible state =
   if state.image_open || state.msx_open then false
   else
     let terminal_rows,_ = get_terminal_size () in
-    match Masc_tui_render.frame_choice state ~terminal_rows with
+    match Masc_tui_render.frame_choice state ~terminal_rows
+      ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
+      ~now:(Unix.gettimeofday ()) with
     | `Surface -> true
     | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
     | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions

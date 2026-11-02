@@ -11607,7 +11607,7 @@ let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
          half-block pairing, so the picture is never stretched. *)
       let cmd =
         Printf.sprintf
-          "ffmpeg -y -loglevel error -i %s -vf scale=%d:-2 -f rawvideo -pix_fmt \
+          "ffmpeg -y -loglevel error -i %s -vf scale=%d:-2 -frames:v 1 -f rawvideo -pix_fmt \
            rgb24 %s"
           (Filename.quote local_path) cols (Filename.quote raw)
       in

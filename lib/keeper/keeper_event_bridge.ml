@@ -688,6 +688,21 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
            let events = Runtime_event_bus.drain sub in
            (* A wake is optional, coalesced metadata. It never moves source
               bodies into this relay or waits for an Add-on to observe them. *)
+           let compare_activity (a : Lane_addon_sources.activity) (b : Lane_addon_sources.activity) =
+             match a, b with
+             | Tool_completed, Tool_completed -> 0
+             | Tool_completed, (Machine_changed _ | Browser_changed | Fusion_changed _) -> -1
+             | (Machine_changed _ | Browser_changed | Fusion_changed _), Tool_completed -> 1
+             | Machine_changed a, Machine_changed b ->
+               let rank = function Machine_lane.Msx -> 0 | Machine_lane.Dos -> 1 in
+               Int.compare (rank a) (rank b)
+             | Machine_changed _, (Browser_changed | Fusion_changed _) -> -1
+             | (Browser_changed | Fusion_changed _), Machine_changed _ -> 1
+             | Browser_changed, Browser_changed -> 0
+             | Browser_changed, Fusion_changed _ -> -1
+             | Fusion_changed _, Browser_changed -> 1
+             | Fusion_changed a, Fusion_changed b -> String.compare a b
+           in
            let activities = List.filter_map (fun (event : Agent_core.Event_bus.event) ->
              match event.payload with
              | Agent_core.Event_bus.ToolCompleted {tool_name;_} ->
@@ -704,7 +719,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
              | Agent_core.Event_bus.TurnCompleted _ | Agent_core.Event_bus.HandoffRequested _
              | Agent_core.Event_bus.HandoffCompleted _ | Agent_core.Event_bus.ElicitationCompleted _
              | Agent_core.Event_bus.ToolApprovalCompleted _
-             | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq Stdlib.compare in
+             | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq compare_activity in
            List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);

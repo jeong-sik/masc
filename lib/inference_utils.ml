@@ -87,12 +87,15 @@ let rec sanitize_content_blocks_utf8
               , sanitized_raw != detail.raw || text_changed )
             in
             let sanitized_details, details_changed =
-              List.fold_right
-                (fun detail (details, changed) ->
-                  let sanitized, detail_changed = sanitize_detail detail in
-                  sanitized :: details, changed || detail_changed)
-                details
-                ([], false)
+              let rev_details, changed =
+                List.fold_left
+                  (fun (details, changed) detail ->
+                    let sanitized, detail_changed = sanitize_detail detail in
+                    sanitized :: details, changed || detail_changed)
+                  ([], false)
+                  details
+              in
+              List.rev rev_details, changed
             in
             if (not reasoning_content_changed) && not details_changed
             then block

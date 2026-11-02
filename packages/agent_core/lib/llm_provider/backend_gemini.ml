@@ -293,14 +293,15 @@ let validate_projected_thought_signatures (messages : message list) =
     messages
 ;;
 
+module String_map = Map.Make (String)
+
 let gemini_tool_signatures_of_blocks blocks =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (function
+  List.fold_left
+    (fun acc -> function
       | RedactedThinking data ->
         (match gemini_thought_signature_of_redacted data with
-         | Some (tool_use_id, signature) -> Hashtbl.replace tbl tool_use_id signature
-         | None -> ())
+         | Some (tool_use_id, signature) -> String_map.add tool_use_id signature acc
+         | None -> acc)
       | Text _
       | Thinking _
       | ReasoningDetails _
@@ -308,9 +309,9 @@ let gemini_tool_signatures_of_blocks blocks =
       | ToolResult _
       | Image _
       | Document _
-      | Audio _ -> ())
-    blocks;
-  tbl
+      | Audio _ -> acc)
+    String_map.empty
+    blocks
 ;;
 
 (* ── Content block -> Gemini part ───────────────────── *)
@@ -382,7 +383,7 @@ let part_of_content_block tool_signatures (block, tool_result_name) =
       [ "functionCall", `Assoc [ "id", `String id; "name", `String name; "args", input ] ]
     in
     let fields =
-      match Hashtbl.find_opt tool_signatures id with
+      match String_map.find_opt id tool_signatures with
       | Some signature -> ("thoughtSignature", `String signature) :: fields
       | None -> fields
     in
@@ -773,7 +774,8 @@ let build_request_artifact
   let text_response_format =
     match config.response_format with
     | Types.JsonSchema schema ->
-      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"; "schema", schema ])
+      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"
+                  ; "schema", Types.json_schema_domain schema ])
     | Types.JsonMode -> Some (`Assoc [ "mimeType", `String "APPLICATION_JSON" ])
     | Types.Off -> None
   in

@@ -61,6 +61,9 @@ end
 
 val tool_choice_of_json : Yojson.Safe.t -> (tool_choice, Error.t) result
 val response_format_of_json : Yojson.Safe.t -> (response_format, Error.t) result
+(** Decode [off], [json_mode], [raw_json_schema] or [named_json_schema].
+    The ambiguous [json_schema] tag is rejected instead of reinterpreting
+    a saved named envelope as domain data. *)
 
 (* ================================================================ *)
 (* Agent-specific types                                              *)

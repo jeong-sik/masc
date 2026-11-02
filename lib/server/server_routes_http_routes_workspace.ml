@@ -912,44 +912,46 @@ let parse_blame_header line =
       | Some _ | None -> None)
   | _ -> None
 
+module Sha_map = Map.Make (String)
+
 let parse_blame_porcelain lines =
-  let metadata : (string, string option * int64 option) Hashtbl.t =
-    Hashtbl.create 16
-  in
-  let update_metadata sha f =
+  let update_metadata metadata sha f =
     let current =
-      match Hashtbl.find_opt metadata sha with
+      match Sha_map.find_opt sha metadata with
       | Some value -> value
       | None -> (None, None)
     in
-    Hashtbl.replace metadata sha (f current)
+    Sha_map.add sha (f current) metadata
   in
-  let rec collect cur_sha acc remaining =
+  let rec collect cur_sha metadata acc remaining =
     match remaining with
-    | [] -> List.rev acc
+    | [] -> metadata, List.rev acc
     | hd :: tl -> (
       match parse_blame_header hd with
       | Some (sha, final_line, _group_size) ->
         (* Porcelain still emits a header for every final line. The counted
            first header only scopes the following metadata block; expanding it
            would duplicate the later bare headers and corrupt attribution. *)
-        collect (Some sha) ((final_line, sha) :: acc) tl
+        collect (Some sha) metadata ((final_line, sha) :: acc) tl
       | None ->
-        (match cur_sha with
-         | Some sha when String.starts_with ~prefix:"author " hd ->
-           let author = String.sub hd 7 (String.length hd - 7) in
-           update_metadata sha (fun (_, time) -> (Some author, time))
-         | Some sha when String.starts_with ~prefix:"author-time " hd ->
-           let ts = String.sub hd 12 (String.length hd - 12) in
-           (match Int64.of_string_opt ts with
-            | Some n -> update_metadata sha (fun (author, _) -> (author, Some n))
-            | None -> ())
-         | Some _ | None -> ());
-        collect cur_sha acc tl)
+        let metadata =
+          match cur_sha with
+          | Some sha when String.starts_with ~prefix:"author " hd ->
+            let author = String.sub hd 7 (String.length hd - 7) in
+            update_metadata metadata sha (fun (_, time) -> (Some author, time))
+          | Some sha when String.starts_with ~prefix:"author-time " hd ->
+            let ts = String.sub hd 12 (String.length hd - 12) in
+            (match Int64.of_string_opt ts with
+             | Some n -> update_metadata metadata sha (fun (author, _) -> (author, Some n))
+             | None -> metadata)
+          | Some _ | None -> metadata
+        in
+        collect cur_sha metadata acc tl)
   in
-  collect None [] lines
+  let metadata, line_shas = collect None Sha_map.empty [] lines in
+  line_shas
   |> List.filter_map (fun (line, sha) ->
-       match Hashtbl.find_opt metadata sha with
+       match Sha_map.find_opt sha metadata with
        | Some (Some author, Some time) ->
          Some { bl_line = line; bl_author = author; bl_time = time }
        | Some (None, _) | Some (_, None) | None -> None)
@@ -962,7 +964,7 @@ let blame_entry_to_json file_path ~line_start ~line_end ~author ~time =
          ; ("kind", `String "edit") ]
 
 let group_blame_entries file_path entries =
-  let sorted = List.sort (fun a b -> compare a.bl_line b.bl_line) entries in
+  let sorted = List.sort (fun a b -> Int.compare a.bl_line b.bl_line) entries in
   let rec go current_start current_end current_author current_time acc remaining =
     match remaining with
     | [] ->

@@ -237,13 +237,36 @@ type tool_choice =
 
 val tool_choice_to_json : tool_choice -> Yojson.Safe.t
 
+type json_schema =
+  | Raw_schema of Yojson.Safe.t
+  | Named_schema of
+      { name : string
+      ; schema : Yojson.Safe.t
+      ; strict : bool option
+      ; description : string option
+      }
+[@@deriving show]
+(** [Raw_schema] is domain data, including any [name], [schema] or [strict]
+    keys. [Named_schema] explicitly supplies an OpenAI named envelope. Only
+    this constructor permits a serializer to extract its inner schema. *)
+
+val json_schema_domain : json_schema -> Yojson.Safe.t
+(** The domain schema, without a named envelope. *)
+
+val json_schema_to_json : json_schema -> Yojson.Safe.t
+(** Raw domain data or the explicitly named envelope, preserving its optional
+    [strict] and [description] fields. *)
+
 type response_format =
   | Off
   | JsonMode
-  | JsonSchema of Yojson.Safe.t
+  | JsonSchema of json_schema
 [@@deriving show]
 
 val response_format_to_json : response_format -> Yojson.Safe.t
+(** Uses distinct [raw_json_schema] and [named_json_schema] tags so decoding
+    never infers an envelope from domain keys. The ambiguous [json_schema]
+    tag is rejected; persisted values must name their intended carrier. *)
 
 (** {1 Content Types} *)
 

@@ -85,7 +85,9 @@ let channels () =
       Hashtbl.fold
         (fun channel_id cell acc -> (channel_id, List.length !cell) :: acc)
         table []
-      |> List.sort compare)
+      |> List.sort (fun (c1, n1) (c2, n2) ->
+           let c = String.compare c1 c2 in
+           if c <> 0 then c else Int.compare n1 n2))
 ;;
 
 let clear () = with_lock (fun () -> Hashtbl.reset table)

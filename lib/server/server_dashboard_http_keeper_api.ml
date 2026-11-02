@@ -5,6 +5,8 @@
 
 include Server_dashboard_http_keeper_api_post
 
+module String_map = Map.Make (String)
+
 let handle_keeper_paused_work_post =
   Server_dashboard_http_keeper_paused_work.handle_post
 ;;
@@ -599,15 +601,15 @@ let keeper_chat_skill_activations_json ~status ?detail
 ;;
 
 let attach_keeper_chat_skill_activations ~config ~keeper_name rows =
-  let resolved_by_trace = Hashtbl.create 4 in
+  let resolved_by_trace = ref String_map.empty in
   let resolve_trace trace_id =
-    match Hashtbl.find_opt resolved_by_trace trace_id with
+    match String_map.find_opt trace_id !resolved_by_trace with
     | Some outcome -> outcome
     | None ->
       let outcome =
         Keeper_skill_activation_projection.resolve_trace_string ~config trace_id
       in
-      Hashtbl.replace resolved_by_trace trace_id outcome;
+      resolved_by_trace := String_map.add trace_id outcome !resolved_by_trace;
       outcome
   in
   let enrich = function

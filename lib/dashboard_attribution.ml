@@ -60,7 +60,7 @@ let recent ?gate ?(limit = 50) () =
         in
         (* Sort by timestamp descending. *)
         let sorted =
-          List.sort (fun (_, t1) (_, t2) -> compare t2 t1) all
+          List.sort (fun (_, t1) (_, t2) -> Float.compare t2 t1) all
         in
         let rec take n = function
           | [] -> []
@@ -82,24 +82,23 @@ let summary () =
   with_lock (fun () ->
       Hashtbl.fold
         (fun gate q acc ->
-          let passed = ref 0
-          and pf = ref 0
-          and tb = ref 0
-          and pp = ref 0 in
-          Queue.iter
-            (fun (a, _ts) ->
-              match a.Attribution.outcome with
-              | Attribution.Passed -> incr passed
-              | Attribution.Policy_failed _ -> incr pf
-              | Attribution.Transition_blocked _ -> incr tb
-              | Attribution.Partial_pass _ -> incr pp)
-            q;
+          let passed, pf, tb, pp =
+            Queue.fold
+              (fun (passed, pf, tb, pp) (a, _ts) ->
+                match a.Attribution.outcome with
+                | Attribution.Passed -> passed + 1, pf, tb, pp
+                | Attribution.Policy_failed _ -> passed, pf + 1, tb, pp
+                | Attribution.Transition_blocked _ -> passed, pf, tb + 1, pp
+                | Attribution.Partial_pass _ -> passed, pf, tb, pp + 1)
+              (0, 0, 0, 0)
+              q
+          in
           {
             gate;
-            passed = !passed;
-            policy_failed = !pf;
-            transition_blocked = !tb;
-            partial_pass = !pp;
+            passed;
+            policy_failed = pf;
+            transition_blocked = tb;
+            partial_pass = pp;
             total = Queue.length q;
           }
           :: acc)

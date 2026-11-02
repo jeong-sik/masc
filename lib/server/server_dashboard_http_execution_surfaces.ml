@@ -1132,14 +1132,14 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
 ;;
 
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
-  List.fold_right
-    (fun row patched ->
-       match patched, patch_keeper_row ~keeper_name ~event ~keepalive_running row with
-       | Patched rows, Patched row -> Patched (row :: rows)
-       | Declaration_row_is_stale, (Patched _ | Declaration_row_is_stale)
-       | Patched _, Declaration_row_is_stale -> Declaration_row_is_stale)
-    rows
-    (Patched [])
+  let rec loop acc = function
+    | [] -> Patched (List.rev acc)
+    | row :: rest ->
+      (match patch_keeper_row ~keeper_name ~event ~keepalive_running row with
+       | Patched patched_row -> loop (patched_row :: acc) rest
+       | Declaration_row_is_stale -> Declaration_row_is_stale)
+  in
+  loop [] rows
 ;;
 
 let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =

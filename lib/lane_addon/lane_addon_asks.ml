@@ -23,12 +23,13 @@ let ask ~ask_id ~declaration_id ~title ~questions ?context ~asked_at () =
 
 let questions_of_json = function
   | `List (_ :: _ as values) ->
-    List.fold_right
-      (fun value acc ->
-         let* acc = acc in
-         let* question = Keeper_ask.question_of_json value in
-         Ok (question :: acc))
-      values (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* question = Keeper_ask.question_of_json value in
+        loop (question :: acc) rest
+    in
+    loop [] values
   | _ -> Error "questions requires a non-empty array"
 
 type event = ask Keeper_ask.lifecycle_event
@@ -53,7 +54,13 @@ let number key fields =
 let list key decode fields =
   match field key fields with
   | Some (`List values) ->
-    List.fold_right (fun value acc -> let* acc = acc in let* item = decode value in Ok (item :: acc)) values (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* item = decode value in
+        loop (item :: acc) rest
+    in
+    loop [] values
   | _ -> Error (key ^ " requires an array")
 
 let event_to_json : event -> Yojson.Safe.t = function

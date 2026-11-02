@@ -64,31 +64,39 @@ let family_of name =
   | first :: second :: _ :: _ -> Some (first ^ "_" ^ second)
   | _ -> None
 
+module String_map = Map.Make (String)
+
 let rows tools =
   let domain_of (tool : Masc.Tui_decode_tools.tool_entry) =
     match domain_of_tool tool.Masc.Tui_decode_tools.tl_name with
     | Some domain -> domain
     | None -> "unsorted"
   in
-  let domain_counts = Hashtbl.create 16 in
-  List.iter
-    (fun tool ->
-       let domain = domain_of tool in
-       Hashtbl.replace domain_counts domain
-         (1 + Option.value ~default:0 (Hashtbl.find_opt domain_counts domain)))
-    tools;
+  let domain_counts =
+    List.fold_left
+      (fun acc tool ->
+         let domain = domain_of tool in
+         String_map.add domain
+           (1 + Option.value ~default:0 (String_map.find_opt domain acc))
+           acc)
+      String_map.empty
+      tools
+  in
   (* The family layer keeps its spelling rule but drops the two-tool minimum:
      domains already do the grouping work, and a lone [masc_add] under
      [work] is a spelling fact worth showing, not noise. *)
-  let family_counts = Hashtbl.create 32 in
-  List.iter
-    (fun (tool : Masc.Tui_decode_tools.tool_entry) ->
-       match family_of tool.Masc.Tui_decode_tools.tl_name with
-       | None -> ()
-       | Some family ->
-           Hashtbl.replace family_counts family
-             (1 + Option.value ~default:0 (Hashtbl.find_opt family_counts family)))
-    tools;
+  let family_counts =
+    List.fold_left
+      (fun acc (tool : Masc.Tui_decode_tools.tool_entry) ->
+         match family_of tool.Masc.Tui_decode_tools.tl_name with
+         | None -> acc
+         | Some family ->
+             String_map.add family
+               (1 + Option.value ~default:0 (String_map.find_opt family acc))
+               acc)
+      String_map.empty
+      tools
+  in
   let rec walk current_domain current_family acc = function
     | [] -> List.rev acc
     | (tool : Masc.Tui_decode_tools.tool_entry) :: rest -> (
@@ -96,7 +104,7 @@ let rows tools =
         let acc =
           if current_domain <> Some domain then
             let count =
-              Option.value ~default:0 (Hashtbl.find_opt domain_counts domain)
+              Option.value ~default:0 (String_map.find_opt domain domain_counts)
             in
             Domain { name = domain; count } :: acc
           else acc
@@ -104,7 +112,7 @@ let rows tools =
         match family_of tool.Masc.Tui_decode_tools.tl_name with
         | Some family when current_family <> Some (Some family) ->
             let count =
-              Option.value ~default:0 (Hashtbl.find_opt family_counts family)
+              Option.value ~default:0 (String_map.find_opt family family_counts)
             in
             walk (Some domain) (Some (Some family))
               (Tool tool :: Family { name = family; count } :: acc)
@@ -127,8 +135,10 @@ let rows tools =
            in
            (order, name)
          in
-         compare (rank a.Masc.Tui_decode_tools.tl_name)
-           (rank b.Masc.Tui_decode_tools.tl_name))
+         let o1, n1 = rank a.Masc.Tui_decode_tools.tl_name in
+         let o2, n2 = rank b.Masc.Tui_decode_tools.tl_name in
+         let c = Int.compare o1 o2 in
+         if c <> 0 then c else String.compare n1 n2)
       tools
   in
   walk None None [] (by_domain tools)

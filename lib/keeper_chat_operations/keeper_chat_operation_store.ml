@@ -152,8 +152,16 @@ let input_checkpoint_table_sql =
   "CREATE TABLE input_checkpoints (trace_id TEXT PRIMARY KEY, turn_count INTEGER NOT NULL CHECK (turn_count >= 0), sha256 TEXT NOT NULL CHECK (length(sha256) = 64)) STRICT"
 let input_history_table_sql =
   "CREATE TABLE input_history (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), basis TEXT NOT NULL CHECK (basis IN ('fresh', 'prior_unavailable'))) STRICT"
+let compare_schema_object (t1, n1, s1) (t2, n2, s2) =
+  let c = String.compare t1 t2 in
+  if c <> 0
+  then c
+  else (
+    let c = String.compare n1 n2 in
+    if c <> 0 then c else String.compare s1 s2)
+;;
 let expected_schema_objects =
-  List.sort compare (chat_schema_objects @ semantic_schema_objects @ batch_schema_objects
+  List.sort compare_schema_object (chat_schema_objects @ semantic_schema_objects @ batch_schema_objects
     @ ["table", "input_checkpoints", input_checkpoint_table_sql;
        "table", "input_history", input_history_table_sql])
 let table_column_counts =
@@ -1224,7 +1232,7 @@ module Offline = struct
   let v2_metadata_sql =
     "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v2'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
   let v2_objects =
-    List.sort compare
+    List.sort compare_schema_object
       (List.map (function
          | "table", "metadata", _ -> "table", "metadata", v2_metadata_sql
          | other -> other) chat_schema_objects @ semantic_schema_objects @ batch_schema_objects)

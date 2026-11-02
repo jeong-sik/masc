@@ -1645,6 +1645,44 @@ let test_prune_deletes_terminal_request_and_wake_receipt () =
   check int "wake receipt removed with it" 0 (List.length state.wakes)
 ;;
 
+let test_find_schedule_and_notes_for_schedule_use_prepared_indexes () =
+  with_workspace
+  @@ fun config ->
+  let req_a = make_request ~schedule_id:"sched-index-a" () in
+  let req_b = make_request ~schedule_id:"sched-index-b" () in
+  ignore (insert_ok config req_a);
+  ignore (insert_ok config req_b);
+  ignore
+    (store_ok "note b"
+       (Schedule_store.append_note
+          config
+          ~schedule_id:"sched-index-b"
+          ~author_id:"agent-a"
+          ~author_kind:Schedule_domain.Automated_actor
+          ~body:"later note"
+          ~now:300.0));
+  ignore
+    (store_ok "note a"
+       (Schedule_store.append_note
+          config
+          ~schedule_id:"sched-index-b"
+          ~author_id:"agent-a"
+          ~author_kind:Schedule_domain.Automated_actor
+          ~body:"earlier note"
+          ~now:100.0));
+  let state = read_state config in
+  (match Schedule_store.find_schedule state ~schedule_id:"sched-index-a" with
+   | Some found -> check string "indexed find_schedule a" "sched-index-a" found.schedule_id
+   | None -> fail "sched-index-a not found by find_schedule");
+  (match Schedule_store.find_schedule state ~schedule_id:"sched-missing" with
+   | None -> ()
+   | Some _ -> fail "unexpected schedule returned for missing id");
+  let notes = Schedule_store.notes_for_schedule state ~schedule_id:"sched-index-b" in
+  check (list string) "notes sorted oldest-first per schedule"
+    [ "earlier note"; "later note" ]
+    (List.map (fun (n : Schedule_domain.schedule_note) -> n.body) notes)
+;;
+
 let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
   with_workspace
   @@ fun config ->
@@ -2443,6 +2481,8 @@ let () =
             test_wake_list_is_scoped_to_its_instance_and_newest_first;
           test_case "prune deletes terminal request and wake receipt"
             `Quick test_prune_deletes_terminal_request_and_wake_receipt;
+          test_case "find_schedule and notes_for_schedule use prepared indexes"
+            `Quick test_find_schedule_and_notes_for_schedule_use_prepared_indexes;
           test_case
             "prune scopes wake receipt ownership by schedule instance"
             `Quick

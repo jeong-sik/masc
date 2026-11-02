@@ -46,15 +46,23 @@ let support_closure_ids facts =
     |> Array.of_list
   in
   let remaining = Array.map (fun (_, premise_ids) -> List.length premise_ids) rules in
-  let dependents = Hashtbl.create (Array.length rules) in
-  Array.iteri
-    (fun rule_index (_, premise_ids) ->
-       List.iter
-         (fun premise_id ->
-            let current = Hashtbl.find_opt dependents premise_id |> Option.value ~default:[] in
-            Hashtbl.replace dependents premise_id (rule_index :: current))
-         premise_ids)
-    rules;
+  let dependents, _ =
+    Array.fold_left
+      (fun (dependents, rule_index) (_, premise_ids) ->
+         let dependents =
+           List.fold_left
+             (fun acc premise_id ->
+                let current =
+                  Identity_map.find_opt premise_id acc |> Option.value ~default:[]
+                in
+                Identity_map.add premise_id (rule_index :: current) acc)
+             dependents
+             premise_ids
+         in
+         dependents, rule_index + 1)
+      (Identity_map.empty, 0)
+      rules
+  in
   let current = ref Set_util.StringSet.empty in
   let pending = Queue.create () in
   let activate identity =
@@ -71,7 +79,7 @@ let support_closure_ids facts =
     facts;
   while not (Queue.is_empty pending) do
     let identity = Queue.take pending in
-    Hashtbl.find_opt dependents identity
+    Identity_map.find_opt identity dependents
     |> Option.value ~default:[]
     |> List.iter (fun rule_index ->
       remaining.(rule_index) <- remaining.(rule_index) - 1;

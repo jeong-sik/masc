@@ -765,17 +765,16 @@ let event_queue_reaction_evidence_of_accumulator
 ;;
 
 let unique_stimulus_ids stimulus_ids =
-  let seen = Hashtbl.create (List.length stimulus_ids) in
-  List.fold_left
-    (fun unique stimulus_id ->
-       if Hashtbl.mem seen stimulus_id
-       then unique
-       else (
-         Hashtbl.add seen stimulus_id ();
-         stimulus_id :: unique))
-    []
-    stimulus_ids
-  |> List.rev
+  let _, rev_unique =
+    List.fold_left
+      (fun (seen, unique) stimulus_id ->
+         if Event_id_set.mem stimulus_id seen
+         then seen, unique
+         else Event_id_set.add stimulus_id seen, stimulus_id :: unique)
+      (Event_id_set.empty, [])
+      stimulus_ids
+  in
+  List.rev rev_unique
 ;;
 
 (* The dashboard asks this on every refresh, for every Keeper with a wake,
@@ -1260,20 +1259,28 @@ let cap_list limit values =
   loop limit [] values
 ;;
 
-let increment_count tbl key =
+module String_count_map = Map.Make (String)
+
+let add_string_count key delta counts =
   let current =
-    match Hashtbl.find_opt tbl key with
+    match String_count_map.find_opt key counts with
     | Some value -> value
     | None -> 0
   in
-  Hashtbl.replace tbl key (current + 1)
+  String_count_map.add key (current + delta) counts
 ;;
 
-let string_count_table_json ~field tbl =
-  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
+let increment_string_count key counts = add_string_count key 1 counts
+
+let sorted_string_count_pairs counts =
+  String_count_map.bindings counts
   |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
     let count_cmp = Int.compare right_count left_count in
     if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+;;
+
+let string_count_map_json ~field counts =
+  sorted_string_count_pairs counts
   |> List.map (fun (name, count) ->
     `Assoc [ field, `String name; "count", `Int count ])
   |> fun values -> `List values
@@ -1292,15 +1299,14 @@ type durable_event_queue_health =
   }
 
 let payload_kind_count_pairs stimuli =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (fun (stimulus : Keeper_event_queue.stimulus) ->
-      increment_count tbl (Keeper_event_queue.payload_kind_label stimulus.payload))
-    stimuli;
-  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
-  |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
-    let count_cmp = Int.compare right_count left_count in
-    if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+  List.fold_left
+    (fun counts (stimulus : Keeper_event_queue.stimulus) ->
+      increment_string_count
+        (Keeper_event_queue.payload_kind_label stimulus.payload)
+        counts)
+    String_count_map.empty
+    stimuli
+  |> sorted_string_count_pairs
 ;;
 
 let durable_event_queue_health ~base_path ~keeper_name =
@@ -1479,7 +1485,7 @@ let summarize_rows ~keeper_name ~pending_queue rows =
   let event_queue_ack_count = ref 0 in
   let event_queue_cancelled_count = ref 0 in
   let quarantined_row_count = ref 0 in
-  let quarantine_reason_counts = Hashtbl.create 8 in
+  let quarantine_reason_counts = ref String_count_map.empty in
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
   let stimulus_seen = Hashtbl.create 16 in
@@ -1491,7 +1497,10 @@ let summarize_rows ~keeper_name ~pending_queue rows =
   let cursor_swept_stimulus_count = ref 0 in
   let note_quarantine reason =
     incr quarantined_row_count;
-    increment_count quarantine_reason_counts (row_quarantine_reason_to_string reason)
+    quarantine_reason_counts :=
+      increment_string_count
+        (row_quarantine_reason_to_string reason)
+        !quarantine_reason_counts
   in
   (* Only schedule occurrences use [post_id] itself as the ledger identity.
      For other kinds an ID can name more than one queue entry (for example,
@@ -1641,7 +1650,7 @@ let summarize_rows ~keeper_name ~pending_queue rows =
     ; "event_queue_cancelled_count", `Int !event_queue_cancelled_count
     ; "quarantined_row_count", `Int !quarantined_row_count
     ; ( "quarantine_reason_counts"
-      , string_count_table_json ~field:"reason" quarantine_reason_counts )
+      , string_count_map_json ~field:"reason" !quarantine_reason_counts )
     ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
     ; "pending_stimulus_count", `Int pending_stimulus_count
     ; "attention_required_stimulus_count", `Int pending_attention_count
@@ -1866,20 +1875,16 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
          (durable_event_queue_health_json ~now)
   in
   let durable_event_queue_payload_counts =
-    let tbl = Hashtbl.create 8 in
-    List.iter
-      (fun summary ->
-        List.iter
-          (fun (payload_kind, count) ->
-            let current =
-              match Hashtbl.find_opt tbl payload_kind with
-              | Some value -> value
-              | None -> 0
-            in
-            Hashtbl.replace tbl payload_kind (current + count))
+    List.fold_left
+      (fun counts summary ->
+        List.fold_left
+          (fun counts (payload_kind, count) ->
+            add_string_count payload_kind count counts)
+          counts
           summary.payload_kind_counts)
-      durable_event_queue_summaries;
-    string_count_table_json ~field:"payload_kind" tbl
+      String_count_map.empty
+      durable_event_queue_summaries
+    |> string_count_map_json ~field:"payload_kind"
   in
   let pending_by_keeper =
     List.filter_map
@@ -1922,21 +1927,20 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
       summaries
   in
   let quarantine_reason_counts =
-    let tbl = Hashtbl.create 8 in
-    List.iter
-      (fun summary ->
-        List.iter
-          (fun item ->
+    List.fold_left
+      (fun counts summary ->
+        List.fold_left
+          (fun counts item ->
             match string_field "reason" item with
             | Some reason ->
               let count = int_field "count" item in
-              (match Hashtbl.find_opt tbl reason with
-               | Some prior -> Hashtbl.replace tbl reason (prior + count)
-               | None -> Hashtbl.add tbl reason count)
-            | None -> ())
+              add_string_count reason count counts
+            | None -> counts)
+          counts
           (list_field "quarantine_reason_counts" summary))
-      summaries;
-    string_count_table_json ~field:"reason" tbl
+      String_count_map.empty
+      summaries
+    |> string_count_map_json ~field:"reason"
   in
   let read_error_count =
     List.fold_left

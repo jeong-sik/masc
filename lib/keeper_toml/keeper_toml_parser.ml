@@ -33,19 +33,16 @@ let rec toml_value_of_otoml = function
   | Otoml.TomlLocalTime value -> Toml_local_time value
   | Otoml.TomlArray values ->
     let values = List.map toml_value_of_otoml values in
-    (match
-       List.fold_right
-         (fun value strings ->
-           match value, strings with
-           | Toml_string string, Some strings -> Some (string :: strings)
-           | Toml_string _, None -> None
-           | ( Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _
-             | Toml_array _ | Toml_table _ | Toml_inline_table _ | Toml_table_array _
-             | Toml_offset_datetime _ | Toml_local_datetime _ | Toml_local_date _
-             | Toml_local_time _ ), _ -> None)
-         values
-         (Some [])
-     with
+    let rec collect_strings acc = function
+      | [] -> Some (List.rev acc)
+      | Toml_string string :: rest -> collect_strings (string :: acc) rest
+      | ( Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _
+        | Toml_array _ | Toml_table _ | Toml_inline_table _ | Toml_table_array _
+        | Toml_offset_datetime _ | Toml_local_datetime _ | Toml_local_date _
+        | Toml_local_time _ )
+        :: _ -> None
+    in
+    (match collect_strings [] values with
      | Some strings -> Toml_string_array strings
      | None -> Toml_array values)
   | Otoml.TomlTable fields ->

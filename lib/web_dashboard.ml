@@ -21,17 +21,13 @@ let select_assets_root
   in
   (* MASC_BASE_PATH is the runtime data root for .masc, not a dashboard asset root. *)
   let candidates =
-    List.fold_right
-      (fun path acc ->
-        match path with
-        | Some value -> value :: acc
-        | None -> acc)
+    List.filter_map
+      Fun.id
       [
         Some inferred_repo_assets;
         Some (Filename.concat exe_dir "assets");
         Some (Filename.concat cwd "assets");
       ]
-      []
   in
   match launch_source_root_state with
   | Build_identity.Bound_valid source_root -> Some (Filename.concat source_root "assets")

@@ -180,13 +180,13 @@ let of_json json =
        let* fields = fields_exactly [ "kind"; "host_prompt"; "answered_asks" ] json in
        let* answered_asks = list_field "answered_asks" fields in
        let* answered_asks =
-         List.fold_right
-           (fun json acc ->
-              let* acc = acc in
-              let* person = person_of_json json in
-              Ok (person :: acc))
-           answered_asks
-           (Ok [])
+         let rec loop acc = function
+           | [] -> Ok (List.rev acc)
+           | json :: rest ->
+             let* person = person_of_json json in
+             loop (person :: acc) rest
+         in
+         loop [] answered_asks
        in
        Ok (Host_prompt (Autonomous_wake { answered_asks }))
      | other -> Error (Printf.sprintf "input speaker host prompt %S is unknown" other))

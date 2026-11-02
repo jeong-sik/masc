@@ -1567,26 +1567,47 @@ let default_board_comment_request =
       ("Board comment page default is invalid: " ^ Yojson.Safe.to_string detail)
 ;;
 
+module Comment_id_map = Map.Make (String)
+module Comment_id_set = Set.Make (String)
+
 (* Resolve every displayed reply's ancestry in the already-read thread. The
    companion context may include rows outside the numeric page; the original
    comments/page contract stays unchanged for clients that only page rows. *)
 let board_comment_context ~focused_comment comments selected =
-  let by_id = Hashtbl.create (List.length comments) in
-  List.iter (fun (comment : Board.comment) ->
-    Hashtbl.replace by_id (Board.Comment_id.to_string comment.id) comment) comments;
-  let included = Hashtbl.create (List.length selected) in
-  let rec include_id id =
-    if not (Hashtbl.mem included id) then begin
-      Hashtbl.add included id ();
-      match Hashtbl.find_opt by_id id with
-      | None -> ()
-      | Some comment -> Option.iter
-          (fun parent -> include_id (Board.Comment_id.to_string parent)) comment.parent_id
-    end in
-  List.iter (fun (comment : Board.comment) -> include_id (Board.Comment_id.to_string comment.id)) selected;
-  Option.iter include_id focused_comment;
-  List.filter (fun (comment : Board.comment) ->
-    Hashtbl.mem included (Board.Comment_id.to_string comment.id)) comments
+  let by_id =
+    List.fold_left
+      (fun acc (comment : Board.comment) ->
+        Comment_id_map.add (Board.Comment_id.to_string comment.id) comment acc)
+      Comment_id_map.empty
+      comments
+  in
+  let rec include_id included id =
+    if Comment_id_set.mem id included then included
+    else
+      let included = Comment_id_set.add id included in
+      match Comment_id_map.find_opt id by_id with
+      | None -> included
+      | Some comment ->
+        (match comment.parent_id with
+         | None -> included
+         | Some parent -> include_id included (Board.Comment_id.to_string parent))
+  in
+  let included =
+    List.fold_left
+      (fun acc (comment : Board.comment) ->
+        include_id acc (Board.Comment_id.to_string comment.id))
+      Comment_id_set.empty
+      selected
+  in
+  let included =
+    match focused_comment with
+    | None -> included
+    | Some id -> include_id included id
+  in
+  List.filter
+    (fun (comment : Board.comment) ->
+      Comment_id_set.mem (Board.Comment_id.to_string comment.id) included)
+    comments
 
 let board_post_detail_json ?(comment_request = default_board_comment_request) ?focused_comment ~config ~voter
     ~reaction_actor ~response_format ~post_id () =
@@ -1601,9 +1622,14 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
       (`Not_found, Printf.sprintf {|{"error":"%s"}|}
          (String.escaped (Board_tool.board_error_to_string err)))
   | Ok (post, comments) ->
-      let comment_positions = Hashtbl.create (List.length comments) in
-      List.iteri (fun offset (comment : Board.comment) ->
-        Hashtbl.replace comment_positions (Board.Comment_id.to_string comment.id) offset) comments;
+      let _, comment_positions =
+        List.fold_left
+          (fun (offset, acc) (comment : Board.comment) ->
+            offset + 1,
+            Comment_id_map.add (Board.Comment_id.to_string comment.id) offset acc)
+          (0, Comment_id_map.empty)
+          comments
+      in
       let comment_revision =
         `List (List.map (fun (comment : Board.comment) ->
             `List [ `String (Board.Comment_id.to_string comment.id)
@@ -1670,8 +1696,8 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ?f
         let context_comment_json (comment : Board.comment) =
           match comment_json comment with
           | `Assoc fields -> `Assoc
-              (("thread_offset", `Int (Hashtbl.find comment_positions
-                  (Board.Comment_id.to_string comment.id))) :: fields)
+              (("thread_offset", `Int (Comment_id_map.find
+                  (Board.Comment_id.to_string comment.id) comment_positions)) :: fields)
           | json -> json in
         let page_fields =
           [ "comments", `List (List.map comment_json comments);

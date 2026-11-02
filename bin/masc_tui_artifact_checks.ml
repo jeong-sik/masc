@@ -14,8 +14,18 @@ let fields names = function
       && List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
   | `Assoc _ -> Error "invalid or duplicate confirmation inventory fields"
   | _ -> Error "expected confirmation inventory object"
-let traverse f values = List.fold_right (fun value rest ->
-  let* value = f value in let* rest = rest in Ok (value :: rest)) values (Ok [])
+let traverse f values =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | value :: rest ->
+      let* value = f value in
+      loop (value :: acc) rest
+  in
+  loop [] values
+
+let compare_target (id1, rev1) (id2, rev2) =
+  let c = String.compare id1 id2 in
+  if c <> 0 then c else Int.compare rev1 rev2
 
 let of_json ~received_at json =
   let* root = fields ["checks"; "diagnostics"] json in
@@ -23,7 +33,7 @@ let of_json ~received_at json =
   | Some (`List checks), Some (`List diagnostics) ->
     let* checks = traverse Check.of_json checks in
     let targets = List.map (fun (check : Check.t) -> check.target.id, check.target.revision) checks in
-    let* () = if List.length targets = List.length (List.sort_uniq compare targets)
+    let* () = if List.length targets = List.length (List.sort_uniq compare_target targets)
       then Ok () else Error "duplicate artifact revision confirmation" in
     let* diagnostics = traverse (fun diagnostic ->
       let* fields = fields ["file"; "error"] diagnostic in

@@ -99,10 +99,14 @@ let command_of_json json =
     let* fields = fields ["action"; "target"; "updates"] json in
     let* target = target_of_json (field "target" fields) in
     let* updates = match field "updates" fields with
-      | `List values -> List.fold_right (fun json rest ->
-          let* rest = rest in match json with
-          | `String value when Engine.valid_state value -> Ok (value :: rest)
-          | _ -> Error "invalid draft update") values (Ok [])
+      | `List values ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | `String value :: rest when Engine.valid_state value ->
+            loop (value :: acc) rest
+          | _ :: _ -> Error "invalid draft update"
+        in
+        loop [] values
       | _ -> Error "expected draft updates" in Ok (Merge { target; updates })
   | "select" ->
     let* fields = fields ["action"; "target"; "anchor"; "head"] json in

@@ -58,13 +58,18 @@ let known_media =
   ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
   ]
 
+module String_set = Set.Make (String)
+
 let known_storage_exts =
   let dedup_preserving_first entries =
-    List.fold_right
-      (fun entry acc ->
-        if List.exists (String.equal entry) acc then acc else entry :: acc)
-      entries
-      []
+    entries
+    |> List.fold_left
+         (fun (seen, acc) entry ->
+            if String_set.mem entry seen then seen, acc
+            else String_set.add entry seen, entry :: acc)
+         (String_set.empty, [])
+    |> snd
+    |> List.rev
   in
   let exts =
     known_media |> List.map (fun media -> media.ext) |> dedup_preserving_first

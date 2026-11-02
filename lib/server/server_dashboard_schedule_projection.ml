@@ -154,19 +154,27 @@ let schedule_dispatch_receipt_dashboard_json
 ;;
 
 module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+module Occurrence_map = Map.Make (struct
+    type t = string * string
+
+    let compare (ka, sa) (kb, sb) =
+      let cmp = String.compare ka kb in
+      if cmp <> 0 then cmp else String.compare sa sb
+  end)
 
 type keeper_reaction_evidence_batch =
-  ( (string * Keeper_reaction_ledger.event_queue_reaction_evidence_outcome) list
+  ( Keeper_reaction_ledger.event_queue_reaction_evidence_outcome String_map.t
   , Keeper_reaction_ledger.event_queue_reaction_evidence_error )
   result
 
 type schedule_evidence_snapshot =
   { queue_by_keeper :
-      (string, (Keeper_event_queue_state.t,
-                Keeper_event_queue_persistence.snapshot_read_error list) result) Hashtbl.t
+      (Keeper_event_queue_state.t,
+       Keeper_event_queue_persistence.snapshot_read_error list) result String_map.t
   ; disposition_by_occurrence :
-      (string * string, (Server_schedule_consumers.resolved_occurrence_disposition, string) result) Hashtbl.t
-  ; reaction_by_keeper : (string, keeper_reaction_evidence_batch) Hashtbl.t
+      (Server_schedule_consumers.resolved_occurrence_disposition, string) result Occurrence_map.t
+  ; reaction_by_keeper : keeper_reaction_evidence_batch String_map.t
   }
 
 let schedule_keeper_receipt_identity (wake : Schedule_domain.wake_record option) =
@@ -185,33 +193,34 @@ let schedule_keeper_receipt_identity (wake : Schedule_domain.wake_record option)
 ;;
 
 let schedule_evidence_snapshot ~config wakes =
-  let requested_stimulus_ids = Hashtbl.create (List.length wakes) in
-  List.iter
-    (fun wake ->
-       match schedule_keeper_receipt_identity wake with
-       | None -> ()
-       | Some (keeper_name, stimulus_id) ->
-         let existing =
-           match Hashtbl.find_opt requested_stimulus_ids keeper_name with
-           | Some existing -> existing
-           | None -> String_set.empty
-         in
-         let requested =
-           match stimulus_id with
-           | None -> existing
-           | Some stimulus_id -> String_set.add stimulus_id existing
-         in
-         Hashtbl.replace requested_stimulus_ids keeper_name requested)
-    wakes;
-  let queue_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
-  let reaction_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
+  let requested_stimulus_ids =
+    List.fold_left
+      (fun acc wake ->
+         match schedule_keeper_receipt_identity wake with
+         | None -> acc
+         | Some (keeper_name, stimulus_id) ->
+           let existing =
+             match String_map.find_opt keeper_name acc with
+             | Some existing -> existing
+             | None -> String_set.empty
+           in
+           let requested =
+             match stimulus_id with
+             | None -> existing
+             | Some stimulus_id -> String_set.add stimulus_id existing
+           in
+           String_map.add keeper_name requested acc)
+      String_map.empty
+      wakes
+  in
+  let queue_by_keeper = ref String_map.empty in
   (* Resolve queue authority before ledger projection. Every callback reads
      fresh bytes, so an owner enters the resolver cache at the same instant as
      its observation. Pre-capturing a target outside that cache could conceal
      a transfer-followed stale absence from the resolver's refresh rule. *)
   let read_state ~base_path keeper_name =
     let observed = Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name in
-    Hashtbl.replace queue_by_keeper keeper_name observed;
+    queue_by_keeper := String_map.add keeper_name observed !queue_by_keeper;
     Result.map_error
       (fun errors -> String.concat "; "
           (List.map (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
@@ -219,29 +228,46 @@ let schedule_evidence_snapshot ~config wakes =
       observed
   in
   let occurrences =
-    Hashtbl.fold (fun keeper_name ids acc ->
+    String_map.fold (fun keeper_name ids acc ->
         List.fold_left (fun acc id -> (keeper_name, id) :: acc)
           acc (String_set.elements ids)) requested_stimulus_ids []
   in
-  let disposition_by_occurrence = Hashtbl.create (List.length occurrences) in
-  Server_schedule_consumers.resolve_keeper_wake_occurrences_with
-    ~read_state ~base_path:config.Workspace_utils.base_path occurrences
-  |> List.iter (fun (keeper_name, stimulus_id, result) ->
-      Hashtbl.add disposition_by_occurrence (keeper_name, stimulus_id) result);
+  let disposition_by_occurrence =
+    Server_schedule_consumers.resolve_keeper_wake_occurrences_with
+      ~read_state ~base_path:config.Workspace_utils.base_path occurrences
+    |> List.fold_left
+         (fun acc (keeper_name, stimulus_id, result) ->
+            Occurrence_map.add (keeper_name, stimulus_id) result acc)
+         Occurrence_map.empty
+  in
   (* Legacy receipts without an identity still get explicit queue read
      errors, but cannot be resolved to an occurrence. *)
-  Hashtbl.iter (fun keeper_name _ ->
-      if not (Hashtbl.mem queue_by_keeper keeper_name) then
+  String_map.iter (fun keeper_name _ ->
+      if not (String_map.mem keeper_name !queue_by_keeper) then
         ignore (read_state ~base_path:config.Workspace_utils.base_path keeper_name))
     requested_stimulus_ids;
-  Hashtbl.iter
-    (fun keeper_name stimulus_ids ->
-       Hashtbl.add reaction_by_keeper keeper_name
-         (Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
-            ~base_path:config.Workspace_utils.base_path ~keeper_name
-            ~stimulus_ids:(String_set.elements stimulus_ids)))
-    requested_stimulus_ids;
-  { queue_by_keeper; disposition_by_occurrence; reaction_by_keeper }
+  let reaction_by_keeper =
+    String_map.fold
+      (fun keeper_name stimulus_ids acc ->
+         let batch =
+           Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+             ~base_path:config.Workspace_utils.base_path
+             ~keeper_name
+             ~stimulus_ids:(String_set.elements stimulus_ids)
+           |> Result.map (fun pairs ->
+                List.fold_left
+                  (fun map (id, outcome) ->
+                     if String_map.mem id map
+                     then map
+                     else String_map.add id outcome map)
+                  String_map.empty
+                  pairs)
+         in
+         String_map.add keeper_name batch acc)
+      requested_stimulus_ids
+      String_map.empty
+  in
+  { queue_by_keeper = !queue_by_keeper; disposition_by_occurrence; reaction_by_keeper }
 ;;
 
 type schedule_reaction_evidence_lookup =
@@ -252,11 +278,11 @@ type schedule_reaction_evidence_lookup =
   | Reaction_evidence_not_captured
 
 let schedule_reaction_evidence_lookup snapshot ~keeper_name ~stimulus_id =
-  match Hashtbl.find_opt snapshot.reaction_by_keeper keeper_name with
+  match String_map.find_opt keeper_name snapshot.reaction_by_keeper with
   | None -> Reaction_evidence_not_captured
   | Some (Error error) -> Reaction_evidence_failed error
   | Some (Ok evidence_by_id) ->
-    (match List.assoc_opt stimulus_id evidence_by_id with
+    (match String_map.find_opt stimulus_id evidence_by_id with
      | Some evidence -> Reaction_evidence_observed evidence
      | None -> Reaction_evidence_not_captured)
 ;;
@@ -407,7 +433,7 @@ let schedule_keeper_queue_evidence_dashboard_json
           let due_at = wake.Schedule_domain.due_at in
           let payload_digest = wake.Schedule_domain.payload_digest in
           let snapshot =
-            match Hashtbl.find_opt evidence_snapshot.queue_by_keeper keeper_name with
+            match String_map.find_opt keeper_name evidence_snapshot.queue_by_keeper with
             | Some (Ok state) ->
               { Keeper_event_queue_persistence.pending = Keeper_event_queue_state.pending state
               ; read_errors = [] }
@@ -497,7 +523,7 @@ let schedule_keeper_queue_evidence_dashboard_json
           let disposition = match stimulus_id with
             | None -> Error "dispatch receipt has no exact stimulus identity"
             | Some id ->
-              (match Hashtbl.find_opt evidence_snapshot.disposition_by_occurrence (keeper_name, id) with
+              (match Occurrence_map.find_opt (keeper_name, id) evidence_snapshot.disposition_by_occurrence with
                | Some result -> result
                | None -> Error "durable occurrence was not captured in the request snapshot")
           in
@@ -791,14 +817,17 @@ let schedule_signal_rows_and_errors config limit =
       | Ok signal -> Decoded_schedule_signal signal
       | Error error -> Schedule_signal_decode_error (ordinal, error))
   in
-  List.fold_right
-    (fun entry (signals, errors) ->
-       match entry with
-       | Decoded_schedule_signal signal -> signal :: signals, errors
-       | Schedule_signal_decode_error (ordinal, error) ->
-         signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
-    entries
-    ([], [])
+  let signals_rev, errors_rev =
+    List.fold_left
+      (fun (signals, errors) entry ->
+         match entry with
+         | Decoded_schedule_signal signal -> signal :: signals, errors
+         | Schedule_signal_decode_error (ordinal, error) ->
+           signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
+      ([], [])
+      entries
+  in
+  List.rev signals_rev, List.rev errors_rev
 ;;
 
 (* The runner's own hold, read from the same [held] list [/health] reports.
@@ -1051,16 +1080,18 @@ let schedule_wake_counts_json
       (schedules : Schedule_domain.schedule_request list)
       (state : Schedule_store.state)
   =
-  let selected = Hashtbl.create 16 in
-  List.iter
-    (fun (request : Schedule_domain.schedule_request) ->
-       Hashtbl.replace selected request.schedule_id ())
-    schedules;
+  let selected =
+    List.fold_left
+      (fun acc (request : Schedule_domain.schedule_request) ->
+         Schedule_store.Schedule_id_set.add request.schedule_id acc)
+      Schedule_store.Schedule_id_set.empty
+      schedules
+  in
   let retained, running, succeeded, failed =
     List.fold_left
       (fun (retained, running, succeeded, failed)
         (wake : Schedule_domain.wake_record) ->
-         if Hashtbl.mem selected wake.schedule_id
+         if Schedule_store.Schedule_id_set.mem wake.schedule_id selected
          then (
            match wake.status with
            | Schedule_domain.Wake_running ->
@@ -1279,14 +1310,15 @@ let scheduled_automation_dashboard_page_json
     | None -> all_signal_rows
     | Some _ ->
       let selected_ids =
-        List.filter_map
-          (fun (request : Schedule_domain.schedule_request) ->
-             Some request.schedule_id)
+        List.fold_left
+          (fun acc (request : Schedule_domain.schedule_request) ->
+             String_set.add request.schedule_id acc)
+          String_set.empty
           schedules
       in
       List.filter
         (fun (signal : Schedule_runner.wake_signal) ->
-           List.exists (String.equal signal.schedule_id) selected_ids)
+           String_set.mem signal.schedule_id selected_ids)
         all_signal_rows
   in
   let base_fields_for signal_rows =
@@ -1458,12 +1490,7 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
          Unavailable
          [ "reason", `String reason ]
      | Ok state ->
-       (match
-          List.find_opt
-            (fun (request : Schedule_domain.schedule_request) ->
-               String.equal request.schedule_id schedule_id)
-            state.schedules
-        with
+       (match Schedule_store.find_schedule state ~schedule_id with
         | None -> exact_lookup_json ~now ~schedule_id Not_found []
         | Some request ->
           let requests =

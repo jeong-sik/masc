@@ -180,9 +180,32 @@ let decode_record json =
   let* raw=member "observation" values in
   let* observation=Child.of_json raw |> Result.map_error (fun error -> Invalid_child error) in
   Ok {seq;recorded_at;observation}
+module Observation_key_set = Set.Make (struct
+    type t = string * int * Runtime_claude_code.content_channel
+
+    let channel_rank = function
+      | Runtime_claude_code.Text_content -> 0
+      | Runtime_claude_code.Thinking_content -> 1
+
+    let compare (id_a, ord_a, ch_a) (id_b, ord_b, ch_b) =
+      let cmp = String.compare id_a id_b in
+      if cmp <> 0
+      then cmp
+      else (
+        let ord_cmp = Int.compare ord_a ord_b in
+        if ord_cmp <> 0 then ord_cmp else Int.compare (channel_rank ch_a) (channel_rank ch_b))
+  end)
+
+let compare_receiver (a : receiver) (b : receiver) =
+  let cmp = String.compare a.receiver_generation b.receiver_generation in
+  if cmp <> 0
+  then cmp
+  else (
+    let sess_cmp = String.compare a.session_id b.session_id in
+    if sess_cmp <> 0 then sess_cmp else String.compare a.client_uuid b.client_uuid)
+
 let validate_rows (scope:scope) (cursor:cursor) rows =
-  let keys=Hashtbl.create 16 in
-  let rec loop previous = function
+  let rec loop keys previous = function
     | [] -> (match previous with None -> Ok () | Some seq ->
         if seq=cursor.after_sequence then Ok () else Error Sequence_mismatch)
     | (row:record)::rest ->
@@ -192,11 +215,11 @@ let validate_rows (scope:scope) (cursor:cursor) rows =
           || origin.invocation.session_id<>scope.receiver.session_id
           || origin.invocation.client_uuid<>scope.receiver.client_uuid then Error Scope_mismatch else
         let key=(observation.observation_id,observation.ordinal,observation.channel) in
-        if Hashtbl.mem keys key then Error Duplicate_observation
+        if Observation_key_set.mem key keys then Error Duplicate_observation
         else if row.seq>cursor.after_sequence
           || (match previous with None -> false | Some seq -> row.seq<>seq+1) then Error Sequence_mismatch
-        else (Hashtbl.add keys key ();loop (Some row.seq) rest) in
-  loop None rows
+        else loop (Observation_key_set.add key keys) (Some row.seq) rest in
+  loop Observation_key_set.empty None rows
 let base_fields = ["schema";"persistence_failure_history";"provider_completeness";"liveness"]
 let decode_envelope schema extra json =
   let* values=fields (base_fields @ extra) json in
@@ -227,7 +250,7 @@ let decode_hint_entry json =
   let* hint=decode_storage "unchecked" raw in
   Ok ({receiver;hint=(match hint with Ok cursor -> Unchecked cursor | Error code -> Hint_failed code)}:hint_entry)
 let distinct_receivers receivers =
-  if List.length receivers=List.length (List.sort_uniq compare receivers) then Ok () else Error Duplicate_receiver
+  if List.length receivers=List.length (List.sort_uniq compare_receiver receivers) then Ok () else Error Duplicate_receiver
 let decode_receivers json =
   let* values=decode_envelope "masc.child_content.receivers.v1" ["keeper_name";"receivers";"cleanup_failures"] json in
   let* keeper_name=identity "keeper_name" values in let* raw=member "receivers" values in

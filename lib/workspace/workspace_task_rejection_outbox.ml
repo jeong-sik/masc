@@ -19,8 +19,7 @@ let standing_in_backlog (backlog : Masc_domain.backlog)
   in
   match relations with
   | [] ->
-    (match List.find_opt (fun (task : Masc_domain.task) ->
-       String.equal task.id task_id) backlog.tasks with
+    (match Workspace_backlog.find_task_in_backlog_opt backlog task_id with
      | Some {task_status=Masc_domain.InProgress {assignee; _}; _}
        when String.equal assignee producer ->
        Error "completion rejection relation is unavailable for its active producer"
@@ -35,8 +34,7 @@ let standing_in_backlog (backlog : Masc_domain.backlog)
                  && String.equal item.reason reason && item.authority = authority)
     then Error "completion rejection payload conflicts with the current relation"
     else
-      match List.find_opt (fun (task : Masc_domain.task) ->
-        String.equal task.id task_id) backlog.tasks with
+      match Workspace_backlog.find_task_in_backlog_opt backlog task_id with
       | Some { task_status = Masc_domain.InProgress {assignee; _}; _ }
         when String.equal assignee producer -> Ok Current
       | Some { task_status = (Masc_domain.Todo | Masc_domain.Claimed _

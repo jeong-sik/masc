@@ -547,18 +547,20 @@ let resolve_official_client_purge_artifacts config ~keeper_name =
     Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path
   in
   let dedup_artifacts artifacts =
-    let seen = Hashtbl.create (List.length artifacts) in
-    List.filter
-      (fun artifact ->
-         match keeper_artifact_path config keeper_name artifact with
-         | None -> true
-         | Some path ->
-           if Hashtbl.mem seen path
-           then false
-           else (
-             Hashtbl.replace seen path ();
-             true))
-      artifacts
+    let module Path_set = Set.Make (String) in
+    let _, rev_deduped =
+      List.fold_left
+        (fun (seen, acc) artifact ->
+           match keeper_artifact_path config keeper_name artifact with
+           | None -> seen, artifact :: acc
+           | Some path ->
+             if Path_set.mem path seen
+             then seen, acc
+             else Path_set.add path seen, artifact :: acc)
+        (Path_set.empty, [])
+        artifacts
+    in
+    List.rev rev_deduped
   in
   match Runtime_toml.parse_file runtime_toml with
   | Error errors ->

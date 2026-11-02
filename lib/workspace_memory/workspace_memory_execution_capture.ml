@@ -214,9 +214,14 @@ module Summary = struct
       let* workspace = workspace_of_json (List.assoc "workspace" f) in
       let* up_to = Request.size_of_json (List.assoc "up_to" f) in
       let* selected = match List.assoc "selected" f with
-        | `List (_ :: _ as refs) -> List.fold_right (fun json selected ->
-            let* selected = selected in
-            let* fact = Ledger.fact_ref_of_json json in Ok (fact :: selected)) refs (Ok [])
+        | `List (_ :: _ as refs) ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | json :: rest ->
+              let* fact = Ledger.fact_ref_of_json json in
+              loop (fact :: acc) rest
+          in
+          loop [] refs
         | _ -> Error "a Curator classification summary selects at least one fact" in
       Ok {predecessor; workspace; batch=Classification {up_to; selected}}
     | Some (`String "briefing") ->

@@ -75,7 +75,7 @@ let last_nonempty_line path =
 
 let latest_json_in_receipt_dir base_dir =
   jsonl_files_under base_dir
-  |> List.sort (fun a b -> compare b a)
+  |> List.sort (fun a b -> String.compare b a)
   |> List.find_map (fun path ->
     match last_nonempty_line path with
     | None -> None
@@ -117,6 +117,6 @@ let latest_execution_receipt_json config ~agent_name =
       Filename.concat (Filename.concat keeper_root keeper_name) "execution-receipts"
     in
     latest_json_in_receipt_dir base_dir)
-  |> List.sort (fun a b -> compare (receipt_sort_key b) (receipt_sort_key a))
+  |> List.sort (fun a b -> String.compare (receipt_sort_key b) (receipt_sort_key a))
   |> List.find_opt (fun _ -> true)
 ;;

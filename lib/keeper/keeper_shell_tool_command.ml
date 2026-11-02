@@ -204,7 +204,7 @@ let split_words (words : string list) : (string * string list) option =
   let paths =
     Lazy.force entries
     |> List.map fst
-    |> List.sort (fun a b -> compare (List.length b) (List.length a))
+    |> List.sort (fun a b -> Int.compare (List.length b) (List.length a))
   in
   let rec try_path = function
     | [] -> None

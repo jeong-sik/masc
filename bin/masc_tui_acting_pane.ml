@@ -753,14 +753,15 @@ let header_line ~cols input =
 
 (* Newest chunk per keeper: the fold returns chunks newest-activity first,
    so the first one met for a keeper is its latest observed record. *)
+module Keeper_map = Map.Make (String)
+
 let newest_chunk_by_keeper chunks =
-  let table = Hashtbl.create 16 in
-  List.iter
-    (fun (chunk : Acting.chunk) ->
-      if not (Hashtbl.mem table chunk.Acting.ck_keeper) then
-        Hashtbl.replace table chunk.Acting.ck_keeper chunk)
-    chunks;
-  table
+  List.fold_left
+    (fun table (chunk : Acting.chunk) ->
+      if Keeper_map.mem chunk.Acting.ck_keeper table then table
+      else Keeper_map.add chunk.Acting.ck_keeper chunk table)
+    Keeper_map.empty
+    chunks
 
 let approval_for approvals name =
   List.find_map
@@ -774,13 +775,17 @@ let approval_for approvals name =
    Keepers without observed activity retain the roster's own order. *)
 let fleet_order input newest =
   let rank keeper =
-    match approval_for input.approvals keeper.name, Hashtbl.find_opt newest keeper.name with
+    match approval_for input.approvals keeper.name, Keeper_map.find_opt keeper.name newest with
     | Some _, _ -> (0, 0.)
     | None, Some (chunk : Acting.chunk) when not chunk.Acting.ck_settled -> (1, -. chunk.Acting.ck_at)
     | None, Some chunk -> (2, -. chunk.Acting.ck_at)
     | None, None -> (3, 0.)
   in
-  List.stable_sort (fun a b -> compare (rank a) (rank b)) (working_keepers input)
+  let compare_rank (s1, t1) (s2, t2) =
+    let c = Int.compare s1 s2 in
+    if c <> 0 then c else Float.compare t1 t2
+  in
+  List.stable_sort (fun a b -> compare_rank (rank a) (rank b)) (working_keepers input)
 
 let fleet_row ~cols input keeper chunk =
   let approval = approval_for input.approvals keeper.name in
@@ -816,7 +821,7 @@ let focus_keeper input newest =
   | Some name -> Some name
   | None ->
       (* No cursor: the keeper that acted last. *)
-      Hashtbl.fold
+      Keeper_map.fold
         (fun name (chunk : Acting.chunk) acc ->
           match acc with
           | Some (_, at) when at >= chunk.Acting.ck_at -> acc
@@ -1481,7 +1486,7 @@ let fleet_body input =
     | Some name -> focus_rows input chunks name
     | None -> []
   in
-  let fleet_row_of keeper = Fleet_row (keeper, Hashtbl.find_opt newest keeper.name) in
+  let fleet_row_of keeper = Fleet_row (keeper, Keeper_map.find_opt keeper.name newest) in
   let body, overview = match input.scope with
   | Selected_only ->
       (* Beside the roster every fleet row is a roster row said twice, except

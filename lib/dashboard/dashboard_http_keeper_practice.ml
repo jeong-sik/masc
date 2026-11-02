@@ -173,7 +173,7 @@ let bump histogram label =
 let sorted_histogram histogram =
   String_histogram.bindings histogram
   |> List.sort (fun (la, ca) (lb, cb) ->
-    match compare cb ca with
+    match Int.compare cb ca with
     | 0 -> String.compare la lb
     | order -> order)
 ;;

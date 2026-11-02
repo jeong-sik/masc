@@ -134,9 +134,9 @@ let resolve_with ~expected_keeper ~read_recent ~limit =
   | Error error -> { entries = []; error = Some (Storage_error error) }
   | Ok rows ->
       let indexed = List.mapi (fun index row -> index + 1, row) rows in
-      let entries, errors =
-        List.fold_right
-          (fun (physical_index, row) (entries, errors) ->
+      let entries_rev, errors_rev =
+        List.fold_left
+          (fun (entries, errors) (physical_index, row) ->
             match row with
             | Dated_jsonl.Parsed json -> (
                 match decode_for_keeper ~expected_keeper json with
@@ -151,8 +151,10 @@ let resolve_with ~expected_keeper ~read_recent ~limit =
             | Dated_jsonl.Malformed_json { path; line_number; detail } ->
                 ( entries,
                   Malformed_json { path; line_number; detail } :: errors ))
-          indexed ([], [])
+          ([], []) indexed
       in
+      let entries = List.rev entries_rev in
+      let errors = List.rev errors_rev in
       let error =
         match errors with
         | [] -> None

@@ -4,6 +4,16 @@
     aggregate caller-provided counters. Conversation visibility follows recorded
     source provenance. *)
 
+module Count_map = Map.Make (String)
+module Mention_counts = Count_map
+
+let count_map_incr (map : int Count_map.t) (key : string) : int Count_map.t =
+  let key = String.trim key in
+  if String.equal key "" then map
+  else
+    let cur = Option.value ~default:0 (Count_map.find_opt key map) in
+    Count_map.add key (cur + 1) map
+
 let count_table_incr (tbl : (string, int) Hashtbl.t) (key : string) : unit =
   let key = String.trim key in
   if key <> "" then
@@ -15,8 +25,6 @@ let truncate_text ~(max_len : int) (s : string) : string =
   match String_util.utf8_safe ~max_bytes:max_len ~suffix:"..." s with
   | String_util.Untouched _ -> s
   | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
-
-module Mention_counts = Map.Make (String)
 
 let keeper_history_summary_json
     ~(all_keeper_names : string list)
@@ -106,7 +114,7 @@ let keeper_history_summary_json
     mention_counts
     |> Mention_counts.bindings
     |> List.sort (fun (ka, va) (kb, vb) ->
-         let c = compare vb va in
+         let c = Int.compare vb va in
          if c <> 0 then c else String.compare ka kb)
     |> Keeper_types_profile.take 5
     |> List.map (fun (k, v) ->
@@ -114,6 +122,19 @@ let keeper_history_summary_json
     |> fun xs -> `List xs
   in
   (conversation, recent_addressed_messages, keeper_mention_counts, raw_count)
+
+let top_counts_map_json
+    ?(limit = 5)
+    ~(name_key : string)
+    (map : int Count_map.t) : Yojson.Safe.t list =
+  map
+  |> Count_map.bindings
+  |> List.sort (fun (ka, va) (kb, vb) ->
+       let c = Int.compare vb va in
+       if c <> 0 then c else String.compare ka kb)
+  |> Keeper_types_profile.take limit
+  |> List.map (fun (k, v) ->
+       `Assoc [ (name_key, `String k); ("count", `Int v) ])
 
 let top_counts_json
     ?(limit = 5)
@@ -123,7 +144,7 @@ let top_counts_json
   |> Hashtbl.to_seq
   |> List.of_seq
   |> List.sort (fun (ka, va) (kb, vb) ->
-       let c = compare vb va in
+       let c = Int.compare vb va in
        if c <> 0 then c else String.compare ka kb)
   |> Keeper_types_profile.take limit
   |> List.map (fun (k, v) ->

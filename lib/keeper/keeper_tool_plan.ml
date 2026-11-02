@@ -1054,12 +1054,19 @@ let exports plan = plan.exports
 
 let branch_failure_policy plan = plan.branch_failure_policy
 
+module Node_set = Set.Make (Node_id)
+
 let stable_unique_node_ids ids =
-  List.fold_left
-    (fun unique id ->
-       if List.exists (Node_id.equal id) unique then unique else unique @ [ id ])
-    []
-    ids
+  let _, rev_unique =
+    List.fold_left
+      (fun (seen, rev_acc) id ->
+         if Node_set.mem id seen
+         then seen, rev_acc
+         else Node_set.add id seen, id :: rev_acc)
+      (Node_set.empty, [])
+      ids
+  in
+  List.rev rev_unique
 ;;
 
 let dependencies node =
@@ -1076,21 +1083,23 @@ type registered_descriptor =
   ; model_names : string list
   }
 
-let registered_by_id : (string, registered_descriptor) Hashtbl.t =
+module Descriptor_id_map = Map.Make (String)
+
+let registered_by_id : registered_descriptor Descriptor_id_map.t =
   let registered = Keeper_tool_descriptor.all_descriptors () in
-  let table = Hashtbl.create (List.length registered) in
-  List.iter
-    (fun (descriptor : Keeper_tool_descriptor.t) ->
-       if not (Hashtbl.mem table descriptor.id)
-       then
-         Hashtbl.add
-           table
+  List.fold_left
+    (fun table (descriptor : Keeper_tool_descriptor.t) ->
+       if Descriptor_id_map.mem descriptor.id table
+       then table
+       else
+         Descriptor_id_map.add
            descriptor.id
            { descriptor
            ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
-           })
-    registered;
-  table
+           }
+           table)
+    Descriptor_id_map.empty
+    registered
 ;;
 
 let descriptor_entries registered =
@@ -1128,13 +1137,13 @@ let canonicalize_descriptors descriptors =
   let rec canonicalize resolved = function
     | [] -> Ok (List.rev resolved)
     | (descriptor : Keeper_tool_descriptor.t) :: rest ->
-      (match Hashtbl.find_opt registered_by_id descriptor.id with
+      (match Descriptor_id_map.find_opt descriptor.id registered_by_id with
        | None ->
          if not (Keeper_lane_addon_descriptor.is_canonical descriptor)
          then Error (Unknown_descriptor_id descriptor.id)
          else
            let names = Keeper_tool_descriptor.registered_names descriptor in
-           let collision = Hashtbl.fold
+           let collision = Descriptor_id_map.fold
              (fun _ registered collision -> match collision with
                 | Some _ -> collision
                 | None -> List.find_opt

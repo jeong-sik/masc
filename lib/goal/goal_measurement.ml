@@ -130,12 +130,13 @@ let load config =
     in
     match Json_util.assoc_member_opt "measurements" json with
     | Some (`List items) ->
-        List.fold_right
-          (fun item rest ->
-             let* decoded = decode item in
-             let* rest = rest in
-             Ok (decoded :: rest))
-          items (Ok [])
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: rest ->
+              let* decoded = decode item in
+              loop (decoded :: acc) rest
+        in
+        loop [] items
     | _ -> Error "goal_measurement: measurements must be a list"
 
 let latest rows (goal : Goal_store.goal) =

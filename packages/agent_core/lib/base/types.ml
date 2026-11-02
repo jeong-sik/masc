@@ -76,14 +76,35 @@ let response_format_of_json json =
       (match json |> member "type" |> to_string with
        | "off" -> Ok Off
        | "json_mode" -> Ok JsonMode
-       | "json_schema" ->
+       | "raw_json_schema" ->
          (match json |> member "schema" with
           | `Null ->
             Error
               (Error.Serialization
                  (JsonParseError
                     { detail = "Invalid response_format JSON: missing schema" }))
-          | schema -> Ok (JsonSchema schema))
+          | schema -> Ok (JsonSchema (Raw_schema schema)))
+       | "named_json_schema" ->
+         let envelope = json |> member "schema" in
+         (match envelope |> member "schema" with
+          | `Null ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail = "Invalid named response_format JSON: missing schema" }))
+          | schema ->
+            let name = envelope |> member "name" |> to_string in
+            let strict =
+              match envelope |> member "strict" with
+              | `Null -> None
+              | value -> Some (to_bool value)
+            in
+            let description =
+              match envelope |> member "description" with
+              | `Null -> None
+              | value -> Some (to_string value)
+            in
+            Ok (JsonSchema (Named_schema { name; schema; strict; description })))
        | other ->
          Error
            (Error.Serialization

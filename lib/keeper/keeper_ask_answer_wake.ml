@@ -340,7 +340,13 @@ type delivery_window = Whole_store | Answer_day of string
 type window_demand = One_source | Multiple_sources
 module Delivery_windows = Map.Make (struct
   type t = delivery_window
-  let compare = Stdlib.compare
+
+  let compare a b =
+    match a, b with
+    | Whole_store, Whole_store -> 0
+    | Whole_store, Answer_day _ -> -1
+    | Answer_day _, Whole_store -> 1
+    | Answer_day d1, Answer_day d2 -> String.compare d1 d2
 end)
 
 let delivery_window since =

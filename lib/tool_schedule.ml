@@ -738,12 +738,7 @@ let authorize_row_change ctx ~schedule_id =
       (Refusal
          ("schedule store read failed: " ^ Schedule_store.read_error_to_string err))
   | Ok state ->
-    let row =
-      List.find_opt
-        (fun (request : Schedule_domain.schedule_request) ->
-           String.equal request.schedule_id schedule_id)
-        state.schedules
-    in
+    let row = Schedule_store.find_schedule state ~schedule_id in
     (match ctx.caller, row with
      | (Operator_caller _ | Unnamed_caller), _ | Named_caller _, None -> Ok row
      | Named_caller name, Some request when caller_holds_row ~name request -> Ok row
@@ -1319,12 +1314,7 @@ let handle_get ~tool_name ~start_time ctx args =
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->
-       match
-         List.find_opt
-           (fun (request : Schedule_domain.schedule_request) ->
-              String.equal request.schedule_id schedule_id)
-           state.schedules
-       with
+       match Schedule_store.find_schedule state ~schedule_id with
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
        let last_wake =

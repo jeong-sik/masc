@@ -17,6 +17,17 @@ type task_create_failure_route =
 
 val task_create_failure_route : Workspace_task.add_task_error -> task_create_failure_route
 
+val sync_keeper_meta_current_task :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  task_id:string ->
+  unit
+(** Reconcile [meta.current_task_id] after a task claim against authoritative
+    prepared-backlog ownership and revision. Rejects/rereads stale projections
+    when a concurrent transition commits before the owner update, and preserves
+    existing metadata rather than asserting [task_id] when the backlog cannot be
+    read. *)
+
 val handle_keeper_task_tool :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

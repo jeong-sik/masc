@@ -11,6 +11,22 @@ type kind =
   | Gauge
   | Histogram
 
+let compare_kind a b =
+  let rank = function
+    | Counter -> 0
+    | Gauge -> 1
+    | Histogram -> 2
+  in
+  Int.compare (rank a) (rank b)
+
+module Group_map = Map.Make (struct
+  type t = string * kind
+
+  let compare (n1, k1) (n2, k2) =
+    let c = String.compare n1 n2 in
+    if c <> 0 then c else compare_kind k1 k2
+end)
+
 type sample = {
   name : string;
   value : float;
@@ -25,15 +41,16 @@ let attrs_of_labels (labels : (string * string) list) =
     identity become a single [M.t] with multiple data points. This reduces the
     number of protobuf metrics emitted per OTel export tick. *)
 let metrics_of_samples (samples : sample list) : M.t list =
-  let groups : (string * kind, sample list) Hashtbl.t = Hashtbl.create 16 in
-  List.iter
-    (fun s ->
-       let key = (s.name, s.kind) in
-       match Hashtbl.find_opt groups key with
-       | None -> Hashtbl.add groups key [ s ]
-       | Some ss -> Hashtbl.replace groups key (s :: ss))
-    samples;
-  Hashtbl.fold
+  let groups =
+    List.fold_left
+      (fun acc s ->
+         let key = (s.name, s.kind) in
+         match Group_map.find_opt key acc with
+         | None -> Group_map.add key [ s ] acc
+         | Some ss -> Group_map.add key (s :: ss) acc)
+      Group_map.empty samples
+  in
+  Group_map.fold
     (fun (name, kind) ss acc ->
        let dps =
          List.rev_map

@@ -333,22 +333,24 @@ let record config (metric : task_metric) =
         let* () = append_bound config ~agent_id:metric.agent_id file line in
         Ok Written)
 
+module File_batch_map = Map.Make (String)
+
 (** Drain all pending entries from the write queue, batching by file. *)
 let flush_pending () =
-  let batch = Hashtbl.create 8 in
-  let rec drain () =
+  let rec drain batch =
     match Eio.Stream.take_nonblocking write_queue with
-    | None -> ()
+    | None -> batch
     | Some entry ->
-        let config, agent_id, buffer = match Hashtbl.find_opt batch entry.file with
-          | Some batch -> batch
-          | None -> entry.config, entry.agent_id, Buffer.create 256 in
+        let config, agent_id, buffer =
+          match File_batch_map.find_opt entry.file batch with
+          | Some existing -> existing
+          | None -> entry.config, entry.agent_id, Buffer.create 256
+        in
         Buffer.add_string buffer entry.line;
-        Hashtbl.replace batch entry.file (config, agent_id, buffer);
-        drain ()
+        drain (File_batch_map.add entry.file (config, agent_id, buffer) batch)
   in
-  drain ();
-  Hashtbl.iter (fun file (config, agent_id, buffer) ->
+  let batch = drain File_batch_map.empty in
+  File_batch_map.iter (fun file (config, agent_id, buffer) ->
     match expected_io file (fun () -> append_bound config ~agent_id file (Buffer.contents buffer)) with
     | Ok () -> ()
     | Error error -> Log.Metrics.error "flush_pending: %s" (record_error_to_string error)

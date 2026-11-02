@@ -74,8 +74,12 @@ let matches text (_, _, json) =
       String_util.contains_all_tokens_ci (String.concat "\n" values) text
     | _ -> false
 
+let compare_diagnostic (id_a, msg_a) (id_b, msg_b) =
+  let cmp = String.compare id_a id_b in
+  if cmp <> 0 then cmp else String.compare msg_a msg_b
+
 let snapshot text entries diagnostics =
-  let diagnostics = List.sort compare diagnostics |> List.map (fun (id, message) ->
+  let diagnostics = List.sort compare_diagnostic diagnostics |> List.map (fun (id, message) ->
     `Assoc ["id", `String id; "error", `String message]) in
   let data = `Assoc ["query", `String text;
     "artifacts", `List (List.map (fun (_, _, json) -> json) entries);

@@ -216,6 +216,8 @@ module Make (Payload : Payload) = struct
     | Completed _ -> false
   ;;
 
+  module Group_map = Map.Make (String)
+
   let prune entries =
     match Payload.completed_retention with
     | `All -> entries
@@ -234,14 +236,14 @@ module Make (Payload : Payload) = struct
           (* Per-group bound: count within each group while preserving the
              global newest-first order, so a busy group cannot evict a quiet
              one's history. *)
-          let seen : (string, int) Hashtbl.t = Hashtbl.create 8 in
+          let seen = ref Group_map.empty in
           List.filter
             (fun entry ->
                let group = group_of entry.registration in
-               let kept = Option.value (Hashtbl.find_opt seen group) ~default:0 in
+               let kept = Option.value (Group_map.find_opt group !seen) ~default:0 in
                if kept < max_completed_retained
                then (
-                 Hashtbl.replace seen group (kept + 1);
+                 seen := Group_map.add group (kept + 1) !seen;
                  true)
                else false)
             newest_first

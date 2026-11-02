@@ -558,9 +558,9 @@ let decode_message_create ~bot_user_id ~payload =
   let mentions, mention_user_ids =
     match assoc_opt "mentions" payload with
     | Some (`List items) ->
-        let pairs, ids =
-          List.fold_right
-            (fun item (pairs, ids) ->
+        let pairs_rev, ids_rev =
+          List.fold_left
+            (fun (pairs, ids) item ->
               match field_string_opt "id" item with
               | None -> (pairs, ids)
               | Some id ->
@@ -570,9 +570,9 @@ let decode_message_create ~bot_user_id ~payload =
                     | None -> pairs
                   in
                   (pairs, id :: ids))
-            items ([], [])
+            ([], []) items
         in
-        (pairs, ids)
+        (List.rev pairs_rev, List.rev ids_rev)
     | Some _ | None -> ([], [])
   in
   let mentions_bot =

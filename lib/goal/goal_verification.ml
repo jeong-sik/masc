@@ -254,40 +254,150 @@ let verifications_recovery_path config =
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
+type prepared_state = {
+  state : state;
+  records_by_goal_id : record Goal_store.Goal_id_map.t;
+}
+
+let prepare_state (state : state) : prepared_state =
+  let records_by_goal_id =
+    List.fold_left
+      (fun acc (record : record) ->
+        (* Preserve first-row precedence so [records_by_goal_id] agrees with
+           [find_record] when [state.records] contains duplicate goal IDs. *)
+        Goal_store.Goal_id_map.update
+          record.goal_id
+          (function
+            | Some existing -> Some existing
+            | None -> Some record)
+          acc)
+      Goal_store.Goal_id_map.empty
+      state.records
+  in
+  { state; records_by_goal_id }
+
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); records = [] }
+
+let default_prepared_state () =
+  { state = default_state (); records_by_goal_id = Goal_store.Goal_id_map.empty }
+
+(* Content-addressed in-memory cache of [prepared_state] keyed by file path.
+   Protected by [Stdlib.Mutex] with zero Eio yield points inside the critical
+   section. A hit requires exact byte equality ([String.equal cached_bytes
+   content]) against the freshly read document, so out-of-band file edits can
+   never serve stale state while repeated reads reuse JSON parsing and
+   [Goal_id_map] indexing. [state] and [record] have no mutable fields. *)
+let verifications_cache : (string, string * prepared_state) Hashtbl.t =
+  Hashtbl.create 8
+
+let verifications_cache_mu = Stdlib.Mutex.create ()
+
+let clear_verifications_cache_for path =
+  Stdlib.Mutex.lock verifications_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
+    (fun () -> Hashtbl.remove verifications_cache path)
+
+let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) result =
+  let read_local () =
+    match Safe_ops.read_file_result path with
+    | Error (Safe_ops.File_not_found _) -> Ok None
+    | Error (Safe_ops.Read_failed _ as error) ->
+        Error
+          (Workspace_utils.Json_doc_unreadable
+             (Safe_ops.read_file_error_to_string error))
+    | Ok content -> Ok (Some content)
+  in
+  match Workspace_utils.key_of_path config path with
+  | Some key ->
+      (match config.Workspace_utils.backend with
+       | Workspace_utils.FileSystem _ when Sys.file_exists path -> read_local ()
+       | Workspace_utils.Memory _ | Workspace_utils.FileSystem _ ->
+           (match Workspace_utils.backend_get config ~key with
+            | Error e ->
+                Error
+                  (Workspace_utils.Json_doc_unreadable
+                     (Printf.sprintf "backend_get failed for %s: %s" key
+                        (Backend_types.show_error e)))
+            | Ok None -> Ok None
+            | Ok (Some content) -> Ok (Some content)))
+  | None -> read_local ()
 
 (* An absent ledger is legitimately empty; a present-but-undecodable ledger
    must not license a write. The recovery read below serves the mirror as
    state, which RFC-0444 removed from the goal store; the ledger keeps it
    until its own RFC (RFC-0444 §0 scopes the goal store only). *)
 type load_outcome =
-  | Loaded of state
+  | Loaded of prepared_state
   | Undecodable of string
 
-let read_state config path =
-  match Workspace_utils.read_json_doc config path with
-  | Error error -> Error (Workspace_utils.json_doc_error_to_string error)
-  | Ok None -> Ok None
-  | Ok (Some json) -> state_of_yojson json |> Result.map Option.some
+let read_state config path : (prepared_state option, string) result =
+  match read_raw_doc config path with
+  | Error error ->
+      clear_verifications_cache_for path;
+      Error (Workspace_utils.json_doc_error_to_string error)
+  | Ok None ->
+      clear_verifications_cache_for path;
+      Ok None
+  | Ok (Some content) ->
+      let cached =
+        Stdlib.Mutex.lock verifications_cache_mu;
+        Fun.protect
+          ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
+          (fun () ->
+            match Hashtbl.find_opt verifications_cache path with
+            | Some (cached_bytes, prepared) when String.equal cached_bytes content ->
+                Some prepared
+            | Some _ | None -> None)
+      in
+      (match cached with
+       | Some prepared -> Ok (Some prepared)
+       | None ->
+           let trimmed = String.trim content in
+           if String.equal trimmed "" then (
+             clear_verifications_cache_for path;
+             Error
+               (Workspace_utils.json_doc_error_to_string
+                  Workspace_utils.Json_doc_blank))
+           else
+             match Safe_ops.parse_json_off_fiber ~context:path trimmed with
+             | Error detail ->
+                 clear_verifications_cache_for path;
+                 Error
+                   (Workspace_utils.json_doc_error_to_string
+                      (Workspace_utils.Json_doc_unparsable detail))
+             | Ok json ->
+                 (match state_of_yojson json with
+                  | Error _ as err ->
+                      clear_verifications_cache_for path;
+                      err
+                  | Ok state ->
+                      let prepared = prepare_state state in
+                      Stdlib.Mutex.lock verifications_cache_mu;
+                      Fun.protect
+                        ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
+                        (fun () ->
+                          Hashtbl.replace verifications_cache path (content, prepared));
+                      Ok (Some prepared)))
 
 let load_state config : load_outcome =
   ensure_dirs config;
   let recovery = verifications_recovery_path config in
   let recovered ~primary_detail = function
-    | Ok (Some state) ->
+    | Ok (Some prepared) ->
         Log.Misc.warn "goal_verification: historical recovery read (%s) from %s"
           primary_detail recovery;
-        Loaded state
+        Loaded prepared
     | Ok None -> Undecodable primary_detail
     | Error detail -> Undecodable (primary_detail ^ "; recovery: " ^ detail)
   in
   match read_state config (verifications_path config) with
-  | Ok (Some state) -> Loaded state
+  | Ok (Some prepared) -> Loaded prepared
   | Error detail -> recovered ~primary_detail:detail (read_state config recovery)
   | Ok None ->
       (match read_state config recovery with
-       | Ok None -> Loaded (default_state ())
+       | Ok None -> Loaded (default_prepared_state ())
        | (Ok (Some _) | Error _) as recovery_read ->
            recovered ~primary_detail:"primary ledger is missing" recovery_read)
 
@@ -295,11 +405,11 @@ let load_primary_state config =
   ensure_dirs config;
   match read_state config (verifications_path config) with
   | Error detail -> Undecodable detail
-  | Ok (Some state) -> Loaded state
+  | Ok (Some prepared) -> Loaded prepared
   | Ok None ->
       if Workspace_utils.path_exists config (verifications_recovery_path config) then
         Undecodable "primary ledger is missing while its recovery mirror exists"
-      else Loaded (default_state ())
+      else Loaded (default_prepared_state ())
 
 let undecodable_store_error config detail =
   Printf.sprintf
@@ -316,17 +426,20 @@ let undecodable_load_error config detail =
 
 let write_state_result config state =
   ensure_dirs config;
+  let primary = verifications_path config in
+  let recovery = verifications_recovery_path config in
+  clear_verifications_cache_for primary;
+  clear_verifications_cache_for recovery;
   let json = state_to_yojson state in
-  let* () = Workspace_utils.write_json_result config (verifications_path config) json in
-  (match Workspace_utils.write_json_result
-           config (verifications_recovery_path config) json
+  let* () = Workspace_utils.write_json_result config primary json in
+  (match Workspace_utils.write_json_result config recovery json
    with
    | Ok () -> ()
    | Error msg ->
      Log.Misc.warn
        "goal_verification: primary committed; recovery mirror write failed for \
         %s: %s"
-       (verifications_recovery_path config)
+       recovery
        msg);
   Ok ()
 
@@ -334,9 +447,6 @@ let write_state_result config state =
 
    Every mutation is a locked read-modify-write that refuses an undecodable
    authoritative store. *)
-
-let find_record records goal_id =
-  List.find_opt (fun (record : record) -> String.equal record.goal_id goal_id) records
 
 let replace_record records updated =
   let rec loop acc = function
@@ -352,9 +462,10 @@ let update_record config ~goal_id f =
   Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
       match load_primary_state config with
       | Undecodable detail -> Error (undecodable_store_error config detail)
-      | Loaded state ->
+      | Loaded prepared ->
+          let state = prepared.state in
           let current =
-            match find_record state.records goal_id with
+            match Goal_store.Goal_id_map.find_opt goal_id prepared.records_by_goal_id with
             | Some record -> record
             | None -> default_record ~goal_id
           in
@@ -379,21 +490,30 @@ let update_record config ~goal_id f =
 let load_records config : (record list, string) result =
   match load_state config with
   | Undecodable detail -> Error (undecodable_load_error config detail)
-  | Loaded state -> Ok state.records
+  | Loaded prepared -> Ok prepared.state.records
+
+let load_records_by_goal_id config : (record Goal_store.Goal_id_map.t, string) result =
+  match load_state config with
+  | Undecodable detail -> Error (undecodable_load_error config detail)
+  | Loaded prepared -> Ok prepared.records_by_goal_id
 
 let get_record config ~goal_id : (record option, string) result =
-  match load_records config with
-  | Error _ as error -> error
-  | Ok records -> Ok (find_record records goal_id)
+  let* records_by_goal_id = load_records_by_goal_id config in
+  Ok (Goal_store.Goal_id_map.find_opt goal_id records_by_goal_id)
 
 let load_records_authoritative config =
   match load_primary_state config with
-  | Loaded state -> Ok state.records
+  | Loaded prepared -> Ok prepared.state.records
+  | Undecodable detail -> Error (undecodable_load_error config detail)
+
+let load_records_by_goal_id_authoritative config =
+  match load_primary_state config with
+  | Loaded prepared -> Ok prepared.records_by_goal_id
   | Undecodable detail -> Error (undecodable_load_error config detail)
 
 let get_record_authoritative config ~goal_id =
-  let* records = load_records_authoritative config in
-  Ok (find_record records goal_id)
+  let* records_by_goal_id = load_records_by_goal_id_authoritative config in
+  Ok (Goal_store.Goal_id_map.find_opt goal_id records_by_goal_id)
 
 let ledger_error_to_yojson detail =
   `Assoc [ "state", `String "ledger_error"; "detail", `String detail ]
@@ -434,11 +554,14 @@ let reopen_goal config ~goal_id ~actor ~note =
           true, { goal with phase; last_review_note; last_review_at }
       in
       Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
-        let* state = match load_primary_state config with
-          | Loaded state -> Ok state
+        let* prepared = match load_primary_state config with
+          | Loaded prepared -> Ok prepared
           | Undecodable detail -> Error (undecodable_store_error config detail)
         in
-        let current = find_record state.records goal_id in
+        let state = prepared.state in
+        let current =
+          Goal_store.Goal_id_map.find_opt goal_id prepared.records_by_goal_id
+        in
         let reset record =
           let now = Masc_domain.now_iso () in
           let* () = archive_reopened_proof config ~goal_id ~actor ~at:now record.completion in

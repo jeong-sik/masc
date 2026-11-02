@@ -11,6 +11,9 @@ type state =
   ; notes : Schedule_domain.schedule_note list
   }
 
+module Schedule_id_map : Map.S with type key = string
+module Schedule_id_set : Set.S with type elt = string
+
 (** The caller-requested transitions that only a [Scheduled] or [Due]
     request accepts. *)
 type attempted_transition =
@@ -163,6 +166,9 @@ val read_state_observed :
     diagnostics remain in the store's existing warning/error channel. *)
 
 val state_of_yojson : Yojson.Safe.t -> (state, string) result
+
+val find_schedule :
+  state -> schedule_id:string -> Schedule_domain.schedule_request option
 
 val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option

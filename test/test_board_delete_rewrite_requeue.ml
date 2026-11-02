@@ -294,7 +294,7 @@ let test_cleanup_counts_pending_separately () =
   let post = create_post_exn ~content:"old post to clean up" in
   let post_id = Board.Post_id.to_string post.id in
   let old_post = { post with Board.created_at = Time_compat.now () -. 7200.0 } in
-  Hashtbl.replace (store ()).Board.posts post_id old_post;
+  Board.put_post (store ()) old_post;
   Board.invalidate_post_caches (store ());
   (store ()).Board.dirty_posts <- true;
   flush ();
@@ -318,7 +318,7 @@ let test_cleanup_counts_pending_separately () =
 let test_cleanup_refusal_is_pre_effect () =
   let post = create_post_exn ~content:"old post with an unreadable snapshot" in
   let post_id = Board.Post_id.to_string post.id in
-  Hashtbl.replace (store ()).Board.posts post_id
+  Board.put_post (store ())
     { post with Board.created_at = Time_compat.now () -. 7200.0 };
   Board.invalidate_post_caches (store ());
   (store ()).Board.posts_load_result <- Error "snapshot read failed";
@@ -344,9 +344,9 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   let pending_id = Board.Post_id.to_string pending.id in
   let refused_id = Board.Post_id.to_string refused.id in
   let now = Time_compat.now () in
-  Hashtbl.replace (store ()).Board.posts pending_id
+  Board.put_post (store ())
     { pending with Board.created_at = now -. 7200.0 };
-  Hashtbl.replace (store ()).Board.posts refused_id
+  Board.put_post (store ())
     { refused with Board.created_at = now -. 10800.0 };
   Board.invalidate_post_caches (store ());
   (store ()).Board.dirty_posts <- true;

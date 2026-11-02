@@ -82,6 +82,10 @@ val load_records :
     listings) call this once per request and join in memory rather than
     re-decoding the store per goal. *)
 
+val load_records_by_goal_id :
+  Workspace_utils.config -> (record Goal_store.Goal_id_map.t, string) result
+(** Loads the immutable [goal_id -> record] index once for $O(\log G)$ joins. *)
+
 val get_record :
   Workspace_utils.config ->
   goal_id:string ->
@@ -92,6 +96,11 @@ val get_record :
 val load_records_authoritative :
   Workspace_utils.config -> (record list, string) result
 (** Bulk primary-only read for current Goal projections and mutation decisions. *)
+
+val load_records_by_goal_id_authoritative :
+  Workspace_utils.config -> (record Goal_store.Goal_id_map.t, string) result
+(** Bulk primary-only immutable [goal_id -> record] index for current Goal
+    projections ($O(\log G)$ lookup per goal). *)
 
 val get_record_authoritative :
   Workspace_utils.config -> goal_id:string -> (record option, string) result

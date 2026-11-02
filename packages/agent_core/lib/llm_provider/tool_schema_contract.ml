@@ -256,20 +256,32 @@ let json_schema_type_member_to_param_type_option type_name =
      | Error _ as error -> error)
 ;;
 
+module String_set = Set.Make (String)
+
+let compare_param_type (a : param_type) (b : param_type) =
+  let rank = function
+    | String -> 0
+    | Integer -> 1
+    | Number -> 2
+    | Boolean -> 3
+    | Array -> 4
+    | Object -> 5
+  in
+  Int.compare (rank a) (rank b)
+;;
+
 let required_list_of_schema schema =
   match schema with
   | `Assoc fields ->
     (match List.assoc_opt "required" fields with
      | None | Some `Null -> Ok []
      | Some (`List items) ->
-       List.fold_right
-         (fun item acc ->
-            match item, acc with
-            | `String value, Ok values -> Ok (value :: values)
-            | _, Ok _ -> Error "required must contain only strings"
-            | _, (Error _ as error) -> error)
-         items
-         (Ok [])
+       let rec loop acc = function
+         | [] -> Ok (List.rev acc)
+         | `String value :: rest -> loop (value :: acc) rest
+         | _ :: _ -> Error "required must contain only strings"
+       in
+       loop [] items
      | Some _ -> Error "required must be an array of strings")
   | _ -> Error "schema must be a JSON object"
 ;;
@@ -286,7 +298,7 @@ let required_list_of_schema schema =
    different routes, and when only the array route carried the rule, mixed
    numeric enums such as ["enum": [1, 2.5]] lost their property. *)
 let narrow_param_types types =
-  match List.sort_uniq compare types with
+  match List.sort_uniq compare_param_type types with
   | [ param_type ] -> Some param_type
   | [ Integer; Number ] | [ Number; Integer ] -> Some Number
   | [] | (String)::_::_ | (Integer)::_::_ | (Number)::_::_ | (Boolean)::_::_ | (Array)::_::_
@@ -366,23 +378,24 @@ let property_description prop =
 let json_schema_to_params_of_checked_schema schema =
   let open Result.Syntax in
   let* required_list = required_list_of_schema schema in
+  let required_set = String_set.of_list required_list in
   match schema with
   | `Assoc fields ->
     (match List.assoc_opt "properties" fields with
      | None | Some `Null -> Ok []
      | Some (`Assoc pairs) ->
-       List.fold_right
-         (fun (name, prop) acc ->
-            let* params = acc in
-            let* param_type = property_type name prop in
-            match param_type with
-            | None -> Ok params
+       let rec loop acc = function
+         | [] -> Ok (List.rev acc)
+         | (name, prop) :: rest ->
+           let* param_type = property_type name prop in
+           (match param_type with
+            | None -> loop acc rest
             | Some param_type ->
               let* description = property_description prop in
-              let required = List.mem name required_list in
-              Ok ({ name; description; param_type; required } :: params))
-         pairs
-         (Ok [])
+              let required = String_set.mem name required_set in
+              loop ({ name; description; param_type; required } :: acc) rest)
+       in
+       loop [] pairs
      | Some _ -> Error "properties must be a JSON object")
   | _ -> Error "schema must be a JSON object"
 ;;
@@ -540,14 +553,12 @@ let validate_tool_argument_root_schema schema =
       | None | Some (`String "object") -> Ok ()
       | Some (`List values) ->
         let type_names =
-          List.fold_right
-            (fun value acc ->
-               match value, acc with
-               | `String type_name, Ok names -> Ok (type_name :: names)
-               | _, Ok _ -> Error "tool input schema root type must contain only strings"
-               | _, (Error _ as error) -> error)
-            values
-            (Ok [])
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | `String type_name :: rest -> loop (type_name :: acc) rest
+            | _ :: _ -> Error "tool input schema root type must contain only strings"
+          in
+          loop [] values
         in
         (match type_names with
          | Ok names when List.sort_uniq String.compare names = [ "object" ] -> Ok ()

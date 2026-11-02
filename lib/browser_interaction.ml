@@ -271,11 +271,13 @@ let parse = function
     let* frame_path = match List.assoc_opt "framePath" fields with
       | None -> Ok []
       | Some (`List values) when values <> [] ->
-        List.fold_right (fun value acc ->
-          let* rest = acc in
-          match value with
-          | `String selector when String.trim selector <> "" -> Ok (selector :: rest)
-          | _ -> Error "framePath must list nonempty frame selectors") values (Ok [])
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | `String selector :: rest when String.trim selector <> "" ->
+            loop (selector :: acc) rest
+          | _ :: _ -> Error "framePath must list nonempty frame selectors"
+        in
+        loop [] values
       | Some _ -> Error "framePath must list nonempty frame selectors" in
     let* () = match frame_path, action with
       | [], _ | _ :: _, (Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _) -> Ok ()

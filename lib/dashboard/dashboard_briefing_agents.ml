@@ -24,27 +24,23 @@ type keeper_context = {
   json : Yojson.Safe.t;
 }
 
+module String_map = Set_util.StringMap
+
 let build_task_lookup config =
   if not (Workspace.is_initialized config) then
-    []
+    String_map.empty
   else
     Workspace.get_tasks_raw config
-    |> List.filter_map (fun (task : Masc_domain.task) ->
-           if String.trim task.id = "" then None
-           else Some (task.id, Printf.sprintf "%s · %s" task.id (compact_text task.title)))
-
-let latest_message_from agent_name messages =
-  let lowered = String.lowercase_ascii (String.trim agent_name) in
-  List.fold_left
-    (fun best (message : Masc_domain.message) ->
-      if not (String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered) then
-        best
-      else
-        match best with
-        | None -> Some message
-        | Some current ->
-            if message.seq >= current.seq then Some message else best)
-    None messages
+    |> List.fold_left
+         (fun acc (task : Masc_domain.task) ->
+            if String.trim task.id = "" || String_map.mem task.id acc
+            then acc
+            else
+              String_map.add
+                task.id
+                (Printf.sprintf "%s · %s" task.id (compact_text task.title))
+                acc)
+         String_map.empty
 
 let latest_message_to agent_name messages =
   let lowered = String.lowercase_ascii (String.trim agent_name) in
@@ -72,17 +68,35 @@ let latest_message_to agent_name messages =
             if message.seq >= current.seq then Some message else best)
     None messages
 
-let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
-  let table = Hashtbl.create 8 in
-  List.iter
-    (fun keeper ->
-      match String_util.trim_nonempty (string_field "name" keeper) with
-      | Some keeper_name -> Hashtbl.replace table keeper_name keeper_name
-      | None -> ())
-    keepers;
-  table
+let index_messages_by_lowered_agent (messages : Masc_domain.message list) =
+  let update_newer (message : Masc_domain.message) = function
+    | None -> Some message
+    | Some (current : Masc_domain.message) ->
+      if message.seq >= current.seq then Some message else Some current
+  in
+  List.fold_left
+    (fun (out_by_sender, in_by_target) (message : Masc_domain.message) ->
+       let sender_lower = String.lowercase_ascii (String.trim message.from_agent) in
+       let out_by_sender =
+         String_map.update sender_lower (update_newer message) out_by_sender
+       in
+       let mentions = Dashboard_workspace.mentions_of_message message in
+       let in_by_target =
+         List.fold_left
+           (fun acc raw_target ->
+              let target_lower = String.lowercase_ascii raw_target in
+              if String.length target_lower = 0
+                 || String.equal target_lower sender_lower
+              then acc
+              else String_map.update target_lower (update_newer message) acc)
+           in_by_target
+           mentions
+       in
+       out_by_sender, in_by_target)
+    (String_map.empty, String_map.empty)
+    messages
 
-let build_agent_briefs config attention_queue (keepers : Yojson.Safe.t list) =
+let build_agent_briefs config attention_queue (_keepers : Yojson.Safe.t list) =
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
@@ -95,7 +109,7 @@ let build_agent_briefs config attention_queue (keepers : Yojson.Safe.t list) =
     match task_id with
     | None -> None
     | Some id -> (
-        match List.assoc_opt id task_lookup with
+        match String_map.find_opt id task_lookup with
         | Some label -> Some label
         | None -> Some id)
   in
@@ -103,31 +117,50 @@ let build_agent_briefs config attention_queue (keepers : Yojson.Safe.t list) =
     if Workspace.is_initialized config then Workspace.get_agents_raw config else []
   in
   let workspace_agent_by_name =
-    workspace_agents
-    |> List.map (fun (agent : Masc_domain.agent) -> (agent.name, agent))
+    List.fold_left
+      (fun acc (agent : Masc_domain.agent) ->
+         if String_map.mem agent.name acc
+         then acc
+         else String_map.add agent.name agent acc)
+      String_map.empty
+      workspace_agents
   in
   let agent_names =
     dedup_strings (List.map (fun (agent : Masc_domain.agent) -> agent.name) workspace_agents)
   in
-  let keeper_aliases = keeper_alias_by_agent_name keepers in
+  let attention_counts =
+    List.fold_left
+      (fun acc (attention : attention_context) ->
+         let unique_names = dedup_strings attention.related_agent_names in
+         List.fold_left
+           (fun acc name ->
+              let prev = Option.value ~default:0 (String_map.find_opt name acc) in
+              String_map.add name (prev + 1) acc)
+           acc
+           unique_names)
+      String_map.empty
+      attention_queue
+  in
+  let latest_out_by_lower, latest_in_by_lower =
+    index_messages_by_lowered_agent messages
+  in
   agent_names
   |> List.map (fun agent_name ->
-         let agent = List.assoc_opt agent_name workspace_agent_by_name in
+         let agent = String_map.find_opt agent_name workspace_agent_by_name in
          let related_attention_count =
-            attention_queue
-            |> List.fold_left
-                (fun acc attention ->
-                  if List.mem agent_name attention.related_agent_names then acc + 1 else acc)
-                0
+           Option.value ~default:0 (String_map.find_opt agent_name attention_counts)
          in
-         let latest_out = latest_message_from agent_name messages in
-         let latest_in = latest_message_to agent_name messages in
+         let lowered = String.lowercase_ascii (String.trim agent_name) in
+         let latest_out = String_map.find_opt lowered latest_out_by_lower in
+         let latest_in =
+           if String.length lowered = 0
+           then None
+           else String_map.find_opt lowered latest_in_by_lower
+         in
          let current_work =
            task_label (Option.bind agent (fun value -> value.current_task))
          in
-         let display_name =
-           Hashtbl.find_opt keeper_aliases agent_name |> Option.value ~default:agent_name
-         in
+         let display_name = agent_name in
          let recent_output_preview =
            latest_out |> Option.map (fun (message : Masc_domain.message) -> compact_text message.content)
          in

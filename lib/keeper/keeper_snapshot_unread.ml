@@ -50,14 +50,14 @@ let of_json json =
 
 let list_of_json = function
   | `List items ->
-    List.fold_right
-      (fun item acc ->
-         match acc, of_json item with
-         | Error _, _ -> acc
-         | Ok _, Error e -> Error e
-         | Ok rest, Ok row -> Ok (row :: rest))
-      items
-      (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        (match of_json item with
+         | Error e -> Error e
+         | Ok row -> loop (row :: acc) rest)
+    in
+    loop [] items
   | other ->
     Error
       (Printf.sprintf "unread keepers is not a list: %s" (Yojson.Safe.to_string other))

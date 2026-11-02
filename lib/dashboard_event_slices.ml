@@ -52,5 +52,5 @@ let carries_whole_projection event_type =
   | Some entry -> entry.whole_projection
   | None -> false
 
-let slices = List.sort_uniq compare (List.map (fun entry -> entry.slice) entries)
+let slices = List.sort_uniq String.compare (List.map (fun entry -> entry.slice) entries)
 let valid_slice slice = List.mem slice slices

@@ -16,16 +16,16 @@
     Both paths emit the same wire shape — `runtime_class="keeper"`
     plus the standard operator-dashboard keeper fields. *)
 
+module String_set = Set.Make (String)
+
 let persistent_agents_json ?keeper_names ?keeper_rows config =
   let rows_from_keeper_rows names rows =
-    let wanted = List.sort_uniq String.compare names in
-    let wanted_tbl = Hashtbl.create (List.length wanted) in
-    List.iter (fun name -> Hashtbl.replace wanted_tbl name ()) wanted;
+    let wanted_set = String_set.of_list names in
     rows
     |> List.filter_map (function
       | `Assoc fields ->
         (match List.assoc_opt "name" fields with
-         | Some (`String name) when Hashtbl.mem wanted_tbl name ->
+         | Some (`String name) when String_set.mem name wanted_set ->
            let field_or_null key =
              match List.assoc_opt key fields with
              | Some value -> value

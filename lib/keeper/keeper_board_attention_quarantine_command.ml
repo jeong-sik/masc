@@ -679,9 +679,14 @@ let inventory_item_of_candidate ~keeper_name ~partitions (candidate : Candidate.
 ;;
 
 let compare_inventory_item (left : inventory_item) (right : inventory_item) =
-  Stdlib.compare
-    (left.keeper_name, left.partition_id, left.candidate_id, left.quarantine_id)
-    (right.keeper_name, right.partition_id, right.candidate_id, right.quarantine_id)
+  let c = String.compare left.keeper_name right.keeper_name in
+  if c <> 0 then c
+  else
+    let c = String.compare left.partition_id right.partition_id in
+    if c <> 0 then c
+    else
+      let c = String.compare left.candidate_id right.candidate_id in
+      if c <> 0 then c else String.compare left.quarantine_id right.quarantine_id
 ;;
 
 let inventory ~base_path ~keeper_names =

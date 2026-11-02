@@ -202,21 +202,24 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
             memo := None;
             None
           | Ok recorded ->
-            let table = Hashtbl.create (List.length recorded) in
-            List.iter
-              (fun (recorded_id, _) -> Hashtbl.replace table recorded_id ())
-              recorded;
-            memo := Option.map (fun version -> version, event_ids, table) version;
-            Some table)
+            let recorded_set =
+              List.fold_left
+                (fun acc (recorded_id, _) ->
+                   Workspace_backlog.Task_id_set.add recorded_id acc)
+                Workspace_backlog.Task_id_set.empty
+                recorded
+            in
+            memo := Option.map (fun version -> version, event_ids, recorded_set) version;
+            Some recorded_set)
       in
       match present () with
       | None -> pending
-      | Some table ->
+      | Some recorded_set ->
         Keeper_event_queue.to_list pending
         |> List.filter (fun (s : Keeper_event_queue.stimulus) ->
                match s.Keeper_event_queue.payload with
                | Keeper_event_queue.Connector_attention { event_id; _ } ->
-                 Hashtbl.mem table event_id
+                 Workspace_backlog.Task_id_set.mem event_id recorded_set
                | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
                | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
                | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _

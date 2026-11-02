@@ -260,15 +260,17 @@ let canonical_sampling_parameters key json =
   match values with
   | None -> Ok None
   | Some values ->
-    let parsed, unknown =
-      List.fold_right
-        (fun raw (parsed, unknown) ->
+    let parsed_rev, unknown_rev =
+      List.fold_left
+        (fun (parsed, unknown) raw ->
            match Capability_vocab.sampling_parameter_of_string raw with
            | Some parameter -> parameter :: parsed, unknown
            | None -> parsed, String.lowercase_ascii (String.trim raw) :: unknown)
-        values
         ([], [])
+        values
     in
+    let parsed = List.rev parsed_rev
+    and unknown = List.rev unknown_rev in
     (match unknown with
      | [] -> Ok (Some parsed)
      | values ->

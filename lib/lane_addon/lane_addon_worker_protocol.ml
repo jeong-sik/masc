@@ -45,12 +45,18 @@ let companion_public_result (result : Mcp_protocol.Mcp_types.tool_result) =
   {S.content=[S.TextContent {type_="text"; text; annotations=None}];
    structured_content=value; is_error=Some is_error; _meta=None}
 
+let compare_tool_hook a b =
+  match a, b with
+  | Validate_input, Validate_input | Validate_output, Validate_output -> 0
+  | Validate_input, Validate_output -> -1
+  | Validate_output, Validate_input -> 1
+
 let contract ~action_tool ~tool_invocation ~exported_tools ~tool_hooks ~max_reply_bytes ~host_requests =
   let invalid detail = Error (Invalid_contract detail) in
   let* exported_tools = validate_exported_tools ~action_tool exported_tools
     |> Result.map_error (fun detail -> Invalid_contract detail) in
   let* () = if max_reply_bytes > 0 then Ok () else invalid "max_reply_bytes must be positive" in
-  let* () = if List.length tool_hooks = List.length (List.sort_uniq compare tool_hooks)
+  let* () = if List.length tool_hooks = List.length (List.sort_uniq compare_tool_hook tool_hooks)
     then Ok () else invalid "duplicate tool hook" in
   let* () = match tool_invocation, action_tool with
     | Host_context, Some tool when String.equal tool Lane_addon_call_context.tool_name ->
@@ -209,7 +215,7 @@ let initialize t client =
                  | None -> Error (Protocol_failed "private companion output schema is required"))
               else Ok () in
             let selected_hooks=if List.mem tool.name companion_tools then
-                List.sort_uniq compare (Validate_input::Validate_output::t.contract.tool_hooks) else t.contract.tool_hooks in
+                List.sort_uniq compare_tool_hook (Validate_input::Validate_output::t.contract.tool_hooks) else t.contract.tool_hooks in
             let* hooks = Lane_addon_tool_hooks.prepare ~hooks:selected_hooks tool
               |> Result.map_error (fun detail -> Protocol_failed detail) in
             Ok ((tool.name, hooks) :: checks)) (Ok []) exported in

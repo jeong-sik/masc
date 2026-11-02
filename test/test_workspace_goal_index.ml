@@ -325,7 +325,18 @@ let test_add_task_persists_goal_link () =
         "reverse index sees linked goal"
         true
         (try List.mem "goal-a" (Hashtbl.find task_goal_index "task-001") with
-         | Not_found -> false)))
+         | Not_found -> false);
+      let task_goal_map =
+        Workspace_goal_index.build_task_goal_map_for_config config
+      in
+      check_bool
+        "immutable reverse map sees linked goal"
+        true
+        (List.mem
+           "goal-a"
+           (Workspace_goal_index.goals_for_task_in_map
+              task_goal_map
+              ~task_id:"task-001"))))
 ;;
 
 let test_prune_goal_links_preserves_other_goals () =

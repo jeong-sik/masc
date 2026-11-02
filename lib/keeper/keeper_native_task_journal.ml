@@ -1,4 +1,5 @@
 module Task = Runtime_native_tasks
+module String_set = Set.Make (String)
 open Result.Syntax
 
 type source = Operation of Keeper_chat_operation.Operation_id.t | Autonomous_turn of Ids.Turn_ref.t
@@ -118,7 +119,10 @@ let no_delete_sql = "CREATE TRIGGER no_delete_observations BEFORE DELETE ON obse
 let immutable_scope_sql = "CREATE TRIGGER immutable_scope BEFORE UPDATE OF singleton,schema,store_id,base_path,keeper_name,receiver_generation,session_id ON metadata BEGIN SELECT RAISE(ABORT,'immutable scope'); END"
 let objects = ["metadata",metadata_sql;"observations",observations_sql;
   "immutable_observations",immutable_rows_sql;"no_delete_observations",no_delete_sql;
-  "immutable_scope",immutable_scope_sql] |> List.sort compare
+  "immutable_scope",immutable_scope_sql]
+  |> List.sort (fun (k1, s1) (k2, s2) ->
+       let c = String.compare k1 k2 in
+       if c <> 0 then c else String.compare s1 s2)
 let corrupt ?(line=0) detail = Error (Corrupt {line;detail})
 let sql_error ~operation ~detail = Store_unavailable {operation;detail}
 let cleanup_report cleanup ~operation ~detail = cleanup := {operation;detail} :: !cleanup
@@ -231,16 +235,15 @@ let full_audit db cleanup scope next =
   let* () = if integrity="ok" then Ok () else corrupt integrity in
   statement db cleanup "audit history"
     "SELECT seq,event_uuid,recorded_at,payload FROM observations ORDER BY seq" (fun stmt ->
-      let uuids = Hashtbl.create 16 in
-      let rec loop expected acc = match step stmt with
+      let rec loop uuids expected acc = match step stmt with
         | Done ->
             if expected=next then Ok (List.rev acc) else corrupt "metadata does not follow history"
         | Row ->
             let* row = decode_row scope stmt in
-            if Int64.of_int row.seq<>expected || Hashtbl.mem uuids row.observation.uuid then
+            if Int64.of_int row.seq<>expected || String_set.mem row.observation.uuid uuids then
               corrupt ~line:row.seq "noncontiguous sequence or duplicate UUID"
-            else (Hashtbl.add uuids row.observation.uuid (); loop (Int64.succ expected) (row::acc))
-        | Failed rc -> Error (sqlite_failure db "audit history" rc) in loop 1L [])
+            else loop (String_set.add row.observation.uuid uuids) (Int64.succ expected) (row::acc)
+        | Failed rc -> Error (sqlite_failure db "audit history" rc) in loop String_set.empty 1L [])
 let tail_boundary db cleanup next =
   let* highest = scalar db cleanup "SELECT COALESCE(MAX(seq),0) FROM observations" |> fun result -> Result.bind result integer in
   if Int64.succ highest=next then Ok () else corrupt "metadata does not follow last row"

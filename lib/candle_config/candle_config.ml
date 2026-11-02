@@ -158,19 +158,24 @@ let payout_of_toml payout =
   let* raw_criteria = required "payout" fields "grade_criteria" in
   let names = List.map fst grades in
   let* criteria = exact_table "payout.grade_criteria" names raw_criteria in
-  let* grades = List.fold_right (fun (name, _) result ->
-    let* result = result in
-    let* grade = match Candle_grade.of_string name with
-      | Some grade -> Ok grade | None -> Error ("invalid grade identifier: " ^ name) in
-    let* amount = integer "payout.grades_milli" grades name 0 max_int in
-    let* criterion = required "payout.grade_criteria" criteria name in
-    let* criterion = match criterion with
-      | Otoml.TomlString text when String.trim text <> "" -> Ok text
-      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _
-    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> Error ("payout.grade_criteria." ^ name ^ " must be nonblank text") in
-    Ok ((grade, amount, criterion) :: result)) grades (Ok []) in
+  let* grades =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (name, _) :: rest ->
+        let* grade = match Candle_grade.of_string name with
+          | Some grade -> Ok grade | None -> Error ("invalid grade identifier: " ^ name) in
+        let* amount = integer "payout.grades_milli" grades name 0 max_int in
+        let* criterion = required "payout.grade_criteria" criteria name in
+        let* criterion = match criterion with
+          | Otoml.TomlString text when String.trim text <> "" -> Ok text
+          | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+          | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+          | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _
+          | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> Error ("payout.grade_criteria." ^ name ^ " must be nonblank text") in
+        loop ((grade, amount, criterion) :: acc) rest
+    in
+    loop [] grades
+  in
   Ok {grades; distribution={Candle_math.share_rounding; tie_break; deduction_rounding};
       weight_max; deduction_rate; deduction_floor}
 
@@ -228,14 +233,17 @@ let shop_of_toml shop =
     | Some prices -> exact_table "shop.prices_milli"
         (List.map Keeper_portrait_item.id Keeper_portrait_item.all) prices in
   let* prices =
-    List.fold_right (fun item result ->
-      let* prices = result in
-      let key = Keeper_portrait_item.id item in
-      match List.assoc_opt key fields with
-      | None -> Ok prices
-      | Some _ ->
-        let* amount = integer "shop.prices_milli" fields key 0 max_int in
-        Ok ((item, amount) :: prices)) Keeper_portrait_item.all (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let key = Keeper_portrait_item.id item in
+        match List.assoc_opt key fields with
+        | None -> loop acc rest
+        | Some _ ->
+          let* amount = integer "shop.prices_milli" fields key 0 max_int in
+          loop ((item, amount) :: acc) rest
+    in
+    loop [] Keeper_portrait_item.all
   in
   let* pricing = match List.assoc_opt "pricing" shop with
     | None -> Ok Fixed

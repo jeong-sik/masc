@@ -786,6 +786,8 @@ let referenced_leaves (entry : Store.entry) =
   String_set.of_list (leaf Input_payload entry.registration.input_source @ output)
 ;;
 
+module String_map = Map.Make (String)
+
 (* Only after a replay that read every row and refused none: a replay whose
    read failed or stopped at a torn tail publishes fewer runs than the log
    holds, and sweeping against that would delete payloads the log still
@@ -794,10 +796,13 @@ let sweep_payload_dirs t ~log_path =
   let root = Filename.concat (Filename.dirname log_path) payload_dirname in
   let sweep parent =
     let names = Payload_directory.names parent in
-    let referenced = Hashtbl.create 1024 in
-    List.iter
-      (fun (entry : Store.entry) -> Hashtbl.replace referenced entry.id (referenced_leaves entry))
-      (Store.list_entries t.store);
+    let referenced =
+      List.fold_left
+        (fun acc (entry : Store.entry) ->
+          String_map.add entry.id (referenced_leaves entry) acc)
+        String_map.empty
+        (Store.list_entries t.store)
+    in
     (* These counters belong only to this synchronous startup sweep. Increment
        immediately after each joined operation acknowledges its successful
        effect, so a later failure cannot erase earlier successful removals. *)
@@ -808,7 +813,7 @@ let sweep_payload_dirs t ~log_path =
     let on_directory_removed () = incr removed_run_directories in
     let sweep_entry name =
       match Payload_directory.with_child parent name (fun directory ->
-        match Hashtbl.find_opt referenced name with
+        match String_map.find_opt name referenced with
         | None ->
           remove_payload_directory ~parent ~directory ~log_path ~run_id:name
             ~on_unlink ~on_directory_removed

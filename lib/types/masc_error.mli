@@ -88,6 +88,11 @@ val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val code : t -> int
 
+(** Total [Task (NotFound _)] classification for callers that dispatch on it
+    with a catch-all; matching the constructor inline under a wildcard is
+    fragile under warn-error 4. *)
+val is_task_not_found : t -> bool
+
 (** The [auth_error_code] a 401/403 body carries, as a closed type. The server
     writes it with [to_string]; a client reads it back with [of_string] and
     matches every constructor, so a new code is a compile error on the reader

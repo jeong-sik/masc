@@ -272,7 +272,7 @@ let outcome_to_json keeper = function
           List.init (r.end_atom - r.start_atom) (fun i -> r.start_atom + i) @ seen)
         []
         rounds
-      |> List.sort_uniq compare
+      |> List.sort_uniq Int.compare
       |> List.length
     in
     (* The stop reason does not say whether anything was left behind:
@@ -324,7 +324,7 @@ let keepers_with_a_log keepers_dir =
               prerr_endline
                 (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error));
               exit 2))
-       |> List.sort compare)
+       |> List.sort String.compare)
 ;;
 
 let () =

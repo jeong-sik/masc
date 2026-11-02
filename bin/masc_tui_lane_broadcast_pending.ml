@@ -6,8 +6,13 @@ let selection json =
   match field "instance_id" json,field "row_ids" json with
   | Some instance,Some (`List rows) ->
       let* instance=nonblank instance in
-      let* rows=List.fold_right (fun value acc ->
-        let* rest=acc in let* value=nonblank value in Ok (value::rest)) rows (Ok []) in
+      let rec collect acc = function
+        | [] -> Ok (List.rev acc)
+        | value :: rest ->
+          let* value = nonblank value in
+          collect (value :: acc) rest
+      in
+      let* rows = collect [] rows in
       if rows=[] then Error "Broadcast recovery selection is empty" else
       Ok (`Assoc ["instance_id",`String instance;
         "row_ids",`List (List.sort_uniq String.compare rows |> List.map (fun row -> `String row))])

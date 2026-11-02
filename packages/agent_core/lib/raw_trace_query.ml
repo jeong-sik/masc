@@ -8,35 +8,39 @@ open Result_syntax
 
 (* ── Run discovery ──────────────────────────────────────────── *)
 
+module String_map = Map.Make (String)
+
 (* Extract [run_ref] values from a list of parsed records.
    Groups records by [worker_run_id] and computes [start_seq]/[end_seq]. *)
 let run_refs_of_records ~path records : Raw_trace.run_ref list =
-  let table : (string, Raw_trace.run_ref) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (fun (record : Raw_trace.record) ->
-       match Hashtbl.find_opt table record.worker_run_id with
-       | None ->
-         Hashtbl.replace
-           table
-           record.worker_run_id
-           { worker_run_id = record.worker_run_id
-           ; path
-           ; start_seq = record.seq
-           ; end_seq = record.seq
-           ; agent_name = record.agent_name
-           ; session_id = record.session_id
-           }
-       | Some current ->
-         Hashtbl.replace
-           table
-           record.worker_run_id
-           { current with
-             start_seq = min current.start_seq record.seq
-           ; end_seq = max current.end_seq record.seq
-           })
-    records;
-  Hashtbl.to_seq_values table
-  |> List.of_seq
+  let table =
+    List.fold_left
+      (fun acc (record : Raw_trace.record) ->
+         match String_map.find_opt record.worker_run_id acc with
+         | None ->
+           String_map.add
+             record.worker_run_id
+             { Raw_trace.worker_run_id = record.worker_run_id
+             ; path
+             ; start_seq = record.seq
+             ; end_seq = record.seq
+             ; agent_name = record.agent_name
+             ; session_id = record.session_id
+             }
+             acc
+         | Some current ->
+           String_map.add
+             record.worker_run_id
+             { current with
+               start_seq = min current.start_seq record.seq
+             ; end_seq = max current.end_seq record.seq
+             }
+             acc)
+      String_map.empty
+      records
+  in
+  String_map.bindings table
+  |> List.map snd
   |> List.sort (fun (a : Raw_trace.run_ref) (b : Raw_trace.run_ref) ->
     Int.compare a.start_seq b.start_seq)
 ;;
@@ -216,43 +220,74 @@ let validate_run run_ref =
     | Some (id, turn, planned_index) -> id, Some turn, Some planned_index
     | None -> tool_use_id, None, None
   in
-  let outstanding : (string * int option * int option, int) Hashtbl.t =
-    Hashtbl.create 8
+  let module Pair_key_map =
+    Map.Make (struct
+      type t = string * int option * int option
+
+      let compare (id1, t1, p1) (id2, t2, p2) =
+        let c = String.compare id1 id2 in
+        if c <> 0
+        then c
+        else (
+          let c = Option.compare Int.compare t1 t2 in
+          if c <> 0 then c else Option.compare Int.compare p1 p2)
+    end)
   in
-  let seen_exact_starts : (string * int * int, unit) Hashtbl.t = Hashtbl.create 8 in
-  let ordering_ok = ref true in
-  let paired_tool_result_count = ref 0 in
-  List.iter
-    (fun (record : Raw_trace.record) ->
-       match record.record_type, record.tool_use_id with
-       | Tool_execution_started, Some tool_use_id ->
-         let key = pair_key record tool_use_id in
-         let count = Option.value ~default:0 (Hashtbl.find_opt outstanding key) in
-         (match exact_key record tool_use_id with
-          | Some exact when Hashtbl.mem seen_exact_starts exact -> ordering_ok := false
-          | Some exact ->
-            Hashtbl.replace seen_exact_starts exact ();
-            Hashtbl.replace outstanding key 1
-          | None -> Hashtbl.replace outstanding key (count + 1))
-       | Tool_execution_finished, Some tool_use_id ->
-         let key = pair_key record tool_use_id in
-         let count = Option.value ~default:0 (Hashtbl.find_opt outstanding key) in
-         if count = 0
-         then ordering_ok := false
-         else (
-           Hashtbl.replace outstanding key (count - 1);
-           incr paired_tool_result_count)
-       | (Tool_execution_started | Tool_execution_finished), None -> ordering_ok := false
-       | ( ( Run_started
-           | Assistant_block
-           | Native_tool_started
-           | Native_tool_finished
-           | Hook_invoked
-           | Run_finished )
-         , _ ) -> ())
-    records;
+  let module Exact_key_set =
+    Set.Make (struct
+      type t = string * int * int
+
+      let compare (id1, t1, p1) (id2, t2, p2) =
+        let c = String.compare id1 id2 in
+        if c <> 0
+        then c
+        else (
+          let c = Int.compare t1 t2 in
+          if c <> 0 then c else Int.compare p1 p2)
+    end)
+  in
+  let outstanding, _seen_exact_starts, ordering_ok, paired_tool_result_count =
+    List.fold_left
+      (fun (outstanding, seen_exact_starts, ordering_ok, paired_count)
+           (record : Raw_trace.record) ->
+         match record.record_type, record.tool_use_id with
+         | Tool_execution_started, Some tool_use_id ->
+           let key = pair_key record tool_use_id in
+           let count = Option.value ~default:0 (Pair_key_map.find_opt key outstanding) in
+           (match exact_key record tool_use_id with
+            | Some exact when Exact_key_set.mem exact seen_exact_starts ->
+              outstanding, seen_exact_starts, false, paired_count
+            | Some exact ->
+              ( Pair_key_map.add key 1 outstanding
+              , Exact_key_set.add exact seen_exact_starts
+              , ordering_ok
+              , paired_count )
+            | None ->
+              Pair_key_map.add key (count + 1) outstanding, seen_exact_starts, ordering_ok, paired_count)
+         | Tool_execution_finished, Some tool_use_id ->
+           let key = pair_key record tool_use_id in
+           let count = Option.value ~default:0 (Pair_key_map.find_opt key outstanding) in
+           if count = 0
+           then outstanding, seen_exact_starts, false, paired_count
+           else
+             ( Pair_key_map.add key (count - 1) outstanding
+             , seen_exact_starts
+             , ordering_ok
+             , paired_count + 1 )
+         | (Tool_execution_started | Tool_execution_finished), None ->
+           outstanding, seen_exact_starts, false, paired_count
+         | ( ( Run_started
+             | Assistant_block
+             | Native_tool_started
+             | Native_tool_finished
+             | Hook_invoked
+             | Run_finished )
+           , _ ) -> outstanding, seen_exact_starts, ordering_ok, paired_count)
+      (Pair_key_map.empty, Exact_key_set.empty, true, 0)
+      records
+  in
   let tool_pairs_ok =
-    !ordering_ok && outstanding |> Hashtbl.to_seq_values |> Seq.for_all (Int.equal 0)
+    ordering_ok && Pair_key_map.for_all (fun _ count -> Int.equal count 0) outstanding
   in
   let checks =
     [ { Raw_trace.name = "seq_monotonic"; passed = seq_monotonic }
@@ -315,7 +350,7 @@ let validate_run run_ref =
     ; Printf.sprintf "final_text=%s" (Option.value summary.final_text ~default:"")
     ; Printf.sprintf "stop_reason=%s" (Option.value summary.stop_reason ~default:"")
     ; Printf.sprintf "error=%s" (Option.value summary.error ~default:"")
-    ; Printf.sprintf "paired_tool_result_count=%d" !paired_tool_result_count
+    ; Printf.sprintf "paired_tool_result_count=%d" paired_tool_result_count
     ]
   in
   Ok
@@ -323,7 +358,7 @@ let validate_run run_ref =
     ; ok
     ; checks
     ; evidence
-    ; paired_tool_result_count = !paired_tool_result_count
+    ; paired_tool_result_count
     ; final_text = summary.final_text
     ; tool_names = summary.tool_names
     ; stop_reason = summary.stop_reason

@@ -253,22 +253,25 @@ let append config values =
       Fs_compat.append_jsonl path (to_yojson value))
     values
 
+module Key_map = Map.Make (String)
+
 let latest_by_key config =
-  let table = Hashtbl.create 16 in
   load_all config
-  |> List.iter (fun value ->
-         let key =
-           key_of ~surface:value.surface ~target_type:value.target_type
-             ~target_id:value.target_id
-         in
-         match Hashtbl.find_opt table key with
-         | Some current when generated_at_unix current >= generated_at_unix value -> ()
-         | _ -> Hashtbl.replace table key value);
-  table
+  |> List.fold_left
+       (fun table value ->
+          let key =
+            key_of ~surface:value.surface ~target_type:value.target_type
+              ~target_id:value.target_id
+          in
+          match Key_map.find_opt key table with
+          | Some current when generated_at_unix current >= generated_at_unix value ->
+            table
+          | _ -> Key_map.add key value table)
+       Key_map.empty
 
 let latest_active config ~surface ~target_type ~target_id =
   let table = latest_by_key config in
-  Hashtbl.find_opt table (key_of ~surface ~target_type ~target_id)
+  Key_map.find_opt (key_of ~surface ~target_type ~target_id) table
 
 let record config ~surface ~target_type ~target_id ~summary ~confidence
     ?model_name ?runtime_name ?recommended_action ?(evidence_refs = [])

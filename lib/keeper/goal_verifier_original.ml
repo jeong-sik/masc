@@ -125,9 +125,15 @@ let of_json json =
   let* evidence_json = field fields "submitted_evidence" in
   let* evidence_list = match evidence_json with
     | `List values -> Ok values | _ -> Error "Goal verifier evidence must be a list" in
-  let* submitted_evidence = List.fold_right (fun json rest ->
-    let* item = Evidence.submitted_evidence_item_of_yojson json in
-    let* rest = rest in Ok (item::rest)) evidence_list (Ok []) in
+  let* submitted_evidence =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | json :: rest ->
+        let* item = Evidence.submitted_evidence_item_of_yojson json in
+        loop (item :: acc) rest
+    in
+    loop [] evidence_list
+  in
   let* lookup_binding = text "lookup_binding" in
   let* () = if String_util.is_lowercase_sha256_hex lookup_binding then Ok ()
     else Error "Goal verifier authority digest is invalid" in

@@ -76,7 +76,10 @@ let request_provenance_of_yojson json =
     let receipt_json = List.assoc "output_token_receipt" fs in
     let* output_token_receipt = Types.output_token_receipt_of_yojson receipt_json in
     let canonical = Types.output_token_receipt_to_yojson output_token_receipt in
-    let sorted = function `Assoc fs -> `Assoc (List.sort compare fs) | value -> value in
+    let sorted = function
+      | `Assoc fs -> `Assoc (List.sort (fun (k1, _) (k2, _) -> String.compare k1 k2) fs)
+      | value -> value
+    in
     let* () = if Yojson.Safe.equal (sorted receipt_json) (sorted canonical)
       then Ok () else Error "request provenance: non-canonical output-token receipt" in
     match List.assoc "body_bytes" fs, List.assoc "body_sha256" fs with

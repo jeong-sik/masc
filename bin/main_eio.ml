@@ -807,17 +807,23 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
        (fun failure -> Log.Server.warn "[Startup] checkpoint object sweep: %s" failure)
        failures);
   (* The process lease is held and no original-request writer has started. *)
-  (match Masc.Lane_addon_orphan_body_sweep.run_at_startup ~base_path:canonical_base_path with
+  let original_inventory_started = Unix.gettimeofday () in
+  let original_inventory_elapsed () = max 0. (Unix.gettimeofday () -. original_inventory_started) in
+  (match Masc.Lane_addon_original_body_inventory.run_at_startup ~base_path:canonical_base_path with
    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
    | exception _ ->
-     Log.Server.warn "[Startup] original request body sweep raised; its last effect may be unconfirmed"
+     Log.Server.warn "[Startup] original request body inventory unavailable elapsed_s=%.3f"
+       (original_inventory_elapsed ())
    | Error error ->
-     Log.Server.warn "[Startup] original request body sweep stopped: %s"
-       (Masc.Lane_addon_orphan_body_sweep.error_to_string error)
+     Log.Server.warn "[Startup] original request body inventory unavailable elapsed_s=%.3f: %s"
+       (original_inventory_elapsed ()) (Masc.Lane_addon_original_body_inventory.error_to_string error)
    | Ok report ->
-     Log.Server.info "[Startup] original request body sweep: removed=%d protected_digests=%d archive=%s"
-       report.removed report.protected_digests
-       (Masc.Lane_addon_orphan_body_sweep.archive_to_string report.archive));
+     let message = Printf.sprintf
+       "[Startup] original request body inventory: live_unprotected_files=%d live_unprotected_logical_bytes=%Ld protected_digests=%d archive=%s elapsed_s=%.3f"
+       report.unprotected_files report.unprotected_logical_bytes report.protected_digests
+       (Masc.Lane_addon_original_body_inventory.archive_to_string report.archive)
+       (original_inventory_elapsed ()) in
+     if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth

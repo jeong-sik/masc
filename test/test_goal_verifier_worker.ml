@@ -419,9 +419,9 @@ let test_linked_frontier_and_staged_run_recovery () =
         let orphan = Yojson.Safe.to_string (`String "unreferenced interrupted retain") in
         get (Lane_addon_store.save_tool_request_body store ~scope:"unused-scope"
           ~request_digest:(Lane_addon_store.digest orphan) orphan);
-        let report = get (Lane_addon_orphan_body_sweep.run ~store
-          |> Result.map_error Lane_addon_orphan_body_sweep.error_to_string) in
-        Alcotest.(check int) "restart removes the orphan while retaining the staged Goal input" 1 report.removed);
+        let report = get (Lane_addon_original_body_inventory.run ~store
+          |> Result.map_error Lane_addon_original_body_inventory.error_to_string) in
+        Alcotest.(check int) "restart retains the unprotected body and staged Goal input" 1 report.unprotected_files);
       let next () = match checked (W.frontier ~store ~installation_id ~package_id
           ~goal_id:subject.goal_id ~request_id:subject.request_id ~new_run:(fun () ->
             if crash_before_child then Alcotest.fail "restart invented another child run";

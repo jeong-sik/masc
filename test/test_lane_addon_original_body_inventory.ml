@@ -2,7 +2,7 @@ open Masc
 module Store = Lane_addon_store
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
-module Sweep = Lane_addon_orphan_body_sweep
+module Inventory = Lane_addon_original_body_inventory
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let owned value = get (Result.map_error Owner.error_to_string value)
 let updated value = get (Result.map_error Owner.update_error_to_string value)
@@ -14,6 +14,13 @@ let with_store f =
     | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Sys.remove path in
   Fun.protect ~finally:(fun () -> remove parent) (fun () ->
     let root = Filename.concat parent "store" in f root (Store.create ~root))
+let with_runtime_store f =
+  let base_path = Filename.temp_dir "addon-body-inventory-runtime" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let runtime_root = Filename.concat base_path ".masc" in
+    Unix.mkdir runtime_root 0o700;
+    let root = Filename.concat runtime_root "lane-addons" in
+    f base_path root (Store.create ~root))
 let body_path root ~scope ~request =
   let digest = get (Owner.request_digest request) in
   Filename.concat root (Store.tool_request_body_path ~scope ~request_digest:digest)
@@ -28,10 +35,10 @@ let advance store expected event = match updated (Owner.advance ~store ~expected
 let stage_orphan store ~scope request =
   let bytes = Yojson.Safe.to_string request in
   get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes)
-let run store = get (Result.map_error Sweep.error_to_string (Sweep.run ~store))
+let run store = get (Result.map_error Inventory.error_to_string (Inventory.run ~store))
 let exists path = Sys.file_exists path
 
-let test_orphan_is_removed_but_active_successor_and_interrupted_archive_survive () =
+let test_unprotected_body_and_owned_bodies_survive () =
   with_store (fun root store ->
     let scope = "parent" and child_scope = "different-child-scope" in
     let parent = `Assoc ["kind",`String "parent"] in
@@ -54,10 +61,12 @@ let test_orphan_is_removed_but_active_successor_and_interrupted_archive_survive 
     Unix.rename archive_path original_path;
     stage_orphan store ~scope:"orphan-scope" orphan;
     let report = run store in
-    Alcotest.(check int) "only the unreferenced body is removed" 1 report.removed;
+    Alcotest.(check int) "only the unprotected live body is counted" 1 report.unprotected_files;
+    Alcotest.(check int64) "count reports the body's logical bytes"
+      (Int64.of_int (String.length (Yojson.Safe.to_string orphan))) report.unprotected_logical_bytes;
     Alcotest.(check bool) "an unprotected live body makes the archive read" true
-      (report.archive = Sweep.Archive_read);
-    Alcotest.(check bool) "orphan is gone" false (exists (body_path root ~scope:"orphan-scope" ~request:orphan));
+      (report.archive = Inventory.Archive_read);
+    Alcotest.(check bool) "unprotected body remains" true (exists (body_path root ~scope:"orphan-scope" ~request:orphan));
     Alcotest.(check bool) "active original still loads" true ((load store ~scope ~id:"parent-id").request = parent);
     Alcotest.(check bool) "intent in a different scope still restores its exact body" true
       (owned (Owner.load_successor_request ~store ~scope:child_scope successor) = child);
@@ -76,9 +85,9 @@ let test_bad_archive_refuses_before_any_removal () = with_store (fun root store 
   let path = Filename.concat root (Store.tool_request_archive_record_path ~scope:"archived"
     ~date:"2026-10-27" ~request_id:"id") in
   get (Fs_compat.save_file_atomic_strict path "{}");
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "bad archive did not reject the inventory");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "bad archive did not reject the inventory");
   Alcotest.(check bool) "unrelated body was not deleted" true (exists (body_path root ~scope:"orphan" ~request:orphan)))
 
 (* Archived records only add protection. When the live records protect every
@@ -95,8 +104,8 @@ let test_protected_live_bodies_leave_the_archive_unread () = with_store (fun roo
     ~date:"2026-10-27" ~request_id:"id") in
   get (Fs_compat.save_file_atomic_strict path "{}");
   let report = run store in
-  Alcotest.(check int) "nothing is removed" 0 report.removed;
-  Alcotest.(check bool) "the archive is not read" true (report.archive = Sweep.Archive_not_needed);
+  Alcotest.(check int) "no live body lacks digest protection" 0 report.unprotected_files;
+  Alcotest.(check bool) "the archive is not read" true (report.archive = Inventory.Archive_not_needed);
   Alcotest.(check int) "only the live record's digest is counted" 1 report.protected_digests;
   Alcotest.(check bool) "the active original still loads" true
     ((load store ~scope:"active" ~id:"active-id").request = active))
@@ -107,23 +116,36 @@ let test_hard_link_refuses_before_any_removal () = with_store (fun root store ->
   stage_orphan store ~scope:"two" second;
   let first_path = body_path root ~scope:"one" ~request:first in
   Unix.link first_path (Filename.concat (Filename.dirname root) "extra-link");
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "aliased body did not reject the inventory");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "aliased body did not reject the inventory");
   Alcotest.(check bool) "other candidate remains" true (exists (body_path root ~scope:"two" ~request:second)))
 
-let test_replaced_body_is_not_removed () = with_store (fun root store ->
-  let request = `String "staged original" and scope = "scope" in
-  stage_orphan store ~scope request;
+let test_displaced_unknown_owner_preserves_original_body () = with_runtime_store (fun base_path root store ->
+  let request = `String "original with unknown execution" and scope = "scope" and id = "original" in
+  retain store ~scope ~id ~request;
+  let started = advance store (load store ~scope ~id) Progress.Dispatch_intended in
+  ignore (advance store started (Progress.Execution_observed
+    (Progress.Outcome_unknown (`Assoc ["cause",`String "reply lost"]))));
   let path = body_path root ~scope ~request in
-  let before_remove _ =
-    Unix.rename path (Filename.concat (Filename.dirname root) "old-body");
-    stage_orphan store ~scope request in
-  (match Sweep.For_testing.run ~before_remove ~store with
-   | Error (Sweep.Removal_incomplete {removed=0;_}) -> ()
-   | Error (Sweep.Removal_incomplete _) | Error (Sweep.Inventory_unavailable _) | Ok _ ->
-     Alcotest.fail "replacement was not reported as an unconfirmed removal");
-  Alcotest.(check bool) "replacement remains" true (exists path))
+  let bytes = Fs_compat.load_file path in
+  let owner_path = Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest scope) (Store.digest id ^ ".json"))) in
+  let aside = Filename.concat base_path "owner-aside.json" in
+  Unix.rename owner_path aside;
+  List.iter (fun () ->
+    let report = get (Result.map_error Inventory.error_to_string (Inventory.run_at_startup ~base_path)) in
+    Alcotest.(check int) "the displaced owner's body is not protected by the known inventory" 1 report.unprotected_files;
+    Alcotest.(check int64) "the retained body's logical bytes are reported"
+      (Int64.of_int (String.length bytes)) report.unprotected_logical_bytes;
+    Alcotest.(check string) "repeated startup observation retains exact body bytes" bytes (Fs_compat.load_file path)) [(); ()];
+  Unix.rename aside owner_path;
+  let restored = load store ~scope ~id in
+  Alcotest.(check bool) "restoring the owner makes the exact original readable" true
+    (restored.request = request);
+  (match Progress.phase restored.progress with
+   | Progress.Dispatch_pending (Some (Outcome_unknown _)) -> ()
+   | _ -> Alcotest.fail "restoring the owner lost its unknown execution phase"))
 
 let test_missing_active_body_is_not_masked_by_another_scope () = with_store (fun root store ->
   let request = `String "shared request" and orphan = `String "unrelated orphan" in
@@ -131,9 +153,9 @@ let test_missing_active_body_is_not_masked_by_another_scope () = with_store (fun
   retain store ~scope:"second" ~id:"second" ~request;
   stage_orphan store ~scope:"other" orphan;
   Sys.remove (body_path root ~scope:"first" ~request);
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "another scope masked a missing active body");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "another scope masked a missing active body");
   Alcotest.(check bool) "unrelated orphan was not deleted" true (exists (body_path root ~scope:"other" ~request:orphan)))
 
 let test_two_active_records_can_share_a_body () = with_store (fun root store ->
@@ -142,11 +164,32 @@ let test_two_active_records_can_share_a_body () = with_store (fun root store ->
   retain store ~scope:"shared" ~id:"second" ~request;
   stage_orphan store ~scope:"other" orphan;
   let report = run store in
-  Alcotest.(check int) "unrelated orphan is removed" 1 report.removed;
+  Alcotest.(check int) "unrelated body remains unprotected" 1 report.unprotected_files;
   Alcotest.(check bool) "shared body remains" true (exists (body_path root ~scope:"shared" ~request));
   List.iter (fun id ->
     Alcotest.(check bool) "each original still restores its shared input" true
       ((load store ~scope:"shared" ~id).request = request)) ["first";"second"])
+
+let test_same_digest_in_another_scope_is_not_counted () = with_store (fun root store ->
+  let request = `String "shared bytes in two scopes" in
+  retain store ~scope:"owned" ~id:"id" ~request;
+  stage_orphan store ~scope:"other" request;
+  let report = run store in
+  Alcotest.(check int) "digest protection is intentionally global across scopes" 0 report.unprotected_files;
+  Alcotest.(check int64) "protected bytes are excluded from the count" 0L report.unprotected_logical_bytes;
+  Alcotest.(check bool) "the second scope's body is still retained" true
+    (exists (body_path root ~scope:"other" ~request)))
+
+let test_missing_runtime_root_reports_empty_without_creating_it () =
+  let base_path = Filename.temp_dir "addon-body-inventory-empty" "" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) (fun () ->
+    match Inventory.run_at_startup ~base_path with
+    | Ok report ->
+      Alcotest.(check int) "missing runtime contains no observed files" 0 report.unprotected_files;
+      Alcotest.(check int64) "missing runtime contains no observed logical bytes" 0L report.unprotected_logical_bytes;
+      Alcotest.(check bool) "observation does not create the runtime root" false
+        (Sys.file_exists (Filename.concat base_path ".masc"))
+    | Error error -> Alcotest.fail (Inventory.error_to_string error))
 
 let test_referenced_non_json_body_is_protected_but_not_loadable () = with_store (fun root store ->
   let scope = "owner" and request = `String "original" and orphan = `String "unrelated" in
@@ -165,7 +208,7 @@ let test_referenced_non_json_body_is_protected_but_not_loadable () = with_store 
   Sys.remove (body_path root ~scope ~request);
   stage_orphan store ~scope:"other" orphan;
   let report = run store in
-  Alcotest.(check int) "unrelated orphan is removed" 1 report.removed;
+  Alcotest.(check int) "unrelated body remains unprotected" 1 report.unprotected_files;
   Alcotest.(check bool) "named body remains" true
     (exists (Filename.concat root (Store.tool_request_body_path ~scope ~request_digest:digest)));
   Alcotest.(check bool) "normal owner load still rejects noncanonical input" true
@@ -177,14 +220,14 @@ let test_unsafe_staging_entry_aborts_but_regular_partial_stage_is_kept () = with
   let directory = Filename.dirname (body_path root ~scope:"one" ~request:orphan) in
   let stage = Filename.concat directory ".atomic_incomplete.tmp" in
   Unix.symlink (body_path root ~scope:"one" ~request:orphan) stage;
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "unsafe staging entry did not abort");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "unsafe staging entry did not abort");
   Alcotest.(check bool) "orphan is preserved after refusal" true (exists (body_path root ~scope:"one" ~request:orphan));
   Unix.unlink stage;
   get (Fs_compat.save_file_atomic_strict stage "partial, not JSON");
   let report = run store in
-  Alcotest.(check int) "safe incomplete staging does not prevent cleanup" 1 report.removed;
+  Alcotest.(check int) "safe incomplete staging is not counted as a live body" 1 report.unprotected_files;
   Alcotest.(check bool) "partial staging file is preserved" true (exists stage))
 
 let test_digest_mismatch_aborts_before_removal () = with_store (fun root store ->
@@ -194,18 +237,18 @@ let test_digest_mismatch_aborts_before_removal () = with_store (fun root store -
   get (Store.save_tool_request_body store ~scope:"invalid" ~request_digest:digest original);
   let path = Filename.concat root (Store.tool_request_body_path ~scope:"invalid" ~request_digest:digest) in
   get (Fs_compat.save_file_atomic_strict path "changed bytes");
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "digest mismatch was accepted");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "digest mismatch was accepted");
   Alcotest.(check bool) "unrelated orphan was not deleted" true (exists (body_path root ~scope:"valid" ~request:orphan)))
 
-let test_unreferenced_non_json_body_is_removed () = with_store (fun root store ->
+let test_unreferenced_non_json_body_is_preserved () = with_store (fun root store ->
   let bytes = "{incomplete" and scope = "scope" in
   let digest = Store.digest bytes in
   get (Store.save_tool_request_body store ~scope ~request_digest:digest bytes);
   let report = run store in
-  Alcotest.(check int) "store permits an unreferenced non-JSON body" 1 report.removed;
-  Alcotest.(check bool) "the unreferenced file is gone" false
+  Alcotest.(check int) "store reports an unreferenced non-JSON body" 1 report.unprotected_files;
+  Alcotest.(check bool) "the unreferenced file is preserved" true
     (exists (Filename.concat root (Store.tool_request_body_path ~scope ~request_digest:digest))))
 
 let test_sparse_body_mismatch_preserves_other_candidates () = with_store (fun root store ->
@@ -218,9 +261,9 @@ let test_sparse_body_mismatch_preserves_other_candidates () = with_store (fun ro
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
     ignore (Unix.LargeFile.lseek fd 8388607L Unix.SEEK_SET);
     ignore (Unix.write_substring fd "x" 0 1));
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "large sparse mismatch was accepted");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "large sparse mismatch was accepted");
   Alcotest.(check bool) "other candidate remains" true (exists (body_path root ~scope:"valid" ~request:orphan)))
 
 let test_sparse_malformed_record_preserves_other_candidates () = with_store (fun root store ->
@@ -233,19 +276,19 @@ let test_sparse_malformed_record_preserves_other_candidates () = with_store (fun
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
     ignore (Unix.LargeFile.lseek fd 8388607L Unix.SEEK_SET);
     ignore (Unix.write_substring fd "x" 0 1));
-  (match Sweep.run ~store with
-   | Error (Sweep.Inventory_unavailable _) -> ()
-   | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "malformed sparse record was accepted");
+  (match Inventory.run ~store with
+   | Error (Inventory.Inventory_unavailable _) -> ()
+   | Ok _ -> Alcotest.fail "malformed sparse record was accepted");
   Alcotest.(check bool) "other candidate remains" true (exists (body_path root ~scope:"valid" ~request:orphan)))
 
 let test_inventory_errors_do_not_disclose_input () =
   let sentinel = "private-sentinel-in-malformed-json" in
   let refuses_without_leak store =
-    match Sweep.run ~store with
-    | Error (Sweep.Inventory_unavailable _ as error) ->
+    match Inventory.run ~store with
+    | Error (Inventory.Inventory_unavailable _ as error) ->
       Alcotest.(check bool) "error does not expose input bytes" false
-        (String_util.contains_substring (Sweep.error_to_string error) sentinel)
-    | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "malformed input was accepted" in
+        (String_util.contains_substring (Inventory.error_to_string error) sentinel)
+    | Ok _ -> Alcotest.fail "malformed input was accepted" in
   with_store (fun root store ->
     let bytes = "original" in
     let digest = Store.digest bytes in
@@ -260,19 +303,21 @@ let test_inventory_errors_do_not_disclose_input () =
     get (Fs_compat.save_file_atomic_strict path ("!" ^ sentinel));
     refuses_without_leak store)
 
-let () = Alcotest.run "lane addon orphan body sweep" ["cleanup", [
-  Alcotest.test_case "protect live, successor and archived requests" `Quick test_orphan_is_removed_but_active_successor_and_interrupted_archive_survive;
-  Alcotest.test_case "archive corruption aborts before removal" `Quick test_bad_archive_refuses_before_any_removal;
+let () = Alcotest.run "lane addon original body inventory" ["inventory", [
+  Alcotest.test_case "protect live, successor and archived requests" `Quick test_unprotected_body_and_owned_bodies_survive;
+  Alcotest.test_case "archive corruption refuses the count" `Quick test_bad_archive_refuses_before_any_removal;
   Alcotest.test_case "protected live bodies leave the archive unread" `Quick test_protected_live_bodies_leave_the_archive_unread;
-  Alcotest.test_case "hard linked body aborts before removal" `Quick test_hard_link_refuses_before_any_removal;
-  Alcotest.test_case "changed body is retained" `Quick test_replaced_body_is_not_removed;
+  Alcotest.test_case "hard linked body refuses the count" `Quick test_hard_link_refuses_before_any_removal;
+  Alcotest.test_case "displaced unknown owner retains its original body" `Quick test_displaced_unknown_owner_preserves_original_body;
   Alcotest.test_case "missing body in one scope is not masked" `Quick test_missing_active_body_is_not_masked_by_another_scope;
   Alcotest.test_case "same-scope shared body remains available" `Quick test_two_active_records_can_share_a_body;
+  Alcotest.test_case "equal digests are protected across scopes" `Quick test_same_digest_in_another_scope_is_not_counted;
+  Alcotest.test_case "missing runtime stays absent" `Quick test_missing_runtime_root_reports_empty_without_creating_it;
   Alcotest.test_case "referenced noncanonical body stays owned" `Quick test_referenced_non_json_body_is_protected_but_not_loadable;
   Alcotest.test_case "staging file safety" `Quick test_unsafe_staging_entry_aborts_but_regular_partial_stage_is_kept;
-  Alcotest.test_case "digest mismatch aborts before removal" `Quick test_digest_mismatch_aborts_before_removal;
-  Alcotest.test_case "unreferenced non-JSON body can be removed" `Quick test_unreferenced_non_json_body_is_removed;
-  Alcotest.test_case "sparse body mismatch aborts before removal" `Quick test_sparse_body_mismatch_preserves_other_candidates;
-  Alcotest.test_case "sparse malformed record aborts before removal" `Quick test_sparse_malformed_record_preserves_other_candidates;
+  Alcotest.test_case "digest mismatch refuses the count" `Quick test_digest_mismatch_aborts_before_removal;
+  Alcotest.test_case "unreferenced non-JSON body is preserved" `Quick test_unreferenced_non_json_body_is_preserved;
+  Alcotest.test_case "sparse body mismatch refuses the count" `Quick test_sparse_body_mismatch_preserves_other_candidates;
+  Alcotest.test_case "sparse malformed record refuses the count" `Quick test_sparse_malformed_record_preserves_other_candidates;
   Alcotest.test_case "inventory errors do not disclose input" `Quick test_inventory_errors_do_not_disclose_input;
 ]]

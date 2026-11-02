@@ -5937,8 +5937,8 @@
  (libraries alcotest yojson masc masc.fs_compat unix))
 
 (test
- (name test_lane_addon_orphan_body_sweep)
- (modules test_lane_addon_orphan_body_sweep)
+ (name test_lane_addon_original_body_inventory)
+ (modules test_lane_addon_original_body_inventory)
  (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
 
 (test

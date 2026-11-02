@@ -217,6 +217,12 @@ let first_messages=[message "The already-read first turn"]
 let selected_messages=first_messages @ [message "Original question to retain";
   Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original completed answer"]]
 type history_kind = Atoms | Official | Mixed
+let official_empty_turn config ~turn ~time =
+  let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
+  Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+    {Boundary.recorded_at=time;event=Boundary.Turn_ended {turn_ref;task_context=Keeper_turn_task_context.No_task;
+      history_at_start=Boundary.Continued_history;position=Boundary.No_atom_history}}
+  |> Result.map_error Boundary.append_error_to_string |> get
 let official_turn config ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session=Keeper_context_core.create_session ~session_id:trace_id ~base_dir:(Keeper_fs.session_store_path config) in
@@ -225,10 +231,7 @@ let official_turn config ~turn ~time =
   Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant" session
     (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original official-client answer"]);
   Keeper_context_core_history.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file" ~outcome:Tool_result.Ok;
-  Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-    {Boundary.recorded_at=time;event=Boundary.Turn_ended {turn_ref;task_context=Keeper_turn_task_context.No_task;
-      history_at_start=Boundary.Continued_history;position=Boundary.No_atom_history}}
-  |> Result.map_error Boundary.append_error_to_string |> get
+  official_empty_turn config ~turn ~time
 let prepare_history config kind =
   let now=Time_compat.now () in
   (match kind with
@@ -1507,11 +1510,15 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let expected=[external_observation;chat_observation] in
     let observations capture =
       let input=Capture.source capture |> Source.input in
-      List.length input.messages,List.length input.tool_observations,
+      List.map (fun (message : Agent_core.Types.message) ->
+        message.role,Agent_core.Types.text_of_message message) input.messages,input.tool_observations,
         List.sort Stdlib.compare input.counterpart_observations in
-    let check_complete ?(expected=expected) capture =
-      check bool "the provider retains complete counterpart identities and bytes" true
-        (observations capture=(0,0,List.sort Stdlib.compare expected)) in
+    let check_complete ?(expected=expected) ~messages ~tools capture =
+      let actual_messages,actual_tools,actual_counterparts=observations capture in
+      check bool "the original retains all expected messages and roles" true (actual_messages=messages);
+      check bool "the original retains all expected tool observations" true (actual_tools=tools);
+      check bool "the original retains complete counterpart identities and bytes" true
+        (actual_counterparts=List.sort Stdlib.compare expected) in
     let provider_inputs=ref [] in
     fixture.set_response (fun capture ->
       provider_inputs:= !provider_inputs @ [observations capture];
@@ -1521,7 +1528,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     assert_pending (run_worker fixture);
     await_delivery fixture ~after:deliveries;
     check bool "the refused HTTP input retains both original counterparts" true
-      (!provider_inputs=[0,0,List.sort Stdlib.compare expected]);
+      (!provider_inputs=[[],[],List.sort Stdlib.compare expected]);
     (match run_worker fixture with
      | Error (Consumer.Counterpart_input_capacity_refused {official_range;counterpart_digest;reports=[report];_} as refusal) ->
        check bool "capacity refusal suspends later Memory phases of the wake" true
@@ -1544,7 +1551,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
         ~official:(Source.official_range_id (Capture.source (snd (only_original fixture)))));
     no_memory fixture;
     let rejected,original=only_original fixture in
-    check_complete original;
+    check_complete ~messages:[] ~tools:[] original;
     let source_json=Source.to_json (Capture.source original) in
     let request_json=Capture.to_json original and rejected_progress=Progress.to_json rejected.progress in
     let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
@@ -1598,9 +1605,23 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let fresh,fresh_capture=observed_originals fixture
       |> List.filter (fun ((record:Owner.retained),_) -> record.request_id<>rejected.request_id)
       |> function [original] -> original | _ -> fail "one new configured original must own the successful request" in
-    check_complete ~expected fresh_capture;
-    check bool "the configured recovery HTTP input retains all old and appended counterparts" true
-      (List.nth_opt !provider_inputs 1=Some (0,0,List.sort Stdlib.compare expected));
+    let messages=[Agent_core.Types.User,"Original official-client question";
+      Agent_core.Types.Assistant,"Original official-client answer"] in
+    let tools : Keeper_librarian.tool_observation list = [{tool_name="read_file";outcome=Succeeded}] in
+    check_complete ~expected ~messages ~tools fresh_capture;
+    check bool "the configured recovery HTTP input retains the new turn and all counterparts" true
+      (List.nth_opt !provider_inputs 1=Some (messages,tools,List.sort Stdlib.compare expected));
+    let exact=Capture.request fresh_capture |> get in
+    let sent=Option.to_list exact.Exact.system
+      @ List.map (fun (item : Exact.message) -> item.text) exact.messages in
+    List.iter (fun (label,phrase) ->
+      check bool label true (List.exists (Astring.String.is_infix ~affix:phrase) sent))
+      ["the sent request includes the later user message","Original official-client question";
+       "the sent request includes the later assistant message","Original official-client answer";
+       "the sent request includes the later tool observation",{|{"tool_name":"read_file","outcome":"succeeded"}|};
+       "the sent request includes the original external evidence","Original admitted external evidence";
+       "the sent request includes the complete oversized counterpart body",String.make 65536 'x';
+       "the sent request includes the appended counterpart",appended];
     check bool "fresh reprocessing uses a new original, not replaying the refused request" true
       (fresh.Owner.request_id<>rejected.request_id);
     check bool "official history advances only after a real complete-input commit" true (official ()<>before);
@@ -1616,7 +1637,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let settled,retained=archived fixture ~date:(day_of rejected.request_id) rejected in
     check json "old refusal and complete source remain in the ordinary archive" (canonical request_json) retained;
     check json "settlement never rewrites the original rejection" rejected_progress (Progress.to_json settled);
-    io (fun () -> official_turn fixture.config ~turn:4 ~time:(Time_compat.now () +. 30.));
+    io (fun () -> official_empty_turn fixture.config ~turn:4 ~time:(Time_compat.now () +. 30.));
     (match run_worker fixture with
      | Ok (Consumer.Official_advanced _) -> ()
      | Ok _ -> fail "a future empty official range should advance under the restored configuration"
@@ -2839,8 +2860,12 @@ let with_legacy_omitted_original fixture f =
       ~policy:seed.policy ~rule_prompt:seed.rule_prompt ~prompt:seed.prompt ~output_schema:seed.output_schema |> get in
     R.validate_durable_preparation preparation |> get;
     let original,request=memory_action fixture (fun () ->
-      let owner=io (fun () -> Capture.observe_owner ~base_path:fixture.base_path
-        ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name) |> get in
+      let owner=io (fun () ->
+        (* Normal durable capture obtains the program anchor before observing
+           the physical owner, creating the empty Memory epoch if needed. *)
+        let _=Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get in
+        Capture.observe_owner ~base_path:fixture.base_path
+          ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name) |> get in
       Keeper_librarian_durable_edge.with_destination ~config:fixture.config ~reserved:[] (fun destination ->
         let request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
           ~owner ~destination ~source ~preparation ()) |> get in

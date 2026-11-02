@@ -3,7 +3,8 @@ import { signal } from '@preact/signals'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ call: vi.fn() }))
-vi.mock('../../api/mcp', () => ({ callMcpToolAtIdentity: mocks.call }))
+vi.mock('../../api/mcp', () => ({ callMcpTaskReceiptAtIdentity: (args: unknown, identity: unknown, current: unknown) =>
+  mocks.call('masc_tasks', args, identity, current) }))
 
 import {
   TASK_CREATE_RECEIPT_STORAGE_KEY,
@@ -183,7 +184,7 @@ describe('Task creation receipts', () => {
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
-    expect(store.compact()).toEqual({ removedAttempts: 2, removedErrors: 0, removedReads: 0, persisted: true })
+    expect(store.compact()).toEqual({ removedAttempts: 2, removedErrors: 1, removedReads: 0, persisted: true })
     expect(store.attempts.value).toHaveLength(1)
     expect(store.attempts.value[0]).toMatchObject({ requestId: unknown.requestId,
       original: { kind: 'unconfirmed', reason: 'response_unknown' },
@@ -194,6 +195,51 @@ describe('Task creation receipts', () => {
     restored.dispose()
     store.dispose()
   })
+
+  it.each(['different-task', 'not-observed-before-success', 'negative-then-matching'])(
+    'retains a presented creation with potentially conflicting evidence: %s', async scenario => {
+      const { store, storage } = setup()
+      const request = reserve(store)
+      if (scenario === 'not-observed-before-success') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+        await store.observe(request.requestId)
+      }
+      store.settleOriginal(request.requestId, { kind: 'created', taskId: 'task-a' })
+      if (scenario === 'different-task') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-b'], workspaceA, 6))
+        await store.observe(request.requestId)
+      }
+      if (scenario === 'negative-then-matching') {
+        mocks.call.mockResolvedValueOnce(response(request.requestId, 'not_observed', [], workspaceA, 5))
+          .mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-a'], workspaceA, 6))
+        await store.observe(request.requestId)
+        await store.observe(request.requestId)
+      }
+      store.markPresented(request.requestId)
+      expect(store.forgetDefinite(request.requestId)).toBe(false)
+      expect(store.compact()).toMatchObject({ removedAttempts: 0, persisted: true })
+      expect(store.attempts.value[0]?.original).toEqual({ kind: 'created', taskId: 'task-a' })
+      expect(store.attempts.value[0]?.reads.length).toBeGreaterThan(0)
+      const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
+      expect(restored.attempts.value[0]?.reads).toEqual(store.attempts.value[0]?.reads)
+      restored.dispose()
+      store.dispose()
+    },
+  )
+
+  it.each(['not_sent', 'rejected_before_effect'] as const)(
+    'retains a %s original if a creation receipt exists', async kind => {
+      const { store } = setup()
+      const request = reserve(store)
+      store.settleOriginal(request.requestId, { kind })
+      mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-a']))
+      await store.observe(request.requestId)
+      expect(store.forgetDefinite(request.requestId)).toBe(false)
+      expect(store.compact()).toMatchObject({ removedAttempts: 0 })
+      expect(store.attempts.value[0]?.reads).toEqual([{ kind: 'recorded', taskId: 'task-a', backlogVersion: 5 }])
+      store.dispose()
+    },
+  )
 
   it('can explicitly free failed storage without losing an unresolved request', () => {
     const { store, storage } = setup()
@@ -295,12 +341,14 @@ describe('Task creation receipts', () => {
     expect(store.attempts.value[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
     expect(store.attempts.value[0]?.reads).toEqual([
       { kind: 'not_observed', backlogVersion: 5 },
+      { kind: 'not_observed', backlogVersion: 5 },
       { kind: 'recorded', taskId: 'task-1', backlogVersion: 6 },
       { kind: 'recorded', taskId: 'task-1', backlogVersion: 7 },
       { kind: 'ambiguous', taskIds: ['task-1', 'task-2'], backlogVersion: 8 },
+      { kind: 'ambiguous', taskIds: ['task-1', 'task-2'], backlogVersion: 8 },
       { kind: 'ambiguous', taskIds: ['task-1', 'task-3'], backlogVersion: 8 },
     ])
-    expect(JSON.parse(storage.value!).attempts[0].reads).toHaveLength(5)
+    expect(JSON.parse(storage.value!).attempts[0].reads).toHaveLength(7)
     store.dispose()
   })
 
@@ -315,8 +363,68 @@ describe('Task creation receipts', () => {
       .mockResolvedValueOnce(response(request.requestId, 'not_observed', []))
     for (let i = 0; i < 5; i++) await store.observe(request.requestId)
     expect(store.attempts.value[0]).toMatchObject({ original: { kind: 'unconfirmed', reason: 'response_unknown' },
-      reads: [{ kind: 'error', reason: 'lookup_failed' }, { kind: 'error', reason: 'invalid_response' },
+      reads: [{ kind: 'error', reason: 'lookup_failed' }, { kind: 'error', reason: 'lookup_failed' },
+        { kind: 'error', reason: 'invalid_response' }, { kind: 'error', reason: 'invalid_response' },
         { kind: 'not_observed', backlogVersion: 5 }] })
+    store.dispose()
+  })
+
+  it('bounds alternating same-version successes and errors while preserving their last kind', async () => {
+    const { store } = setup()
+    const request = reserve(store)
+    store.settleOriginal(request.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+    for (let index = 0; index < 60; index++) {
+      mocks.call.mockResolvedValueOnce(response(request.requestId, 'recorded', ['task-a'], workspaceA, 5))
+      await store.observe(request.requestId)
+      expect(store.attempts.value[0]?.reads.at(-1)).toEqual({ kind: 'recorded', taskId: 'task-a', backlogVersion: 5 })
+      expect(store.attempts.value[0]?.latestReadCurrent).toBe(true)
+      mocks.call.mockRejectedValueOnce(new Error('transient'))
+      await store.observe(request.requestId)
+      expect(store.attempts.value[0]?.reads.at(-1)).toEqual({ kind: 'error', reason: 'lookup_failed' })
+      expect(store.attempts.value[0]?.latestReadFailureCurrent).toBe(true)
+      expect(store.attempts.value[0]?.reads.length).toBeLessThanOrEqual(5)
+    }
+    expect(store.attempts.value[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
+    expect(store.attempts.value[0]?.reads).toEqual([
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 5 },
+      { kind: 'error', reason: 'lookup_failed' },
+      { kind: 'error', reason: 'lookup_failed' },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 5 },
+      { kind: 'error', reason: 'lookup_failed' },
+    ])
+    store.dispose()
+  })
+
+  it('preserves first and last errors of each kind across successful observations and transitions', async () => {
+    const { store } = setup()
+    const request = reserve(store)
+    store.settleOriginal(request.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+    const sequence: Array<string | Error> = [
+      response(request.requestId, 'recorded', ['task-a'], workspaceA, 5), new Error('down'),
+      response(request.requestId, 'recorded', ['task-a'], workspaceA, 6), '{bad',
+      response(request.requestId, 'recorded', ['task-a'], workspaceA, 7), new Error('down again'),
+      response(request.requestId, 'recorded', ['task-a'], workspaceA, 7), '{still bad',
+      response(request.requestId, 'recorded', ['task-a'], workspaceA, 6), new Error('after reversal'),
+      response(request.requestId, 'recorded', ['task-b'], workspaceA, 7),
+      response(request.requestId, 'not_observed', [], workspaceA, 8),
+    ]
+    for (const item of sequence) {
+      if (item instanceof Error) mocks.call.mockRejectedValueOnce(item)
+      else mocks.call.mockResolvedValueOnce(item)
+      await store.observe(request.requestId)
+    }
+    expect(store.attempts.value[0]?.reads).toEqual([
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 5 },
+      { kind: 'error', reason: 'lookup_failed' },
+      { kind: 'error', reason: 'invalid_response' },
+      { kind: 'error', reason: 'lookup_failed' },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 7 },
+      { kind: 'error', reason: 'invalid_response' },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 6 },
+      { kind: 'error', reason: 'lookup_failed' },
+      { kind: 'recorded', taskId: 'task-b', backlogVersion: 7 },
+      { kind: 'not_observed', backlogVersion: 8 },
+    ])
     store.dispose()
   })
 
@@ -351,19 +459,24 @@ describe('Task creation receipts', () => {
 
   it('compacts authorized legacy observations and can reserve again within a storage quota', async () => {
     const storage = new MemoryStorage()
-    const legacyReads = Array.from({ length: 16 }, (_, i) => ({ kind: 'not_observed', backlogVersion: i + 1 }))
+    const legacyReads = [
+      ...Array.from({ length: 16 }, (_, i) => ({ kind: 'not_observed', backlogVersion: i + 1 })),
+      ...Array.from({ length: 16 }, (_, i) => ({ kind: 'recorded', taskId: 'task-old', backlogVersion: i + 17 })),
+    ]
     storage.value = JSON.stringify({ schema: TASK_CREATE_RECEIPT_STORAGE_KEY, attempts: [{ requestId: 'legacy',
       workspace: workspaceA, goalId: null, createdAt: '2026-11-02T00:00:00.000Z',
       original: { kind: 'unconfirmed', reason: 'response_unknown' }, presented: false, reads: legacyReads }] })
     storage.maxBytes = storage.value.length - 100
     const { store } = setup({ storage })
-    mocks.call.mockResolvedValueOnce(response('legacy', 'not_observed', [], workspaceA, 17))
+    mocks.call.mockResolvedValueOnce(response('legacy', 'recorded', ['task-new'], workspaceA, 33))
     expect(await store.observe('legacy')).toMatchObject({ kind: 'observed', persisted: false })
     expect(store.storageState.value).toBe('write_failed')
-    expect(store.attempts.value[0]?.reads.length).toBe(16)
-    expect(store.compact()).toEqual({ removedAttempts: 0, removedErrors: 0, removedReads: 14, persisted: true })
+    expect(store.compact()).toEqual({ removedAttempts: 0, removedErrors: 0, removedReads: 28, persisted: true })
     expect(store.attempts.value[0]).toMatchObject({ original: { kind: 'unconfirmed', reason: 'response_unknown' },
-      reads: [{ kind: 'not_observed', backlogVersion: 1 }, { kind: 'not_observed', backlogVersion: 17 }] })
+      reads: [{ kind: 'not_observed', backlogVersion: 1 }, { kind: 'not_observed', backlogVersion: 16 },
+        { kind: 'recorded', taskId: 'task-old', backlogVersion: 17 },
+        { kind: 'recorded', taskId: 'task-old', backlogVersion: 32 },
+        { kind: 'recorded', taskId: 'task-new', backlogVersion: 33 }] })
     expect(store.reserve().kind).toBe('reserved')
     store.dispose()
   })

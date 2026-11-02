@@ -1,6 +1,6 @@
 import { effect, signal, type ReadonlySignal } from '@preact/signals'
 import { v4 as randomUuid } from 'uuid'
-import { callMcpToolAtIdentity } from '../../api/mcp'
+import { callMcpTaskReceiptAtIdentity } from '../../api/mcp'
 import { artifactWorkspaceBody, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { parseUniqueJson } from '../../lib/json-unique'
 import { isRecord } from '../common/normalize'
@@ -44,6 +44,17 @@ export interface TaskCreateAttempt {
   readonly latestReadCurrent: boolean
   /** The latest current-owner read failed; never authorizes stored evidence. */
   readonly latestReadFailureCurrent: boolean
+}
+
+/** A negative read can predate a success; retain it without declaring a contradiction. */
+export function hasUnresolvedTaskCreationEvidence(item: Pick<TaskCreateAttempt, 'original' | 'reads'>): boolean {
+  return item.reads.some(read => {
+    if (read.kind === 'ambiguous') return true
+    if (read.kind === 'not_observed') return item.original.kind === 'created'
+    if (read.kind !== 'recorded') return false
+    if (item.original.kind === 'created') return read.taskId !== item.original.taskId
+    return item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
+  })
 }
 
 /** The caller must publish a new immutable owner whenever authority, actor,
@@ -139,23 +150,63 @@ function sameObservationContent(a: TaskCreationObservation, b: TaskCreationObser
   return false
 }
 
-/** Keep the endpoints of consecutive equal observations with increasing versions. */
-function appendRead(reads: readonly TaskCreationRead[], next: TaskCreationRead): readonly TaskCreationRead[] {
-  const previous = reads.at(-1)
-  if (!previous) return [next]
-  if (previous.kind === 'error' && next.kind === 'error' && previous.reason === next.reason) return reads
-  if (previous.kind === 'error' || next.kind === 'error' || !sameObservationContent(previous, next)) return [...reads, next]
-  if (next.backlogVersion === previous.backlogVersion) return reads
-  if (next.backlogVersion > previous.backlogVersion) {
-    const first = reads.at(-2)
-    if (first && first.kind !== 'error' && sameObservationContent(first, previous)
-      && first.backlogVersion < previous.backlogVersion) return [...reads.slice(0, -1), next]
+function summarizeReads(reads: readonly TaskCreationRead[]): readonly TaskCreationRead[] {
+  const result: TaskCreationRead[] = []
+  let firstObservation: number | null = null
+  let lastObservation: number | null = null
+  let previousObservation: TaskCreationObservation | null = null
+  const errors = new Map<string, { first: number; last: number }>()
+  const flush = () => {
+    const indices = new Set<number>()
+    if (firstObservation !== null) indices.add(firstObservation)
+    if (lastObservation !== null) indices.add(lastObservation)
+    for (const error of errors.values()) { indices.add(error.first); indices.add(error.last) }
+    for (const index of [...indices].sort((a, b) => a - b)) {
+      const read = reads[index]
+      if (read) result.push(read)
+    }
+    firstObservation = null
+    lastObservation = null
+    previousObservation = null
+    errors.clear()
   }
-  return [...reads, next]
+  reads.forEach((read, index) => {
+    if (read.kind === 'error') {
+      const previous = errors.get(read.reason)
+      if (previous) previous.last = index
+      else errors.set(read.reason, { first: index, last: index })
+      return
+    }
+    if (previousObservation && (!sameObservationContent(previousObservation, read)
+      || read.backlogVersion < previousObservation.backlogVersion)) flush()
+    if (firstObservation === null) firstObservation = index
+    lastObservation = index
+    previousObservation = read
+  })
+  flush()
+  return result
 }
 
-function summarizeReads(reads: readonly TaskCreationRead[]): readonly TaskCreationRead[] {
-  return reads.reduce<readonly TaskCreationRead[]>((summary, read) => appendRead(summary, read), [])
+function appendRead(reads: readonly TaskCreationRead[], next: TaskCreationRead): readonly TaskCreationRead[] {
+  if (next.kind !== 'error') {
+    // Only rewrite the current observation segment. Older stored segments are
+    // compacted explicitly once an authenticated read grants that authority.
+    let previous: TaskCreationObservation = next
+    let start = reads.length
+    for (let index = reads.length - 1; index >= 0; index--) {
+      const read = reads[index]
+      if (!read || read.kind === 'error') continue
+      if (!sameObservationContent(read, previous) || read.backlogVersion > previous.backlogVersion) break
+      start = index
+      previous = read
+    }
+    return [...reads.slice(0, start), ...summarizeReads([...reads.slice(start), next])]
+  }
+  // A failed read does not authorize rewriting earlier observed facts. Only
+  // summarize the trailing errors until a valid scoped read succeeds.
+  let errorStart = reads.length
+  while (errorStart > 0 && reads[errorStart - 1]?.kind === 'error') errorStart--
+  return [...reads.slice(0, errorStart), ...summarizeReads([...reads.slice(errorStart), next])]
 }
 
 /** Decode the exact original request and workspace, with state cardinality. */
@@ -268,7 +319,7 @@ function browserSessionStorage(): ReceiptStorage | null {
 }
 
 const defaultLookup: ReceiptLookup = (owner, requestId, isCurrent) =>
-  callMcpToolAtIdentity('masc_tasks', { creation_request_id: requestId,
+  callMcpTaskReceiptAtIdentity({ creation_request_id: requestId,
     expected_workspace: artifactWorkspaceBody(owner.workspace) }, owner.identity, isCurrent)
 
 export function createTaskCreateReceiptStore(options: {
@@ -345,7 +396,7 @@ export function createTaskCreateReceiptStore(options: {
       || (item.original.kind === 'created' && item.presented)
 
   const canForget = (item: TaskCreateAttempt): boolean =>
-    canManage(item) && definite(item) && !item.checking && !item.reads.some(read => read.kind === 'ambiguous')
+    canManage(item) && definite(item) && !item.checking && !hasUnresolvedTaskCreationEvidence(item)
 
   const reserveWith = (persistence: 'session' | 'memory', goalId: string | null = null): TaskCreateReserveResult => {
     if (disposed) return { kind: 'disposed' }
@@ -473,7 +524,7 @@ export function createTaskCreateReceiptStore(options: {
     let removedReads = 0
     const next: TaskCreateAttempt[] = []
     for (const item of attempts.peek()) {
-      if (!canManage(item)) { next.push(item); continue }
+      if (item.checking || !canManage(item)) { next.push(item); continue }
       if (canForget(item)) {
         removedAttempts++
         continue

@@ -29,6 +29,8 @@ function firstCallArgs(): Record<string, unknown> {
 }
 
 vi.mock('../../api/mcp', () => ({ callMcpToolAtIdentity: (...args: any[]) => mockCallMcpToolAtIdentity(...args),
+  callMcpTaskReceiptAtIdentity: (args: unknown, identity: unknown, current: unknown) =>
+    mockCallMcpToolAtIdentity('masc_tasks', args, identity, current),
   callMcpTaskCreationAtIdentity: (args: unknown, identity: unknown, current: unknown, recovery: unknown, wait: unknown) =>
     mockCallMcpToolAtIdentity('masc_add_task', args, identity, current, recovery, wait),
   mcpCallFailureDisposition: (error: unknown) => mockFailureDisposition(error) }))

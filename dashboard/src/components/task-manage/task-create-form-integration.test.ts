@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../api/mcp', () => ({
   callMcpToolAtIdentity: mocks.callMcpToolAtIdentity,
+  callMcpTaskReceiptAtIdentity: (args: unknown, identity: unknown, current: unknown) =>
+    mocks.callMcpToolAtIdentity('masc_tasks', args, identity, current),
   callMcpTaskCreationAtIdentity: (args: unknown, identity: unknown, current: unknown, recovery: unknown, wait: unknown) =>
     mocks.callMcpToolAtIdentity('masc_add_task', args, identity, current, recovery, wait),
   mcpCallFailureDisposition: mocks.failureDisposition,
@@ -53,9 +55,10 @@ function created(args: Record<string, unknown>): string {
 
 function identity() { return { revision: currentStoredTokenRevision(), actor: currentDashboardActor() } }
 
-function goalTree(goalId: string, taskId = 'task-1', taskGoalId = goalId): DashboardGoalsTreeResponse {
-  return { tree: [{ id: goalId, tasks: [{ id: taskId, goal_id: taskGoalId }], children: [] }],
-    summary: {}, identity_observation: { ids: [goalId], complete: true } } as unknown as DashboardGoalsTreeResponse
+function goalTree(goalId: string, taskId = 'task-1', taskGoalId: string | null = null): DashboardGoalsTreeResponse {
+  return { tree: [{ id: goalId, tasks: [{ id: taskId, goal_id: taskGoalId }], task_count: 1, children: [] }],
+    summary: {}, identity_observation: { ids: [goalId], complete: true },
+    task_identity_observation: { ids: [taskId], complete: true } } as unknown as DashboardGoalsTreeResponse
 }
 
 function callArgs(index: number): Record<string, unknown> {
@@ -139,8 +142,9 @@ describe('Task creation draft ownership', () => {
   })
 
   it('automatically removes a nested Goal Task only after current and scoped trees both observe it', async () => {
-    const nested = { tree: [{ id: 'parent', tasks: [], children: goalTree('goal-a').tree }], summary: {},
-      identity_observation: { ids: ['parent', 'goal-a'], complete: true } } as unknown as DashboardGoalsTreeResponse
+    const nested = { tree: [{ id: 'parent', tasks: [], task_count: 0, children: goalTree('goal-a').tree }], summary: {},
+      identity_observation: { ids: ['parent', 'goal-a'], complete: true },
+      task_identity_observation: { ids: ['task-1'], complete: true } } as unknown as DashboardGoalsTreeResponse
     mocks.refreshGoals.mockImplementation(async () => { goalTreeData.value = nested; goalTreeObservationRevision.value++ })
     mocks.fetchScopedGoals.mockResolvedValue(nested)
     const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' }, identity: identity(), isCurrent: () => true }
@@ -149,7 +153,8 @@ describe('Task creation draft ownership', () => {
     expect(taskCreateReceipts.attempts.peek()).toHaveLength(0)
   })
 
-  it.each(['partial error', 'superseded', 'missing task', 'wrong goal', 'duplicate goal', 'direct error', 'direct mismatch'])(
+  it.each(['partial error', 'superseded', 'missing task', 'wrong goal', 'duplicate goal', 'duplicate task',
+    'incomplete tasks', 'wrong task count', 'direct error', 'direct mismatch'])(
     'retains the created receipt when Goal observation is %s', async condition => {
       const valid = goalTree('goal-a')
       goalTreeData.value = valid
@@ -161,6 +166,14 @@ describe('Task creation draft ownership', () => {
         else if (condition === 'wrong goal') goalTreeData.value = goalTree('goal-a', 'task-1', 'another-goal')
         else if (condition === 'duplicate goal') {
           goalTreeData.value = { ...valid, identity_observation: { ids: ['goal-a', 'goal-a'], complete: true } }
+        } else if (condition === 'duplicate task') {
+          goalTreeData.value = { ...valid, task_identity_observation: { ids: ['task-1', 'task-1'], complete: true } }
+        } else if (condition === 'incomplete tasks') {
+          goalTreeData.value = { ...valid, task_identity_observation: { ids: ['task-1'], complete: false } }
+        } else if (condition === 'wrong task count') {
+          const node = valid.tree[0]
+          if (!node) throw new Error('Missing test Goal')
+          goalTreeData.value = { ...valid, tree: [{ ...node, task_count: 2 }] }
         } else goalTreeData.value = valid
       })
       if (condition === 'direct error') mocks.fetchScopedGoals.mockRejectedValueOnce(new Error('direct read unavailable'))
@@ -399,18 +412,11 @@ describe('Task creation draft ownership', () => {
     expect(screen.getByText(new RegExp(String(args.creation_request_id)))).toBeTruthy()
     expect(screen.getByText(/Goal goal-a/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '이 결과 확인' }))
-    await waitFor(() => expect(taskCreateReceipts.attempts.value[0]?.presented).toBe(true))
+    await waitFor(() => expect(taskCreateReceipts.attempts.value).toHaveLength(0))
     restored.unmount()
     _testResetTaskCreateState({ preserveStorage: true })
     render(html`<${TaskCreateReceiptsPanel} />`)
-    expect(screen.queryByText(/task-1|goal-a/)).toBeNull()
-    mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
-      workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
-      creation_receipt: { state: 'recorded', task_ids: ['task-1'] } }))
-    fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
-    await screen.findByText('task-1 생성 응답을 받았습니다.')
-    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 반복 조회 정리' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
+    expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull()
   })
 
   it('allows a restored definite refusal to be authenticated and removed', async () => {
@@ -437,7 +443,11 @@ describe('Task creation draft ownership', () => {
     expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
   })
 
-  it('keeps an ambiguous read visible after a late success is acknowledged', async () => {
+  it.each([
+    { state: 'ambiguous', ids: ['task-1', 'task-2'], text: /생성 기록이 여러 건입니다/ },
+    { state: 'recorded', ids: ['task-2'], text: /task-2의 생성 기록을 확인했습니다/ },
+    { state: 'not_observed', ids: [], text: /아직 생성 기록을 찾지 못했습니다/ },
+  ])('keeps a $state read visible after a late success is acknowledged', async ({ state, ids, text }) => {
     let resolveCreate!: (value: string) => void
     mocks.callMcpToolAtIdentity.mockImplementationOnce(() => new Promise<string>(resolve => { resolveCreate = resolve }))
     render(html`<div><${TaskCreateForm} /><${TaskCreateReceiptsPanel} /></div>`)
@@ -451,12 +461,16 @@ describe('Task creation draft ownership', () => {
     await screen.findByText('task-1 생성 응답을 받았습니다.')
     mocks.callMcpToolAtIdentity.mockResolvedValueOnce(JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
       workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
-      creation_receipt: { state: 'ambiguous', task_ids: ['task-1', 'task-2'] } }))
+      creation_receipt: { state, task_ids: ids } }))
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
-    await screen.findByText(/생성 기록이 여러 건입니다/)
+    await screen.findByText(text)
     fireEvent.click(screen.getByRole('button', { name: '이 결과 확인' }))
-    expect(screen.getByText(/생성 기록이 여러 건입니다/)).toBeTruthy()
+    expect(screen.getByText(text)).toBeTruthy()
+    expect(screen.getByText(/조회 기록이 있어 이 요청을 정리하지 않고 보관합니다/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: '이 결과 확인' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 반복 조회 정리' }))
+    expect(screen.getByText(text)).toBeTruthy()
+    expect(taskCreateReceipts.attempts.value).toHaveLength(1)
     expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
   })
 

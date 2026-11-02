@@ -516,6 +516,31 @@ function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | 
   }
 }
 
+function observeTreeTaskIds(rows: unknown): { ids: string[]; complete: boolean } {
+  const ids: string[] = []
+  let complete = true
+  function collect(value: unknown): void {
+    if (!Array.isArray(value)) { complete = false; return }
+    for (const item of value) {
+      if (!isRecord(item) || !Array.isArray(item.tasks) || !Array.isArray(item.children)
+        || typeof item.task_count !== 'number' || !Number.isSafeInteger(item.task_count)
+        || item.task_count < 0 || item.task_count !== item.tasks.length) { complete = false; continue }
+      for (const task of item.tasks) {
+        if (!isRecord(task) || typeof task.id !== 'string' || task.id.trim() === ''
+          || (task.goal_id !== undefined && task.goal_id !== null
+            && (typeof task.goal_id !== 'string' || task.goal_id === ''))) {
+          complete = false
+          continue
+        }
+        ids.push(task.id)
+      }
+      collect(item.children)
+    }
+  }
+  collect(rows)
+  return { ids, complete }
+}
+
 function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeResponse | null {
   if (!isRecord(raw)) return null
   const approvalQueueState = requireReadyApprovalQueue(raw)
@@ -532,9 +557,10 @@ function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeRespo
     && Number.isSafeInteger(rawTotalGoals) && rawTotalGoals >= 0
   const identity_observation = { ...observedIds, complete: observedIds.complete && validTotal
     && observedIds.ids.length === rawTotalGoals }
+  const task_identity_observation = observeTreeTaskIds(raw.tree)
   return generatedAt
-    ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary, identity_observation }
-    : { approval_queue_state: approvalQueueState, tree, summary, identity_observation }
+    ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary, identity_observation, task_identity_observation }
+    : { approval_queue_state: approvalQueueState, tree, summary, identity_observation, task_identity_observation }
 }
 
 function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {

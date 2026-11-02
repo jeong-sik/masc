@@ -82,6 +82,22 @@ afterEach(() => {
 })
 
 describe('fetchDashboardGoalsTree decoding', () => {
+  it('retains raw nested Task identity evidence before dropping malformed display rows', async () => {
+    const child = validNode('goal-child', 'Child', { tasks: [validTask('task-1', 'Task'), { id: 'task-1' }],
+      task_count: 2, children: [] })
+    const parent = validNode('goal-parent', 'Parent', { tasks: [], task_count: 0, children: [child] })
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, tree: [parent], summary: { ...emptySummary(), total_goals: 2 } })
+    const tree = await fetchDashboardGoalsTree()
+    expect(tree.task_identity_observation).toEqual({ ids: ['task-1', 'task-1'], complete: true })
+    expect(tree.tree[0]?.children[0]?.tasks).toHaveLength(1)
+  })
+
+  it.each([undefined, -1, '1', 2])('does not treat raw task_count %s as complete identity evidence', async count => {
+    const node = validNode('goal-a', 'Goal', { tasks: [validTask('task-1', 'Task')], task_count: count, children: [] })
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, tree: [node], summary: { ...emptySummary(), total_goals: 1 } })
+    expect((await fetchDashboardGoalsTree()).task_identity_observation?.complete).toBe(false)
+  })
+
   it.each([1.9, '1', '1junk', -1, null, undefined])(
     'does not treat a malformed raw Goal count %s as a complete identity observation',
     async totalGoals => {

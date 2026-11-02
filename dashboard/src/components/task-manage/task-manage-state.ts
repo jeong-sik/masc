@@ -28,6 +28,9 @@ export const taskCreateUsingMemoryOnly = computed(() => memoryOnlyDraft.value ==
 const receiptOwner = signal<TaskReceiptOwner | null>(null)
 export const taskCreateReceiptOwner: ReadonlySignal<TaskReceiptOwner | null> = receiptOwner
 export let taskCreateReceipts = createTaskCreateReceiptStore({ owner: receiptOwner })
+let observedReceiptAuthority: unknown
+let receiptAuthorityEpoch = 0
+let receiptHealthTicket = 0
 
 export const taskCreating = computed(() => {
   const draft = currentTaskDraft.value
@@ -79,6 +82,7 @@ export function _testResetTaskCreateState(options?: { preserveStorage?: boolean 
 function bindReceiptOwner(workspace: ArtifactWorkspace, readOnlyWithoutAuthority = false): TaskReceiptOwner | null {
   const authority = executionWorkspaceAuthority.peek()
   if (!authority && !readOnlyWithoutAuthority) return null
+  const authorityEpoch = receiptAuthorityEpoch
   const workspaceRevision = executionWorkspaceRevision.peek()
   const revision = currentStoredTokenRevision()
   const actor = currentDashboardActor()
@@ -87,6 +91,7 @@ function bindReceiptOwner(workspace: ArtifactWorkspace, readOnlyWithoutAuthority
   const actorRevision = managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek()
   const managedRevision = managedDashboardAuthRevision.peek()
   const isCurrent = () => executionWorkspaceAuthority.peek() === authority
+    && receiptAuthorityEpoch === authorityEpoch
     && executionWorkspaceRevision.peek() === workspaceRevision
     && currentStoredTokenRevision() === revision && currentDashboardActor() === actor
     && (managed ? getStoredToken() === token && getStoredTokenMeta()?.source === 'dev'
@@ -106,7 +111,11 @@ function bindReceiptOwner(workspace: ArtifactWorkspace, readOnlyWithoutAuthority
 }
 
 effect(() => {
-  void executionWorkspaceAuthority.value
+  const authority = executionWorkspaceAuthority.value
+  if (authority !== observedReceiptAuthority) {
+    observedReceiptAuthority = authority
+    receiptAuthorityEpoch++
+  }
   void executionWorkspaceRevision.value
   void storedTokenRevision.value
   void dashboardActorRevision.value
@@ -119,11 +128,13 @@ effect(() => {
 })
 
 async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskReceiptOwner | null> {
+  const ticket = ++receiptHealthTicket
   const authority = executionWorkspaceAuthority.peek()
   if (!authority && !expected) {
     showToast('현재 작업 공간을 확인한 뒤 이전 요청을 다시 확인해 주세요.', 'warning')
     return null
   }
+  const authorityEpoch = receiptAuthorityEpoch
   const workspaceRevision = executionWorkspaceRevision.peek()
   const revision = currentStoredTokenRevision()
   const actor = currentDashboardActor()
@@ -133,14 +144,16 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskRec
   const managedAuthVersion = managedDashboardAuthRevision.peek()
   const ownerAtStart = receiptOwner.peek()
   const current = () => executionWorkspaceAuthority.peek() === authority && executionWorkspaceRevision.peek() === workspaceRevision
+    && receiptAuthorityEpoch === authorityEpoch && receiptHealthTicket === ticket
     && currentStoredTokenRevision() === revision
     && currentDashboardActor() === actor
     && (managed ? getStoredToken() === token && getStoredTokenMeta()?.source === 'dev'
       && managedDashboardActorRevision.peek() === actorVersion && managedDashboardAuthRevision.peek() === managedAuthVersion
       : dashboardActorRevision.peek() === actorVersion)
   const retireMatchingOwner = () => {
-    if (current() && expected && ownerAtStart && receiptOwner.peek() === ownerAtStart
-      && ownerAtStart.workspace.basePath === expected.basePath && ownerAtStart.workspace.mascRoot === expected.mascRoot) {
+    const owner = receiptOwner.peek()
+    if (current() && owner && (owner.access === 'read_only' || (expected && owner === ownerAtStart
+      && owner.workspace.basePath === expected.basePath && owner.workspace.mascRoot === expected.mascRoot))) {
       receiptOwner.value = null
     }
   }
@@ -193,10 +206,10 @@ export async function recheckTaskCreation(requestId: string): Promise<void> {
 export function acknowledgeTaskCreateResult(requestId: string): void {
   const item = taskCreateReceipts.attempts.peek().find(attempt => attempt.requestId === requestId)
   const owner = receiptOwner.peek()
-  if (!item || !owner || !owner.isCurrent() || item.workspace.basePath !== owner.workspace.basePath
+  if (!item || item.checking || !owner || !owner.isCurrent() || item.workspace.basePath !== owner.workspace.basePath
     || item.workspace.mascRoot !== owner.workspace.mascRoot || item.latestReadFailureCurrent
     || !(item.originalCurrent || item.latestReadCurrent)) return
-  taskCreateReceipts.markPresented(requestId)
+  if (taskCreateReceipts.markPresented(requestId)) taskCreateReceipts.forgetDefinite(requestId)
 }
 
 export function compactTaskCreateReceipts(): void {
@@ -236,18 +249,24 @@ export type TaskCreatePresentation = {
 
 function treeHasCreatedTask(tree: DashboardGoalsTreeResponse | null, goalId: string, taskId: string): boolean {
   if (!tree?.identity_observation?.complete || !isUnambiguousGoalId(goalId, tree.identity_observation.ids)) return false
+  if (!tree.task_identity_observation?.complete
+    || tree.task_identity_observation.ids.filter(id => id === taskId).length !== 1) return false
   const nodes: GoalTreeNode[] = []
   const pending = [...tree.tree]
+  let taskMatches = 0
   while (pending.length > 0) {
     const node = pending.pop()
-    if (!node || !Array.isArray(node.children)) return false
+    if (!node || !Array.isArray(node.children) || !Array.isArray(node.tasks)
+      || !Number.isSafeInteger(node.task_count) || node.task_count !== node.tasks.length) return false
     if (node.id === goalId) nodes.push(node)
+    for (const task of node.tasks) {
+      if (task.id !== taskId) continue
+      if (node.id !== goalId || (task.goal_id != null && task.goal_id !== goalId)) return false
+      taskMatches++
+    }
     pending.push(...node.children)
   }
-  const node = nodes[0]
-  if (nodes.length !== 1 || !node || !Array.isArray(node.tasks)) return false
-  const matches = node.tasks.filter(task => task.id === taskId)
-  return matches.length === 1 && matches[0]?.goal_id === goalId
+  return nodes.length === 1 && taskMatches === 1
 }
 
 export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTaskDispatch,

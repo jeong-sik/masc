@@ -16,7 +16,9 @@ import * as store from '../../store'
 import { goalTreeData, goalTreeError } from '../../goal-tree-state'
 import { TaskCreateForm, resetForm } from './task-create-form'
 import { TaskCreateReceiptsPanel } from './task-create-receipt-panel'
-import { _testResetTaskCreateState, createTask, showTaskCreate, taskCreateReceiptOwner, taskCreateReceipts } from './task-manage-state'
+import { TASK_CREATE_RECEIPT_STORAGE_KEY } from './task-create-receipt'
+import { _testResetTaskCreateState, acknowledgeTaskCreateResult, createTask, recheckTaskCreation, showTaskCreate,
+  taskCreateReceiptOwner, taskCreateReceipts } from './task-manage-state'
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
@@ -47,7 +49,8 @@ afterEach(() => {
   window.localStorage.removeItem(DASHBOARD_AGENT_NAME_KEY)
 })
 
-it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', 'workspace-aba', 'token-aba', 'actor-aba', 'managed-hint'])(
+it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', 'workspace-aba', 'authority-aba',
+  'token-aba', 'actor-aba', 'managed-hint'])(
   'uses only a scoped read after real execution authority withdrawal: %s', async scenario => {
     setStoredToken('actor-a-token', scenario === 'managed-hint'
       ? { source: 'dev', actor: 'dashboard', role: 'admin' } : { source: 'manual' })
@@ -57,9 +60,13 @@ it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', '
     let taskPosts = 0
     let receiptReads = 0
     let healthReads = 0
+    let finishHealth!: (response: Response) => void
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/health?full=1') {
         healthReads++
+        if (scenario === 'authority-aba' && healthReads === 2) {
+          return new Promise<Response>(resolve => { finishHealth = resolve })
+        }
         return json({ paths: ((scenario === 'workspace-mismatch' && healthReads > 1)
           || (scenario === 'workspace-change-after' && healthReads > 2))
           ? { effective_base_path: '/b', effective_masc_root: '/b/.masc' }
@@ -90,6 +97,23 @@ it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', '
     expect(taskCreateReceipts.attempts.peek()[0]?.original).toEqual({ kind: 'created', taskId: 'task-private' })
     expect(screen.queryByText(/task-private/)).toBeNull()
 
+    if (scenario === 'authority-aba') {
+      const revision = store.executionWorkspaceRevision.peek()
+      const pendingRead = recheckTaskCreation(creationRequestId)
+      await waitFor(() => expect(healthReads).toBe(2))
+      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+        status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
+      expect(store.executionWorkspaceAuthority.peek()).not.toBeNull()
+      await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
+      expect(store.executionWorkspaceAuthority.peek()).toBeNull()
+      expect(store.executionWorkspaceRevision.peek()).toBe(revision)
+      finishHealth(json({ paths: { effective_base_path: '/a', effective_masc_root: '/a/.masc' } }))
+      await pendingRead
+      expect(receiptReads).toBe(0)
+      expect(taskCreateReceiptOwner.peek()).toBeNull()
+      expect(screen.queryByText(/task-private/)).toBeNull()
+      return
+    }
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
     if (scenario === 'workspace-mismatch') {
       await waitFor(() => expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('작업 공간을 확인하지 못했습니다'), 'warning'))
@@ -146,7 +170,120 @@ it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', '
   },
 )
 
-it.each(['partial', 'attested', 'missing-attestation'])(
+it.each(['owner-then-mismatch', 'superseded-success', 'superseded-mismatch', 'same-request-superseded'])(
+  'orders concurrent workspace checks without reviving or clearing another owner: %s', async scenario => {
+    setStoredToken('actor-a-token', { source: 'manual' })
+    await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
+    const makeAttempt = (requestId: string, basePath: string, taskId: string) => ({ requestId,
+      workspace: { basePath, mascRoot: `${basePath}/.masc` }, goalId: null, createdAt: '2026-11-02T00:00:00.000Z',
+      original: { kind: 'created', taskId }, presented: false, reads: [] })
+    sessionStorage.setItem(TASK_CREATE_RECEIPT_STORAGE_KEY, JSON.stringify({ schema: TASK_CREATE_RECEIPT_STORAGE_KEY,
+      attempts: [makeAttempt('request-a', '/a', 'task-a'), makeAttempt('request-b', '/b', 'task-b')] }))
+    _testResetTaskCreateState({ preserveStorage: true })
+    const healthResolvers: Array<(response: Response) => void> = []
+    let receiptReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/health?full=1') return new Promise<Response>(resolve => { healthResolvers.push(resolve) })
+      expect(url).toBe('/mcp')
+      receiptReads++
+      const request = JSON.parse(String(init?.body))
+      const text = JSON.stringify({ ok: true, creation_request_id: request.params.arguments.creation_request_id,
+        workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+        creation_receipt: { state: 'recorded', task_ids: ['task-a'] } })
+      return json({ id: request.id, result: { content: [{ type: 'text', text }] } })
+    }))
+    render(html`<${TaskCreateReceiptsPanel} />`)
+    const health = (basePath: string) => json({ paths: { effective_base_path: basePath, effective_masc_root: `${basePath}/.masc` } })
+    const resolveHealth = (index: number, basePath: string) => {
+      const resolve = healthResolvers[index]
+      if (!resolve) throw new Error('Missing health request')
+      resolve(health(basePath))
+    }
+    const first = recheckTaskCreation(scenario === 'superseded-mismatch' ? 'request-b' : 'request-a')
+    await waitFor(() => expect(healthResolvers).toHaveLength(1))
+    if (scenario === 'owner-then-mismatch') {
+      resolveHealth(0, '/a')
+      await first
+      await screen.findByText('task-a 생성 응답을 받았습니다.')
+      const second = recheckTaskCreation('request-b')
+      await waitFor(() => expect(healthResolvers).toHaveLength(2))
+      resolveHealth(1, '/c')
+      await second
+      expect(taskCreateReceiptOwner.peek()).toBeNull()
+      expect(screen.queryByText(/task-a|task-b/)).toBeNull()
+      expect(receiptReads).toBe(1)
+    } else {
+      const second = recheckTaskCreation(scenario === 'superseded-success' ? 'request-b' : 'request-a')
+      await waitFor(() => expect(healthResolvers).toHaveLength(2))
+      if (scenario === 'superseded-success') {
+        resolveHealth(0, '/a')
+        await first
+        resolveHealth(1, '/c')
+        await second
+        expect(taskCreateReceiptOwner.peek()).toBeNull()
+        expect(receiptReads).toBe(0)
+      } else {
+        resolveHealth(1, '/a')
+        await second
+        await screen.findByText('task-a 생성 응답을 받았습니다.')
+        resolveHealth(0, '/c')
+        await first
+        expect(screen.getByText('task-a 생성 응답을 받았습니다.')).toBeTruthy()
+        expect(receiptReads).toBe(1)
+      }
+    }
+    expect(taskCreateReceipts.attempts.peek()).toHaveLength(2)
+    expect(taskCreateReceipts.attempts.peek()[0]?.original).toEqual({ kind: 'created', taskId: 'task-a' })
+    expect(taskCreateReceipts.attempts.peek()[1]?.original).toEqual({ kind: 'created', taskId: 'task-b' })
+  },
+)
+
+it.each([401, 403])('hides previously authorized evidence while HTTP %i body is pending', async status => {
+  setStoredToken('actor-a-token', { source: 'manual' })
+  await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
+  sessionStorage.setItem(TASK_CREATE_RECEIPT_STORAGE_KEY, JSON.stringify({ schema: TASK_CREATE_RECEIPT_STORAGE_KEY,
+    attempts: [{ requestId: 'request-a', workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      goalId: 'goal-private', createdAt: '2026-11-02T00:00:00.000Z',
+      original: { kind: 'created', taskId: 'task-private' }, presented: false, reads: [] }] }))
+  _testResetTaskCreateState({ preserveStorage: true })
+  let readCount = 0
+  let finishBody!: (body: string) => void
+  let bodyStarted!: () => void
+  const started = new Promise<void>(resolve => { bodyStarted = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/health?full=1') return json({ paths: { effective_base_path: '/a', effective_masc_root: '/a/.masc' } })
+    const request = JSON.parse(String(init?.body))
+    readCount++
+    if (readCount === 2) {
+      const response = new Response('', { status })
+      response.text = () => { bodyStarted(); return new Promise(resolve => { finishBody = resolve }) }
+      return response
+    }
+    const text = JSON.stringify({ ok: true, creation_request_id: 'request-a',
+      workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+      creation_receipt: { state: 'recorded', task_ids: ['task-private'] } })
+    return json({ id: request.id, result: { content: [{ type: 'text', text }] } })
+  }))
+  render(html`<${TaskCreateReceiptsPanel} />`)
+  fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+  await screen.findByText('task-private 생성 응답을 받았습니다.')
+  fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+  await started
+  expect(taskCreateReceipts.attempts.peek()[0]?.checking).toBe(true)
+  expect(screen.queryByText(/task-private|goal-private|request-a/)).toBeNull()
+  expect(screen.queryByRole('button', { name: '이 결과 확인' })).toBeNull()
+  acknowledgeTaskCreateResult('request-a')
+  expect(taskCreateReceipts.attempts.peek()[0]?.presented).toBe(false)
+  expect(taskCreateReceipts.compact()).toMatchObject({ removedAttempts: 0, removedReads: 0, removedErrors: 0 })
+  finishBody(JSON.stringify({ error: 'denied' }))
+  await screen.findByText(/생성 기록을 확인하지 못했습니다/)
+  expect(screen.queryByText(/task-private|goal-private|request-a/)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
+  await screen.findByText('task-private 생성 응답을 받았습니다.')
+  expect(readCount).toBe(3)
+})
+
+it.each(['partial', 'attested', 'nested', 'missing-attestation', 'duplicate-task', 'dropped-duplicate', 'missing-count', 'wrong-goal'])(
   'uses the real Goal refresh and direct workspace attestation before cleanup: %s', async scenario => {
     setStoredToken('actor-a-token', { source: 'manual' })
     mocks.fetchExecution.mockResolvedValue({
@@ -154,11 +291,22 @@ it.each(['partial', 'attested', 'missing-attestation'])(
       status: { project: 'project-a', workspace_root: '/a' }, agents: [], messages: [], keepers: [],
       tasks: [{ id: 'task-private', title: 'Task', goal_id: 'goal-a', status: 'todo' }],
     })
-    const tree = { approval_queue_state: { state: 'ready' }, tree: [{ id: 'goal-a', title: 'Goal', phase: 'executing',
-      criterion_revision: 'criterion-1', measurement: { state: 'not_recorded' }, children: [],
-      tasks: [{ id: 'task-private', title: 'Task', status: 'todo', goal_id: 'goal-a',
-        is_terminal: false, created_at: '2026-01-01', updated_at: '2026-01-02' }] }],
-    summary: { total_goals: 1, active_goals: 1, phase_counts: {}, total_tasks: 1, done_tasks: 0, pending_approvals: 0 } }
+    const task: Record<string, unknown> = { id: 'task-private', title: 'Task', status: 'todo',
+      is_terminal: false, created_at: '2026-01-01', updated_at: '2026-01-02' }
+    if (scenario === 'wrong-goal') task.goal_id = 'another-goal'
+    const goal: Record<string, unknown> = { id: 'goal-a', title: 'Goal', phase: 'executing',
+      criterion_revision: 'criterion-1', measurement: { state: 'not_recorded' }, children: [], child_count: 0, task_count: 1,
+      tasks: [task] }
+    if (scenario === 'missing-count') delete goal.task_count
+    if (scenario === 'dropped-duplicate') { goal.tasks = [task, { id: 'task-private' }]; goal.task_count = 2 }
+    const other = { id: 'goal-parent', title: 'Parent', phase: 'executing', criterion_revision: 'criterion-1',
+      measurement: { state: 'not_recorded' }, children: [], child_count: 0, task_count: 0, tasks: [] }
+    let nodes: Record<string, unknown>[] = [goal]
+    if (scenario === 'nested') nodes = [{ ...other, children: [goal], child_count: 1 }]
+    if (scenario === 'duplicate-task') nodes = [goal, { ...other, tasks: [task], task_count: 1 }]
+    const totalGoals = scenario === 'nested' || scenario === 'duplicate-task' ? 2 : 1
+    const tree = { approval_queue_state: { state: 'ready' }, tree: nodes,
+      summary: { total_goals: totalGoals, active_goals: totalGoals, phase_counts: {}, total_tasks: 1, done_tasks: 0, pending_approvals: 0 } }
     let directReads = 0
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/v1/dashboard/planning') {
@@ -192,8 +340,9 @@ it.each(['partial', 'attested', 'missing-attestation'])(
       expect(goalTreeData.peek()).toBeNull()
       expect(goalTreeError.peek()).not.toBeNull()
       expect(directReads).toBe(0)
-    } else expect(directReads).toBe(1)
-    if (scenario === 'attested') expect(taskCreateReceipts.attempts.peek()).toHaveLength(0)
+    } else if (scenario === 'attested' || scenario === 'nested' || scenario === 'missing-attestation') expect(directReads).toBe(1)
+    else expect(directReads).toBe(0)
+    if (scenario === 'attested' || scenario === 'nested') expect(taskCreateReceipts.attempts.peek()).toHaveLength(0)
     else expect(taskCreateReceipts.attempts.peek()[0]).toMatchObject({ original: { kind: 'created', taskId: 'task-private' },
       presented: false })
   },

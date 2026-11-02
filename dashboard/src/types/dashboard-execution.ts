@@ -713,6 +713,8 @@ export interface DashboardGoalsTreeResponse {
   summary: GoalTreeSummary
   /** Client-side ID evidence captured before the display decoder drops rows. */
   identity_observation?: { readonly ids: readonly string[]; readonly complete: boolean }
+  /** Raw task identities and counts, for decisions requiring an unambiguous tree. */
+  task_identity_observation?: { readonly ids: readonly string[]; readonly complete: boolean }
 }
 
 export interface GoalDetailKeeper {

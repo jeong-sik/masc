@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
 import { acknowledgeTaskCreateResult, compactTaskCreateReceipts, recheckTaskCreation, retryTaskCreateStorage,
   taskCreateReceiptOwner, taskCreateReceipts } from './task-manage-state'
-import type { TaskCreateAttempt, TaskCreationRead } from './task-create-receipt'
+import { hasUnresolvedTaskCreationEvidence, type TaskCreateAttempt, type TaskCreationRead } from './task-create-receipt'
 
 function readText(read: TaskCreationRead): string {
   switch (read.kind) {
@@ -30,7 +30,7 @@ export function TaskCreateReceiptsPanel() {
     || item.original.kind === 'unconfirmed' || (item.original.kind === 'created' && !item.presented)
     || (!item.originalCurrent && (item.original.kind === 'not_sent' || item.original.kind === 'rejected_before_effect'
       || (item.original.kind === 'created' && item.presented)))
-    || item.reads.some(read => read.kind === 'ambiguous'))
+    || hasUnresolvedTaskCreationEvidence(item))
   const storageState = taskCreateReceipts.storageState.value
   if (attempts.length === 0 && storageState !== 'write_failed') return null
   return html`<section aria-label="이전 태스크 생성 요청" class="rounded border border-card-border p-3">
@@ -42,15 +42,19 @@ export function TaskCreateReceiptsPanel() {
     ${attempts.map((attempt, index) => {
       const sameOwner = Boolean(owner && owner.isCurrent() && owner.workspace.basePath === attempt.workspace.basePath
         && owner.workspace.mascRoot === attempt.workspace.mascRoot)
-      const canShow = sameOwner && !attempt.latestReadFailureCurrent && (attempt.originalCurrent || attempt.latestReadCurrent)
+      const canShow = sameOwner && !attempt.checking && !attempt.latestReadFailureCurrent
+        && (attempt.originalCurrent || attempt.latestReadCurrent)
       const latestRead = attempt.reads[attempt.reads.length - 1]
       return html`<div key=${attempt.requestId} role="status" class="mt-2 text-xs text-text-muted">
         <p>요청 ${index + 1}${canShow ? ` · ${attempt.requestId} · ${attempt.createdAt}${attempt.goalId ? ` · Goal ${attempt.goalId}` : ''}` : ''}</p>
         <p>${attemptText(attempt, canShow)}</p>
-        ${sameOwner && attempt.latestReadFailureCurrent && latestRead?.kind === 'error' ? html`<p>${readText(latestRead)}</p>` : null}
+        ${sameOwner && !attempt.checking && attempt.latestReadFailureCurrent && latestRead?.kind === 'error'
+          ? html`<p>${readText(latestRead)}</p>` : null}
         ${canShow && attempt.latestReadCurrent && attempt.reads.length > 0 ? html`<ol>
           ${attempt.reads.map((read, readIndex) => html`<li key=${readIndex}>${readText(read)}</li>`)}
         </ol>` : null}
+        ${canShow && hasUnresolvedTaskCreationEvidence(attempt)
+          ? html`<p>서로 다른 조회 기록이 있어 이 요청을 정리하지 않고 보관합니다. 조회 시점에 따라 결과가 다를 수 있습니다.</p>` : null}
         ${attempt.persistence === 'memory' ? html`<p>이 요청은 새로고침하면 이 탭에서 확인할 수 없습니다.</p>` : null}
         <${ActionButton} variant="ghost" size="sm" disabled=${attempt.checking}
           onClick=${() => { void recheckTaskCreation(attempt.requestId) }}>
@@ -63,6 +67,6 @@ export function TaskCreateReceiptsPanel() {
     <${ActionButton} variant="ghost" size="sm" onClick=${compactTaskCreateReceipts}>
       확인된 기록과 반복 조회 정리
     <//>
-    <p class="text-xs text-text-muted">미확정 요청과 모호한 결과는 보관하고, 연속된 같은 조회의 처음과 최근 버전을 남깁니다.</p>
+    <p class="text-xs text-text-muted">미확정 요청과 모호한 결과는 보관하고, 같은 결과 구간의 첫·최근 조회와 오류 유형별 첫·최근 기록을 남깁니다.</p>
   </section>`
 }

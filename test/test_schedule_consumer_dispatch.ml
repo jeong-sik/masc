@@ -114,6 +114,8 @@ let with_workspace f =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Masc_test_deps.Board_test_preparation.prepare ~base_path:dir
+    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
@@ -2518,7 +2520,7 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
           check string
             "retry reports the resolved owner fence"
             (Printf.sprintf
-               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s; schedule returned to due for retry"
                target_keeper
                (Keeper_shutdown_types.Operation_id.to_string operation_id))
             detail

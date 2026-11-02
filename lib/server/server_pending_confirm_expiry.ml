@@ -81,9 +81,17 @@ let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
               notified, None, true
           | Ok entries ->
               let plan = expiry_plan ~now:(Eio.Time.now clock) entries in
-              if source_failed ||
-                 not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) then
+              let newly_expired =
+                not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) in
+              (* A confirmation past its deadline leaves the store unwritten:
+                 readers stop listing it at read time. A deadline that passed
+                 while the store could not be read may since have been removed
+                 by a reader's cleanup, so a read that recovers is announced
+                 too. *)
+              if source_failed || newly_expired then begin
                 invalidate ~base_path:scope.config.base_path;
+                Operator_pending_confirm_broadcast.changed ~base_path:scope.config.base_path
+              end;
               plan.expired, plan.next, false in
         match await_next scope next with
         | `Replaced -> follow_current ()

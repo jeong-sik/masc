@@ -103,6 +103,10 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // A Keeper's durable async message requests changed
   // (lib/keeper/keeper_msg_async_broadcast.ml). The TUI re-reads on it.
   'keeper_async_requests_changed',
+  // The confirmations waiting for an operator changed or one passed its
+  // deadline (lib/operator/operator_pending_confirm_broadcast.ml). The TUI
+  // re-reads on it.
+  'pending_confirms_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

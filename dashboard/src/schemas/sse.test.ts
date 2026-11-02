@@ -52,6 +52,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_async_requests_changed')).toBe('keeper_async_requests_changed')
   })
 
+  it('accepts pending confirmation changes', () => {
+    expect(SSEEventTypeSchema.parse('pending_confirms_changed')).toBe('pending_confirms_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

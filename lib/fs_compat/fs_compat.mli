@@ -1734,6 +1734,22 @@ val append_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
+(** Append only if identity, length and all previously observed bytes still
+    match [expected] under the same stable sibling lock. This also refuses
+    same-cursor content changes and inode-reuse ABA before writing. It reads
+    the complete previous bytes on each append; it never recovers torn tails.
+    Append fsync, rollback and descriptor-settlement evidence retain the
+    existing transaction semantics. *)
+val append_private_jsonl_durable_locked_at_snapshot_result :
+  string -> expected:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+(** The same exact-snapshot append with actual descriptor-settlement injection. *)
+val append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Atomically replace a complete private JSONL store iff [expected] still
     names the exact current store. The staged payload and parent directory are
     fsynced; no directory-fsync failure is suppressed. The stable sibling lock
@@ -1751,8 +1767,13 @@ val rewrite_private_jsonl_durable_locked_at_snapshot_result :
   string -> expected:private_jsonl_snapshot -> string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
-(** Production-path seam for descriptor settlement after a snapshot check. *)
+(** Production-path seam for descriptor settlement after a snapshot check.
+    [before_sync_rewrite_parent] runs after publication, immediately before
+    the real parent-directory fsync, inside its [Sync_rewrite_parent] failure
+    boundary. Raising there retains [Rewrite_published_durability_unknown];
+    visible replacement bytes do not prove completed durability. *)
 val rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing :
+  ?before_sync_rewrite_parent:(string -> unit) ->
   io:private_jsonl_transaction_io_for_testing ->
   string -> expected:private_jsonl_snapshot -> string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result

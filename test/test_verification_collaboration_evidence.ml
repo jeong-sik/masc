@@ -318,7 +318,11 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
      `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
              "comment_tail", `Int 1; "comment_offset", `Int 0]];
   let Board_dispatch.Jsonl store = Board_dispatch.backend () in
-  store.Board.posts_load_result <- Error "unreadable persisted source";
+  let path = Board.persist_path store in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+    (fun out -> output_string out "{invalid-post-source\n");
+  Alcotest.(check bool) "actual malformed posts source fails reload" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   Evidence.capture ~config ~authority:(Evidence.Task_producer "producer") ~references:[board_ref p]
     |> require_error "corrupt source captured";
   ignore (read task "masc_board_post_get" (post_args p)))

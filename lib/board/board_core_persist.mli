@@ -39,6 +39,15 @@ val create_store : workspace_masc_dir:string -> unit -> store
     the empty string raises [Invalid_argument]. No payload files are created.
     The binding is a path, not an ongoing symlink or resource-identity lease. *)
 
+val create_store_with_posts_io_for_testing :
+  workspace_masc_dir:string ->
+  io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
+(** The same production store and posts writer with an immutable, store-local
+    Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
+    initialization and the actual post-rename rewrite-parent sync; [close_fd]
+    covers descriptor settlement. Posts remain unobserved until explicit load. *)
+
+
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
 (** Reject a mutation whose full-snapshot source did not load completely.
@@ -52,7 +61,8 @@ val with_lock : store -> (unit -> 'a) -> 'a
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 (** Observer exceptions propagate only after unlocking, so an instrumentation
     failure cannot poison this mutex. Exceptions from the mutation itself
-    retain the write lock's normal poisoning behavior. *)
+    retain the write lock's normal poisoning behavior, except the private
+    known-primary settlement carrier, which leaves all Board locks normally. *)
 val sweep : store -> int * int
 val maybe_sweep : store -> unit
 val reset_sweep_schedule_for_test : store -> unit
@@ -70,12 +80,37 @@ val sub_boards_path : store -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : store -> unit
 
-val save_posts_snapshot : store -> string -> (unit, board_error) result
+type posts_snapshot
+(** Frozen candidate rows and their exact expected source observation. *)
+val capture_posts_snapshot : ?replacement:post -> store -> posts_snapshot
+val save_posts_snapshot : store -> posts_snapshot -> posts_write_outcome
+(** Capture under persist then state; save retains persist and acquires no
+    recursive Board lock. A stale or unreadable source cannot authorize save.
+    Binding is by canonical path and exact observation, not a store-owner token. *)
+val require_posts_source_readable : store -> (unit, board_error) result
+(** Pure source gate; caller holds the persistence mutex. Refused and unsettled
+    sources never grant a write. Definite transient nonwrites retain the expected
+    observation, while observed stale identity/bytes/tail revoke it. *)
+val posts_source_failure_to_board_error : posts_source_failure -> board_error
+val finish_posts_write : posts_write_outcome -> (unit, board_error) result
+(** Caller holds persistence. Observe settlement diagnostics only after known
+    successful memory publication, or a proven nonwrite after rollback/refusal.
+    Reserved cleanup exceptions leave enclosing Board mutexes normally and are
+    reraised after unlocking with their original backtrace. *)
+val publish_posts_read : store -> posts_source_read -> unit
+(** Loader publication under persistence then state locks. *)
+val read_posts_source : store -> posts_source_read
+(** Caller holds persistence; general reads never recover tails or settle an
+    unknown write. Complete and partial reads retain the actual Fs snapshot. *)
+val finish_posts_read : posts_source_read -> unit
+val inspect_posts_source : workspace_masc_dir:string -> posts_source_read
+(** Coherent lower-shell read for durable preflight. It grants no operation
+    receipt, historical absence or authority to mutate a separate live store. *)
 val save_comments_snapshot : store -> string -> (unit, board_error) result
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string
 val save_reactions_jsonl_result : store -> string -> (unit, board_error) result
-val append_post : store -> post -> (unit, board_error) result
+val append_post : store -> post -> posts_write_outcome
 val append_comment : store -> comment -> (unit, board_error) result
 
 val sub_board_access_to_string : sub_board_access -> string

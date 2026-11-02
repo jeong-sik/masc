@@ -41,9 +41,10 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store ~workspace_masc_dir () =
+let create_store_with_posts_io ~workspace_masc_dir posts_io_for_testing () =
   let workspace_masc_dir = Board_paths.capture_workspace_masc_dir workspace_masc_dir in
-  { posts_load_result = Ok ()
+  { posts_source = Posts_unobserved
+  ; posts_io_for_testing
   ; comments_load_result = Ok ()
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
@@ -76,6 +77,11 @@ let create_store ~workspace_masc_dir () =
   ; posts_by_run_id = Hashtbl.create 256
   }
 ;;
+
+let create_store ~workspace_masc_dir () =
+  create_store_with_posts_io ~workspace_masc_dir None ()
+let create_store_with_posts_io_for_testing ~workspace_masc_dir ~io () =
+  create_store_with_posts_io ~workspace_masc_dir (Some io) ()
 
 let require_persisted_snapshot_readable = function
   | Ok () -> Ok ()
@@ -209,12 +215,20 @@ let mark_dirty_comment store comment_id =
 
 (** {1 Eio-style Locking with Switch.on_release} *)
 
-let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
+exception Deferred_persist_observer of exn * Printexc.raw_backtrace
+
+let with_lock store f =
+  let result = Eio.Mutex.use_rw ~protect:true store.mutex (fun () ->
+    try Ok (f ()) with
+    | Board_posts_source.Reserved_settlement settlement -> Error settlement) in
+  match result with
+  | Ok value -> value
+  | Error settlement -> raise (Board_posts_source.Reserved_settlement settlement)
 
 (** Serialize JSONL writes. Callers must never hold the state mutex while
     acquiring [persist_mutex]. Acquire the persist lock before taking a state
     snapshot, and retain it until the snapshot has been written. *)
-let with_persist_lock store f =
+let with_persist_lock_internal ~defer_settlement store f =
   let observe f =
     try f (); Ok () with
     | exn -> Error (exn, Printexc.get_raw_backtrace ())
@@ -230,7 +244,10 @@ let with_persist_lock store f =
       | Ok () ->
         (* Mutation exceptions still cross [use_rw] and poison an uncertain
            store. Observer exceptions leave it normally before re-raising. *)
-        let result = f () in
+        let result =
+          try Ok (f ()) with
+          | Board_posts_source.Reserved_settlement settlement -> Error settlement
+        in
         let observation = observe (fun () ->
           let released = Time_compat.now () in
           Board_metrics_hooks.observe_persist_lock_held_sec
@@ -239,10 +256,22 @@ let with_persist_lock store f =
         Ok (result, observation))
   in
   match observed with
-  | Ok (result, Ok ()) -> result
-  | Error (exn, backtrace) | Ok (_, Error (exn, backtrace)) ->
+  | Ok (Ok result, Ok ()) -> result
+  | Ok (Error settlement, _) ->
+    if defer_settlement then raise (Board_posts_source.Reserved_settlement settlement)
+    else Printexc.raise_with_backtrace settlement.exception_ settlement.backtrace
+  | Error (exn, backtrace) | Ok (Ok _, Error (exn, backtrace)) ->
+    (* The observer ran outside mutation work, and [persist_mutex] is already
+       released. Fusion still owns its origin lock: carry reserved observer
+       failures through that lock too, without inventing a write receipt. *)
+    (match defer_settlement, Board_posts_source.reserved_exception (exn, backtrace) with
+     | true, Some (exception_, original_backtrace) ->
+       raise (Deferred_persist_observer (exception_, original_backtrace))
+     | true, None | false, _ -> ());
     Printexc.raise_with_backtrace exn backtrace
 ;;
+
+let with_persist_lock store f = with_persist_lock_internal ~defer_settlement:false store f
 
 (** {1 Sweeper - Aggressive Cleanup} *)
 let vote_key_target key =
@@ -256,11 +285,12 @@ let vote_key_target key =
 ;;
 
 let sweep store =
+  with_persist_lock store (fun () ->
   with_lock store (fun () ->
     (* Best-effort loaded rows remain readable, but cannot authorize deletion
        of a target and its dependents until all four sources loaded fully.
        The loader retains the typed failures for diagnosis and healthy reload. *)
-    match store.posts_load_result, store.comments_load_result,
+    match Board_posts_source.require_readable store, store.comments_load_result,
           store.votes_load_result, store.reactions_load_result with
     | Error _, _, _, _ | _, Error _, _, _
     | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
@@ -419,7 +449,7 @@ let sweep store =
     if !removed_posts > 0 || !removed_comments > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
     store.last_sweep <- now;
-    !removed_posts, !removed_comments)
+    !removed_posts, !removed_comments))
 ;;
 
 (** Auto-sweep if needed, delegates to flusher actor inbox *)
@@ -522,20 +552,6 @@ let ensure_masc_dir = Board_paths.ensure_masc_dir
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
-let posts_jsonl_unlocked ~(replacement : post) store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter
-    (fun key (pst : post) ->
-       let pst =
-         if String.equal key (Post_id.to_string replacement.id)
-         then replacement
-         else pst
-       in
-       Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
-       Buffer.add_char buf '\n')
-    store.posts;
-  Buffer.contents buf
-;;
 (* A snapshot replaces the whole file with what memory holds. The loader reads
    every line and keeps each row it can decode, but a line it cannot decode
    never reaches memory, so the rewrite would delete that line: the only
@@ -555,18 +571,41 @@ let refuse_partial_snapshot ~where ~file load_result =
          file detail)
 ;;
 
-let save_posts_snapshot store content =
-  match refuse_partial_snapshot ~where:"rewrite_posts" ~file:"posts" store.posts_load_result with
-  | Error _ as refused -> refused
-  | Ok () ->
-    (try
-       ensure_masc_dir store;
-       let path = persist_path store in
-       match Fs_compat.save_file_atomic path content with
-       | Ok () -> Ok ()
-       | Error msg -> persist_io_error ~where:"rewrite_posts" msg
-     with
-     | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg)
+type posts_snapshot = Board_posts_source.snapshot
+let capture_posts_snapshot = Board_posts_source.capture
+let save_posts_snapshot = Board_posts_source.rewrite
+let append_post = Board_posts_source.append
+let require_posts_source_readable = Board_posts_source.require_readable
+let posts_source_failure_to_board_error = Board_posts_source.failure_to_board_error
+let read_posts_source = Board_posts_source.read
+let publish_posts_read = Board_posts_source.publish_read
+let finish_posts_write outcome =
+  (match outcome with
+   | Posts_written { settlement_diagnostic = None } -> ()
+   | Posts_written { settlement_diagnostic = Some error } ->
+     record_persist_error ~where:"posts settlement" (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Posts_not_written failure | Posts_write_unknown failure ->
+     record_persist_error ~where:"posts source" (show_board_error (posts_source_failure_to_board_error failure)));
+  Board_posts_source.finish_write outcome
+let finish_posts_read outcome =
+  (match outcome with
+   | Posts_complete { settlement_diagnostic = Some error; _ }
+   | Posts_partial { settlement_diagnostic = Some error; _ } ->
+     record_persist_error ~where:"posts read settlement" (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Posts_complete { settlement_diagnostic = None; _ }
+   | Posts_partial { settlement_diagnostic = None; _ } | Posts_unavailable _ -> ());
+  Board_posts_source.finish_read outcome
+let inspect_posts_source ~workspace_masc_dir =
+  let store = create_store ~workspace_masc_dir () in
+  (* This independent unpublished store has no concurrent model or lock owner;
+     unlike live loader admission this preflight is also usable outside Eio. *)
+  try
+    let outcome = read_posts_source store in
+    publish_posts_read store outcome;
+    finish_posts_read outcome;
+    outcome
+  with Board_posts_source.Reserved_settlement settlement ->
+    Printexc.raise_with_backtrace settlement.exception_ settlement.backtrace
 ;;
 let comments_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -627,16 +666,7 @@ let save_reactions_jsonl_result store content =
   | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
 ;;
 
-(** {1 Append Helpers}  RFC-0091: [append_post] / [append_comment] are *create-only fast paths*. *)
-let append_post store (p : post) =
-  try
-    ensure_masc_dir store;
-    let path = persist_path store in
-    Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
-    Ok ()
-  with
-  | Sys_error msg -> persist_io_error ~where:"append_post" msg
-;;
+(** {1 Comments append helper. Posts use the stable source owner above.} *)
 let append_comment store (c : comment) =
   try
     ensure_masc_dir store;
@@ -760,7 +790,8 @@ let validate_post_origin_for_author ~author_id (origin : post_origin option)
          (Validation_error "origin.fusion_run_id must not be empty"))
 ;;
 
-let create_post_with_audience
+let create_post_with_audience_internal
+      ~defer_settlement
       store
       ~lookup
       ~author
@@ -869,7 +900,7 @@ let create_post_with_audience
       | Error _ as e -> e
       | Ok post ->
         let creation = { post; audience; unresolved } in
-        with_persist_lock store (fun () ->
+        with_persist_lock_internal ~defer_settlement store (fun () ->
           (* Runtime sub-board mutations share this persistence lock. Check
              their current policy before append; no policy rejection follows
              a successful append. The state lock is released for I/O. *)
@@ -881,8 +912,12 @@ let create_post_with_audience
           | Ok () ->
             phase := Append_started;
             match append_post store post with
-            | Error _ as error -> error
-            | Ok () ->
+            | (Posts_not_written _ as outcome) ->
+              phase := Before_append;
+              finish_posts_write outcome |> Result.map (fun () -> creation)
+            | (Posts_write_unknown _ as outcome) ->
+              finish_posts_write outcome |> Result.map (fun () -> creation)
+            | (Posts_written _ as outcome) ->
               with_lock store (fun () ->
                 Hashtbl.add store.posts (Post_id.to_string post.id) post;
                 index_post_origin store post;
@@ -890,15 +925,27 @@ let create_post_with_audience
                 Stdlib.incr store.post_count;
                 invalidate_post_caches store;
                 phase := Post_committed creation);
-              Ok creation)
+              finish_posts_write outcome |> Result.map (fun () -> creation))
   in
   Result.map_error (fun error -> failure (Post_publication_failure.Board_error error)) result
   with
+  | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
+  | Deferred_persist_observer _ as carrier -> raise carrier
   | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout
      | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
     let backtrace = Printexc.get_raw_backtrace () in
     Printexc.raise_with_backtrace exn backtrace
-  | exn -> Error (failure (Post_publication_failure.Raised exn))
+  | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.propagate_reserved exn backtrace;
+    Error (failure (Post_publication_failure.Raised exn))
+;;
+
+let create_post_with_audience store ~lookup ~author ~content ?title ?body
+      ~post_kind ?meta_json ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+  create_post_with_audience_internal ~defer_settlement:false store ~lookup ~author
+    ~content ?title ?body ~post_kind ?meta_json ?visibility ?ttl_hours ?hearth
+    ?thread_id ?origin ()
 ;;
 
 let create_post store ~lookup ~author ~content ?title ?body ~post_kind ?meta_json
@@ -1017,7 +1064,8 @@ let create_post_once_by_fusion_run_id
          if String.equal body ""
          then pre_effect (Validation_error "Content cannot be empty")
          else
-           Eio.Mutex.use_rw ~protect:true store.origin_create_mutex (fun () ->
+           let result = Eio.Mutex.use_rw ~protect:true store.origin_create_mutex (fun () ->
+             try Ok (
              maybe_sweep store;
              let existing_post =
                with_lock store (fun () ->
@@ -1051,9 +1099,17 @@ let create_post_once_by_fusion_run_id
                          "conflicting Fusion Board projection for run_id=%S"
                          fusion_run_id))
              | None ->
-               create_post_with_audience store ~lookup ~author ~content ~post_kind
+               create_post_with_audience_internal ~defer_settlement:true
+                 store ~lookup ~author ~content ~post_kind
                  ?meta_json ~visibility ~ttl_hours ~origin ()
-               |> Result.map (fun creation -> Post_created creation)))
+               |> Result.map (fun creation -> Post_created creation))
+             with
+             | Board_posts_source.Reserved_settlement settlement ->
+               Error (settlement.exception_, settlement.backtrace)
+             | Deferred_persist_observer (exn, backtrace) -> Error (exn, backtrace)) in
+           match result with
+           | Ok result -> result
+           | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace)
     | Some origin_run_id, (None | Some _)
       when String.equal origin_run_id fusion_run_id ->
       pre_effect
@@ -1229,19 +1285,21 @@ let update_post_with_outcome
                             ; updated_at = now
                             }
                           in
-                          let snapshot = posts_jsonl_unlocked ~replacement:updated store in
+                          let snapshot = capture_posts_snapshot ~replacement:updated store in
                           match save_posts_snapshot store snapshot with
-                          | Error _ as error -> error
-                          | Ok () ->
+                          | (Posts_not_written _ | Posts_write_unknown _) as outcome ->
+                            finish_posts_write outcome |> Result.map (fun () ->
+                              { edited = updated; recorded_audience = audience; unresolved; content_changed })
+                          | (Posts_written _ as outcome) ->
                             Hashtbl.replace store.posts key updated;
                             mark_dirty_post store key;
                             invalidate_post_caches store;
-                            Ok
+                            finish_posts_write outcome |> Result.map (fun () ->
                               { edited = updated
                               ; recorded_audience = audience
                               ; unresolved
                               ; content_changed
-                              })
+                              }))
                    | Some _ | None -> `Replan existing)))
       in
       match outcome with

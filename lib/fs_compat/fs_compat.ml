@@ -4045,7 +4045,7 @@ let private_jsonl_remove_rewrite_stage temp_path =
      | _ -> Some failure)
 ;;
 
-let private_jsonl_replace_locked ~dir path content =
+let private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content =
   match private_jsonl_capture Create_rewrite_stage (fun () ->
     (* Open_binary for the same reason as [Atomic_replace.open_atomic_temp_file]:
        the stage file holds the replacement bytes verbatim. *)
@@ -4121,6 +4121,8 @@ let private_jsonl_replace_locked ~dir path content =
                      { cursor = None; failure })
               | Ok cursor ->
                 (match private_jsonl_capture Sync_rewrite_parent (fun () ->
+                   Option.iter (fun before_sync -> before_sync dir)
+                     before_sync_rewrite_parent;
                    fsync_parent_directory dir)
                  with
                  | Ok () -> Ok cursor
@@ -4133,13 +4135,23 @@ let private_jsonl_replace_locked ~dir path content =
 type private_jsonl_append_observation =
   { before : Unix.stats; after : Unix.stats; suffix : string }
 
-let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expected suffix =
+type private_jsonl_append_precondition =
+  | Append_without_precondition
+  | Append_at_cursor of Private_jsonl_cursor.t
+  | Append_at_snapshot of private_jsonl_snapshot
+
+let append_private_jsonl_durable_stable_with_io
+      ?(observe=ignore) ~io path ~precondition suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
   else
     let open Result.Syntax in
     let check_cursor actual =
+      let expected = match precondition with
+        | Append_without_precondition -> None
+        | Append_at_cursor cursor -> Some cursor
+        | Append_at_snapshot snapshot -> Some snapshot.cursor in
       match expected with
       | Some expected when not (Private_jsonl_cursor.equal expected actual) ->
         Error (Cursor_mismatch { expected; actual })
@@ -4154,6 +4166,10 @@ let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expe
     match existing with
     | None ->
       let* () = check_cursor Private_jsonl_cursor.Missing in
+      let* () = match precondition with
+        | Append_at_snapshot snapshot when not (String.equal snapshot.bytes "") ->
+          Error (Transaction_content_changed { path })
+        | Append_without_precondition | Append_at_cursor _ | Append_at_snapshot _ -> Ok () in
       private_jsonl_replace_locked ~dir path suffix
     | Some fd ->
       private_jsonl_with_fd
@@ -4173,9 +4189,9 @@ let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expe
              match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
              | Ok () -> Ok stats.Unix.st_size
              | Error (Incomplete_transaction_tail _ as error) ->
-               (match expected with
-                | Some _ -> Error error
-                | None ->
+               (match precondition with
+                | Append_at_cursor _ | Append_at_snapshot _ -> Error error
+                | Append_without_precondition ->
                   private_jsonl_recover_snapshot fd
                   |> Result.map (fun snapshot -> String.length snapshot.bytes))
              | Error
@@ -4194,6 +4210,14 @@ let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expe
                  | Transaction_settlement_failed _
                  | Transaction_append_failed _ ) as error) -> Error error
            in
+           let* () = match precondition with
+             | Append_without_precondition | Append_at_cursor _ -> Ok ()
+             | Append_at_snapshot expected ->
+               let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
+               if not (String.equal expected.bytes bytes)
+               then Error (Transaction_content_changed { path })
+               else private_jsonl_validate_open_binding
+                   ~operation:Inspect_transaction_path ~path fd in
            let* () = capture Set_transaction_data_permissions (fun () ->
              Unix.fchmod fd 0o600) in
            (* See POSIX lseek: O_APPEND owns writes; this resets reads. *)
@@ -4211,27 +4235,38 @@ let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expe
 
 let append_private_jsonl_durable_stable_result path suffix =
   append_private_jsonl_durable_stable_with_io
-    ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
+    ~io:private_jsonl_transaction_unix_io path ~precondition:Append_without_precondition suffix
 ;;
 
 let append_private_jsonl_durable_observed_result path suffix =
   let observation = ref None in
   append_private_jsonl_durable_stable_with_io
     ~observe:(fun value -> observation := Some value)
-    ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
+    ~io:private_jsonl_transaction_unix_io path ~precondition:Append_without_precondition suffix
   |> Result.map (fun cursor -> cursor, !observation)
 ;;
 
 let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
   append_private_jsonl_durable_stable_with_io
-    ~io:private_jsonl_transaction_unix_io path ~expected:(Some expected) suffix
+    ~io:private_jsonl_transaction_unix_io path ~precondition:(Append_at_cursor expected) suffix
 ;;
 
 let append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
       ~io path ~expected suffix
   =
   append_private_jsonl_durable_stable_with_io
-    ~io path ~expected:(Some expected) suffix
+    ~io path ~precondition:(Append_at_cursor expected) suffix
+;;
+
+let append_private_jsonl_durable_locked_at_snapshot_result path ~expected suffix =
+  append_private_jsonl_durable_stable_with_io
+    ~io:private_jsonl_transaction_unix_io path ~precondition:(Append_at_snapshot expected) suffix
+;;
+
+let append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+      ~io path ~expected suffix =
+  append_private_jsonl_durable_stable_with_io
+    ~io path ~precondition:(Append_at_snapshot expected) suffix
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_cursor_with_io
@@ -4285,7 +4320,7 @@ let rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
 (* A cursor can repeat after an inode is recycled. Compare the full observed
    bytes under the stable sibling lock before replacing the current store. *)
 let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
-      ~io path ~(expected : private_jsonl_snapshot) content =
+      ?before_sync_rewrite_parent ~io path ~(expected : private_jsonl_snapshot) content =
   if not (String.equal content "")
      && not (Char.equal content.[String.length content - 1] '\n')
   then Error Invalid_transaction_suffix
@@ -4300,7 +4335,7 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
       if not (Private_jsonl_cursor.equal expected.cursor actual)
       then Error (Cursor_mismatch { expected = expected.cursor; actual })
       else if not (String.equal expected.bytes "") then Error (Transaction_content_changed { path })
-      else private_jsonl_replace_locked ~dir path content
+      else private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content
     | Some fd ->
       private_jsonl_with_fd ~close_operation:Close_transaction_data ~close_fd:io.close_fd ~success fd (fun () ->
         let* stats = private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd)
@@ -4312,7 +4347,7 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
         let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
         let* () = if String.equal expected.bytes bytes then Ok () else Error (Transaction_content_changed { path }) in
         let* () = private_jsonl_validate_open_binding ~operation:Inspect_transaction_path ~path fd in
-        private_jsonl_replace_locked ~dir path content)
+        private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content)
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected content =
@@ -4320,8 +4355,10 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected conte
     ~io:private_jsonl_transaction_unix_io path ~expected content
 ;;
 
-let rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing ~io path ~expected content =
-  rewrite_private_jsonl_durable_locked_at_snapshot_with_io ~io path ~expected content
+let rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+      ?before_sync_rewrite_parent ~io path ~expected content =
+  rewrite_private_jsonl_durable_locked_at_snapshot_with_io
+    ?before_sync_rewrite_parent ~io path ~expected content
 ;;
 
 module Private_jsonl_slice = struct

@@ -2,9 +2,22 @@ type kind = Posts | Comments | Votes | Reactions
 
 type selection = kind list
 
-type t = (kind * string) list
+type payload =
+  | Posts_payload of Board_core_persist.posts_snapshot
+  | Comments_payload of string
+  | Votes_payload of string
+  | Reactions_payload of string
 
-type 'error outcome = (kind * (unit, 'error) result) list
+type t = payload list
+
+let kind_of_payload = function
+  | Posts_payload _ -> Posts | Comments_payload _ -> Comments
+  | Votes_payload _ -> Votes | Reactions_payload _ -> Reactions
+
+type outcome = {
+  writes : (kind * (unit, Board_types.board_error) result) list;
+  settlement : Board_posts_source.reserved_settlement option;
+}
 
 type retry = Retry_posts | Retry_comments
 
@@ -20,23 +33,38 @@ let for_flush ~dirty_posts ~dirty_comments ~votes_readable ~reactions_readable =
       | Reactions -> had_dirty && reactions_readable)
     for_delete
 
-let capture selection ~read =
+let capture selection ~posts ~comments ~votes ~reactions =
   List.fold_left
     (fun reversed kind ->
-       let content = read kind in
-       (kind, content) :: reversed)
+       let content = match kind with
+         | Posts -> Posts_payload (posts ())
+         | Comments -> Comments_payload (comments ())
+         | Votes -> Votes_payload (votes ())
+         | Reactions -> Reactions_payload (reactions ()) in
+       content :: reversed)
     []
     selection
   |> List.rev
 
 let persist batch ~write =
-  List.fold_left
-    (fun reversed (kind, content) ->
-       let result = write kind content in
-       (kind, result) :: reversed)
-    []
-    batch
-  |> List.rev
+  let reversed, settlement = List.fold_left
+    (fun (reversed, settlement) content ->
+       let result, settlement =
+         try write content, settlement with
+         | Board_posts_source.Reserved_settlement deferred ->
+           (* This carrier follows a known primary success or nonwrite. The
+              posts writer publishes success before finishing its diagnostic;
+              nonwrites carry their typed error for normal retry marking. *)
+           let settlement = match settlement with
+             | Some _ -> settlement | None -> Some deferred in
+           deferred.result, settlement in
+       (kind_of_payload content, result) :: reversed, settlement)
+    ([], None) batch in
+  { writes = List.rev reversed; settlement }
+
+let finish_settlement outcome = match outcome.settlement with
+  | None -> ()
+  | Some deferred -> raise (Board_posts_source.Reserved_settlement deferred)
 
 let retry_for_kind = function
   | Posts | Votes | Reactions -> Retry_posts
@@ -53,7 +81,7 @@ let retries outcome =
             | Retry_posts -> true, comments
             | Retry_comments -> posts, true))
       (false, false)
-      outcome
+      outcome.writes
   in
   match posts, comments with
   | true, true -> [ Retry_posts; Retry_comments ]
@@ -66,4 +94,4 @@ let errors outcome =
     (function
       | _, Ok () -> None
       | _, Error error -> Some error)
-    outcome
+    outcome.writes

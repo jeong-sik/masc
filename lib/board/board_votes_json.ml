@@ -76,40 +76,31 @@ let replace_loaded_comments store comments =
   store.karma_cache <- None
 
 let load_persisted_posts store =
-  let path = Board_paths.store_file_path store Board_paths.Posts in
-  let result = try
-    if Fs_compat.exact_path_kind path = Fs_compat.Exact_missing then (
-      replace_loaded_posts store []; Ok 0)
-    else begin
-      let t0 = Time_compat.now () in
-      let loaded = ref 0 and retained = ref [] in
-      let parsed = load_source_rows path ~decode:post_of_yojson ~accept:(fun p ->
-             (* Expired rows still own dependent comments/votes/reactions.
-                Only the sweeper removes them, so a restart can resume a
-                partial cascade instead of abandoning its remaining rows. *)
-             retained := p :: !retained;
-             Hashtbl.replace store.posts (Post_id.to_string p.id) p;
-             (* RFC-0233 §7: rebuild the origin indexes on load (derive-on-load,
-                mirroring comments_by_post below) so find_post_by_turn_ref /
-                find_post_by_run_id survive a restart without a second persisted
-                SSOT that could drift from the post rows. *)
-             index_post_origin store p;
-             incr loaded) in
-      (match parsed with
-       | Ok () -> replace_loaded_posts store (List.rev !retained)
-       | Error _ ->
-         rebuild_hot_post_index store;
-         store.karma_cache <- None);
-      store.post_count := Hashtbl.length store.posts;
-      let elapsed = Time_compat.now () -. t0 in
-      log_loaded ~noun:"posts" ~loaded:!loaded ~path ~elapsed parsed;
-      Result.map (fun () -> !loaded) parsed
-    end
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
-  in
-  record_load_result (fun result -> store.posts_load_result <- result) result
+  with_persist_lock store (fun () ->
+    let path = Board_paths.persist_path store in
+    let t0 = Time_compat.now () in
+    let outcome = read_posts_source store in
+    let result = with_lock store (fun () ->
+      let result = match outcome with
+        | Posts_complete { posts; _ } -> replace_loaded_posts store posts; Ok (List.length posts)
+        | Posts_partial { posts; errors; _ } ->
+          List.iter (fun (post : post) ->
+            Hashtbl.replace store.posts (Post_id.to_string post.id) post;
+            index_post_origin store post) posts;
+          store.post_count := Hashtbl.length store.posts;
+          rebuild_hot_post_index store;
+          invalidate_post_caches store;
+          Error (path, Failure (show_board_error (posts_source_failure_to_board_error (Posts_rows_rejected errors))))
+        | Posts_unavailable failure ->
+          Error (path, Failure (show_board_error (posts_source_failure_to_board_error failure))) in
+      publish_posts_read store outcome;
+      result) in
+    let loaded = match outcome with Posts_complete { posts; _ } | Posts_partial { posts; _ } -> List.length posts
+      | Posts_unavailable _ -> 0 in
+    log_loaded ~noun:"posts" ~loaded ~path ~elapsed:(Time_compat.now () -. t0)
+      (Result.map (fun _ -> ()) result);
+    finish_posts_read outcome;
+    result)
 ;;
 
 let load_persisted_comments store =

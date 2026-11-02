@@ -76,34 +76,6 @@ let scan_files ~paths ~decode =
     paths
 ;;
 
-let scan_jsonl ~path ~decode =
-  if not (Fs_compat.file_exists path)
-  then empty_report
-  else (
-    let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
-    let report =
-      List.fold_left
-        (fun report json -> count_row report (decode json))
-        empty_report
-        rows
-    in
-    if malformed = 0
-    then report
-    else
-      { rows = report.rows + malformed
-      ; refused = report.refused + malformed
-      ; first_refusal =
-          (match report.first_refusal with
-           | Some _ as refusal -> refusal
-           | None ->
-             Some
-               (Printf.sprintf
-                  "%s: %d malformed JSON row(s)"
-                  path
-                  malformed))
-      })
-;;
-
 let files_under dir ~keep =
   match Sys.readdir dir with
   | exception Sys_error _ -> []
@@ -303,22 +275,24 @@ let disposition_receipt_store =
 let board_posts_store =
   { store = "board posts"
   ; on_refusal =
-      "the loader keeps the rows it can read and logs an ERROR naming the file; \
-       board_posts.jsonl is not rewritten, deleting a post is refused, and \
-       expired posts are not swept, until the line is fixed or removed and the \
-       server restarts"
+      "the loader retains valid rows for ordinary reads and refuses posts \
+       writes, strict evidence and sweeping until an explicit healthy reload; \
+       an uncertain write remains blocked even after an ordinary reload"
   ; scan =
       (fun ~base_path ->
-         let path =
-           Filename.concat
-             (Common.masc_dir_from_base_path ~base_path)
-             "board_posts.jsonl"
-         in
-         Ok
-           (scan_jsonl ~path ~decode:(fun json ->
-              match Masc_board_handlers.Board_votes_json.post_of_yojson json with
-              | Some _ -> Ok ()
-              | None -> Error "post rejected by the current field set")))
+        let module Posts = Masc_board_handlers.Board_core_persist in
+        let observed = Posts.inspect_posts_source
+            ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path) in
+        match observed with
+        | Board_types.Posts_complete { posts; _ } ->
+          Ok { empty_report with rows = List.length posts }
+        | Board_types.Posts_partial { posts; errors; _ } ->
+          let refused = List.length errors in
+          let detail = Posts.posts_source_failure_to_board_error (Board_types.Posts_rows_rejected errors)
+            |> Board_types.show_board_error in
+          Ok { rows = List.length posts + refused; refused; first_refusal = Some detail }
+        | Board_types.Posts_unavailable failure ->
+          Error (Posts.posts_source_failure_to_board_error failure |> Board_types.show_board_error))
   }
 ;;
 

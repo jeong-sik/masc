@@ -158,6 +158,138 @@ let test_held_observer_failure_keeps_the_committed_receipt () =
   Alcotest.(check int) "both actual writes reached the WAL" 2
     (List.length (post_rows ()))
 
+let test_combined_reserved_held_observer_is_reraised_after_commit () =
+  let original_backtrace = Printexc.get_raw_backtrace () in
+  let original, original_backtrace = Eio.Exn.combine
+      (Failure "ordinary held observer failure", original_backtrace)
+      (Eio.Time.Timeout, original_backtrace) in
+  let active = Board.global () in
+  let calls = ref 0 in
+  let raised = with_observer
+      { noop_observer with observe_persist_lock_held_sec = (fun _ ->
+          incr calls;
+          if !calls = 1 then Printexc.raise_with_backtrace original original_backtrace) }
+      (fun () ->
+        match Board_dispatch.create_post_with_unresolved
+                ~author:"combined-receipt-author"
+                ~content:"committed before combined observer failure"
+                ~post_kind:Board.Human_post () with
+        | Ok _ -> Alcotest.fail "reserved observer failure must be rethrown"
+        | Error failure ->
+          Alcotest.fail ("reserved observer failure became a typed publication failure: " ^
+            Board.Post_publication_failure.to_string failure)
+        | exception (Eio.Exn.Multiple _ as raised) -> raised)
+  in
+  Alcotest.(check bool) "the original combined exception is rethrown" true (raised == original);
+  Alcotest.(check int) "the held observer failed once" 1 !calls;
+  Alcotest.(check bool) "the original store is retained" true (active == Board.global ());
+  let post = match Board_dispatch.list_posts () with
+    | [post] -> post
+    | posts -> Alcotest.failf "expected one actual committed post, got %d" (List.length posts)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  Alcotest.(check string) "the actual committed body remains in memory"
+    "committed before combined observer failure" post.body;
+  (match post_rows () with
+   | [row] ->
+     (match Board.post_of_yojson row with
+      | Some persisted ->
+        Alcotest.(check string) "the actual committed identity remains on disk" post_id
+          (Board.Post_id.to_string persisted.id);
+        Alcotest.(check string) "disk retains the actual committed body" post.body persisted.body
+      | None -> Alcotest.fail "the actual committed post row did not decode")
+   | rows -> Alcotest.failf "expected one actual committed post row, got %d" (List.length rows));
+  (* Keep the same store and mutex after the original reserved failure. *)
+  let later = create_post_exn ~author:"combined-receipt-author" ~content:"later real write" in
+  Alcotest.(check bool) "the later write has a distinct identity" false
+    (String.equal post_id (Board.Post_id.to_string later.id));
+  Alcotest.(check int) "both actual posts remain in memory" 2
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check int) "both actual writes remain on disk" 2 (List.length (post_rows ()))
+
+let test_fusion_combined_held_observer_preserves_replay_and_later_creation () =
+  let original_backtrace = Printexc.get_raw_backtrace () in
+  let original, original_backtrace = Eio.Exn.combine
+      (Failure "ordinary Fusion held observer failure", original_backtrace)
+      (Eio.Time.Timeout, original_backtrace) in
+  let active = Board.global () in
+  let content = "Fusion result committed before combined observer failure" in
+  let create run_id =
+    Board_dispatch.create_post_once_by_fusion_run_id
+      ~fusion_run_id:run_id ~author:"fusion-observer-keeper" ~content
+      ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+      ~origin:
+        { Board.turn_ref = None
+        ; source = Some "fusion"
+        ; fusion_run_id = Some run_id
+        ; fusion_producer = Some "fusion-observer-keeper"
+        }
+      ()
+  in
+  let calls = ref 0 in
+  let raised = with_observer
+      { noop_observer with observe_persist_lock_held_sec = (fun _ ->
+          incr calls;
+          if !calls = 1 then Printexc.raise_with_backtrace original original_backtrace) }
+      (fun () ->
+        match create "fusion-combined-observer-first" with
+        | Ok _ -> Alcotest.fail "the reserved Fusion observer failure must be rethrown"
+        | Error failure ->
+          Alcotest.fail ("the reserved Fusion observer failure became a typed failure: " ^
+            Board.Post_publication_failure.to_string failure)
+        | exception (Eio.Exn.Multiple _ as raised) -> raised)
+  in
+  Alcotest.(check bool) "Fusion rethrows the original combined exception" true
+    (raised == original);
+  Alcotest.(check int) "the actual Fusion held observer failed once" 1 !calls;
+  let committed = match Board_dispatch.list_posts () with
+    | [post] -> post
+    | posts -> Alcotest.failf "expected one committed Fusion post, got %d" (List.length posts)
+  in
+  let committed_id = Board.Post_id.to_string committed.id in
+  Alcotest.(check string) "the actual Fusion body remains in memory" content committed.body;
+  let persisted_ids () =
+    List.map (fun row ->
+      match Board.post_of_yojson row with
+      | Some post ->
+        Alcotest.(check string) "the actual Fusion body remains on disk" content post.body;
+        Board.Post_id.to_string post.id
+      | None -> Alcotest.fail "the actual Fusion WAL row did not decode")
+      (post_rows ())
+  in
+  Alcotest.(check (list string)) "the committed Fusion identity remains on disk"
+    [committed_id] (persisted_ids ());
+  (* Reuse the original origin mutex: a swallowed poison must not masquerade
+     as an idempotent replay, nor can a replacement store repair this test. *)
+  (match create "fusion-combined-observer-first" with
+   | Ok (Board.Post_already_present post) ->
+     Alcotest.(check string) "the exact Fusion replay returns the committed ID"
+       committed_id (Board.Post_id.to_string post.id)
+   | Ok (Board.Post_created _) -> Alcotest.fail "the Fusion replay created a duplicate"
+   | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure));
+  Alcotest.(check int) "the Fusion replay adds no model post" 1
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check (list string)) "the Fusion replay adds no disk row"
+    [committed_id] (persisted_ids ());
+  let later = match create "fusion-combined-observer-next" with
+    | Ok (Board.Post_created creation) -> creation.post
+    | Ok (Board.Post_already_present _) -> Alcotest.fail "a new Fusion run was treated as a replay"
+    | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure)
+  in
+  let later_id = Board.Post_id.to_string later.id in
+  Alcotest.(check bool) "a different Fusion origin creates its own identity" false
+    (String.equal committed_id later_id);
+  Alcotest.(check bool) "Fusion retained the original store throughout recovery" true
+    (active == Board.global ());
+  let ids = [committed_id; later_id] |> List.sort String.compare in
+  Alcotest.(check (list string)) "both Fusion identities remain in the original model"
+    ids
+    (Board_dispatch.list_posts ()
+     |> List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id)
+     |> List.sort String.compare);
+  Alcotest.(check (list string)) "both Fusion writes remain on disk"
+    ids (persisted_ids () |> List.sort String.compare)
+
 let test_acquire_observer_failure_proves_no_publication () =
   let calls = ref 0 in
   let failure = with_observer
@@ -243,8 +375,8 @@ let test_post_append_failure_commits_nothing () =
    with
    | Ok _ -> Alcotest.fail "post must not succeed when the append fails"
    | Error failure ->
-     check_effect "an attempted append has unknown effect"
-       Failure_effect.Effect_outcome_unknown failure;
+     check_effect "blocked filesystem proves the append did not start"
+       Failure_effect.Proven_pre_effect failure;
      Alcotest.(check bool) "append failure has no committed receipt" true
        (Option.is_none (Board.Post_publication_failure.committed failure));
      (match Board.Post_publication_failure.cause failure with
@@ -814,6 +946,10 @@ let () =
         [
           Alcotest.test_case "held observer failure retains committed receipt and later writes" `Quick
             (with_eio test_held_observer_failure_keeps_the_committed_receipt);
+          Alcotest.test_case "combined reserved held observer is rethrown after commit" `Quick
+            (with_eio test_combined_reserved_held_observer_is_reraised_after_commit);
+          Alcotest.test_case "Fusion combined held observer preserves replay and later creation" `Quick
+            (with_eio test_fusion_combined_held_observer_preserves_replay_and_later_creation);
           Alcotest.test_case "acquire observer failure proves no publication" `Quick
             (with_eio test_acquire_observer_failure_proves_no_publication);
           Alcotest.test_case "dispatch preparation failure proves no publication" `Quick

@@ -12,25 +12,30 @@ let nobody_declared = Masc.Recipient_lookup.none_declared
 let create_post store = create_post store ~lookup:nobody_declared
 let add_comment store = add_comment store ~lookup:nobody_declared
 
-(* #9903 test isolation: [create_post] now persists through
-   [Env_config_core.base_path ()], which raises [Config_error] in test
-   executables when the resolved path falls under HOME (PR #12584 moved
-   persistence outside the board lock and onto the live ledger path).
-   Pin [MASC_BASE_PATH] to a per-run tmp dir so the persist guard is
-   satisfied and ledger writes stay isolated from production. *)
-let () =
-  let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-board-ttl-%06x" (Random.bits ()))
-  in
-  Unix.putenv "MASC_BASE_PATH" dir
-
+(* Every writing fixture loads its posts source explicitly. Give each case
+   its own workspace so that load cannot adopt another case's persisted rows. *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  f ()
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let base_path = Filename.temp_dir "masc-test-board-ttl-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      match original_base with
+      | Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> Unix.unsetenv "MASC_BASE_PATH")
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" base_path;
+      f ())
+
+let load_posts_source store =
+  match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+  | Ok _ -> ()
+  | Error (path, cause) ->
+    Alcotest.failf "posts fixture load failed: %s (%s)" path (Printexc.to_string cause)
+;;
 
 let test_default_ttl () =
   Alcotest.(check int) "default_ttl_hours is 0" 0 Limits.default_ttl_hours
@@ -94,6 +99,7 @@ let test_permanent_post () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   match
     create_post store ~author:"test-agent" ~content:"Permanent post"
       ~post_kind:Human_post ()
@@ -106,6 +112,7 @@ let test_expiring_post () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   match
     create_post store ~author:"test-agent" ~content:"Expiring post"
       ~post_kind:Human_post ~ttl_hours:24 ()
@@ -118,6 +125,7 @@ let test_sweeper_skips_permanent () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   (match
      create_post store ~author:"test-agent" ~content:"Permanent"
        ~post_kind:Human_post ()
@@ -132,6 +140,7 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -166,6 +175,7 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   let post_id =
     match
       create_post store ~author:"test-agent" ~content:"Post that fails to load"
@@ -195,6 +205,7 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -231,6 +242,7 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -268,6 +280,7 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   let unwrap = function
     | Ok value -> value
     | Error e -> Alcotest.fail (show_board_error e)
@@ -519,6 +532,7 @@ let test_post_kind_direct_default () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   match
     create_post store ~author:"test-agent" ~content:"Human post"
       ~post_kind:Human_post ()
@@ -533,6 +547,7 @@ let test_post_kind_automation_contract () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   match
     create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
       ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness"
@@ -548,6 +563,7 @@ let test_post_kind_system_contract () =
   let store = create_store
       ~workspace_masc_dir:(Common.masc_dir_from_base_path
         ~base_path:(Env_config_core.base_path ())) () in
+  load_posts_source store;
   match
     create_post store ~author:"operator" ~content:"System post"
       ~post_kind:System_post ()

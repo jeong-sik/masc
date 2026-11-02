@@ -2264,6 +2264,38 @@ rejected values and validation-count deltas; their execution evidence belongs to
 the layer PR. This prepares the stable posts source owner without changing any
 writer protocol, source authority, guard, receipt or client behavior.
 
+The posts writer foundation [#47224](https://github.com/jeong-sik/masc/pull/47224)
+replaces `posts_load_result` with one closed source
+state and a private `Board_posts_source` owner. A new store is unobserved; posts
+persistence requires an explicit stable load that publishes the matching model.
+Complete and rejected-row observations retain the captured path, bytes and cursor.
+Missing after observed presence or refusal cannot become fresh empty authority,
+and reading visible bytes cannot settle a previous unknown write.
+
+Creation, pin, close, reopen, edit, flush and deletion use the same stable sibling
+lock family. Both append and replacement compare the full expected source
+snapshot; captured replacement rows have an abstract type instead of an unrelated
+string/cursor pair. Exact append reads all previous bytes before writing, so this
+layer makes no append-performance improvement claim. Snapshot batching retains
+Posts, Comments, Votes, Reactions order, selected empty snapshots and independent
+retry obligations. Other file families retain their existing protocols; a Board
+deletion is still not a four-file atomic transaction.
+
+A definite prewrite nonregular-file obstruction retains the previous exact
+expectation so an applied deletion can retry after the original file is restored.
+The retry still compares full bytes and file identity; changed content, cursor,
+binding or tail remains a refusal, and an unknown write remains latched.
+
+A known fsynced primary write advances the source; the creation receipt becomes
+committed after the model and origin indexes are published. Descriptor diagnostics
+follow that publication. Reserved cleanup and observer exceptions leave state,
+persistence and Fusion origin mutexes before propagating. A model-publication
+exception still leaves an uncertain product outcome, and uncertain writes remain
+blocked instead of being replayed.
+Actual producer/CAS/cleanup/unknown-parent-sync scenarios and validation status
+belong to the layer PR. This supplies no Board initialization guard, original
+operation receipt, historical absence proof or client reconciliation.
+
 T1 remains open: ordinary Board creation still lacks a persisted client operation
 identity and authoritative unknown-acknowledgement reconciliation. Session history
 does not survive restart, and unchanged-draft protection compares bytes rather than

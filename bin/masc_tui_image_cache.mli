@@ -35,6 +35,10 @@ val has_png_structure : string -> bool
 
 (** {1 The fetch} *)
 
+type runner_failure = { error : Unix.error; operation : string; argument : string }
+(** An operating-system failure starting or supervising the supplied runner,
+    distinct from a command's exit status. *)
+
 type fetch_failure =
   | Http_error_status  (** curl [--fail] saw an HTTP error status. *)
   | Operation_timeout  (** curl hit [--max-time]. *)
@@ -44,6 +48,7 @@ type fetch_failure =
   | Curl_exit of { code : int }  (** Any other documented curl exit code. *)
   | Curl_signaled of { signal : int }
   | Curl_stopped of { signal : int }
+  | Curl_runner_failed of runner_failure
   | No_body_written  (** curl exited 0 and wrote no file. *)
 
 val fetch_failure_of_status :
@@ -71,6 +76,7 @@ type decode_failure =
           output permissions, disk space, or other environment failures. *)
   | Decoder_signaled of { signal : int }
   | Decoder_stopped of { signal : int }
+  | Decoder_runner_failed of runner_failure
   | No_frame_written  (** ffmpeg exited 0 and wrote no frame. *)
   | Frame_unreadable of { detail : string }
       (** The frame file could not be read back. *)
@@ -117,13 +123,16 @@ val run_decoder :
   run:(string -> Unix.process_status) -> output_path:string -> string ->
   (string, decode_failure) result
 (** Run one command after discarding any old output, returning a nonempty
-    output file. Failed output is removed. Never removes input bytes. *)
+    output file. Output from a failed command is removed. After a runner OS
+    failure or unexpected exception, the output is left for its owner to
+    remove, since callers may share the path. Never removes input bytes. *)
 
 val convert_to_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->
   (string, conversion_failure) result
 (** Try the existing converter sequence, preserving every failed attempt's
-    typed status. Input is retained even when no converter succeeds. *)
+    typed status. A runner failure stops the sequence; input is retained even
+    when no converter succeeds. *)
 
 val prepare_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->

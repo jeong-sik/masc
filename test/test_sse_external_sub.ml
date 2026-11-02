@@ -168,6 +168,91 @@ let test_callback_error_does_not_crash_broadcast () =
     Masc.Sse.unsubscribe_external "test-fail";
     Masc.Sse.unsubscribe_external "test-ok")
 
+let test_callback_cancellation_does_not_skip_other_subscribers () =
+  Eio_main.run (fun _env ->
+    let authority = Masc.Sse.runtime_authority_exn ~base_path:"/tmp/sse-cancel-scope" in
+    let other = Masc.Sse.runtime_authority_exn ~base_path:"/tmp/sse-cancel-other" in
+    let received = ref 0 and foreign = ref 0 in
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Sse.unsubscribe_external "cancel-a";
+        Masc.Sse.unsubscribe_external "cancel-b";
+        Masc.Sse.unsubscribe_external "cancel-foreign")
+      (fun () ->
+        Masc.Sse.subscribe_external ~runtime_authority:authority ~id:"cancel-a"
+          ~callback:(fun _ -> raise (Eio.Cancel.Cancelled Exit)) ();
+        Masc.Sse.subscribe_external ~runtime_authority:authority ~id:"cancel-b"
+          ~callback:(fun _ -> incr received) ();
+        Masc.Sse.subscribe_external ~runtime_authority:other ~id:"cancel-foreign"
+          ~callback:(fun _ -> incr foreign) ();
+        let before = Masc.Sse.current_id () in
+        Masc.Sse.broadcast_to (Masc.Sse.Runtime_observers authority)
+          (`Assoc [ "type", `String "cancellation-test" ]);
+        Alcotest.(check bool) "event was buffered" true (Masc.Sse.current_id () > before);
+        Alcotest.(check int) "later matching subscriber receives the event" 1 !received;
+        Alcotest.(check int) "another workspace receives no event" 0 !foreign))
+
+let test_publisher_cancellation_still_propagates () =
+  Eio_main.run (fun _env ->
+    let reason = Failure "publisher cancelled" in
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Sse.unsubscribe_external "scope-cancel-a";
+        Masc.Sse.unsubscribe_external "scope-cancel-b")
+      (fun () ->
+        match Eio.Cancel.sub (fun context ->
+          Masc.Sse.subscribe_external ~id:"scope-cancel-a" ~callback:(fun _ ->
+            Eio.Cancel.cancel context reason;
+            raise (Eio.Cancel.Cancelled Exit)) ();
+          Masc.Sse.subscribe_external ~id:"scope-cancel-b" ~callback:(fun _ -> ()) ();
+          Masc.Sse.broadcast (`Assoc [ "type", `String "caller-cancel" ])) with
+        | () -> Alcotest.fail "publisher cancellation did not propagate"
+        | exception Eio.Cancel.Cancelled actual when actual == reason -> ()
+        | exception exn ->
+          Alcotest.fail ("unexpected cancellation: " ^ Printexc.to_string exn)))
+
+let test_liveness_failure_does_not_skip_other_subscribers () =
+  Eio_main.run (fun _env ->
+    let authority = Masc.Sse.runtime_authority_exn ~base_path:"/tmp/sse-liveness-scope" in
+    let other = Masc.Sse.runtime_authority_exn ~base_path:"/tmp/sse-liveness-other" in
+    let failure = ref (Failure "liveness failed" : exn) in
+    let received = ref 0 in
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Sse.unsubscribe_external "liveness-a";
+        Masc.Sse.unsubscribe_external "liveness-b")
+      (fun () ->
+        Masc.Sse.subscribe_external ~runtime_authority:other ~id:"liveness-a"
+          ~is_alive:(fun () -> raise !failure) ~callback:(fun _ -> ()) ();
+        Masc.Sse.subscribe_external ~runtime_authority:authority ~id:"liveness-b"
+          ~callback:(fun _ -> incr received) ();
+        Masc.Sse.broadcast_to (Masc.Sse.Runtime_observers authority)
+          (`Assoc [ "type", `String "liveness-exception" ]);
+        failure := Eio.Cancel.Cancelled Exit;
+        Masc.Sse.broadcast_to (Masc.Sse.Runtime_observers authority)
+          (`Assoc [ "type", `String "liveness-cancellation" ]);
+        Alcotest.(check int) "later subscriber receives both events" 2 !received))
+
+let test_non_eio_callback_cancellation_does_not_skip_other_subscribers () =
+  let received = Atomic.make 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external "non-eio-cancel-a";
+      Masc.Sse.unsubscribe_external "non-eio-cancel-b")
+    (fun () ->
+      Masc.Sse.subscribe_external ~id:"non-eio-cancel-a"
+        ~callback:(fun _ -> raise (Eio.Cancel.Cancelled Exit)) ();
+      Masc.Sse.subscribe_external ~id:"non-eio-cancel-b"
+        ~callback:(fun _ -> Atomic.incr received) ();
+      let outside_eio = Domain.spawn (fun () ->
+        let outside = match Fs_compat.execution_context () with
+          | Non_eio -> true
+          | Eio_fiber -> false in
+        Masc.Sse.broadcast (`Assoc [ "type", `String "non-eio-cancel" ]);
+        outside) |> Domain.join in
+      Alcotest.(check bool) "publisher was outside Eio" true outside_eio;
+      Alcotest.(check int) "later subscriber receives the event" 1 (Atomic.get received))
+
 let test_multiple_subscribers () =
   setup ();
   Eio_main.run (fun _env ->
@@ -356,6 +441,14 @@ let () =
         test_broadcast_skips_after_unsubscribe;
       Alcotest.test_case "error does not crash broadcast" `Quick
         test_callback_error_does_not_crash_broadcast;
+      Alcotest.test_case "callback cancellation does not skip later subscribers" `Quick
+        test_callback_cancellation_does_not_skip_other_subscribers;
+      Alcotest.test_case "publisher cancellation propagates" `Quick
+        test_publisher_cancellation_still_propagates;
+      Alcotest.test_case "liveness failure does not skip later subscribers" `Quick
+        test_liveness_failure_does_not_skip_other_subscribers;
+      Alcotest.test_case "non-Eio callback cancellation does not skip later subscribers" `Quick
+        test_non_eio_callback_cancellation_does_not_skip_other_subscribers;
       Alcotest.test_case "multiple subscribers" `Quick
         test_multiple_subscribers;
     ]);

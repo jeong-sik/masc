@@ -2170,7 +2170,8 @@ let test_observer_recovery_belongs_to_unconfirmed_workspace () =
   state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
   let owns_identity () =
     Masc_tui_async_protocol.observer_recovery_identity_owned state
-      ~authority ~owner ~live ~instance:"instance-a" ~expected in
+      ~authority ~owner ~live ~instance:"instance-a"
+      ~origin:(Masc_tui_async_protocol.Observer_existing_workspace expected) in
   Alcotest.(check bool) "live scoped stream owns its identity" true (owns_identity ());
   state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
   Alcotest.(check bool) "same epoch retains its authority" true (owns_identity ());
@@ -2208,6 +2209,39 @@ let test_observer_recovery_belongs_to_unconfirmed_workspace () =
   Alcotest.(check bool) "confirmed workspace no longer owns recovery" false
     (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
   Alcotest.(check bool) "confirmed workspace rejects late identity" false (owns_identity ())
+
+let test_observer_initial_identity_ownership () =
+  let open Masc_tui_types in
+  let open Masc_tui_async_protocol in
+  let state = create_state ~workspace:"observer-cold" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  let authority = state.workspace_authority in
+  let owner = ref () and live = ref true in
+  let paths = Option.get state.local_workspace_paths in
+  let origin = Observer_initial_workspace paths in
+  state.observer_recovery_owner <- Some owner;
+  let accepted () = observer_recovery_identity_owned state ~authority ~owner ~live
+      ~instance:"instance-a" ~origin in
+  Alcotest.(check bool) "live initial matching workspace may establish authority" true (accepted ());
+  live := false;
+  Alcotest.(check bool) "closed initial stream cannot establish authority" false (accepted ());
+  live := true;
+  state.observer_recovery_owner <- Some (ref ());
+  Alcotest.(check bool) "a replaced initial owner cannot establish authority" false (accepted ());
+  state.observer_recovery_owner <- Some owner;
+  let foreign = Observer_initial_workspace (Option.get (local_paths "/workspace/b")) in
+  Alcotest.(check bool) "foreign local paths cannot establish authority" false
+    (observer_recovery_identity_owned state ~authority ~owner ~live
+       ~instance:"instance-a" ~origin:foreign);
+  state.observer_scope_binding <- Observer_scope_retired;
+  Alcotest.(check bool) "a retired scope cannot be reintroduced as initial" false (accepted ());
+  state.observer_scope_binding <- Observer_scope_unbound;
+  state.server_identity <- Some (identity "/workspace/a");
+  Alcotest.(check bool) "a separate identity observation supersedes the cold path" false (accepted ());
+  state.server_identity <- None;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a later authority rejects a stale initial receipt" false (accepted ())
 
 let test_archive_cache_does_not_cross_equal_stat_files () =
   let first = Filename.temp_file "tui-archive-source-a-" ".json" in
@@ -5979,6 +6013,8 @@ let () =
             test_observer_retry_retires_with_workspace_read_authority
         ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick
             test_observer_recovery_belongs_to_unconfirmed_workspace
+        ; Alcotest.test_case "initial Observer identity is locally owned" `Quick
+            test_observer_initial_identity_ownership
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
         ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick

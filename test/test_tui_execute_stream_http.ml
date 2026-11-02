@@ -411,7 +411,7 @@ let test_observer_rejects_bad_replay_before_delivering_bytes env =
     with_server env ~handler:(stream_response ~receipts:(receipt :: headers) [ "data: {}\n\n" ]) (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path ~expected_masc_root:identity.sid_masc_root
           ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match result with
@@ -439,7 +439,7 @@ let test_observer_identity_requires_scoped_admission env =
     with_server env ~handler:(stream_response ~receipts:headers ["data: {}\n\n"]) (fun ~port ->
       let identities = ref [] and opens = ref 0 and chunks = ref 0 and order = ref [] in
       let outcome = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~expected_workspace:identity ~host:"127.0.0.1" ~port ~session_id:"observer-test"
+          ~expected_base_path:identity.sid_base_path ~expected_masc_root:identity.sid_masc_root ~host:"127.0.0.1" ~port ~session_id:"observer-test"
           ~cursor:None ~on_identity:(fun value -> identities := value :: !identities; order := `Identity :: !order)
           ~on_open:(fun _ -> incr opens; order := `Open :: !order)
           ~on_chunk:(fun _ -> incr chunks; order := `Body :: !order) in
@@ -457,7 +457,7 @@ let test_observer_accepts_valid_and_unadvertised_live_streams env =
     with_server env ~handler:(stream_response ~receipts:(receipt :: headers) [ "data: {}\n\n" ]) (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path ~expected_masc_root:identity.sid_masc_root
           ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match result with
@@ -491,7 +491,7 @@ let test_observer_requires_workspace_receipt env =
     with_server env ~handler (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path ~expected_masc_root:identity.sid_masc_root
           ~host:"127.0.0.1" ~port ~session_id:"observer-workspace" ~cursor:None
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match accepted, result with
@@ -544,7 +544,7 @@ let test_sse_status_and_content_type_gate env =
     with_server env ~handler (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path ~expected_masc_root:identity.sid_masc_root
           ~host:"127.0.0.1" ~port ~session_id:"observer-media" ~cursor:None
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       let check_outcome source outcome =
@@ -568,7 +568,7 @@ let test_sse_http_refusals_keep_status_and_body env =
     with_server env ~handler:(json_response ~status body) (fun ~port ->
       let chunks = ref 0 and opens = ref 0 in
       let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-          ~on_identity:(fun _ -> ()) ~expected_workspace:identity
+          ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path ~expected_masc_root:identity.sid_masc_root
           ~host:"127.0.0.1" ~port ~session_id:"observer-refused" ~cursor:None
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       let fleet = Http.observe_fleet_stream ~clock:(Eio.Stdenv.clock env)

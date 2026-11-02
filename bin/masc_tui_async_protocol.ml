@@ -219,6 +219,10 @@ type resume_confirmation =
   | Owner_resumed
   | Owner_already_active
 
+type observer_recovery_origin =
+  | Observer_existing_workspace of Masc.Tui_decode.server_identity
+  | Observer_initial_workspace of local_workspace_paths
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -781,7 +785,7 @@ type async_msg =
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
-      * Masc.Tui_decode.server_identity * Sse_wire.observer_identity
+      * observer_recovery_origin * Sse_wire.observer_identity
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -1222,20 +1226,30 @@ let observer_retry_owned state ~authority expected =
 
 let observer_recovery_owned state ~authority expected =
   authority = state.workspace_authority
-  && match state.observer_recovery_owner, state.workspace_identity with
-     | Some current, Workspace_identity_match_unconfirmed _ -> current == expected
-     | None, _ | Some _, (Workspace_identity_unread | Workspace_identity_match
-                         | Workspace_identity_mismatch _) -> false
+  && match state.observer_recovery_owner, state.workspace_identity, state.server_identity with
+     | Some current, Workspace_identity_match_unconfirmed _, Some _
+     | Some current, Workspace_identity_unread, None -> current == expected
+     | None, _, _
+     | Some _, (Workspace_identity_match | Workspace_identity_mismatch _), _
+     | Some _, Workspace_identity_match_unconfirmed _, None
+     | Some _, Workspace_identity_unread, Some _ -> false
 
-let observer_recovery_identity_owned state ~authority ~owner ~live ~instance ~expected =
+let observer_recovery_identity_owned state ~authority ~owner ~live ~instance ~origin =
   !live && observer_recovery_owned state ~authority owner
-  && expected.Masc.Tui_decode.sid_state_ready <> Some false
-  && (match state.observer_scope_binding with
-      | Observer_scope_bound previous -> String.equal previous instance
-      | Observer_scope_unbound | Observer_scope_retired -> false)
-  && match state.server_identity with
-     | Some current -> server_workspace_matches ~expected:(Some expected) (Ok current)
-     | None -> false
+  && match origin, state.workspace_identity, state.server_identity, state.observer_scope_binding with
+     | Observer_existing_workspace expected, Workspace_identity_match_unconfirmed _,
+       Some current, Observer_scope_bound previous ->
+         expected.Masc.Tui_decode.sid_state_ready <> Some false
+         && String.equal previous instance
+         && server_workspace_matches ~expected:(Some expected) (Ok current)
+     | Observer_initial_workspace expected, Workspace_identity_unread, None, Observer_scope_unbound ->
+         state.local_workspace_paths = Some expected
+         && not (Canonical_path.is_empty expected.lw_base_path)
+         && not (Canonical_path.is_empty expected.lw_masc_root)
+     | (Observer_existing_workspace _ | Observer_initial_workspace _),
+       (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+       | Workspace_identity_match | Workspace_identity_mismatch _), _,
+       (Observer_scope_unbound | Observer_scope_bound _ | Observer_scope_retired) -> false
 
 (* Capture the read intent while the exact effect owner is still Loading.
    The UI applies the receipt first, then retains or dispatches this read. *)

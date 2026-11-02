@@ -4,6 +4,15 @@ include Board_core_payload
 
 module Post_publication_failure = Board_post_publication_failure
 
+module Expired_target_set = Set.Make (struct
+  type t = [ `Post | `Comment ] * string
+
+  let compare (k1, id1) (k2, id2) =
+    let rank = function `Post -> 0 | `Comment -> 1 in
+    let c = Int.compare (rank k1) (rank k2) in
+    if c <> 0 then c else String.compare id1 id2
+end)
+
 let flush_interval_sec = Env_config.Board.flush_interval_sec
 let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
 
@@ -48,7 +57,8 @@ let create_store () =
   ; persist_mutex = Eio.Mutex.create ()
   ; origin_create_mutex = Eio.Mutex.create ()
   ; karma_cache = None
-  ; sorted_posts_cache = None
+  ; hot_post_index = Hot_post_set.empty
+  ; recent_post_index = Recent_post_set.empty
   ; comments_by_post = Hashtbl.create 1024
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
@@ -97,12 +107,77 @@ let unindex_post_origin store (post : post) =
   match post.origin with
   | None -> ()
   | Some (o : post_origin) ->
+    let pid = Post_id.to_string post.id in
     (match o.turn_ref with
-     | Some tr -> Hashtbl.remove store.posts_by_turn_ref (Ids.Turn_ref.to_string tr)
+     | Some tr ->
+       let key = Ids.Turn_ref.to_string tr in
+       (match Hashtbl.find_opt store.posts_by_turn_ref key with
+        | Some indexed_pid when String.equal indexed_pid pid ->
+          Hashtbl.remove store.posts_by_turn_ref key
+        | Some _ | None -> ())
      | None -> ());
     (match o.fusion_run_id with
-     | Some run_id -> Hashtbl.remove store.posts_by_run_id run_id
+     | Some run_id ->
+       (match Hashtbl.find_opt store.posts_by_run_id run_id with
+        | Some indexed_pid when String.equal indexed_pid pid ->
+          Hashtbl.remove store.posts_by_run_id run_id
+        | Some _ | None -> ())
      | None -> ())
+;;
+
+let index_hot_post store (post : post) =
+  store.hot_post_index <-
+    Hot_post_set.add (hot_post_key_of_post post) store.hot_post_index;
+  store.recent_post_index <-
+    Recent_post_set.add (recent_post_key_of_post post) store.recent_post_index
+;;
+
+let unindex_hot_post store (post : post) =
+  store.hot_post_index <-
+    Hot_post_set.remove (hot_post_key_of_post post) store.hot_post_index;
+  store.recent_post_index <-
+    Recent_post_set.remove (recent_post_key_of_post post) store.recent_post_index
+;;
+
+let reindex_hot_post store ~(previous : post) ~(updated : post) =
+  let prev_key = hot_post_key_of_post previous in
+  let next_key = hot_post_key_of_post updated in
+  if compare_hot_post_key prev_key next_key <> 0
+  then
+    store.hot_post_index <-
+      store.hot_post_index
+      |> Hot_post_set.remove prev_key
+      |> Hot_post_set.add next_key;
+  let prev_recent = recent_post_key_of_post previous in
+  let next_recent = recent_post_key_of_post updated in
+  if compare_recent_post_key prev_recent next_recent <> 0
+  then
+    store.recent_post_index <-
+      store.recent_post_index
+      |> Recent_post_set.remove prev_recent
+      |> Recent_post_set.add next_recent
+;;
+
+let put_post store (post : post) =
+  let key = Post_id.to_string post.id in
+  let previous = Hashtbl.find_opt store.posts key in
+  Hashtbl.replace store.posts key post;
+  match previous with
+  | None -> index_hot_post store post
+  | Some previous -> reindex_hot_post store ~previous ~updated:post
+;;
+
+let rebuild_hot_post_index store =
+  let hot_index, recent_index =
+    Hashtbl.fold
+      (fun _ (post : post) (hot_acc, recent_acc) ->
+         ( Hot_post_set.add (hot_post_key_of_post post) hot_acc
+         , Recent_post_set.add (recent_post_key_of_post post) recent_acc ))
+      store.posts
+      (Hot_post_set.empty, Recent_post_set.empty)
+  in
+  store.hot_post_index <- hot_index;
+  store.recent_post_index <- recent_index
 ;;
 
 (** Remove [value] from the string list stored at [key] in [tbl]. Removes the key entirely when the list becomes empty. *)
@@ -117,8 +192,7 @@ let remove_from_list_index tbl key value =
 
 (** Invalidate caches that depend on post data *)
 let invalidate_post_caches store =
-  store.karma_cache <- None;
-  store.sorted_posts_cache <- None
+  store.karma_cache <- None
 ;;
 
 (** Invalidate caches that depend on comment data *)
@@ -250,7 +324,9 @@ let sweep store =
            Stdlib.decr removed_posts
          else (
            (match Hashtbl.find_opt store.posts id with
-            | Some p -> unindex_post_origin store p
+            | Some p ->
+              unindex_post_origin store p;
+              unindex_hot_post store p
             | None -> ());
            Hashtbl.remove store.posts id;
            Hashtbl.remove store.comments_by_post id;
@@ -287,16 +363,23 @@ let sweep store =
        every vote as an orphan. A row whose target is absent is left alone —
        [recalculate_vote_counts] never counts it, and the target may still
        arrive on the next load. *)
-    let expired_targets = Hashtbl.create 16 in
-    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) !swept_posts;
-    List.iter
-      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
-      expired_comments;
-    List.iter
-      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
-      !cascaded_comment_ids;
+    let expired_targets =
+      let acc =
+        List.fold_left
+          (fun acc id -> Expired_target_set.add (`Post, id) acc)
+          Expired_target_set.empty !swept_posts
+      in
+      let acc =
+        List.fold_left
+          (fun acc id -> Expired_target_set.add (`Comment, id) acc)
+          acc expired_comments
+      in
+      List.fold_left
+        (fun acc id -> Expired_target_set.add (`Comment, id) acc)
+        acc !cascaded_comment_ids
+    in
     let removed_reactions, removed_votes =
-      if Hashtbl.length expired_targets = 0
+      if Expired_target_set.is_empty expired_targets
       then 0, 0
       else begin
         let expired_reaction_keys =
@@ -307,7 +390,7 @@ let sweep store =
                  | Reaction_post -> `Post, reaction.target_id
                  | Reaction_comment -> `Comment, reaction.target_id
                in
-               if Hashtbl.mem expired_targets target then key :: acc else acc)
+               if Expired_target_set.mem target expired_targets then key :: acc else acc)
             store.reactions
             []
         in
@@ -315,7 +398,7 @@ let sweep store =
           Hashtbl.fold
             (fun key _ acc ->
                match vote_key_target key with
-               | Some target when Hashtbl.mem expired_targets target -> key :: acc
+               | Some target when Expired_target_set.mem target expired_targets -> key :: acc
                | Some _ | None -> acc)
             store.vote_log
             []
@@ -598,9 +681,17 @@ let sub_board_post_counts_unlocked store =
 let sub_board_post_count_from_counts counts slug =
   Hashtbl.find_opt counts slug |> Option.value ~default:0
 ;;
+let sub_board_post_count_for_slug_unlocked store slug =
+  Hashtbl.fold
+    (fun _ (p : post) count ->
+       match p.hearth with
+       | Some post_slug when String.equal post_slug slug -> count + 1
+       | Some _ | None -> count)
+    store.posts
+    0
+;;
 let sub_board_with_post_count_unlocked store (sb : sub_board) =
-  let counts = sub_board_post_counts_unlocked store in
-  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+  { sb with post_count = sub_board_post_count_for_slug_unlocked store sb.slug }
 ;;
 let sub_board_with_post_count counts (sb : sub_board) =
   { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
@@ -809,6 +900,7 @@ let create_post_with_audience
                | Ok () ->
                  Hashtbl.add store.posts (Post_id.to_string post.id) post;
                  index_post_origin store post;
+                 index_hot_post store post;
                  Stdlib.incr store.post_count;
                  invalidate_post_caches store;
                  phase := Post_committed creation;

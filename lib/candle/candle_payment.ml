@@ -14,10 +14,17 @@ let make ~distribution ~identity ~grade ~total_milli ~grade_trace ~relations ~we
   let* () = Candle_appraisal.validate_weights ~keepers:(List.map fst weights) ~weight_max weights in
   let* coefficient = math (Candle_math.deduction_coefficient ~rate:deduction_rate ~floor:deduction_floor ~overdue_hours) in
   let* shares = math (Candle_math.split ~rounding:distribution.Candle_math.share_rounding ~tie_break:distribution.tie_break ~total:total_milli weights) in
-  let* allocations = List.fold_right (fun (keeper, share_milli) acc ->
-    let* acc = acc in
-    let* amount_milli = math (Candle_math.deduct ~rounding:distribution.deduction_rounding ~coefficient share_milli) in
-    Ok ({keeper; weight=List.assoc keeper weights; share_milli; amount_milli} :: acc)) shares (Ok []) in
+  let* allocations =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (keeper, share_milli) :: rest ->
+        let* amount_milli =
+          math (Candle_math.deduct ~rounding:distribution.deduction_rounding ~coefficient share_milli)
+        in
+        loop ({ keeper; weight = List.assoc keeper weights; share_milli; amount_milli } :: acc) rest
+    in
+    loop [] shares
+  in
   let unallocated_milli = List.fold_left (fun left (_, share) -> left - share) total_milli shares in
   Ok {distribution;unallocated_milli;identity; grade; total_milli; grade_trace; relations; weights_trace; weight_max;
       deduction_rate; deduction_floor; overdue_hours; coefficient; allocations}

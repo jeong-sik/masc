@@ -21,11 +21,15 @@ type t =
   ; labels : (string * string) list
   }
 
+let compare_string_pair (kl, vl) (kr, vr) =
+  let c = String.compare kl kr in
+  if c <> 0 then c else String.compare vl vr
+
 let label_key = "masc.mcp.boot_plan"
 let strings values = `List (List.map (fun value -> `String value) values)
 let pairs values =
   `List (List.map (fun (key, value) -> strings [key; value])
-    (List.sort compare values))
+    (List.sort compare_string_pair values))
 
 let mount_json = function
   | Tmpfs {destination} -> `List [`String "tmpfs"; `String destination]

@@ -29,10 +29,13 @@ let kind_name = function Claim -> "claim" | Conflict -> "conflict"
 let source_json (source : source) = `Assoc
   ["id", `String source.id; "kind", `String (kind_name source.kind);
    "text", `String source.text]
+let compare_source_key (id1, h1) (id2, h2) =
+  let c = String.compare id1 id2 in
+  if c <> 0 then c else String.compare h1 h2
 let source_key source =
   source.id, Agent_core_sha256.(digest_string (Yojson.Safe.to_string (source_json source)) |> to_hex)
-let source_keys sources = List.map source_key sources |> List.sort_uniq Stdlib.compare
-module Keys = Set.Make (struct type t = string * string let compare = Stdlib.compare end)
+let source_keys sources = List.map source_key sources |> List.sort_uniq compare_source_key
+module Keys = Set.Make (struct type t = string * string let compare = compare_source_key end)
 let subset left right = Keys.subset (Keys.of_list left) (Keys.of_list right)
 let summary (publication : publication) =
   { source_ids = List.map fst publication.keys; text = publication.text }
@@ -213,7 +216,7 @@ let decode_keys json =
   let ids = List.map fst keys in
   if List.length ids <> List.length (List.sort_uniq String.compare ids)
   then Error "briefing state repeats a source id"
-  else Ok (List.sort Stdlib.compare keys)
+  else Ok (List.sort compare_source_key keys)
 let decode_publication json =
   let* fields = exact_fields "briefing publication" ["sources"; "text"; "contract"] json in
   let* keys = decode_keys (List.assoc "sources" fields) in

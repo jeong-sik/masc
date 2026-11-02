@@ -479,24 +479,28 @@ let recorded_item_by_event_id events event_id =
    in-memory list via a single pass building an id -> item table (first
    [Recorded] occurrence per id wins, matching [recorded_item_by_event_id]
    exactly), so the whole batch costs one file read regardless of size. *)
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
   let open Result.Syntax in
   let* events = load_events_result ~base_path ~keeper_name in
-  let wanted : (string, unit) Hashtbl.t = Hashtbl.create (List.length event_ids) in
-  List.iter (fun event_id -> Hashtbl.replace wanted event_id ()) event_ids;
-  let found : (string, item) Hashtbl.t = Hashtbl.create (List.length event_ids) in
-  List.iter
-    (function
-      | Recorded item
-        when Hashtbl.mem wanted item.event_id
-             && not (Hashtbl.mem found item.event_id) ->
-        Hashtbl.add found item.event_id item
-      | Recorded _ -> ())
-    events;
+  let wanted = String_set.of_list event_ids in
+  let found =
+    List.fold_left
+      (fun acc -> function
+        | Recorded item
+          when String_set.mem item.event_id wanted
+               && not (String_map.mem item.event_id acc) ->
+          String_map.add item.event_id item acc
+        | Recorded _ -> acc)
+      String_map.empty
+      events
+  in
   Ok
     (List.filter_map
        (fun event_id ->
-          Option.map (fun item -> event_id, item) (Hashtbl.find_opt found event_id))
+          Option.map (fun item -> event_id, item) (String_map.find_opt event_id found))
        event_ids)
 
 (* Read one bounded tail without parsing either boundary fragment. The writer

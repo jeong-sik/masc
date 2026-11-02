@@ -41,7 +41,13 @@ let validate {source;reasons} =
     else Error "unread message requires a nonempty canonical named refusal set" in
   validate_source source
 
-module Atom_positions = Map.Make (struct type t = int * int let compare = compare end)
+module Atom_positions = Map.Make (struct
+  type t = int * int
+
+  let compare (a1, b1) (a2, b2) =
+    let c = Int.compare a1 a2 in
+    if c <> 0 then c else Int.compare b1 b2
+end)
 
 let atom_messages messages =
   let _, _, indexed = List.fold_left (fun (last, index, indexed) (message, label) ->
@@ -159,7 +165,21 @@ let source_key {source;_} = match source with
 
 module Source_key = struct
   type t = [ `Atom of string * int * int * int | `Official of string * int * int * int ]
-  let compare = compare
+
+  let compare a b =
+    match a, b with
+    | `Atom (t1, b1, a1, m1), `Atom (t2, b2, a2, m2)
+    | `Official (t1, b1, a1, m1), `Official (t2, b2, a2, m2) ->
+      let c = String.compare t1 t2 in
+      if c <> 0 then c
+      else
+        let c = Int.compare b1 b2 in
+        if c <> 0 then c
+        else
+          let c = Int.compare a1 a2 in
+          if c <> 0 then c else Int.compare m1 m2
+    | `Atom _, `Official _ -> -1
+    | `Official _, `Atom _ -> 1
 end
 module Source_keys = Set.Make (Source_key)
 

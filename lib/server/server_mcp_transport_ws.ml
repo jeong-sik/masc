@@ -410,7 +410,7 @@ let dashboard_slice_for_sse_type = Dashboard_event_slices.slice_for_sse_type
 let dashboard_session_result session =
   let slices =
     Atomic.get session.dashboard_slices
-    |> List.sort compare
+    |> List.sort String.compare
     |> List.map (fun slice -> `String slice)
   in
   let auth = dashboard_auth session in
@@ -505,7 +505,7 @@ let dashboard_subscribe ~session_id ?route ~slices () =
             with_sessions_rw (fun () ->
                 slice_index_remove_session_locked session_id;
                 Atomic.set session.dashboard_slices
-                  (List.sort_uniq compare slices);
+                  (List.sort_uniq String.compare slices);
                 List.iter
                   (fun slice -> slice_index_add_locked ~session_id ~slice)
                   slices);

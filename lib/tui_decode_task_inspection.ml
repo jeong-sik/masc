@@ -45,7 +45,13 @@ let entity = function
     let* id=nonblank (List.assoc "id" fields) in Ok (Some (kind,id))
 module Observation_set = Set.Make (struct
   type t = Tui_decode.task_history_origin
-  let compare = Stdlib.compare
+  let compare (a : t) (b : t) =
+    let c = String.compare (source_name a.tho_source) (source_name b.tho_source) in
+    if c <> 0
+    then c
+    else (
+      let c = String.compare a.tho_file b.tho_file in
+      if c <> 0 then c else Int.compare a.tho_offset b.tho_offset)
 end)
 type observation_index = Observation_set.t
 let decode_history ~task_id json =

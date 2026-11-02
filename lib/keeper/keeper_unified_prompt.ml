@@ -27,7 +27,11 @@ type turn_prompt_parts = {
 
 module Layer_map = Map.Make (struct
   type t = Keeper_context_layers.layer_id
-  let compare = Stdlib.compare
+
+  let compare a b =
+    Int.compare
+      (Keeper_context_layers.order_index a)
+      (Keeper_context_layers.order_index b)
 end)
 
 type prepared_prompt =
@@ -1092,15 +1096,20 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
            Workspace_task.active_owned_task_ids_for_agent
              config ~agent_name:keeper_name backlog
          with
-         | [] -> Ok []
+         | [] -> Ok Workspace_backlog.Task_id_set.empty
          | held_task_ids ->
+           let held_set = Workspace_backlog.Task_id_set.of_list held_task_ids in
            let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
            Ok
-             (List.filter_map
-                (fun (goal_id, task_ids) ->
-                   if List.exists (fun task_id -> List.mem task_id held_task_ids) task_ids
-                   then Some goal_id
-                   else None)
+             (List.fold_left
+                (fun acc (goal_id, task_ids) ->
+                   if List.exists
+                        (fun task_id ->
+                           Workspace_backlog.Task_id_set.mem task_id held_set)
+                        task_ids
+                   then Workspace_backlog.Task_id_set.add goal_id acc
+                   else acc)
+                Workspace_backlog.Task_id_set.empty
                 links)
        in
        let held_task_link =
@@ -1108,9 +1117,9 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
          | [] -> fun _goal_id -> Not_served_by_held_task
          | _ :: _ ->
            (match served_goal_ids () with
-            | Ok served ->
+            | Ok served_set ->
               fun goal_id ->
-                if List.mem goal_id served
+                if Workspace_backlog.Task_id_set.mem goal_id served_set
                 then Served_by_held_task
                 else Not_served_by_held_task
             | Error detail ->

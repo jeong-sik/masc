@@ -16,7 +16,10 @@ module Execution_map = Map.Make (String)
 module Sequence_map = Map.Make (Int)
 module Invocation_map = Map.Make (struct
   type t = int * int
-  let compare = Stdlib.compare
+
+  let compare (a1, b1) (a2, b2) =
+    let c = Int.compare a1 a2 in
+    if c <> 0 then c else Int.compare b1 b2
 end)
 
 type execution_occurrence = {

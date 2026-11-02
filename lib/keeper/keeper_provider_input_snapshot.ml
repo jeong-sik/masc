@@ -221,17 +221,17 @@ let indexed_list ~name decode values =
 
 let stored_media_of_json = function
   | `List values ->
-    List.fold_right
-      (fun value acc ->
-         let* rest = acc in
-         match Agent_core.History.stored_source_of_json value with
-         | Agent_core.History.Decoded_stored_source { media_type; stored } ->
-           Ok ((media_type, stored) :: rest)
-         | Invalid_stored_source error ->
-           Error ("message.media: " ^ Agent_core.History.decode_error_to_string error)
-         | Not_stored_source -> Error "message.media holds a value that is not a stored source")
-      values
-      (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        match Agent_core.History.stored_source_of_json value with
+        | Agent_core.History.Decoded_stored_source { media_type; stored } ->
+          loop ((media_type, stored) :: acc) rest
+        | Invalid_stored_source error ->
+          Error ("message.media: " ^ Agent_core.History.decode_error_to_string error)
+        | Not_stored_source -> Error "message.media holds a value that is not a stored source"
+    in
+    loop [] values
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
     Error "message.media must be a list"
 ;;

@@ -113,22 +113,23 @@ let is_env_name name =
 
    An error names the file and the line number and says what is wrong, never
    the line's text: a malformed line may be a secret value. *)
+module Env_name_map = Map.Make (String)
+
 let parse_env_file ~path content =
   let err n fmt =
     Printf.ksprintf
       (fun m ->
         Error (Printf.sprintf "%s: env_file %s line %d: %s" config_error_code path n m))
       fmt in
-  let first_line_of_name = Hashtbl.create 16 in
-  let declare declared (n, line) =
-    Result.bind declared (fun declared ->
+  let declare state (n, line) =
+    Result.bind state (fun (declared, first_line_of_name) ->
         let line =
           if String.ends_with ~suffix:"\r" line
           then String.sub line 0 (String.length line - 1)
           else line in
         let body = String.trim line in
         if body = "" || body.[0] = '#'
-        then Ok declared
+        then Ok (declared, first_line_of_name)
         else
           match String.index_opt line '=' with
           | None -> err n "not NAME=VALUE"
@@ -148,13 +149,15 @@ let parse_env_file ~path content =
             else if String.contains value '\000'
             then err n "the value holds a NUL byte, which exec cannot pass"
             else
-              match Hashtbl.find_opt first_line_of_name name with
+              match Env_name_map.find_opt name first_line_of_name with
               | Some first -> err n "a name is declared twice, on lines %d and %d" first n
               | None ->
-                Hashtbl.add first_line_of_name name n;
-                Ok ((name, value) :: declared)) in
-  List.fold_left declare (Ok no_endpoint_env)
+                Ok
+                  ( (name, value) :: declared
+                  , Env_name_map.add name n first_line_of_name )) in
+  List.fold_left declare (Ok (no_endpoint_env, Env_name_map.empty))
     (List.mapi (fun i line -> (i + 1, line)) (String.split_on_char '\n' content))
+  |> Result.map fst
 
 let synthesize_env ~path ~endpoint_env ~base_env ~allowlist ~request_env =
   let shim_env = base_env in

@@ -123,11 +123,15 @@ let transcript_of_json json =
   let* members = fields ["version";"evaluations";"aborted"] json in
   let* () = require (value "version" members = `Int 1) "Unknown gate transcript version" in
   let* evaluations = match value "evaluations" members with
-    | `List values -> List.fold_right (fun json tail ->
-      let* members = fields ["request";"returned"] json in
-      let* tail = tail in
-      let returned = match value "returned" members with `Null -> None | json -> Some json in
-      Ok ({Gate.request=value "request" members;returned} :: tail)) values (Ok [])
+    | `List values ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: tail ->
+          let* members = fields ["request";"returned"] json in
+          let returned = match value "returned" members with `Null -> None | json -> Some json in
+          loop ({Gate.request=value "request" members;returned} :: acc) tail
+      in
+      loop [] values
     | _ -> Error "Gate transcript requires original evaluations" in
   let* aborted = match value "aborted" members with
     | `Null -> Ok None

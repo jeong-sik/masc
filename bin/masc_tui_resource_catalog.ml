@@ -114,8 +114,14 @@ let summary json =
     Ok { id; revision }
   | _ -> Error "invalid report identity or URL"
 
-let traverse f items = List.fold_right (fun item rest ->
-  let* item = f item in let* rest = rest in Ok (item :: rest)) items (Ok [])
+let traverse f items =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      let* item = f item in
+      loop (item :: acc) rest
+  in
+  loop [] items
 
 let reports_of_json json =
   let* fields = object_fields json in

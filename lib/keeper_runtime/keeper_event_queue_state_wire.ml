@@ -696,17 +696,12 @@ let pending_identity_is_duplicated (entries : pending_selection list) =
   let rec loop seen = function
     | [] -> false
     | entry :: rest ->
-      if
-        List.exists
-          (fun prior ->
-             Keeper_event_queue.stimulus_identity_equal
-               prior.source
-               entry.source)
-          seen
+      let identity = Keeper_event_queue.stimulus_identity entry.source in
+      if Keeper_event_queue.Stimulus_identity_set.mem identity seen
       then true
-      else loop (entry :: seen) rest
+      else loop (Keeper_event_queue.Stimulus_identity_set.add identity seen) rest
   in
-  loop [] entries
+  loop Keeper_event_queue.Stimulus_identity_set.empty entries
 ;;
 
 let validate_state state =
@@ -858,6 +853,12 @@ let of_yojson json =
       accepted_transfer_projection_of_yojson
       fields
   in
+  let last_non_immediate_served =
+    derived_last_non_immediate_served
+      ~transition_outbox
+      ~last_transition
+      ~projected_dispositions
+  in
   validate_state
     { revision
     ; next_arrival
@@ -866,5 +867,6 @@ let of_yojson json =
     ; projected_dispositions
     ; transition_outbox
     ; accepted_transfer_projections
+    ; last_non_immediate_served
     }
 ;;

@@ -27,7 +27,57 @@ type t =
   | Gate of { label : string; address : (string * string) list }
 
 let equal (a : t) (b : t) = a = b
-let compare (a : t) (b : t) = Stdlib.compare a b
+
+let compare_string_pair (k1, v1) (k2, v2) =
+  let c = String.compare k1 k2 in
+  if c <> 0 then c else String.compare v1 v2
+
+let surface_rank = function
+  | Dashboard _ -> 0
+  | Discord _ -> 1
+  | Slack _ -> 2
+  | Webhook _ -> 3
+  | Agent -> 4
+  | Broadcast -> 5
+  | Gate _ -> 6
+
+let compare (a : t) (b : t) =
+  match a, b with
+  | Dashboard { session_id = a }, Dashboard { session_id = b } ->
+    Option.compare String.compare a b
+  | Discord a, Discord b ->
+    let c = Option.compare String.compare a.guild_id b.guild_id in
+    if c <> 0 then c
+    else
+      let c = String.compare a.channel_id b.channel_id in
+      if c <> 0 then c
+      else
+        let c = Option.compare String.compare a.channel_name b.channel_name in
+        if c <> 0 then c
+        else
+          let c = Option.compare String.compare a.parent_channel_id b.parent_channel_id in
+          if c <> 0 then c
+          else Option.compare String.compare a.thread_id b.thread_id
+  | Slack a, Slack b ->
+    let c = Option.compare String.compare a.team_id b.team_id in
+    if c <> 0 then c
+    else
+      let c = String.compare a.channel_id b.channel_id in
+      if c <> 0 then c
+      else
+        let c = Option.compare String.compare a.channel_name b.channel_name in
+        if c <> 0 then c
+        else Option.compare String.compare a.thread_ts b.thread_ts
+  | Webhook a, Webhook b ->
+    let c = String.compare a.source b.source in
+    if c <> 0 then c else String.compare a.event_id b.event_id
+  | Agent, Agent | Broadcast, Broadcast -> 0
+  | Gate a, Gate b ->
+    let c = String.compare a.label b.label in
+    if c <> 0 then c else List.compare compare_string_pair a.address b.address
+  | (Dashboard _ | Discord _ | Slack _ | Webhook _ | Agent | Broadcast | Gate _),
+    (Dashboard _ | Discord _ | Slack _ | Webhook _ | Agent | Broadcast | Gate _) ->
+    Int.compare (surface_rank a) (surface_rank b)
 
 let lane_label = function
   | Dashboard _ -> "dashboard"

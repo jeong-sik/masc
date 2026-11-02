@@ -3,6 +3,8 @@
 open Tui_decode_fields
 open Result.Syntax
 
+module String_set = Set.Make (String)
+
 type runtime_probe_refresh_state =
   | Runtime_probe_fresh
   | Runtime_probe_recent
@@ -334,26 +336,23 @@ let decode_runtime_probe_snapshot json =
       Error "runtime probe probed count disagrees with providers"
     else Ok ()
   in
-  let* () =
-    let seen = Hashtbl.create (max 1 row_count) in
-    let rec loop = function
-      | [] -> Ok ()
+  let* seen =
+    let rec loop seen = function
+      | [] -> Ok seen
       | row :: rest ->
-          if Hashtbl.mem seen row.rpp_runtime_id then
+          if String_set.mem row.rpp_runtime_id seen then
             Error
               (Printf.sprintf "duplicate runtime probe id %S" row.rpp_runtime_id)
-          else begin
-            Hashtbl.add seen row.rpp_runtime_id ();
-            loop rest
-          end
+          else
+            loop (String_set.add row.rpp_runtime_id seen) rest
     in
-    loop rps_providers
+    loop String_set.empty rps_providers
   in
   let* () =
     match rps_summary.rpsu_default_runtime_id with
     | None -> Ok ()
     | Some default_id ->
-        if List.exists (fun row -> String.equal row.rpp_runtime_id default_id) rps_providers
+        if String_set.mem default_id seen
         then Ok ()
         else Error (Printf.sprintf "default runtime %S is absent from providers" default_id)
   in

@@ -2087,11 +2087,20 @@ let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
   in
   let* () = complete_parts "summary" (fun index -> Summary index) in
   let* () = complete_parts "content" (fun index -> Content index) in
+  let compare_reasoning_key (id1, p1) (id2, p2) =
+    let c = String.compare id1 id2 in
+    if c <> 0 then c
+    else
+      match p1, p2 with
+      | Summary a, Summary b | Content a, Content b -> Int.compare a b
+      | Summary _, Content _ -> -1
+      | Content _, Summary _ -> 1
+  in
   (* The item closes every observed part, including one whose full text the
      completion payload does not restate. Sort to keep closure deterministic. *)
   Hashtbl.to_seq_keys streamed_texts.reasoning_buffers |> List.of_seq
   |> List.filter (fun (id, _) -> id = item_id)
-  |> List.sort compare
+  |> List.sort compare_reasoning_key
   |> List.iter (fun ((_, part) as key) ->
        if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
          Hashtbl.add streamed_texts.completed_reasoning key ();

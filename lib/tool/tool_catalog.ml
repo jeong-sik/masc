@@ -680,13 +680,12 @@ end
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
 (* ================================================================ *)
 
-let public_mcp_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create 64 in
-  List.iter (fun name -> Hashtbl.replace tbl name ())
-    Tool_catalog_surfaces.public_mcp_surface_tools;
-  tbl
+module String_set = Set_util.StringSet
 
-let is_public_mcp name = Hashtbl.mem public_mcp_set name
+let public_mcp_set : String_set.t =
+  String_set.of_list Tool_catalog_surfaces.public_mcp_surface_tools
+
+let is_public_mcp name = String_set.mem name public_mcp_set
 
 (* ================================================================ *)
 (* Metadata lookup                                                  *)

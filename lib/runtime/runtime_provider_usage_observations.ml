@@ -28,7 +28,17 @@ end
 module Window_map = Map.Make (Window_key)
 module Source_map = Map.Make (struct
     type t = source
-    let compare = Stdlib.compare
+    let source_rank = function
+      | Claude_code_rate_limit_event -> 0
+      | Codex_account_rate_limits_updated -> 1
+      | Codex_account_rate_limits_read -> 2
+      | Openrouter_key_read -> 3
+      | Zai_quota_limit_read -> 4
+      | Kimi_coding_usages_read -> 5
+      | Ollama_balance_read -> 6
+      | Antigravity_usage_read -> 7
+      | Muse_subscription_usage -> 8
+    let compare a b = Int.compare (source_rank a) (source_rank b)
   end)
 
 type t =

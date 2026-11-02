@@ -187,7 +187,9 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
                   entries
               in
               StringMap.fold (fun tool count acc -> (tool, count) :: acc) tool_map []
-              |> List.sort (fun (_, a) (_, b) -> compare b a)
+              |> List.sort (fun (tool_a, a) (tool_b, b) ->
+                   let cmp = Int.compare b a in
+                   if cmp <> 0 then cmp else String.compare tool_a tool_b)
               |> take 10)
          ; recent_entries =
              success_entries
@@ -223,7 +225,9 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
        stats :: acc)
     tbl
     []
-  |> List.sort (fun a b -> compare b.entry_count a.entry_count)
+  |> List.sort (fun a b ->
+       let cmp = Int.compare b.entry_count a.entry_count in
+       if cmp <> 0 then cmp else String.compare a.model_id b.model_id)
 ;;
 
 (* ── Time-bucketed aggregation ──────────────────────────── *)
@@ -391,7 +395,7 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min =
               ; mb_buckets = bucket_entries_for_model es ~bucket_sec
               })
            by_model
-         |> List.sort (fun a b -> compare a.mb_model_id b.mb_model_id)
+         |> List.sort (fun a b -> String.compare a.mb_model_id b.mb_model_id)
        , diagnostics ))
     (Result.map_error (fun error -> Costs_unavailable error) cost_read)
 ;;

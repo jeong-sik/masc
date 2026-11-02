@@ -202,15 +202,18 @@ let goal_context_for_task ~config = function
       let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
       let ids = List.filter_map (fun (goal_id, tasks) ->
         if List.mem task_id tasks then Some goal_id else None) links in
-      let* goals =
+      let* goals_by_id =
         Result.map_error Goal_store.unavailable_to_string
-          (Goal_store.list_goals_result config ())
+          (Goal_store.load_goals_by_id_result config)
       in
-      List.fold_right (fun id rest ->
-        let* rest = rest in
-        match List.find_opt (fun (goal : Goal_store.goal) -> String.equal goal.id id) goals with
-        | None -> Error ("Linked Goal is missing: " ^ id)
-        | Some goal -> Ok ((id, goal.phase, Goal_store.criterion_of_goal goal) :: rest)) ids (Ok [])
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | id :: rest ->
+          match Goal_store.Goal_id_map.find_opt id goals_by_id with
+          | None -> Error ("Linked Goal is missing: " ^ id)
+          | Some goal -> loop ((id, goal.phase, Goal_store.criterion_of_goal goal) :: acc) rest
+      in
+      loop [] ids
     in
     Keeper_librarian.Task_goals { task_id; criteria }
 ;;

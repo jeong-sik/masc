@@ -46,5 +46,9 @@ val claim_next_r
        (** When [true] and no goal-scoped task passes [task_filter], widen the
            claim pool to all_tasks. Result carries [scope_widened = true].
            Default [false] preserves the hard scope. *)
+  -> ?auto_start:bool
+       (** When [true], atomically transitions the claimed task (or an already
+           held [Claimed] task) to [InProgress] inside the same [.backlog]
+           lock and commit. Default [false]. *)
   -> unit
   -> Masc_domain.claim_next_result

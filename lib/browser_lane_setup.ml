@@ -230,17 +230,17 @@ let embedded_extension () =
   | Some manifest_text ->
     let* id = extension_id ~manifest_text in
     let* files =
-      List.fold_right
-        (fun name collected ->
-           let* collected = collected in
-           match Embedded_browser_extension.read name with
-           | Some contents -> Ok ((name, contents) :: collected)
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | name :: rest ->
+          (match Embedded_browser_extension.read name with
+           | Some contents -> loop ((name, contents) :: acc) rest
            | None ->
              Error
                (Embedded_extension_invalid
                   (Printf.sprintf "it lists %s and carries no bytes for it" name)))
-        Embedded_browser_extension.file_list
-        (Ok [])
+      in
+      loop [] Embedded_browser_extension.file_list
     in
     Ok (id, files)
 

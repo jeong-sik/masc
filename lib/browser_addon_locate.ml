@@ -26,11 +26,16 @@ let decode json =
   let* json=Lane_addon_action.validate_value ~schema ~name:output_name json in
   match json with
   | `Assoc ["matches",`List matches] ->
-      let* matches=List.fold_right (fun value acc -> let* rest=acc in match value with
-        | `Assoc ["description",`String description;"nodeId",`String node_id]
-            when String.trim node_id<>"" && String.trim description<>"" ->
-            Ok ({Browser_webdriver.node_id;description}::rest)
-        | _ -> Error "invalid locate match") matches (Ok []) in
+      let* matches =
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | `Assoc ["description",`String description;"nodeId",`String node_id] :: rest
+            when String.trim node_id <> "" && String.trim description <> "" ->
+              loop ({Browser_webdriver.node_id; description} :: acc) rest
+          | _ :: _ -> Error "invalid locate match"
+        in
+        loop [] matches
+      in
       let ids=List.map (fun (node:Browser_webdriver.located_node) -> node.node_id) matches in
       if List.length ids=List.length (List.sort_uniq String.compare ids) then Ok matches
       else Error "duplicate locate node reference"

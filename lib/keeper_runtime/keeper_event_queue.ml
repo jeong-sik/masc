@@ -370,93 +370,640 @@ let identity_payload = function
     ) as payload ->
     payload
 
-let fusion_terminal_equal left right =
-  match left, right with
-  | Fusion_succeeded left, Fusion_succeeded right
-  | Fusion_failed left, Fusion_failed right -> String.equal left right
-  | Fusion_cancelled, Fusion_cancelled -> true
-  | Fusion_succeeded _, (Fusion_failed _ | Fusion_cancelled)
-  | Fusion_failed _, (Fusion_succeeded _ | Fusion_cancelled)
-  | Fusion_cancelled, (Fusion_succeeded _ | Fusion_failed _) -> false
+type payload_identity =
+  | Identity_board_post_created
+  | Identity_board_comment_added of string
+  | Identity_board_attention_comment_added of string * string
+  | Identity_board_post_updated of float
+  | Identity_board_attention_post_updated of string * float
+  | Identity_fusion_completed of string * fusion_terminal * string
+  | Identity_schedule_due
+  | Identity_canonical_payload of stimulus_payload
 
-let fusion_completion_identity_equal left right =
-  String.equal left.run_id right.run_id
-  && fusion_terminal_equal left.terminal right.terminal
-  && String.equal left.board_post_id right.board_post_id
-  (* The first durably committed row owns recipient authority. The channel is
-     recipient metadata, not result identity: a replay sources it from the
-     durable delivery obligation, but a first commit can legitimately carry
-     [Unrouted] (obligation unavailable at projection time) while a later
-     startup recovery replays the same result with the recovered channel.
-     Treating [channel] as event identity would turn that exact result replay
-     into a false conflict. [enqueue_external_decision] retains the existing
-     row, so excluding the channel here never overwrites the authoritative
-     recipient. *)
+type stimulus_identity =
+  { id_post_id : post_id
+  ; id_urgency : urgency
+  ; id_payload : payload_identity
+  }
 
-let stimulus_identity_equal a b =
-  String.equal a.post_id b.post_id
-  && a.urgency = b.urgency
-  &&
-  match a.payload, b.payload with
-  | Board_signal {kind=Post_created; _}, Board_signal {kind=Post_created; _} -> true
-  | Board_signal {kind=Comment_added left; _}, Board_signal {kind=Comment_added right; _} ->
-    String.equal left.comment_id right.comment_id
-  | Board_attention {candidate_id=left_id; signal={kind=Comment_added left; _}},
-    Board_attention {candidate_id=right_id; signal={kind=Comment_added right; _}} ->
-    String.equal left_id right_id && String.equal left.comment_id right.comment_id
-  | Board_signal {kind=Post_updated left; _}, Board_signal {kind=Post_updated right; _} ->
-    Float.equal left.content_updated_at right.content_updated_at
-  | Board_attention {candidate_id=left_id; signal={kind=Post_updated left; _}},
-    Board_attention {candidate_id=right_id; signal={kind=Post_updated right; _}} ->
-    String.equal left_id right_id && Float.equal left.content_updated_at right.content_updated_at
-  | Fusion_completed left, Fusion_completed right ->
-    fusion_completion_identity_equal left right
-  | Schedule_due _, Schedule_due _ ->
-    (* [post_id] is the scheduler occurrence identity.  Pre-occurrence-id
+let payload_identity_of_payload = function
+  | Board_signal { kind = Post_created; _ } -> Identity_board_post_created
+  | Board_signal { kind = Comment_added comment; _ } ->
+    Identity_board_comment_added comment.comment_id
+  | Board_attention
+      { candidate_id; signal = { kind = Comment_added comment; _ } } ->
+    Identity_board_attention_comment_added (candidate_id, comment.comment_id)
+  | Board_signal { kind = Post_updated update; _ } ->
+    Identity_board_post_updated update.content_updated_at
+  | Board_attention
+      { candidate_id; signal = { kind = Post_updated update; _ } } ->
+    Identity_board_attention_post_updated
+      (candidate_id, update.content_updated_at)
+  | Fusion_completed fusion ->
+    (* The first durably committed row owns recipient authority. The channel is
+       recipient metadata, not result identity: a replay sources it from the
+       durable delivery obligation, but a first commit can legitimately carry
+       [Unrouted] (obligation unavailable at projection time) while a later
+       startup recovery replays the same result with the recovered channel.
+       Treating [channel] as event identity would turn that exact result replay
+       into a false conflict. [enqueue_external_decision] retains the existing
+       row, so excluding the channel here never overwrites the authoritative
+       recipient. *)
+    Identity_fusion_completed
+      (fusion.run_id, fusion.terminal, fusion.board_post_id)
+  | Schedule_due _ ->
+    (* [post_id] is the scheduler occurrence identity. Pre-occurrence-id
        durable rows decode with an empty payload [occurrence_id], while a
-       replay after upgrade carries the same occurrence in both places.  The
+       replay after upgrade carries the same occurrence in both places. The
        first committed row owns the payload, so comparing the payload again
        would turn that representation upgrade into a second execution. *)
-    true
-  | ( ( Board_signal
-          { kind =
-              ( Post_created | Post_updated _ | Comment_added _
-              | Reaction_changed _ | Vote_cast _ )
-          ; _
-          }
-      | Board_attention
-          { signal =
-              { kind =
-                  ( Post_created | Post_updated _ | Comment_added _
-                  | Reaction_changed _ | Vote_cast _ )
-              ; _
-              }
-          ; _
-          }
-      | Bootstrap | Fusion_completed _
-      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ )
-    , ( Board_signal
-          { kind =
-              ( Post_created | Post_updated _ | Comment_added _
-              | Reaction_changed _ | Vote_cast _ )
-          ; _
-          }
-      | Board_attention
-          { signal =
-              { kind =
-                  ( Post_created | Post_updated _ | Comment_added _
-                  | Reaction_changed _ | Vote_cast _ )
-              ; _
-              }
-          ; _
-          }
-      | Bootstrap | Fusion_completed _
-      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ ) ) ->
-    identity_payload a.payload = identity_payload b.payload
+    Identity_schedule_due
+  | ( Board_signal { kind = Reaction_changed _ | Vote_cast _; _ }
+    | Board_attention
+        { signal =
+            { kind = Post_created | Reaction_changed _ | Vote_cast _; _ }
+        ; _
+        }
+    | Bootstrap
+    | Connector_attention _
+    | Hitl_resolved _
+    | Ask_answered _
+    | Completion_authority_rejected _
+    | Task_cancelled _
+    | Workspace_message _
+    | Delegate_completed _
+    | Composition_completed _
+    | Tool_result_ready _
+    | Owned_job_completed _
+    | Addon_operation_changed _
+    | Task_outcome _ ) as payload ->
+    Identity_canonical_payload (identity_payload payload)
+
+let payload_identity_rank = function
+  | Identity_board_post_created -> 0
+  | Identity_board_comment_added _ -> 1
+  | Identity_board_attention_comment_added _ -> 2
+  | Identity_board_post_updated _ -> 3
+  | Identity_board_attention_post_updated _ -> 4
+  | Identity_fusion_completed _ -> 5
+  | Identity_schedule_due -> 6
+  | Identity_canonical_payload _ -> 7
+
+let fusion_terminal_rank = function
+  | Fusion_succeeded _ -> 0
+  | Fusion_failed _ -> 1
+  | Fusion_cancelled -> 2
+
+let compare_fusion_terminal left right =
+  match left, right with
+  | Fusion_succeeded l, Fusion_succeeded r | Fusion_failed l, Fusion_failed r ->
+    String.compare l r
+  | Fusion_cancelled, Fusion_cancelled -> 0
+  | ( (Fusion_succeeded _ | Fusion_failed _ | Fusion_cancelled)
+    , (Fusion_succeeded _ | Fusion_failed _ | Fusion_cancelled) ) ->
+    Int.compare (fusion_terminal_rank left) (fusion_terminal_rank right)
+
+let compare_chain cmp next = if cmp <> 0 then cmp else next ()
+
+let board_reaction_target_type_rank = function
+  | Reaction_post -> 0
+  | Reaction_comment -> 1
+
+let compare_board_reaction_target_type left right =
+  Int.compare
+    (board_reaction_target_type_rank left)
+    (board_reaction_target_type_rank right)
+
+let compare_board_reaction_change
+      (left : board_reaction_change)
+      (right : board_reaction_change)
+  =
+  compare_chain
+    (compare_board_reaction_target_type left.target_type right.target_type)
+    (fun () ->
+       compare_chain
+         (String.compare left.target_id right.target_id)
+         (fun () ->
+            compare_chain
+              (String.compare left.user_id right.user_id)
+              (fun () ->
+                 compare_chain
+                   (String.compare left.emoji right.emoji)
+                   (fun () -> Bool.compare left.reacted right.reacted))))
+
+let board_vote_target_rank = function
+  | Vote_on_post _ -> 0
+  | Vote_on_comment _ -> 1
+
+let compare_board_vote_target left right =
+  match left, right with
+  | Vote_on_post l, Vote_on_post r | Vote_on_comment l, Vote_on_comment r ->
+    String.compare l r
+  | (Vote_on_post _ | Vote_on_comment _), (Vote_on_post _ | Vote_on_comment _) ->
+    Int.compare (board_vote_target_rank left) (board_vote_target_rank right)
+
+let board_vote_direction_rank = function
+  | Vote_up -> 0
+  | Vote_down -> 1
+
+let compare_board_vote_direction left right =
+  Int.compare (board_vote_direction_rank left) (board_vote_direction_rank right)
+
+let compare_board_vote_change
+      (left : board_vote_change)
+      (right : board_vote_change)
+  =
+  compare_chain
+    (compare_board_vote_target left.target right.target)
+    (fun () ->
+       compare_chain
+         (String.compare left.target_author right.target_author)
+         (fun () ->
+            compare_chain
+              (String.compare left.voter right.voter)
+              (fun () -> compare_board_vote_direction left.direction right.direction)))
+
+let board_stimulus_kind_rank = function
+  | Post_created -> 0
+  | Post_updated _ -> 1
+  | Comment_added _ -> 2
+  | Reaction_changed _ -> 3
+  | Vote_cast _ -> 4
+
+let compare_board_stimulus_kind left right =
+  match left, right with
+  | Post_created, Post_created -> 0
+  | ( Post_updated { content_updated_at = l }
+    , Post_updated { content_updated_at = r } ) ->
+    Float.compare l r
+  | ( Comment_added { comment_id = l_cid; parent_id = l_pid }
+    , Comment_added { comment_id = r_cid; parent_id = r_pid } ) ->
+    compare_chain
+      (String.compare l_cid r_cid)
+      (fun () -> Option.compare String.compare l_pid r_pid)
+  | Reaction_changed l, Reaction_changed r ->
+    compare_board_reaction_change l r
+  | Vote_cast l, Vote_cast r ->
+    compare_board_vote_change l r
+  | ( ( Post_created
+      | Post_updated _
+      | Comment_added _
+      | Reaction_changed _
+      | Vote_cast _ )
+    , ( Post_created
+      | Post_updated _
+      | Comment_added _
+      | Reaction_changed _
+      | Vote_cast _ ) ) ->
+    Int.compare (board_stimulus_kind_rank left) (board_stimulus_kind_rank right)
+
+let compare_board_stimulus (left : board_stimulus) (right : board_stimulus) =
+  compare_chain
+    (compare_board_stimulus_kind left.kind right.kind)
+    (fun () ->
+       compare_chain
+         (String.compare left.author right.author)
+         (fun () ->
+            compare_chain
+              (String.compare left.title right.title)
+              (fun () ->
+                 compare_chain
+                   (String.compare left.content right.content)
+                   (fun () ->
+                      compare_chain
+                        (Option.compare String.compare left.hearth right.hearth)
+                        (fun () ->
+                           Option.compare Float.compare left.updated_at right.updated_at)))))
+
+let continuation_channel_rank (channel : Keeper_continuation_channel.t) =
+  match channel with
+  | Keeper_continuation_channel.Dashboard _ -> 0
+  | Keeper_continuation_channel.Discord _ -> 1
+  | Keeper_continuation_channel.Slack _ -> 2
+  | Keeper_continuation_channel.Telegram _ -> 3
+  | Keeper_continuation_channel.Imessage _ -> 4
+  | Keeper_continuation_channel.Keeper _ -> 5
+  | Keeper_continuation_channel.Unrouted _ -> 6
+
+let compare_continuation_channel
+      (left : Keeper_continuation_channel.t)
+      (right : Keeper_continuation_channel.t)
+  =
+  match left, right with
+  | ( Keeper_continuation_channel.Dashboard { thread_id = l }
+    , Keeper_continuation_channel.Dashboard { thread_id = r } ) ->
+    String.compare l r
+  | ( Keeper_continuation_channel.Discord l
+    , Keeper_continuation_channel.Discord r ) ->
+    compare_chain
+      (Option.compare String.compare l.guild_id r.guild_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.channel_id r.channel_id)
+           (fun () ->
+              compare_chain
+                (Option.compare String.compare l.parent_channel_id r.parent_channel_id)
+                (fun () ->
+                   compare_chain
+                     (Option.compare String.compare l.thread_id r.thread_id)
+                     (fun () ->
+                        compare_chain
+                          (Option.compare
+                             String.compare
+                             l.reply_to_message_id
+                             r.reply_to_message_id)
+                          (fun () -> String.compare l.user_id r.user_id)))))
+  | ( Keeper_continuation_channel.Slack l
+    , Keeper_continuation_channel.Slack r ) ->
+    compare_chain
+      (Option.compare String.compare l.team_id r.team_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.channel_id r.channel_id)
+           (fun () ->
+              compare_chain
+                (Option.compare String.compare l.thread_ts r.thread_ts)
+                (fun () -> String.compare l.user_id r.user_id)))
+  | ( Keeper_continuation_channel.Telegram l
+    , Keeper_continuation_channel.Telegram r ) ->
+    compare_chain
+      (Int64.compare l.bot_user_id r.bot_user_id)
+      (fun () ->
+         compare_chain
+           (Int64.compare l.chat_id r.chat_id)
+           (fun () ->
+              compare_chain
+                (Option.compare
+                   Int64.compare
+                   l.direct_messages_topic_id
+                   r.direct_messages_topic_id)
+                (fun () ->
+                   compare_chain
+                     (Option.compare Int.compare l.message_thread_id r.message_thread_id)
+                     (fun () ->
+                        compare_chain
+                          (Option.compare
+                             Int.compare
+                             l.reply_to_message_id
+                             r.reply_to_message_id)
+                          (fun () -> Int64.compare l.user_id r.user_id)))))
+  | ( Keeper_continuation_channel.Imessage l
+    , Keeper_continuation_channel.Imessage r ) ->
+    compare_chain
+      (String.compare l.chat_identifier r.chat_identifier)
+      (fun () ->
+         compare_chain
+           (Option.compare String.compare l.chat_guid r.chat_guid)
+           (fun () -> String.compare l.user_id r.user_id))
+  | ( Keeper_continuation_channel.Keeper { keeper_name = l }
+    , Keeper_continuation_channel.Keeper { keeper_name = r } ) ->
+    String.compare l r
+  | ( Keeper_continuation_channel.Unrouted { reason = l }
+    , Keeper_continuation_channel.Unrouted { reason = r } ) ->
+    String.compare l r
+  | ( ( Keeper_continuation_channel.Dashboard _
+      | Keeper_continuation_channel.Discord _
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Telegram _
+      | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Keeper _
+      | Keeper_continuation_channel.Unrouted _ )
+    , ( Keeper_continuation_channel.Dashboard _
+      | Keeper_continuation_channel.Discord _
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Telegram _
+      | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Keeper _
+      | Keeper_continuation_channel.Unrouted _ ) ) ->
+    Int.compare (continuation_channel_rank left) (continuation_channel_rank right)
+
+let compare_hitl_resolution_decision left right =
+  match left, right with
+  | Hitl_approved, Hitl_approved -> 0
+  | Hitl_rejected l, Hitl_rejected r -> String.compare l r
+  | Hitl_approved, Hitl_rejected _ -> -1
+  | Hitl_rejected _, Hitl_approved -> 1
+
+let compare_completion_authority
+      (left : Masc_domain.completion_authority)
+      (right : Masc_domain.completion_authority)
+  =
+  match left, right with
+  | ( Masc_domain.Human_operator { operator_id = l }
+    , Masc_domain.Human_operator { operator_id = r } ) ->
+    String.compare l r
+  | ( Masc_domain.System_llm_agent { agent_run_id = l }
+    , Masc_domain.System_llm_agent { agent_run_id = r } ) ->
+    String.compare l r
+  | Masc_domain.Human_operator _, Masc_domain.System_llm_agent _ -> -1
+  | Masc_domain.System_llm_agent _, Masc_domain.Human_operator _ -> 1
+
+let delegate_terminal_rank = function
+  | Delegate_replied _ -> 0
+  | Delegate_no_reply -> 1
+  | Delegate_failed _ -> 2
+
+let compare_delegate_terminal left right =
+  match left, right with
+  | Delegate_replied l, Delegate_replied r | Delegate_failed l, Delegate_failed r ->
+    String.compare l r
+  | Delegate_no_reply, Delegate_no_reply -> 0
+  | ( (Delegate_replied _ | Delegate_no_reply | Delegate_failed _)
+    , (Delegate_replied _ | Delegate_no_reply | Delegate_failed _) ) ->
+    Int.compare (delegate_terminal_rank left) (delegate_terminal_rank right)
+
+let composition_terminal_rank = function
+  | Composition_succeeded -> 0
+  | Composition_failed _ -> 1
+  | Composition_cancelled _ -> 2
+
+let compare_composition_terminal left right =
+  match left, right with
+  | Composition_succeeded, Composition_succeeded -> 0
+  | Composition_failed l, Composition_failed r
+  | Composition_cancelled l, Composition_cancelled r ->
+    String.compare l r
+  | ( (Composition_succeeded | Composition_failed _ | Composition_cancelled _)
+    , (Composition_succeeded | Composition_failed _ | Composition_cancelled _) ) ->
+    Int.compare (composition_terminal_rank left) (composition_terminal_rank right)
+
+let compare_turn_ref (left : Ids.Turn_ref.t) (right : Ids.Turn_ref.t) =
+  compare_chain
+    (String.compare (Ids.Turn_ref.trace_id left) (Ids.Turn_ref.trace_id right))
+    (fun () ->
+       Int.compare
+         (Ids.Turn_ref.absolute_turn left)
+         (Ids.Turn_ref.absolute_turn right))
+
+let compare_owned_job_source
+      (left : Keeper_owned_job_identity.source)
+      (right : Keeper_owned_job_identity.source)
+  =
+  compare_chain
+    (Option.compare String.compare left.task_id right.task_id)
+    (fun () ->
+       compare_chain
+         (Option.compare compare_turn_ref left.turn_ref right.turn_ref)
+         (fun () ->
+            compare_chain
+              (Option.compare String.compare left.tool_use_id right.tool_use_id)
+              (fun () ->
+                 compare_chain
+                   (Option.compare String.compare left.trace_id right.trace_id)
+                   (fun () ->
+                      Option.compare Int.compare left.keeper_turn_id right.keeper_turn_id))))
+
+let stimulus_payload_rank = function
+  | Board_signal _ -> 0
+  | Board_attention _ -> 1
+  | Bootstrap -> 2
+  | Tool_result_ready _ -> 3
+  | Fusion_completed _ -> 4
+  | Schedule_due _ -> 5
+  | Connector_attention _ -> 6
+  | Hitl_resolved _ -> 7
+  | Ask_answered _ -> 8
+  | Completion_authority_rejected _ -> 9
+  | Task_cancelled _ -> 10
+  | Workspace_message _ -> 11
+  | Delegate_completed _ -> 12
+  | Composition_completed _ -> 13
+  | Owned_job_completed _ -> 14
+  | Addon_operation_changed _ -> 15
+  | Task_outcome _ -> 16
+
+let compare_stimulus_payload (left : stimulus_payload) (right : stimulus_payload) =
+  match left, right with
+  | Board_signal l, Board_signal r -> compare_board_stimulus l r
+  | Board_attention l, Board_attention r ->
+    compare_chain
+      (String.compare l.candidate_id r.candidate_id)
+      (fun () -> compare_board_stimulus l.signal r.signal)
+  | Bootstrap, Bootstrap -> 0
+  | Tool_result_ready l, Tool_result_ready r -> String.compare l r
+  | Fusion_completed l, Fusion_completed r ->
+    compare_chain
+      (String.compare l.run_id r.run_id)
+      (fun () ->
+         compare_chain
+           (compare_fusion_terminal l.terminal r.terminal)
+           (fun () ->
+              compare_chain
+                (String.compare l.board_post_id r.board_post_id)
+                (fun () -> compare_continuation_channel l.channel r.channel)))
+  | Schedule_due l, Schedule_due r ->
+    compare_chain
+      (String.compare l.occurrence_id r.occurrence_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.schedule_instance_id r.schedule_instance_id)
+           (fun () ->
+              compare_chain
+                (String.compare l.schedule_id r.schedule_id)
+                (fun () ->
+                   compare_chain
+                     (Float.compare l.due_at r.due_at)
+                     (fun () ->
+                        compare_chain
+                          (String.compare l.payload_digest r.payload_digest)
+                          (fun () ->
+                             compare_chain
+                               (Option.compare String.compare l.title r.title)
+                               (fun () ->
+                                  compare_chain
+                                    (String.compare l.message r.message)
+                                    (fun () ->
+                                       Option.compare
+                                         compare_continuation_channel
+                                         l.result_delivery
+                                         r.result_delivery)))))))
+  | Connector_attention l, Connector_attention r ->
+    compare_chain
+      (String.compare l.event_id r.event_id)
+      (fun () -> compare_continuation_channel l.channel r.channel)
+  | Hitl_resolved l, Hitl_resolved r ->
+    compare_chain
+      (String.compare l.approval_id r.approval_id)
+      (fun () ->
+         compare_chain
+           (compare_hitl_resolution_decision l.decision r.decision)
+           (fun () -> compare_continuation_channel l.channel r.channel))
+  | Ask_answered l, Ask_answered r ->
+    compare_chain
+      (String.compare l.ask_id r.ask_id)
+      (fun () -> compare_continuation_channel l.channel r.channel)
+  | Completion_authority_rejected l, Completion_authority_rejected r ->
+    compare_chain
+      (String.compare l.car_task_id r.car_task_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.car_verification_id r.car_verification_id)
+           (fun () ->
+              compare_chain
+                (String.compare l.car_reason r.car_reason)
+                (fun () ->
+                   compare_completion_authority l.car_authority r.car_authority)))
+  | Task_cancelled l, Task_cancelled r ->
+    compare_chain
+      (String.compare l.tc_task_id r.tc_task_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.tc_cancelled_by r.tc_cancelled_by)
+           (fun () -> Option.compare String.compare l.tc_reason r.tc_reason))
+  | Workspace_message l, Workspace_message r ->
+    compare_chain
+      (String.compare l.wmsg_request_id r.wmsg_request_id)
+      (fun () -> String.compare l.wmsg_from r.wmsg_from)
+  | Delegate_completed l, Delegate_completed r ->
+    compare_chain
+      (String.compare l.dc_operation_id r.dc_operation_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.dc_keeper r.dc_keeper)
+           (fun () -> compare_delegate_terminal l.dc_terminal r.dc_terminal))
+  | Composition_completed l, Composition_completed r ->
+    compare_chain
+      (String.compare l.cc_request_id r.cc_request_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.cc_tool r.cc_tool)
+           (fun () -> compare_composition_terminal l.cc_terminal r.cc_terminal))
+  | Owned_job_completed l, Owned_job_completed r ->
+    compare_chain
+      (String.compare
+         (Keeper_owned_job_identity.Job_id.to_string l.oj_job_id)
+         (Keeper_owned_job_identity.Job_id.to_string r.oj_job_id))
+      (fun () ->
+         compare_chain
+           (compare_owned_job_source l.oj_source r.oj_source)
+           (fun () -> compare_continuation_channel l.oj_channel r.oj_channel))
+  | Addon_operation_changed l, Addon_operation_changed r ->
+    compare_chain
+      (String.compare l.ao_origin_id r.ao_origin_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.ao_publication_id r.ao_publication_id)
+           (fun () ->
+              compare_chain
+                (compare_owned_job_source l.ao_source r.ao_source)
+                (fun () -> compare_continuation_channel l.ao_channel r.ao_channel)))
+  | Task_outcome l, Task_outcome r ->
+    compare_chain
+      (String.compare l.to_task_id r.to_task_id)
+      (fun () ->
+         compare_chain
+           (String.compare l.to_verification_id r.to_verification_id)
+           (fun () ->
+              compare_chain
+                (String.compare l.to_producer r.to_producer)
+                (fun () ->
+                   compare_completion_authority l.to_authority r.to_authority)))
+  | ( ( Board_signal _
+      | Board_attention _
+      | Bootstrap
+      | Tool_result_ready _
+      | Fusion_completed _
+      | Schedule_due _
+      | Connector_attention _
+      | Hitl_resolved _
+      | Ask_answered _
+      | Completion_authority_rejected _
+      | Task_cancelled _
+      | Workspace_message _
+      | Delegate_completed _
+      | Composition_completed _
+      | Owned_job_completed _
+      | Addon_operation_changed _
+      | Task_outcome _ )
+    , ( Board_signal _
+      | Board_attention _
+      | Bootstrap
+      | Tool_result_ready _
+      | Fusion_completed _
+      | Schedule_due _
+      | Connector_attention _
+      | Hitl_resolved _
+      | Ask_answered _
+      | Completion_authority_rejected _
+      | Task_cancelled _
+      | Workspace_message _
+      | Delegate_completed _
+      | Composition_completed _
+      | Owned_job_completed _
+      | Addon_operation_changed _
+      | Task_outcome _ ) ) ->
+    Int.compare (stimulus_payload_rank left) (stimulus_payload_rank right)
+
+let compare_payload_identity left right =
+  match left, right with
+  | Identity_board_post_created, Identity_board_post_created
+  | Identity_schedule_due, Identity_schedule_due ->
+    0
+  | Identity_board_comment_added l_cid, Identity_board_comment_added r_cid ->
+    String.compare l_cid r_cid
+  | ( Identity_board_attention_comment_added (l_cand, l_cid)
+    , Identity_board_attention_comment_added (r_cand, r_cid) ) ->
+    let cmp = String.compare l_cand r_cand in
+    if cmp <> 0 then cmp else String.compare l_cid r_cid
+  | Identity_board_post_updated l_ts, Identity_board_post_updated r_ts ->
+    Float.compare l_ts r_ts
+  | ( Identity_board_attention_post_updated (l_cand, l_ts)
+    , Identity_board_attention_post_updated (r_cand, r_ts) ) ->
+    let cmp = String.compare l_cand r_cand in
+    if cmp <> 0 then cmp else Float.compare l_ts r_ts
+  | ( Identity_fusion_completed (l_run, l_term, l_post)
+    , Identity_fusion_completed (r_run, r_term, r_post) ) ->
+    let cmp = String.compare l_run r_run in
+    if cmp <> 0
+    then cmp
+    else (
+      let cmp = compare_fusion_terminal l_term r_term in
+      if cmp <> 0 then cmp else String.compare l_post r_post)
+  | Identity_canonical_payload l_payload, Identity_canonical_payload r_payload ->
+    compare_stimulus_payload l_payload r_payload
+  | ( ( Identity_board_post_created
+      | Identity_board_comment_added _
+      | Identity_board_attention_comment_added _
+      | Identity_board_post_updated _
+      | Identity_board_attention_post_updated _
+      | Identity_fusion_completed _
+      | Identity_schedule_due
+      | Identity_canonical_payload _ )
+    , ( Identity_board_post_created
+      | Identity_board_comment_added _
+      | Identity_board_attention_comment_added _
+      | Identity_board_post_updated _
+      | Identity_board_attention_post_updated _
+      | Identity_fusion_completed _
+      | Identity_schedule_due
+      | Identity_canonical_payload _ ) ) ->
+    Int.compare (payload_identity_rank left) (payload_identity_rank right)
+
+let compare_stimulus_identity (a : stimulus_identity) (b : stimulus_identity) =
+  let cmp = String.compare a.id_post_id b.id_post_id in
+  if cmp <> 0
+  then cmp
+  else (
+    let cmp = Int.compare (urgency_rank a.id_urgency) (urgency_rank b.id_urgency) in
+    if cmp <> 0 then cmp else compare_payload_identity a.id_payload b.id_payload)
+
+let stimulus_identity (s : stimulus) : stimulus_identity =
+  { id_post_id = s.post_id
+  ; id_urgency = s.urgency
+  ; id_payload = payload_identity_of_payload s.payload
+  }
+
+module Stimulus_identity_order = struct
+  type t = stimulus_identity
+
+  let compare = compare_stimulus_identity
+end
+
+module Stimulus_identity_set = Set.Make (Stimulus_identity_order)
+module Stimulus_identity_map = Map.Make (Stimulus_identity_order)
+
+let stimulus_identity_equal a b =
+  Stimulus_identity_order.compare (stimulus_identity a) (stimulus_identity b) = 0
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with
@@ -485,18 +1032,22 @@ let remove_by_post_id post_id queue =
 (* Scans both halves of the queue directly instead of rebuilding it through
    repeated [dequeue], so membership stays allocation-free. *)
 let contains (queue : t) (stimulus : stimulus) : bool =
-  let same head = stimulus_identity_equal head stimulus in
+  let target = stimulus_identity stimulus in
+  let same head = Stimulus_identity_order.compare (stimulus_identity head) target = 0 in
   List.exists same queue.front || List.exists same queue.back_rev
 
 let uniq_stimuli stimuli =
-  List.fold_left
-    (fun acc stimulus ->
-       if List.exists (stimulus_identity_equal stimulus) acc
-       then acc
-       else stimulus :: acc)
-    []
-    stimuli
-  |> List.rev
+  let _, rev_acc =
+    List.fold_left
+      (fun (seen, acc) stimulus ->
+         let key = stimulus_identity stimulus in
+         if Stimulus_identity_set.mem key seen
+         then seen, acc
+         else Stimulus_identity_set.add key seen, stimulus :: acc)
+      (Stimulus_identity_set.empty, [])
+      stimuli
+  in
+  List.rev rev_acc
 
 let sort_by_urgency (queue : t) : t =
   queue
@@ -505,28 +1056,32 @@ let sort_by_urgency (queue : t) : t =
        (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
   |> of_list
 
-(* Starvation fix for #31597: [Low] competes forever against a Keeper's own
-   continuous [Normal] backlog (explicit task work, board mentions) under a
-   strict-priority selector with no fairness correction — measured as a
-   16-day-old recurring schedule that dispatched "succeeded" every hour
-   without a single Board post ever landing. 3600s matches the cadence most
-   recurring schedules in this fleet already use; it is a reasoned default,
-   not a measured distribution (unlike the dated comments elsewhere in this
-   file — there is no equivalent aging measurement yet). [Normal] is never
-   aged into [Immediate]: [Immediate] is a producer-declared contract (see
-   keeper_composition_completion_wake.ml) reserved for "this Keeper is
-   waiting on an answer to something it asked for," and letting aging blur
-   into that would erode the one guarantee Immediate still gives callers. *)
-let low_to_normal_aging_threshold_sec = 3600.0
-
-let effective_urgency ~now (s : stimulus) : urgency =
-  match s.urgency with
-  | Low when now -. s.arrived_at >= low_to_normal_aging_threshold_sec -> Normal
-  | (Immediate | Normal | Low) as u -> u
+(* Deterministic starvation-free [Normal]/[Low] alternation (#31597):
+   [Immediate] remains strictly highest priority (rank 0) because it is a
+   producer-declared contract ("this Keeper is waiting on an answer to
+   something it asked for"). Between [Normal] and [Low], selection alternates
+   based on the last non-immediate urgency served, bounding [Low] wait to at
+   most one [Normal] turn when both lanes have ready work without relying on
+   wall-clock aging thresholds. *)
+let preferred_non_immediate_urgency ~last_non_immediate_served =
+  match last_non_immediate_served with
+  | Some Normal -> Low
+  | None | Some (Low | Immediate) -> Normal
 ;;
 
-let effective_urgency_rank ~now (s : stimulus) : int =
-  urgency_rank (effective_urgency ~now s)
+let selection_urgency_rank ~last_non_immediate_served urgency =
+  match urgency with
+  | Immediate -> 0
+  | (Normal | Low) as candidate ->
+    if candidate = preferred_non_immediate_urgency ~last_non_immediate_served
+    then 1
+    else 2
+;;
+
+let compare_selection_urgency ~last_non_immediate_served left right =
+  Int.compare
+    (selection_urgency_rank ~last_non_immediate_served left)
+    (selection_urgency_rank ~last_non_immediate_served right)
 ;;
 
 let payload_kind_label = function

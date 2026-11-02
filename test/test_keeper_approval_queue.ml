@@ -4978,7 +4978,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
          (List.length read_errors);
        let current =
          `Assoc
-           (Masc.Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
+           (Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
               ~base_path ~keeper_name:"queue-partial-read" ~now_ts:(Unix.gettimeofday ()))
        in
        let open Yojson.Safe.Util in
@@ -6388,7 +6388,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        let approval_id = submit ~base_path ~keeper_name ~input in
        let gate_fields () =
          `Assoc
-           (Masc.Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
+           (Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
               ~base_path ~keeper_name ~now_ts:(Unix.gettimeofday ()))
        in
        let open Yojson.Safe.Util in

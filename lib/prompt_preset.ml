@@ -985,11 +985,16 @@ let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes co
     lanes
 ;;
 
+let compare_string_pair (k1, v1) (k2, v2) =
+  let c = String.compare k1 k2 in
+  if c <> 0 then c else String.compare v1 v2
+;;
+
 (* The preset's routing already holds in the file: the same assignment
    rows, and every preset lane present with the same slots. Compared on the
    parsed values, not the text — the writers reformat rows they touch. *)
 let routing_holds ~current_assignments ~current_lanes ~assignments ~lanes =
-  let sorted = List.sort compare in
+  let sorted = List.sort compare_string_pair in
   sorted current_assignments = sorted assignments
   && List.for_all (fun lane -> match lane.owner with
        | Unavailable_lane _ -> true
@@ -1175,15 +1180,52 @@ let delete_error_to_string = function
     Printf.sprintf "preset %s could not be removed: %s" name reason
 ;;
 
+let compare_override_entry (a : Override.entry) (b : Override.entry) =
+  let c = String.compare a.key b.key in
+  if c <> 0 then c
+  else
+    let c = String.compare a.value b.value in
+    if c <> 0 then c
+    else
+      let c = String.compare a.authored_against b.authored_against in
+      if c <> 0 then c else List.compare String.compare a.template_variables b.template_variables
+;;
+
+let standalone_lane_rank = function
+  | Standalone_lane.Librarian -> 0
+  | Standalone_lane.Hitl_auto_judge -> 1
+  | Standalone_lane.Board_attention -> 2
+  | Standalone_lane.Verifier -> 3
+  | Standalone_lane.Browser_stagehand -> 4
+  | Standalone_lane.Candle_appraiser -> 5
+;;
+
+let compare_lane_owner (a : lane_owner) (b : lane_owner) =
+  match a, b with
+  | Current_lane (Runtime_schema.Builtin a), Current_lane (Runtime_schema.Builtin b) ->
+    Int.compare (standalone_lane_rank a) (standalone_lane_rank b)
+  | Current_lane (Runtime_schema.Builtin _),
+    (Current_lane (Runtime_schema.Addon _) | Unavailable_lane _) -> -1
+  | (Current_lane (Runtime_schema.Addon _) | Unavailable_lane _),
+    Current_lane (Runtime_schema.Builtin _) -> 1
+  | Current_lane (Runtime_schema.Addon a), Current_lane (Runtime_schema.Addon b) ->
+    let c = String.compare a.declaration_id b.declaration_id in
+    if c <> 0 then c else String.compare a.output b.output
+  | Current_lane (Runtime_schema.Addon _), Unavailable_lane _ -> -1
+  | Unavailable_lane _, Current_lane (Runtime_schema.Addon _) -> 1
+  | Unavailable_lane a, Unavailable_lane b -> String.compare a b
+;;
+
 let same_settings (left : snapshot) (right : snapshot) =
-  let ordered rows = List.sort Stdlib.compare rows in
+  let ordered_overrides rows = List.sort compare_override_entry rows in
+  let ordered_pairs rows = List.sort compare_string_pair rows in
   let ordered_lanes lanes =
     List.filter (fun lane -> match lane.owner with Current_lane _ -> true | Unavailable_lane _ -> false) lanes
-    |> List.sort (fun left right -> Stdlib.compare left.owner right.owner)
+    |> List.sort (fun left right -> compare_lane_owner left.owner right.owner)
   in
-  ordered left.prompt_overrides = ordered right.prompt_overrides
-  && ordered left.instructions = ordered right.instructions
-  && ordered left.assignments = ordered right.assignments
+  ordered_overrides left.prompt_overrides = ordered_overrides right.prompt_overrides
+  && ordered_pairs left.instructions = ordered_pairs right.instructions
+  && ordered_pairs left.assignments = ordered_pairs right.assignments
   && List.equal (fun saved current -> lane_holds ~current_lanes:[current] saved)
        (ordered_lanes left.lanes) (ordered_lanes right.lanes)
 

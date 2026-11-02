@@ -130,8 +130,16 @@ and handle_transition ~tool_name ~start_time ctx args =
     parse_handoff_context ~agent_name:ctx.agent_name ~action args
   in
   let expected_version = get_int_opt args "expected_version" in
-  let tasks = Workspace.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
+  Workspace.ensure_initialized ctx.config;
+  match Workspace_backlog.read_prepared_backlog_r ctx.config with
+  | Error msg ->
+    let err = Masc_domain.System (Masc_domain.System_error.IoError msg) in
+    log_task_transition_failed ~agent_name:ctx.agent_name err;
+    result_to_response ~tool_name ~start_time (Error err)
+  | Ok prepared ->
+  let task_opt =
+    Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id
+  in
   match task_opt with
   | None ->
     missing_live_task_transition_rejection

@@ -69,41 +69,46 @@ let candle_observation_sequence ~base_path ~request_sequence observation =
       Hashtbl.add candle_observations base_path (request_sequence, request_sequence, observation);
       request_sequence)
 
+module String_set = Set_util.StringSet
+module String_map = Set_util.StringMap
+
 let keeper_names_in_snapshot snapshot =
-  let seen = Hashtbl.create 16 in
-  let acc = ref [] in
-  let note_row = function
+  let note_row (seen, rev_acc) = function
     | `Assoc _ as json ->
-        (match Json_util.assoc_string_opt "name" json with
-         | Some keeper when not (Hashtbl.mem seen keeper) ->
-             Hashtbl.add seen keeper ();
-             acc := keeper :: !acc
-         | Some _ | None -> ())
-    | _ -> ()
+      (match Json_util.assoc_string_opt "name" json with
+       | Some keeper when not (String_set.mem keeper seen) ->
+         String_set.add keeper seen, keeper :: rev_acc
+       | Some _ | None -> seen, rev_acc)
+    | _ -> seen, rev_acc
   in
-  let note_rows rows = List.iter note_row rows in
-  (match snapshot with
-   | `Assoc fields ->
-       List.iter
-         (function
-           | "keepers", `Assoc section_fields ->
-               List.iter
-                 (function
-                   | "items", `List rows -> note_rows rows
-                   | _ -> ())
-                 section_fields
-           | ("keepers" | "keeper_briefs" | "continuity_briefs"), `List rows ->
-               note_rows rows
-           | "operator_targets", `Assoc target_fields ->
-               List.iter
-                 (function
-                   | "keepers", `List rows -> note_rows rows
-                   | _ -> ())
-                 target_fields
-           | _ -> ())
-         fields
-   | _ -> ());
-  List.rev !acc
+  let note_rows state rows = List.fold_left note_row state rows in
+  let _, rev_acc =
+    match snapshot with
+    | `Assoc fields ->
+      List.fold_left
+        (fun state -> function
+          | "keepers", `Assoc section_fields ->
+            List.fold_left
+              (fun state -> function
+                | "items", `List rows -> note_rows state rows
+                | _ -> state)
+              state
+              section_fields
+          | ("keepers" | "keeper_briefs" | "continuity_briefs"), `List rows ->
+            note_rows state rows
+          | "operator_targets", `Assoc target_fields ->
+            List.fold_left
+              (fun state -> function
+                | "keepers", `List rows -> note_rows state rows
+                | _ -> state)
+              state
+              target_fields
+          | _ -> state)
+        (String_set.empty, [])
+        fields
+    | _ -> String_set.empty, []
+  in
+  List.rev rev_acc
 
 let with_current_keeper_observations_using ~read ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
@@ -115,21 +120,20 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
   let board_addresses =
     match keeper_names_in_snapshot snapshot with
-    | [] -> Hashtbl.create 0
+    | [] -> String_map.empty
     | names ->
-        let pairs =
-          Eio_guard.run_in_systhread
-            ~label:"dashboard-keeper-board-addresses"
-            (fun () ->
-              List.map
-                (fun keeper -> keeper, Keeper_board_address.read config keeper)
-                names)
-        in
-        let table = Hashtbl.create (List.length pairs) in
-        List.iter
-          (fun (keeper, address) -> Hashtbl.replace table keeper address)
-          pairs;
-        table
+      let pairs =
+        Eio_guard.run_in_systhread
+          ~label:"dashboard-keeper-board-addresses"
+          (fun () ->
+            List.map
+              (fun keeper -> keeper, Keeper_board_address.read config keeper)
+              names)
+      in
+      List.fold_left
+        (fun acc (keeper, address) -> String_map.add keeper address acc)
+        String_map.empty
+        pairs
   in
   let set key value fields =
     if List.mem_assoc key fields then
@@ -150,7 +154,7 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
             | Ok value -> Keeper_portrait_equipment.Ready value
             | Error reason -> Keeper_portrait_equipment.Unavailable reason in
           let address =
-            match Hashtbl.find_opt board_addresses keeper with
+            match String_map.find_opt keeper board_addresses with
             | Some address -> address
             | None -> Keeper_board_address.read config keeper
           in

@@ -1021,19 +1021,22 @@ let requires_restart setting =
   | Process_restart -> true
 ;;
 
+module String_map = Map.Make (String)
+
 let duplicates ~identity rows =
-  let counts = Hashtbl.create (List.length rows) in
-  List.iter
-    (fun row ->
-       let key = identity row in
-       let next_count =
-         match Hashtbl.find_opt counts key with
-         | None -> 1
-         | Some count -> count + 1
-       in
-       Hashtbl.replace counts key next_count)
-    rows;
-  Hashtbl.fold
+  let counts =
+    List.fold_left
+      (fun acc row ->
+         let key = identity row in
+         let next_count =
+           match String_map.find_opt key acc with
+           | None -> 1
+           | Some count -> count + 1
+         in
+         String_map.add key next_count acc)
+      String_map.empty rows
+  in
+  String_map.fold
     (fun key count acc -> if count > 1 then key :: acc else acc)
     counts
     []

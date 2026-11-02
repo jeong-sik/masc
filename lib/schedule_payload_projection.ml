@@ -440,7 +440,7 @@ let support_summary schedules =
   let unsupported_kinds =
     unsupported_kinds
     |> List.sort (fun (left_kind, left_count) (right_kind, right_count) ->
-      match compare right_count left_count with
+      match Int.compare right_count left_count with
       | 0 -> String.compare left_kind right_kind
       | order -> order)
     |> List.map (fun (raw_kind, count) -> { raw_kind; count })

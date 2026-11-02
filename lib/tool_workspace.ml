@@ -232,12 +232,11 @@ let status_summary_string (ctx : context) =
     credential_state.credential_required && not credential_state.credential_available
   in
   let current_task, task_failures = safe_current_task ctx ~session_bound in
-  let active_task_assignees = Workspace.active_task_assignees_by_task_id backlog in
+  let prepared = Workspace_backlog.prepare_backlog backlog in
+  let active_assignees_by_task_id = prepared.active_assignees_by_task_id in
   let roster, roster_failures = safe_get_agents_observed ctx in
   let observation_failures =
-    List.fold_left
-      (fun acc failures -> acc @ failures)
-      []
+    List.concat
       [ session_binding_failures; resolve_failures; task_failures; roster_failures ]
   in
   let agents =
@@ -246,10 +245,13 @@ let status_summary_string (ctx : context) =
       match agent.current_task with
       | Some task_id
         when not
-               (Workspace.agent_current_task_matches_assignments
-                  active_task_assignees
-                  ~agent_name:agent.name
-                  task_id) ->
+               (match
+                  Workspace_backlog.Task_id_map.find_opt
+                    task_id
+                    active_assignees_by_task_id
+                with
+                | Some assignee -> String.equal assignee agent.name
+                | None -> false) ->
         let status =
           match agent.status with
           | Masc_domain.Inactive -> Masc_domain.Inactive

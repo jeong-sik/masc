@@ -99,34 +99,38 @@ let read_post_and_comments store ~post_id
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
   maybe_sweep store;
   with_lock store (fun () ->
-    (* Use cached sorted list if available (cache hit = skip sort) *)
-    let sorted_all =
-      match store.sorted_posts_cache with
-      | Some cached -> cached
-      | None ->
-        let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
-        (* Hot formula lives in [Board_sort] (SSOT) — shared with
-           [Board_dispatch.sort_posts_in_memory] to prevent drift. *)
-        let sorted = List.sort Board_sort.hot_compare all in
-        store.sorted_posts_cache <- Some sorted;
-        sorted
-    in
-    (* Apply filters on the pre-sorted list *)
-    let filtered =
-      match visibility_filter with
-      | None -> sorted_all
-      | Some v -> List.filter (fun (p : post) -> p.visibility = v) sorted_all
-    in
-    let filtered =
-      match hearth with
-      | None -> filtered
-      | Some h ->
-        let h_norm = String.lowercase_ascii (String.trim h) in
-        List.filter
-          (fun (p : post) -> Option.equal String.equal p.hearth (Some h_norm))
-          filtered
-    in
-    take limit filtered)
+    let limit = max 0 limit in
+    if limit = 0
+    then []
+    else (
+      let hearth_norm =
+        Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth
+      in
+      let matches_filters (p : post) =
+        (match visibility_filter with
+         | None -> true
+         | Some v -> p.visibility = v)
+        &&
+        match hearth_norm with
+        | None -> true
+        | Some h_norm -> Option.equal String.equal p.hearth (Some h_norm)
+      in
+      let rec collect seq remaining acc =
+        if remaining <= 0
+        then List.rev acc
+        else (
+          match seq () with
+          | Seq.Nil -> List.rev acc
+          | Seq.Cons ((key : hot_post_key), rest) ->
+            (match Hashtbl.find_opt store.posts key.post_id with
+             | Some post when matches_filters post ->
+               collect rest (remaining - 1) (post :: acc)
+             | Some _ -> collect rest remaining acc
+             | None ->
+               store.hot_post_index <- Hot_post_set.remove key store.hot_post_index;
+               collect rest remaining acc))
+      in
+      collect (Hot_post_set.to_seq store.hot_post_index) limit []))
 ;;
 
 let current_post_cursor store =
@@ -156,24 +160,33 @@ let current_post_cursor store =
     | None -> Time_compat.now (), None)
 ;;
 
-(** Full-scan search over all posts (no limit on scan, only on results).
-    Used by Board_dispatch.search to avoid the list_posts hard cap. *)
+(** Lazily traverses [store.recent_post_index] ([created_at DESC, post_id ASC])
+    and collects up to [limit] posts satisfying [predicate] without sorting the
+    full post table. *)
 let search_posts store ~predicate ~limit : post list =
   maybe_sweep store;
   with_lock store (fun () ->
-    let matches =
-      Hashtbl.fold
-        (fun _ (p : post) acc -> if predicate p then p :: acc else acc)
-        store.posts
-        []
-    in
-    (* Sort by recency for search results *)
-    let sorted =
-      List.sort
-        (fun (a : post) (b : post) -> Stdlib.Float.compare b.created_at a.created_at)
-        matches
-    in
-    take limit sorted)
+    let limit = max 0 limit in
+    if limit = 0
+    then []
+    else (
+      let rec collect seq remaining acc =
+        if remaining <= 0
+        then List.rev acc
+        else (
+          match seq () with
+          | Seq.Nil -> List.rev acc
+          | Seq.Cons ((key : recent_post_key), rest) ->
+            (match Hashtbl.find_opt store.posts key.recent_post_id with
+             | Some post when predicate post ->
+               collect rest (remaining - 1) (post :: acc)
+             | Some _ -> collect rest remaining acc
+             | None ->
+               store.recent_post_index <-
+                 Recent_post_set.remove key store.recent_post_index;
+               collect rest remaining acc))
+      in
+      collect (Recent_post_set.to_seq store.recent_post_index) limit []))
 ;;
 
 (** {1 Comment Operations} *)
@@ -463,52 +476,83 @@ let ensure_reaction_target_unlocked store ~target_type ~target_id =
        else Error (Comment_not_found target_id))
 ;;
 
+module Reaction_emoji_map = Map.Make (String)
+module Reaction_emoji_set = Set.Make (String)
+
+let compare_reaction_target_type a b =
+  match a, b with
+  | Reaction_post, Reaction_post | Reaction_comment, Reaction_comment -> 0
+  | Reaction_post, Reaction_comment -> -1
+  | Reaction_comment, Reaction_post -> 1
+;;
+
+let equal_reaction_target_type a b = compare_reaction_target_type a b = 0
+
+module Reaction_target_map = Map.Make (struct
+    type t = reaction_target_type * string
+
+    let compare (lt, lid) (rt, rid) =
+      let c = compare_reaction_target_type lt rt in
+      if c <> 0 then c else String.compare lid rid
+  end)
+
 type reaction_summary_bucket =
-  { counts : (string, int) Hashtbl.t
-  ; reacted : (string, bool) Hashtbl.t
-  ; recent_users : (string, (string * float) list) Hashtbl.t
+  { counts : int Reaction_emoji_map.t
+  ; reacted : Reaction_emoji_set.t
+  ; recent_users : (string * float) list Reaction_emoji_map.t
   }
 
-let create_reaction_summary_bucket () =
-  { counts = Hashtbl.create 8
-  ; reacted = Hashtbl.create 8
-  ; recent_users = Hashtbl.create 8
+let empty_reaction_summary_bucket =
+  { counts = Reaction_emoji_map.empty
+  ; reacted = Reaction_emoji_set.empty
+  ; recent_users = Reaction_emoji_map.empty
   }
 ;;
 
 let add_reaction_to_summary_bucket bucket ?user_id (reaction : reaction) =
   let reaction_user_id = Agent_id.to_string reaction.user_id in
   let current =
-    Hashtbl.find_opt bucket.counts reaction.emoji |> Option.value ~default:0
+    Reaction_emoji_map.find_opt reaction.emoji bucket.counts
+    |> Option.value ~default:0
   in
-  Hashtbl.replace bucket.counts reaction.emoji (current + 1);
+  let counts =
+    Reaction_emoji_map.add reaction.emoji (current + 1) bucket.counts
+  in
   let users =
-    Hashtbl.find_opt bucket.recent_users reaction.emoji |> Option.value ~default:[]
+    Reaction_emoji_map.find_opt reaction.emoji bucket.recent_users
+    |> Option.value ~default:[]
   in
-  Hashtbl.replace
-    bucket.recent_users
-    reaction.emoji
-    ((reaction_user_id, reaction.created_at) :: users);
-  match user_id with
-  | Some user when String.equal reaction_user_id user ->
-    Hashtbl.replace bucket.reacted reaction.emoji true
-  | Some _ | None -> ()
+  let recent_users =
+    Reaction_emoji_map.add
+      reaction.emoji
+      ((reaction_user_id, reaction.created_at) :: users)
+      bucket.recent_users
+  in
+  let reacted =
+    match user_id with
+    | Some user when String.equal reaction_user_id user ->
+      Reaction_emoji_set.add reaction.emoji bucket.reacted
+    | Some _ | None -> bucket.reacted
+  in
+  { counts; reacted; recent_users }
 ;;
 
 let reaction_summaries_of_bucket bucket =
   List.filter_map
     (fun emoji ->
-       let count = Hashtbl.find_opt bucket.counts emoji |> Option.value ~default:0 in
+       let count =
+         Reaction_emoji_map.find_opt emoji bucket.counts
+         |> Option.value ~default:0
+       in
        if count = 0
        then None
        else
          Some
            { emoji
            ; count
-           ; reacted =
-               Hashtbl.find_opt bucket.reacted emoji |> Option.value ~default:false
+           ; reacted = Reaction_emoji_set.mem emoji bucket.reacted
            ; recent_user_ids =
-               Hashtbl.find_opt bucket.recent_users emoji
+               Reaction_emoji_map.find_opt emoji bucket.recent_users
                |> Option.value ~default:[]
                |> List.sort (fun (_, a_ts) (_, b_ts) -> Stdlib.Float.compare b_ts a_ts)
                |> List.map fst
@@ -518,30 +562,42 @@ let reaction_summaries_of_bucket bucket =
 ;;
 
 let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
-  let bucket = create_reaction_summary_bucket () in
-  Hashtbl.iter
-    (fun _ (reaction : reaction) ->
-       if reaction.target_type = target_type && String.equal reaction.target_id target_id
-       then add_reaction_to_summary_bucket bucket ?user_id reaction)
-    store.reactions;
+  let bucket =
+    Hashtbl.fold
+      (fun _ (reaction : reaction) acc ->
+         if equal_reaction_target_type reaction.target_type target_type
+            && String.equal reaction.target_id target_id
+         then add_reaction_to_summary_bucket acc ?user_id reaction
+         else acc)
+      store.reactions
+      empty_reaction_summary_bucket
+  in
   reaction_summaries_of_bucket bucket
 ;;
 
 let reaction_summaries_batch_unlocked store ~targets ?user_id () =
-  let target_buckets = Hashtbl.create (List.length targets) in
-  List.iter
-    (fun target ->
-       Hashtbl.replace target_buckets target (create_reaction_summary_bucket ()))
-    targets;
-  Hashtbl.iter
-    (fun _ (reaction : reaction) ->
-       match
-         Hashtbl.find_opt target_buckets (reaction.target_type, reaction.target_id)
-       with
-       | None -> ()
-       | Some bucket -> add_reaction_to_summary_bucket bucket ?user_id reaction)
-    store.reactions;
-  Hashtbl.fold
+  let target_buckets =
+    List.fold_left
+      (fun acc target ->
+         Reaction_target_map.add target empty_reaction_summary_bucket acc)
+      Reaction_target_map.empty
+      targets
+  in
+  let target_buckets =
+    Hashtbl.fold
+      (fun _ (reaction : reaction) acc ->
+         let key = reaction.target_type, reaction.target_id in
+         match Reaction_target_map.find_opt key acc with
+         | None -> acc
+         | Some bucket ->
+           Reaction_target_map.add
+             key
+             (add_reaction_to_summary_bucket bucket ?user_id reaction)
+             acc)
+      store.reactions
+      target_buckets
+  in
+  Reaction_target_map.fold
     (fun target bucket acc -> (target, reaction_summaries_of_bucket bucket) :: acc)
     target_buckets
     []
@@ -583,7 +639,12 @@ let set_reaction_unlocked store key = function
 let same_reaction_state left right =
   match left, right with
   | None, None -> true
-  | Some left, Some right -> left = right
+  | Some left, Some right ->
+    equal_reaction_target_type left.target_type right.target_type
+    && String.equal left.target_id right.target_id
+    && String.equal (Agent_id.to_string left.user_id) (Agent_id.to_string right.user_id)
+    && String.equal left.emoji right.emoji
+    && Float.equal left.created_at right.created_at
   | None, Some _ | Some _, None -> false
 ;;
 

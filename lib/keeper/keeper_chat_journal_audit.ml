@@ -580,42 +580,44 @@ let candidates ~base_dir ~lookback_sec ~audited =
   end
 ;;
 
+module Keeper_store_map = Map.Make (String)
+
 let audit_answered ~base_dir ~audited answered =
   (* One store load per keeper per pass, and only when that keeper has an
      auditable journal; auditing each file against its own load was
      O(files x store size). *)
-  let stores = Hashtbl.create 8 in
-  let rows_of keeper_name =
-    match Hashtbl.find_opt stores keeper_name with
-    | Some rows -> rows
-    | None ->
-      let rows = lazy (Store.load_all ~base_dir ~keeper_name) in
-      Hashtbl.replace stores keeper_name rows;
-      rows
+  let _, results, audited =
+    List.fold_left
+      (fun (stores, results, audited) ({ keeper_name; operation_id; path }, liveness) ->
+         let stores, rows =
+           match Keeper_store_map.find_opt keeper_name stores with
+           | Some rows -> stores, rows
+           | None ->
+             let rows = lazy (Store.load_all ~base_dir ~keeper_name) in
+             Keeper_store_map.add keeper_name rows stores, rows
+         in
+         match
+           sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows
+         with
+         | Leave -> stores, results, audited
+         | Report (Liveness_unknown _ as verdict) ->
+           stores, (keeper_name, operation_id, verdict) :: results, audited
+         | Report
+             (( Match
+              | Mismatch _
+              | Journal_missing
+              | Journal_unreadable _
+              | Journal_truncated
+              | Journal_unsupported_version _
+              | Journal_corrupt _
+              | Store_unreadable _ ) as verdict) ->
+           ( stores
+           , (keeper_name, operation_id, verdict) :: results
+           , Audited.add (keeper_name, operation_id) audited ))
+      (Keeper_store_map.empty, [], audited)
+      answered
   in
-  List.fold_left
-    (fun (results, audited) ({ keeper_name; operation_id; path }, liveness) ->
-       match
-         sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness
-           ~rows:(rows_of keeper_name)
-       with
-       | Leave -> results, audited
-       | Report (Liveness_unknown _ as verdict) ->
-         (keeper_name, operation_id, verdict) :: results, audited
-       | Report
-           (( Match
-            | Mismatch _
-            | Journal_missing
-            | Journal_unreadable _
-            | Journal_truncated
-            | Journal_unsupported_version _
-            | Journal_corrupt _
-            | Store_unreadable _ ) as verdict) ->
-         ( (keeper_name, operation_id, verdict) :: results
-         , Audited.add (keeper_name, operation_id) audited ))
-    ([], audited)
-    answered
-  |> fun (results, audited) -> List.rev results, audited
+  List.rev results, audited
 ;;
 
 (* Issue #46816. The hourly maintenance pass ran this whole sweep on the main

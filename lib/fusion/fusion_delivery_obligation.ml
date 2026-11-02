@@ -297,16 +297,13 @@ let roster_of_yojson = function
       match panel_json with
       | `Null -> Ok None
       | `List items ->
-        List.fold_right
-          (fun item acc ->
-             let* routes = acc in
-             match item with
-             | `String route -> Ok (route :: routes)
-             | _ ->
-               Error (Decode_failed "field \"panel_routes\" must hold only strings"))
-          items
-          (Ok [])
-        |> Result.map Option.some
+        let rec loop acc = function
+          | [] -> Ok (Some (List.rev acc))
+          | `String route :: rest -> loop (route :: acc) rest
+          | _ :: _ ->
+            Error (Decode_failed "field \"panel_routes\" must hold only strings")
+        in
+        loop [] items
       | _ -> Error (Decode_failed "field \"panel_routes\" must be a list or null")
     in
     Ok { Fusion_types.judge_route; panel_routes }

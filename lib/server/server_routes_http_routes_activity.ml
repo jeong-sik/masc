@@ -498,7 +498,7 @@ let board_karma_ledger_json req =
   let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
   let totals =
     Board_dispatch.get_all_karma ()
-    |> List.sort (fun (_, a) (_, b) -> compare b a)
+    |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
   in
   `Assoc
     [
@@ -1408,7 +1408,7 @@ let add_routes ~sw ~clock router =
 
   |> Server_route.get Server_route.Public_read "/api/v1/karma" (fun _state _req reqd ->
          let karma_list = Board_dispatch.get_all_karma () in
-         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+         let sorted = List.sort (fun (_, a) (_, b) -> Int.compare b a) karma_list in
          let json = `Assoc [
            ("karma", `List (List.map (fun (agent, k) ->
              `Assoc [("agent", `String agent); ("karma", `Int k)]

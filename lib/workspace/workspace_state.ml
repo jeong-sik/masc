@@ -22,15 +22,20 @@ open Workspace_utils
 (* ============================================ *)
 
 let normalized_string_list values =
-  let seen = Hashtbl.create (List.length values) in
-  values
-  |> List.filter_map (fun value -> String_util.trim_nonempty value)
-  |> List.filter (fun value ->
-         if Hashtbl.mem seen value then
-           false
-         else (
-           Hashtbl.add seen value ();
-           true))
+  let module String_set = Set.Make (String) in
+  let _seen, rev_acc =
+    List.fold_left
+      (fun (seen, acc) raw ->
+         match String_util.trim_nonempty raw with
+         | None -> seen, acc
+         | Some value ->
+           if String_set.mem value seen
+           then seen, acc
+           else String_set.add value seen, value :: acc)
+      (String_set.empty, [])
+      values
+  in
+  List.rev rev_acc
 
 (* ============================================ *)
 (* State Recovery                               *)

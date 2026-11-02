@@ -54,10 +54,12 @@ let field key fields = List.assoc_opt key fields
 
 let parse_hyperlinks = function
   | `List rows ->
-    List.fold_right (fun row result ->
-      let* rest = result in
-      match row with `String target -> Ok (target :: rest)
-      | _ -> Error (Invalid_output "invalid hyperlink")) rows (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String target :: rest -> loop (target :: acc) rest
+      | _ :: _ -> Error (Invalid_output "invalid hyperlink")
+    in
+    loop [] rows
   | _ -> Error (Invalid_output "invalid hyperlinks")
 
 let parse_slides = function
@@ -80,11 +82,12 @@ let parse_slides = function
 
 let parse_strings = function
   | `List rows ->
-    List.fold_right (fun row result ->
-      let* rest = result in
-      match row with
-      | `String text -> Ok (text :: rest)
-      | _ -> Error (Invalid_output "invalid parser diagnostics")) rows (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String text :: rest -> loop (text :: acc) rest
+      | _ :: _ -> Error (Invalid_output "invalid parser diagnostics")
+    in
+    loop [] rows
   | _ -> Error (Invalid_output "missing parser diagnostics")
 
 let parse_result ~bytes ~sha256 content =

@@ -28,9 +28,8 @@ let streaming_capable_tools =
     "masc_status"
   ]
 
-let set =
-  let tbl = Hashtbl.create (List.length streaming_capable_tools) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) streaming_capable_tools;
-  tbl
+module String_set = Set_util.StringSet
 
-let is_streaming_capable name = Hashtbl.mem set name
+let set = String_set.of_list streaming_capable_tools
+
+let is_streaming_capable name = String_set.mem name set

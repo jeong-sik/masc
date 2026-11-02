@@ -291,7 +291,7 @@ let keeper_decisions_json
             lines))
       keepers
   in
-  let sorted = List.sort (fun (ta, _, _, _) (tb, _, _, _) -> compare tb ta) all_events in
+  let sorted = List.sort (fun (ta, _, _, _) (tb, _, _, _) -> Float.compare tb ta) all_events in
   let rec take n = function
     | [] -> []
     | _ when n <= 0 -> []
@@ -615,7 +615,7 @@ let keeper_decisions_log_json
               | None -> acc))
       keepers
   in
-  let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_events in
+  let sorted = List.sort (fun (ta, _) (tb, _) -> Float.compare tb ta) all_events in
   let rec take n = function
     | [] -> []
     | _ when n <= 0 -> []

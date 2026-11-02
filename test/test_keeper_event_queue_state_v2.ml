@@ -95,79 +95,148 @@ let test_checkpoint_retention_spends_the_caller_snapshot () =
     (post_ids (State.pending acked))
 ;;
 
-(* #31597: Low never competes with a fresh Normal entry before it has aged
-   past the threshold — this is the pre-existing strict-priority behaviour,
-   kept as a regression baseline so the aging tests below can't pass by
-   accident (e.g. a bug that always promotes Low regardless of age). *)
-let test_low_below_aging_threshold_still_loses_to_fresh_normal () =
+(* #31597: before any non-immediate turn has completed, [Normal] takes
+   precedence over [Low] regardless of wall-clock timestamps. *)
+let test_fresh_state_prefers_normal_before_low () =
   let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
   let normal = stimulus "normal-item" 1000.0 in
   let state = State.with_pending (queue [ low; normal ]) State.empty in
-  let selected =
-    State.select_when ~now:1000.0 ~ready:(fun _ -> true) state
-    |> require_some "pending selection"
-  in
-  Alcotest.(check string)
-    "unaged Low (age 1000s < 3600s threshold) still loses to Normal"
-    "normal-item"
-    selected.source.post_id
-;;
-
-(* Once a Low entry has waited at least the aging threshold, it competes with
-   Normal entries on arrival order instead of losing unconditionally. *)
-let test_low_aged_past_threshold_competes_with_normal_by_arrival () =
-  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
-  let normal = stimulus "normal-item" 1000.0 in
-  let state = State.with_pending (queue [ low; normal ]) State.empty in
-  let selected =
-    State.select_when ~now:3700.0 ~ready:(fun _ -> true) state
-    |> require_some "pending selection"
-  in
-  Alcotest.(check string)
-    "aged Low (age 3700s >= 3600s threshold) wins on earlier arrival"
-    "low-item"
-    selected.source.post_id
-;;
-
-(* Aging promotes Low to Normal only — it never reaches Immediate, no matter
-   how long it has waited. Immediate stays a producer-declared contract
-   (keeper_composition_completion_wake.ml). *)
-let test_low_aging_never_reaches_immediate () =
-  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
-  let immediate =
-    { (stimulus "immediate-item" 5000.0) with urgency = Queue.Immediate }
-  in
-  let state = State.with_pending (queue [ low; immediate ]) State.empty in
   let selected =
     State.select_when ~now:100_000.0 ~ready:(fun _ -> true) state
     |> require_some "pending selection"
   in
   Alcotest.(check string)
-    "an arbitrarily old Low still loses to Immediate"
-    "immediate-item"
+    "initial state prefers Normal over Low without wall-clock aging"
+    "normal-item"
     selected.source.post_id
 ;;
 
-(* Two Low entries aged past the threshold keep their relative arrival order
-   once promoted, the same fairness guarantee same-urgency entries already
-   had (see [with_pending]'s "stable order" invariant). *)
-let test_multiple_aged_low_entries_keep_arrival_order () =
+(* Once one [Normal] entry is served, deterministic alternation selects a ready
+   [Low] entry on the very next non-immediate turn (even at [now = 0.0] with a
+   second [Normal] entry waiting), and survives durable snapshot reload. *)
+let test_normal_ack_alternates_to_low_without_aging_wait () =
+  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
+  let normal_a = stimulus "normal-a" 0.0 in
+  let normal_b = stimulus "normal-b" 0.0 in
+  let state = State.with_pending (queue [ low; normal_a; normal_b ]) State.empty in
+  let first =
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) state
+    |> require_some "first selection"
+  in
+  Alcotest.(check string) "first turn picks Normal" "normal-a" first.source.post_id;
+  let staged, receipt =
+    match
+      State.terminalize_pending_turn_completed ~applied_at:1.0 ~selection:first state
+      |> require_ok "complete first Normal turn"
+    with
+    | next, State.Transition_applied receipt -> next, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "fresh completion must apply"
+  in
+  let projected =
+    State.mark_transition_projected
+      ~transition_id:receipt.transition_id
+      ~retain_previous:(fun _ -> false)
+      staged
+    |> require_ok "project first Normal completion"
+  in
+  let reloaded =
+    State.to_yojson projected
+    |> State.of_yojson
+    |> require_ok "reload state after Normal completion"
+  in
+  let second =
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) reloaded
+    |> require_some "second selection after Normal completion"
+  in
+  Alcotest.(check string)
+    "second turn alternates to Low at zero elapsed wall-clock time"
+    "low-item"
+    second.source.post_id;
+  let after_low =
+    State.ack_pending ~selection:second reloaded
+    |> require_ok "ack Low turn"
+  in
+  let third =
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) after_low
+    |> require_some "third selection after Low ack"
+  in
+  Alcotest.(check string)
+    "third turn alternates back to remaining Normal"
+    "normal-b"
+    third.source.post_id
+;;
+
+(* Alternation promotes [Low] ahead of [Normal] after a [Normal] turn, but
+   never ahead of [Immediate]. Serving [Immediate] preserves the pending
+   non-immediate alternation state so [Low] still runs next. *)
+let test_low_alternation_never_preempts_immediate () =
+  let normal = stimulus "normal-item" 0.0 in
+  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
+  let immediate =
+    { (stimulus "immediate-item" 5000.0) with urgency = Queue.Immediate }
+  in
+  let state = State.with_pending (queue [ normal; low ]) State.empty in
+  let first_normal = select ~now:0.0 state in
+  let after_normal =
+    State.ack_pending ~selection:first_normal state
+    |> require_ok "ack Normal to arm Low preference"
+  in
+  let with_immediate =
+    State.with_pending (queue [ low; immediate; normal ]) after_normal
+  in
+  let selected_immediate =
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) with_immediate
+    |> require_some "Immediate selection"
+  in
+  Alcotest.(check string)
+    "Immediate preempts preferred Low"
+    "immediate-item"
+    selected_immediate.source.post_id;
+  let after_immediate =
+    State.ack_pending ~selection:selected_immediate with_immediate
+    |> require_ok "ack Immediate"
+  in
+  let next_non_immediate =
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) after_immediate
+    |> require_some "post-Immediate selection"
+  in
+  Alcotest.(check string)
+    "Low preference survives intervening Immediate turn"
+    "low-item"
+    next_non_immediate.source.post_id
+;;
+
+(* Same-urgency [Low] entries keep FIFO arrival order and respect
+   [defer_pending] lane rotation regardless of [arrived_at] timestamps. *)
+let test_multiple_low_entries_keep_fifo_and_defer_order () =
   let low_a = { (stimulus "low-a" 0.0) with urgency = Queue.Low } in
   let low_b = { (stimulus "low-b" 100.0) with urgency = Queue.Low } in
   let state = State.with_pending (queue [ low_a; low_b ]) State.empty in
   let first =
-    State.select_when ~now:4000.0 ~ready:(fun _ -> true) state
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) state
     |> require_some "first pending selection"
   in
-  Alcotest.(check string) "earlier-arrived aged Low is picked first" "low-a" first.source.post_id;
+  Alcotest.(check string) "earlier-arrived Low is picked first" "low-a" first.source.post_id;
+  let deferred, _ =
+    State.defer_pending ~selection:first state |> require_ok "defer first Low"
+  in
+  let after_defer =
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) deferred
+    |> require_some "selection after defer"
+  in
+  Alcotest.(check string)
+    "deferring head Low rotates lane to low-b despite low-a having smaller arrived_at"
+    "low-b"
+    after_defer.source.post_id;
   let acked =
-    State.ack_pending ~selection:first state |> require_ok "ack first aged Low"
+    State.ack_pending ~selection:after_defer deferred |> require_ok "ack low-b"
   in
   let second =
-    State.select_when ~now:4000.0 ~ready:(fun _ -> true) acked
-    |> require_some "second pending selection"
+    State.select_when ~now:0.0 ~ready:(fun _ -> true) acked
+    |> require_some "remaining Low selection"
   in
-  Alcotest.(check string) "later-arrived aged Low is picked next" "low-b" second.source.post_id
+  Alcotest.(check string) "deferred low-a is picked next" "low-a" second.source.post_id
 ;;
 
 let test_pending_collapses_duplicate_source_identity () =
@@ -2702,21 +2771,21 @@ let () =
         ; Alcotest.test_case "an unchanged snapshot is not reparsed" `Quick
             test_unchanged_snapshot_is_not_reparsed
         ; Alcotest.test_case
-            "unaged Low still loses to fresh Normal"
+            "fresh state prefers Normal before Low"
             `Quick
-            test_low_below_aging_threshold_still_loses_to_fresh_normal
+            test_fresh_state_prefers_normal_before_low
         ; Alcotest.test_case
-            "aged Low competes with Normal by arrival"
+            "Normal completion alternates to Low without aging wait"
             `Quick
-            test_low_aged_past_threshold_competes_with_normal_by_arrival
+            test_normal_ack_alternates_to_low_without_aging_wait
         ; Alcotest.test_case
-            "Low aging never reaches Immediate"
+            "Low alternation never preempts Immediate"
             `Quick
-            test_low_aging_never_reaches_immediate
+            test_low_alternation_never_preempts_immediate
         ; Alcotest.test_case
-            "multiple aged Low entries keep arrival order"
+            "multiple Low entries keep FIFO and defer order"
             `Quick
-            test_multiple_aged_low_entries_keep_arrival_order
+            test_multiple_low_entries_keep_fifo_and_defer_order
         ; Alcotest.test_case
             "pending collapses duplicate source identity"
             `Quick

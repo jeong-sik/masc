@@ -1,3 +1,6 @@
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 type waiting_source =
   | Event_queue_pending
   | Chat_operation_queued
@@ -363,29 +366,27 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
   let connectors_emitted = ref false in
   (* One entry per schedule_id with two or more pending occurrences. Members
      keep queue order; the aggregate row takes the position of the first. *)
-  let schedule_members
-    : (string, (Keeper_event_queue.scheduled_wake * Keeper_event_queue_state.pending_selection) list) Hashtbl.t =
-    Hashtbl.create 8
+  let schedule_members =
+    List.fold_left
+      (fun acc (selection : Keeper_event_queue_state.pending_selection) ->
+         match selection.source.payload with
+         | Keeper_event_queue.Schedule_due wake ->
+           let existing =
+             Option.value (String_map.find_opt wake.schedule_id acc) ~default:[]
+           in
+           String_map.add wake.schedule_id ((wake, selection) :: existing) acc
+         | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+         | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+         | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+         | Workspace_message _ | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ -> acc)
+      String_map.empty selections
   in
-  List.iter
-    (fun (selection : Keeper_event_queue_state.pending_selection) ->
-       match selection.source.payload with
-       | Keeper_event_queue.Schedule_due wake ->
-         let existing =
-           Option.value (Hashtbl.find_opt schedule_members wake.schedule_id) ~default:[]
-         in
-         Hashtbl.replace schedule_members wake.schedule_id ((wake, selection) :: existing)
-       | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
-       | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-       | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
-       | Workspace_message _ | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ -> ())
-    selections;
   let schedule_group wake_schedule_id =
-    match Hashtbl.find_opt schedule_members wake_schedule_id with
+    match String_map.find_opt wake_schedule_id schedule_members with
     | Some (_ :: _ :: _ as members) -> Some (List.rev members)
     | Some ([] | [ _ ]) | None -> None
   in
-  let schedules_emitted : (string, unit) Hashtbl.t = Hashtbl.create 8 in
+  let schedules_emitted = ref String_set.empty in
   let rec go queue_index acc = function
     | [] -> List.rev acc
     | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
@@ -436,11 +437,11 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         | Keeper_event_queue.Task_outcome _ -> None
       in
       (match grouped_schedule with
-       | Some (wake, _) when Hashtbl.mem schedules_emitted wake.schedule_id ->
+       | Some (wake, _) when String_set.mem wake.schedule_id !schedules_emitted ->
          (* Already represented by the schedule's aggregate row. *)
          go (queue_index + 1) acc rest
        | Some (wake, members) ->
-         Hashtbl.replace schedules_emitted wake.schedule_id ();
+         schedules_emitted := String_set.add wake.schedule_id !schedules_emitted;
          let count = List.length members in
          let oldest_arrived_at, first_due, last_due =
            List.fold_left
@@ -841,20 +842,23 @@ let scope_includes_actor ~keeper_name actor_id =
 ;;
 
 let pending_confirm_rows keeper_names pending_confirms =
+  let keeper_set = Set_util.StringSet.of_list keeper_names in
   pending_confirms
   |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
     match pending_confirm_keeper_target entry with
-    | Some keeper_name when List.mem keeper_name keeper_names -> Some (pending_confirm_row ~keeper_name entry)
+    | Some keeper_name when Set_util.StringSet.mem keeper_name keeper_set ->
+      Some (pending_confirm_row ~keeper_name entry)
     | Some _ | None -> None)
 ;;
 
 let global_pending_confirm_rows ?keeper_name keeper_names pending_confirms =
+  let keeper_set = Set_util.StringSet.of_list keeper_names in
   pending_confirms
   |> List.filter (fun entry ->
     scope_includes_actor ~keeper_name (pending_confirm_keeper_target entry))
   |> List.filter_map (fun entry ->
     match pending_confirm_keeper_target entry with
-    | Some target when List.mem target keeper_names -> None
+    | Some target when Set_util.StringSet.mem target keeper_set -> None
     | Some _ | None -> Some (pending_confirm_row entry))
 ;;
 
@@ -876,21 +880,22 @@ let schedule_waiting_on (request : Schedule_domain.schedule_request) =
   | None -> request.schedule_id
 ;;
 
-let schedule_keeper_owner keeper_names request =
+let schedule_keeper_owner keeper_set request =
   (* A fleet inventory counts each reservation once, preferring its creator.
      A scoped inventory contains only its selected Keeper, so a wake target
      receives the same reservation locally even when another Keeper made it. *)
   Schedule_payload_projection.keeper_participants request
-  |> List.find_opt (fun name -> List.mem name keeper_names)
+  |> List.find_opt (fun name -> Set_util.StringSet.mem name keeper_set)
 ;;
 
 let schedule_rows ?keeper_name ~keeper_names state =
+  let keeper_set = Set_util.StringSet.of_list keeper_names in
   state.Schedule_store.schedules
   |> List.filter (fun request ->
     schedule_active request
     && Schedule_payload_projection.visible_to_keeper keeper_name request)
   |> List.map (fun (request : Schedule_domain.schedule_request) ->
-    { keeper_name = schedule_keeper_owner keeper_names request
+    { keeper_name = schedule_keeper_owner keeper_set request
     ; source = Schedule_waiting
     ; waiting_on = schedule_waiting_on request
     ; what = Printf.sprintf "예약 실행 · %s" request.schedule_id
@@ -971,32 +976,33 @@ let keeper_state ~busy rows =
 ;;
 
 let source_counts rows =
-  let bump source counts =
-    let key = source_to_string source in
-    let rec loop acc = function
-      | [] -> List.rev ((key, 1) :: acc)
-      | (existing, count) :: rest when String.equal existing key ->
-        List.rev_append acc ((existing, count + 1) :: rest)
-      | item :: rest -> loop (item :: acc) rest
-    in
-    loop [] counts
-  in
   rows
-  |> List.fold_left (fun counts row -> bump row.source counts) []
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  |> List.fold_left
+       (fun counts row ->
+          let key = source_to_string row.source in
+          let prev =
+            Option.value
+              ~default:0
+              (Keeper_registry.StringMap.find_opt key counts)
+          in
+          Keeper_registry.StringMap.add key (prev + 1) counts)
+       Keeper_registry.StringMap.empty
+  |> Keeper_registry.StringMap.bindings
   |> List.map (fun (source, count) -> source, `Int count)
 ;;
 
 let busy_keeper_names ~base_path =
   Keeper_registry.all ~base_path ()
-  |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-    match Keeper_composite_observer.live_turn_observation entry with
-    | Some _ -> Some entry.name
-    | None -> None)
+  |> List.fold_left
+       (fun acc (entry : Keeper_registry.registry_entry) ->
+          match Keeper_composite_observer.live_turn_observation entry with
+          | Some _ -> Set_util.StringSet.add entry.name acc
+          | None -> acc)
+       Set_util.StringSet.empty
 ;;
 
 let keeper_is_busy busy_names keeper_name =
-  List.exists (String.equal keeper_name) busy_names
+  Set_util.StringSet.mem keeper_name busy_names
 ;;
 
 let count_rows_for_source source rows =
@@ -1105,18 +1111,22 @@ let source_next_actions rows =
   |> List.fold_left
        (fun actions row ->
           let source = source_to_string row.source in
-          let current =
-            match List.assoc_opt source actions with
+          let rev_current =
+            match Keeper_registry.StringMap.find_opt source actions with
             | None -> []
             | Some values -> values
           in
-          if List.mem row.next_action current
+          if List.mem row.next_action rev_current
           then actions
-          else (source, current @ [ row.next_action ]) :: List.remove_assoc source actions)
-       []
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-  |> List.map (fun (source, actions) ->
-    source, `List (List.map (fun action -> `String action) actions))
+          else
+            Keeper_registry.StringMap.add
+              source
+              (row.next_action :: rev_current)
+              actions)
+       Keeper_registry.StringMap.empty
+  |> Keeper_registry.StringMap.bindings
+  |> List.map (fun (source, rev_actions) ->
+    source, `List (List.map (fun action -> `String action) (List.rev rev_actions)))
 ;;
 
 let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =

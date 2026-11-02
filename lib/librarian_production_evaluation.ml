@@ -99,8 +99,14 @@ let nonblank = function
   | `String _ | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ ->
     Error "Expected nonblank production evaluation text"
 let array parse = function
-  | `List values -> List.fold_right (fun value result ->
-      let* value=parse value in let* rest=result in Ok (value::rest)) values (Ok [])
+  | `List values ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* value = parse value in
+        loop (value :: acc) rest
+    in
+    loop [] values
   | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Error "Expected array"
 let boundary_lines (case : case) =
   let* position=B.position_of_messages case.source.messages in
@@ -134,15 +140,28 @@ let select_source (case : case) =
       select (index+1) (if keep then message::kept else kept) identities rest in
   let* messages=select 0 [] identities labelled in
   let tool_count=List.length source.tool_observations in
-  let* historical_task_contexts=List.fold_right (fun (context : Keeper_librarian_task_context.t) result ->
-    let* rest=result in
-    if context.first_message<0 || context.first_message>context.after_message
-      || context.after_message>=Array.length offsets
-      || context.first_tool_observation<0 || context.first_tool_observation>context.after_tool_observation
-      || context.after_tool_observation>tool_count
-    then Error "Historical task context exceeds its captured input"
-    else Ok ({context with first_message=offsets.(context.first_message);
-      after_message=offsets.(context.after_message)}::rest)) source.historical_task_contexts (Ok []) in
+  let* historical_task_contexts =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (context : Keeper_librarian_task_context.t) :: rest ->
+        if context.first_message < 0
+           || context.first_message > context.after_message
+           || context.after_message >= Array.length offsets
+           || context.first_tool_observation < 0
+           || context.first_tool_observation > context.after_tool_observation
+           || context.after_tool_observation > tool_count
+        then Error "Historical task context exceeds its captured input"
+        else
+          loop
+            ({ context with
+               first_message = offsets.(context.first_message)
+             ; after_message = offsets.(context.after_message)
+             }
+             :: acc)
+            rest
+    in
+    loop [] source.historical_task_contexts
+  in
   Ok {source with messages;historical_task_contexts}
 let parse_case json =
   let* f=fields ["id";"source";"previous_state";"unread_messages";"suffix";"question"] json in

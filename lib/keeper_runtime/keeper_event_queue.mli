@@ -428,6 +428,15 @@ val stimulus_identity_equal : stimulus -> stimulus -> bool
     recovered-channel replay must not conflict. Result, run, and Board
     evidence must still match exactly. *)
 
+type stimulus_identity
+(** Canonical immutable identity projection for {!stimulus}, suitable as an
+    ordered key in {!Stimulus_identity_set} and {!Stimulus_identity_map}. *)
+
+val stimulus_identity : stimulus -> stimulus_identity
+
+module Stimulus_identity_set : Set.S with type elt = stimulus_identity
+module Stimulus_identity_map : Map.S with type key = stimulus_identity
+
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)
 
@@ -453,14 +462,23 @@ val sort_by_urgency : t -> t
     same urgency keep insertion order, so urgency reordering does
     not invalidate per-bucket FIFO. *)
 
-val low_to_normal_aging_threshold_sec : float
-(** How long a [Low] stimulus waits before {!effective_urgency} promotes it
-    to [Normal]. A reasoned default (matches common recurring-schedule
-    cadence in this fleet), not a measured distribution. *)
+val preferred_non_immediate_urgency :
+  last_non_immediate_served:urgency option -> urgency
+(** Deterministic non-immediate lane selector:
+    - [Some Normal -> Low]
+    - [None | Some (Low | Immediate) -> Normal]
+    Eliminates wall-clock aging thresholds while guaranteeing that a ready
+    [Low] stimulus cannot be starved for more than one [Normal] turn. *)
 
+val selection_urgency_rank :
+  last_non_immediate_served:urgency option -> urgency -> int
+(** Selection rank under deterministic [Normal]/[Low] alternation:
+    - [Immediate] -> [0] (strictly preempts both [Normal] and [Low])
+    - preferred non-immediate lane -> [1]
+    - other non-immediate lane -> [2] *)
 
-val effective_urgency_rank : now:float -> stimulus -> int
-(** [urgency_rank (effective_urgency ~now s)]. *)
+val compare_selection_urgency :
+  last_non_immediate_served:urgency option -> urgency -> urgency -> int
 
 val summary : t -> string
 (** Short human-readable description for log lines. *)

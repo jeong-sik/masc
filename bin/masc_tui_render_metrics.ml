@@ -645,19 +645,31 @@ let render_section_tools ~cols (state : state) : string list =
   let yolo =
     observe_source ~observed:state.keeper_tool_modes_observed
       ~error:state.keeper_tool_modes_error state.keeper_yolo_names in
-  let counts = Hashtbl.create 16 in
-  Option.iter (List.iter
-    (fun (gp : Decode.gate_pending) ->
-      let tool = Terminal_text.single_line gp.gp_display_tool in
-      let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-      Hashtbl.replace counts tool (current + 1)))
-    (current_value gate);
-  Option.iter (List.iter
-    (fun (kta : Decode.keeper_tool_approval) ->
-      let tool = Terminal_text.single_line kta.kta_tool in
-      let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-      Hashtbl.replace counts tool (current + 1)))
-    (current_value held);
+  let module Tool_map = Map.Make (String) in
+  let counts =
+    let add_tool acc tool =
+      let current = Option.value (Tool_map.find_opt tool acc) ~default:0 in
+      Tool_map.add tool (current + 1) acc
+    in
+    let acc =
+      match current_value gate with
+      | None -> Tool_map.empty
+      | Some gps ->
+        List.fold_left
+          (fun acc (gp : Decode.gate_pending) ->
+            add_tool acc (Terminal_text.single_line gp.gp_display_tool))
+          Tool_map.empty
+          gps
+    in
+    match current_value held with
+    | None -> acc
+    | Some ktas ->
+      List.fold_left
+        (fun acc (kta : Decode.keeper_tool_approval) ->
+          add_tool acc (Terminal_text.single_line kta.kta_tool))
+        acc
+        ktas
+  in
 
   let gate_summary =
     [ "    Pending Gate Calls: " ^ observation_detail gate
@@ -673,7 +685,7 @@ let render_section_tools ~cols (state : state) : string list =
   in
 
   let tool_bars =
-    if Hashtbl.length counts = 0 then
+    if Tool_map.is_empty counts then
       (match gate, held with
        | Current [], Current [] ->
          [ "    (no active pending gate operations or held approval requests)" ]
@@ -682,12 +694,13 @@ let render_section_tools ~cols (state : state) : string list =
        | (Current (_::_), _) | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) -> [ "    Pending tool totals unavailable; no empty queue inferred" ])
     else
       let items =
-        Hashtbl.fold
+        Tool_map.fold
           (fun name count acc ->
             { Chart.name; count; style = Some Masc_tui_theme.Warn } :: acc)
           counts []
         |> List.sort (fun (a : Chart.bar_item) (b : Chart.bar_item) ->
-               Int.compare b.count a.count)
+               let c = Int.compare b.count a.count in
+               if c <> 0 then c else String.compare a.name b.name)
       in
       let scope = match gate, held with
         | Current _, Current _ -> []

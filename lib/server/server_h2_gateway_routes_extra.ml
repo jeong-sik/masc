@@ -149,7 +149,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
         let totals =
           (* TEL-OK: same read, same H1 counterpart, same reason. *)
           Board_dispatch.get_all_karma ()
-          |> List.sort (fun (_, a) (_, b) -> compare b a)
+          |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
         in
         let json =
           `Assoc
@@ -216,7 +216,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
   | `GET, "/api/v1/karma" ->
       gate (fun () ->
         let karma_list = Board_dispatch.get_all_karma () in
-        let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+        let sorted = List.sort (fun (_, a) (_, b) -> Int.compare b a) karma_list in
         let json = `Assoc [
           ("karma", `List (List.map (fun (agent, k) ->
             `Assoc [("agent", `String agent); ("karma", `Int k)]

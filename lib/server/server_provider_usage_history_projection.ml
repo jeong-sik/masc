@@ -287,7 +287,9 @@ let empty_reports t daily =
   Scope_day_map.fold
     (fun (day : Scope_day.t) observed_at rows -> (day.scope_id, observed_at) :: rows)
     empty_days []
-  |> List.sort compare
+  |> List.sort (fun (s1, t1) (s2, t2) ->
+       let c = String.compare s1 s2 in
+       if c <> 0 then c else Float.compare t1 t2)
   |> List.map (fun (scope_id, observed_at) ->
       `Assoc [ "scope_id", `String scope_id; "observed_at", `Float observed_at ])
 
@@ -296,8 +298,14 @@ let response_json ~days t =
   let points =
     Display_day_map.fold (fun _ point points -> point :: points) daily []
     |> List.sort (fun (a : point) (b : point) ->
-        compare (a.scope_id, a.kind, a.limit_id, a.observed_at)
-          (b.scope_id, b.kind, b.limit_id, b.observed_at))
+        let c = String.compare a.scope_id b.scope_id in
+        if c <> 0 then c
+        else
+          let c = String.compare a.kind b.kind in
+          if c <> 0 then c
+          else
+            let c = Option.compare String.compare a.limit_id b.limit_id in
+            if c <> 0 then c else Float.compare a.observed_at b.observed_at)
   in
   `Assoc
     [ "days", `Int days

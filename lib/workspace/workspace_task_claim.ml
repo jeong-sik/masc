@@ -71,17 +71,87 @@ let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
   let held_ids =
     active_owned_task_ids_for_agent config ~agent_name backlog
     |> List.filter (fun task_id -> not (String.equal task_id requested_task_id))
+    |> Task_id_set.of_list
   in
-  match
-    List.filter (fun (task : Masc_domain.task) -> List.mem task.id held_ids) backlog.tasks
-  with
-  | [] -> None
-  | held_tasks -> Some (held_tasks_refusal_message ~agent_name held_tasks)
+  if Task_id_set.is_empty held_ids
+  then None
+  else (
+    match
+      List.filter
+        (fun (task : Masc_domain.task) -> Task_id_set.mem task.id held_ids)
+        backlog.tasks
+    with
+    | [] -> None
+    | held_tasks -> Some (held_tasks_refusal_message ~agent_name held_tasks))
+;;
+
+let run_post_commit ~task_id ~agent_name ~action label f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.TaskState.error
+      "task %s committed but post-commit projection failed task_id=%s agent=%s label=%s detail=%s"
+      action task_id agent_name label (Printexc.to_string exn)
+;;
+
+let emit_auto_start_side_effects config ~agent_name ~task_id ~from_status ~to_status =
+  let run label f = run_post_commit ~task_id ~agent_name ~action:"start" label f in
+  run "broadcast" (fun () ->
+    let _ =
+      broadcast
+        ~audience:System_record
+        config
+        ~from_agent:agent_name
+        ~content:(Printf.sprintf "Started %s" task_id)
+    in
+    ());
+  run "activity" (fun () ->
+    Workspace_task_classify.emit_task_activity
+      config
+      ~agent_name
+      ~task_id
+      ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
+      ~payload:(`Assoc [ "task_id", `String task_id ]));
+  run "observe_transition" (fun () ->
+    Workspace_task_classify.observe_task_transition
+      config
+      ~agent_name
+      ~task_id
+      ~transition:Masc_domain.Start
+      ~details:
+        (Workspace_task_classify.task_transition_details
+           ~from_status
+           ~to_status
+           ()));
+  run "push_task_event" (fun () ->
+    (Atomic.get Workspace_hooks.push_task_event_fn)
+      ~event_type:"masc/task_transition"
+      ~details:
+        [ "task_id", `String task_id
+        ; "action", `String "start"
+        ; "agent_name", `String agent_name
+        ]);
+  run "transition_log" (fun () ->
+    log_event
+      config
+      (Workspace_task_classify.transition_log_event
+         ~agent_name
+         ~task_id
+         ~from_status
+         ~to_status
+         ~action:(Masc_domain.task_action_to_string Masc_domain.Start)
+         ~assignee:agent_name
+         ()))
 ;;
 
 (** Result-returning version of claim_task for type-safe error handling. *)
-let claim_task_r config ~agent_name ~task_id ()
-  : string Masc_domain.masc_result
+let claim_task_with_details_r
+      config
+      ~agent_name
+      ~task_id
+      ?(auto_start = false)
+      ()
+  : (Masc_domain.task * string) Masc_domain.masc_result
   =
   let open Result.Syntax in
   let* () = if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized) else Ok () in
@@ -92,18 +162,37 @@ let claim_task_r config ~agent_name ~task_id ()
     | Ok _, Ok _ -> Ok ()
   in
   let lock_path = backlog_lock_path config in
-  let claim_result =
-    with_file_lock config lock_path (fun () ->
-    match read_backlog_r config with
+  with_file_lock config lock_path (fun () ->
+    match read_prepared_backlog_r config with
     | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
-    | Ok backlog ->
+    | Ok prepared ->
+      let backlog = prepared.backlog in
       (try
          (* Check role constraint before attempting claim *)
-         let target_task = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
+         let target_task = Task_id_map.find_opt task_id prepared.tasks_by_id in
          let* task =
            match target_task with
            | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task -> Ok task
+         in
+         let duplicate_count =
+           List.fold_left
+             (fun count (t : task) ->
+                if String.equal t.id task_id then count + 1 else count)
+             0
+             backlog.tasks
+         in
+         let* () =
+           if duplicate_count > 1
+           then
+             Error
+               (Masc_domain.Task
+                  (Masc_domain.Task_error.InvalidState
+                     (Printf.sprintf
+                        "Backlog contains %d duplicate rows for task %s; refusing ambiguous claim."
+                        duplicate_count
+                        task_id)))
+           else Ok ()
          in
          (* RFC-0323 G-10: the typed reclaim claim gate is retired — status
             alone decides claimability ([resolve_claim] below owns it). *)
@@ -127,8 +216,9 @@ let claim_task_r config ~agent_name ~task_id ()
            | Done _
            | Cancelled _ -> Ok ()
          in
+         let now = now_iso () in
          (* fold_left to find+transform in a single pass without mutable refs.
-         Uses polymorphic variants for inline state tracking. *)
+            Uses polymorphic variants for inline state tracking. *)
          let claim_state, new_tasks =
            List.fold_left
              (fun (state, acc) (t : task) ->
@@ -144,15 +234,38 @@ let claim_task_r config ~agent_name ~task_id ()
                       ~same_actor:(fun a ->
                         Workspace_task_classify.same_task_actor config a agent_name)
                       ~agent_name
-                      ~now:(now_iso ())
+                      ~now
                       t
                   with
-                  | Workspace_task_lifecycle.Worker_claim status ->
+                  | Workspace_task_lifecycle.Worker_claim claimed_status ->
                     let t = clear_reclaim_decision t in
-                    `Claimed_ok, { t with task_status = status } :: acc
+                    let final_status =
+                      if auto_start
+                      then Masc_domain.InProgress { assignee = agent_name; started_at = now }
+                      else claimed_status
+                    in
+                    let updated_task = { t with task_status = final_status } in
+                    `Claimed_ok (updated_task, claimed_status), updated_task :: acc
                   | Workspace_task_lifecycle.Held_pending_verdict { verification_id } ->
                     `Pending_verdict verification_id, t :: acc
-                  | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
+                  | Workspace_task_lifecycle.Self_owned ->
+                    if auto_start
+                    then (
+                      match t.task_status with
+                      | Masc_domain.Claimed _ as from_status ->
+                        let to_status =
+                          Masc_domain.InProgress { assignee = agent_name; started_at = now }
+                        in
+                        let updated_task = { t with task_status = to_status } in
+                        `Already_mine_started (updated_task, from_status, to_status),
+                        updated_task :: acc
+                      | Masc_domain.InProgress _
+                      | Masc_domain.Todo
+                      | Masc_domain.AwaitingVerification _
+                      | Masc_domain.Done _
+                      | Masc_domain.Cancelled _ ->
+                        `Already_mine t, t :: acc)
+                    else `Already_mine t, t :: acc
                   | Workspace_task_lifecycle.Held_by_other holder ->
                     `Claimed_by holder, t :: acc
                   | Workspace_task_lifecycle.Held_terminal status ->
@@ -162,6 +275,9 @@ let claim_task_r config ~agent_name ~task_id ()
              backlog.tasks
          in
          let new_tasks = List.rev new_tasks in
+         let run_claim_post_commit label f =
+           run_post_commit ~task_id ~agent_name ~action:"claim" label f
+         in
          match claim_state with
          | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
          | `Terminal status ->
@@ -188,14 +304,32 @@ let claim_task_r config ~agent_name ~task_id ()
                        Keeper is not a verifier."
                       task_id
                       verification_id)))
-         | `Already_mine ->
-           Ok
-             (`Existing_claim
-               (Printf.sprintf "Task %s is already claimed by you" task_id))
-         | `Claimed_ok ->
-           let claimed_task =
-             List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
+         | `Already_mine existing_task ->
+           (* When [existing_task] is already [InProgress] (or [auto_start = false]),
+              no [Claimed -> InProgress] transition occurred: report the existing
+              claim without claiming an auto-start happened. *)
+           let msg = Printf.sprintf "Task %s is already claimed by you" task_id in
+           Ok (existing_task, msg)
+         | `Already_mine_started (started_task, from_status, to_status) ->
+           let new_backlog = { backlog with tasks = new_tasks } in
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task config
+                 ~cause:Task_cache_invariant.After_commit
+                 ~agent_name ~task_id ~status:started_task.task_status
+                 ~module_name:"claim_task_r.already_mine_auto_start")
+             config new_backlog;
+           run_claim_post_commit "agent_state" (fun () ->
+             Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
+               { agent with status = Busy; current_task = Some task_id }));
+           emit_auto_start_side_effects config ~agent_name ~task_id ~from_status ~to_status;
+           let msg =
+             Printf.sprintf
+               "Task %s is already claimed by you. Task auto-started — begin work now."
+               task_id
            in
+           Ok (started_task, msg)
+         | `Claimed_ok (claimed_task, claimed_status) ->
            (* [write_backlog] stamps version/last_updated at the commit point. *)
            let new_backlog = { backlog with tasks = new_tasks } in
            write_backlog
@@ -205,53 +339,72 @@ let claim_task_r config ~agent_name ~task_id ()
                  ~agent_name ~task_id ~status:claimed_task.task_status
                  ~module_name:"claim_task_r.claimed_ok")
              config new_backlog;
-           Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
-             { agent with status = Busy; current_task = Some task_id });
-           let _ =
-             broadcast ~audience:System_record
+           run_claim_post_commit "agent_state" (fun () ->
+             Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
+               { agent with status = Busy; current_task = Some task_id }));
+           run_claim_post_commit "broadcast" (fun () ->
+             let _ =
+               broadcast ~audience:System_record
+                 config
+                 ~from_agent:agent_name
+                 ~content:(Printf.sprintf "Claimed %s" task_id)
+             in
+             ());
+           run_claim_post_commit "activity" (fun () ->
+             Workspace_task_classify.emit_task_activity
                config
-               ~from_agent:agent_name
-               ~content:(Printf.sprintf "Claimed %s" task_id)
+               ~agent_name
+               ~task_id
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
+               ~payload:(`Assoc [ "task_id", `String task_id ]));
+           run_claim_post_commit "claim_log" (fun () ->
+             log_event
+               config
+               (`Assoc
+                      [ "type", `String "task_claim"
+                      ; "agent", `String agent_name
+                      ; ( "actor_kind"
+                        , `String
+                            (Workspace_task_classify.task_actor_kind_to_string
+                               Workspace_task_classify.Agent) )
+                      ; "task", `String task_id
+                      ; "ts", `String now
+                      ]));
+           run_claim_post_commit "observe_transition" (fun () ->
+             Workspace_task_classify.observe_task_transition
+               config
+               ~agent_name
+               ~task_id
+               ~transition:Masc_domain.Claim
+               ~details:
+                 (Workspace_task_classify.task_transition_details
+                    ~from_status:Masc_domain.Todo
+                    ~to_status:claimed_status
+                    ()));
+           if auto_start
+           then
+             emit_auto_start_side_effects
+               config
+               ~agent_name
+               ~task_id
+               ~from_status:claimed_status
+               ~to_status:claimed_task.task_status;
+           let base_msg = Printf.sprintf "%s claimed %s" agent_name task_id in
+           let claim_msg =
+             if auto_start
+             then base_msg ^ " Task auto-started — begin work now."
+             else base_msg
            in
-           Workspace_task_classify.emit_task_activity
-             config
-             ~agent_name
-             ~task_id
-             ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
-             ~payload:(`Assoc [ "task_id", `String task_id ]);
-           log_event
-             config
-             (`Assoc
-                    [ "type", `String "task_claim"
-                    ; "agent", `String agent_name
-                    ; ( "actor_kind"
-                      , `String
-                          (Workspace_task_classify.task_actor_kind_to_string
-                             Workspace_task_classify.Agent) )
-                    ; "task", `String task_id
-                    ; "ts", `String (now_iso ())
-                    ]);
-           Workspace_task_classify.observe_task_transition
-             config
-             ~agent_name
-             ~task_id
-             ~transition:Masc_domain.Claim
-             ~details:
-               (Workspace_task_classify.task_transition_details
-                  ~from_status:Masc_domain.Todo
-                  ~to_status:
-                    (Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () })
-                  ());
-           let claim_msg = Printf.sprintf "%s claimed %s" agent_name task_id in
-           Ok (`New_claim claim_msg)
+           Ok (claimed_task, claim_msg)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
-  in
-  match claim_result with
-  | Ok (`New_claim outcome) -> Ok outcome
-  | Ok (`Existing_claim outcome) -> Ok outcome
-  | Error _ as err -> err
+;;
+
+let claim_task_r config ~agent_name ~task_id ?(auto_start = false) ()
+  : string Masc_domain.masc_result
+  =
+  Result.map snd (claim_task_with_details_r config ~agent_name ~task_id ~auto_start ())
 ;;
 
 (** String-returning convenience wrapper over [claim_task_r]. *)

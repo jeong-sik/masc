@@ -11,6 +11,16 @@ type observation = Outside_observation | Observing of string
 type t = { package : Types.package; instance_id : string; store : Store.t;
   observation : observation ref;
   handler : Agent_core.Mcp.sampling_handler }
+let compare_evidence (a : Types.evidence) (b : Types.evidence) =
+  let c = String.compare a.uri b.uri in
+  if c <> 0 then c else Option.compare String.compare a.sha256 b.sha256
+
+module Evidence_map = Map.Make (struct
+    type t = Types.evidence
+
+    let compare = compare_evidence
+  end)
+
 let for_worker t ~package ~instance_id =
   if Types.same_execution_package t.package package && String.equal t.instance_id instance_id then Ok t.handler
   else Error "host sampling broker belongs to another package or installation"
@@ -44,7 +54,7 @@ let with_observation t ~binding ~sources ~on_error run =
                     then Ok () else Error "model evidence belongs to different observation inputs"
                 | Some _ | None -> Ok ()) (Ok ())
             (List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
-             |> List.sort_uniq Stdlib.compare)) |> Result.map_error on_error in
+             |> List.sort_uniq compare_evidence)) |> Result.map_error on_error in
         Ok output)
 
 type request_state = Pending | Finished of Types.evidence
@@ -270,13 +280,13 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
     | json -> json in
   (* An outcome is both row evidence and a request's terminal. Resolve each
      immutable address once so those two paths share the actual read charge. *)
-  let blobs = Hashtbl.create 8 in
+  let blobs = ref Evidence_map.empty in
   let read_blob reference =
-    match Hashtbl.find_opt blobs reference with
+    match Evidence_map.find_opt reference !blobs with
     | Some result -> result
     | None ->
         let result = Store.read_blob_bounded ~budget store reference in
-        Hashtbl.add blobs reference result;
+        blobs := Evidence_map.add reference result !blobs;
         result in
   let json_bytes reference =
     match read_blob reference with
@@ -315,7 +325,7 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
          | _ -> Ok None)
     | _ -> Ok None in
   let references = List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
-    |> List.sort_uniq Stdlib.compare in
+    |> List.sort_uniq compare_evidence in
   List.fold_left (fun result reference ->
     let* receipts = result in
     let* captured = receipt reference in

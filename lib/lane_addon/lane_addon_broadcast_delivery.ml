@@ -75,8 +75,13 @@ let initial json =
   let* operation_id = Request_id.of_string operation |> Result.map_error (fun e -> Corrupt e) in
   let* artifact_sha256 = text f "artifact_sha256" in let* content = text f "content" in
   let* recipients = match List.assoc "recipients" f with
-    | `List names -> List.fold_right (fun value acc -> let* rest=acc in match value with
-        | `String name -> Ok (name::rest) | _ -> Error (Corrupt "recipient must be text")) names (Ok [])
+    | `List names ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | `String name :: rest -> loop (name :: acc) rest
+        | _ :: _ -> Error (Corrupt "recipient must be text")
+      in
+      loop [] names
     | _ -> Error (Corrupt "recipients must be a list") in
   let payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
   let* () = validate payload |> Result.map_error (function

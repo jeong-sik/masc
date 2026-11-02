@@ -5,6 +5,11 @@ type expected = {
   world_name : string; binding_name : string;
 }
 type marker = Start | End
+type marker_member = Command_id | Generation | Step_index | Nonce | Source_page | Current_page | Bound
+let marker_members = [Command_id;Generation;Step_index;Nonce;Source_page;Current_page;Bound]
+let marker_member_name = function
+  | Command_id -> "commandId" | Generation -> "generation" | Step_index -> "stepIndex" | Nonce -> "nonce"
+  | Source_page -> "sourcePage" | Current_page -> "currentPage" | Bound -> "bound"
 type phase = Page_enable | Runtime_enable | Frame_tree | Isolated_world
   | Add_binding | Bootstrap_events | Before_start | Start_marker | End_marker
   | Interval_events
@@ -25,6 +30,27 @@ type event_kind =
   | Contexts_cleared | Dialog | Frame_changed of string
   | Target_destroyed of string | Session_detached of string | Transport_lost
   | Other
+type event_policy = Binding_policy | Context_created_policy | Context_destroyed_policy
+  | Contexts_cleared_policy | Dialog_policy | Frame_policy of bool
+  | Target_destroyed_policy | Session_detached_policy | Transport_lost_policy
+let event_policies = [
+  "Runtime.bindingCalled",Binding_policy;
+  "Runtime.executionContextCreated",Context_created_policy;
+  "Runtime.executionContextDestroyed",Context_destroyed_policy;
+  "Runtime.executionContextsCleared",Contexts_cleared_policy;
+  "Page.javascriptDialogOpening",Dialog_policy;
+  "Page.frameNavigated",Frame_policy true; "Page.documentOpened",Frame_policy true;
+  "Page.frameDetached",Frame_policy false; "Page.frameSubtreeWillBeDetached",Frame_policy false;
+  "Page.navigatedWithinDocument",Frame_policy false; "Page.frameStartedNavigating",Frame_policy false;
+  "Page.frameStartedLoading",Frame_policy false;
+  "Target.targetDestroyed",Target_destroyed_policy; "Target.detachedFromTarget",Session_detached_policy;
+  "Inspector.detached",Transport_lost_policy; "Inspector.targetCrashed",Transport_lost_policy]
+let policy_name = function
+  | Binding_policy -> "binding" | Context_created_policy -> "context_created"
+  | Context_destroyed_policy -> "context_destroyed" | Contexts_cleared_policy -> "contexts_cleared"
+  | Dialog_policy -> "dialog" | Frame_policy true -> "nested_frame" | Frame_policy false -> "frame"
+  | Target_destroyed_policy -> "target_destroyed" | Session_detached_policy -> "session_detached"
+  | Transport_lost_policy -> "transport_lost"
 type event = { session_id : string option; method_ : string; params : (string * Yojson.Safe.t) list }
 type document = { frame_id : string; loader_id : string }
 type bootstrap = {
@@ -47,12 +73,21 @@ let prepare ~command_id ~generation ~step_index ~source ~current ~nonce ~world_n
   then Ok {command_id;generation;step_index;source;current;nonce;world_name;binding_name}
   else Error "invalid native input window command/Page binding"
 
-let page_json page = `Assoc (("spaceId",`Int page.space_id)::Browser_surface.ego_page_fields page.native)
-let marker_payload expected marker = Yojson.Safe.to_string (`Assoc [
-  "commandId",`String expected.command_id; "generation",`String expected.generation;
-  "stepIndex",`Int expected.step_index; "nonce",`String expected.nonce;
-  "sourcePage",page_json expected.source; "currentPage",page_json expected.current;
-  "bound",`String (match marker with Start -> "start" | End -> "end")])
+let page_fields page = ("spaceId",`Int page.space_id)::Browser_surface.ego_page_fields page.native
+let page_json page = `Assoc (page_fields page)
+let marker_payload (expected:expected) marker =
+  let value = function
+    | Command_id -> `String expected.command_id | Generation -> `String expected.generation
+    | Step_index -> `Int expected.step_index | Nonce -> `String expected.nonce
+    | Source_page -> page_json expected.source | Current_page -> page_json expected.current
+    | Bound -> `String (match marker with Start -> "start" | End -> "end") in
+  Yojson.Safe.to_string (`Assoc (List.map (fun member -> marker_member_name member,value member) marker_members))
+let producer_contract (expected:expected) =
+  let strings values = `List (List.map (fun value -> `String value) values) in
+  `Assoc ["markerMembers",strings (List.map marker_member_name marker_members);
+    "pageMembers",strings (List.map fst (page_fields expected.source));
+    "eventPolicies",`List (List.map (fun (method_,policy) -> `Assoc [
+      "method",`String method_;"kind",`String (policy_name policy)]) event_policies)]
 
 let malformed phase detail = Error (Malformed_native {phase;detail})
 let rec distinct_json = function
@@ -107,34 +142,33 @@ let context_of_json phase value =
         && List.assoc_opt "type" aux = Some (`String "isolated") in
       Ok (frame_id,isolated) in
   Ok {id;unique_id;name;frame_id;isolated}
-let kind phase method_ params = match method_ with
-  | "Runtime.bindingCalled" ->
+let kind phase method_ params = match List.assoc_opt method_ event_policies with
+  | Some Binding_policy ->
     let* name = text phase "name" params in
     let* payload = match List.assoc_opt "payload" params with
       | Some (`String value) -> Ok value | None | Some _ -> malformed phase "invalid binding payload" in
     let* context_id = integer phase "executionContextId" params in
     Ok (Binding {name;payload;context_id})
-  | "Runtime.executionContextCreated" ->
+  | Some Context_created_policy ->
     let* context = get phase "context" params >>= context_of_json phase in
     Ok (Context_created context)
-  | "Runtime.executionContextDestroyed" ->
+  | Some Context_destroyed_policy ->
     let* id = integer phase "executionContextId" params in
     let* unique_id = text phase "executionContextUniqueId" params in
     Ok (Context_destroyed {id;unique_id})
-  | "Runtime.executionContextsCleared" -> Ok Contexts_cleared
-  | "Page.javascriptDialogOpening" -> Ok Dialog
-  | "Page.frameNavigated" | "Page.documentOpened" ->
+  | Some Contexts_cleared_policy -> Ok Contexts_cleared
+  | Some Dialog_policy -> Ok Dialog
+  | Some (Frame_policy true) ->
     let* frame = get phase "frame" params >>= object_ phase in
     let* id = text phase "id" frame in Ok (Frame_changed id)
-  | "Page.frameDetached" | "Page.frameSubtreeWillBeDetached"
-  | "Page.navigatedWithinDocument" | "Page.frameStartedNavigating" | "Page.frameStartedLoading" ->
+  | Some (Frame_policy false) ->
     let* id = text phase "frameId" params in Ok (Frame_changed id)
-  | "Target.targetDestroyed" ->
+  | Some Target_destroyed_policy ->
     let* id = text phase "targetId" params in Ok (Target_destroyed id)
-  | "Target.detachedFromTarget" ->
+  | Some Session_detached_policy ->
     let* id = text phase "sessionId" params in Ok (Session_detached id)
-  | "Inspector.detached" | "Inspector.targetCrashed" -> Ok Transport_lost
-  | _ -> Ok Other
+  | Some Transport_lost_policy -> Ok Transport_lost
+  | None -> Ok Other
 let event_of_json phase value =
   let* fields = object_ phase value in
   let* () = if List.for_all (fun (key,_) -> List.mem key ["method";"params";"sessionId"]) fields
@@ -190,7 +224,7 @@ let bootstrap ~expected ~page_enable ~runtime_enable ~frame_tree ~isolated_world
   let rec contexts index found = function
     | [] -> Ok (List.rev found)
     | event::rest ->
-      let* found = if event.method_<>"Runtime.executionContextCreated" then Ok found else
+      let* found = if List.assoc_opt event.method_ event_policies<>Some Context_created_policy then Ok found else
         let* value = get Bootstrap_events "context" event.params in
         let* context = context_of_json Bootstrap_events value in
         Ok (if context.id=id || context.name=expected.world_name
@@ -237,7 +271,7 @@ let classify (bound:bootstrap) ~current ~returned ~start_reply ~end_reply ~event
   let rec find index starts ends = function
     | [] -> Ok (List.rev starts,List.rev ends)
     | event::rest ->
-      let* observed = if event.method_="Runtime.bindingCalled"
+      let* observed = if List.assoc_opt event.method_ event_policies=Some Binding_policy
         then observed_kind Interval_events event else Ok Other in
       match observed with
       | Binding {name;payload;context_id} when name=bound.expected.binding_name ->
@@ -272,3 +306,31 @@ let matches (completion:completion) expected =
   && original.current=expected.current && original.nonce=expected.nonce
   && original.world_name=expected.world_name && original.binding_name=expected.binding_name
 let observation completion = completion.observation
+let same_completion (first:completion) (second:completion) =
+  matches first second.expected && first.observation=second.observation
+type binding = {command_id:string;generation:string;step_index:int;source:page;current:page}
+let binding (completion:completion) : binding =
+  let expected = completion.expected in
+  {command_id=expected.command_id;generation=expected.generation;step_index=expected.step_index;
+    source=expected.source;current=expected.current}
+let public_summary completion =
+  let bound = binding completion in
+  `Assoc ["kind",`String "host_observed_sdk_tail";"method",`String "keyboard.type";
+    "returnKind",`String "void";"index",`Int bound.step_index;
+    "sourcePage",page_json bound.source;"currentPage",page_json bound.current]
+let phase_name = function
+  | Page_enable -> "page_enable" | Runtime_enable -> "runtime_enable" | Frame_tree -> "frame_tree"
+  | Isolated_world -> "isolated_world" | Add_binding -> "add_binding" | Bootstrap_events -> "bootstrap_events"
+  | Before_start -> "before_start" | Start_marker -> "start_marker" | End_marker -> "end_marker"
+  | Interval_events -> "interval_events"
+let public_unconfirmed ~index reason =
+  let reason,phase = match reason with
+    | Malformed_native {phase;detail=_} -> "malformed_native",["phase",`String (phase_name phase)]
+    | Context_or_session_changed -> "context_or_session_changed",[]
+    | Document_changed -> "document_changed",[] | Bounds_missing_or_duplicated -> "bounds_missing_or_duplicated",[]
+    | Bounds_out_of_order -> "bounds_out_of_order",[] | Dialog_opened -> "dialog_opened",[]
+    | Unexpected_return -> "unexpected_return",[] | No_raw_call -> "no_raw_call",[]
+    | Native_failure -> "native_failure",[] | Control_unavailable -> "control_unavailable",[]
+    | Transport_unconfirmed -> "transport_unconfirmed",[] | Cancelled -> "cancelled",[]
+    | Page_binding_changed -> "page_binding_changed",[] in
+  `Assoc (["kind",`String "unconfirmed_native_window";"index",`Int index;"reason",`String reason] @ phase)

@@ -47,12 +47,13 @@ val begin_holding : t -> scope:scope -> tab_id:int -> page_label:string -> opera
     changes the connection-wide guard or operator reset authority. *)
 
 val command_settled : t -> generation:string -> Browser_ego_release.proof -> (unit, string) result
-(** Settle the pending input. A proof comes only from [Browser_ego_release.judge]
-    over answers that [Browser_ego_release.answer_of_json] read, so a flag a
-    script sets cannot settle it. The types cannot show that the caller read the
-    SDK's answer for this pending input: the proof is not tied to one input, and
-    [answer_of_json] reads whatever JSON it is given. This module does not
-    inspect physical keys. *)
+(** Native-window evidence additionally requires this Pending's command,
+    generation, source Page label and retained native Space. Production never
+    settles a native window from an unbound volatile fixture state.
+    Settle from the one Release judge, not a script flag. Receipt answers retain
+    their existing call-site responsibility. Native-window proofs additionally
+    carry verified invocation binding checked here before CAS. This module
+    does not inspect or attest physical keys. *)
 
 val not_started : t -> generation:string -> (unit, string) result
 (** Restore the prior readiness, retaining its operator provenance. *)

@@ -5,12 +5,15 @@ type method_ =
   | Keyboard_press | Keyboard_paste | Keyboard_type | Keyboard_insert_text
   | Raw_pointer_drag
 
-type unavailable = Keyboard_type_void | Raw_pointer_drag_void
-type t = No_hold | Observed_receipt | Unattestable_raw_hold of unavailable
+type unavailable = Raw_pointer_drag_void
+type t = No_hold | Observed_receipt | Observed_native_window
+  | Unattestable_raw_hold of unavailable
 
 val contract : method_ -> t
 (** [No_hold] creates no key/button-down state. [Observed_receipt] still needs
     the actual SDK receipt and the existing release judge after execution.
+    [Observed_native_window] needs local interval validation before following
+    effects and independent Host classification before Input settlement.
     [Unattestable_raw_hold] must be refused before any input is dispatched. *)
 
 val unavailable : t -> unavailable option

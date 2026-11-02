@@ -1,12 +1,14 @@
-(** Whether the keys or buttons an input-holding step may have pressed are
-    released. The answer comes only from what the SDK declared for the step.
+(** Completion of the input-holding steps entered by one command. Receipt
+    evidence comes only from what the SDK declared for the step.
     The SDK documents no release acknowledgement. What it declares for an
     observed action is its receipt, [{popups?; dialog?: object}] in ego-lite
     page-model.ts: [dialog] is set from the dialog-opened error that unwound the
     driver, so an object receipt without it means the whole action ran. Raw
     calls such as [keyboard.type] and [mouse.up] swallow that error into void,
-    so a void answer declares nothing. [Page.info()] and the Page's event buffer
-    are samples of the page, not answers of the SDK, and are never evidence.
+    so a void answer declares nothing. A separately verified native isolated
+    binding interval may establish the raw SDK loop tail. It remains distinct
+    from a native receipt and never proves physical freshness. Unbounded
+    [Page.info()] or event samples cannot establish that interval.
 
     This premise was read at [citrolabs/ego-lite@aecc5831fc5a] in
     [package/ego-browser/src/page-model.ts]. The line numbers below hold only
@@ -27,13 +29,18 @@ type unreleased =
           repeated member, a malformed [popups], or a [dialog] that is not an
           object *)
   | Never_returned  (** the step was entered and gave no answer *)
+  | Native_window_unconfirmed of Browser_ego_native_window.unconfirmed
+  | Conflicting_evidence
 
-(** What the SDK declared for one input-holding step. The one answer that
-    releases, [Receipt_without_dialog], is an object receipt that has only the
+(** Completion evidence for one input-holding step. The SDK receipt answer,
+    [Receipt_without_dialog], is an object receipt that has only the
     declared members, each once: [popups] (a list of [{label; targetId}] whose
     two members are strings that are not empty) and [dialog], and no [dialog].
-    Only [answer_of_json] builds it. *)
-type answer = private Receipt_without_dialog | Unreleased of unreleased
+    Only [answer_of_json] builds that receipt answer. [Native_window_tail]
+    remains a separate Host-verified provenance. *)
+type answer = private Receipt_without_dialog
+  | Native_window_tail of Browser_ego_native_window.completion
+  | Unreleased of unreleased
 
 val receipt_contract : Yojson.Safe.t
 (** Fixed field data for validating SDK input receipts before another action.
@@ -47,9 +54,18 @@ val answer_of_json : Yojson.Safe.t -> answer
 val of_unreleased : unreleased -> answer
 (** An answer that releases nothing. *)
 
-(** The input-holding steps, by index, whose answer released them. It is never
-    empty, and only [judge] builds it. *)
+val answer_of_window : expected:Browser_ego_native_window.expected ->
+  Browser_ego_native_window.completion -> (answer, string) result
+(** Accept only exact verified invocation binding, never JSON/void flags. *)
+
+(** Input-holding step evidence. Only [judge] builds a nonempty proof; native
+    windows retain their private verified invocation identity. *)
+type evidence = private Receipt_step of int
+  | Window_step of { index:int; completion:Browser_ego_native_window.completion }
 type proof = private Released_by_receipts of int list
+  | Completed_by_evidence of evidence list
+val window_bindings : proof -> Browser_ego_native_window.binding list
+(** Reduced verified bindings for Input's current-pending/CAS check. *)
 
 (** Nothing is left unconfirmed. [No_hold]: no input-holding step was entered,
     so there is nothing to release and the input keeps the readiness it had. *)
@@ -57,7 +73,7 @@ type settled = No_hold | Released of proof
 
 type unconfirmed =
   | Step_not_released of { index : int; answer : unreleased }
-      (** the first holding step whose answer is not [Receipt_without_dialog] *)
+      (** the first holding step without valid completion evidence *)
   | Held_by_script_report
       (** every answer is clean, but the script reports a held input *)
 
@@ -66,11 +82,12 @@ type t = Settled of settled | Unconfirmed of unconfirmed
 val judge : (int * answer) list -> t
 (** [judge answers] takes the input-holding steps in order. A step that
     appears twice counts once and keeps its first answer that releases nothing,
-    so a later clean answer never undoes a dialog, and a proof never lists a
-    step twice. It is [Settled No_hold] for none, [Settled (Released _)] when
-    every answer is [Receipt_without_dialog], and otherwise [Unconfirmed]
-    naming the first answer that is not. The caller passes what the SDK
-    returned; a proof is not tied to the call it came from. *)
+    so a later clean answer never undoes uncertainty. Identical native windows
+    count once, but contradictory windows or receipt/window evidence at the
+    same index refuse. All windows must agree on command/generation/source and
+    authenticated index. [No_hold] preserves prior readiness. Receipt-only
+    proof keeps its historical provenance; window bindings must additionally
+    match actual Pending before Input settlement. *)
 
 val describe : unconfirmed -> string
 (** A short reason for an error message. *)

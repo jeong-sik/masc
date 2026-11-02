@@ -302,12 +302,16 @@ let test_native_input_admission_surface () =
   let methods=Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "steps"
     |> member "items" |> member "properties" |> member "method" |> member "enum"
     |> to_list |> List.map to_string) in
-  check bool "unattestable raw type is not an executable model method" false (List.mem "keyboard.type" methods);
+  check int "native-window typing is an explicit executable model method" 1
+    (List.length (List.filter ((=) "keyboard.type") methods));
   List.iter (fun name -> check bool (name ^ " remains explicit") true (List.mem name methods))
     ["fill";"keyboard.insertText";"keyboard.paste";"keyboard.press";"dragAndDrop"];
   (match Cap.support (Cap.Connected Lane.Ego_task_space) Cap.Type_text with
-   | Cap.Unsupported _ -> ()
-   | Available _ | Conditional _ -> fail "Ego must not advertise raw type_text");
+   | Cap.Conditional {invocation;constraints=_::_} ->
+     check bool "typing remains an exact observed native interaction" true
+       (invocation.Cap.tool=Cap.Interact && invocation.Cap.action=Some "type_text")
+   | Conditional {constraints=[];_} | Available _ | Unsupported _ ->
+     fail "native-window typing must retain its Page and focus conditions");
   List.iter (fun backend -> check bool "other native backends retain type_text" true
     (match Cap.support backend Cap.Type_text with Cap.Available _|Conditional _->true|Unsupported _->false))
     [Cap.Connected Lane.Webdriver_bidi;Cap.Owned_gecko;Cap.Owned_chromium];
@@ -322,9 +326,9 @@ let test_native_input_admission_surface () =
   let fill=`Assoc ["method",`String "fill";"selector",`String "#editor";"text",`String "earlier effect"] in
   let raw=`Assoc ["method",`String "keyboard.type";"text",`String "raw"] in
   let safe=`Assoc ["method",`String "keyboard.insertText";"text",`String "literal"] in
-  check bool "whole-workflow refusal happens before looking for a browser Add-on" true
-    (Tool_result.failure_class (invoke [fill;raw])=Some Tool_result.Policy_rejection);
-  check bool "the explicit native alternative reaches ordinary Add-on lookup" true
+  check bool "native-window typing reaches ordinary Add-on lookup" true
+    (Tool_result.failure_class (invoke [fill;raw])=Some Tool_result.Dependency_unavailable);
+  check bool "nonholding insertion retains ordinary Add-on lookup" true
     (Tool_result.failure_class (invoke [fill;safe])=Some Tool_result.Dependency_unavailable)
 
 let () = run "task-aware browser choice" ["scenarios",[

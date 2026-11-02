@@ -2116,6 +2116,42 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
     (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
+let test_observer_retry_retires_with_workspace_read_authority () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  let closed = Observer_closed_before_answer { reason = "closed"; at = 1. } in
+  let owner = ref () in
+  let retry = Masc_tui_async_protocol.Observer_retry_due (authority, owner) in
+  state.observer <- closed;
+  state.observer_retry_owner <- Some owner;
+  Alcotest.(check bool) "closed stream owns its retry" true
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.observer <- Observer_closed_before_answer { reason = "closed"; at = 1. };
+  state.observer_retry_owner <- Some (ref ());
+  Alcotest.(check bool) "an equal later close does not own the earlier retry" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.observer_retry_owner <- Some owner;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a replaced workspace cannot own the earlier retry" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.workspace_authority <- authority;
+  state.observer <- Observer_opening;
+  Alcotest.(check bool) "an opening stream cannot be retried" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  Alcotest.(check bool) "retry is a workspace observation" true
+    (Masc_tui_async_protocol.workspace_message_is_read retry);
+  Alcotest.(check bool) "current workspace admits the retry" true
+    (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry);
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "retired workspace cannot admit the retry" false
+    (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry)
+
 let test_archive_cache_does_not_cross_equal_stat_files () =
   let first = Filename.temp_file "tui-archive-source-a-" ".json" in
   let second = Filename.temp_file "tui-archive-source-b-" ".json" in
@@ -5882,6 +5918,8 @@ let () =
             test_failed_read_keeps_followup_and_withdrawal_retires_it
         ; Alcotest.test_case "concurrent creations retain individual refresh coverage" `Quick
             test_concurrent_created_keepers_retain_individual_refresh_coverage
+        ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
+            test_observer_retry_retires_with_workspace_read_authority
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
         ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick

@@ -20,6 +20,7 @@ examples into the current adapter or invent Playwright methods.
 The source entrypoints are
 [`browser_ego_peer.ml`](../../lib/browser_ego_peer.ml),
 [`browser_ego_workflow.ml`](../../lib/browser_ego_workflow.ml),
+[`browser_ego_raw_type.ml`](../../lib/browser_ego_raw_type.ml),
 [`browser_native_workflow.mli`](../../lib/browser_lane/browser_native_workflow.mli),
 and the actual
 [`masc_browser_interact` schema](../../config/tools/masc_browser_interact.toml).
@@ -36,8 +37,10 @@ The subsequent retention adapter described in this tree adds native
 `keepPages="all"` to `finish_space`; this source addition has the same evidence
 limits. The handler validates both retention policies before any effect; the
 generic Agent-Core argument validator does not enforce nested `oneOf` itself.
-The input-admission and Input-retention entries below were checked against
-`9ce15d79c77f73b38f84b4dc152500c17aab2b8d`. The 74-entry inventory and the guide
+An earlier input-admission and Input-retention refresh was checked against
+`9ce15d79c77f73b38f84b4dc152500c17aab2b8d`. The typing row additionally reflects
+the shared native producer and Host verification at
+`3ea76700514f6b0cd2a098afdb9ce14ad053c1f5`. The 74-entry inventory and the guide
 and browser versions above remain historical captures, not a current SDK or
 installed-runtime observation. These corrections do not establish full parity.
 
@@ -121,7 +124,7 @@ local Space is visible or that its login is complete.
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
 | `Page.keyboard.press` | Interaction chord; workflow forwards native delay | New option forms require real SDK and installed-route proof |
-| `Page.keyboard.type` | Current admission refuses this method and ordinary Ego type_text before input. A workflow containing it is refused before its first step, so an earlier prefix is not executed. Native data decoding still recognizes retained receipts | Raw typing equivalence and its completion/interruption contract remain open; this restriction is not a claim that the SDK API is permanently unusable |
+| `Page.keyboard.type` | Ordinary type_text and workflow keyboard.type use the shared native typing producer. A verified same-command native window returns nativeCompletion separately from the SDK's void receipt; an unconfirmed window stops later steps and keeps entered input pending | Real SDK/installed Keeper execution remains unverified. SDK-tail completion does not establish application acceptance or physical key freshness |
 | `Page.keyboard.insertText` | Native workflow, classified No_hold because it invokes Input.insertText without key-down/up; preserves existing input readiness | Does not attest release of earlier input or application success; broad installed MASC/Keeper equivalence remains unverified |
 | `Page.keyboard.paste` | Native workflow plain/rich paste | Real trusted paste proof; installed MASC/Keeper route unverified |
 | `FileChooser.isMultiple` | Internal chooser validation | Explicit chooser handle observation |

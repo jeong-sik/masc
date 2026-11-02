@@ -1819,6 +1819,13 @@ let test_undecodable_output_is_an_error_not_absence () =
     ; "", "empty output is refused"
     ; "{\"id\":\"masc-egress-policy\"}", "a bare object is refused"
     ; "not json", "garbage is refused"
+    ; "[{}]", "a row without an id cannot establish absence"
+    ; "[{\"id\":7}]", "a row with a non-string id is refused"
+    ; "[{\"id\":\"  \"}]", "a blank id is refused"
+    ; "[null]", "a non-object row is refused"
+    ; "[{\"id\":\"default\",\"id\":\"masc-egress-policy-probe\"}]", "duplicate ids are refused"
+    ; "[{\"id\":\"masc-egress-policy-probe\"},{}]", "a match does not hide a later malformed row"
+    ; "[{}, {\"id\":\"masc-egress-policy-probe\"}]", "a match does not hide an earlier malformed row"
     ]
 
 (* A policy guest has one route and it is the proxy. A boot that does not

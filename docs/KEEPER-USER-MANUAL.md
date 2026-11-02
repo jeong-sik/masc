@@ -847,6 +847,12 @@ boundary.
 
 ## Follow an input through a turn
 
+A Keeper can discover delegation targets with the read-only `masc_keeper_list`
+tool. `detailed=true` includes Keeper summaries; `total`, `limit` and `truncated`
+describe the returned roster's coverage. A listed Keeper is not proof that it
+has accepted work. Submit through `masc_keeper_delegate` and follow the original
+target and operation ID for the result.
+
 Open a Keeper's Turn Inspector and select a turn, then **입력과 실행**
 (input and execution). The view uses the complete `turn_ref` — trace and
 absolute turn together — rather than joining nearby timestamps.

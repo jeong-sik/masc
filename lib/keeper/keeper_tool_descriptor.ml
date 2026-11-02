@@ -3271,10 +3271,10 @@ let internal_descriptors : t list =
   @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
-    masc_keeper_descriptor ~keeper_model_projection:Operator_only
+    masc_keeper_descriptor ~keeper_model_projection:Internal_name
       ~ordinary_execution_mode:Concurrent "list" Keeper_tool_name.(to_string Keeper_list)
-      (* Concurrent: registry and roster reads; the list cache is an Atomic
-         over an immutable record with CAS install. *)
+      (* Read-only roster discovery lets a Keeper choose a delegation target.
+         Registry reads are concurrent; the cache is immutable with CAS install. *)
       ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
       ~ordinary_execution_mode:Concurrent "delegate_status" Keeper_tool_name.(to_string Keeper_delegate_status)

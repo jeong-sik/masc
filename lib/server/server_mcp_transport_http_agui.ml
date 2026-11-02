@@ -20,7 +20,8 @@ let presence_stream_headers ~deps raw_session_id protocol_version origin =
     ([
        ("content-type", Http_negotiation.sse_content_type);
        ("cache-control", "no-cache");
-       ("connection", "keep-alive");
+       (* This streaming body is close-delimited by Httpun. *)
+       ("connection", "close");
        ("x-accel-buffering", "no");
        Server_mcp_transport_http_headers.session_cookie_header raw_session_id;
      ]

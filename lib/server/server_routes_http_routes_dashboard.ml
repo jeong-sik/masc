@@ -175,7 +175,8 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
            Httpun.Headers.of_list
              ([ "content-type", "text/event-stream"
               ; "cache-control", "private, no-store"
-              ; "connection", "keep-alive"
+              (* Httpun delimits this streaming body by closing the connection. *)
+              ; "connection", "close"
               ; "x-accel-buffering", "no"
               ]
               @ Http.Response.scoped_headers ()

@@ -17387,14 +17387,26 @@ let resume_goal_confirmation_identity_refresh state ~mailbox =
   if server_authority_ready state then begin
     let pending = state.goal_confirmation_identity_refresh in
     state.goal_confirmation_identity_refresh <- None;
-    match pending, state.view, state.planning_mode, state.server_identity, state.goal_confirmation with
-    | Some (goal_id, workspace), Planning, Planning_detail selected, Some identity, Goal_confirmation.Inspecting read
-      when String.equal goal_id selected
-           && String.equal workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
-           && String.equal workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
-           && Goal_confirmation_read.current_key read = Some goal_id ->
-        launch_goal_confirmation_read state ~mailbox ~goal_id
-    | _, _, _, _, _ -> ()
+    match pending, state.server_identity with
+    | Some (goal_id, workspace), Some (identity : Masc.Tui_decode.server_identity) ->
+        (match state.view with
+         | Planning ->
+             (match state.planning_mode with
+              | Planning_list -> ()
+              | Planning_detail selected ->
+                  (match state.goal_confirmation with
+                   | Goal_confirmation.Inspecting read
+                     when String.equal goal_id selected
+                          && String.equal workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
+                          && String.equal workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
+                          && Goal_confirmation_read.current_key read = Some goal_id ->
+                       launch_goal_confirmation_read state ~mailbox ~goal_id
+                   | Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _ -> ()))
+         | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+         | Approvals | Schedules | Verification | Harness | Fusion | Repositories
+         | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+         | System_logs -> ())
+    | None, _ | Some _, None -> ()
   end
 
 let launch_skill_evidence_read ?composition_run_id state ~mailbox reference =
@@ -18805,7 +18817,7 @@ let handle_goal_confirmation_key state ~mailbox =
            report_action state "system" "Goal proof is being refreshed; wait for the current result"
        | Goal_confirmation.Inspecting read ->
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
-       | Ready confirmation when not (Option.exists (fun identity ->
+       | Ready confirmation when not (Option.exists (fun (identity : Masc.Tui_decode.server_identity) ->
            String.equal confirmation.workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
            && String.equal confirmation.workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
            && identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
@@ -18831,7 +18843,7 @@ let handle_goal_confirmation_key state ~mailbox =
            if not (note_goal_action_started state ~goal_id ~ticket) then
              report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
            else begin
-           let origin = Option.fold ~none:"unconfirmed" ~some:(fun identity ->
+           let origin = Option.fold ~none:"unconfirmed" ~some:(fun (identity : Masc.Tui_decode.server_identity) ->
              Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
              ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ^ ")") state.server_identity
              ^ " (server instance " ^ confirmation.runtime_instance_id ^ ")" in

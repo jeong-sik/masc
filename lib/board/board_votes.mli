@@ -52,9 +52,9 @@ val vote_direction_of_string_opt : string -> vote_direction option
 
 (** {1 Vote log path} *)
 
-val vote_log_path : unit -> string
+val vote_log_path : store -> string
 (** Path to the append-only vote log JSONL under the board directory
-    resolved by {!Board_paths.board_masc_dir} — the same resolver used by
+    captured by the store — the same workspace used by
     [persist_path] / [comments_path] / [reactions_path] / [sub_boards_path],
     so this is [<base>/.masc/board_votes.jsonl].  Each accepted row
     has exactly [target], [voter], [direction], and positive finite [ts]

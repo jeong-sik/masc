@@ -18,10 +18,10 @@ let sub_boards_jsonl_unlocked store =
   Buffer.contents buf
 ;;
 
-let save_sub_boards_jsonl content =
+let save_sub_boards_jsonl store content =
   try
-    ensure_masc_dir ();
-    let path = sub_boards_path () in
+    ensure_masc_dir store;
+    let path = sub_boards_path store in
     match Fs_compat.save_file_atomic path content with
     | Ok () -> ()
     | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
@@ -29,10 +29,10 @@ let save_sub_boards_jsonl content =
   | Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
 ;;
 
-let append_sub_board (sb : sub_board) =
+let append_sub_board store (sb : sub_board) =
   try
-    ensure_masc_dir ();
-    let path = sub_boards_path () in
+    ensure_masc_dir store;
+    let path = sub_boards_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
     Ok ()
   with
@@ -106,7 +106,7 @@ let create_sub_board
                         (Printf.sprintf "Sub-board slug %S already exists" slug))
                  else Ok ())
              in
-             let* () = append_sub_board sb in
+             let* () = append_sub_board store sb in
              with_lock store (fun () ->
                Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) sb;
                Hashtbl.replace store.sub_boards_by_slug slug
@@ -168,7 +168,7 @@ let update_sub_board
     match result with
     | Error _ as error -> error
     | Ok (updated, content) ->
-      save_sub_boards_jsonl content;
+      save_sub_boards_jsonl store content;
       Ok updated)
 ;;
 
@@ -239,6 +239,6 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
     match snapshot with
     | Error _ as e -> e
     | Ok content ->
-      save_sub_boards_jsonl content;
+      save_sub_boards_jsonl store content;
       Ok ())
 ;;

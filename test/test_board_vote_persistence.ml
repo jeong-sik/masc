@@ -20,19 +20,29 @@ let fresh_test_base_path () =
 (* Replaces the board's [.masc] directory with a regular file so any
    subsequent [Fs_compat.mkdir_p]/[append_file] under it raises [Sys_error]
    (ENOTDIR). Same fixture as [test_board_dispatch.ml]'s
-   [block_board_masc_dir_with_file]; duplicated locally per this suite's
+   [with_blocked_board_masc_dir]; duplicated locally per this suite's
    existing per-file fixture convention (see [fresh_test_base_path] above). *)
-let block_board_masc_dir_with_file () =
-  let base =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-vote-persist-blocked-%06x" (Random.bits ()))
-  in
-  Unix.putenv "MASC_BASE_PATH" base;
-  let masc_dir = Filename.dirname (Board.persist_path ()) in
+let with_blocked_board_masc_dir f =
+  let store = Board.global () in
+  let masc_dir = store.Board.workspace_masc_dir in
+  let backup = masc_dir ^ ".fixture-backup" in
+  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
-  Fs_compat.save_file masc_dir "not a directory";
-  base
+  let paths =
+    [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
+    ; Board.reactions_path store; Board.sub_boards_path store ]
+  in
+  List.iter Fs_compat.invalidate_cached_writer paths;
+  let existed = Sys.file_exists masc_dir in
+  if existed then Unix.rename masc_dir backup;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Fs_compat.invalidate_cached_writer paths;
+      if Sys.file_exists masc_dir then Sys.remove masc_dir;
+      if existed then Unix.rename backup masc_dir)
+    (fun () ->
+      Fs_compat.save_file masc_dir "not a directory";
+      f ())
 
 let with_eio f () =
   Eio_main.run @@ fun env ->
@@ -40,7 +50,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 let read_ts_rows path =
@@ -134,7 +147,7 @@ let test_flush_preserves_cast_ts () =
   (match Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let append_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let append_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let cast_ts =
     match find_row ~target ~voter append_rows with
     | Some (_, _, ts) -> ts
@@ -147,7 +160,7 @@ let test_flush_preserves_cast_ts () =
     (before_flush_now > cast_ts +. 0.01);
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rewrite_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let rewritten_ts =
     match find_row ~target ~voter rewrite_rows with
     | Some (_, _, ts) -> ts
@@ -171,7 +184,7 @@ let test_flip_inherits_flip_time () =
   (match Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let up_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let up_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let up_ts =
     match find_row ~target ~voter up_rows with
     | Some (_, _, ts) -> ts
@@ -181,7 +194,7 @@ let test_flip_inherits_flip_time () =
   (match Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Down with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let flip_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let flip_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let last_flip_row =
     List.fold_left (fun acc row ->
       let (t, v, _) = row in
@@ -196,7 +209,7 @@ let test_flip_inherits_flip_time () =
         true (flip_ts > up_ts +. 0.01);
       (match Board_dispatch.backend () with
        | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-      let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+      let rewrite_rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
       let rewritten_ts =
         match find_row ~target ~voter rewrite_rows with
         | Some (_, _, ts) -> ts
@@ -233,19 +246,22 @@ let test_comment_vote_flips_and_duplicate_survive_restart () =
   check_counts "flip to up" 1 0;
   cast Board.Down (-1);
   check_counts "flip back to down" 0 1;
-  let before_duplicate = Fs_compat.load_file (Board_votes.vote_log_path ()) in
+  let before_duplicate = Fs_compat.load_file (Board_votes.vote_log_path (Board.global ())) in
   (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Down with
    | Error (Board.Already_voted _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "same-direction comment vote was accepted");
   check_counts "rejected duplicate" 0 1;
   Alcotest.(check string) "duplicate does not append a durable row" before_duplicate
-    (Fs_compat.load_file (Board_votes.vote_log_path ()));
+    (Fs_compat.load_file (Board_votes.vote_log_path (Board.global ())));
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   check_counts "restarted comment" 0 1;
   (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
    | Ok (Some Board.Down) -> ()
@@ -281,7 +297,7 @@ let test_restart_loads_only_current_vote_rows () =
     ]
   in
   Fs_compat.save_file
-    (Board_votes.vote_log_path ())
+    (Board_votes.vote_log_path (Board.global ()))
     (String.concat
        ""
        (List.map
@@ -289,7 +305,10 @@ let test_restart_loads_only_current_vote_rows () =
           (canonical :: rejected_rows)));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let store =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
@@ -322,14 +341,17 @@ let test_namespaced_voter_survives_snapshot_and_restart () =
    | Error error -> Alcotest.fail (Board.show_board_error error));
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   Alcotest.(check bool)
     "snapshot keeps the complete namespaced voter"
     true
     (Option.is_some (find_row ~target ~voter rows));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   (match Board_dispatch.current_vote_for_post ~voter ~post_id with
    | Ok (Some Board.Up) -> ()
    | Ok (Some Board.Down) -> Alcotest.fail "snapshot changed vote direction"
@@ -373,13 +395,16 @@ let test_restart_uses_last_vote_row_and_rebuilds_counts () =
     ]
   in
   Fs_compat.save_file
-    (Board_votes.vote_log_path ())
+    (Board_votes.vote_log_path (Board.global ()))
     (String.concat
        ""
        (List.map (fun json -> Yojson.Safe.to_string json ^ "\n") rows));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   (match
      Board_dispatch.current_vote_for_post
        ~voter:"flip-voter"
@@ -423,10 +448,13 @@ let test_missing_ledger_resets_persisted_vote_counts () =
    | Error error -> Alcotest.fail (Board.show_board_error error));
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  Unix.unlink (Board_votes.vote_log_path ());
+  Unix.unlink (Board_votes.vote_log_path (Board.global ()));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->
@@ -440,8 +468,7 @@ let test_vote_persistence_failure_leaves_nothing_committed () =
       ~content:"vote must not survive a failed append"
   in
   let post_id = Board.Post_id.to_string post.id in
-  let working_base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"" in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok _ -> Alcotest.fail "vote must not succeed when the durable append fails"
@@ -459,17 +486,17 @@ let test_vote_persistence_failure_leaves_nothing_committed () =
   (match Board_dispatch.current_vote_for_post ~voter ~post_id with
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "a failed append must not leave a vote log entry"
-   | Error e -> Alcotest.fail (Board.show_board_error e));
+   | Error e -> Alcotest.fail (Board.show_board_error e))
   (* Nothing was committed, so the same vote is not blocked by Already_voted
      once the append can actually succeed — the earlier failure left no
      residual state to collide with. *)
-  Unix.putenv "MASC_BASE_PATH" working_base;
+  );
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok score -> Alcotest.(check int) "retry after unblock succeeds" 1 score
    | Error e -> Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let target = "post:" ^ post_id ^ ":" ^ voter in
   Alcotest.(check int)
     "flush snapshot has exactly the retried vote, no ghost from the failed attempt"
@@ -486,8 +513,7 @@ let test_vote_flip_persistence_failure_leaves_original_direction_committed () =
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let working_base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"" in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Down with
    | Ok _ -> Alcotest.fail "flip must not succeed when the durable append fails"
@@ -506,16 +532,16 @@ let test_vote_flip_persistence_failure_leaves_original_direction_committed () =
    | Ok (Some Board.Up) -> ()
    | Ok (Some Board.Down) -> Alcotest.fail "a failed flip must not persist the new direction"
    | Ok None -> Alcotest.fail "a failed flip must not erase the original vote"
-   | Error e -> Alcotest.fail (Board.show_board_error e));
+   | Error e -> Alcotest.fail (Board.show_board_error e))
   (* The original "up" vote is still the only committed state, so retrying
      the flip once the append can succeed is a normal flip, not a collision. *)
-  Unix.putenv "MASC_BASE_PATH" working_base;
+  );
   (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Down with
    | Ok score -> Alcotest.(check int) "retried flip after unblock succeeds" (-1) score
    | Error e -> Alcotest.fail ("retried flip must succeed, got " ^ Board.show_board_error e));
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let target = "post:" ^ post_id ^ ":" ^ voter in
   Alcotest.(check int)
     "flush snapshot has exactly one row for this voter, no ghost \"down\" from the failed flip"
@@ -534,8 +560,7 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
       ~content:"comment under test"
   in
   let comment_id = Board.Comment_id.to_string comment.id in
-  let working_base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"" in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up with
    | Ok _ -> Alcotest.fail "comment vote must not succeed when the durable append fails"
@@ -554,14 +579,14 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
   (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "a failed append must not leave a vote log entry"
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  Unix.putenv "MASC_BASE_PATH" working_base;
+   | Error e -> Alcotest.fail (Board.show_board_error e))
+  );
   (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up with
    | Ok score -> Alcotest.(check int) "retry after unblock succeeds" 1 score
    | Error e -> Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
   (match Board_dispatch.backend () with
    | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   let target = "comment:" ^ comment_id ^ ":" ^ voter in
   Alcotest.(check int)
     "flush snapshot has exactly the retried vote, no ghost from the failed attempt"
@@ -615,7 +640,7 @@ let test_flush_under_cancellation_still_writes () =
     "the flush completed, so nothing stayed scheduled"
     false
     store.Board.dirty_posts;
-  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   Alcotest.(check bool)
     "the vote reached the log despite the cancellation"
     true
@@ -631,31 +656,34 @@ let test_flush_writes_only_changed_primary_table () =
   let store = match Board_dispatch.backend () with Board_dispatch.Jsonl s -> s in
   Board.flush_dirty store;
   let inode path = (Unix.stat path).Unix.st_ino in
-  let comments_before = inode (Board.comments_path ()) in
+  let comments_before = inode (Board.comments_path (Board.global ())) in
   (match Board_dispatch.vote ~voter:"selective-post-voter" ~post_id
       ~direction:Board.Up with
    | Ok _ -> () | Error e -> Alcotest.fail (Board.show_board_error e));
   Board.flush_dirty store;
   Alcotest.(check int) "post vote leaves comments file untouched"
-    comments_before (inode (Board.comments_path ()));
-  let posts_before = inode (Board.persist_path ()) in
+    comments_before (inode (Board.comments_path (Board.global ())));
+  let posts_before = inode (Board.persist_path (Board.global ())) in
   (match Board_dispatch.vote_comment ~voter:"selective-comment-voter" ~comment_id
       ~direction:Board.Up with
    | Ok _ -> () | Error e -> Alcotest.fail (Board.show_board_error e));
   Board.flush_dirty store;
   Alcotest.(check int) "comment vote leaves posts file untouched"
-    posts_before (inode (Board.persist_path ()));
+    posts_before (inode (Board.persist_path (Board.global ())));
   (* A new comment changes both tables; the narrower flush must keep the
      parent's reply count as well as the child row across restart. *)
   ignore (add_comment_exn ~post_id ~author:"second-commenter" ~content:"second comment");
   Board.flush_dirty store;
-  let persisted_post = Fs_compat.load_file (Board.persist_path ())
+  let persisted_post = Fs_compat.load_file (Board.persist_path (Board.global ()))
     |> String.trim |> Yojson.Safe.from_string in
   Alcotest.(check int) "parent count is persisted before loader reconstruction" 2
     Yojson.Safe.Util.(persisted_post |> member "reply_count" |> to_int);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok p ->
@@ -682,7 +710,7 @@ let test_flush_failure_keeps_the_vote_log_scheduled () =
    | Ok _ -> ()
    | Error e -> Alcotest.fail ("vote must succeed: " ^ Board.show_board_error e));
   Alcotest.(check bool) "the vote marked the post dirty" true store.Board.dirty_posts;
-  let vote_log = Board_votes.vote_log_path () in
+  let vote_log = Board_votes.vote_log_path (Board.global ()) in
   (try Sys.remove vote_log with Sys_error _ -> ());
   Fs_compat.mkdir_p vote_log;
   let before = Board.persist_error_count () in
@@ -707,7 +735,7 @@ let test_restart_keeps_a_vote_whose_post_is_absent () =
   in
   let absent_post_id = "p-0123456789abcdef0123456789abcdef" in
   Fs_compat.save_file
-    (Board_votes.vote_log_path ())
+    (Board_votes.vote_log_path (Board.global ()))
     (Yojson.Safe.to_string
        (vote_row
           ~post_id:absent_post_id
@@ -717,7 +745,10 @@ let test_restart_keeps_a_vote_whose_post_is_absent () =
      ^ "\n");
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let store =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
@@ -734,7 +765,7 @@ let test_restart_keeps_a_vote_whose_post_is_absent () =
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error));
   Board_votes.flush_dirty store;
-  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let rows = read_ts_rows (Board_votes.vote_log_path (Board.global ())) in
   Alcotest.(check bool)
     "the vote is still on disk after the flush"
     true
@@ -756,15 +787,18 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
   in
   let post_id = Board.Post_id.to_string post.id in
   let unreadable_row = "{not-json}\n" in
-  let vote_path = Board_votes.vote_log_path () in
-  let reaction_path = Board.reactions_path () in
-  let sub_board_path = Board.sub_boards_path () in
+  let vote_path = Board_votes.vote_log_path (Board.global ()) in
+  let reaction_path = Board.reactions_path (Board.global ()) in
+  let sub_board_path = Board.sub_boards_path (Board.global ()) in
   List.iter
     (fun path -> Fs_compat.save_file path unreadable_row)
     [ vote_path; reaction_path; sub_board_path ];
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let store =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
@@ -851,7 +885,10 @@ let test_snapshot_waiting_after_edit_keeps_edited_post
     [ "edit"; "snapshot" ] (List.rev !completed);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->

@@ -18,17 +18,16 @@ let vote_direction_of_string_opt raw =
   | "down" -> Some Down
   | _ -> None
 
-let vote_log_path () =
-  Board_paths.file_path ~workspace_masc_dir:(Board_paths.board_masc_dir ()) Board_paths.Votes
+let vote_log_path store = Board_paths.store_file_path store Board_paths.Votes
 
 (* Append and snapshot writers persist the cast timestamp stored for the exact
    [(target, voter)] vote identity. Returns [Error (Io_error _)] instead of
    swallowing the write failure, so a disk-full or permission error propagates
    to the caller instead of leaving the in-memory vote as the only copy. *)
-let append_vote_log ~target ~voter ~direction ~ts : (unit, board_error) Result.t =
+let append_vote_log store ~target ~voter ~direction ~ts : (unit, board_error) Result.t =
   try
-    ensure_masc_dir ();
-    let path = vote_log_path () in
+    ensure_masc_dir store;
+    let path = vote_log_path store in
     let json = `Assoc [
       ("target", `String target);
       ("voter", `String voter);
@@ -72,10 +71,10 @@ let vote_log_jsonl store =
    [Log.BoardLog.error] directly, which meant this write's failures never
    incremented [persist_errors], unlike every other persist path in this
    file. *)
-let save_vote_log_jsonl content : (unit, board_error) Result.t =
+let save_vote_log_jsonl store content : (unit, board_error) Result.t =
   try
-    ensure_masc_dir ();
-    let path = vote_log_path () in
+    ensure_masc_dir store;
+    let path = vote_log_path store in
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()
     | Error msg ->
@@ -141,7 +140,7 @@ let persisted_vote_row_of_yojson = function
 let record_vote_side_effect store ~target ~voter ~direction ~ts
     : (unit, board_error) Result.t =
   let* () = require_persisted_snapshot_readable store.votes_load_result in
-  with_persist_lock store (fun () -> append_vote_log ~target ~voter ~direction ~ts)
+  with_persist_lock store (fun () -> append_vote_log store ~target ~voter ~direction ~ts)
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -578,7 +577,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
       match result with
       | Error e -> Error e
       | Ok (previous, updated) ->
-          (match append_post updated with
+          (match append_post store updated with
            | Ok () -> Ok ()
            | Error e ->
                with_lock store (fun () ->
@@ -686,7 +685,7 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
          match result with
          | Error e -> Error e
          | Ok (previous, updated) ->
-           (match append_post updated with
+           (match append_post store updated with
             | Ok () -> Ok ()
             | Error e ->
               with_lock store (fun () ->
@@ -728,7 +727,7 @@ let reopen store ~post_id : (unit, board_error) Result.t =
       | Error e -> Error e
       | Ok None -> Ok () (* already open: no write, no updated_at bump *)
       | Ok (Some (previous, updated)) ->
-        (match append_post updated with
+        (match append_post store updated with
          | Ok () -> Ok ()
          | Error e ->
            with_lock store (fun () ->
@@ -776,8 +775,8 @@ let capture_snapshot_batch store selection =
 let write_snapshot store = function
   | Snapshot_batch.Posts -> save_posts_snapshot store
   | Snapshot_batch.Comments -> save_comments_snapshot store
-  | Snapshot_batch.Votes -> save_vote_log_jsonl
-  | Snapshot_batch.Reactions -> Board_core_persist.save_reactions_jsonl_result
+  | Snapshot_batch.Votes -> save_vote_log_jsonl store
+  | Snapshot_batch.Reactions -> Board_core_persist.save_reactions_jsonl_result store
 ;;
 
 (* Re-mark everything dirty after a failed snapshot write, so the next flush
@@ -919,8 +918,7 @@ let load_all_persisted store =
 
 let global_lazy : store Eio.Lazy.t ref =
   ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let workspace_masc_dir = Some (Fs_compat.realpath_lenient (Board_paths.board_masc_dir ())) in
-    let store = { (create_store ()) with workspace_masc_dir } in
+    let store = create_store ~workspace_masc_dir:(Board_paths.board_masc_dir ()) () in
     load_all_persisted store;
     store))
 
@@ -930,8 +928,7 @@ let global () = Eio.Lazy.force !global_lazy
     Safe: only called from test setup before concurrent fibers exist. *)
 let reset_global_for_test () =
   global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let workspace_masc_dir = Some (Fs_compat.realpath_lenient (Board_paths.board_masc_dir ())) in
-    let store = { (create_store ()) with workspace_masc_dir } in
+    let store = create_store ~workspace_masc_dir:(Board_paths.board_masc_dir ()) () in
     load_all_persisted store;
     store)
 

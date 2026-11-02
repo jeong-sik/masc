@@ -9,8 +9,12 @@
     the router matches a recorded target against those names.  The server
     hands this to {!Board_dispatch.init_jsonl}. *)
 
-val make : base_path:string -> Recipient_lookup.t
-(** [make ~base_path] answers for each candidate:
+val make : config:Workspace.config -> Recipient_lookup.t
+(** [make ~config] retains the resolved workspace configuration for the lookup's
+    lifetime. Each write reads fresh Keeper settings from that same workspace;
+    later ambient base-path changes cannot redirect the lookup.
+
+    It answers for each candidate:
 
     - A candidate that cannot be a Keeper name ({!Keeper_id.Keeper_name.of_string}:
       a path component of at most 128 bytes) is never used to build an own-name

@@ -516,11 +516,11 @@ type store = {
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
   mutable sub_boards_load_result : (unit, string) result;
-  workspace_masc_dir : string option;
-  (** Canonical workspace directory captured before the global store is loaded.
-      Unlike environment-derived path helpers, this identity does not change
-      when a later config resolution selects another workspace. [None] denotes
-      a standalone in-memory store with no workspace review authority. *)
+  workspace_masc_dir : string;
+  (** Canonical workspace state directory captured by the store constructor.
+      Every persistence path uses this immutable binding. Constructing an empty
+      store creates no payload files and does not establish loaded-source or
+      verification authority. *)
   posts : (string, post) Hashtbl.t;
   comments : (string, comment) Hashtbl.t;
   vote_log : (string, vote_direction * float) Hashtbl.t;

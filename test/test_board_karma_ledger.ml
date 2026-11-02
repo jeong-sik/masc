@@ -36,7 +36,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 (** Variant of [with_eio] that forwards the Eio environment to [f].
@@ -48,7 +51,10 @@ let with_eio_env f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f env
 
 (** Create a post and fail the test on error *)
@@ -298,17 +304,17 @@ let test_delete_post_rewrites_persisted_snapshots () =
     if file_contains path needle then
       Alcotest.failf "%s: %S is still present in %s" label needle path
   in
-  check_absent "posts snapshot removes deleted post" (Board.persist_path ()) pid;
-  check_absent "comments snapshot removes deleted comment" (Board.comments_path ()) cid;
-  check_absent "vote snapshot removes deleted post vote" (Board_votes.vote_log_path ()) pid;
+  check_absent "posts snapshot removes deleted post" (Board.persist_path (Board.global ())) pid;
+  check_absent "comments snapshot removes deleted comment" (Board.comments_path (Board.global ())) cid;
+  check_absent "vote snapshot removes deleted post vote" (Board_votes.vote_log_path (Board.global ())) pid;
   check_absent
     "vote snapshot removes deleted comment vote"
-    (Board_votes.vote_log_path ())
+    (Board_votes.vote_log_path (Board.global ()))
     cid;
-  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path ()) pid;
+  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path (Board.global ())) pid;
   check_absent
     "reaction snapshot removes deleted comment reaction"
-    (Board.reactions_path ())
+    (Board.reactions_path (Board.global ()))
     cid;
   let store =
     match Board_dispatch.backend () with

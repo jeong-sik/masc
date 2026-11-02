@@ -151,7 +151,17 @@ val backend : unit -> board_backend
     first call (defaulting to {!Jsonl}). Exposed so the dispatch
     test suite can reach into the underlying [Board.store] directly. *)
 
-val init_jsonl : recipient_lookup:Recipient_lookup.t -> unit -> unit
+type initialization_error =
+  | Workspace_mismatch of
+      { active_workspace_masc_dir : string
+      ; requested_workspace_masc_dir : string
+      }
+
+val init_jsonl :
+  workspace_masc_dir:string ->
+  recipient_lookup:Recipient_lookup.t ->
+  unit ->
+  (unit, initialization_error) result
 (** Initialise the JSONL backend and hand it the lookup that decides which
     names written after [@] are recipients (idempotent).  The lookup is
     required: the Board libraries cannot read Keeper settings, so whoever
@@ -159,7 +169,11 @@ val init_jsonl : recipient_lookup:Recipient_lookup.t -> unit -> unit
 
     A read can start the backend before this runs.  That backend has no lookup
     and its writes refuse every address; this call then installs [recipient_lookup]
-    into it.  A backend that already has a lookup keeps it. *)
+    into it. A backend that already has a lookup keeps it. The requested root
+    is canonicalized once (empty input raises [Invalid_argument]) and must
+    match the startup-bound store before this call
+    installs a lookup or starts a flusher; a mismatch returns [Error] without
+    switching the retained backend. *)
 
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)

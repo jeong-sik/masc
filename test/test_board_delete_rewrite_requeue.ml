@@ -30,17 +30,27 @@ let fresh_test_base_path () =
    subsequent write under it raises [Sys_error] (ENOTDIR). Same fixture as
    [test_board_vote_persistence.ml], duplicated per the suite's per-file
    convention. *)
-let block_board_masc_dir_with_file () =
-  let base =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-delete-rq-blocked-%06x" (Random.bits ()))
-  in
-  Unix.putenv "MASC_BASE_PATH" base;
-  let masc_dir = Filename.dirname (Board.persist_path ()) in
+let with_blocked_board_masc_dir f =
+  let store = Board.global () in
+  let masc_dir = store.Board.workspace_masc_dir in
+  let backup = masc_dir ^ ".fixture-backup" in
+  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
-  Fs_compat.save_file masc_dir "not a directory";
-  base
+  let paths =
+    [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
+    ; Board.reactions_path store; Board.sub_boards_path store ]
+  in
+  List.iter Fs_compat.invalidate_cached_writer paths;
+  let existed = Sys.file_exists masc_dir in
+  if existed then Unix.rename masc_dir backup;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Fs_compat.invalidate_cached_writer paths;
+      if Sys.file_exists masc_dir then Sys.remove masc_dir;
+      if existed then Unix.rename backup masc_dir)
+    (fun () ->
+      Fs_compat.save_file masc_dir "not a directory";
+      f ())
 
 let with_eio f () =
   Eio_main.run @@ fun env ->
@@ -48,7 +58,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 let store () =
@@ -67,7 +80,7 @@ let flush () =
   match Board_dispatch.backend () with
   | Board_dispatch.Jsonl store -> Board.flush_dirty store
 
-let post_rows () = Fs_compat.load_jsonl (Board.persist_path ())
+let post_rows () = Fs_compat.load_jsonl (Board.persist_path (Board.global ()))
 
 (* A row is the post when its own [id] field is the id -- not when the id
    happens to appear anywhere in the row's text (a body or a reply-to field
@@ -91,10 +104,7 @@ let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
   flush ();
   Alcotest.(check bool)
     "flushed clean before the delete" false (store ()).Board.dirty_posts;
-  let working_base =
-    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
-  in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let writes = ref 0 in
   Board_dispatch.set_board_write_hook (fun () -> incr writes);
   (match Board_dispatch.delete_post ~post_id:doomed_id with
@@ -114,10 +124,10 @@ let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
     "failed rewrite re-marked the store dirty" true (store ()).Board.dirty_posts;
   Alcotest.(check bool)
     "failed rewrite re-marked comments dirty too" true
-    (store ()).Board.dirty_comments;
+    (store ()).Board.dirty_comments
   (* Disk healthy again: the re-marked store schedules the rewrite, and the
      flush below is what performs it. *)
-  Unix.putenv "MASC_BASE_PATH" working_base;
+  );
   flush ();
   let rows = post_rows () in
   Alcotest.(check bool)
@@ -148,7 +158,7 @@ let test_individual_snapshot_failure path () =
        (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
           ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
   flush ();
-  let path = path () in
+  let path = path (store ()) in
   let backup = path ^ ".before-delete" in
   Unix.rename path backup;
   Unix.mkdir path 0o700;
@@ -165,7 +175,10 @@ let test_individual_snapshot_failure path () =
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let restored = store () in
   Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
   Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);
@@ -186,9 +199,9 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
           ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
   flush ();
   Alcotest.(check int) "comment is on disk before deletion" 1
-    (List.length (Fs_compat.load_jsonl (Board.comments_path ())));
+    (List.length (Fs_compat.load_jsonl (Board.comments_path (Board.global ()))));
   Alcotest.(check int) "reaction is on disk before deletion" 1
-    (List.length (Fs_compat.load_jsonl (Board.reactions_path ())));
+    (List.length (Fs_compat.load_jsonl (Board.reactions_path (Board.global ()))));
   let with_blocked_path path f =
     let backup = path ^ ".before-delete" in
     Unix.rename path backup;
@@ -197,8 +210,8 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
       ~finally:(fun () -> Unix.rmdir path; Unix.rename backup path)
       f
   in
-  with_blocked_path (Board.persist_path ()) (fun () ->
-    with_blocked_path (Board.vote_log_path ()) (fun () ->
+  with_blocked_path (Board.persist_path (Board.global ())) (fun () ->
+    with_blocked_path (Board.vote_log_path (Board.global ())) (fun () ->
       let errors_before = Board.persist_error_count () in
       (match Board_dispatch.delete_post ~post_id with
        | Ok (Board.Deletion_persistence_pending _) -> ()
@@ -208,13 +221,16 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
       Alcotest.(check int) "both failed writes are counted" 2
         (Board.persist_error_count () - errors_before);
       Alcotest.(check string) "comments are removed before repair" ""
-        (Fs_compat.load_file (Board.comments_path ()));
+        (Fs_compat.load_file (Board.comments_path (Board.global ())));
       Alcotest.(check string) "reactions are removed before repair" ""
-        (Fs_compat.load_file (Board.reactions_path ()))));
+        (Fs_compat.load_file (Board.reactions_path (Board.global ())))));
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let restored = store () in
   Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
   Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);
@@ -236,7 +252,7 @@ let test_unreadable_snapshot_refuses_before_transition () =
   Alcotest.(check int) "refusal emits no applied transition" 0 !writes
 
 let with_blocked_reactions f =
-  let path = Board.reactions_path () in
+  let path = Board.reactions_path (Board.global ()) in
   let backup = path ^ ".before-delete" in
   if not (Sys.file_exists path) then Fs_compat.save_file path "";
   Unix.rename path backup;

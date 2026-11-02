@@ -28,7 +28,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 let create_post_exn ~author ~content =
@@ -45,7 +48,10 @@ let store () =
 let restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ())
 
 let get_post_exn post_id =
   match Board_dispatch.get_post ~post_id with
@@ -127,7 +133,7 @@ let test_reopen_clears_closed_state_across_restart () =
            match Yojson.Safe.Util.member "id" row with
            | `String id -> String.equal id post_id
            | _ -> false)
-         (Fs_compat.load_jsonl (Board.persist_path ())))
+         (Fs_compat.load_jsonl (Board.persist_path (Board.global ()))))
   in
   (match Board_votes.reopen (store ()) ~post_id with
    | Ok () -> ()
@@ -144,7 +150,7 @@ let test_reopen_clears_closed_state_across_restart () =
            match Yojson.Safe.Util.member "id" row with
            | `String id -> String.equal id post_id
            | _ -> false)
-         (Fs_compat.load_jsonl (Board.persist_path ())))
+         (Fs_compat.load_jsonl (Board.persist_path (Board.global ()))))
   in
   Alcotest.(check int) "no-op reopen appends no new posts.jsonl row"
     rows_before rows_after

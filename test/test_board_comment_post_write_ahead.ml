@@ -31,17 +31,27 @@ let fresh_test_base_path () =
    [Sys_error] (ENOTDIR). Same fixture as
    [test_board_vote_persistence.ml]; duplicated locally per that
    suite's per-file fixture convention. *)
-let block_board_masc_dir_with_file () =
-  let base =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-comment-wa-blocked-%06x" (Random.bits ()))
-  in
-  Unix.putenv "MASC_BASE_PATH" base;
-  let masc_dir = Filename.dirname (Board.persist_path ()) in
+let with_blocked_board_masc_dir f =
+  let store = Board.global () in
+  let masc_dir = store.Board.workspace_masc_dir in
+  let backup = masc_dir ^ ".fixture-backup" in
+  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
-  Fs_compat.save_file masc_dir "not a directory";
-  base
+  let paths =
+    [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
+    ; Board.reactions_path store; Board.sub_boards_path store ]
+  in
+  List.iter Fs_compat.invalidate_cached_writer paths;
+  let existed = Sys.file_exists masc_dir in
+  if existed then Unix.rename masc_dir backup;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Fs_compat.invalidate_cached_writer paths;
+      if Sys.file_exists masc_dir then Sys.remove masc_dir;
+      if existed then Unix.rename backup masc_dir)
+    (fun () ->
+      Fs_compat.save_file masc_dir "not a directory";
+      f ())
 
 let with_eio f () =
   Eio_main.run @@ fun env ->
@@ -49,7 +59,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 let create_post_exn ~author ~content =
@@ -80,7 +93,7 @@ let check_effect label expected failure =
     (Board.Post_publication_failure.effect_disposition failure)
 
 let post_rows () =
-  let path = Board.persist_path () in
+  let path = Board.persist_path (Board.global ()) in
   if Sys.file_exists path then Fs_compat.load_jsonl path else []
 
 let test_held_observer_failure_keeps_the_committed_receipt () =
@@ -174,7 +187,7 @@ let flush () =
   match Board_dispatch.backend () with
   | Board_dispatch.Jsonl store -> Board.flush_dirty store
 
-let comment_rows () = Fs_compat.load_jsonl (Board.comments_path ())
+let comment_rows () = Fs_compat.load_jsonl (Board.comments_path (Board.global ()))
 
 let test_comment_append_failure_commits_nothing () =
   let post =
@@ -182,10 +195,7 @@ let test_comment_append_failure_commits_nothing () =
       ~content:"comment write-ahead under test"
   in
   let post_id = Board.Post_id.to_string post.id in
-  let working_base =
-    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
-  in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   (match
      Board_dispatch.add_comment ~post_id ~author:"comment-wa-commenter"
        ~content:"must not survive a failed append" ()
@@ -193,8 +203,8 @@ let test_comment_append_failure_commits_nothing () =
    | Ok _ -> Alcotest.fail "comment must not succeed when the append fails"
    | Error (Board.Io_error _) -> ()
    | Error e ->
-     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
-  Unix.putenv "MASC_BASE_PATH" working_base;
+     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e))
+  );
   (match Board_dispatch.get_comments ~post_id with
    | Ok [] -> ()
    | Ok comments ->
@@ -225,10 +235,7 @@ let test_comment_append_failure_commits_nothing () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let test_post_append_failure_commits_nothing () =
-  let working_base =
-    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
-  in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   (match
      Board_dispatch.create_post ~author:"post-wa-author"
        ~content:"must not survive a failed append"
@@ -245,8 +252,8 @@ let test_post_append_failure_commits_nothing () =
       | Board.Post_publication_failure.Board_error _
       | Board.Post_publication_failure.Raised _ ->
         Alcotest.fail ("expected Io_error, got " ^
-          Board.Post_publication_failure.to_string failure)));
-  Unix.putenv "MASC_BASE_PATH" working_base;
+          Board.Post_publication_failure.to_string failure)))
+  );
   (* Same store, no reset: the failed create must have left nothing in
      memory for the healthy-path retry to collide with. *)
   (match Board_dispatch.list_posts () with
@@ -266,16 +273,13 @@ let test_post_append_failure_commits_nothing () =
     (List.length (Board_dispatch.list_posts ()));
   Alcotest.(check int)
     "posts WAL has exactly the retried row, no ghost from the failure" 1
-    (List.length (Fs_compat.load_jsonl (Board.persist_path ())))
+    (List.length (Fs_compat.load_jsonl (Board.persist_path (Board.global ()))))
 
 (* An edit that cannot reach disk used to report success: the rewrite carrying
    the new content and the new updated_at discarded its failure and the call
    returned Ok. A restart showed the old post, and a keeper board cursor rides
    updated_at, so nothing said the edit was gone (#26168). *)
 let test_post_edit_failure_is_reported () =
-  let working_base =
-    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
-  in
   let post =
     match
       Board_dispatch.create_post ~author:"edit-author" ~content:"original"
@@ -287,7 +291,7 @@ let test_post_edit_failure_is_reported () =
         Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.Board.id in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   (match
      Board_dispatch.update_post ~post_id ~editor:"edit-author"
        ~content:"edit that cannot reach disk" ()
@@ -295,8 +299,8 @@ let test_post_edit_failure_is_reported () =
    | Ok _ -> Alcotest.fail "an edit that cannot be persisted must not report success"
    | Error (Board.Io_error _) -> ()
    | Error e ->
-     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
-  Unix.putenv "MASC_BASE_PATH" working_base
+     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e))
+  )
 
 let test_restart_recomputes_reply_count_from_comment_wal () =
   let post =
@@ -315,7 +319,10 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
      comment WAL row alone must restore both. *)
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   match Board_dispatch.get_post ~post_id with
   | Ok loaded ->
     Alcotest.(check int)
@@ -344,7 +351,6 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
   in
-  let working_base = Sys.getenv "MASC_BASE_PATH" in
   flush ();
   Alcotest.(check bool) "flushed clean before the comment" false store.Board.dirty_posts;
   (match
@@ -361,7 +367,7 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
     true
     store.Board.dirty_posts;
   let before = Board.persist_error_count () in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   flush ();
   Alcotest.(check bool)
     "the failed flush was counted"
@@ -370,8 +376,8 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
   Alcotest.(check bool)
     "the bump is still scheduled after the write failed"
     true
-    store.Board.dirty_posts;
-  Unix.putenv "MASC_BASE_PATH" working_base
+    store.Board.dirty_posts
+  )
 ;;
 
 let test_creation_commits_before_releasing_persistence () =
@@ -418,7 +424,10 @@ let test_creation_commits_before_releasing_persistence () =
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let reloaded =
     match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
   in
@@ -503,7 +512,10 @@ let test_dispatch_preparation_failure_proves_no_publication () =
 let restart_board () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ())
 
 let board_result_exn = function
   | Ok value -> value
@@ -547,7 +559,7 @@ let check_no_posts () =
   Alcotest.(check int) "no post reached the WAL" 0 (List.length (post_rows ()))
 
 let sub_board_rows () =
-  let path = Board.sub_boards_path () in
+  let path = Board.sub_boards_path (Board.global ()) in
   if Sys.file_exists path then Fs_compat.load_jsonl path else []
 
 let test_queued_post_uses_the_policy_before_append () =
@@ -707,7 +719,7 @@ let test_new_restrictive_board_rechecks_a_queued_unknown_hearth () =
 
 let test_partial_policy_source_refuses_only_hearth_posts () =
   ignore (board_result_exn (create_policy_board "partial-policy"));
-  Fs_compat.append_file (Board.sub_boards_path ()) "{broken-policy-row\n";
+  Fs_compat.append_file (Board.sub_boards_path (Board.global ())) "{broken-policy-row\n";
   restart_board ();
   Alcotest.(check int) "best-effort reads retain the valid policy row" 1
     (List.length (Board_dispatch.list_sub_boards ()));
@@ -740,8 +752,8 @@ let test_partial_policy_source_refuses_comment_publication () =
       Alcotest.fail (Board.Post_publication_failure.to_string failure)
   in
   let post_id = Board.Post_id.to_string post.id in
-  Fs_compat.append_file (Board.sub_boards_path ()) "{broken-comment-policy-row\n";
-  let policy_source = Fs_compat.load_file (Board.sub_boards_path ()) in
+  Fs_compat.append_file (Board.sub_boards_path (Board.global ())) "{broken-comment-policy-row\n";
+  let policy_source = Fs_compat.load_file (Board.sub_boards_path (Board.global ())) in
   restart_board ();
   let observations = fanout_counts () in
   (match Board_dispatch.add_comment ~post_id ~author:"policy-owner"
@@ -751,7 +763,7 @@ let test_partial_policy_source_refuses_comment_publication () =
    | Ok _ -> Alcotest.fail "partial policy source admitted a comment");
   let comments = board_result_exn (Board_dispatch.get_comments ~post_id) in
   Alcotest.(check int) "no comment reached memory" 0 (List.length comments);
-  let comment_path = Board.comments_path () in
+  let comment_path = Board.comments_path (Board.global ()) in
   let rows = if Sys.file_exists comment_path then comment_rows () else [] in
   Alcotest.(check int) "no comment reached the WAL" 0 (List.length rows);
   let retained = board_result_exn (Board_dispatch.get_post ~post_id) in
@@ -763,7 +775,7 @@ let test_partial_policy_source_refuses_comment_publication () =
   Alcotest.(check (list int)) "the refused comment emits no fanout" [0; 0; 0]
     (observations ());
   Alcotest.(check string) "comment refusal preserves the corrupt policy source"
-    policy_source (Fs_compat.load_file (Board.sub_boards_path ()))
+    policy_source (Fs_compat.load_file (Board.sub_boards_path (Board.global ())))
 
 let test_queued_update_does_not_resurrect_a_deleted_policy () =
   ignore (board_result_exn (create_policy_board "deleted-policy"));

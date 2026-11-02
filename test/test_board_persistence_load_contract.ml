@@ -31,7 +31,9 @@ let fresh_test_base_path () =
 
 let test_load_persisted_posts_missing_file () =
   let _dir = fresh_test_base_path () in
-  let store = Board_core.create_store () in
+  let store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
   | Ok 0 -> ()
   | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n
@@ -44,7 +46,9 @@ let test_load_persisted_posts_missing_file () =
 
 let test_load_persisted_comments_missing_file () =
   let _dir = fresh_test_base_path () in
-  let store = Board_core.create_store () in
+  let store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match Masc_board_handlers.Board_votes_json.load_persisted_comments store with
   | Ok 0 -> ()
   | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n
@@ -83,7 +87,9 @@ let test_loader_keeps_only_current_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let source_store = Board_core.create_store () in
+  let source_store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let post =
     match
       Board_core.create_post
@@ -99,14 +105,16 @@ let test_loader_keeps_only_current_rows () =
       Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
   in
   let canonical = Board_core.post_to_yojson post in
-  let path = Board.persist_path () in
+  let path = Board.persist_path source_store in
   let append json =
     Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n")
   in
   append (remove_key canonical "pinned");
   append (prepend_field canonical ("meta_json", `String "{}"));
   append (replace_key canonical "votes_up" (`String "0"));
-  let loaded_store = Board_core.create_store () in
+  let loaded_store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   (match Masc_board_handlers.Board_votes_json.load_persisted_posts loaded_store with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "invalid persisted schemas must report partial-source failure");
@@ -129,7 +137,7 @@ let test_loader_keeps_only_current_rows () =
       ~content:"retained partial comment" ~ttl_hours:0 () with
     | Ok comment -> Board_core.comment_to_yojson comment
     | Error error -> Alcotest.failf "create_comment failed: %s" (Board.show_board_error error) in
-  let comments_path = Board.comments_path () in
+  let comments_path = Board.comments_path source_store in
   Out_channel.with_open_bin comments_path (fun out ->
     output_string out (Yojson.Safe.to_string comment ^ "\n{bad-json\n"));
   Alcotest.(check bool) "mixed valid/corrupt comments fail completeness" true
@@ -150,7 +158,9 @@ let test_loader_keeps_only_current_rows () =
     [-1.; Float.nan; Float.infinity; Float.neg_infinity];
   Out_channel.with_open_bin path (fun out ->
     output_string out (Yojson.Safe.to_string (replace_key canonical "expires_at" (`Float 1.)) ^ "\n"));
-  let expired_store = Board_core.create_store () in
+  let expired_store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   Alcotest.(check bool) "valid expired posts remain available for cascade cleanup" true
     (Masc_board_handlers.Board_votes_json.load_persisted_posts expired_store = Ok 1);
   Alcotest.(check bool) "expired-only source remains complete" true
@@ -173,11 +183,13 @@ let test_source_failure_clears_only_after_successful_reload () =
   Fun.protect ~finally:(fun () ->
     Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
     if Sys.file_exists dir then Fs_compat.remove_tree dir) (fun () ->
-    let store = Board_core.create_store () in
+    let store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
     let loaders = [
-      (Board.persist_path (), Masc_board_handlers.Board_votes_json.load_persisted_posts,
+      (Board.persist_path store, Masc_board_handlers.Board_votes_json.load_persisted_posts,
        (fun () -> store.Board.posts_load_result));
-      (Board.comments_path (), Masc_board_handlers.Board_votes_json.load_persisted_comments,
+      (Board.comments_path store, Masc_board_handlers.Board_votes_json.load_persisted_comments,
        (fun () -> store.Board.comments_load_result))] in
     List.iter (fun (path, load, health) ->
       Fs_compat.mkdir_p (Filename.dirname path);
@@ -209,7 +221,9 @@ let test_partial_load_never_rewrites_the_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let source_store = Board_core.create_store () in
+  let source_store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let make_post content =
     match
       Board_core.create_post source_store ~lookup:nobody_declared ~author:"partial-writer" ~content
@@ -240,8 +254,8 @@ let test_partial_load_never_rewrites_the_file () =
     read path
   in
   let json to_yojson value = Yojson.Safe.to_string (to_yojson value) in
-  let posts_path = Board.persist_path () in
-  let comments_path = Board.comments_path () in
+  let posts_path = Board.persist_path source_store in
+  let comments_path = Board.comments_path source_store in
   let posts_on_disk =
     damage posts_path (json Board_core.post_to_yojson before)
       (json Board_core.post_to_yojson after)
@@ -250,7 +264,9 @@ let test_partial_load_never_rewrites_the_file () =
     damage comments_path (json Board_core.comment_to_yojson c_before)
       (json Board_core.comment_to_yojson c_after)
   in
-  let store = Board_core.create_store () in
+  let store = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   Alcotest.(check bool) "posts load reports the damage" true
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   Alcotest.(check bool) "comments load reports the damage" true
@@ -309,11 +325,177 @@ let test_partial_load_never_rewrites_the_file () =
   Alcotest.(check (pair int int)) "complete reload allows expiry and cascade"
     (1, 2) (Board_core.sweep store);
   Board.flush_dirty store;
-  let reloaded = Board_core.create_store () in
+  let reloaded = Board_core.create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   Alcotest.(check bool) "unexpired post remains after cleanup flush" true
     (Masc_board_handlers.Board_votes_json.load_persisted_posts reloaded = Ok 1);
   Alcotest.(check bool) "both cascaded comments stay removed" true
     (Masc_board_handlers.Board_votes_json.load_persisted_comments reloaded = Ok 0)
+;;
+
+let test_explicit_workspace_is_captured_once () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let original_cwd = Sys.getcwd () in
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let directory = Filename.temp_dir "board-captured-root" "" in
+  let first = Filename.concat directory "first" in
+  let second = Filename.concat directory "second" in
+  Fs_compat.mkdir_p first;
+  Fs_compat.mkdir_p second;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir original_cwd;
+      Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
+    (fun () ->
+      (match Board.create_store ~workspace_masc_dir:"" () with
+       | _ -> Alcotest.fail "empty workspace must raise Invalid_argument"
+       | exception Invalid_argument _ -> ());
+      Unix.chdir first;
+      let store = Board.create_store ~workspace_masc_dir:" state with spaces " () in
+      let captured = Filename.concat (Unix.realpath first) " state with spaces " in
+      Unix.chdir second;
+      Unix.putenv "MASC_BASE_PATH" second;
+      Board.ensure_masc_dir store;
+      Alcotest.(check string) "relative directory is anchored without trimming"
+        captured store.workspace_masc_dir;
+      let post =
+        match Board.create_post store ~lookup:nobody_declared ~author:"writer"
+          ~content:"written after cwd and Env change" ~post_kind:Board.Human_post () with
+        | Ok post -> post
+        | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure)
+      in
+      Alcotest.(check bool) "post is written under the captured directory" true
+        (Sys.file_exists (Board.persist_path store));
+      Alcotest.(check bool) "new cwd has no substituted directory" false
+        (Sys.file_exists (Filename.concat second " state with spaces "));
+      let reloaded = Board.create_store ~workspace_masc_dir:captured () in
+      Alcotest.(check bool) "explicit reload under EnvB reads A" true
+        (Masc_board_handlers.Board_votes_json.load_persisted_posts reloaded = Ok 1);
+      Alcotest.(check bool) "accepted identity survives reload" true
+        (Result.is_ok (Board.read_post reloaded ~post_id:(Board.Post_id.to_string post.id))))
+;;
+
+let test_all_persistence_stays_in_captured_workspace () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let base_a = Filename.temp_dir "board-workspace-a" "" in
+  let base_b = Filename.temp_dir "board-workspace-b" "" in
+  let root_a = Common.masc_dir_from_base_path ~base_path:base_a in
+  let root_b = Common.masc_dir_from_base_path ~base_path:base_b in
+  let paths store =
+    [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
+    ; Board.reactions_path store; Board.sub_boards_path store ]
+  in
+  let board_ok = function
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_ok = function
+    | Ok value -> value
+    | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure)
+  in
+  let init_a () =
+    Board.reset_global_for_test ();
+    Board_dispatch.reset_for_test ();
+    Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
+      ~recipient_lookup:nobody_declared ());
+    Board.global ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
+    (fun () ->
+      (* Seed B through real store producers, so redirecting any of the five
+         files would overwrite independent accepted data rather than an empty fixture. *)
+      let store_b = Board.create_store ~workspace_masc_dir:root_b () in
+      let b = post_ok (Board.create_post store_b ~lookup:nobody_declared ~author:"b-owner"
+        ~content:"B must survive untouched" ~post_kind:Board.Human_post ()) in
+      let bid = Board.Post_id.to_string b.id in
+      ignore (board_ok (Board.add_comment store_b ~lookup:nobody_declared ~post_id:bid
+        ~author:"b-reader" ~content:"B comment" ~ttl_hours:0 ()));
+      ignore (board_ok (Board.vote store_b ~voter:"b-voter" ~post_id:bid ~direction:Board.Up));
+      ignore (board_ok (Board.toggle_reaction store_b ~target_type:Board.Reaction_post
+        ~target_id:bid ~user_id:"b-reader" ~emoji:"🚀"));
+      ignore (board_ok (Board.create_sub_board store_b ~slug:"b-room" ~name:"B room"
+        ~description:"independent policy" ~owner:"b-owner" ()));
+      Board.flush_dirty store_b;
+      let baseline_b = List.map (fun path -> path, Fs_compat.load_file path) (paths store_b) in
+      let b_unchanged label = List.iter (fun (path, expected) ->
+        Alcotest.(check string) (label ^ ": " ^ Filename.basename path)
+          expected (Fs_compat.load_file path)) baseline_b in
+      Unix.putenv "MASC_BASE_PATH" base_a;
+      let store_a = init_a () in
+      Unix.putenv "MASC_BASE_PATH" base_b;
+      let room = board_ok (Board_dispatch.create_sub_board ~slug:"a-room" ~name:"A room"
+        ~description:"A policy" ~owner:"a-owner" ()) in
+      let room_id = Board.Sub_board_id.to_string room.id in
+      let post = post_ok (Board_dispatch.create_post ~author:"a-owner" ~content:"A post"
+        ~hearth:"a-room" ~post_kind:Board.Human_post ()) in
+      let pid = Board.Post_id.to_string post.id in
+      let comment = board_ok (Board_dispatch.add_comment ~post_id:pid ~author:"a-reader"
+        ~content:"A comment" ~ttl_hours:0 ()) in
+      let cid = Board.Comment_id.to_string comment.id in
+      ignore (board_ok (Board_dispatch.vote ~voter:"a-voter" ~post_id:pid ~direction:Board.Up));
+      ignore (board_ok (Board_dispatch.vote_comment ~voter:"a-voter" ~comment_id:cid
+        ~direction:Board.Down));
+      ignore (board_ok (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+        ~target_id:pid ~user_id:"a-reader" ~emoji:"🚀"));
+      ignore (board_ok (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+        ~target_id:cid ~user_id:"a-owner" ~emoji:"🚀"));
+      ignore (board_ok (Board_dispatch.update_post ~post_id:pid ~editor:"a-owner"
+        ~content:"A edited under EnvB" ()));
+      ignore (board_ok (Board_dispatch.set_pinned ~post_id:pid ~pinned:true));
+      ignore (board_ok (Board_dispatch.update_sub_board ~sub_board_id:room_id
+        ~access:Board.Members_only ~members:["a-reader"] ()));
+      Board.flush_dirty store_a;
+      b_unchanged "after producers and flush under EnvB";
+      (* The production singleton owns the complete five-source loader. Select
+         A for its fresh construction, then drift Env back to B before using it. *)
+      let restart_a () =
+        Unix.putenv "MASC_BASE_PATH" base_a;
+        let store = init_a () in
+        Unix.putenv "MASC_BASE_PATH" base_b;
+        store
+      in
+      let reloaded = restart_a () in
+      let retained = board_ok (Board_dispatch.get_post ~post_id:pid) in
+      Alcotest.(check string) "edited post reloaded" "A edited under EnvB" retained.body;
+      Alcotest.(check bool) "pin reloaded" true retained.pinned;
+      Alcotest.(check int) "post vote reloaded" 1 retained.votes_up;
+      Alcotest.(check int) "reply count rebuilt" 1 retained.reply_count;
+      let comments = board_ok (Board_dispatch.get_comments ~post_id:pid) in
+      Alcotest.(check (list string)) "comment identity reloaded" [cid]
+        (List.map (fun (c : Board.comment) -> Board.Comment_id.to_string c.id) comments);
+      Alcotest.(check bool) "comment vote ledger reloaded" true
+        (board_ok (Board_dispatch.current_vote_for_comment ~voter:"a-voter" ~comment_id:cid)
+          = Some Board.Down);
+      List.iter (fun (target_type, target_id) ->
+        let reactions = board_ok (Board_dispatch.list_reactions ~target_type ~target_id ()) in
+        Alcotest.(check int) "reaction reloaded" 1 (List.length reactions))
+        [Board.Reaction_post, pid; Board.Reaction_comment, cid];
+      let room = board_ok (Board_dispatch.get_sub_board ~sub_board_id:room_id) in
+      Alcotest.(check bool) "updated policy reloaded" true (room.access = Board.Members_only);
+      ignore (board_ok (Board_dispatch.delete_sub_board ~sub_board_id:room_id));
+      (match board_ok (Board_dispatch.delete_post ~post_id:pid) with
+       | Board.Durable_deletion -> ()
+       | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
+      Board.flush_dirty reloaded;
+      b_unchanged "after deletion under EnvB";
+      let deleted = restart_a () in
+      Alcotest.(check bool) "deleted post cannot resurrect" true
+        (Result.is_error (Board_dispatch.get_post ~post_id:pid));
+      Alcotest.(check int) "cascaded comment cannot resurrect" 0
+        (List.length (board_ok (Board_dispatch.get_comments ~post_id:pid)));
+      Alcotest.(check bool) "deleted policy cannot resurrect" true
+        (Result.is_error (Board_dispatch.get_sub_board ~sub_board_id:room_id));
+      Alcotest.(check int) "deleted votes cannot resurrect" 0 (Hashtbl.length deleted.vote_log);
+      Alcotest.(check int) "deleted reactions cannot resurrect" 0 (Hashtbl.length deleted.reactions);
+      b_unchanged "after complete reload")
 ;;
 
 let () =
@@ -321,7 +503,11 @@ let () =
   Alcotest.run
     "board_persistence_load_contract"
     [ ( "loader_contract"
-      , [ Alcotest.test_case "source failures survive until a complete successful reload" `Quick
+      , [ Alcotest.test_case "explicit workspace captures relative path once" `Quick
+            test_explicit_workspace_is_captured_once
+        ; Alcotest.test_case "all persistence stays in captured workspace after Env drift" `Quick
+            test_all_persistence_stays_in_captured_workspace
+        ; Alcotest.test_case "source failures survive until a complete successful reload" `Quick
             test_source_failure_clears_only_after_successful_reload
         ; Alcotest.test_case
             "posts loader returns Ok 0 when file absent"

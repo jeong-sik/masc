@@ -163,10 +163,13 @@ let test_running_sweep_does_not_mutate_volumes () =
       fake_container ~bin ~calls volumes;
       check string "Board persistence stays in the isolated workspace"
         (Unix.realpath (Workspace.masc_dir config))
-        (Unix.realpath (Filename.dirname (Board.persist_path ())));
+        (Unix.realpath (Filename.dirname (Board.persist_path (Board.global ()))));
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
-      Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~workspace_masc_dir:(Common.masc_dir_from_base_path
+          ~base_path:(Env_config_core.base_path ()))
+        ~recipient_lookup:Recipient_lookup.none_declared ());
       Eio.Switch.run (fun owners_sw ->
         (match Keeper_owner_registry.install_from_store ~sw:owners_sw
                  ~operation_runner:None ~on_turn_slot_released:None config with
@@ -211,7 +214,10 @@ let test_running_sweep_does_not_mutate_volumes () =
       let recorded_ids = post_ids posts in
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
-      Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~workspace_masc_dir:(Common.masc_dir_from_base_path
+          ~base_path:(Env_config_core.base_path ()))
+        ~recipient_lookup:Recipient_lookup.none_declared ());
       check (list string) "damage notices survive a Board reload" recorded_ids
         (post_ids (Board_dispatch.list_posts ~limit:20 ()));
       List.iter

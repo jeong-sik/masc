@@ -130,9 +130,8 @@ let declared ~config ~all_names ~all_metas candidate =
         | Ok Keeper_meta_store.Meta_absent -> find ~direct:None))
 ;;
 
-let make ~base_path =
+let make ~config =
   Recipient_lookup.make_per_write (fun () ->
-    let config = Workspace.default_config base_path in
     let all_names = lazy (reading (fun () -> Keeper_meta_store.persisted_keeper_names_result config)) in
     let all_metas =
       lazy

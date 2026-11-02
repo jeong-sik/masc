@@ -91,7 +91,9 @@ let test_sort_order_legacy_aliases_rejected () =
   rejected "garbage rejected" "definitely-not-an-order"
 
 let test_permanent_post () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match
     create_post store ~author:"test-agent" ~content:"Permanent post"
       ~post_kind:Human_post ()
@@ -101,7 +103,9 @@ let test_permanent_post () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_expiring_post () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match
     create_post store ~author:"test-agent" ~content:"Expiring post"
       ~post_kind:Human_post ~ttl_hours:24 ()
@@ -111,7 +115,9 @@ let test_expiring_post () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_sweeper_skips_permanent () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   (match
      create_post store ~author:"test-agent" ~content:"Permanent"
        ~post_kind:Human_post ()
@@ -123,7 +129,9 @@ let test_sweeper_skips_permanent () =
 
 (* A post and its dependent rows leave together, in the pass that expires it. *)
 let test_sweep_removes_the_rows_of_an_expired_target () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -155,7 +163,9 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
    live board on 2026-09-19, because the next snapshot wrote the pruned
    tables to disk. *)
 let test_sweep_keeps_rows_whose_target_is_not_loaded () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let post_id =
     match
       create_post store ~author:"test-agent" ~content:"Post that fails to load"
@@ -182,7 +192,9 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
 (* A reply the sweeper removes leaves the post's reply count with it, so a
    listing never announces a reply no read can return. *)
 let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -216,7 +228,9 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
 (* A swept post takes its comments with it, or they strand with a dangling
    post_id no read can reach. *)
 let test_sweep_cascades_an_expired_post_to_its_comments () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let post_id =
     match
       create_post store ~author:"test-agent"
@@ -251,7 +265,9 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
     (Hashtbl.length store.reactions)
 
 let test_sweep_drains_a_post_larger_than_two_comment_batches () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   let unwrap = function
     | Ok value -> value
     | Error e -> Alcotest.fail (show_board_error e)
@@ -387,7 +403,7 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
   Alcotest.(check (pair int int)) "next sweep has no work" (0, 0) (sweep store);
   (* A failed final reaction snapshot must stay scheduled even when the
      post/comment tables are already empty. *)
-  let reaction_path = reactions_path () in
+  let reaction_path = reactions_path store in
   Sys.remove reaction_path;
   Fs_compat.mkdir_p reaction_path;
   let errors_before = persist_error_count () in
@@ -444,7 +460,9 @@ let check_one_sweep_and_flush label messages =
   Alcotest.(check int) (label ^ " flush count") 1 flush_count
 
 let test_maybe_sweep_updates_schedule_once () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   reset_sweep_schedule_for_test store;
   maybe_sweep_for_test store;
   let first_sweep, first_flush = sweep_schedule_timestamps_for_test store in
@@ -457,7 +475,9 @@ let test_maybe_sweep_updates_schedule_once () =
   check_one_sweep_and_flush "sequential" (drain_flusher_inbox store)
 
 let test_maybe_sweep_concurrent_schedules_once () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   reset_sweep_schedule_for_test store;
   let callers = List.init 32 Fun.id in
   let _ =
@@ -469,7 +489,9 @@ let test_maybe_sweep_concurrent_schedules_once () =
   check_one_sweep_and_flush "concurrent" (drain_flusher_inbox store)
 
 let test_maybe_sweep_full_inbox_rolls_back_schedule () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   reset_sweep_schedule_for_test store;
   for _ = 1 to flusher_inbox_capacity_for_test do
     Eio.Stream.add store.flusher_inbox Flush
@@ -494,7 +516,9 @@ let test_maybe_sweep_full_inbox_rolls_back_schedule () =
     (Eio.Stream.length store.flusher_inbox)
 
 let test_post_kind_direct_default () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match
     create_post store ~author:"test-agent" ~content:"Human post"
       ~post_kind:Human_post ()
@@ -506,7 +530,9 @@ let test_post_kind_direct_default () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_post_kind_automation_contract () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match
     create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
       ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness"
@@ -519,7 +545,9 @@ let test_post_kind_automation_contract () =
   | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_post_kind_system_contract () =
-  let store = create_store () in
+  let store = create_store
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path
+        ~base_path:(Env_config_core.base_path ())) () in
   match
     create_post store ~author:"operator" ~content:"System post"
       ~post_kind:System_post ()

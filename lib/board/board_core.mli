@@ -70,8 +70,11 @@ val flush_interval_sec : float
 (** Builds a fresh empty store with default Hashtbl capacities
     (1024 posts / 4096 comments / 2048 vote-log entries),
     fresh [Eio.Mutex], cold caches, and an [Eio.Stream]
-    [flusher_inbox] capped by the persistence-layer flusher inbox capacity. *)
-val create_store : unit -> store
+    [flusher_inbox] capped by the persistence-layer flusher inbox capacity.
+    Canonicalizes the explicit state directory once, anchoring relative input;
+    an empty input raises [Invalid_argument]. This creates no payload files
+    and grants no ongoing symlink/resource identity or loaded-source proof. *)
+val create_store : workspace_masc_dir:string -> unit -> store
 
 (** {1 Locking + cache invalidation} *)
 
@@ -113,31 +116,27 @@ val sweep : store -> int * int
 
 (** {1 Persistence paths} *)
 
-(** Resolves the board base path from {!Env_config}.  Used by
-    {!persist_path}, {!comments_path}, and the
-    side-effect hook integration in {!create_post}. *)
+(** Resolves the configured base path. Store persistence uses its captured
+    directory instead of consulting this configuration helper. *)
 val board_base_path : unit -> string
 
-(** Path to the board posts JSONL log under
-    [<base>/.masc/board_posts.jsonl]. *)
-val persist_path : unit -> string
+(** Path to the posts JSONL log in the store's captured workspace. *)
+val persist_path : store -> string
 
-(** Path to the board comments JSONL log under
-    [<base>/.masc/board_comments.jsonl]. *)
-val comments_path : unit -> string
+(** Path to the comments JSONL log in the store's captured workspace. *)
+val comments_path : store -> string
 
-(** Path to the board reactions JSONL snapshot under
-    [<base>/.masc/board_reactions.jsonl]. *)
-val reactions_path : unit -> string
+(** Path to the reactions snapshot in the store's captured workspace. *)
+val reactions_path : store -> string
 
-(** Idempotent [.masc] directory creation; called before
+(** Idempotent captured-directory creation; called before
     every JSONL append. *)
-val ensure_masc_dir : unit -> unit
+val ensure_masc_dir : store -> unit
 
 (** {1 Append-only persistence} *)
 
 (** Appends one post snapshot to {!persist_path}. *)
-val append_post : post -> (unit, board_error) result
+val append_post : store -> post -> (unit, board_error) result
 
 (** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
     [posts_by_run_id]) from a post's [origin].  Used by the load path to
@@ -154,7 +153,7 @@ val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
 (** Appends one comment snapshot to {!comments_path}. *)
-val append_comment : comment -> (unit, board_error) result
+val append_comment : store -> comment -> (unit, board_error) result
 
 (** {1 Whole-state JSONL rewrite} *)
 
@@ -454,9 +453,8 @@ val toggle_reaction
 
 (** {1 SubBoard operations} *)
 
-(** Path to the sub-boards JSONL snapshot under
-    [<base>/.masc/board_sub_boards.jsonl]. *)
-val sub_boards_path : unit -> string
+(** Path to the sub-board snapshot in the store's captured workspace. *)
+val sub_boards_path : store -> string
 
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option

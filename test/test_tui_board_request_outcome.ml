@@ -82,7 +82,10 @@ let with_fixture run =
       Server_auth.For_testing.restore_server_state (Some server);
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
-      Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+      Result.get_ok (Masc.Board_dispatch.init_jsonl
+        ~workspace_masc_dir:(Common.masc_dir_from_base_path
+          ~base_path:(Env_config_core.base_path ()))
+        ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
       let router = Server_routes_http_routes_activity.add_routes ~sw
           ~clock:(Eio.Stdenv.clock env) (Http.Router.create ())
         |> Server_routes_http_routes_artifacts.add_routes in
@@ -138,7 +141,7 @@ let check_committed response =
   | Some id -> Masc.Board.Post_id.to_string id
   | None -> fail "the actual publication response lost its committed post ID"
 
-let rows () = Fs_compat.load_jsonl (Masc.Board.persist_path ())
+let rows () = Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))
 
 let apply state outcome =
   Updates.apply_publication state ~report:(fun _ _ -> ()) ~refresh:(fun () -> ()) outcome

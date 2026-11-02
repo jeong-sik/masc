@@ -54,7 +54,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:every_name_declared ());
   f ()
 ;;
 
@@ -186,7 +189,10 @@ let test_poison_durable_source_is_retired_during_intake () =
   let base_path = fresh_test_base_path () in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:every_name_declared ());
   Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.clear ())
@@ -250,7 +256,10 @@ let with_intake_sources ~max_events f =
   let base_path = fresh_test_base_path () in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:every_name_declared ());
   Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.clear ())

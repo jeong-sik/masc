@@ -51,7 +51,10 @@ let with_workspace f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
-       Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+       Result.get_ok (Board_dispatch.init_jsonl
+         ~workspace_masc_dir:(Common.masc_dir_from_base_path
+           ~base_path:(Env_config_core.base_path ()))
+         ~recipient_lookup:Recipient_lookup.none_declared ());
        f config)
 ;;
 
@@ -102,7 +105,10 @@ let post_id (post : Board.post) = Board.Post_id.to_string post.id
 let reload_board () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ())
 ;;
 
 (* Rewrites the stored row of each listed id in the file at [path] so that it
@@ -198,7 +204,7 @@ let test_scan_follows_the_recorded_audience () =
   (* Text names the lane, record is open to discovery. *)
   let recorded_open = create "@scanreader please look" in
   record_audiences
-    ~path:(Board.persist_path ())
+    ~path:(Board.persist_path (Board.global ()))
     [ post_id recorded_target, Some (targets_wire [ "scanreader" ])
     ; post_id recorded_open, Some (`Assoc [ "kind", `String "discoverable" ])
     ; post_id unrecorded, None
@@ -261,7 +267,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
          ~post_kind:Board.Human_post
          ())
   in
-  record_audiences ~path:(Board.persist_path ()) [ post_id old_post, None ];
+  record_audiences ~path:(Board.persist_path (Board.global ())) [ post_id old_post, None ];
   let scan () = Keeper_world_observation.collect_board_events ~base_path ~meta in
   let _events, listed, _mentions = scan () in
   check int "the first scan only starts the cursor" 0 listed;
@@ -321,7 +327,7 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
           ~author:"external-author"
           ~content:"@scanreader please look"
           ()));
-  record_audiences ~path:(Board.persist_path ()) [ post_id post, None ];
+  record_audiences ~path:(Board.persist_path (Board.global ())) [ post_id post, None ];
   Keeper_registry.set_board_cursor
     ~base_path:config.Workspace.base_path
     meta.Keeper_meta_contract.name
@@ -381,7 +387,7 @@ let test_scan_follows_the_recorded_comment_audience () =
      belongs to this thread and the comment reaches it. *)
   let recorded_thread = comment "plain follow-up two" in
   record_audiences
-    ~path:(Board.comments_path ())
+    ~path:(Board.comments_path (Board.global ()))
     [ comment_id recorded_target, Some (targets_wire [ "scanreader" ])
     ; comment_id recorded_elsewhere, Some (targets_wire [ "someone-else" ])
     ; comment_id recorded_thread, Some (`Assoc [ "kind", `String "thread_participants" ])

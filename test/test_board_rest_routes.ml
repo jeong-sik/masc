@@ -580,7 +580,10 @@ let with_board_store ~base_path f =
   @@ fun () ->
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+  Result.get_ok (Masc.Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
   f ()
 ;;
 
@@ -606,7 +609,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   let post_id = create "delete with a failed snapshot" in
   let writes = ref 0 in
   Masc.Board_dispatch.set_board_write_hook (fun () -> incr writes);
-  let path = Masc.Board.reactions_path () in
+  let path = Masc.Board.reactions_path (Masc.Board.global ()) in
   let had_snapshot = Sys.file_exists path in
   let backup = path ^ ".before-delete" in
   if had_snapshot then Unix.rename path backup;
@@ -760,7 +763,7 @@ let test_board_post_route_preserves_publication_evidence () =
   check string "publication uses the authenticated actor" "publication-operator"
     (Masc.Board.Agent_id.to_string committed.author);
   check int "the failed response still has one actual WAL row" 1
-    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path ())));
+    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))));
   (* Keep this store alive: a reset would conceal persistence-mutex poison. *)
   let status, completed = post ~expected_workspace:current "later HTTP publication" in
   check int "the same real route accepts a later write" 201 status;
@@ -796,7 +799,7 @@ let test_board_post_route_preserves_publication_evidence () =
   check int "the refused request leaves exactly the two real posts" 2
     (List.length (Masc.Board_dispatch.list_posts ()));
   check int "the refused request appends no additional WAL row" 2
-    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path ())))
+    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path (Masc.Board.global ()))))
 ;;
 
 let test_board_write_routes_use_authenticated_actor () =
@@ -1525,13 +1528,12 @@ let parsed_targets ids =
 let test_board_reaction_batch_answers_every_id_asked_about () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Unix.putenv
-    "MASC_BASE_PATH"
-    (Filename.concat
+  let base_path =
+    Filename.concat
        (Filename.get_temp_dir_name ())
-       (Printf.sprintf "masc-test-reaction-batch-%06x" (Random.bits ())));
-  Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+       (Printf.sprintf "masc-test-reaction-batch-%06x" (Random.bits ()))
+  in
+  with_board_store ~base_path (fun () ->
   let json =
     Server_board_reaction_http.list_batch_json
       ~actor:"tester"
@@ -1549,7 +1551,7 @@ let test_board_reaction_batch_answers_every_id_asked_about () =
       "the emoji catalog rides along so a caller needs no second request"
       true
       (List.mem_assoc "supported_reaction_emojis" fields)
-  | _ -> fail "batch answer must be a JSON object"
+  | _ -> fail "batch answer must be a JSON object")
 
 let test_board_reaction_batch_rejects_an_empty_or_oversized_list () =
   let rejected ids =

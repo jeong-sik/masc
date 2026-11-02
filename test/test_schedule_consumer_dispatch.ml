@@ -114,7 +114,10 @@ let with_workspace f =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "test"));
   (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with

@@ -294,6 +294,10 @@ module For_testing : sig
       work are deliberately outside this test-only boundary. *)
 end
 
+exception Board_initialization_failed of Board_dispatch.initialization_error
+(** Startup requested a workspace different from the retained Board store.
+    No server state is returned and the existing Board binding is retained. *)
+
 val create_state_eio :
   sw:Eio.Switch.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->

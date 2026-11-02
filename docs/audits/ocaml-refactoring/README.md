@@ -151,7 +151,7 @@ evidence one immutable owner. R1 in
 [#47131](https://github.com/jeong-sik/masc/pull/47131) separates frozen credential-batch
 admission evidence from current immutable ownership. R2 in
 [#47133](https://github.com/jeong-sik/masc/pull/47133) gives validated Fusion decision
-events one typed owner while retaining original journal JSON. Two candidates remain unfinished. This ordering
+events one typed owner while retaining original journal JSON. One candidate remains unfinished. This ordering
 does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -2233,6 +2233,23 @@ operations. It does not serialize other stores/processes, replace cached appends
 with fsynced commits, change sub-board snapshot-error reporting, or provide a
 durable operation receipt. Its focused producer scenarios and exact-head review
 and execution status belong to its PR evidence.
+
+The workspace-binding prerequisite [#47192](https://github.com/jeong-sik/masc/pull/47192)
+gives every Board store a required immutable
+canonical state directory, captured once by its constructor. All five persistence
+families use that store for loads, append, snapshots, rollback, flush and deletion
+cascades. Explicit relative paths are anchored at construction; empty input is a
+documented programmer error. There is no ambient-path fallback for a standalone
+store and no automatic rekey of the startup singleton. Server initialization
+returns a typed workspace mismatch before installing another workspace's lookup
+or starting a new flusher. The MCP composition retains the actual resolved
+configuration for both Board initialization and the Keeper recipient lookup;
+each write still reads fresh Keeper settings from that captured workspace.
+The collaboration-evidence workspace check remains in force. This captures a
+path, without claiming an inode/symlink lease or proving an empty source was
+loaded. Cached append behavior, row formats, write durability, snapshot failure
+policy and retry obligations are unchanged. The producer, startup and lookup
+scenarios and their execution status are recorded separately with the layer.
 
 T1 remains open: ordinary Board creation still lacks a persisted client operation
 identity and authoritative unknown-acknowledgement reconciliation. Session history

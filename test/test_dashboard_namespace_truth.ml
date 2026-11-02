@@ -367,6 +367,8 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
       let module Mcp_server = Lib.Mcp_server in
       Eio.Switch.run (fun sw ->
         Auth.disable_auth dir;
+        Lib.Board.reset_global_for_test ();
+        Lib.Board_dispatch.reset_for_test ();
         let state =
           Lib.Mcp_server_eio.create_state_eio
             ~sw
@@ -422,6 +424,8 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       let module Mcp_server = Lib.Mcp_server in
       Eio.Switch.run (fun sw ->
         Auth.disable_auth dir;
+        Lib.Board.reset_global_for_test ();
+        Lib.Board_dispatch.reset_for_test ();
         let state =
           Lib.Mcp_server_eio.create_state_eio
             ~sw

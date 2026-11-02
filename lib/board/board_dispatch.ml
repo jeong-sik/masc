@@ -39,6 +39,12 @@ let sort_order_of_string_opt s =
 type board_backend =
   | Jsonl of Board.store
 
+type initialization_error =
+  | Workspace_mismatch of
+      { active_workspace_masc_dir : string
+      ; requested_workspace_masc_dir : string
+      }
+
 (** Marker carried inside [Active] tracking whether the flusher fiber has
     been spawned for the current backend.  [Eio.Fiber.fork_daemon] returns
     [unit], so there's no cancel handle to thread through; the [bool]
@@ -267,27 +273,52 @@ let warn_comment_cap_once () =
   | Some msg -> Log.BoardLog.warn "%s" msg
   | None -> ()
 
-let init_jsonl ~recipient_lookup () =
+let init_jsonl ~workspace_masc_dir ~recipient_lookup () =
+  let requested_workspace_masc_dir =
+    Board_paths.capture_workspace_masc_dir workspace_masc_dir
+  in
+  let validate_workspace (store : Board.store) =
+    if String.equal store.workspace_masc_dir requested_workspace_masc_dir
+    then Ok ()
+    else
+      Error
+        (Workspace_mismatch
+           { active_workspace_masc_dir = store.workspace_masc_dir
+           ; requested_workspace_masc_dir
+           })
+  in
   let installed = Lookup_installed recipient_lookup in
   let rec install () =
     match Atomic.get backend_state with
-    | Active (_, _, Lookup_installed _) ->
-      Log.BoardLog.debug "already initialized, ignoring init_jsonl"
-    | Active (backend, flusher, Lookup_not_installed) as current ->
-      (* A read started the backend before the server did, so it has no
-         lookup and refuses every address.  The server's lookup goes in now. *)
-      if Atomic.compare_and_set
-           backend_state current (Active (backend, flusher, installed))
-      then Log.BoardLog.info "JSONL backend recipient lookup installed"
-      else install ()
+    | Active ((Jsonl store as backend), flusher, lookup) as current ->
+      (match validate_workspace store with
+       | Error _ as error -> error
+       | Ok () ->
+         (match lookup with
+          | Lookup_installed _ ->
+            Log.BoardLog.debug "already initialized, ignoring init_jsonl";
+            Ok ()
+          | Lookup_not_installed ->
+            (* A read started this same workspace before the server supplied
+               its lookup. A different workspace cannot replace that authority. *)
+            if Atomic.compare_and_set
+                 backend_state current (Active (backend, flusher, installed))
+            then (
+              Log.BoardLog.info "JSONL backend recipient lookup installed";
+              Ok ())
+            else install ()))
     | Uninitialized ->
       let store = Board.global () in
-      let backend = Active (Jsonl store, false, installed) in
-      if Atomic.compare_and_set backend_state Uninitialized backend then begin
-        ensure_flusher_actor store;
-        warn_comment_cap_once ();
-        Log.BoardLog.info "JSONL backend initialized"
-      end else install ()
+      (match validate_workspace store with
+       | Error _ as error -> error
+       | Ok () ->
+         let backend = Active (Jsonl store, false, installed) in
+         if Atomic.compare_and_set backend_state Uninitialized backend then (
+           ensure_flusher_actor store;
+           warn_comment_cap_once ();
+           Log.BoardLog.info "JSONL backend initialized";
+           Ok ())
+         else install ())
   in
   install ()
 

@@ -1066,24 +1066,37 @@ module For_testing = struct
   ;;
 end
 
+exception Board_initialization_failed of Board_dispatch.initialization_error
+
 (** Create state with Eio context. *)
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
+  (* The callback runs only when backend creation succeeds. Wait for the
+     resolved configuration before binding Board and its recipient lookup. *)
+  let backend_initialized = ref false in
   let config =
     Workspace.default_config_uncached
-      ~on_backend_ready:(fun _backend ->
-        Log.Backend.info "Board: JSONL default backend";
-        Board_metric_hooks_adapter.install ();
-        Workspace_metric_hooks.install ();
-        Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
-        Atomic.set
-          Workspace_hooks.get_verifier_exact_lane_slots_fn
-          Runtime.verifier_exact_lane_slots;
-        Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
-        Board_dispatch.init_jsonl
-          ~recipient_lookup:(Keeper_board_recipient_lookup.make ~base_path)
-          ())
+      ~on_backend_ready:(fun _backend -> backend_initialized := true)
       base_path
   in
+  if !backend_initialized then begin
+    Log.Backend.info "Board: JSONL default backend";
+    Board_metric_hooks_adapter.install ();
+    Workspace_metric_hooks.install ();
+    Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+    Atomic.set
+      Workspace_hooks.get_verifier_exact_lane_slots_fn
+      Runtime.verifier_exact_lane_slots;
+    Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
+    match Board_dispatch.init_jsonl
+            ~workspace_masc_dir:(Workspace.masc_dir config)
+            ~recipient_lookup:(Keeper_board_recipient_lookup.make ~config) () with
+    | Ok () -> ()
+    | Error (Board_dispatch.Workspace_mismatch
+        { active_workspace_masc_dir; requested_workspace_masc_dir } as error) ->
+      Log.Backend.error "Board workspace mismatch: active=%s requested=%s"
+        active_workspace_masc_dir requested_workspace_masc_dir;
+      raise (Board_initialization_failed error)
+  end;
   (* Settle the shared mounted shim configuration before this state can be
      returned to a transport and admit an attached endpoint. Verification
      reads this actual result; the asynchronous startup sweep cannot race it. *)

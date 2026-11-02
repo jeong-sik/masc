@@ -33,7 +33,11 @@ val record_persist_error : where:string -> string -> unit
     their callers. *)
 val persist_io_error : where:string -> string -> ('a, board_error) result
 
-val create_store : unit -> store
+val create_store : workspace_masc_dir:string -> unit -> store
+(** Capture the explicitly supplied state directory with
+    [Fs_compat.realpath_lenient] once. Relative inputs are anchored at capture;
+    the empty string raises [Invalid_argument]. No payload files are created.
+    The binding is a path, not an ongoing symlink or resource-identity lease. *)
 
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
@@ -59,20 +63,20 @@ val sweep_schedule_timestamps_for_test : store -> float * float
 
 val board_base_path : unit -> string
 val board_masc_dir : unit -> string
-val persist_path : unit -> string
-val comments_path : unit -> string
-val reactions_path : unit -> string
-val sub_boards_path : unit -> string
+val persist_path : store -> string
+val comments_path : store -> string
+val reactions_path : store -> string
+val sub_boards_path : store -> string
 val ensure_dir : string -> unit
-val ensure_masc_dir : unit -> unit
+val ensure_masc_dir : store -> unit
 
 val save_posts_snapshot : store -> string -> (unit, board_error) result
 val save_comments_snapshot : store -> string -> (unit, board_error) result
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string
-val save_reactions_jsonl_result : string -> (unit, board_error) result
-val append_post : post -> (unit, board_error) result
-val append_comment : comment -> (unit, board_error) result
+val save_reactions_jsonl_result : store -> string -> (unit, board_error) result
+val append_post : store -> post -> (unit, board_error) result
+val append_comment : store -> comment -> (unit, board_error) result
 
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option

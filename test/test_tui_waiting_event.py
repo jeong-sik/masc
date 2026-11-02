@@ -91,6 +91,8 @@ class WaitingHandler(FixtureHandler):
                             "dropped_count": 1,
                         },
                     }
+                elif keeper == "__schedule__":
+                    payload = {"type": "schedule_store_invalidated"}
                 else:
                     payload = {
                         "type": "keeper_waiting_inventory_changed",
@@ -117,10 +119,10 @@ class WaitingHandler(FixtureHandler):
                 server.valid_admission = False
                 self.respond(409, {"error": "workspace precondition failed"})
                 return
-            if phase in ("held", "collision-held"):
+            if phase in ("held", "collision-held", "schedule-held"):
                 server.held_read_started.set()
                 server.release_held_read.wait()
-            if phase in ("queued", "collision-follow"):
+            if phase in ("queued", "collision-follow", "schedule-follow"):
                 server.followup_started.set()
                 server.release_followup.wait()
             detail = {
@@ -129,10 +131,15 @@ class WaitingHandler(FixtureHandler):
                 "collision-held": "collision-obsolete",
                 "collision-follow": "collision-recovered",
                 "collision-during": "collision-ignored",
+                "schedule": "schedule-refreshed",
+                "schedule-held": "obsolete-schedule",
+                "schedule-follow": "final-schedule",
             }.get(phase, "old-waiting")
-            beta_detail = {"held": "beta-updated", "queued": "beta-final"}.get(
-                phase, "beta-before"
-            )
+            beta_detail = {
+                "held": "beta-updated",
+                "queued": "beta-final",
+                "schedule": "beta-schedule-refreshed",
+            }.get(phase, "beta-before")
 
             def keeper_row(name: str, text: str) -> dict[str, object]:
                 return {
@@ -448,6 +455,50 @@ class WaitingEventTest(unittest.TestCase):
                 drain_for(1.0)
                 self.assertNotIn(b"collision-obsolete", output[collision_output_start:])
                 self.assertEqual(server.count("collision-after", TURNS_PATH), 0)
+                server.set_phase("schedule")
+                schedule_output_start = len(output)
+                server.events.put((6, "__schedule__"))
+                wait_until(
+                    lambda: server.response_count("schedule", TURNS_PATH) == 1,
+                    "schedule invalidation did not re-read waiting inventory",
+                )
+                wait_until(
+                    lambda: rendered_row_contains(
+                        schedule_output_start, b"analyst", b"schedule-refreshed"
+                    )
+                    and rendered_row_contains(
+                        schedule_output_start, b"beta", b"beta-schedule-refreshed"
+                    ),
+                    "schedule invalidation did not refresh every keeper",
+                )
+                drain_for(0.5)
+                self.assertEqual(server.count("schedule", TURNS_PATH), 1)
+                server.held_read_started.clear()
+                server.release_held_read.clear()
+                server.followup_started.clear()
+                server.release_followup.clear()
+                server.set_phase("schedule-held")
+                schedule_race_start = len(output)
+                server.events.put((7, "__schedule__"))
+                wait_until(server.held_read_started.is_set, "schedule read did not start")
+                server.set_phase("schedule-queued")
+                server.events.put((8, "__schedule__"))
+                wait_until(
+                    lambda: server.count("schedule-queued", "observer-event-written") == 1,
+                    "second schedule invalidation was not delivered",
+                )
+                self.assertEqual(server.count("schedule-queued", TURNS_PATH), 0)
+                server.set_phase("schedule-follow")
+                server.release_held_read.set()
+                wait_until(server.followup_started.is_set, "schedule follow-up did not start")
+                server.set_phase("schedule-after")
+                server.release_followup.set()
+                wait_until(
+                    lambda: b"final-schedule" in output[schedule_race_start:],
+                    "schedule follow-up did not refresh the waiting rows",
+                )
+                self.assertNotIn(b"obsolete-schedule", output[schedule_race_start:])
+                self.assertEqual(server.count("schedule-after", TURNS_PATH), 0)
                 self.assertTrue(server.valid_admission)
                 self.assertIsNone(process.poll())
             finally:

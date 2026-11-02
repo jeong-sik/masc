@@ -424,11 +424,19 @@ let test_approval_health_callback_preserves_scope_cancellation () =
 let test_schedule_publication_wakes_its_workspace () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let other_path = Filename.concat base_path "other-schedule-workspace" in
+  let current_session = "schedule-invalidation-current" in
+  let other_session = "schedule-invalidation-other" in
+  let external_id = "schedule-invalidation-external" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   let previous_fs = Fs_compat.get_fs_opt () in
   Fun.protect
     ~finally:(fun () ->
       Schedule_store.install_change_observer (fun ~base_path:_ -> ());
+      Masc.Sse.unsubscribe_external external_id;
+      Masc.Sse.unregister current_session;
+      Masc.Sse.unregister other_session;
+      ignore (Masc.Session.McpSessionStore.remove current_session);
+      ignore (Masc.Session.McpSessionStore.remove other_session);
       reset ();
       Server_auth.For_testing.restore_server_state previous_state;
       (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
@@ -443,8 +451,26 @@ let test_schedule_publication_wakes_its_workspace () =
         let other = Workspace_core.default_config other_path in
         ignore (Workspace_core.init current ~agent_name:(Some "test"));
         ignore (Workspace_core.init other ~agent_name:(Some "test"));
-        Schedule_store.install_change_observer Runtime.invalidate_full_health_snapshot_for_workspace;
+        let register path session_id =
+          let auth = Masc_test_deps.make_sse_auth path "schedule-invalidation-test" in
+          ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
+          match Masc.Sse.register ~kind:Observer ~auth session_id ~last_event_id:0 with
+          | Ok (_, stream, _) -> stream
+          | Error error -> fail (Masc.Sse.registration_error_to_string error)
+        in
+        let current_stream = register base_path current_session in
+        let other_stream = register other_path other_session in
+        let authority = Masc.Sse.runtime_authority_exn ~base_path in
+        let external_calls = ref 0 in
+        Masc.Sse.subscribe_external ~runtime_authority:authority ~id:external_id
+          ~callback:(fun _ -> incr external_calls) ();
+        Eio.Switch.run (fun sw ->
+        Server_schedule_invalidation.start ~sw;
         reset ();
+        let before_id = Masc.Sse.current_id () in
+        let receive stream =
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0
+            (fun () -> Masc.Sse.take_delivery stream) in
         let actor : Schedule_domain.actor =
           { id = "test"; kind = Schedule_domain.Human_operator; display_name = None } in
         let insert config schedule_id =
@@ -461,15 +487,90 @@ let test_schedule_publication_wakes_its_workspace () =
         insert other "other";
         check bool "foreign publication does not wake current health" false
           (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+        let other_delivery = receive other_stream in
+        check bool "foreign publication does not reach current observer" true
+          (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream));
+        check bool "foreign observer receives its change" true
+          (other_delivery.payload = Masc.Schedule_invalidation_event.json);
         insert current "current";
         check bool "current publication wakes health" true
           (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+        let current_delivery = receive current_stream in
+        check bool "current observer receives its change" true
+          (current_delivery.payload = Masc.Schedule_invalidation_event.json);
+        check bool "current publication does not reach foreign observer" true
+          (Option.is_none (Masc.Sse.take_delivery_nonblocking other_stream));
+        check int "schedule writes do not invoke external callbacks" 0 !external_calls;
+        let replay = Masc.Sse.replay_after_for_session ~runtime_authority:authority
+          ~session_id:current_session ~kind:Observer before_id in
+        check int "only the current workspace change is replayed" 1 (List.length replay.deliveries);
+        (match replay.deliveries with
+         | [delivery] -> check bool "replayed event is the invalidation" true
+             (delivery.payload = Masc.Schedule_invalidation_event.json)
+         | [] | _ :: _ :: _ -> fail "expected one scoped replay event");
         (match Schedule_store.refresh_due current ~now:150.0
           ~retention_days:Schedule_store.terminal_schedule_retention_days with
          | Ok _ -> ()
          | Error err -> fail (Schedule_store.store_error_to_string err));
         check bool "quiet tick does not wake health" false
-          (Runtime.For_testing.take_full_health_wakeup_nonblocking ())))
+          (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+        check bool "quiet tick does not publish a change" true
+          (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream)))))
+;;
+
+let test_schedule_worker_coalesces_and_preserves_successor () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Schedule_store.install_change_observer (fun ~base_path:_ -> ());
+      (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let config = Workspace_core.default_config base_path in
+        ignore (Workspace_core.init config ~agent_name:(Some "test"));
+        let actor : Schedule_domain.actor =
+          { id = "test"; kind = Schedule_domain.Human_operator; display_name = None } in
+        let insert schedule_id =
+          let request = match Schedule_domain.create_request ~schedule_id
+            ~requested_by:actor ~scheduled_by:actor ~requested_at:100.0 ~due_at:200.0
+            ~payload:(`Assoc [ "kind", `String "consumer.note"; "body", `Assoc [] ])
+            ~source:Schedule_domain.Operator_request () with
+            | Ok request -> request
+            | Error err -> fail err in
+          match Schedule_store.insert_request config ~runner_tick_sec:1.0 request with
+          | Ok _ -> ()
+          | Error err -> fail (Schedule_store.store_error_to_string err) in
+        let started = Eio.Stream.create 4 in
+        let release, release_u = Eio.Promise.create () in
+        let publications = ref 0 and successor_calls = ref 0 in
+        Eio.Switch.run (fun sw ->
+          Server_schedule_invalidation.For_testing.start ~sw
+            ~invalidate:(fun ~base_path:_ -> ())
+            ~publish:(fun ~base_path ->
+              incr publications;
+              Eio.Stream.add started base_path;
+              if !publications = 1 then Eio.Promise.await release
+              else if !publications = 2 then raise (Eio.Cancel.Cancelled Exit));
+          let receive () =
+            Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0
+              (fun () -> Eio.Stream.take started) in
+          insert "first";
+          check string "first publication starts" base_path (receive ());
+          insert "second";
+          insert "third";
+          check int "writes return while the publisher is held" 1 !publications;
+          Eio.Promise.resolve release_u ();
+          check string "one follow-up covers both writes" base_path (receive ());
+          Eio.Fiber.yield ();
+          check int "duplicate workspace signals coalesce" 2 !publications;
+          insert "after-callback-cancellation";
+          check string "callback cancellation does not stop the worker" base_path (receive ());
+          Schedule_store.install_change_observer (fun ~base_path:_ -> incr successor_calls));
+        insert "after-stop";
+        check int "worker shutdown leaves a successor installed" 1 !successor_calls))
 ;;
 
 let test_pending_confirm_publication_wakes_its_workspace () =
@@ -534,6 +635,8 @@ let () =
             test_approval_health_callback_preserves_scope_cancellation
         ; test_case "schedule publication wakes its workspace" `Quick
             test_schedule_publication_wakes_its_workspace
+        ; test_case "schedule worker coalesces and preserves its successor" `Quick
+            test_schedule_worker_coalesces_and_preserves_successor
         ; test_case "pending confirm publication wakes its workspace" `Quick
             test_pending_confirm_publication_wakes_its_workspace
         ]

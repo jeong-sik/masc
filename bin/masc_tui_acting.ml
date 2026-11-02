@@ -82,7 +82,7 @@ let visible filter (event : Observer.event) =
       | Observer.Fusion_run_status _
       (* A run registry changed. Nothing a keeper did; the frame says only
          that a reader showing internal runs should fetch them again. *)
-      | Observer.Internal_agent_runs_changed ->
+      | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -116,7 +116,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       visible Actions event
 
@@ -411,7 +411,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
-  | Observer.Internal_agent_runs_changed | Observer.Lane_resource _
+  | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Other _ ->
       "server"
 
@@ -449,6 +449,7 @@ let label_of_event (event : Observer.event) =
       | Masc.Lane_addon_resource_events.Release_confirmed -> "resource released"
       | Masc.Lane_addon_resource_events.Release_incomplete -> "release unconfirmed")
   | Observer.Internal_agent_runs_changed -> "internal runs"
+  | Observer.Schedule_store_invalidated -> "schedule"
   | Observer.Snapshot _ -> "snapshot"
   | Observer.Other name -> name
 
@@ -573,6 +574,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label
       ; detail = "a run registry changed"
       }
+  | Observer.Schedule_store_invalidated ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "schedule ledger needs refresh" }
   | Observer.Snapshot name ->
       { at; keeper = "server"; glyph = Quiet; label; detail = name }
   | Observer.Other _ ->
@@ -751,7 +754,7 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated
   | Observer.Lane_resource _ | Observer.Other _ ->
       None
 
@@ -924,7 +927,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       None
 
@@ -1067,7 +1070,7 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
-  | Observer.Internal_agent_runs_changed | Observer.Snapshot _
+  | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Snapshot _
   | Observer.Other _ ->
       None
 
@@ -1246,7 +1249,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
-          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated
           | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
@@ -1323,7 +1326,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

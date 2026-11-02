@@ -21399,6 +21399,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let observer_source_loss_seen = ref false in
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
+      let schedule_store_invalidated = ref false in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
          asks once per batch. Agent-core events name their lane; the
@@ -21455,6 +21456,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_waiting_inventory_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed
+               | Masc_tui_observer.Schedule_store_invalidated
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21465,6 +21467,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                        ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
+               | Masc_tui_observer.Schedule_store_invalidated ->
+                   schedule_store_invalidated := true
                | Masc_tui_observer.Snapshot name
                  when String.equal name Masc.Dashboard_event_slices.execution_snapshot_type ->
                    execution_snapshot_seen := true
@@ -21593,7 +21597,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
-      if !waiting_inventory_changed <> [] then
+      if !schedule_store_invalidated then
+        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox
+      else if !waiting_inventory_changed <> [] then
         launch_keeper_waiting_load
           ~change:(Waiting_keepers (List.sort_uniq String.compare !waiting_inventory_changed)) state ~mailbox;
       (* The pane otherwise reloads only on open and on its own sends — a

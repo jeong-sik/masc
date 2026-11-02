@@ -151,6 +151,10 @@ val install_change_observer : (base_path:string -> unit) -> unit
     callback runs on the caller, so it must be short and non-yielding; it must
     not perform network fanout. *)
 
+val replace_change_observer_if_current :
+  current:(base_path:string -> unit) -> replacement:(base_path:string -> unit) -> bool
+(** Replace a switch-owned observer only if no successor has installed one. *)
+
 val with_ledger_lock : Workspace_utils.config -> (unit -> 'a) -> 'a
 (** Serialize a composed durable transfer through its target projection with
     schedule mutation. Acquire any ordered Keeper intake fences before this

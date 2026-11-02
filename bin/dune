@@ -3122,7 +3122,7 @@
  (name masc_tui_image_cache)
  (wrapped false)
  (modules masc_tui_image_cache)
- (libraries masc masc_tui_image_mosaic unix threads mtime.clock.os))
+ (libraries masc masc.agent_core.digest masc_tui_image_mosaic unix threads mtime.clock.os))
 (library
  (name masc_tui_interactive)
 ;; An interactive surface contract plus the MSX backend: renderer-independent

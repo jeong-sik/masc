@@ -223,6 +223,83 @@ let test_suspended_diagram_preparation () =
   check bool "retained original response remains readable" true
     (saved state == original)
 
+let test_superseded_resource_diagram_worker () =
+  let module Diagrams=Masc_tui_resource_diagrams in
+  let module Work=Masc_tui_board_preview_work in
+  let contents = [{Mcp.rc_uri=None;rc_mime_type=Some "text/markdown";
+    rc_kind=Resource_text "```mermaid\ngraph TD; A-->B\n```\n\n```mermaid\ngraph TD; C-->D\n```\n"}] in
+  let frame = Diagrams.{frame_mime_type=None;frame_contents=contents;frame_width=640;
+    frame_cell_pixels=(8,16);frame_colors=None} in
+  let old=Diagrams.create ~mime_type:None ~contents ~width:640 ~cell_pixels:(8,16) ~colors:None in
+  let next=Diagrams.create ~mime_type:None ~contents ~width:320 ~cell_pixels:(8,16) ~colors:None in
+  let request=Diagrams.request old in
+  let source=match Diagrams.sources request with [source;_] -> source | _ -> fail "expected two diagrams" in
+  let decide ~frame snapshot = Diagrams.admission request ~frame snapshot in
+  check bool "current frame may start" true
+    (decide ~frame:(Some frame) (Some old) = Diagrams.Admit);
+  check bool "leaving before the first source prevents admission" true
+    (decide ~frame:None (Some old) = Diagrams.Retire);
+  let partially_done=Diagrams.settle request ~source (Error "first source finished") old in
+  check bool "first completion still owns the request" true
+    (Diagrams.progress partially_done = (1,2));
+  check bool "leaving between sources prevents further admission" true
+    (decide ~frame:None (Some partially_done) = Diagrams.Retire);
+  let first,first_claim,first_preparing = match Diagrams.claim_next old with
+    | Some claim -> claim | None -> fail "first diagram claim" in
+  check bool "the first source is exclusively claimed" true
+    (String.equal first source && Diagrams.owns_claim request ~source:first first_claim first_preparing
+     && Option.is_none (Diagrams.claim_next first_preparing));
+  let first_done=Diagrams.settle request ~source:first (Error "first source finished") first_preparing in
+  let second,old_claim,second_preparing = match Diagrams.claim_next first_done with
+    | Some claim -> claim | None -> fail "second diagram claim" in
+  let interrupted=Diagrams.abandon_preparing second_preparing in
+  check bool "withdrawing a pending source preserves completed progress" true
+    (Diagrams.progress interrupted = (1,2));
+  let retry,retry_claim,retrying = match Diagrams.claim_next interrupted with
+    | Some claim -> claim | None -> fail "retry diagram claim" in
+  check bool "only the unfinished source is retried" true (String.equal second retry);
+  let after_old_cleanup=Diagrams.abandon request ~source:second old_claim retrying in
+  check bool "old cleanup cannot abandon a new claim for the same source" true
+    (Diagrams.owns_claim request ~source:retry retry_claim after_old_cleanup);
+  let stale_completion=Diagrams.settle_claimed request ~source:second old_claim
+    (Error "stale completion") after_old_cleanup in
+  check bool "an old completion cannot settle a new claim for the same source" true
+    (stale_completion == after_old_cleanup);
+  let finished=Diagrams.settle_claimed request ~source:retry retry_claim
+    (Error "retry finished") stale_completion in
+  check bool "the retained and retried sources both finish" true (Diagrams.progress finished = (2,2));
+  List.iter (fun changed ->
+    check bool "changed frame is not admitted" true
+      (decide ~frame:(Some changed) (Some old) = Diagrams.Retire))
+    [ {frame with frame_width=320}; {frame with frame_cell_pixels=(9,16)};
+      {frame with frame_colors=Some ("#ffffff", "#000000")};
+      {frame with frame_mime_type=Some "text/plain"};
+      {frame with frame_contents=List.map Fun.id contents} ];
+  check bool "a replaced owner is ignored" true
+    (decide ~frame:(Some frame) (Some next) = Diagrams.Ignore);
+  check bool "old claim cleanup preserves the replacement request" true
+    (Diagrams.abandon request ~source:second old_claim next == next);
+  let worker=Work.create () in
+  let old_ticket=match Work.reserve worker with Some ticket -> ticket | None -> fail "old dispatch" in
+  if decide ~frame:None (Some old) = Diagrams.Retire then
+    check bool "pending dispatch was withdrawn" true (Work.withdraw_pending worker);
+  let new_ticket=match Work.reserve worker with Some ticket -> ticket | None -> fail "replacement dispatch" in
+  check bool "withdrawn diagram dispatch cannot start" true
+    (Option.is_none (Work.run_reserved worker old_ticket (fun () -> ())));
+  Work.withdraw worker old_ticket;
+  check bool "old cleanup cannot cancel the replacement dispatch" true
+    (Option.is_some (Work.run_reserved worker new_ticket (fun () -> ())));
+  check bool "the old physical worker starts" true (Work.try_acquire worker);
+  check bool "withdrawal does not free an active renderer" false (Work.withdraw_pending worker);
+  check bool "new width no longer matches the old request" false
+    (Diagrams.matches ~mime_type:None ~contents ~width:320 ~cell_pixels:(8,16) ~colors:None old);
+  check bool "a replacement waits while physical work remains" true (Option.is_none (Work.reserve worker));
+  let after_stale=Diagrams.settle request ~source (Error "old request") next in
+  check bool "old completion cannot change the replacement" true (after_stale == next);
+  Work.release worker;
+  check bool "the replacement can start after physical return" true
+    (Option.is_some (Work.try_run worker (fun () -> ())))
+
 let test_operator_protocol_boundary () =
   let module Reader = Masc_tui_input_reader in
   check bool "APC reply cannot withdraw an image request" false
@@ -544,7 +621,7 @@ let test_physical_inspection_worker () =
   let mutex=Mutex.create () and changed=Condition.create () in
   let started=ref false and attempted=ref false and finish=ref false in
   let retired=match Work.reserve worker with Some ticket -> ticket | None -> fail "first reservation" in
-  Work.withdraw_pending worker;
+  ignore (Work.withdraw_pending worker);
   let current=match Work.reserve worker with Some ticket -> ticket | None -> fail "new reservation" in
   let stale_started=ref false in
   let stale=Work.run_reserved worker retired (fun () -> stale_started := true) in
@@ -563,7 +640,7 @@ let test_physical_inspection_worker () =
   while not !started && not !attempted do Condition.wait changed mutex done;
   let did_start = !started in
   Mutex.unlock mutex;
-  Work.withdraw_pending worker;
+  ignore (Work.withdraw_pending worker);
   let second_started=ref false in
   let second=Work.try_run worker (fun () -> second_started := true) in
   Mutex.lock mutex;
@@ -620,7 +697,7 @@ let test_initial_vector_worker () =
     check bool "raster preview still loads without a reservation" true
       (Result.is_ok (load ~board_worker:None ~vector_admission:None raster));
     let old=match Work.reserve worker with Some ticket -> ticket | None -> fail "old admission" in
-    Work.withdraw_pending worker;
+    ignore (Work.withdraw_pending worker);
     let current=match Work.reserve worker with Some ticket -> ticket | None -> fail "current admission" in
     check bool "withdrawn open cannot start Pele" true
       (Result.is_error (load ~board_worker:None ~vector_admission:(Some (worker,old)) source));
@@ -845,6 +922,7 @@ let () =
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;
   test_case "Board renderer shutdown reaps child" `Quick test_renderer_shutdown;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
+  test_case "superseded resource diagrams retain physical ownership" `Quick test_superseded_resource_diagram_worker;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;
   test_case "failed and detached completion" `Quick test_failed_read;

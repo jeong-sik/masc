@@ -5,6 +5,7 @@ module W = Browser_addon_wire
 type t = {stop:unit -> unit}
 type worker = { serves : B.Backend.t; clients : B.client_info list; exports : bool }
 type snapshot_state = Snapshot_clients of B.client_info list | Snapshot_unavailable
+  | Snapshot_ego_refused of { space : string; ids : int list }
 type attached = {
   serves : B.Backend.t;
   instance_id : string;
@@ -55,7 +56,10 @@ def control(conn):
             return
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
         with open(os.path.join(a.root,"owned.json")) as src: owned=json.load(src)
-        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":owned["stagehand"],"session":"unknown","locate":False}}}}
+        ego_refused=[]
+        if os.path.exists(os.path.join(a.root,"unavailable.json")):
+            with open(os.path.join(a.root,"unavailable.json")) as src: ego_refused=json.load(src)
+        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"unavailable":ego_refused,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":owned["stagehand"],"session":"unknown","locate":False}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
 def serve():
     while True:
@@ -211,10 +215,19 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
        | value -> value) clients))) in
   write_clients clients;
   let unavailable=Filename.concat root "snapshot-unavailable" in
+  let ego_refused=Filename.concat root "unavailable.json" in
   let set_snapshot = function
     | Snapshot_unavailable -> write unavailable "unavailable"
     | Snapshot_clients clients ->
         write_clients clients;current_clients:=clients;
+        if Sys.file_exists unavailable then Sys.remove unavailable;
+        if Sys.file_exists ego_refused then Sys.remove ego_refused
+    | Snapshot_ego_refused {space;ids} ->
+        write_clients [];current_clients:=[];
+        write ego_refused (Yojson.Safe.to_string (`List [`Assoc ["backend",`String "ego";
+          "reason",`String "user_owned_name";"space",`String space;
+          "ids",`List (List.map (fun id -> `Int id) ids);
+          "observedAt",`Float 1.;"recheck",`String "take_over"]]));
         if Sys.file_exists unavailable then Sys.remove unavailable in
   write (Filename.concat root "owned.json")
     (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation;"stagehand",`Bool stagehand]));
@@ -245,6 +258,7 @@ max_reply_bytes = 2097152
     let arguments=Yojson.Safe.Util.member "arguments" request in
     let route=match Yojson.Safe.Util.member "lane" arguments,Yojson.Safe.Util.member "clientId" arguments with
       | `String "live",`String raw -> B.Live_route (Some (require (B.client_id_of_string raw)))
+      | `String "live",`Null -> B.Live_route None
       | `String "stagehand",`Null -> B.Stagehand_route
       | `String "automation",`Null -> B.Automation_route
       | _ -> failwith "invalid fixture browser connection" in
@@ -253,7 +267,7 @@ max_reply_bytes = 2097152
     received ~route;
     let known=match route with B.Live_route (Some id) ->
         List.exists (fun (client:B.client_info) -> client.client_id=id) !current_clients
-      | Automation_route|Stagehand_route -> true | Live_route None -> false in
+      | Automation_route|Stagehand_route|Live_route None -> true in
     let result=if known then response ~route verb (respond ~route verb)
       else
         let typed=Tool_result.make_err ~tool_name:"browser_command" ~start_time:(Tool_timing.start ())

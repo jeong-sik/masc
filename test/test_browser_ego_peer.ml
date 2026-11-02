@@ -113,6 +113,21 @@ let test_space_name_inspection_is_read_only_and_requires_evidence () =
     (match observe (Error Peer.Timed_out) with
      | Peer.Space_names_unavailable _ -> true | Peer.No_user_owned_match | Peer.User_owned_matches _ -> false)
 
+let test_a_claim_reclaims_only_the_space_that_was_asked_for () =
+  let claim result = Peer.claim_space ~space_id:7 ~run:(fun ~window_s:_ script ->
+    check bool "claims through the SDK claim, never a takeover" true
+      (contains script "await claimTaskSpace(args.spaceId)" && not (contains script "takeOverTaskSpace"));
+    result) in
+  check bool "a claimed Space id and name come back" true
+    (claim (answered (obj ["spaceId",`Int 7;"name",str "masc-keepers";"ownership",str "agent"]))
+     = Ok (7,"masc-keepers"));
+  check bool "a foreign Space id is refused" true
+    (Result.is_error (claim (answered (obj ["spaceId",`Int 8;"name",str "other";"ownership",str "agent"]))));
+  check bool "a Space still held by the operator is refused" true
+    (Result.is_error (claim (answered (obj ["spaceId",`Int 7;"name",str "masc-keepers";"ownership",str "user"]))));
+  check bool "a frame error is a refusal" true (Result.is_error (claim (failed "claim refused")));
+  check bool "a timeout is a refusal" true (Result.is_error (claim (Error Peer.Timed_out)))
+
 let test_the_space_opens_by_name_and_is_held_by_number () =
   let spaces = ref [] in
   let run ~window_s script = let sent = sent_of ~window_s script in
@@ -3798,6 +3813,7 @@ let () =
       test_case "numeric Space references never create replacements" `Quick test_exact_numeric_space_resume;
       test_case "Page provenance survives document projection" `Quick test_page_provenance_survives_document_projection;
       test_case "space inspection preserves user ownership and uncertain listings" `Quick test_space_name_inspection_is_read_only_and_requires_evidence;
+      test_case "a claim reclaims only the Space that was asked for" `Quick test_a_claim_reclaims_only_the_space_that_was_asked_for;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;

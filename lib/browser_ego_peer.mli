@@ -44,6 +44,12 @@ type space_name_observation =
 
 val observe_space_name : run:runner -> space:string -> space_name_observation
 
+(** Reclaims a Space whose task ended while the operator held it. Only
+    claimTaskSpace does this; takeOverTaskSpace on such a Space ends the
+    whole nodejs process instead of throwing. The caller asks only after the
+    operator said to continue. [Ok] is the claimed Space id and name. *)
+val claim_space : run:runner -> space_id:int -> (int * string, string) result
+
 (** The prefix of the one line each script writes its answer on. *)
 val result_marker : string
 

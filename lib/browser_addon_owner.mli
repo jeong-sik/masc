@@ -13,6 +13,13 @@ val incarnation : t -> string
 val is_retired : t -> bool
 val mark_ego_user_owned_name : t -> space:string -> ids:int list -> observed_at:float -> (unit, string) result
 (** Publish an observed startup conflict only while this owner serves. *)
+val clear_ego_unavailable : t -> unit
+(** The published ego refusal ended: the Space was claimed or the lane serves again. *)
+val attach_ego_recovery : t -> (int list -> (int * string, string) result) -> (unit, string) result
+(** The live ego backend's claim: it receives the published Space ids and
+    answers with the reclaimed Space id and name. One claim runs at a time;
+    a second while one runs is refused before the SDK is asked anything. *)
+val detach_ego_recovery : t -> unit
 (** Admission observation only. It grants neither a new poll nor process cleanup
     authority; an owned resource still waits for its original cleanup request. *)
 val attach_models : t -> Browser_addon_models.t -> (unit, string) result

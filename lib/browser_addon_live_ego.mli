@@ -54,5 +54,10 @@ val end_session : session -> unit
     is the host-selected workspace Lane store, never the ephemeral socket or
     download directory. Managed Ego attachment must retain/restore Input there;
     missing/unwritable authority never falls back to volatile state. *)
-val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t -> input_store:Lane_addon_store.t -> downloads:string ->
+val run : ?on_lane_ended:(unit -> unit) -> env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
+  input_store:Lane_addon_store.t -> downloads:string ->
   Browser_configuration.live_ego -> (unit -> unit) -> unit
+(** [on_lane_ended] runs when a recovery cycle fails after the run started:
+    the owner is already retired and the lane cannot re-serve, so the worker
+    host should stop. The worker binary passes its stop switch; an embedded
+    run decides how to end itself (the default does nothing). *)

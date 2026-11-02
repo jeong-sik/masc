@@ -71,8 +71,9 @@ worker 의 `Browser_addon_owner.issue` 는 `Live_route None` +
    done")와 같은 자리에 둔다. ego SDK 의 안내 문구와 같은 뜻이다.
 
 `unavailable` 기록은 Space ID 목록을 함께 운반하도록 확장한다
-(`ids : int list`). worker-서버 간 내부 wire 의 hard cut 이며 과거 형태의
-reader 는 만들지 않는다.
+(`ids : int list`). 이 wire 를 읽는 곳은 worker-서버 사이와 대시보드
+(browser-lane-connections 스키마) 둘 다이며, hard cut 으로 함께 갱신한다.
+과거 형태의 reader 는 만들지 않는다.
 
 ## 하지 않는 것
 

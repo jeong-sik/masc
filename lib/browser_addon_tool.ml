@@ -23,7 +23,7 @@ let output_schema = object_schema ~required:["reply";"answer"] [
       "ok",`Assoc ["type",`String "boolean";"const",`Bool true]]]]
 let definition : S.tool = {name=W.command_tool_name;
   title=Some "Browser";description=Some
-    "Run one closed browser command on the browser the host chose: lane, and for live its clientId. The host chooses the browser and states it in the receipt. No JavaScript or debug-protocol escape hatch. Uploads require a host snapshot grant; completed owned downloads are finalized into host artifacts.";
+    "Run one closed browser command on the browser the host chose: lane, and for live its clientId except the task Space reclaim (take_over without a clientId on a lane that published a user-owned refusal). The host chooses the browser and states it in the receipt. No JavaScript or debug-protocol escape hatch. Uploads require a host snapshot grant; completed owned downloads are finalized into host artifacts.";
   input_schema;output_schema=Some output_schema;annotations=None;icon=None;execution=None}
 let parse json =
   let* fields=match json with
@@ -36,12 +36,26 @@ let parse json =
     | Some _ -> Error "clientId must be a canonical browser UUID" in
   let* route=match List.assoc_opt "lane" fields,client with
     | Some (`String "live"),Some client -> Ok (B.Live_route (Some client))
+    | Some (`String "live"),None -> Ok (B.Live_route None)
     | Some (`String "automation"),None -> Ok B.Automation_route
     | Some (`String "stagehand"),None -> Ok B.Stagehand_route
     | (None|Some _),(None|Some _) ->
         Error "lane must name the browser the host chose; a live lane also names its clientId" in
   let* raw=Option.to_result ~none:"command is required" (List.assoc_opt "command" fields) in
   let* verb=W.verb_of_json ~route raw in
+  let* ()=match route with
+    | B.Live_route None ->
+        (match verb with
+         | B.Page_act action ->
+             if B.Action.is_take_over action then Ok ()
+             else Error "a live lane without a clientId answers only its task Space reclaim"
+         | B.Tabs_list|Session_open _|Session_close|Session_status
+         |B.Page_read _|B.Page_document _|B.Page_downloads _|B.Page_console _|B.Page_network _
+         |B.Page_cookies _|B.Page_capture _|B.Page_scene _|B.Page_snapshot _
+         |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
+         |B.Page_context _|B.Page_instruct _|B.Page_locate _|B.Page_extract _ ->
+             Error "a live lane without a clientId answers only its task Space reclaim")
+    | B.Live_route (Some _)|B.Automation_route|B.Stagehand_route -> Ok () in
   let* ()=match route,verb with
     | (B.Automation_route|Stagehand_route),B.Page_act (B.Action.Control _) ->
         Error B.handoff_refused

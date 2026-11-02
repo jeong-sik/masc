@@ -12,6 +12,12 @@ let of_browser selected browser = {selected=Browser_selection.bind selected brow
     | Owned_automation | Owned_stagehand -> [B.client_id_field,`Null]);
   space=(match browser with Browser_selection.Connected info -> info.space | Owned_automation|Owned_stagehand -> None);
   backend=Browser_selection.backend_of_browser browser}
+(* A lane-level command the lane answers without a client: the live lane
+   itself is the browser, and the transport it reports is the ego task
+   space lane it serves. *)
+let of_lane selected =
+  {selected;connection_fields=[B.client_id_field,`Null];
+   backend=Browser_capabilities.Connected B.Ego_task_space;space=None}
 let to_json t=`Assoc ["browserSelection",Browser_selection.to_json t.selected;
   "browserConnection",`Assoc t.connection_fields]
 let annotate t = function

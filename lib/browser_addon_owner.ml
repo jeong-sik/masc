@@ -16,6 +16,11 @@ type t = {
   mutable live : (B.live_transport * cleanup) list;
   mutable ego_input : (B.client_id * Browser_ego_operator.recovery) option;
   mutable unavailable : Browser_addon_observation.unavailable list;
+  (* Reclaims the user-owned ego Space the worker refused: receives the
+     published ids, answers with the reclaimed Space id and name. Set by the
+     live ego backend between cycles; one claim runs at a time. *)
+  mutable ego_recovery : (int list -> (int * string, string) result) option;
+  mutable ego_claim_active : bool;
   mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
   mutable downloads : Browser_addon_downloads.t option;
@@ -33,7 +38,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_input=None;unavailable=[];models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_input=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -70,6 +75,17 @@ let mark_ego_user_owned_name t ~space ~ids ~observed_at =
       Error "invalid ego user-owned space observation"
     | Serving,[] -> t.unavailable <- [Browser_addon_observation.Ego_user_owned_name {space; ids; observed_at}]; Ok ()
     | Serving,_ :: _ -> Error "ego unavailability is already published")
+let clear_ego_unavailable t =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
+    t.unavailable <- [])
+let attach_ego_recovery t claim =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase, t.ego_recovery with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,Some _ -> Error "ego recovery is already attached"
+    | Serving,None -> t.ego_recovery <- Some claim; Ok ())
+let detach_ego_recovery t =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
+    t.ego_recovery <- None)
 let models_enabled t = Option.is_some t.models
 let attach_models t models =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
@@ -158,7 +174,10 @@ let attach_live ?ego_input t ~client_id ~cleanup =
              | (Webdriver_bidi|Web_extension|Ego_task_space),None | Ego_task_space,Some _ ->
                Result.map (fun () ->
                  t.live <- (transport, owned_cleanup name cleanup) :: t.live;
-                 t.ego_input <- (match ego_input with None -> t.ego_input | Some recovery -> Some (client_id,recovery)))
+                 t.ego_input <- (match ego_input with None -> t.ego_input | Some recovery -> Some (client_id,recovery));
+                 (* A live connection serving again ends every refusal this
+                    owner published about the lane. *)
+                 t.unavailable <- [])
                (B.hold_client ~client_id))
         | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active connection this worker runs")
 let operator_schema = Browser_ego_operator.schema
@@ -184,6 +203,8 @@ let revoke t =
       t.phase <- Retired;
       t.extensions <- None;
       t.ego_input <- None;
+      t.ego_recovery <- None;
+      t.ego_claim_active <- false;
       Option.iter Browser_addon_models.retire t.models;
       Option.iter Browser_addon_uploads.revoke t.uploads;
       Option.iter Browser_addon_downloads.revoke t.downloads;
@@ -249,6 +270,54 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
       |Page_context _|Page_instruct _|Page_locate _|Page_extract _),(Ordinary|Scoped_upload)
     | Page_act (On_tab {interaction=Upload _;_}),Scoped_upload -> Ok () in
   match allowed with Error reply -> reply | Ok () ->
+    (* take_over without a client reclaims the ego Space whose task ended
+       while the operator held it; every other live execution still names
+       its client. *)
+    let reclaim = match route with
+      | B.Live_route None ->
+          (match verb with
+           | B.Page_act action -> B.Action.is_take_over action
+           | B.Tabs_list|Session_open _|Session_close|Session_status
+           |B.Page_read _|B.Page_document _|B.Page_downloads _|B.Page_console _|B.Page_network _
+           |B.Page_cookies _|B.Page_capture _|B.Page_scene _|B.Page_snapshot _
+           |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
+           |B.Page_context _|B.Page_instruct _|B.Page_locate _|B.Page_extract _ -> false)
+      | B.Live_route (Some _) | B.Automation_route | B.Stagehand_route -> false in
+    if reclaim then
+      (* The claim answers in seconds, so only this state read holds the
+         gate; the claim itself runs like any other browser command, and
+         after it the backend reconnects on its own. The published refusal
+         must name exactly one Space, and only one claim runs at a time:
+         the SDK has not promised what a second claim of the same Space
+         does, so it is refused instead of raced. *)
+      (match with_admission t incarnation (fun () ->
+         match t.ego_recovery, t.unavailable, t.ego_claim_active with
+         | _, _, true ->
+             Error (refusal "a task Space reclaim is already running on this worker")
+         | Some claim, [Browser_addon_observation.Ego_user_owned_name {space; ids=[space_id]; _}], false ->
+             (* The mark rides the same gate as the check, so a second
+                request cannot pass between reading and marking. *)
+             t.ego_claim_active <- true;
+             Ok (claim, space, space_id)
+         | Some _, [Browser_addon_observation.Ego_user_owned_name {space; ids; _}], false ->
+             Error (refusal (Printf.sprintf
+               "the refused task Space name %S matches %d Spaces, so one is not chosen for the operator"
+               space (List.length ids)))
+         | Some _, ([] | _ :: _ :: _), false ->
+             Error (refusal "the ego task space this worker refused is not one user-owned Space; inspect the lane's inventory")
+         | None, _, false -> Error (refusal "worker execution requires a selected clientId")) with
+       | Error reply -> reply
+       | Ok (claim, space, space_id) ->
+           Fun.protect
+             ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+               Eio.Mutex.use_rw ~protect:true t.gate (fun () -> t.ego_claim_active <- false)))
+             (fun () -> waiting t ~disposition:W.Outcome_unknown (fun () ->
+                match claim [space_id] with
+                | Ok (claimed_id, claimed_name) ->
+                    W.Issue_result (Ok (B.Answered (`Assoc ["action",`String "take_over";
+                      "spaceId",`Int claimed_id;"spaceName",`String claimed_name;"reclaimed",`Bool true])))
+                | Error detail -> refusal detail)))
+    else
     (match with_admission t incarnation (fun () ->
       match route with
       | B.Stagehand_route when Option.is_none t.stagehand -> Error (refusal "Stagehand is not attached to this worker")

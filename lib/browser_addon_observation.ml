@@ -9,11 +9,17 @@ let unavailable_to_json = function
 
 let unavailable_of_json = function
   | `Assoc fields ->
+    (* A JSON number may arrive without its decimal point; both spell a
+       wall-clock second. *)
+    let seconds = function
+      | Some (`Float value) -> Some value
+      | Some (`Int value) -> Some (Float.of_int value)
+      | Some _|None -> None in
     (match List.assoc_opt "backend" fields, List.assoc_opt "reason" fields,
            List.assoc_opt "space" fields, List.assoc_opt "ids" fields,
-           List.assoc_opt "observedAt" fields, List.assoc_opt "recheck" fields with
+           seconds (List.assoc_opt "observedAt" fields), List.assoc_opt "recheck" fields with
      | Some (`String "ego"), Some (`String "user_owned_name"), Some (`String space), Some (`List rows),
-       Some (`Float observed_at), Some (`String "take_over") ->
+       Some observed_at, Some (`String "take_over") ->
        (if space = "" || not (Float.is_finite observed_at) || observed_at < 0. then
           Error "invalid unavailable browser backend"
         else

@@ -100,7 +100,9 @@ let () =
     | Browser_lane.Backend.Owned_firefox,_ -> Masc.Browser_addon_live_bidi.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Ego,Some configuration ->
       let input_store=match input_store with Some store->store|None->raise (Arg.Bad "missing retained Ego input authority") in
-      Masc.Browser_addon_live_ego.run ~env ~owner ~input_store
+      Masc.Browser_addon_live_ego.run ~on_lane_ended:(fun () ->
+        Atomic.set stopping true; Eio.Condition.broadcast wake)
+        ~env ~owner ~input_store
         ~downloads:(Masc.Browser_addon_downloads.downloads_directory ~directory) configuration serve
     | Browser_lane.Backend.Ego,None -> raise (Arg.Bad "the ego source needs its task space")
     | Browser_lane.Backend.External_host,_ -> serve ()))

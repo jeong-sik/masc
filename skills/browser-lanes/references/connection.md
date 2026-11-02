@@ -117,6 +117,26 @@ Ego Space는 같은 브라우저 안의 작업 공간이다. 작업할 때마다
 근거: [Ego Space 협업](https://www.egolite.app/document/en/docs/space),
 설치된 `ego-browser skill`의 “User control and completion”.
 
+## 사용자 소유로 남은 Space 회수
+
+인계 뒤 task가 끝나면(운영자가 끝내거나 `finish` 후) 그 Space의 소유권은
+사용자에게 남는다. 이때 live lane은 그 Space를 열지 않으므로 연결 목록이
+비고, `inventoryIssues`에 `ego_user_owned_space`(Space 이름, 관찰 시각)가
+올라온다. 이유 없이 비어 있는 게 아니라 거부 중이다.
+
+운영자가 그 Space에서 계속하겠다고 말한 뒤에만 BrowserAct `take_over`를
+`lane: "live"`로, clientId 없이 부른다. worker가 `claimTaskSpace`로 소유권을
+돌려받고 스스로 다시 연결하므로 worker를 재시작하지 않는다. 영수증은
+`reclaimed: true`와 Space 이름을 싣고 탭은 싣지 않는다. 이후 탭 목록부터
+다시 읽는다. `claimTaskSpace` 없이 `takeOverTaskSpace`를 쓰면 안전하게
+되돌릴 수 없는 실패라 ego 런타임이 프로세스를 끊는다. 여러 Space가 같은
+이름을 쓰면 worker가 하나를 고르지 않고 거부하므로, 운영자에게 어느
+Space인지 확인한 뒤 그 Space만 정리한다.
+
+연결이 끊긴 다른 원인(브라우저 종료, 확장 미설치, native host 문제)과
+이 케이스를 구분하는 근거는 `inventoryIssues`다. 해당 이슈가 없는데
+client가 없으면 `no_live_client` 절차를 따른다.
+
 ## 운영자가 automation을 설정할 때
 
 ```toml

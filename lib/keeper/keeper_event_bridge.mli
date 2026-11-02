@@ -31,6 +31,11 @@ val start :
     copy of the rule. *)
 val public_custom_event_type : string -> string
 
+val subscription_loss_event_type : string
+(** The bridge's process-wide notice that its bounded subscriber discarded
+    events before the relay could observe them. The notice carries a positive
+    [payload.dropped_count] and is retried ahead of later relayed events. *)
+
 (** Serialize a single AGENT_CORE event to SSE JSON.
     Exposed for unit testing. *)
 val native_event_to_json : Agent_core.Event_bus.event -> Yojson.Safe.t option

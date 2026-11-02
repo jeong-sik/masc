@@ -161,6 +161,14 @@ val current_id : unit -> int
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
 
+val broadcast_to_with_commit
+  : broadcast_target -> on_committed:(unit -> unit) -> Yojson.Safe.t -> unit
+(** The non-yielding callback runs once the replay buffer and live queues have
+    accepted the delivery and failed sessions have been unregistered. A later
+    diagnostic or external-subscriber exception does not undo that receipt.
+    This callback is not a receipt for external subscribers. [Presence_only]
+    is rejected because it is not a replayable observer delivery. *)
+
 val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
 (** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
     so the value is not encoded again under the fan-out lock. *)

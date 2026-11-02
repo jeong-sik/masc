@@ -1726,7 +1726,11 @@ let connection_badge (state : state) =
       connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  connection ^ refresh_progress_badge state
+  let source_loss =
+    if state.observer_source_loss then Theme.warn () ^ "[events lost] " ^ Ansi.reset
+    else ""
+  in
+  source_loss ^ connection ^ refresh_progress_badge state
 
 type compact_connection_state =
   | Compact_workspace_mismatch

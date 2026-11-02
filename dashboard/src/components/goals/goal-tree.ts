@@ -231,6 +231,8 @@ const expandedNodes = signal<Set<string>>(new Set())
 const filterQuery = signal('')
 const treePhaseFilter = signal<GoalPhaseFilter>('all')
 const selectedGoalId = signal<string | null>(null)
+let selectedGoalRevision = 0
+selectedGoalId.subscribe(() => { selectedGoalRevision += 1 })
 const detailData = signal<DashboardGoalDetailResponse | null>(null)
 const detailLoading = signal(false)
 const detailError = signal<string | null>(null)
@@ -253,7 +255,9 @@ type TreeRetryIntent = { authority: ExecutionWorkspaceAuthority; authRevision: n
 const treeRetryIntent = signal<TreeRetryIntent | null>(null)
 const treeRequestInFlight = signal<{ request: number; authority: ExecutionWorkspaceAuthority;
   authRevision: number; actor: string; observationRevision: number; controller: AbortController;
-  workspace: ArtifactWorkspace | null } | null>(null)
+  workspace: ArtifactWorkspace | null; workspaceReady: Promise<ArtifactWorkspace> } | null>(null)
+let treeWorkspaceAttestation: { request: number; authority: ExecutionWorkspaceAuthority;
+  authRevision: number; actor: string; workspace: ArtifactWorkspace } | null = null
 
 function recordTreeErrorOwner(authority: ExecutionWorkspaceAuthority, authRevision: number, actor: string) {
   treeErrorOwner.value = { authority, authRevision, actor, observationRevision: goalTreeObservationRevision.peek(), error: treeError.peek(),
@@ -525,6 +529,7 @@ function collapseAll() {
 async function refreshTree() {
   const request = ++treeRequestSeq
   treeRequestInFlight.peek()?.controller.abort()
+  treeWorkspaceAttestation = null
   treeDecisionBinding.value = null
   const authority = executionWorkspaceAuthority.peek()
   if (!authority) {
@@ -547,12 +552,15 @@ async function refreshTree() {
   const current = () => treeRequestSeq === request && executionWorkspaceAuthority.peek() === authority
     && storedTokenRevision.peek() === authRevision && goalDecisionActor() === actor
     && goalTreeObservationRevision.peek() === observationRevision
-  treeRequestInFlight.value = { request, authority, authRevision, actor, observationRevision, controller, workspace: null }
+  const workspaceReady = (async () => captureArtifactWorkspace(
+    authority.workspaceRoot, controller.signal, { reportCredentialRefusal: false }))()
+  treeRequestInFlight.value = { request, authority, authRevision, actor, observationRevision, controller, workspace: null, workspaceReady }
   treeLoading.value = true
   treeError.value = null
   try {
-    const workspace = await captureArtifactWorkspace(authority.workspaceRoot, controller.signal, { reportCredentialRefusal: false })
+    const workspace = await workspaceReady
     if (!current()) return
+    treeWorkspaceAttestation = { request, authority, authRevision, actor, workspace }
     const active = treeRequestInFlight.peek()
     if (active?.request === request) treeRequestInFlight.value = { ...active, workspace }
     if (replaceReadBeforeWrite(request, authority, authRevision, actor, workspace)) return
@@ -1597,20 +1605,46 @@ function GoalDetailPanel({
     credentialScope: JSON.stringify([binding.authRevision, binding.actor]),
     executionEpoch: binding.authority.epoch,
   } : null
+  const confirmationSelectionRevision = selectedGoalRevision
   const confirmationIsCurrent = () => Boolean(binding && goalIdIsUnambiguous(selectedNode.id, binding.snapshot)
     && selectedGoalId.peek() === selectedNode.id
+    && selectedGoalRevision === confirmationSelectionRevision
     && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
     && executionWorkspaceAuthority.peek() === binding.authority
     && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
+  const confirmationRecoveryBaseIsCurrent = () => Boolean(binding && treeConsumerCount > 0 && selectedGoalId.peek() === selectedNode.id
+    && selectedGoalRevision === confirmationSelectionRevision
+    && executionWorkspaceAuthority.peek() === binding.authority
+    && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
   const confirmationRecoveryIsCurrent = () => {
-    if (!binding || selectedGoalId.peek() !== selectedNode.id || executionWorkspaceAuthority.peek() !== binding.authority
-      || storedTokenRevision.peek() !== binding.authRevision || goalDecisionActor() !== binding.actor) return false
+    if (!binding || !confirmationRecoveryBaseIsCurrent()) return false
     const current = treeDecisionBinding.peek()
     if (current && current.authority === binding.authority && current.authRevision === binding.authRevision
       && current.actor === binding.actor && sameArtifactWorkspace(current.workspace, binding.workspace)) return true
+    const attestation = treeWorkspaceAttestation
+    if (attestation && attestation.request === treeRequestSeq && attestation.authority === binding.authority
+      && attestation.authRevision === binding.authRevision && attestation.actor === binding.actor
+      && sameArtifactWorkspace(attestation.workspace, binding.workspace)) return true
     const active = treeRequestInFlight.peek()
     return Boolean(active?.workspace && active.authority === binding.authority && active.authRevision === binding.authRevision
       && active.actor === binding.actor && sameArtifactWorkspace(active.workspace, binding.workspace))
+  }
+  const waitForConfirmationRecoveryCurrent = async () => {
+    while (binding && confirmationRecoveryBaseIsCurrent()) {
+      if (confirmationRecoveryIsCurrent()) return true
+      const pending = treeRequestInFlight.peek()
+      if (!pending || pending.authority !== binding.authority || pending.authRevision !== binding.authRevision
+        || pending.actor !== binding.actor) return false
+      try { await pending.workspaceReady } catch {
+        if (treeRequestInFlight.peek()?.request !== pending.request) continue
+        return false
+      }
+      if (confirmationRecoveryIsCurrent()) return true
+      // A post-write refresh may replace the pre-write read as soon as it
+      // identifies its workspace. Follow that new read, never the old one.
+      if (treeRequestInFlight.peek()?.request === pending.request) return false
+    }
+    return false
   }
   const candleIsCurrent = () => {
     const current = treeDecisionBinding.peek()
@@ -1685,6 +1719,7 @@ function GoalDetailPanel({
         || confirmationHasUnsettledReceipt(confirmationOwner.workspace, selectedNode.id)) ? html`
         <${GoalConfirmationPanel} key=${confirmationOwner.key} owner=${confirmationOwner} isCurrent=${confirmationIsCurrent}
           isRecoveryCurrent=${confirmationRecoveryIsCurrent}
+          waitForRecoveryCurrent=${waitForConfirmationRecoveryCurrent}
           readAuthority=${binding} lifecyclePending=${lifecyclePending} hasLifecyclePending=${hasLifecyclePending}
           onOutcome=${(result: { ticket: number; state: 'pending' | 'confirmed' | 'uncertain' }) => {
             if (!binding) return

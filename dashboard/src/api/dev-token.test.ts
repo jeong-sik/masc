@@ -77,6 +77,54 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).not.toHaveBeenCalled()
   })
 
+  it('withdraws a reset bootstrap without letting its late response replace a newer one', async () => {
+    let finishOld!: (response: Response) => void
+    let finishNew!: (response: Response) => void
+    fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve }))
+    const old = ensureDevToken()
+    expect(devTokenBootstrapStatus.value).toBe('fetching')
+    resetDevTokenBootstrap()
+    expect(devTokenBootstrapStatus.value).toBe('idle')
+    const current = ensureDevToken()
+    finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
+    await old
+    expect(devTokenBootstrapStatus.value).toBe('fetching')
+    expect(setStoredToken).not.toHaveBeenCalled()
+    finishNew(jsonResponse({ token: 'current', actor: 'dashboard', role: 'admin' }))
+    await current
+    expect(setStoredToken).toHaveBeenCalledOnce()
+    expect(setStoredToken).toHaveBeenCalledWith('current', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(devTokenBootstrapStatus.value).toBe('ok')
+  })
+
+  it('restarts once for a changed owner that still permits dashboard bootstrap', async () => {
+    let finishOld!: (response: Response) => void
+    currentDashboardActor.mockReturnValue('alice')
+    fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce(jsonResponse({ token: 'current', actor: 'dashboard', role: 'admin' }))
+    const pending = ensureDevToken()
+    currentDashboardActor.mockReturnValue('dashboard')
+    finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
+    await pending
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
+    expect(setStoredToken).toHaveBeenCalledOnce()
+    expect(setStoredToken).toHaveBeenCalledWith('current', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(devTokenBootstrapStatus.value).toBe('ok')
+  })
+
+  it('does not replace an explicitly selected non-dashboard actor after an owner change', async () => {
+    let finishOld!: (response: Response) => void
+    fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    const pending = ensureDevToken()
+    currentDashboardActor.mockReturnValue('alice')
+    finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
+    await pending
+    expect(fetchWithTimeout).toHaveBeenCalledOnce()
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(devTokenBootstrapStatus.value).toBe('idle')
+  })
+
   it('requires an explicit bootstrap call after the server warm-up payload', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(jsonResponse({

@@ -189,6 +189,19 @@ describe('a refusal owned by a Goal request', () => {
     expect(getStoredToken()).toBe('manual-token')
   })
 
+  it.each([
+    ['actor_mismatch', 'url-token'],
+    ['invalid_token', null],
+  ] as const)('does not replace a non-dashboard URL credential after %s', async (code, expected) => {
+    setStoredToken('url-token', { source: 'url' })
+    setCanonicalDashboardActor('alice')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await recoverScopedRejectedCredential({ token: 'url-token', authErrorCode: code }, () => true)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(getStoredToken()).toBe(expected)
+  })
+
   it.each([200, 404])('does not publish a dev-token %i response after its owner changes', async status => {
     setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     let current = true

@@ -55,9 +55,10 @@ function beginAuthorityRead(key: string) {
 }
 
 const errorStatus = (error: unknown) => error instanceof ApiRequestError ? error.status : undefined
-const recoverRefusal = (error: unknown, token: string | null, isCurrent: () => boolean) =>
+const recoverRefusal = (error: unknown, token: string | null, isCurrent: () => boolean,
+  waitForCurrent?: () => Promise<boolean>) =>
   error instanceof ApiRequestError && error.status === 401 && token
-    ? recoverScopedRejectedCredential({ token, authErrorCode: error.authErrorCode }, isCurrent)
+    ? recoverScopedRejectedCredential({ token, authErrorCode: error.authErrorCode }, isCurrent, waitForCurrent)
     : Promise.resolve()
 
 function anotherRequestPending(owner: ConfirmationOwner): boolean {
@@ -89,9 +90,10 @@ export function confirmationHasUnsettledReceipt(workspace: ArtifactWorkspace, go
     && (receipt.view.kind === 'submitting' || receipt.view.kind === 'uncertain'))
 }
 
-export function GoalConfirmationPanel({ owner, isCurrent, isRecoveryCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed, onOutcome }: {
+export function GoalConfirmationPanel({ owner, isCurrent, isRecoveryCurrent, waitForRecoveryCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed, onOutcome }: {
   owner: ConfirmationOwner; isCurrent: () => boolean; readAuthority: object
   isRecoveryCurrent?: () => boolean
+  waitForRecoveryCurrent?: () => Promise<boolean>
   lifecyclePending: boolean; hasLifecyclePending: () => boolean; onConfirmed: () => void
   onOutcome?: (result: { ticket: number; state: 'pending' | 'confirmed' | 'uncertain' }) => void
 }) {
@@ -230,7 +232,8 @@ export function GoalConfirmationPanel({ owner, isCurrent, isRecoveryCurrent, rea
         // Start recovery under the original owner, then immediately withdraw
         // the old tree. Never replay the POST after a credential change.
         const recovery = recoverRefusal(error, sentToken, () =>
-          (isRecoveryCurrent ? isRecoveryCurrent() : current()) && receipts.peek()[owner.key]?.ticket === ticket)
+          (isRecoveryCurrent ? isRecoveryCurrent() : current()) && receipts.peek()[owner.key]?.ticket === ticket,
+        waitForRecoveryCurrent ? async () => await waitForRecoveryCurrent() && receipts.peek()[owner.key]?.ticket === ticket : undefined)
         onOutcome?.({ ticket, state: 'uncertain' })
         void recovery.catch(error => console.warn('[goal-confirmation] credential recovery failed', error))
       }

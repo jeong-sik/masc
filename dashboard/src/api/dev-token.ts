@@ -124,6 +124,19 @@ export async function ensureDevToken(): Promise<void> {
   const actorReset = currentCanonicalDashboardActor() === null ? 0 : 1
   const current = () => generation === bootstrapGeneration && sameTokenOwner(owner, tokenOwner())
   const forget = () => { if (generation === bootstrapGeneration) devTokenBootstrapPromise = null }
+  const continueForChangedOwner = async (): Promise<void> => {
+    if (generation !== bootstrapGeneration) return
+    forget()
+    ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'idle'
+    // An explicitly selected non-dashboard actor must not be replaced by an
+    // automatic dashboard token, nor may an older request replace a token
+    // that another owner installed while it was in flight.
+    const nextOwner = tokenOwner()
+    if (nextOwner.token === owner.token && nextOwner.revision === owner.revision
+      && !isRemoteAccess() && nextOwner.actor === 'dashboard' && shouldRefreshDevToken()) {
+      await ensureDevToken()
+    }
+  }
   const rememberCurrentOwner = () => {
     if (generation === bootstrapGeneration && devTokenBootstrapPromise) devTokenBootstrapPromise.owner = tokenOwner()
   }
@@ -138,7 +151,7 @@ export async function ensureDevToken(): Promise<void> {
           DEV_TOKEN_FETCH_TIMEOUT_MS,
           async res => ({ res, payload: res.ok ? await res.json() as DevTokenBootstrapPayload : null }),
         )
-        if (!current()) return
+        if (!current()) return continueForChangedOwner()
         if (!res.ok) {
           if (res.status === 404 && storedMeta?.source === 'dev') {
             clearStoredToken()
@@ -198,7 +211,7 @@ export async function ensureDevToken(): Promise<void> {
         rememberCurrentOwner()
         return
     } catch {
-      if (!current()) return
+      if (!current()) return continueForChangedOwner()
       ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
       forget()
       return
@@ -212,6 +225,9 @@ export function resetDevTokenBootstrap(): void {
   bootstrapGeneration += 1
   devTokenBootstrapPromise = null
   bootstrapApplication = null
+  if (devTokenBootstrapStatus.peek() === 'fetching') {
+    ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'idle'
+  }
 }
 
 export async function refreshDevTokenAfterAuthError(code: unknown): Promise<boolean> {
@@ -286,12 +302,18 @@ export async function recoverFromRejectedCredential(
 export async function recoverScopedRejectedCredential(
   rejection: RejectedCredential,
   isCurrent: () => boolean,
+  waitForCurrent?: () => Promise<boolean>,
 ): Promise<void> {
   const owner = tokenOwner()
   const current = () => isCurrent() && sameTokenOwner(owner, tokenOwner())
+  const currentAfterWait = async () => {
+    if (current()) return true
+    if (!waitForCurrent || !sameTokenOwner(owner, tokenOwner())) return false
+    try { return await waitForCurrent() && current() } catch { return false }
+  }
   if (!current() || owner.token !== rejection.token) return
   const meta = getStoredTokenMeta()
-  if (isRefreshableDashboardAuthCode(rejection.authErrorCode) && !isRemoteAccess() && meta?.source !== 'manual') {
+  if (isRefreshableDashboardAuthCode(rejection.authErrorCode) && !isRemoteAccess() && shouldRefreshDevToken()) {
     // A prior unscoped bootstrap must not publish after this recovery starts.
     resetDevTokenBootstrap()
     try {
@@ -301,7 +323,7 @@ export async function recoverScopedRejectedCredential(
         DEV_TOKEN_FETCH_TIMEOUT_MS,
         async res => ({ res, payload: res.ok ? await res.json() as DevTokenBootstrapPayload : null }),
       )
-      if (!current()) return
+      if (!await currentAfterWait()) return
       if (res.status === 404 && meta?.source === 'dev') {
         resetDevTokenBootstrap()
         if (current()) clearStoredToken()
@@ -319,7 +341,7 @@ export async function recoverScopedRejectedCredential(
       // A failed re-mint is not evidence that a loopback dev token should be cleared.
     }
   }
-  if (!current() || !isCredentialRejectionCode(rejection.authErrorCode)) return
+  if (!isCredentialRejectionCode(rejection.authErrorCode) || !await currentAfterWait()) return
   if (meta?.source === 'dev' && !isRemoteAccess()) return
   resetDevTokenBootstrap()
   if (current()) clearStoredToken()

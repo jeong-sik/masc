@@ -12,7 +12,7 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 const devTokenMocks = vi.hoisted(() => ({
-  recoverFromRejectedCredential: vi.fn(async () => undefined),
+  recoverFromRejectedCredential: vi.fn(async (_rejection: { token: string; authErrorCode: string | undefined }): Promise<void> => {}),
 }))
 
 vi.mock('./api', () => apiMocks)

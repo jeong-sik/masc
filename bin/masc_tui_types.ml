@@ -3644,9 +3644,8 @@ type workspace_health =
   | Workspace_health_unknown
 
 (** What the runtime event feed ([GET /mcp?sse_kind=observer]) is doing.
-    The feed is opened once the server has answered a refresh and reopened
-    on the refresh cadence after it closes, so an operator reads the same
-    row for "no server yet" and "the stream dropped" -- with the reason. *)
+    The feed opens after server contact and has a workspace-scoped delayed
+    retry after it closes. The reason remains visible while retry is pending. *)
 type observer_status =
   | Observer_off  (** not opened: no server has answered yet *)
   | Observer_opening  (** initialize and subscribe in flight *)
@@ -10646,6 +10645,8 @@ type state = {
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
   mutable observer: observer_status;
+  mutable observer_retry_owner: unit ref option;
+  mutable observer_recovery_owner: unit ref option;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
@@ -14104,6 +14105,7 @@ let suspend_workspace_readings state =
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
+  state.observer_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
@@ -19168,6 +19170,8 @@ let create_state
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;
+  observer_retry_owner = None;
+  observer_recovery_owner = None;
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;

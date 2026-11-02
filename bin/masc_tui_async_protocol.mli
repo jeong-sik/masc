@@ -776,6 +776,8 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
+  | Observer_retry_due of workspace_authority * unit ref
+  | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -832,6 +834,10 @@ val workspace_message_admitted :
   state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> bool
 (** A stale read never re-enters a reconfirmed workspace. Admitted operation
     and chat receipts keep their original workspace authority. *)
+
+val observer_retry_owned : state -> authority:workspace_authority -> unit ref -> bool
+val observer_recovery_owned : state -> authority:workspace_authority -> unit ref -> bool
+(** A retry belongs only to the workspace and exact closed stream that scheduled it. *)
 
 val account_login_action_is_read : Masc_tui_account_login.action -> bool
 

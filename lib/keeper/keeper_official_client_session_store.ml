@@ -143,6 +143,7 @@ type carried_context =
   | Librarian_unread
   | Tool_result_receipts
   | Historical_task_reference
+  | Codex_system_prompt
 
 type held_context =
   { context : carried_context
@@ -427,6 +428,7 @@ let carried_context_rank = function
   | Librarian_unread -> 5
   | Tool_result_receipts -> 6
   | Historical_task_reference -> 7
+  | Codex_system_prompt -> 8
 ;;
 
 let compare_carried_context a b =
@@ -446,7 +448,8 @@ let compare_carried_context a b =
   | Librarian_working_state, Librarian_working_state
   | Librarian_unread, Librarian_unread
   | Tool_result_receipts, Tool_result_receipts
-  | Historical_task_reference, Historical_task_reference -> 0
+  | Historical_task_reference, Historical_task_reference
+  | Codex_system_prompt, Codex_system_prompt -> 0
   | ( Context_block _
     | Context_section _
     | Context_section_row _
@@ -454,7 +457,8 @@ let compare_carried_context a b =
     | Librarian_working_state
     | Librarian_unread
     | Tool_result_receipts
-    | Historical_task_reference ),
+    | Historical_task_reference
+    | Codex_system_prompt ),
     ( Context_block _
     | Context_section _
     | Context_section_row _
@@ -462,7 +466,8 @@ let compare_carried_context a b =
     | Librarian_working_state
     | Librarian_unread
     | Tool_result_receipts
-    | Historical_task_reference ) ->
+    | Historical_task_reference
+    | Codex_system_prompt ) ->
     Int.compare (carried_context_rank a) (carried_context_rank b)
 ;;
 
@@ -498,7 +503,7 @@ let validate binding =
                      not (String.equal row_sha256 held.sha256)
                    | Context_block _ | Context_section _ | Context_carrier
                    | Librarian_working_state | Librarian_unread
-                   | Historical_task_reference | Tool_result_receipts -> false)
+                   | Historical_task_reference | Tool_result_receipts | Codex_system_prompt -> false)
                 frontier.held_context
       then Error "held section row is not named by its own digest"
       else if List.length (List.sort_uniq compare_carried_context held_contexts) <> List.length held_contexts
@@ -797,6 +802,7 @@ let held_context_to_yojson { context; sha256 } =
     | Librarian_unread -> [ "context", `String "librarian_unread" ]
     | Tool_result_receipts -> [ "context", `String "tool_result_receipts" ]
     | Historical_task_reference -> [ "context", `String "task_reference" ]
+    | Codex_system_prompt -> [ "context", `String "codex_system_prompt" ]
   in
   `Assoc (context_fields @ [ "sha256", `String sha256 ])
 
@@ -822,6 +828,7 @@ let held_context_of_yojson = function
       | [ "context", `String "librarian_unread"; "sha256", _ ] -> Ok Librarian_unread
       | [ "context", `String "tool_result_receipts"; "sha256", _ ] -> Ok Tool_result_receipts
       | [ "context", `String "task_reference"; "sha256", _ ] -> Ok Historical_task_reference
+      | [ "context", `String "codex_system_prompt"; "sha256", _ ] -> Ok Codex_system_prompt
       | _ -> Error "invalid held context fields"
     in
     (match List.assoc_opt "sha256" fields with

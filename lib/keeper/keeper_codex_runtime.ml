@@ -1030,19 +1030,20 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        compacts it itself. What changes per turn or per operation -- the
        context carrier, the Librarian working state and the historical task
        reference ({!Host.is_carried_on_resume}) -- goes in front of the goal,
-       as the Claude Code lane sends it. Codex applies the [developerInstructions]
-       a [thread/resume] names only when it next compacts the thread (codex-cli
-       0.156.1, 2026-09-25: a resumed thread's requests carried none of them
-       until its compaction wrote them into the replacement history), so the
-       carried messages stay out of them and the compacted thread never holds a
-       stale copy of what the prompt carries.
+       as the Claude Code lane sends it. A resumed Codex 0.166.0 thread with
+       a restored context reference stores new [developerInstructions] in
+       its configuration without appending them to the next model request.
+       The standing System prompt therefore also uses the acknowledged
+       Developer injection path below when its exact bytes change. Carried
+       observations keep their existing current-turn placement.
 
        History can contain large tool results. Projecting and encoding it for
        a new session is CPU work over immutable messages; keeping it on the
        owner domain stalls HTTP, SSE and every other Keeper sharing that
        scheduler. Vendor-session frontier provenance needs only its message
        count, not an encoding or digest of the canonical conversation. *)
-    let* history, context_frontier, composed_developer_instructions =
+    let* history, context_frontier, composed_developer_instructions,
+        (system_projection, system_receipt) =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let* developer_messages, history =
           project_messages ~assembly:composed_context
@@ -1081,8 +1082,20 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         let composed_developer_instructions =
           compose_developer_instructions developer_messages
         in
-        Ok (history, context_frontier, composed_developer_instructions))
+        let system_projection = compose_developer_instructions [] in
+        let system_receipt : Keeper_official_client_session_store.held_context =
+          { context = Codex_system_prompt
+          ; sha256 = Agent_core_sha256.(
+              digest_string (Keeper_context_submission_link.text system_projection) |> to_hex)
+          } in
+        Ok (history, context_frontier, composed_developer_instructions,
+            (system_projection, system_receipt)))
     in
+    let previously_held = Keeper_official_client_session_store.held_context_for_resume
+      claim_plan ~expected:stored_session in
+    let refresh_system = match thread_mode with
+      | Runtime_codex_app_server.Start -> false
+      | Runtime_codex_app_server.Resume _ -> not (List.mem system_receipt previously_held) in
     let prompt, held_context, prompt_projection =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
@@ -1091,10 +1104,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         Host.start_held_context ?composed_context prepared.messages, projection
       | Runtime_codex_app_server.Resume _ ->
         let delivery = Host.resume_prompt ~goal:prompt ?composed_context
-          ~held:(Keeper_official_client_session_store.held_context_for_resume
-            claim_plan ~expected:stored_session) prepared.messages in
+          ~held:previously_held prepared.messages in
         delivery.prompt, delivery.held_context, delivery.context_projection
     in
+    let held_context = system_receipt :: List.filter
+      (fun (held : Keeper_official_client_session_store.held_context) ->
+         held.context <> Codex_system_prompt) held_context in
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
     let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
@@ -1106,7 +1121,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        developer items, independently of the previous session's survival. *)
     let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
       |> Result.map_error internal_error in
-    let developer_context = Keeper_client_tool_outbox.developer_context tool_outbox in
+    (* Resume configuration alone does not update the model-visible history.
+       The runtime waits for this injection's ACK before [turn/start]. The
+       existing frontier acknowledges it only after a completed vendor turn;
+       compaction invalidates the receipt along with other held context. *)
+    let developer_context =
+      (if refresh_system then [Keeper_context_submission_link.text system_projection] else [])
+      @ Keeper_client_tool_outbox.developer_context tool_outbox in
     let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)
@@ -1548,7 +1569,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                  ~slot:Developer_instructions composed_developer_instructions observation.write
              | Turn_start -> Keeper_context_submission_link.binding_to_json
                  ~slot:(Turn_text (List.length images)) prompt_projection observation.write
-             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
+             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_injected_context"]
              | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
              | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
            Host.record_context_submission ~keeper_name ~raw_trace_run

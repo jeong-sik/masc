@@ -1513,7 +1513,7 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
                    | Ok None -> fail "expected queued target event for bystander"
                    | Error unavailable ->
                      fail (KWOBS.unavailable_to_string unavailable))
-                | _ -> fail "expected exactly one queued stimulus for bystander")))
+                | _ -> fail "expected exactly one queued stimulus for bystander"))))
     [ "public", Board.Public, 1
     ; "internal", Board.Internal, 1
     ; "unlisted", Board.Unlisted, 0

@@ -263,6 +263,16 @@ let test_selection_hides_but_preserves_a_retained_answer () =
     check bool "disabled output does not disclose the original answer" true
       (match off (request "selected") with Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check int "the delivery refusal is retained alongside the original attempt" 2 (List.length (attempts store "selected"));
+    let latest () = require (Exact.read_latest_original_execution ~store:(Store.create ~root)
+        ~declaration_id ~schema (request "selected")) in
+    let expect_original_proof () = match latest () with
+      | Exact.Completed_latest {attempt_ordinal=1;execution={outcome=Exact.Call_ended (Exact.Answered _);_}} -> ()
+      | Exact.No_completed_latest | Exact.Completed_latest _ -> fail "delivery refusal hid the original proof" in
+    expect_original_proof ();
+    check bool "a second refusal remains a refusal" true
+      (match off (request "selected") with Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
+    check int "both delivery refusals remain in the audit" 3 (List.length (attempts store "selected"));
+    expect_original_proof ();
     check bool "reenabling replays the original answer" true
       (answered_with question (run_request store runner (request "selected")));
     check int "one provider call across selection changes" 1 !sends)
@@ -516,6 +526,17 @@ let test_latest_execution_never_borrows_an_earlier_proof () =
        check int "actual refusal ordinal" 1 attempt_ordinal;
        check bool "actual original refusal" true (refusal=busy)
      | Exact.No_completed_latest | Exact.Completed_latest _ -> fail "latest refusal is missing");
+    let retained=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    let started=match retained with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="attempts" then (match value with
+            | `List entries -> `List (entries @ [`Assoc ["started",`String (String.make 32 'a')]])
+            | _ -> fail "expected attempt history") else value) fields)
+      | _ -> fail "expected retained original" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id started);
+    check bool "a later started attempt cannot borrow a completed predecessor" true
+      (latest ()=Exact.No_completed_latest);
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id retained);
     ignore (run_request store runner original);
     check bool "a later unstarted attempt cannot borrow a completed predecessor" true
       (latest ()=Exact.No_completed_latest);
@@ -528,6 +549,14 @@ let test_latest_execution_never_borrows_an_earlier_proof () =
      | Exact.Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended (Exact.Answered _);_}} ->
        check int "the reader reports the real ordinal including the unsent attempt" 3 attempt_ordinal
      | Exact.No_completed_latest | Exact.Completed_latest _ -> fail "latest answer is missing");
+    let off = {package with exact_outputs=[]} in
+    (match require (Exact.run ~authorize_request ~store ~declaration_id ~package:off ~runner original) with
+     | Exact.Final (Exact.Not_allowed _) -> ()
+     | Exact.Final _ | Exact.Not_final _ -> fail "disabled output must refuse delivery");
+    (match latest () with
+     | Exact.Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended (Exact.Answered _);_}} ->
+       check int "delivery refusal preserves the original ordinal, including earlier attempts" 3 attempt_ordinal
+     | Exact.No_completed_latest | Exact.Completed_latest _ -> fail "the original answer proof was hidden");
     check int "proof reads never dispatch" 2 !sends)
 
 let test_proof_publication_failure_never_exposes_an_answer () =

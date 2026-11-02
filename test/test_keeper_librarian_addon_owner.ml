@@ -436,6 +436,19 @@ let test_retained_host_terminal_commits_off ()=with_fixture (fun ~sw:_ fixture -
     (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
   let posts=F.post_count fixture.server in
   set_enabled fixture false;
+  let exact=Capture.request capture |> get in
+  io (fun () ->
+    let stored=Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get
+      |> Option.value ~default:`Null in
+    let denial=Lane_addon_exact.final_to_json (Not_allowed {reason="legacy delivery refusal"}) in
+    let with_denial=match stored with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="attempts" then (match value with `List entries -> `List (entries @ [denial])
+            | _ -> fail "expected actual host attempt history") else value) fields)
+      | _ -> fail "expected actual retained host request" in
+    Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id with_denial |> get);
+  let recovered=latest_execution fixture capture in
+  check bool "delivery refusal does not replace the actual provider proof" true (recovered=execution);
   drive_until fixture settled |> assert_settled;
   check int "accepted original recovery while Off starts no provider" posts (F.post_count fixture.server);
   check int "only the actual local domain commit authorizes queue ACK" 0

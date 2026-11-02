@@ -282,6 +282,8 @@ type latest_original_execution =
 val read_latest_original_execution : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (latest_original_execution, string) result
 (** Strictly read the actual last original attempt and its matching host proof.
+    Delivery refusals appended after a retained final are observations of that
+    final, not later executions; their original audit entries remain intact.
     A later unresolved or never-dispatched attempt never borrows an earlier
     proof. Validate the complete original history and all sparse proofs before
     returning the actual ordinal; no caller guesses it from a worker result.

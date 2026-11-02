@@ -754,7 +754,15 @@ let read_latest_original_execution ~store ~declaration_id ~schema request =
     let* record=bound_record ~declaration_id request wire in
     let* _=validate_record ~request ~schema:None record in
     let* proofs=bound_proofs ~store ~declaration_id request record in
-    let attempt_ordinal=List.length record.attempts in
+    let rec last_execution_ordinal ordinal = function
+      | Delivery_refused _ :: earlier -> last_execution_ordinal (ordinal - 1) earlier
+      | [] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted
+          | Unknown_cut | Unknown_raised _ | Reused) :: _ -> ordinal in
+    let length=List.length record.attempts in
+    let attempt_ordinal = match record.final with
+      | Some (Call_final _ | Outcome_unknown | Request_id_reused) ->
+          last_execution_ordinal length (List.rev record.attempts)
+      | None | Some (Not_allowed _) -> length in
     match selected_proof ~attempt_ordinal proofs with
     | None -> Ok No_completed_latest
     | Some (retained_schema,execution) ->

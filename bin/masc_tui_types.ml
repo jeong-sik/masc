@@ -10381,6 +10381,7 @@ type state = {
   mutable schedules_agenda: schedule_snapshot option;
   mutable schedules_agenda_error: string option;
   mutable schedules_agenda_read: Snapshot_read.t;
+  mutable schedules_agenda_event_pending: bool;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
@@ -16900,11 +16901,14 @@ let apply_schedule_agenda_read state ticket result =
   | None -> ()
   | Some read ->
       state.schedules_agenda_read <- read;
-      (match result with
-       | Ok snapshot ->
-           state.schedules_agenda <- Some snapshot;
-           state.schedules_agenda_error <- None
-       | Error error -> state.schedules_agenda_error <- Some error)
+      (* A change observed during this read means its result may precede the
+         change. Retire it without publishing; the caller starts a successor. *)
+      if not state.schedules_agenda_event_pending then
+        (match result with
+         | Ok snapshot ->
+             state.schedules_agenda <- Some snapshot;
+             state.schedules_agenda_error <- None
+         | Error error -> state.schedules_agenda_error <- Some error)
 
 let selected_schedule_id state =
   Option.bind state.schedules (fun snapshot ->
@@ -19552,6 +19556,7 @@ let create_state
   schedules_agenda = None;
   schedules_agenda_error = None;
   schedules_agenda_read = Snapshot_read.idle;
+  schedules_agenda_event_pending = false;
   schedule_cursor = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;

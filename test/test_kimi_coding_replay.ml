@@ -41,7 +41,11 @@ let provider_config runtime model_id =
   let binding = List.find (fun (binding : Runtime_schema.binding) ->
     binding.provider_id = "kimi_coding" && binding.model_id = model_id)
       runtime.Runtime_schema.bindings in
-  Runtime_adapter.binding_to_provider_config runtime binding |> expect_ok
+  Runtime_adapter.materialize_provider_binding
+    ~construction:(Runtime_adapter.create_construction ()) runtime binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) ->
+       selected.provider_config)
+  |> expect_ok
 
 let checkpoint model messages =
   Agent_core.Checkpoint.

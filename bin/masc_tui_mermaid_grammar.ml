@@ -8,6 +8,8 @@ type shape =
   | Rect
   | Round
   | Diamond
+  | Hexagon
+  | Asymmetric
   | Database
   | Subroutine
   | Stadium
@@ -287,11 +289,11 @@ let openers =
   ; ("[(", ")]", Database)
   ; ("([", "])", Stadium)
   ; ("((", "))", Circle)
-  ; ("{{", "}}", Diamond)
+  ; ("{{", "}}", Hexagon)
   ; ("[", "]", Rect)
   ; ("(", ")", Round)
   ; ("{", "}", Diamond)
-  ; (">", "]", Rect)
+  ; (">", "]", Asymmetric)
   ]
 
 type cursor = {

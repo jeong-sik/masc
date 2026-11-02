@@ -140,12 +140,22 @@ type backlog_cache_entry = {
 
 let backlog_cache : (string, backlog_cache_entry) Hashtbl.t = Hashtbl.create 16
 let backlog_cache_mu = Stdlib.Mutex.create ()
+(* A miss may finish decoding after invalidation. Its token prevents it from
+   repopulating the cache with a value read before that invalidation. *)
+let backlog_cache_generation = ref (ref ())
+
+(* Test seam for an in-flight miss racing invalidation. *)
+let before_backlog_cache_registration_hook = Atomic.make (fun () -> ())
 
 let file_stat_opt path =
   try Some (Unix.stat path) with Unix.Unix_error _ | Sys_error _ -> None
 
 let clear_backlog_cache_for path =
-  Stdlib.Mutex.protect backlog_cache_mu (fun () -> Hashtbl.remove backlog_cache path)
+  Stdlib.Mutex.protect backlog_cache_mu (fun () ->
+      backlog_cache_generation := ref ();
+      Hashtbl.remove backlog_cache path)
+
+let invalidate_backlog_cache config = clear_backlog_cache_for (backlog_path config)
 
 type backlog_recovery = {
   primary_error : string;
@@ -196,20 +206,23 @@ let read_backlog_with_source_r config =
            recovery_path
            (json_doc_error_to_string recovery_error))
   in
-  let cached =
+  let cached, generation =
     match config.backend with
-    | Memory _ -> None
+    | Memory _ -> None, None
     | FileSystem _ ->
         Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-            match Hashtbl.find_opt backlog_cache path with
-            | None -> None
-            | Some entry -> (
-                match file_stat_opt path with
-                | None -> None
-                | Some st ->
-                    if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
-                    then Some entry.backlog
-                    else None))
+            let cached =
+              match Hashtbl.find_opt backlog_cache path with
+              | None -> None
+              | Some entry -> (
+                  match file_stat_opt path with
+                  | None -> None
+                  | Some st ->
+                      if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
+                      then Some entry.backlog
+                      else None)
+            in
+            cached, Some !backlog_cache_generation)
   in
   match cached with
   | Some backlog ->
@@ -246,17 +259,19 @@ let read_backlog_with_source_r config =
               let stat_after =
                 match stat_before with None -> None | Some _ -> file_stat_opt path
               in
-              (match (stat_before, stat_after) with
-              | Some before, Some after
+              (match (stat_before, stat_after, generation) with
+              | Some before, Some after, Some generation
                 when after.Unix.st_mtime = before.Unix.st_mtime
                      && after.Unix.st_size = before.Unix.st_size ->
+                  (Atomic.get before_backlog_cache_registration_hook) ();
                   Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-                      Hashtbl.replace backlog_cache path
-                        { mtime = after.Unix.st_mtime
-                        ; size = after.Unix.st_size
-                        ; backlog
-                        ; prepared = None
-                        })
+                      if !backlog_cache_generation == generation then
+                        Hashtbl.replace backlog_cache path
+                          { mtime = after.Unix.st_mtime
+                          ; size = after.Unix.st_size
+                          ; backlog
+                          ; prepared = None
+                          })
               | _ ->
                   (* The file moved under the read (or vanished before it):
                      hand back the value but leave the cache to the next

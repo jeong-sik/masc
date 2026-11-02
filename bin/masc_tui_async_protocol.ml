@@ -541,7 +541,10 @@ type async_msg =
           itself. [image_url] is what was fetched; [page_url] is the link the
           operator chose, and the one a browser gets when drawing fails
           (see [Masc_tui_browser.browser_url]). *)
-  | Keeper_turns_loaded of (string * int) list * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_waiting_loaded of Keeper_waiting_read.request * keeper_waiting_snapshot
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -994,7 +997,7 @@ let rec workspace_message_is_read = function
   | Approvals_summary_loaded _
   | Listen_prepared _
   | Sent_image_ready _
-  | Keeper_turns_loaded _
+  | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Gate_snapshot_loaded _
   | Keeper_gate_settings_loaded _
   | Keeper_tool_modes_loaded _
@@ -1182,7 +1185,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
   | Keeper_tool_approvals_loaded _ | Listen_prepared _ | Resource_diagram_ready _
-  | Keeper_turns_loaded _
+  | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
@@ -1298,7 +1301,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
     | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
-    | Image_render_ready _ | Keeper_turns_loaded (_, _)
+    | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
     | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
     | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
@@ -1436,7 +1439,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)
   | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
-  | Image_render_ready _ | Keeper_turns_loaded (_, _)
+  | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)
   | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)

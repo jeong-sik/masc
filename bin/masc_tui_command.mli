@@ -292,6 +292,13 @@ val parse : string -> t
 (** Read the composer's text. Leading blanks are not stripped before the
     slash is looked for: an operator who types a space first meant text. *)
 
+val parse_with_message_source :
+  string -> t * Masc_tui_message_input.source_range list option
+(** The same parser also identifies the exact source ranges used for [Say] or
+    [Steer_turn] payloads. [None] is another command, whose arguments must not
+    be interpreted as pasted message data. In particular the ranges preserve
+    the parser's first-line trimming without trimming a spill's original text. *)
+
 val task_message : task_id:string -> title:string -> body:string -> string
 (** The message handed to the keeper once its task exists: the task id in
     front of what the operator wrote, so the keeper can claim the exact task

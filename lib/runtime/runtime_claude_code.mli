@@ -122,11 +122,15 @@ type request_input =
   { input_tokens : int
   ; cache_creation_input_tokens : int
   ; cache_read_input_tokens : int
+  ; reported_cache_creation_input_tokens : int option
+  ; reported_cache_read_input_tokens : int option
   }
 
 (** Usage counts read from a CLI frame. The CLI mirrors Anthropic
     Messages semantics: [input_tokens] is the exclusive wire count (tokens
-    after the last cache breakpoint); absent cache fields read as 0. The
+    after the last cache breakpoint); absent cache fields read as 0 in the
+    normalized accounting fields while [reported_cache_*] preserve wire field
+    presence ([None] when omitted, [Some 0] when explicitly zero). The
     keeper mapping builds the canonical inclusive
     {!Agent_core.Types.api_usage} from these via
     [Backend_anthropic.usage_of_wire_counts]. *)
@@ -135,6 +139,8 @@ type turn_usage =
   ; output_tokens : int
   ; cache_creation_input_tokens : int
   ; cache_read_input_tokens : int
+  ; reported_cache_creation_input_tokens : int option
+  ; reported_cache_read_input_tokens : int option
   }
 
 (** Two facts about one client turn that neither stands in for. *)

@@ -148,7 +148,7 @@ let test_tab_dialog_is_kept_and_checked () =
   let dialogs tabs = with_browser tabs (fun read _ ->
     Yojson.Safe.Util.(read_ok read None |> member "tabs" |> to_list |> List.map (member "dialog"))) in
   let prompt = `Assoc ["type",`String "prompt";"message",`String "name?";"defaultValue",`String "dflt"] in
-  check bool "a tab keeps the dialog it is blocked on, and one with none names none" true
+  check bool "a tab keeps observed dialog metadata and does not invent absent text" true
     (dialogs [with_dialog 41 prompt; tab 73 "https://example.org/page" false] = [prompt; `Null]);
   List.iter (fun (label, dialog) ->
     with_browser [with_dialog 41 dialog] (fun read _ ->
@@ -160,6 +160,31 @@ let test_tab_dialog_is_kept_and_checked () =
      "no message", `Assoc ["type",`String "alert"];
      "a default that is not text", `Assoc ["type",`String "prompt";"message",`String "x";"defaultValue",`Int 1];
      "not an object", `String "alert"]
+
+let test_dialog_coverage_does_not_make_inventory_unreadable () =
+  let base=match tab 41 "https://example.org/page" true with
+    | `Assoc fields -> fields
+    | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> fail "fixture must be an object" in
+  let observed fields=Result.get_ok (Surface.inventory_tab ~tab_id:41 (`List [`Assoc (base@fields)])) in
+  check bool "absent metadata remains unobserved" true ((observed []).dialog=Surface.Unobserved);
+  List.iter (fun observation ->
+    let fields=Surface.dialog_observation_fields observation in
+    check bool "coverage roundtrips through usable exact Page selection" true ((observed fields).dialog=observation);
+    with_browser [`Assoc (base@fields)] (fun read reads ->
+      let projected=read_ok read (Some 41) in
+      check (list int) "unknown dialog knowledge does not block the read" [41] !reads;
+      let row=Yojson.Safe.Util.(projected |> member "tabs" |> to_list |> List.hd) in
+      List.iter (fun (key,value) -> check bool "projection retains observation coverage" true
+        (Yojson.Safe.Util.member key row=value)) fields))
+    [Surface.Unobserved;Surface.Observed None;
+     Surface.Observed (Some {kind=Alert;message="page text";default_value=None})];
+  let prompt=`Assoc ["type",`String "prompt";"message",`String "name?"] in
+  List.iter (fun fields -> check bool "invalid or contradictory coverage refuses selection" true
+      (Result.is_error (Surface.inventory_tab ~tab_id:41 (`List [`Assoc (base@fields)]))))
+    [["dialogObservation",`String "unobserved";"dialog",prompt];
+     ["dialogObservation",`String "unknown"];
+     ["dialogObservation",`Bool false];
+     ["dialogObservation",`String "observed";"dialogObservation",`String "unobserved"]]
 
 let test_any_website_selection () =
   with_browser [tab 41 "https://docs.example.org/guide" false;
@@ -431,6 +456,7 @@ let () = run "browser surface" ["behavior",[
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
   test_case "a tab keeps its window and a malformed one is refused" `Quick test_tab_window_is_kept_and_checked;
   test_case "a tab keeps and checks the dialog it is blocked on" `Quick test_tab_dialog_is_kept_and_checked;
+  test_case "dialog coverage is separate from inventory validity" `Quick test_dialog_coverage_does_not_make_inventory_unreadable;
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;

@@ -335,6 +335,16 @@ let chat_markdown_palette = Masc_tui_markdown_theme.palette
 let markdown_with_closing = Masc_tui_markdown_theme.render
 let document_markdown = Masc_tui_markdown_theme.document
 
+(* [text] must be canonical Yojson output, or a prefix starting at byte zero.
+   Leave out the gutter so it cannot clip a wide grapheme at the frame edge. *)
+let document_json ~width text =
+  let palette =
+    { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+  text
+  |> Masc.Tui_terminal_json.sanitize_canonical_preview
+  |> Masc_tui_markdown_theme.fenced ~language:"json"
+  |> Masc_tui_markdown.render ~palette ~width
+
 (* A level meter, only while a capture is running.
 
    A dead input device and a quiet room both end the same way — an empty draft
@@ -756,7 +766,10 @@ let composer_row state ~rows ~cols =
     let draft = Terminal_text.single_line composer.Composer.draft in
     (* Editing stops at whole grapheme boundaries, so this prefix cannot end
        inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
-    let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
+    let before = match composer.Composer.focus with
+      | Composer.Focused ->
+          Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input)
+      | Composer.Unfocused -> draft in
     Message_layout.input_window ~max_cells:(max 0 (cols - prompt_cells))
       ~cursor:(String.length before) draft
   in
@@ -4695,7 +4708,7 @@ let context_exact_item_detail_lines ~width ~scale ~part
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
-      (Inspector.format_bytes item.bytes)
+      (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
   ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
@@ -4786,12 +4799,13 @@ let context_exact_input_summary ~width ~scale
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s%s %s%s %s%3d %s%s  \xe2\x89\x88%6s tok  %6s"
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  \xe2\x89\x88%6s tok  %6s"
           (context_source_style source)
           (context_source_glyph source)
           label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
+          (Masc_tui_context_inspector.exact_bytes bytes)
           (Masc_tui_context_inspector.format_tokens
              (Masc_tui_token_scale.estimate scale bytes))
           share_text)
@@ -4803,7 +4817,7 @@ let context_exact_input_summary ~width ~scale
             (Printf.sprintf "%s, %s tok (%s) retained"
                (Masc_tui_message_layout.count_noun (List.length items) "item")
                (Masc_tui_token_scale.format_estimate scale total)
-               (Masc_tui_context_inspector.format_bytes total))
+               (Masc_tui_context_inspector.exact_bytes total))
     ]
     @ bar @ rows
   , total )
@@ -4952,7 +4966,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"
           input.wire.provider input.wire.model
           (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-          (Inspector.format_bytes input.wire.body_bytes)
+          (Inspector.exact_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
       in
       let summary, retained =
@@ -4965,13 +4979,16 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                 request%s"
                Ansi.dim
                (Masc_tui_token_scale.format_estimate scale retained)
-               (Inspector.format_bytes retained)
+               (Inspector.exact_bytes retained)
                (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-               (Inspector.format_bytes input.wire.body_bytes)
+               (Inspector.exact_bytes input.wire.body_bytes)
                Ansi.reset
            ]
          else [])
         @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset ]
+        @ (Context_bars.wrap ~width
+             "Item token estimates can change with this ratio even when their bytes and SHA-256 stay identical."
+           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       (* What came back for this exact request, to the extent the turn
          record observed it. The response text lives in the chat store and
@@ -5001,15 +5018,29 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
+      (* Usage belongs to the last reported request in the turn. A retained
+         pre-dispatch snapshot can instead name a later failed attempt; the
+         record has no response-to-capture ID, so do not label this as a hit
+         on the prepared request above. All counts here are provider-reported,
+         independent of the byte-to-token scale used for individual items. *)
+      let cache_lines =
+        match response with
+        | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]
+        | Some (record : Turn_record.t) ->
+            Context_bars.wrap ~width
+              (Inspector.provider_usage_summary record.usage)
+            |> List.map (fun line -> "  " ^ line)
+      in
       let common =
-        [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire
+        [ identity; wire ] @ response_line @ cache_lines @ [ "" ] @ summary @ against_wire
         @ [ context_response_summary response_parts; "" ]
       in
       (* One letter per row says where the item stands in the assembly. The
          wire is append-only, so the last message is this turn's newest
          addition and every earlier message is history the window carried
-         forward; the prompt and the schemas are the fixed parts that ride
-         every turn. The letter states a position on the wire, not a join
+         forward. The system prompt can include changing turn observations;
+         its position alone does not establish cacheability. The letter
+         states a position on the wire, not a join
          the pane would have to invent. *)
       let last_message_index =
         List.fold_left
@@ -5022,7 +5053,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       in
       let kind_letter index (item : Inspector.exact_input_item) =
         match item.kind with
-        | Inspector.System_prompt -> "F"
+        | Inspector.System_prompt -> "P"
         | Inspector.Tool_schema _ -> "S"
         | Inspector.Message _ ->
             if Some index = last_message_index then "N" else "H"
@@ -5057,7 +5088,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       let legend =
         ("  " ^ context_source_legend)
         :: (Context_bars.wrap ~width
-              "F fixed prompt · H history · N new this turn · S schema"
+              "P system prompt (may include turn observations) · H history · N new this turn · S schema"
            |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in
@@ -5158,7 +5189,7 @@ let context_input_map_detail_lines ~width ~scale ~part_of
   ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  %s"
       (Masc_tui_token_scale.format_estimate scale row.bytes)
-      (Inspector.format_bytes row.bytes)
+      (Inspector.exact_bytes row.bytes)
       (Inspector.input_source_label row.source)
   ; Ansi.dim ^ digest ^ Ansi.reset
   ; ""
@@ -5206,7 +5237,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                (Inspector.input_component_label row.component)
                Ansi.reset
                (Masc_tui_token_scale.format_estimate scale row.bytes)
-               (Inspector.format_bytes row.bytes)
+               (Inspector.exact_bytes row.bytes)
                (Inspector.input_source_label row.source)
                (context_evidence_badge row.evidence)
            in

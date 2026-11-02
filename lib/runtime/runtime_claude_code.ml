@@ -164,6 +164,8 @@ type request_input =
   { input_tokens : int
   ; cache_creation_input_tokens : int
   ; cache_read_input_tokens : int
+  ; reported_cache_creation_input_tokens : int option
+  ; reported_cache_read_input_tokens : int option
   }
 
 type turn_usage =
@@ -171,6 +173,8 @@ type turn_usage =
   ; output_tokens : int
   ; cache_creation_input_tokens : int
   ; cache_read_input_tokens : int
+  ; reported_cache_creation_input_tokens : int option
+  ; reported_cache_read_input_tokens : int option
   }
 
 (* Token counts over the assistant frames of one turn. Each assistant frame
@@ -1874,15 +1878,23 @@ let turn_usage_of_fields fields =
        base counts. *)
     (match int_field "input_tokens", int_field "output_tokens" with
      | Some input_tokens, Some output_tokens ->
+       let reported_cache_creation_input_tokens =
+         int_field "cache_creation_input_tokens"
+       in
+       let reported_cache_read_input_tokens =
+         int_field "cache_read_input_tokens"
+       in
        Some
          { input_tokens
          ; output_tokens
          ; cache_creation_input_tokens =
              (* DET-OK: absent wire field is 0 by api_usage convention *)
-             Option.value (int_field "cache_creation_input_tokens") ~default:0
+             Option.value reported_cache_creation_input_tokens ~default:0
          ; cache_read_input_tokens =
              (* DET-OK: absent wire field is 0 by api_usage convention *)
-             Option.value (int_field "cache_read_input_tokens") ~default:0
+             Option.value reported_cache_read_input_tokens ~default:0
+         ; reported_cache_creation_input_tokens
+         ; reported_cache_read_input_tokens
          }
      | Some _, None | None, Some _ | None, None -> None)
   | Some _ -> None
@@ -1896,6 +1908,10 @@ let request_input_of_fields fields : request_input option =
        { input_tokens = usage.input_tokens
        ; cache_creation_input_tokens = usage.cache_creation_input_tokens
        ; cache_read_input_tokens = usage.cache_read_input_tokens
+       ; reported_cache_creation_input_tokens =
+           usage.reported_cache_creation_input_tokens
+       ; reported_cache_read_input_tokens =
+           usage.reported_cache_read_input_tokens
        })
     (turn_usage_of_fields fields)
 ;;

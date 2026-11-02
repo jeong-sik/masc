@@ -524,6 +524,52 @@ let test_rename_table_absent_source_precedes_existing_target () =
   | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_conflict ->
     Alcotest.fail "an absent source path should report Table_rename_absent"
 
+let test_rename_table_allows_canonicalizing_same_path () =
+  let source = "[ \"runtime\" . lanes . coding ]\ncandidates = [\"b.two\"]\n" in
+  match
+    Toml_line_editor.rename_table source
+      ~path:"runtime.lanes.coding" ~to_path:"runtime.lanes.coding"
+  with
+  | Toml_line_editor.Table_renamed out ->
+    Alcotest.(check bool) "canonical header written" true
+      (has_line out "[runtime.lanes.coding]")
+  | Toml_line_editor.Table_rename_absent | Toml_line_editor.Table_rename_conflict ->
+    Alcotest.fail "canonicalizing a single table to its own path should succeed"
+
+let test_rename_table_refuses_table_array_and_inline_key_conflicts () =
+  let with_array =
+    "[runtime.lanes.old]\ncandidates = [\"a.one\"]\n\n[[runtime.lanes.taken]]\nid = \"x\"\n"
+  in
+  (match
+     Toml_line_editor.rename_table with_array
+       ~path:"runtime.lanes.old" ~to_path:"runtime.lanes.taken"
+   with
+   | Toml_line_editor.Table_rename_conflict -> ()
+   | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_absent ->
+     Alcotest.fail "renaming onto a table array must report Table_rename_conflict");
+  let with_inline =
+    "[runtime.lanes]\ntaken = { candidates = [\"b.two\"] }\n\n[runtime.lanes.old]\ncandidates = [\"a.one\"]\n"
+  in
+  match
+    Toml_line_editor.rename_table with_inline
+      ~path:"runtime.lanes.old" ~to_path:"runtime.lanes.taken"
+  with
+  | Toml_line_editor.Table_rename_conflict -> ()
+  | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_absent ->
+    Alcotest.fail "renaming onto an inline parent key must report Table_rename_conflict"
+
+let test_rename_table_refuses_duplicate_source_tables () =
+  let duplicate =
+    "[runtime.lanes.dup]\ncandidates = [\"a.one\"]\n\n[runtime.lanes.dup]\ncandidates = [\"b.two\"]\n"
+  in
+  match
+    Toml_line_editor.rename_table duplicate
+      ~path:"runtime.lanes.dup" ~to_path:"runtime.lanes.fresh"
+  with
+  | Toml_line_editor.Table_rename_conflict -> ()
+  | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_absent ->
+    Alcotest.fail "renaming duplicate source tables must report Table_rename_conflict"
+
 let is_absent content ~path =
   match Toml_line_editor.remove_table content ~path with
   | Toml_line_editor.Table_absent -> true
@@ -1122,6 +1168,12 @@ let () =
             `Quick test_rename_table_ignores_target_header_inside_multiline_string
         ; Alcotest.test_case "rename_table absent source precedes existing target"
             `Quick test_rename_table_absent_source_precedes_existing_target
+        ; Alcotest.test_case "rename_table allows canonicalizing same path"
+            `Quick test_rename_table_allows_canonicalizing_same_path
+        ; Alcotest.test_case "rename_table refuses table array and inline key conflicts"
+            `Quick test_rename_table_refuses_table_array_and_inline_key_conflicts
+        ; Alcotest.test_case "rename_table refuses duplicate source tables"
+            `Quick test_rename_table_refuses_duplicate_source_tables
         ] )
     ; ( "keys the writer has to quote"
       , [ Alcotest.test_case "a key that is not bare is quoted" `Quick

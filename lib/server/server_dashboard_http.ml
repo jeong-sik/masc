@@ -979,11 +979,31 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm task history page and events indices on the
          background pool so the first operator task inspection does not run a
          cold multi-hundred-MB journal scan on the 2-domain HTTP read pool. *)
-      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        ignore (Task.History_page.read ~config ~task_id:"__prewarm__" ~max_events:1 ());
-        ignore (Task.Tool.task_history_events_json config ~task_id:"__prewarm__" ~limit:1));
-      Log.Dashboard.info "task-history surface pre-warmed (%.1fms)"
-        ((Time_compat.now () -. t_start) *. 1000.0)
+      let history_result =
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+          let result =
+            Task.History_page.read ~config ~task_id:"__prewarm__" ~max_events:1 ()
+          in
+          ignore (Task.Tool.task_history_events_json config ~task_id:"__prewarm__" ~limit:1);
+          result)
+      in
+      match history_result with
+      | Ok _ ->
+        Log.Dashboard.info "task-history surface pre-warmed (%.1fms)"
+          ((Time_compat.now () -. t_start) *. 1000.0)
+      | Error error ->
+        let detail =
+          match error with
+          | Task.History_page.Invalid_request -> "invalid history request"
+          | Invalid_cursor -> "invalid history cursor"
+          | Source_changed -> "history source changed during pre-warm"
+          | Invalid_event {file; offset} ->
+            Printf.sprintf "invalid history event file=%S offset=%d" file offset
+          | Invalid_layout {entry} ->
+            Printf.sprintf "invalid history layout entry=%S" entry
+          | Source_unavailable -> "history source unavailable"
+        in
+        Log.Dashboard.warn "task-history pre-warm failed: %s" detail
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Log.Dashboard.warn "task-history pre-warm failed: %s" (Printexc.to_string exn)
@@ -996,6 +1016,6 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
     ; warm_keeper_memory_health
     ; warm_task_history
     ];
-  Log.Dashboard.info "all primary dashboard surfaces pre-warmed in parallel (%.1fms total)"
+  Log.Dashboard.info "primary dashboard surface pre-warm attempts completed in parallel (%.1fms total)"
     ((Time_compat.now () -. t0) *. 1000.0)
 ;;

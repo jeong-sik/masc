@@ -481,14 +481,15 @@ let rec run_ready writer durable_writer journal =
      | Group_failed failure -> Epoch_failed failure)
 ;;
 
-let open_writer writer ~sw mode =
+let open_writer writer ~sw ~lease mode =
   match mode with
   | Create correlation_id ->
     (match
-       Journal.create_durable_writer
+       Journal.create_durable_writer_with_lease
          ~sw
          ~codec:writer.codec
          ~dir:writer.dir
+         ~lease
          ?correlation_id
          ()
      with
@@ -496,7 +497,7 @@ let open_writer writer ~sw mode =
      | Ok (durable_writer, _initialization) ->
        Ok (durable_writer, Journal.durable_writer_journal durable_writer))
   | Open_existing ->
-    (match Journal.open_durable_writer ~sw ~codec:writer.codec ~dir:writer.dir with
+    (match Journal.open_durable_writer_with_lease ~sw ~codec:writer.codec ~dir:writer.dir ~lease with
      | Error error -> Error error
      | Ok (durable_writer, _recovery) ->
        Ok (durable_writer, Journal.durable_writer_journal durable_writer))
@@ -564,10 +565,10 @@ let failure_after_reconciliation pending reconciliation_error =
     Reconciliation_failed { evidence = pending.evidence; reconciliation_error }
 ;;
 
-let run_epoch writer mode pending =
+let run_epoch writer ~lease mode pending =
   let observed_wake = reconciliation_wake_token writer in
   Eio.Switch.run (fun store_sw ->
-    match open_writer writer ~sw:store_sw mode with
+    match open_writer writer ~sw:store_sw ~lease mode with
     | Error error ->
       (match Journal.commit_error_disposition error, pending with
        | Journal.Reconcile_required, None ->
@@ -727,20 +728,28 @@ let await_reconciliation_wake writer observed_wake =
 ;;
 
 let run_actor writer =
-  let rec epochs mode pending =
-    match run_epoch writer mode pending with
-    | Epoch_closed -> complete_actor writer
-    | Epoch_failed failure -> fail_actor writer failure
-    | Epoch_reconcile next ->
-      Eio.Fiber.yield ();
-      Eio.Fiber.check ();
-      epochs Open_existing (Some next)
-    | Epoch_await_reconciliation_wake { pending; observed_wake } ->
-      let _wake = await_reconciliation_wake writer observed_wake in
-      Eio.Fiber.check ();
-      epochs Open_existing (Some pending)
+  let run () =
+    Eio.Switch.run (fun owner_sw ->
+      match Execution_event_store.acquire_writer_lease ~sw:owner_sw ~dir:writer.dir with
+      | Error error ->
+        fail_actor writer (Initialization_failed (Journal.Persistence_failure error))
+      | Ok lease ->
+        let rec epochs mode pending =
+          match run_epoch writer ~lease mode pending with
+          | Epoch_closed -> complete_actor writer
+          | Epoch_failed failure -> fail_actor writer failure
+          | Epoch_reconcile next ->
+            Eio.Fiber.yield ();
+            Eio.Fiber.check ();
+            epochs Open_existing (Some next)
+          | Epoch_await_reconciliation_wake { pending; observed_wake } ->
+            let _wake = await_reconciliation_wake writer observed_wake in
+            Eio.Fiber.check ();
+            epochs Open_existing (Some pending)
+        in
+        epochs writer.initial_mode None)
   in
-  match epochs writer.initial_mode None with
+  match run () with
   | () -> ()
   | exception (Eio.Cancel.Cancelled reason as exn) ->
     let bt = Printexc.get_raw_backtrace () in

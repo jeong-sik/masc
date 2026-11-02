@@ -1,7 +1,31 @@
+let native_error_script = {js|function nativeErrorObservation(error) {
+      switch (error?.code) {
+        case 'EGO_PAGE_DIALOG_OPENED': return {
+          code: error.code, method: error.method,
+          sessionId: error.sessionId, dialog: error.dialog
+        };
+        case 'EGO_PAGE_EVALUATION_TIMED_OUT': return {
+          code: error.code, timeoutMs: error.timeoutMs,
+          executionStopped: error.executionStopped,
+          mayHaveLateEffects: error.mayHaveLateEffects,
+          pageResponsive: error.pageResponsive
+        };
+        case 'EGO_NAVIGATION_TIMEOUT': return {
+          code: error.code, timeoutMs: error.timeoutMs,
+          committed: error.committed, waitUntil: error.waitUntil,
+          ...(error.url === undefined ? {} : {url: error.url}),
+          ...(error.readyState === undefined ? {} : {readyState: error.readyState})
+        };
+        default: return undefined;
+      }
+}
+|js}
+
 let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
   const completed = [];
   let pages = null, pendingAction = null;
   const hasPopup = args.steps.some(step => step.method === 'clickAndWaitForPopup');
+  const hasRawTyping = args.steps.some(step => step.method === 'keyboard.type');
   // The lightweight event/task.page handle can lack targetId/openedBy. Only
   // the unique native inventory row supplies the canonical enriched Page.
   const canonicalPage = async observed => {
@@ -45,29 +69,14 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
   let effectStarted = false, completedEffect = false;
   let inputReleased = true;
   const failure = (index, method, error, extra = {}) => {
-    const nativeError = (() => {
-      if (method === 'popupWait') return undefined;
-      switch (error?.code) {
-        case 'EGO_PAGE_EVALUATION_TIMED_OUT': return {
-          code: error.code, timeoutMs: error.timeoutMs,
-          executionStopped: error.executionStopped,
-          mayHaveLateEffects: error.mayHaveLateEffects,
-          pageResponsive: error.pageResponsive
-        };
-        case 'EGO_NAVIGATION_TIMEOUT': return {
-          code: error.code, timeoutMs: error.timeoutMs,
-          committed: error.committed, waitUntil: error.waitUntil,
-          ...(error.url === undefined ? {} : {url: error.url}),
-          ...(error.readyState === undefined ? {} : {readyState: error.readyState})
-        };
-        default: return undefined;
-      }
-    })();
+    const nativeError = method === 'popupWait' ? undefined : nativeErrorObservation(error);
     return {
       completed, effectStarted, completedEffect, inputReleased,
       ...(pages === null ? {} : {pages}),
       ...(pendingAction === null ? {} : {pendingAction}),
-      failure: {index, method, message: String(error?.message ?? error),
+      failure: {index, method, message: hasRawTyping
+        ? 'native workflow stopped; inspect progress before continuing; never replay uncertain input'
+        : String(error?.message ?? error),
         ...(nativeError === undefined ? {} : {nativeError}),
         ...(method !== 'popupWait' ? {} : {eventError:{
           ...(typeof error?.name === 'string' ? {name:error.name} : {}),
@@ -81,9 +90,11 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
   catch (error) { return failure(0, 'initialUrl', error); }
   if (initialUrl !== args.expectedUrl)
     return failure(0, 'initialUrl', 'the tab is at ' + initialUrl + ', not at expectedUrl; read it again');
-  if (hasPopup) {
+  if (hasPopup || hasRawTyping) {
     try {
-      if (typeof watchPage !== 'function') throw new Error('popup workflow requires its fixed managed-Page download observer');
+      if (hasRawTyping && (!args.nativeInputWindows || typeof nativeTypeWindow !== 'function'))
+        throw new Error('raw typing requires its fixed Host-owned native window context');
+      if (hasPopup && typeof watchPage !== 'function') throw new Error('popup workflow requires its fixed managed-Page download observer');
       const original = await canonicalPage(page), expected = args.expectedSourcePage;
       if (!expected || ['spaceId','label','targetId','openedBy'].some(key => original.identity[key] !== expected[key]))
         throw new Error('native source Page changed since the host inventory observation');
@@ -95,7 +106,7 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
     const step = args.steps[index];
     const options = step.options ?? {};
     const pointerOptions = {...options, label: args.cursor + (options.label ? ' · ' + options.label : '')};
-    let receipt = null, effect = false, pageResult = false, holdingInput = false;
+    let receipt = null, nativeInputWindow = null, nativeInputError, effect = false, pageResult = false, holdingInput = false;
     try {
       switch (step.method) {
         case 'clickAndWaitForPopup': {
@@ -164,9 +175,24 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
           receipt = await page.press(step.selector, step.key, options); break;
         case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
         case 'reload': effect = effectStarted = true; receipt = await page.reload(options); break;
-        case 'keyboard.type':
-          holdingInput = effect = effectStarted = true; inputReleased = false;
-          receipt = await page.keyboard.type(step.text, options); break;
+        case 'keyboard.type': {
+          // One shared fixed producer verifies the native tail before this
+          // loop can dispatch another step. The Host verifies it again.
+          // Native setup can enable instrumentation or consume events even
+          // when the raw holding call is subsequently proven not entered.
+          effectStarted = true;
+          const observed = await nativeTypeWindow(task, page, args.nativeInputWindows,
+            index, step.text, step.options, pages.source, pages.current);
+          if (observed.capture.entered) {
+            effect = effectStarted = true; inputReleased = false;
+          }
+          if (observed.status !== 'completed') return failure(index, 'nativeTyping',
+            observed.error ?? 'native typing completion is unconfirmed; never replay this step',
+            {nativeInputWindow:observed.capture});
+          nativeInputWindow = observed.capture; nativeInputError = observed.error;
+          inputReleased = true;
+          break;
+        }
         case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;
         case 'keyboard.paste':
           holdingInput = effect = effectStarted = true; inputReleased = false;
@@ -300,7 +326,11 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
           'Ego returned an undeclared native action receipt; input release remains unconfirmed. Never replay this step.');
     }
     completedEffect ||= effect;
-    completed.push({index, method: step.method, receipt: receipt ?? null});
+    completed.push({index, method: step.method, receipt: receipt ?? null,
+      ...(nativeInputWindow === null ? {} : {nativeInputWindow})});
+    if (nativeInputWindow !== null && nativeInputWindow.cleanup.kind !== 'returned')
+      return failure(index + 1, 'nativeCleanup',
+        nativeInputError ?? 'typing completed, but native observation cleanup is unconfirmed');
     // Receipt-less non-holding effects can still open a dialog. Observe it
     // before dispatching another operation; this read never proves key-up.
     let dialog = pageResult ? null : receipt?.dialog;
@@ -308,7 +338,9 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
       try { dialog = (await page.info()).dialog; }
       catch (error) { return failure(index + 1, 'observation', error); }
     }
-    if (dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog});
+    if (dialog) return failure(nativeInputWindow === null ? index : index + 1,
+      nativeInputWindow === null ? step.method : 'observation',
+      'answer the JavaScript dialog before continuing', {dialog});
   }
   try {
     const snapshot = await (args.snapshotScope === 'viewport'
@@ -340,9 +372,21 @@ type navigation_timeout = {
   wait_until : navigation_wait;
 }
 type popup_event_error = { name : string option; code : string option; timeout_ms : float option }
+type native_dialog = {
+  kind : Browser_surface.dialog_kind;
+  message : string;
+  default_prompt : string option;
+  url : string option;
+  frame_id : string option;
+  has_browser_handler : bool option;
+}
+type dialog_error = { method_ : string; session_id : string; dialog : native_dialog }
 type native_error = Evaluation_timed_out of evaluation_timeout
   | Navigation_timed_out of navigation_timeout | Popup_event_failed of popup_event_error
+  | Page_dialog_opened of dialog_error
 module Release = Browser_ego_release
+module Raw = Browser_ego_raw_type
+module Window = Browser_ego_native_window
 type page_identity = { space_id : int; label : string; target_id : string;
   opened_by : Browser_surface.ego_page_origin }
 type transition = { index : int; source : page_identity; popup : page_identity; selected : bool }
@@ -374,6 +418,19 @@ let optional_text key fields = match List.assoc_opt key fields with
   | None -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error ("invalid native " ^ key ^ " observation")
+let optional_bool key fields = match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some _ -> Error ("invalid native " ^ key ^ " observation")
+let native_dialog value =
+  let* fields=object_fields ["type";"message";"defaultPrompt";"url";"frameId";"hasBrowserHandler"] value in
+  let* kind=text "type" fields in
+  let* kind=Option.to_result ~none:"invalid native dialog type" (Browser_surface.dialog_kind_of_wire kind) in
+  let* message=text "message" fields in
+  let* default_prompt=optional_text "defaultPrompt" fields in
+  let* url=optional_text "url" fields in let* frame_id=optional_text "frameId" fields in
+  let* has_browser_handler=optional_bool "hasBrowserHandler" fields in
+  Ok {kind;message;default_prompt;url;frame_id;has_browser_handler}
 let native_error fields = match List.assoc_opt "eventError" fields,List.assoc_opt "nativeError" fields with
   | Some value,None ->
     let* fields=object_fields ["name";"code";"timeoutMs"] value in
@@ -388,6 +445,11 @@ let native_error fields = match List.assoc_opt "eventError" fields,List.assoc_op
     let* code=match value with `Assoc fields -> text "code" fields
       | _ -> Error "native error is not an object" in
     match code with
+    | "EGO_PAGE_DIALOG_OPENED" ->
+    let* fields=object_fields ["code";"method";"sessionId";"dialog"] value in
+    let* method_=text "method" fields in let* session_id=text "sessionId" fields in
+    let* value=get "dialog" fields in let* dialog=native_dialog value in
+    Ok (Some (Page_dialog_opened {method_;session_id;dialog}))
     | "EGO_PAGE_EVALUATION_TIMED_OUT" ->
     let* fields=object_fields ["code";"timeoutMs";"executionStopped";"mayHaveLateEffects";"pageResponsive"] value in
     let* timeout_ms=timeout_ms fields in
@@ -406,6 +468,11 @@ let native_error fields = match List.assoc_opt "eventError" fields,List.assoc_op
       | _ -> Error "invalid native navigation lifecycle" in
     Ok (Some (Navigation_timed_out {timeout_ms;committed;url;ready_state;wait_until}))
     | _ -> Error "unsupported native workflow error code"
+let validate_native_error value =
+  let* observed=native_error ["nativeError",value] in
+  match observed with
+  | Some _ -> Ok value
+  | None -> Error "missing native SDK diagnostic"
 let saved_fetch_receipt filename value =
   let* fields=object_fields ["ok";"status";"statusText";"url";"headers";"downloadId";"suggestedFilename";"source"] value in
   let* _=bool "ok" fields in let* _=integer "status" fields in
@@ -454,14 +521,30 @@ let popup_step (step:Browser_lane.Native_workflow.step) = match step.action with
   | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
 let popup_at (request:Browser_lane.Native_workflow.t) index =
   match List.nth_opt request.steps index with Some step -> popup_step step | None -> false
-let pages_of_json (request:Browser_lane.Native_workflow.t) ~count fields =
+let raw_step (step:Browser_lane.Native_workflow.step) = match step.action with
+  | Keyboard_type _ -> true
+  | Click _|Click_and_wait_for_popup _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+  | Fill _|Press _|Focus _|Reload|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+  | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+  | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
+let window_page (identity:page_identity) =
+  {Window.space_id=identity.space_id;native={Browser_surface.label=Some identity.label;
+    target_id=identity.target_id;opened_by=identity.opened_by}}
+let page_at (pages:pages) index =
+  List.fold_left (fun current (transition:transition) ->
+    if transition.selected && transition.index<index then transition.popup else current) pages.source pages.transitions
+let pages_of_json (request:Browser_lane.Native_workflow.t) ~windows ~count fields =
   match List.assoc_opt "pages" fields with
   | None -> Ok None
   | Some value ->
-    let* ()=if List.exists popup_step request.steps then Ok () else Error "workflow declared unrequested Page transitions" in
+    let* ()=if List.exists popup_step request.steps || List.exists raw_step request.steps then Ok ()
+      else Error "workflow declared unrequested Page identities" in
     let* fields=object_fields ["source";"current";"transitions"] value in
     let page key=let* value=get key fields in page_identity_of_json value in
     let* source=page "source" in let* current=page "current" in
+    let* ()=match windows with
+      | Some context when window_page source<>Raw.source context -> Error "workflow source Page disagrees with native typing context"
+      | None|Some _ -> Ok () in
     let* rows=get "transitions" fields in
     let* rows=match rows with `List rows -> Ok rows | _ -> Error "workflow Page transitions must be an array" in
     let rec decode previous active acc = function
@@ -495,7 +578,7 @@ let pending_action (request:Browser_lane.Native_workflow.t) ~count fields =
     else Error "pending popup trigger does not match the request"
 let receipts_do_not_show reason =
   "workflow reports a released input that its receipts do not show: " ^ Release.describe reason
-let decode (request : Browser_lane.Native_workflow.t) receipt =
+let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
   let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars";"pages";"pendingAction"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
   let* input_released=bool "inputReleased" fields in
@@ -504,16 +587,24 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     else Error "workflow claims a held input without an input-holding effect" in
   let* raw=get "completed" fields in
   let* completed=match raw with `List values -> Ok values | _ -> Error "workflow completed is not an array" in
+  let* pages=pages_of_json request ~windows ~count:(List.length completed) fields in
+  let* ()=if not started || not (List.exists (fun step -> popup_step step || raw_step step) request.steps)
+      || Option.is_some pages then Ok () else Error "started workflow omitted its source Page identity" in
+  let decode_window index capture =
+    match windows,pages with
+    | Some context,Some pages -> Raw.decode context ~index ~current:(window_page (page_at pages index)) capture
+    | None,_|_,None -> Error "native typing has no Host-owned Page and pending context" in
   let methods=List.map (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.method_name step.action) request.steps in
   let method_at index = Option.to_result ~none:"workflow step index is outside the request" (List.nth_opt methods index) in
   let holds_at index = match List.nth_opt request.steps index with
     | Some step -> Browser_lane.Native_workflow.holds_input step.action | None -> false in
   (* [answers]: the SDK's answer for each input-holding step that returned, newest first. *)
-  let rec progress index has_effect answers steps = function
-    | [] -> Ok (index,has_effect,List.rev answers,steps)
+  let rec progress index has_effect answers projected cleanup_pending steps = function
+    | [] -> Ok (index,has_effect,List.rev answers,List.rev projected,cleanup_pending,steps)
     | value::rest ->
-      let* row=object_fields ["index";"method";"receipt"] value in
+      let* ()=if cleanup_pending then Error "workflow continued after unconfirmed native cleanup" else Ok () in
+      let* row=object_fields ["index";"method";"receipt";"nativeInputWindow"] value in
       let* observed=integer "index" row in let* method_=text "method" row in let* receipt=get "receipt" row in
       let* expected=method_at index in
       if observed<>index || method_<>expected then Error "workflow completed steps do not match the request"
@@ -521,20 +612,35 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         | [] -> Error "workflow completed more steps than requested"
         | (step : Browser_lane.Native_workflow.step)::steps ->
           let* ()=observation_receipt step receipt in
-          let answers=if Browser_lane.Native_workflow.holds_input step.action
-            then (index,Release.answer_of_json receipt)::answers else answers in
-          progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) answers steps rest in
-  let* count,has_effect,answers,remaining=progress 0 false [] request.steps completed in
+          let* answer,public_receipt,native_completion,cleanup_pending=if raw_step step then
+              let* ()=if receipt=`Null then Ok () else Error "raw typing cannot claim a native action receipt" in
+              let* capture=get "nativeInputWindow" row in
+              let* native=decode_window index capture in
+              (match native with
+               | Raw.Completed {expected;completion;cleanup} ->
+                 let* answer=Release.answer_of_window ~expected completion in
+                 Ok (Some answer,`Null,Some (Window.public_summary completion),cleanup<>Raw.Returned)
+               | Raw.Not_entered _|Raw.Entered_unconfirmed _ -> Error "completed raw typing has no verified native tail")
+            else
+              let* ()=if List.mem_assoc "nativeInputWindow" row then Error "non-raw step claimed a native typing window" else Ok () in
+              Ok ((if Browser_lane.Native_workflow.holds_input step.action
+                then Some (Release.answer_of_json receipt) else None),receipt,None,false) in
+          let answers=match answer with Some answer -> (index,answer)::answers | None -> answers in
+          let projected=`Assoc (["index",`Int index;"method",`String method_;"receipt",public_receipt]
+            @ Option.to_list (Option.map (fun value -> "nativeCompletion",value) native_completion))::projected in
+          progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action)
+            answers projected cleanup_pending steps rest in
+  let* count,has_effect,answers,public_completed,cleanup_pending,remaining=progress 0 false [] [] false request.steps completed in
   let* pending=pending_action request ~count fields in
-  let* pages=pages_of_json request ~count fields in
-  let* ()=if (not started || not (List.exists popup_step request.steps) || Option.is_some pages) then Ok ()
-    else Error "started popup workflow omitted its source Page identity" in
   let* ()=if completed_effect=(has_effect || Option.is_some pending) && (not completed_effect || started) then Ok ()
     else Error "workflow effect flags do not match completed steps" in
   let* failure=get "failure" fields in
+  let public_receipt failure = `Assoc (List.map (fun (key,value) -> match key with
+    | "completed" -> key,`List public_completed | "failure" -> key,failure | _ -> key,value) fields) in
   match failure with
   | `Null ->
-    let* ()=if remaining=[] && pending=None && started=has_effect && input_released then Ok () else Error "workflow success omitted requested steps or input release" in
+    let* ()=if remaining=[] && pending=None && started=has_effect && input_released && not cleanup_pending
+      then Ok () else Error "workflow success omitted requested steps, cleanup or input release" in
     let* input=match Release.judge answers with
       | Release.Settled settled -> Ok settled
       | Release.Unconfirmed reason -> Error (receipts_do_not_show reason) in
@@ -543,15 +649,50 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     let* _=text "url" fields in let* _=text "title" fields in let* _=text "snapshot" fields in
     let* truncated=bool "truncated" fields in let* chars=integer "chars" fields in
     let* ()=if truncated=(chars>request.max_chars) then Ok () else Error "workflow snapshot cut flags disagree" in
-    Ok (Completed {reply=receipt; input;pages})
+    Ok (Completed {reply=public_receipt `Null; input;pages})
   | `Assoc _ ->
-    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError";"eventError"] failure in
+    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError";"eventError";"nativeInputWindow"] failure in
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
+    let* ()=if cleanup_pending=(method_="nativeCleanup") then Ok () else Error "workflow native cleanup failure disagrees with progress" in
+    let* ()=if not cleanup_pending || (pending=None &&
+        (match pages with None -> true | Some pages ->
+          List.for_all (fun (transition:transition) -> transition.index<count) pages.transitions))
+      then Ok () else Error "workflow progressed after unconfirmed native cleanup" in
+    let* native_failure=match method_,List.assoc_opt "nativeInputWindow" failed with
+      | "nativeTyping",Some capture when index=count && pending=None ->
+        (match remaining with
+         | step::_ when raw_step step ->
+           let* outcome=decode_window index capture in
+           (match outcome with
+            | Raw.Completed _ -> Error "failed native typing already has a verified completion"
+            | Raw.Not_entered reason -> Ok (Some (false,reason))
+            | Raw.Entered_unconfirmed reason -> Ok (Some (true,reason)))
+         | []|_::_ -> Error "native typing failure does not match its requested step")
+      | "nativeTyping",_ -> Error "native typing failure has no private native capture"
+      | _,Some _ -> Error "non-raw failure claimed a native typing window"
+      | _,None -> Ok None in
+    let* ()=if Option.is_some native_failure && List.exists (fun key -> List.mem_assoc key failed)
+        ["dialog";"eventError"] then Error "native typing failure claimed unrelated SDK diagnostics" else Ok () in
+    let* ()=if method_="nativeCleanup" && List.exists (fun key -> List.mem_assoc key failed)
+        ["dialog";"eventError"] then Error "native cleanup claimed unrelated observations" else Ok () in
     let* ()=if not (List.mem_assoc "eventError" failed) || method_="popupWait" then Ok ()
       else Error "popup event diagnostics do not match the failed operation" in
-    let* native_error=native_error failed in
+    let* native_error=match native_error failed with
+      | Ok observed -> Ok observed
+      | Error _ when method_="nativeCleanup" && cleanup_pending -> Ok None
+      | Error detail -> Error detail in
+    (* A malformed diagnostic from the separately failed nonholding cleanup
+       cannot erase an already authenticated raw tail or become public JSON. *)
+    let public_failed=if Option.is_none native_error then List.remove_assoc "nativeError" failed else failed in
     (* [entered]: when the failed step holds input, what the SDK did not give for it: no answer, or a dialog. *)
     let* expected_started,entered=match method_ with
+      | "nativeTyping" ->
+        (match native_failure with
+         | Some (entered,reason) -> Ok (true,
+             if entered then Some (index,Release.of_unreleased
+               (Release.Native_window_unconfirmed (Raw.failure_reason reason))) else None)
+         | None -> Error "native typing failure has no typed outcome")
+      | "nativeCleanup" when index=count && count>0 && cleanup_pending -> Ok (has_effect,None)
       | ("initialUrl"|"pageIdentity") when index=0 && count=0 && pending=None -> Ok (false,None)
       | "popupPreflight" when index=count && pending=None && popup_at request index -> Ok (has_effect,None)
       | ("popupWait"|"popupIdentity") when index=count && Option.is_some pending && popup_at request index -> Ok (true,None)
@@ -602,5 +743,15 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
       | true,Release.Unconfirmed reason -> Error (receipts_do_not_show reason)
       | false,Release.Unconfirmed _ -> Ok judged
       | false,Release.Settled _ -> Ok (Release.Unconfirmed Release.Held_by_script_report) in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input;native_error;pages})
+    let public_failure,message=match native_failure with
+      | Some (_,reason) ->
+        let message="native typing completion is unconfirmed; never replay this step" in
+        `Assoc (["index",`Int index;"method",`String method_;"message",`String message;
+          "nativeInput",Raw.public_failure reason] @ Option.to_list
+            (Option.map (fun value -> "nativeError",value) (List.assoc_opt "nativeError" public_failed))),message
+      | None when Option.is_some windows ->
+        let message="native workflow stopped; inspect progress before continuing; never replay uncertain input" in
+        `Assoc (("message",`String message)::List.remove_assoc "message" public_failed),message
+      | None -> `Assoc public_failed,message in
+    Ok (Stopped {receipt=public_receipt public_failure;message;effect_started=started;completed_effect;input;native_error;pages})
   | _ -> Error "workflow failure must be null or an object"

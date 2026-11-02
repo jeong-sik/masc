@@ -1035,17 +1035,34 @@ let with_index ~before_scan ~store:ledger ~read =
         let attempt () =
           try
             let* store = get_store ~ledger_dir in
-            let* cursors = read_cursors store in
-            let* paths =
+            let paths_now () =
               Dated_jsonl.range_day_file_paths_result ledger ~since:"1970-01-01"
                 ~until:(Jsonl_writer.day_key ~ts:(Unix.gettimeofday ()))
               |> Result.map_error Dated_jsonl.read_error_to_string
             in
             File_lock_eio.with_durable_lock
               ~lock_path:(Filename.concat ledger_dir ".continuity.lock") (fun () ->
-                retire_missing_continuities ~ledger_dir;
-                let* () = advance store ~before_scan ~paths ~cursors in
-                read store)
+                let rec advance_snapshot () =
+                  let* paths = paths_now () in
+                  let* cursors = read_cursors store in
+                  retire_missing_continuities ~ledger_dir;
+                  let* () = advance store ~before_scan ~paths ~cursors in
+                  let* after = paths_now () in
+                  (* A writer can rotate the current file after enumeration
+                     and before its stat. Include the completed segment before
+                     querying, otherwise that successful read loses old rows
+                     and can hide a duplicate execution identity. *)
+                  if not (List.equal String.equal paths after) then advance_snapshot ()
+                  else
+                    let reading = read store in
+                    let* after_read = paths_now () in
+                    (* A selected old-current address can point into the new
+                       current file after rotation. Do not publish that row as
+                       unique while its old segment is absent from the index. *)
+                    if List.equal String.equal paths after_read then reading
+                    else advance_snapshot ()
+                in
+                advance_snapshot ())
             |> Result.map_error File_lock_eio.durable_lock_error_to_string
             |> Result.join
           with

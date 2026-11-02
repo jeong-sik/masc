@@ -2260,6 +2260,7 @@ type row_counts = {
   rc_entries : entry list;
   rc_inner_width : int;
   rc_origin : origin_display;
+  rc_has_markdown : bool;
   rc_newest_first : entry array;
   rc_row_ends : int array;
   mutable rc_filled : int;
@@ -2269,12 +2270,14 @@ type row_counts = {
 
 let row_counts_memo : row_counts option ref = ref None
 
-let row_counts_for entries ~inner_width ~origin =
+let row_counts_for ?markdown entries ~inner_width ~origin =
+  let has_markdown = Option.is_some markdown in
   match !row_counts_memo with
   | Some held
     when held.rc_entries == entries
          && held.rc_inner_width = inner_width
-         && held.rc_origin = origin ->
+         && held.rc_origin = origin
+         && held.rc_has_markdown = has_markdown ->
       held
   | Some _ | None ->
       let newest_first = Array.of_list (List.rev entries) in
@@ -2282,6 +2285,7 @@ let row_counts_for entries ~inner_width ~origin =
         { rc_entries = entries;
           rc_inner_width = inner_width;
           rc_origin = origin;
+          rc_has_markdown = has_markdown;
           rc_newest_first = newest_first;
           rc_row_ends = Array.make (Array.length newest_first) 0;
           rc_filled = 0;
@@ -2356,7 +2360,7 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
     let origin = Option.value origin ~default:Origin_row in
     let window_height = Int.max 0 height in
     let bound_height = Int.max 1 height in
-    let held = row_counts_for entries ~inner_width ~origin in
+    let held = row_counts_for ?markdown entries ~inner_width ~origin in
     let visited, total =
       count_rows_until held ?markdown ~wanted:(requested + bound_height) ()
     in
@@ -2407,7 +2411,9 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
    newer suffix. This is shared by search and by the next frame's origin pin. *)
 let scroll_for_body_row ?markdown ?(origin = Origin_row) ~inner_width
     ~entry_index ~body_row entries =
-  let held = row_counts_for entries ~inner_width:(Int.max 1 inner_width) ~origin in
+  let held =
+    row_counts_for ?markdown entries ~inner_width:(Int.max 1 inner_width) ~origin
+  in
   let index = Array.length held.rc_newest_first - entry_index - 1 in
   if index < 0 || index >= Array.length held.rc_newest_first || body_row < 0 then None
   else

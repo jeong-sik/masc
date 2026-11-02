@@ -36,6 +36,10 @@ The subsequent retention adapter described in this tree adds native
 `keepPages="all"` to `finish_space`; this source addition has the same evidence
 limits. The handler validates both retention policies before any effect; the
 generic Agent-Core argument validator does not enforce nested `oneOf` itself.
+The input-admission and Input-retention entries below were checked against
+`9ce15d79c77f73b38f84b4dc152500c17aab2b8d`. The 74-entry inventory and the guide
+and browser versions above remain historical captures, not a current SDK or
+installed-runtime observation. These corrections do not establish full parity.
 
 The official [Space guide](https://lite.ego.app/document/en/docs/space) describes
 Spaces as BrowserContexts in the same Ego browser process, rather than headless
@@ -57,7 +61,7 @@ local Space is visible or that its login is complete.
 | `TaskSpace.page` | Permanent label resolution; tab inventory and document-read projection retain the observed label | Lifecycle tools and installed-route proof |
 | `TaskSpace.userPage` | Native takeover freezes the managed/unmanaged boundary handle and checks its Space/target/label/origin against that same Space's tabs. The receipt returns activeTabId/egoPage; absence stays absent | Explicit adoption before unmanaged reads; no current focus, login or input-reset proof; real SDK/installed execution unverified |
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |
-| `TaskSpace.tabs` | `tabs.list` preserves label, target ID and `agent`/`unknown` origin for readable and unavailable tabs | Per-goal scope, lifecycle and installed-route proof |
+| `TaskSpace.tabs` | Bare native inventory, mapped to local tab IDs with canonical Page provenance; no Page.info prerequisite, dialogObservation=unobserved | Unobserved dialog knowledge is independent of a complete inventory; explicit mode=dialog is a separate native read |
 | `TaskSpace.newPage` | `page.act` open_tab | Per-goal Space and returned permanent label |
 | `TaskSpace.adopt` | Explicit `page.act` adopt_tab, observed tabId and clientId; native UnmanagedPage handle and optional pageLabel/as. Native Page effects support adopted Pages while preserving origin | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
@@ -83,9 +87,9 @@ local Space is visible or that its login is complete.
 | `Page.waitForEvent` | Internal download watch; typed clickAndWaitForPopup pre-arms the native popup wait and continues on its canonically reconciled same-Space Page, retaining source/current identities and partial trigger evidence | General event waits/conditional flows remain unsupported; installed MASC popup acceptance is separate |
 | `Page.waitForTimeout` | Native workflow explicit finite nonnegative milliseconds | Real SDK/installed-route proof; elapsed time is not state verification |
 | `Page.title` | Native workflow title returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
-| `Page.info` | Native workflow info returns native state; dialog stops following steps | Installed MASC/Keeper route unverified |
-| `Page.acceptDialog` | `page.act` accept_dialog validates native true and returns answered=true; false refuses, malformed results remain uncertain | Real SDK/installed execution and per-goal ownership evidence |
-| `Page.dismissDialog` | `page.act` dismiss_dialog validates native true and returns answered=true; false refuses, malformed results remain uncertain | Real SDK/installed execution and per-goal ownership evidence |
+| `Page.info` | Explicit BrowserRead mode=dialog reads native info once; native workflow info also returns state. Bare tab inventory does not call info and reports dialogObservation=unobserved | A retained modal can make info unavailable after SDK-session replacement; unobserved is not no-dialog |
+| `Page.acceptDialog` | `page.act` accept_dialog binds a fresh canonical managed Page and directly validates native true/false without a mandatory info read; true returns answered=true with dialogObservation=unobserved, false refuses, malformed results remain uncertain | Real SDK/installed execution and per-goal ownership evidence |
+| `Page.dismissDialog` | `page.act` dismiss_dialog binds a fresh canonical managed Page and directly validates native true/false without a mandatory info read; true returns answered=true with dialogObservation=unobserved, false refuses, malformed results remain uncertain | Real SDK/installed execution and per-goal ownership evidence |
 | `Page.evaluate` | Native workflow browser expression/call with JSON; structured timeout code, timeoutMs, executionStopped, mayHaveLateEffects and pageResponsive retained as diagnostics | Actual installed timeout path unverified; diagnostics never authorize replay or settle held input |
 | `Page.waitForFunction` | Native workflow waitForFunction with JSON and timeout/polling | Predicates count as possible effects; installed MASC/Keeper route unverified |
 | `Page.fetch` | Native workflow fetch with browser options; `saveAs` accepts an artifact filename, maps it to a fresh private path, and returns a download ID for the existing download broker | Actual SDK binary execution, installed MASC/Keeper route and registry recovery across SDK-process replacement remain unverified |
@@ -111,14 +115,14 @@ local Space is visible or that its login is complete.
 | --- | --- | --- |
 | `Page.mouse.click` | Trusted coordinates; workflow forwards button/clickCount/delay/label | New workflow requires real SDK and installed-route proof |
 | `Page.mouse.move` | Hover/path internals; workflow forwards steps/label | New workflow requires real SDK and installed-route proof |
-| `Page.mouse.down` | Internal coordinate-path drag presses natively; an entered raw sequence retains unknown release and blocks input pending private operator confirmation | General held-button workflows and native release settlement remain unsupported |
-| `Page.mouse.up` | Internal coordinate-path drag attempts native release in finally; its void result never proves release. Selector drag delegates release to native dragAndDrop | Explicit raw release acknowledgement and automatic uncertain-pointer recovery remain unsupported |
+| `Page.mouse.down` | Not exposed. Current admission refuses coordinate, waypoint and scene-node drags before input; selector-to-selector drag uses native dragAndDrop | General held-button workflows and the native raw-input completion contract remain open |
+| `Page.mouse.up` | Not exposed. Raw drag is refused before input; no synthetic release is sent. Native selector drag keeps its observed receipt boundary | Explicit raw release acknowledgement and automatic uncertain-pointer recovery remain unsupported by the current integration |
 | `Page.mouse.wheel` | Scroll at observed point; workflow forwards deltas/label | New workflow requires real SDK and installed-route proof; move over observed container first |
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
 | `Page.keyboard.press` | Interaction chord; workflow forwards native delay | New option forms require real SDK and installed-route proof |
-| `Page.keyboard.type` | Workflow forwards native text/delay, then stops on the SDK's void result with input release unconfirmed; preserves the earlier completed prefix and requires private operator recovery | Automatic continuation requires native settlement evidence; real SDK and installed-route proof remain open |
-| `Page.keyboard.insertText` | Native workflow | Real SDK primitive proof; installed MASC/Keeper route unverified |
+| `Page.keyboard.type` | Current admission refuses this method and ordinary Ego type_text before input. A workflow containing it is refused before its first step, so an earlier prefix is not executed. Native data decoding still recognizes retained receipts | Raw typing equivalence and its completion/interruption contract remain open; this restriction is not a claim that the SDK API is permanently unusable |
+| `Page.keyboard.insertText` | Native workflow, classified No_hold because it invokes Input.insertText without key-down/up; preserves existing input readiness | Does not attest release of earlier input or application success; broad installed MASC/Keeper equivalence remains unverified |
 | `Page.keyboard.paste` | Native workflow plain/rich paste | Real trusted paste proof; installed MASC/Keeper route unverified |
 | `FileChooser.isMultiple` | Internal chooser validation | Explicit chooser handle observation |
 | `FileChooser.setFiles` | Internal upload with staged copies/leases | Explicit handle lifecycle and timeout options |
@@ -232,8 +236,19 @@ authority. The TUI changes are source integration; visible behavior is unverifie
 
 A pending input may be resumed through the private operator confirmation form.
 This records a human check/reset assertion for the exact connected Space and
-pending generation, not an SDK cleanup acknowledgement. It does not provide native release acknowledgement, prove login/visible UI, or
-persist pending input through worker replacement. Receipt-less holding workflows
-stop without inferring release from Page.info; ordinary void typing also requires
-explicit operator recovery. Current exact-source build/test
-receipts must be checked separately from installed Keeper and real SDK proof.
+pending generation, not an SDK cleanup acknowledgement or proof of login/visible
+UI. Managed workers durably record known holding intent before dispatch and
+restore that Input state for the same numeric native Space after worker
+replacement. Use the current installation's form; a retired worker's form does
+not authorize a replacement. Retention cannot recover uncertainty that an older
+worker never recorded, and a missing record does not prove native freshness.
+
+Current admission refuses raw typing and raw coordinate/waypoint/scene drags
+before input. That refusal preserves existing readiness; it does not clear an
+earlier uncertain command. Already-dispatched uncertain input must not be
+replayed or inferred released from Page.info. See the
+[native workflow input contract](ego-native-workflow.md) for the supported
+fill, insertText, paste and selector-drag paths. Durable Input does not establish
+complete task continuation, durable download/finish reconciliation or physical
+input release. Exact-source checks, installed execution and goal-only Keeper
+results remain separate evidence.

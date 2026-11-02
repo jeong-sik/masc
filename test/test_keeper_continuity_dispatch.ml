@@ -209,7 +209,10 @@ let test_real_dispatch_freezes_unread_across_refusal () =
   check int "first request reached the refusing peer" 1 (Fixture.post_count refused);
   check int "second request reached the fallback peer" 1 (Fixture.post_count accepted);
   let frozen=Frozen.of_results ~snapshot:(Ok [original]) ~memory:(Ok [original]) in
-  let carrier=match Frozen.text frozen with Some text -> text | None -> fail "missing unread fixture" in
+  let carrier=match Frozen.text frozen with
+    | Ok (Some text) -> text
+    | Ok None -> fail "missing unread fixture"
+    | Error detail -> fail detail in
   let store=Dated_jsonl.open_store
     (Keeper_types_support.keeper_store_location config keeper_name Continuity_requests) in
   let evidence=Dated_jsonl.read_recent store 10 in
@@ -220,7 +223,7 @@ let test_real_dispatch_freezes_unread_across_refusal () =
       (has_content rows "Build the patch.");
     let row=match List.find_opt (fun row -> U.member "runtime_id" row=`String runtime) evidence with
       | Some row -> row | None -> fail "frozen request diagnostic missing" in
-    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v2"
+    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v3"
       (row |> U.member "schema" |> U.to_string);
     check bool "diagnostic binds precisely the sent frozen observation" true
       (U.member "unread" row=Frozen.to_json frozen);

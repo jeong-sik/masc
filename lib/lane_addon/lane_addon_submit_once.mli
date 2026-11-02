@@ -42,7 +42,9 @@ val record : publication -> Lane_addon_tool_request_owner.retained
 
 val resume : store:Lane_addon_store.t -> label:string ->
   original:Lane_addon_tool_request_owner.retained -> request:Lane_addon_exact.request ->
-  schema:Yojson.Safe.t -> prepare:(unit -> (unit, error) Stdlib.result) -> call:call ->
+  schema:Yojson.Safe.t ->
+  decode_final:(Yojson.Safe.t -> (Lane_addon_exact.final, string) Stdlib.result) ->
+  prepare:(unit -> (unit, error) Stdlib.result) -> call:call ->
   terminal:(Lane_addon_tool_request_owner.retained -> Lane_addon_exact.final ->
     ('final, error) Stdlib.result) ->
   ('final result, error) Stdlib.result
@@ -67,7 +69,9 @@ val resume : store:Lane_addon_store.t -> label:string ->
     returned as its error.
     Consecutive equal observations reuse the record without another write.
 
-    [terminal] validates a final result before Judgment_retained or Refused is
+    [decode_final] interprets worker and retained final JSON for this original.
+    A decoder accepting more than the strict schema must establish its original
+    host evidence before returning. [terminal] validates a final result before Judgment_retained or Refused is
     written and again on the published record; [label] names this owner in
     refusals. Refusal evidence retains the host's unknown cause. A worker's
     [Outcome_unknown] is accepted only after an authoritative host observation

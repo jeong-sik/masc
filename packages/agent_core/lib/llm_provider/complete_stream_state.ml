@@ -1283,16 +1283,35 @@ let finalize_completed state stop_reason =
   let stop_reason =
     Stop_reason_wire.reconcile stop_reason ~has_tool_blocks:(has_tool_block content)
   in
+  let cache_creation_input_tokens =
+    Option.bind state.usage (fun (u : Types.delta_usage) ->
+      u.cache_creation_input_tokens)
+  in
+  let cache_read_input_tokens =
+    Option.bind state.usage (fun (u : Types.delta_usage) ->
+      u.cache_read_input_tokens)
+  in
   Ok
     { Types.id = state.id
     ; model = state.model
     ; stop_reason
     ; content
     ; usage = Option.map terminal_usage state.usage
-    ; telemetry = Some (Types.with_reported_model ~model:state.model
-        (match response_replay,inline_content_replay with
-         | None,None -> None
-         | _ -> Some {Types.default_inference_telemetry with response_replay;inline_content_replay}))
+    ; telemetry =
+        Some
+          (Types.with_reported_cache_usage
+             ~cache_creation_input_tokens
+             ~cache_read_input_tokens
+             (Some
+                (Types.with_reported_model ~model:state.model
+                   (match response_replay, inline_content_replay with
+                    | None, None -> None
+                    | _ ->
+                      Some
+                        { Types.default_inference_telemetry with
+                          response_replay
+                        ; inline_content_replay
+                        }))))
     }
 ;;
 

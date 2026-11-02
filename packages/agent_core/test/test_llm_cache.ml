@@ -82,6 +82,69 @@ let test_fingerprint_separates_request_shaping_fields () =
     { base with PC.response_format = JsonMode }
 ;;
 
+let test_fingerprint_system_prompt_cache_prefix_normalization () =
+  let msgs = [ user_msg "same" ] in
+  let key config = Cache.request_fingerprint ~config ~messages:msgs () in
+  let anthropic_base =
+    PC.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-4-6"
+      ~base_url:"http://localhost"
+      ~system_prompt:"stable prefix\ndynamic tail"
+      ~cache_system_prompt:true
+      ()
+  in
+  let anthropic_split =
+    { anthropic_base with PC.system_prompt_cache_prefix = Some "stable prefix" }
+  in
+  Alcotest.(check bool)
+    "effective Anthropic prefix split changes the key"
+    true
+    (key anthropic_base <> key anthropic_split);
+  let anthropic_non_prefix =
+    { anthropic_base with PC.system_prompt_cache_prefix = Some "unrelated prefix" }
+  in
+  Alcotest.(check string)
+    "non-matching prefix hint is ignored in key"
+    (key anthropic_base)
+    (key anthropic_non_prefix);
+  let anthropic_full_equal =
+    { anthropic_base with
+      PC.system_prompt_cache_prefix = Some "stable prefix\ndynamic tail"
+    }
+  in
+  Alcotest.(check string)
+    "prefix equal to full system prompt is ignored in key"
+    (key anthropic_base)
+    (key anthropic_full_equal);
+  let anthropic_no_cache =
+    { anthropic_base with PC.cache_system_prompt = false }
+  in
+  let anthropic_no_cache_with_hint =
+    { anthropic_no_cache with PC.system_prompt_cache_prefix = Some "stable prefix" }
+  in
+  Alcotest.(check string)
+    "disabled system caching ignores prefix hint in key"
+    (key anthropic_no_cache)
+    (key anthropic_no_cache_with_hint);
+  let openai_base =
+    PC.make
+      ~kind:OpenAI_compat
+      ~model_id:"gpt-5"
+      ~base_url:"http://localhost"
+      ~system_prompt:"stable prefix\ndynamic tail"
+      ~cache_system_prompt:true
+      ()
+  in
+  let openai_with_hint =
+    { openai_base with PC.system_prompt_cache_prefix = Some "stable prefix" }
+  in
+  Alcotest.(check string)
+    "non-Anthropic kind ignores prefix hint in key"
+    (key openai_base)
+    (key openai_with_hint)
+;;
+
 let test_fingerprint_different_models () =
   let c1 = make_config ~model_id:"model-a" () in
   let c2 = make_config ~model_id:"model-b" () in
@@ -646,6 +709,8 @@ let () =
         ; Alcotest.test_case "different models" `Quick test_fingerprint_different_models
         ; Alcotest.test_case "request-shaping fields separate keys" `Quick
             test_fingerprint_separates_request_shaping_fields
+        ; Alcotest.test_case "system_prompt_cache_prefix normalization" `Quick
+            test_fingerprint_system_prompt_cache_prefix_normalization
         ; Alcotest.test_case "with tools" `Quick test_fingerprint_with_tools
         ; Alcotest.test_case
             "empty tools vs none"

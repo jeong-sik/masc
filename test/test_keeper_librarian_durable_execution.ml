@@ -408,6 +408,92 @@ let gate_records fixture capture =
   let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) |> get in
   List.concat_map (fun execution_id -> Gate.Inventory.execution_records inventory ~execution_id)
     (Gate.Inventory.executions inventory)
+let with_absorb_guidance_gap ~empty f =
+  let original=Prompt_registry.get_markdown_dir () |> Option.get in
+  let key=Prompt_names.librarian_absorb_forward in
+  let override=(Prompt_registry.resolve_prompt key).override_value in
+  let directory=io (fun () ->
+    let directory=Filename.temp_dir "history-absorb-policy-gap-" "" in
+    let text=Fs_compat.load_file (Filename.concat original "librarian.md") in
+    let _,lines=List.fold_left (fun (skipping,lines) line ->
+      if line="### absorb_forward" then true,(if empty then ""::line::lines else lines)
+      else if skipping && not (String.starts_with ~prefix:"### " line) then true,lines
+      else false,line::lines) (false,[]) (String.split_on_char '\n' text) in
+    write (Filename.concat directory "librarian.md") (String.concat "\n" (List.rev lines));directory) in
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.set_markdown_dir original;
+    (match override with None -> Prompt_registry.clear_prompt_override key
+     | Some text -> Prompt_registry.set_override key text |> get);
+    io (fun () -> Fs_compat.remove_tree directory)) (fun () ->
+    Prompt_registry.clear_prompt_override key;
+    Prompt_registry.set_markdown_dir directory;f ())
+let with_enabled_absorb_gate (fixture:fixture) f =
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "unused-absorb-key") (fun () ->
+    Masc_test_deps.with_typesafeai_policy
+      {Runtime_schema.default_typesafeai with lane_enabled=true;absorb_gate=true;excluded_keepers=[];
+       destinations=({Runtime_schema.endpoint=fixture.server.base_url;model="unused-absorb-model";
+         api_key_env="TYPESAFEAI_API_KEY"},[])} f)
+let add_absorption (proposal:Yojson.Safe.t) =
+  let fields=Yojson.Safe.Util.to_assoc proposal in
+  let claims=List.assoc "new_claims" fields |> Yojson.Safe.Util.to_list in
+  let claims=match claims with
+    | `Assoc first::rest -> `Assoc (("absorbs",`List [`String "m1"])::List.remove_assoc "absorbs" first)::rest
+    | [] | _::_ -> fail "the absorbing fixture requires a new claim" in
+  `Assoc (("new_claims",`List claims)::List.remove_assoc "new_claims" fields)
+let seed_absorb_source (fixture:fixture) = memory_action fixture (fun () -> io (fun () ->
+  Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~expected_revision:None
+    ~now:50. ~source:{Current.kind=Current.Librarian;trace_id="unused-absorb-policy"}
+    ~facts:[Types.observed ~claim:"Earlier complete source memory." ~category:Types.Fact ~now:50.
+      ~origin:{kind=Types.Authored;trace_id="unused-absorb-policy"}] () |> get |> ignore))
+let answered_proposal (record:Owner.retained) (request:Exact.request) =
+  let judgment=match Progress.phase record.progress with
+    | Judged judgment -> judgment | _ -> fail "expected an answered original before gate preparation" in
+  match Exact.final_of_json ~schema:(Option.get request.schema) judgment |> get with
+  | Call_final (Answered {output;_}) -> Exact.checked_json output
+  | _ -> fail "expected the original host-checked answer"
+let test_history_guidance_is_required_only_for_actual_absorptions () =
+  List.iter (fun (empty,absorbing) -> with_fixture (fun ~sw:_ fixture ->
+    seed_absorb_source fixture;
+    fixture.set_response (fun capture ->
+      let proposal=answer capture in `OK,F.openai_response (if absorbing then add_absorption proposal else proposal));
+    with_enabled_absorb_gate fixture (fun () -> with_absorb_guidance_gap ~empty (fun () ->
+      let before= !(fixture.deliveries) in
+      assert_pending (run_worker fixture);await_delivery fixture ~after:before;
+      if absorbing then check bool "nonempty history cannot prepare without guidance" true (Result.is_error (run_worker fixture))
+      else drive_advanced fixture;
+      let parent,capture=only_original fixture in
+      let owner=Capture.physical_owner capture in
+      let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority ~new_observations:[] authority with
+        | Error detail -> detail | Ok _ -> fail "enabled guidance must remain explicitly unavailable" in
+      if absorbing then (
+        let proposal=answered_proposal parent (Capture.request capture |> get) in
+        check bool "the host retained real nonempty absorption" true
+          ((Capture.validate_proposal capture proposal |> get).absorption.absorbed<>[]);
+        let request_id=Random_id.uuid_v7 () in
+        check (result unit string) "nonempty history root requires guidance" (Error missing_policy)
+          (io (fun () -> Gate.prepare_root ~store:fixture.store ~owner ~capture ~parent ~proposal ~request_id ~authority) |> Result.map (fun _ -> ()));
+        check (result unit string) "nonempty history retention requires guidance" (Error missing_policy)
+          (io (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent ~proposal ~request_id ~authority ~predecessor:None) |> Result.map (fun _ -> ()));
+        check int "no invalid history gate was retained" 0 (List.length (gate_records fixture capture)))
+      else (
+        let gate=match gate_records fixture capture with [gate] -> gate | _ -> fail "one empty history gate expected" in
+        check json "empty history captures explicit guidance absence" `Null (member "guidance" gate.request);
+        let parent=memory_action fixture (fun () -> io (fun () -> Gate.recover_root ~store:fixture.store ~owner ~capture) |> get) in
+        let gate=memory_action fixture (fun () -> io (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent
+          ~proposal:(member "proposal" gate.request) ~request_id:gate.request_id ~authority ~predecessor:None) |> get) in
+        let result=memory_action fixture (fun () -> Gate.resume ~store:fixture.store ~owner ~capture ~record:gate ~live_authority:None
+          ~request_clock:(fun () -> fail "empty history acquired a gate clock")
+          ~before_dispatch:(fun () -> fail "empty history dispatched a gate request") |> get) in
+        let result=match result with Gate.Complete (result,_) -> result | Pending _ -> fail "empty history must complete locally" in
+        check bool "empty history replays as No_absorptions" true
+          (match result with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true | _ -> false);
+        let replayed=io (fun () -> Gate.restore_size_evidence ~store:fixture.store ~owner ~parent_execution:capture
+          ~gate_request_id:gate.request_id) |> get in
+        check json "empty history survives strict replay" (Keeper_librarian_absorb_gate.run_result_to_yojson result)
+          (Keeper_librarian_absorb_gate.run_result_to_yojson replayed));
+      check int "only the original history provider was called" 1 (F.post_count fixture.server)))))
+    [false,false;true,false;false,true;true,true]
 let settled_on fixture ~date (record:Owner.retained) =
   io (fun () -> Owner.settled ~store:fixture.store ~scope:record.scope ~date ~request_id:record.request_id) |> owned
 let settle_only fixture ~date (record:Owner.retained) =
@@ -426,6 +512,51 @@ let assert_unattached = function
     check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);
     check bool "attachment refusal has an actual diagnostic" true (String.length (Consumer.error_to_string error)>0)
   | Ok _ -> fail "missing Addon must not silently return Pending or an empty report"
+let test_retained_source_root_alias () = with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+  let alias=Filename.concat fixture.base_path "workspace-alias" in
+  io (fun () -> Unix.symlink fixture.base_path alias);
+  Fun.protect ~finally:(fun () -> io (fun () -> Unix.unlink alias)) (fun () ->
+    let config={fixture.config with Workspace.base_path=alias} in
+    let source=ref None in
+    (match memory_action fixture (fun () -> Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun captured -> source:=Some captured;Consumer.Memory_refused [])) with
+     | Ok (Consumer.Memory_not_committed _) -> ()
+     | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending) ->
+       fail "the aliased source was not captured"
+     | Error error -> fail (Consumer.error_to_string error));
+    let source=Option.to_result ~none:"the consumer retained no aliased source" !source |> get in
+    check string "the public source producer preserves its supplied path"
+      (Workspace.keepers_runtime_dir config) (Source.runtime_keepers_dir source);
+    let owner=io (fun () ->
+      ignore (Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
+      Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
+    check bool "the physical owner uses another spelling of the same root" false
+      (Source.runtime_keepers_dir source=Capture.runtime_keepers_dir owner);
+    let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> get in
+    let destination=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination -> Ok destination) |> get in
+    let capture=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+      ~owner ~destination ~source ~preparation ()) |> get in
+    let record=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store capture)
+      |> Result.map_error Durable_owner.error_to_string |> get in
+    let preflight ()=io (fun () -> Lane_addon_store_preflight.scan
+      ~validate_tool_request:Keeper_librarian_store_preflight.validate
+      Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
+    check int "the retained alias passes current payload preflight" 0 (List.length (preflight ()).refusals);
+    let restored=io (fun () -> Capture.restore ~owner record) |> get in
+    check json "runtime restoration preserves the exact captured source spelling"
+      (Capture.to_json capture) (Capture.to_json restored);
+    let another_workspace=Filename.concat fixture.base_path "another-workspace" in
+    io (fun () ->
+      Fs_compat.mkdir_p (Common.keepers_runtime_dir_of_base ~base_path:another_workspace);
+      Unix.unlink alias;
+      Unix.symlink another_workspace alias);
+    check int "pure payload inspection grants no physical source authority" 0 (List.length (preflight ()).refusals);
+    (match io (fun () -> Capture.restore ~owner record) with
+     | Error detail -> check string "a retargeted alias is another physical source"
+         "Original history source came from another physical runtime/output root" detail
+     | Ok _ -> fail "a different physical source root was restored");
+    check int "source inspection and retention dispatch no provider request" 0 (F.post_count fixture.server)))
 let test_unattached_reports_without_consuming () = with_fixture (fun ~sw:_ fixture ->
   let before=progress fixture in
   set_enabled fixture false;
@@ -594,6 +725,93 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   check bool "its gate records settle under the same day" true (List.for_all (settled_on fixture ~date) gates);
   check int "no gate record stays for validation" 0 (List.length (gate_records fixture capture));
   check int "already consumed source never creates another provider request" posts (F.post_count fixture.server))
+
+let test_retained_answer_with_invalid_working_context_recovers () = with_fixture (fun ~sw:_ fixture ->
+  let output capture = match answer capture with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+      if key="working_contexts" then key,`List [`Assoc [
+        "merge_contexts",`List [];"sources",`List [`String "fixture-source"];
+        "context",`String "original context";"next_steps",`List [];
+        "completeness",`String "current"]]
+      else key,value) fields)
+    | _ -> fail "fixture answer is not an object" in
+  fixture.set_response (fun capture -> `OK,F.openai_response (output capture));
+  let before=progress fixture and delivered= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:delivered;
+  let record,capture=only_original fixture in
+  let exact=Capture.request capture |> get in
+  let schema=Option.get exact.Exact.schema in
+  let final=match latest fixture capture with
+    | Exact.Completed_latest {execution={outcome=Call_ended (Answered _ as answer);_};_} -> Exact.Call_final answer
+    | _ -> fail "actual original answer and proof were not retained" in
+  let wire=Exact.final_to_json final in
+  check bool "strict consumer schema rejects the additional nested field" true
+    (Result.is_error (Exact.final_of_json ~schema wire));
+  let decoded=io (fun () -> Capture.decode_final ~store:fixture.store capture wire) |> get in
+  check json "recovery preserves the exact host answer" wire (Exact.final_to_json decoded);
+  let proposal=Capture.validate_proposal capture (output capture) |> get in
+  (match proposal.Keeper_librarian_runtime.accepted.selection.working_contexts with
+   | Keeper_librarian.Working_contexts_invalid _ -> ()
+   | Working_contexts_organized _ | Working_contexts_missing -> fail "invalid context must remain refused");
+  let changed=match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="slot" then key,`String "different-slot" else key,value) fields)
+    | _ -> fail "final is not an object" in
+  check bool "a different worker result cannot borrow the host answer" true
+    (io (fun () -> Result.is_error (Capture.decode_final ~store:fixture.store capture changed)));
+  check bool "a different schema cannot observe this original" true
+    (io (fun () -> Result.is_error (Exact.observe_retained ~store:fixture.store
+      ~declaration_id:"librarian" ~schema:(`Assoc []) exact)));
+  let strict_forgery=match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="output" then key,answer capture else key,value) fields)
+    | _ -> fail "final is not an object" in
+  let strict_final=io (fun () -> Capture.decode_final ~store:fixture.store capture strict_forgery) |> get in
+  check bool "a strict forged answer still fails the host confirmation boundary" true
+    (io (fun () -> Result.is_error (Capture.confirm_final ~store:fixture.store capture strict_final)));
+  let empty_store=Store.create ~root:(Filename.concat fixture.base_path "missing-original-proof") in
+  let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+    ~request_id:exact.request_id |> get |> Option.get) in
+  io (fun () -> Store.save_exact_request empty_store ~declaration_id:"librarian"
+    ~request_id:exact.request_id host |> get);
+  check bool "a terminal without its execution proof cannot recover" true
+    (io (fun () -> Result.is_error (Capture.decode_final ~store:empty_store capture wire)));
+  let invalid_memory=match output capture with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="new_claims" then key,`List [new_claim ""] else key,value) fields)
+    | _ -> fail "fixture answer is not an object" in
+  check bool "invalid Memory is still rejected by its domain" true
+    (Result.is_error (Capture.validate_proposal capture invalid_memory));
+  let hold=memory_action fixture (fun () ->
+    Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[]
+      ~original:record ~request:capture
+      ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "proved host answer must not call the worker")
+      ~publish:(fun ~original:_ ~request:_ ~proposal:_ ->
+        Ok (Durable_owner.Publication_pending "fixture holds publication after judgment"))
+      ~wake:(fun () -> ())) in
+  (match hold with
+   | Ok (Durable_owner.Publication_waiting _) -> ()
+   | Ok (Pending _ | Refused _ | Finished _ | Basis_superseded _) -> fail "original did not retain its judgment"
+   | Error error -> fail (Durable_owner.error_to_string error));
+  let judged,_=only_original fixture in
+  (match Progress.phase judged.Owner.progress with
+   | Progress.Judged actual -> check json "the real submit machine retained the original answer" wire actual
+   | _ -> fail "original is not waiting with its proven judgment");
+  let posts=F.post_count fixture.server in
+  check bool "the retained original completes publication" true (advanced (run_worker fixture));
+  check (list string) "valid original Memory was committed"
+    ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+  check bool "source progress follows the committed original" true (progress fixture<>before);
+  let range=Option.get (Source.range_id (Capture.source capture)) in
+  let coverage=io (fun () -> Current.committed_durable_coverage ~keepers_dir:fixture.keepers_dir
+    ~keeper_id:keeper_name ~receipt_scope:range.Current.receipt_scope |> get) in
+  check bool "the original Memory receipt covers the source range" true (coverage=Some range);
+  let finished,_=only_original fixture in
+  (match Progress.phase finished.Owner.progress with
+   | Progress.Finished commit -> check json "finished judgment remains unchanged" wire commit.judgment
+   | _ -> fail "original judgment did not finish");
+  check int "the original provider request is not resubmitted" posts (F.post_count fixture.server))
 (* A settle that stopped between a history record and its gate records leaves
    gates of an archived execution. A pass with no original reads no gate
    scope, so the pass of the next original settles them. *)
@@ -717,7 +935,7 @@ let test_gate_request_names_its_parent_by_digest () = with_fixture (fun ~sw:_ fi
     ~request:earlier) |> owned;
   match io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) with
   | Error detail -> check string "a gate request in the earlier shape is refused by its version"
-      "Original gate request is not version 2" detail
+      "Original gate request is not version 3" detail
   | Ok _ -> fail "a gate request that copies its parent was read")
 let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind (fun ~sw:_ fixture ->
   let atom_before=progress fixture in
@@ -1133,6 +1351,19 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       let child=io (fun () -> Capture.create
         ~predecessor:{request_id=original_record.request_id;request_digest=original_record.request_digest}
         ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
+      let read ~scope ~request_id = Owner.load ~store:fixture.store ~scope ~request_id
+        |> Result.map_error Owner.error_to_string in
+      let inspect ?(read=read) ~require_confirmed child = io (fun () ->
+        Capture.validate_predecessor_payload ~read ~require_confirmed child) in
+      check bool "preflight refuses a missing history predecessor" true
+        (Result.is_error (inspect ~read:(fun ~scope:_ ~request_id:_ -> Ok None) ~require_confirmed:false child));
+      let wrong_digest=io (fun () -> Capture.create
+        ~predecessor:{request_id=original_record.request_id;request_digest=String.make 64 '0'}
+        ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
+      check bool "preflight refuses a changed history predecessor digest" true
+        (Result.is_error (inspect ~require_confirmed:false wrong_digest));
+      check bool "preflight requires the parent's full replacement intent" true
+        (Result.is_error (inspect ~require_confirmed:false child));
       let intended:Progress.preparation_intent={request_id;request=Capture.to_json child} in
       let parent=io (fun () -> match Owner.advance ~store:fixture.store ~expected:parked
           ~event:(Progress.Replacement_intended intended) with
@@ -1141,6 +1372,9 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
         | Error error -> fail (Owner.update_error_to_string error)) in
       check bool "full parent intent exists before any child retention" true
         (Option.is_some (Progress.replacement parent.progress));
+      inspect ~require_confirmed:false child |> get;
+      check bool "a pending history child cannot claim acknowledged publication" true
+        (Result.is_error (inspect ~require_confirmed:true child));
       let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
       let authorize child=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
@@ -1157,6 +1391,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       (match Progress.replacement parent.progress with
        | Some (Preparation_confirmed successor) -> check string "Off recovery acknowledges the same child" request_id successor.request_id
        | None | Some (Preparation_pending _) -> fail "Off did not recover the original child publication");
+      inspect ~require_confirmed:true child |> get;
       (match authorize child with
        | Ok (Some authorization) -> check bool "Off still refuses actual dispatch after local ACK" true
            (Result.is_error (authorization.before_dispatch ()))
@@ -1381,6 +1616,60 @@ let candidate_and_request fixture =
   match candidate_of fixture with
   | Some candidate -> candidate,request
   | None -> fail "the refused original must be a floor candidate"
+let test_floor_guidance_is_required_only_for_actual_absorptions () =
+  let module Journal = Keeper_librarian_floor_step_gate in
+  let module Step = Keeper_librarian_floor_step_request in
+  List.iter (fun (empty,absorbing) -> with_fixture (fun ~sw:_ fixture ->
+    seed_absorb_source fixture;
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate,request=candidate_and_request fixture in
+    let posts=F.post_count fixture.server in
+    let answers=ref 0 in
+    fixture.set_step_response (fun _ ->
+      incr answers;
+      let proposal=step_answer !answers in `OK,F.openai_response (if absorbing then add_absorption proposal else proposal));
+    with_enabled_absorb_gate fixture (fun () -> with_absorb_guidance_gap ~empty (fun () ->
+      let outcome=descend fixture candidate in
+      if absorbing then check bool "nonempty floor cannot prepare without guidance" true (Result.is_error outcome)
+      else ignore (finished outcome);
+      let owner=Capture.physical_owner request in
+      let steps=steps_of fixture request in
+      check int "each source message has exactly its original provider answer" (if absorbing then 1 else 2)
+        (F.post_count fixture.server-posts);
+      let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority ~new_observations:[] authority with
+        | Error detail -> detail | Ok _ -> fail "enabled floor guidance must remain explicitly unavailable" in
+      List.iter (fun ((parent:Owner.retained),_) ->
+        let step=io (fun () -> Step.restore ~owner parent) |> get in
+        let proposal=answered_proposal parent (Step.request step |> get) in
+        let validated:Keeper_librarian_runtime.durable_step_proposal=Step.validate_proposal step proposal |> get in
+        check bool "the original step retains its actual absorption shape" absorbing
+          (validated.proposal.absorption.absorbed<>[]);
+        if absorbing then (
+          let request_id=Random_id.uuid_v7 () in
+          check (result unit string) "nonempty floor root requires guidance" (Error missing_policy)
+            (io (fun () -> Journal.prepare_root ~store:fixture.store ~owner ~capture:step ~parent ~proposal ~request_id ~authority) |> Result.map (fun _ -> ()));
+          check (result unit string) "nonempty floor retention requires guidance" (Error missing_policy)
+            (io (fun () -> Journal.retain ~store:fixture.store ~owner ~capture:step ~parent ~proposal ~request_id ~authority ~predecessor:None) |> Result.map (fun _ -> ()));
+          check bool "no invalid floor gate was prepared" true (Progress.preparation parent.progress=None))
+        else (
+          let parent=memory_action fixture (fun () -> io (fun () -> Journal.recover_root ~store:fixture.store ~owner ~capture:step) |> get) in
+          let gate=io (fun () -> Journal.root ~store:fixture.store ~owner ~capture:step) |> get |> Option.get in
+          check json "empty floor captures explicit guidance absence" `Null (member "guidance" gate.request);
+          let gate=memory_action fixture (fun () -> io (fun () -> Journal.retain ~store:fixture.store ~owner ~capture:step ~parent
+            ~proposal ~request_id:gate.request_id ~authority ~predecessor:None) |> get) in
+          let result=memory_action fixture (fun () -> Journal.resume ~store:fixture.store ~owner ~capture:step ~record:gate
+            ~live_authority:None ~request_clock:(fun () -> fail "empty floor acquired a gate clock")
+            ~before_dispatch:(fun () -> fail "empty floor dispatched a gate request") |> get) in
+          let result=match result with Journal.Complete (result,_) -> result | Pending _ -> fail "empty floor must complete locally" in
+          check bool "empty floor replays as No_absorptions" true
+            (match result with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true | _ -> false);
+          let replayed=io (fun () -> Journal.restore_size_evidence ~store:fixture.store ~owner ~parent_execution:step
+            ~gate_request_id:gate.request_id) |> get in
+          check json "empty floor survives strict replay" (Keeper_librarian_absorb_gate.run_result_to_yojson result)
+            (Keeper_librarian_absorb_gate.run_result_to_yojson replayed))) steps;
+      check int "gate recovery and replay add no provider call" (if absorbing then 1 else 2)
+        (F.post_count fixture.server-posts))))) [false,false;true,false;false,true;true,true]
 let test_a_kept_size_refusal_of_one_turn_is_a_candidate () = with_fixture (fun ~sw:_ fixture ->
   fixture.set_response (fun _ -> size_refusal);
   narrow_next_read fixture;
@@ -2083,6 +2372,9 @@ let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~s
   check (list int) "and no step moved" [0;1] (sorted_positions fixture request))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "proved original survives invalid working context on resume" `Quick
+    test_retained_answer_with_invalid_working_context_recovers;
+  test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "a worker frame refusal ends the original instead of blocking publication" `Quick
@@ -2092,6 +2384,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "a refusal the latest execution did not end in shows nothing" `Quick
     test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
+  test_case "history guidance is required only for actual absorptions" `Quick
+    test_history_guidance_is_required_only_for_actual_absorptions;
+  test_case "floor guidance is required only for actual absorptions" `Quick
+    test_floor_guidance_is_required_only_for_actual_absorptions;
   test_case "a settle stopped before its gate records finishes with the next original" `Quick
     test_stopped_settle_leaves_gates_for_the_next_original;
   test_case "one inventory observation reuses verified gate and parent bodies without effect authority" `Quick

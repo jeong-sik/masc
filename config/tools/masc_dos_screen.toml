@@ -8,8 +8,10 @@ that it is done; settled also does not prove a game's final prompt. frame_ascii 
 the whole frame's luminance in 8x16 cells: where a graphics mode drew, not \
 what it says. frame_nonblack counts lit cells. Unless include_frame is false, \
 the frame also comes as a PNG: inline image content over MCP, and a Keeper gets \
-an artifact instead -- read a game's own lettering (Korean menus) with \
-keeper_analyze_image."""
+an artifact instead -- inspect its pixels and a game's own lettering (Korean \
+menus) with keeper_image_read when offered. Use keeper_analyze_image if the \
+current runtime's capability excludes native image input, native image admission \
+rejects it, or another model's interpretation is needed."""
 additional_properties = false
 
 defer_loading = true

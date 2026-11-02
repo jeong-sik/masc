@@ -34,12 +34,21 @@ sequence and returns one final snapshot. Split the call when intermediate
 results require a new decision. Retain `completed` progress on failure and
 never replay the sequence after uncertain effects.
 
-The current SDK's raw `keyboard.type` returns no action receipt, including after
-some dialog interruptions. MASC refuses an entire workflow containing it before
-any step, and refuses the Ego `type_text` route before input. Full raw typing
-parity requires a native SDK completion contract. A new pre-effect refusal
-requires no input reset; previously uncertain input still follows the private
-operator recovery below and must never be replayed.
+Use `type_text` with the observed `documentId` and `expectedUrl` to type at the
+current enabled editable focus, or use workflow `keyboard.type` after an
+observed focus. Both call native typing once. The SDK return stays void;
+MASC independently verifies that the same command reached the native typing
+tail and reports `nativeCompletion` separately. This is command completion,
+not proof that the application accepted the text or that external input is fresh.
+Read the resulting field or editor before deciding what to do next.
+
+If that native window is interrupted or unconfirmed, MASC stops before the next
+workflow step and retains pending input. Never replay the typing or workflow.
+A proven refusal before typing can restore the previous input readiness without
+claiming that observation setup had no effects. Typing consumes the native Page
+event buffer for its completion check; a later `events` result is not a full
+history. Previously uncertain input still requires the private operator
+recovery below.
 
 A `drag` between observed points, and a `drag_to` with waypoints or scene nodes,
 use raw mouse calls with no release receipt. MASC refuses them before input.
@@ -90,6 +99,17 @@ A changed or lost boundary result does not authorize another active tab,
 another Space or automatic takeover replay. Confirm login with a fresh read
 of the intended managed Page. Explicit input/navigation/activation can
 then use an adopted native Page without changing its origin.
+
+Ego tab inventory uses native `task.tabs()` without waiting for Page info.
+`dialogObservation = "unobserved"` means the inventory does not establish whether
+an alert or prompt is open. To request dialog metadata explicitly, use
+`BrowserRead mode = "dialog"` on the same live client and observed `tabId`, with
+no `framePath`. This native read can be unavailable after SDK-session replacement;
+its failure does not invalidate the inventory. An observed dialog in an input
+receipt remains useful. `accept_dialog` and `dismiss_dialog` bind the same native
+managed Page and call its boolean method directly without first reading info;
+`answered = true` does not certify input release or identify unobserved dialog text.
+Never repeat an uncertain answer or infer a clean key/button state from it.
 
 If an Ego result says input release is unconfirmed, keep the original connection
 and do not replay its command. Answer any JavaScript dialog separately. Ask the

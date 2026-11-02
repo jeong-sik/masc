@@ -247,6 +247,11 @@ type execution_terminal_evidence =
     (** As the execution journal records them, before history conversion. *)
   }
 
+type execution_observation =
+  | Execution_awaiting
+  | Execution_owner_lost
+  | Execution_terminal of execution_terminal_evidence
+
 val execution_locator_to_yojson : execution_locator -> Yojson.Safe.t
 
 (** Decode the exact versioned locator emitted by
@@ -268,7 +273,10 @@ module Execution_projection : Agent_execution_projection_intf.S
     process restart. [locator] must identify the top-level run in exactly this
     directory. The call takes no writer lock and performs no recovery writes.
     The returned value is safe to share between fibers; sharing also preserves
-    its incremental validated-prefix cache across consumers. *)
+    its incremental validated-prefix cache across consumers. Canonical store
+    formats predating the actor-lifetime lease protocol are typed unsupported
+    storage errors, including their terminal histories. No migration, deletion
+    or automatic recovery of those older bytes is performed. *)
 val open_execution_projection
   :  runtime:execution_runtime
   -> dir:Eio.Fs.dir_ty Eio.Path.t
@@ -280,7 +288,8 @@ val read_execution_terminal :
   (execution_terminal_evidence option, Execution_projection.error) result
 (** Read the canonical terminal/recovery disposition after restart, including
     a crash after journal commit but before the host's terminal callback.
-    [None] means the root is still running. Uses the same recovery derivation
+    [None] means no root terminal has been observed; liveness is unknown.
+    Uses the same recovery derivation
     as terminal settlement, with no writer lock or recovery mutation. A
     terminal disposition alone does not reconstruct the lost Agent response
     or acknowledge its delivery to the host. The evidence includes canonical
@@ -288,6 +297,19 @@ val read_execution_terminal :
     A host can distinguish a
     provider-only failure from effects settled before its checkpoint sink.
     Child results are represented by their enclosing root ToolResult. *)
+
+val observe_execution :
+  Execution_projection.t ->
+  (execution_observation, Execution_projection.error) result
+(** Observe the same canonical terminal evidence, or distinguish an awaiting
+    writer from confirmed writer loss. Owner loss requires the existing
+    canonical-path claim and OS writer lock plus a fresh validated snapshot
+    under that lock. Missing files, identity changes and cleanup failures are
+    errors, never owner-loss evidence. The operation creates no lock file and
+    performs no recovery writes, replay or execution admission. A lost owner
+    with no terminal requires operator reconciliation; external effects remain
+    unknown. [Execution_awaiting] includes a competing observation or writer
+    admission whose absence has not been established. *)
 
 (** Configure one durable execution scope. Without [resume], the directory must
     be new and the call starts a fresh scope. With [resume], the same Agent API

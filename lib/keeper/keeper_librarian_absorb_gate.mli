@@ -52,6 +52,18 @@ type evaluate =
 (** One evaluation request. {!run} installs {!Typesafeai_client.evaluate};
     a test installs a function that answers from a table. *)
 
+type guidance
+(** Immutable common policies and the one forward context selected by the
+    original observations from the managed Librarian prompt. *)
+val resolve_guidance : new_observations:Yojson.Safe.t list -> unit -> (guidance, string) result
+val guidance_to_yojson : guidance -> Yojson.Safe.t
+val guidance_of_yojson : Yojson.Safe.t -> (guidance, string) result
+(** Strict version 2 codec. Requires every nonempty captured resolution and
+    renders them without consulting current prompt metadata or overrides. *)
+val validate_guidance_for_input : new_observations:Yojson.Safe.t list -> guidance -> (unit, string) result
+(** Pure check that the captured context matches the original observation
+    presence; a wire context tag alone supplies no input authority. *)
+
 type consolidation = Mergeable | Different_context | Loses_knowledge | Uncertain
 
 type source_verdict =
@@ -112,7 +124,7 @@ val state_bytes_limit : int
 
 val request_bytes_limit : int
 (** A request carries at most this many bytes of claim and questions (each
-    source with the fixed instruction and criteria text sent beside it):
+    source with the captured instruction and criteria text sent beside it):
     the smallest request bound among the routes the lane can use (32k
     tokens on OpenRouter, 64k at TypeSafe) taken in bytes, so a request is
     conservatively admitted for size. A complete source that does not fit a request
@@ -120,7 +132,8 @@ val request_bytes_limit : int
     than being absorbed on a predictable refusal. *)
 
 val judge
-  :  evaluate:evaluate
+  :  guidance:guidance
+  -> evaluate:evaluate
   -> new_observations:Yojson.Safe.t list
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
@@ -171,7 +184,8 @@ type copy_check =
   }
 
 val judge_copies
-  :  evaluate:evaluate
+  :  guidance:guidance
+  -> evaluate:evaluate
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> superseding:string list
@@ -260,15 +274,24 @@ type replay_authority =
 
 type live_authority
 (** An original Keeper identity and the once-resolved gate availability and
-    armed destinations. Credentials remain private in memory; this handle
+    armed destinations, plus independent resolved guidance results for both
+    forward contexts. Unavailable authority captures no guidance.
+    Credentials remain private in memory; this handle
     has no decoder and cannot be reconstructed from replay evidence. *)
 
 val resolve : keeper_id:string -> live_authority
-(** Capture current gate configuration and credentials once, without any
-    provider call. Explicit disabled/excluded and unavailable states remain
+(** Capture current gate configuration and credentials once, then resolve managed
+    guidance only for available authority, without any provider call.
+    Explicit disabled/excluded and unavailable states remain
     distinct. Resolve before retaining the original pass and dispatching it. *)
 val keeper_of_authority : live_authority -> string
 (** The original Keeper bound to this live handle; exposes no credentials. *)
+
+val guidance_of_authority : new_observations:Yojson.Safe.t list -> live_authority -> (guidance option, string) result
+(** Pure selection from once-resolved guidance, including the selected setup failure. Unavailable
+    authority has [None] and performs no prompt lookup; an armed evaluation
+    requires [Some guidance] before publishing any request intent. The unused
+    context's resolution failure never blocks this input. *)
 
 val replay_authority : live_authority -> replay_authority
 (** Credential-free availability and ordered destination identities from the
@@ -304,7 +327,8 @@ val evaluation_evidence_to_yojson : evaluation -> Yojson.Safe.t
     Pair it with the independently persisted pre-dispatch request. *)
 
 val restore
-  :  authority:replay_authority
+  :  guidance:guidance option
+  -> authority:replay_authority
   -> new_observations:Yojson.Safe.t list
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
@@ -394,7 +418,8 @@ val run_captured
     Current configuration and credentials are not reread. The Keeper identity
     used for logging is captured by {!resolve}. Hooks, observation ordering,
     protected terminal recording and cancellation have the same contract as
-    {!run}. Persist {!replay_authority} before calling this port; after restart
+    {!run}. Persist {!replay_authority} and {!guidance_of_authority}, including
+    its explicit absence for unavailable authority, before calling this port; after restart
     use {!restore} with original transcripts rather than resolving a new live
     authority to repeat an uncertain evaluation. *)
 
@@ -404,6 +429,7 @@ type request_clock = unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) re
 
 val continue_captured
   : request_clock:request_clock
+  -> guidance:guidance option
   -> keeper_id:string
   -> authority:replay_authority
   -> live_authority:live_authority option
@@ -423,7 +449,8 @@ val continue_captured
     as restore, then execute only questions beyond that prefix. A retained
     request without a returned answer refuses without another provider call.
     Every new question requires the original Keeper and exactly matching
-    captured live/replay authority. With no needed new question, no live handle
+    captured live/replay authority. The retained guidance drives every question;
+    current prompt edits do not alter authority equality. With no needed new question, no live handle
     or configuration is required. The required [request_clock] supplier is
     consulted only for a new evaluation, before its intent is recorded or
     HTTP is admitted. An unavailable clock returns [Clock_unavailable] without

@@ -259,6 +259,10 @@ module Durable_read : sig
 
   type snapshot
 
+  (** Translate private Store observations through the same storage-error
+      authority as [read_snapshot]. *)
+  val storage_failure : Execution_event_store.error -> storage_failure
+
   val read_snapshot
     :  codec:Execution_codec_executor.t
     -> dir:Eio.Fs.dir_ty Eio.Path.t
@@ -312,6 +316,25 @@ val open_durable_writer
   :  sw:Eio.Switch.t
   -> codec:Execution_codec_executor.t
   -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> (durable_writer * Execution_event_store.recovery, error) result
+
+(** Actor-owned forms borrow one lifetime lease across all reconciliation
+    epochs. Their semantic and recovery validation uses the same constructors
+    as the self-owned forms above. *)
+val create_durable_writer_with_lease
+  :  sw:Eio.Switch.t
+  -> codec:Execution_codec_executor.t
+  -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> lease:Execution_event_store.writer_lease
+  -> ?correlation_id:Execution_event.Correlation_id.t
+  -> unit
+  -> (durable_writer * Execution_event_store.initialization, error) result
+
+val open_durable_writer_with_lease
+  :  sw:Eio.Switch.t
+  -> codec:Execution_codec_executor.t
+  -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> lease:Execution_event_store.writer_lease
   -> (durable_writer * Execution_event_store.recovery, error) result
 
 (** Read/projection access. Direct mutation functions reject this journal with

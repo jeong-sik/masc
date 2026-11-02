@@ -19,6 +19,7 @@ import {
   type KeeperPhaseToken,
 } from '../../lib/fleet-tone'
 import type { Keeper } from '../../types'
+import { approvalQueueProblem } from '../../lib/gate-observation-state'
 
 /** Coarse lifecycle bucket used both for the dot tone and roster grouping.
  *  Derived from the typed `KeeperOperationalState` SSOT so the roster groups
@@ -136,6 +137,7 @@ export function keeperFleetTone(keeper: Keeper): FleetTone {
     || keeper.needs_attention === true
     || (keeper.blocked_task_count ?? 0) > 0
     || keeper.current_gate?.kind === 'approval_required'
+    || approvalQueueProblem(keeper.approval_queue_state) !== null
   ) return 'bad'
   return keeperStatusTone(keeper)
 }

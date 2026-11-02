@@ -289,7 +289,7 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
   let before = List.length (read_requests capture) in
   let continuation_goal =
     Keeper_direct_checkpoint_continuation.official_resume_message
-      ~operation_id in
+      ~operation_id |> require in
   successful
     (run ~official_task_reference ~official_client_continuation:checkpoint
        ~goal:continuation_goal
@@ -565,6 +565,13 @@ let test_rejected_context_never_submits_turn () =
   check int "rejected context never reports transmitted turn input" 0 (List.length !reports)
 
 let test_cooperative_resume_sends_only_remaining_work_instruction () =
+  let key = Prompt_names.keeper_official_client_resume in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  Prompt_registry.set_override key "MANAGED_RESUME {{operation_id}}" |> require;
+  Fun.protect
+    ~finally:(fun () -> match previous with
+      | Some value -> Prompt_registry.set_override key value |> require
+      | None -> Prompt_registry.clear_prompt_override key) @@ fun () ->
   with_fixture @@ fun ~run ~capture ~reports:_ ->
   let original_task = "Create the requested artifact and report its path." in
   let initial = run ~goal:original_task ~instructions:"Keeper instructions" ~world:"Original work" () in
@@ -589,7 +596,9 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let official_task_reference = Keeper_official_task_reference.create
     ~operation_id ~message:original_task ~original_turn:observed in
   let before = List.length (read_requests capture) in
-  let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
+  let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id |> require in
+  check string "the managed template renders the admitted operation"
+    "MANAGED_RESUME cooperative-original" goal;
   let rejected = run ~official_task_reference ~official_client_continuation:checkpoint ~goal
     ~model_input_projection:(fun messages -> Ok (List.filter
       (fun (message : Agent_core.Types.message) -> message.role <> System) messages))
@@ -1064,19 +1073,24 @@ let turn_start_to_string = Keeper_carried_front.turn_start_to_string
 
 let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   let seed_reads = ref 0 and librarian_reads = ref 0 in
+  (* The review owns even an unread-tagged message: it is submitted evidence,
+     not a current Keeper observation to be replaced by this dispatch. *)
+  let evidence = large_history @
+    Keeper_librarian_request_unread.attach ~include_empty:true
+      ~role:Agent_core.Types.System Keeper_librarian_request_unread.empty [] in
   let sent = Keeper_codex_runtime.For_testing.carried_projection
       ~input_source:Masc.Keeper_request_source.Completion_review ~capacity_bytes:1
       ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
       ~librarian_front:(fun _ -> incr librarian_reads;
         Error (Agent_core.Error.Internal "completion evidence has no Keeper continuity"))
       ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "program-owned completion evidence" })
-      ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" large_history
+      ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" evidence
     |> Result.map_error Agent_core.Error.to_string
     |> function Ok messages -> messages | Error error -> fail error
   in
   check bool "Codex receives the exact full evidence, despite a tiny capacity" true
     (List.map Agent_core.Checkpoint.message_to_json sent
-     = List.map Agent_core.Checkpoint.message_to_json large_history);
+     = List.map Agent_core.Checkpoint.message_to_json evidence);
   check int "the native completion review does not read a Keeper seed" 0 !seed_reads;
   check int "the native completion review does not query the Librarian" 0 !librarian_reads
 

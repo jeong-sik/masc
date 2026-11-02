@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
 from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
+from tool_call_log_paths import tool_call_log_paths  # noqa: E402
 from keeper_store_layout import (  # noqa: E402
     load_store_layout,
     store_dirname,
@@ -984,20 +985,19 @@ def scan_persistent_work_evidence(
                 tool_log_path = path_from_link(
                     base_path, links.get("tool_call_log_path")
                 )
-                if (
-                    tool_log_path is not None
-                    and tool_log_path.is_file()
-                    and tool_call_log_has_matching_row(
-                        tool_log_path,
+                if tool_log_path is None:
+                    continue
+                for candidate in tool_call_log_paths(base_path, tool_log_path):
+                    if tool_call_log_has_matching_row(
+                        candidate,
                         name=name,
                         trace=trace,
                         generation=generation,
                         turn=turn,
-                    )
-                ):
-                    tool_call_log_refs.add(
-                        f"tool_call_log:{ref}:{path_label(base_path, tool_log_path)}"
-                    )
+                    ):
+                        tool_call_log_refs.add(
+                            f"tool_call_log:{ref}:{path_label(base_path, candidate)}"
+                        )
 
     return PersistentWorkEvidence(
         latest_ts=latest_ts,

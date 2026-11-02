@@ -106,6 +106,15 @@ val check_published :
     and request ID the record names: the complete record, the body
     [read_body] returns for its digest, and its scope directory and filename.
     Reads nothing else and writes nothing. *)
+val read_published :
+  read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
+  directory_name:string -> file_name:string -> Yojson.Safe.t -> (retained, string) result
+(** The same strict record/body check as {!check_published}, returning its
+    verified original for a consumer's pure payload decoder. The body port is
+    read-only; this does not observe live authority or recover progress. *)
+val request_of_body : request_digest:string -> string option -> (Yojson.Safe.t, string) result
+(** Pure current body validation shared with {!load}: required, canonical JSON
+    whose exact bytes match the named digest. No old-body reader or I/O. *)
 val decode_published : directory_name:string -> file_name:string -> Yojson.Safe.t ->
   (Record.t, string) result
 (** Strictly decode a record and verify the scope-directory and request-file

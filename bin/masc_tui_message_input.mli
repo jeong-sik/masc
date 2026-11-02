@@ -18,6 +18,35 @@ val cursor : t -> int
 val before_cursor : t -> string
 val clear : t -> unit
 val insert : t -> string -> unit
+
+type owner
+type owned_view
+type snapshot
+type source_range = { offset : int; length : int }
+
+val snapshot : t -> snapshot
+val snapshot_text : snapshot -> string
+val snapshot_owned_view : snapshot -> owner -> owned_view option
+(** Immutable text and span ownership captured together, including across
+    explicit draft saves. [None] means this snapshot does not own the handle.
+    A retired owner never occurs in a later snapshot. *)
+
+val insert_owned : t -> string -> owner
+(** Insert one owned span at the cursor, retiring any previous owner. Edits before/after it move or
+    preserve its extent; an edit inside it, overlapping deletion, or [clear]
+    retires it. Typing equal bytes later never revives the owner. *)
+
+val owned_is_current : t -> owned_view -> bool
+(** The captured input revision still owns this view. Projection preserves the
+    original revision so preparation can refuse stale projected messages. *)
+
+val project_owned : owned_view -> source_range list -> owned_view option
+(** Project ordered disjoint source ranges, retaining ownership only when the
+    whole owned span occurs in one range. [None] also refuses invalid ranges. *)
+
+val replace_owned : owned_view -> replacement:string -> string
+(** Replace the captured owned extent. Equal text elsewhere is ordinary text. *)
+
 val insert_char : t -> char -> unit
 val append : t -> string -> unit
 (** Add text at the end of the whole draft and leave the cursor there.

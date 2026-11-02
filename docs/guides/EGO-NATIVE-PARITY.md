@@ -43,9 +43,11 @@ This table is an acceptance obligation, not a list of implemented features.
 The existing integration describes native calls and limitations in
 [the Ego RFC](../rfc/RFC-browser-live-ego.md). Keep an actual gap open until
 the installed MASC path proves it. In particular, the workflow currently
-exposes a finite set of Page methods. Raw keyboard/pointer void replies can
-leave MASC input release unconfirmed; an ordinary SDK success and a dialog
-interruption must not be conflated. Additional public SDK methods, Page/Space
+exposes a finite set of Page methods. Current MASC admission refuses raw
+keyboard typing and coordinate/waypoint/scene drags before input. That refusal
+does not settle earlier uncertain input or establish native parity; an ordinary
+SDK success and a dialog interruption must not be conflated. The native raw-input
+completion contract remains part of the open comparison. Additional public SDK methods, Page/Space
 composition and actual Keeper acceptance remain part of the full target.
 
 ## Installed MASC tool-path fixture

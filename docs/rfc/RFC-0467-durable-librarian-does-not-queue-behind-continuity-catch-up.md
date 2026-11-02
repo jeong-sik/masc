@@ -3,15 +3,20 @@ rfc: "0467"
 title: "durable 회차는 연속성 따라잡기 뒤에 줄 서지 않는다"
 status: Accepted
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-10-30
 author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["librarian-lifecycle", "0463-librarian-absorb-rewrite-round"]
-implementation_prs: ["#39036"]
+implementation_prs: ["#39036", "#46926"]
 ---
 
 # RFC-0467 — durable 회차는 연속성 따라잡기 뒤에 줄 서지 않는다
+
+> 2026-10-30 개정: 아래의 한 턴 폭과 atom 폭 유지에 관한 설명은 제정 당시의 구조다.
+> 이후 [lifecycle §4.12](RFC-librarian-lifecycle.md#412-완료된-범위를-묶어-이어-쓰기-2026-10-30-개정)가
+> 완료 범위 묶기·Memory 경계 분할·실제 턴 및 원본 메시지 단위 축소로 바꾼다.
+> 이 RFC의 커밋 사이 양보, 진행 중 호출 비취소, 일반 실패 후 새 신호 대기는 유지한다.
 
 ## 1. 문제
 
@@ -113,3 +118,4 @@ run_continuity:
 - 연속성이 72턴 뒤처진 것 자체는 이 RFC 가 줄이지 않는다. 회차마다 한 턴을 읽으므로 턴이 회차보다
   자주 끝나는 한 차이는 줄지 않는다. #37857 이 입력을 줄이면 회차가 빨라져 차이가 덜 벌어질 뿐이다.
   한 회차가 여러 턴을 읽게 하려면 §4.3 의 폭 규칙과 함께 따로 설계해야 한다.
+  2026-10-30의 별도 설계·구현은 lifecycle §4.12에 있다. 지연·호출 감소와 의미 보존의 실측은 여전히 별도 검증 대상이다.

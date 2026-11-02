@@ -14,6 +14,64 @@ let prompt_blocks { status; body } =
       | Some body -> [ Prompt_block_id.Recalled_memory, body ]
       | None -> [])
 
+type offered_body =
+  | No_current_body
+  | Offered_body of { turn_ref : Ids.Turn_ref.t; status : string; body : string }
+
+type delivery_state =
+  | Full_body of offered_body
+  | Capacity_deferred of string
+
+type delivery = { mutable state : delivery_state }
+
+let create_delivery () = { state = Full_body No_current_body }
+let begin_runtime_attempt delivery = delivery.state <- Full_body No_current_body
+
+let begin_request delivery =
+  match delivery.state with
+  | Full_body (No_current_body | Offered_body _) ->
+    delivery.state <- Full_body No_current_body
+  | Capacity_deferred _ -> ()
+
+let for_request delivery prepared =
+  match delivery.state, prepared.body with
+  | Full_body _, (Some _ | None) | Capacity_deferred _, None -> prepared
+  | Capacity_deferred status, Some _ -> { status; body = None }
+
+let observe_request delivery ~turn_ref ~blocks =
+  match delivery.state with
+  | Capacity_deferred _ -> ()
+  | Full_body _ ->
+    let texts id = List.filter_map (fun (block, text) ->
+      if Prompt_block_id.equal id block then Some text else None) blocks in
+    let offered =
+      match texts Prompt_block_id.Recalled_memory_status,
+            texts Prompt_block_id.Recalled_memory with
+      | [status], [body] -> Offered_body {turn_ref; status; body}
+      | [], _ | _ :: _ :: _, _ | _, [] | _, _ :: _ :: _ -> No_current_body
+    in
+    delivery.state <- Full_body offered
+
+let defer_for_capacity delivery =
+  let open Keeper_memory_delivery_reprojection in
+  match delivery.state with
+  | Full_body No_current_body | Capacity_deferred _ -> Ok Unchanged
+  | Full_body (Offered_body {turn_ref; status; body}) ->
+    (match Render.capacity_deferred_status ~turn_ref with
+     | Error detail ->
+       Log.Keeper.warn "memory recall capacity status could not be rendered turn=%s: %s"
+         (Ids.Turn_ref.to_string turn_ref) detail;
+       Error detail
+     | Ok deferred_status ->
+       (* Both blocks exist in the observed assembly. Removing the body also
+          removes one of the assembler's exact two-byte separators. *)
+       let before = String.length status + String.length "\n\n" + String.length body in
+       if String.length deferred_status < before
+       then (
+         delivery.state <- Capacity_deferred deferred_status;
+         Ok Reprojected)
+       else Ok Unchanged)
+
 let purpose ~current_input ~keeper_instructions ~turn_ref =
   `Assoc
     [ "current_input", `String current_input
@@ -30,6 +88,7 @@ let read_facts ~keepers_dir ~keeper_id =
 let describe_build_error = function
   | Codec.Duplicate_candidate_id id -> "two facts share the id " ^ id
   | Codec.Choice_set_invalid detail -> "the option set is invalid: " ^ detail
+  | Codec.Guidance_unavailable detail -> "recall guidance is unavailable: " ^ detail
 
 let is_judged = Keeper_memory_recall_standing.is_judged
 

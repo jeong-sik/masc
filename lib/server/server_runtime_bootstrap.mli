@@ -203,6 +203,7 @@ type activated_owner_state =
 
 val initialize_owner_state_blocking
   :  sw:Eio.Switch.t
+  -> runtime_sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base
   -> base_path:string
   -> ?input_base_path:string
@@ -215,7 +216,8 @@ val initialize_owner_state_blocking
   -> fs:Eio.Fs.dir_ty Eio.Path.t
   -> unit
   -> initialized_owner_state
-(** Complete every transport-neutral, fallible owner-initialization step and
+(** [runtime_sw] must outlive [sw], including session journal cleanup.
+    Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must
     pass this opaque value directly to {!activate_owner_state}; the prepared
     ownership token is intentionally not exposed to transports.
@@ -271,6 +273,7 @@ val start_post_ready_owner_lanes :
     {!Server_bootstrap_http.parse_bind_address}. *)
 val run :
   sw:Eio.Switch.t ->
+  runtime_sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
   address:Ipaddr.t ->
   port:int ->

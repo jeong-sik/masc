@@ -32,8 +32,12 @@ let rec ordered (json:Yojson.Safe.t) : Yojson.Safe.t = match json with
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value
 let owner_hash owner =
   Capture.scope_hash (Capture.scope_identity owner)
-let scope owner = "keeper-librarian-parts/" ^ owner_hash owner
-let partition_scope owner = "keeper-librarian-partitions/" ^ owner_hash owner
+let scope_prefix = "keeper-librarian-parts/"
+let partition_scope_prefix = "keeper-librarian-partitions/"
+let is_scope value = String.starts_with ~prefix:scope_prefix value
+let is_partition_scope value = String.starts_with ~prefix:partition_scope_prefix value
+let scope owner = scope_prefix ^ owner_hash owner
+let partition_scope owner = partition_scope_prefix ^ owner_hash owner
 let destination_json (d:Capture.destination) = `Assoc [
   "installation_id",`String d.installation_id;"package_id",`String d.package_id;
   "tool",`String d.tool;"source_revision",`String d.source_revision;
@@ -326,6 +330,30 @@ let check_children (parent:part) (partition:partition_record) =
   let* ()=equal (destination_json parent.destination) (destination_json partition.right.destination) "Right child destination changed" in
   let* ()=equal (Queue.batch_to_json expected_left) (Queue.batch_to_json partition.left.original_batch) "Left child is not original ordered split" in
   equal (Queue.batch_to_json expected_right) (Queue.batch_to_json partition.right.original_batch) "Right child is not original ordered split"
+let validate_part_payload ~owner record = Result.map (fun _ -> ()) (decode_record ~owner record)
+let validate_partition_payload ~owner record = Result.map (fun _ -> ()) (decode_partition ~owner record)
+let load_parent_payload ~read ~owner ~request_id =
+  let load scope request_id =
+    let* record=read ~scope ~request_id in
+    Option.to_result ~none:("Original parent record is absent: " ^ request_id) record in
+  let rec visit seen request_id =
+    let* ()=require (not (List.mem request_id seen)) "Original candidate ancestry contains a cycle" in
+    let* record=load (scope owner) request_id in
+    let* part=decode_record ~owner record in
+    let* ()=match part.predecessor with
+      | None -> require (part.through=highest part.original_batch) "Root candidate bound changed"
+      | Some id ->
+        let* record=load (partition_scope owner) id in
+        let* partition=decode_partition ~owner record in
+        let* ()=require (acknowledged partition) "Original candidate partition is not acknowledged" in
+        let* parent=visit (request_id::seen) partition.parent_id in
+        let* ()=check_children parent partition in
+        let* expected=if part.id=partition.left.id then Ok partition.left
+          else if part.id=partition.right.id then Ok partition.right
+          else Error "Child is not owned by original predecessor" in
+        equal (to_json part) (to_json expected) "Original partition child changed" in
+    Ok part in
+  let+ part=visit [] request_id in part.original_batch
 let rec traverse f = function
   | [] -> Ok []
   | first::rest -> let* value=f first in let+ rest=traverse f rest in value::rest
@@ -502,13 +530,11 @@ let validate_execution_inventory ~store ~owner inventory =
   let parents=List.map Capture.parent_part_id captures in
   require (List.length parents=List.length (List.sort_uniq String.compare parents))
     "Multiple original executions claim the same immutable candidate part"
-let validate_forest ~store ~owner ~restore_gate inventory =
+let validate_forest_structure inventory =
   let* ()=List.map (fun (partition:partition_record) ->
     let* parent=find inventory ~part_id:partition.parent_id in
     let* ()=eligible inventory [] parent in
     let* ()=check_children parent partition in
-    let* actual=check_size ~store ~owner ~inventory ~parent ~restore_gate partition.evidence.source in
-    let* ()=equal actual.proof partition.evidence.proof "Original subdivision proof changed" in
     let* ()=List.map (fun (expected:part) -> match List.find_opt (fun (p:part) -> p.id=expected.id) inventory.parts with
       | None -> require (not (acknowledged partition)) "Acknowledged original partition child is missing"
       | Some actual ->
@@ -530,10 +556,6 @@ let validate_forest ~store ~owner ~restore_gate inventory =
   let all_ids=List.map (fun (p:part) -> p.id) inventory.parts @ List.map (fun (p:partition_record) -> p.id) inventory.partitions in
   let* ()=require (unique all_ids) "Original part and transaction identities collide" in
   let* ()=validate_root_lineage inventory in
-  let* ()=validate_execution_inventory ~store ~owner inventory in
-  let* _=traverse (fun (part:part) -> match part.supersession with
-    | None -> Ok ()
-    | Some proof -> validate_replacement ~store ~owner ~restore_gate ~inventory proof) (all_roots inventory) in
   let rec root_ids seen = function
     | [] -> Ok ()
     | (part:part)::rest ->
@@ -543,6 +565,22 @@ let validate_forest ~store ~owner ~restore_gate inventory =
       let* ()=require (not (List.exists conflict ids)) "Original roots overlap candidate ownership" in
       root_ids (ids@seen) rest in
   root_ids [] (roots inventory)
+let validate_payload_forest ~read_scope ~owner =
+  let* raw_parts=read_scope ~scope:(scope owner) in
+  let* parts=traverse (decode_record ~owner) raw_parts in
+  let* raw_partitions=read_scope ~scope:(partition_scope owner) in
+  let* partitions=traverse (decode_partition ~owner) raw_partitions in
+  validate_forest_structure {parts;partitions}
+let validate_forest ~store ~owner ~restore_gate inventory =
+  let* ()=validate_forest_structure inventory in
+  let* _=traverse (fun (partition:partition_record) ->
+    let* parent=find inventory ~part_id:partition.parent_id in
+    let* actual=check_size ~store ~owner ~inventory ~parent ~restore_gate partition.evidence.source in
+    equal actual.proof partition.evidence.proof "Original subdivision proof changed") inventory.partitions in
+  let* ()=validate_execution_inventory ~store ~owner inventory in
+  let+ _=traverse (fun (part:part) -> match part.supersession with
+    | None -> Ok ()
+    | Some proof -> validate_replacement ~store ~owner ~restore_gate ~inventory proof) (all_roots inventory) in ()
 let check_current_owner owner =
   let* current=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in

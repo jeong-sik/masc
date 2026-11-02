@@ -1,0 +1,351 @@
+{
+  "schema": "masc.keeper-temporal-continuity-evidence-summary.v1",
+  "selection": "Private canonical observations retained locally; only selected identifiers and measurements published.",
+  "keeper": "temporal-continuity-20261030-1727",
+  "capture_started_at": "2026-10-30T08:27:18.937438+00:00",
+  "capture_finished_at": "2026-10-30T08:53:54.434329+00:00",
+  "capture_report_sha256": "9252ecbee9c4b78094fd7bf3f52efbc026b1ad995bf0ac56d8b4e0d6046394b5",
+  "capture_harness_sha256": "cc9dfd5b8b12cf94c92eb06c6fc420ef14121115882aaee910d5fcad647be9b9",
+  "assessment_started_at": "2026-10-30T08:54:45.792079+00:00",
+  "assessment_finished_at": "2026-10-30T08:55:27.849771+00:00",
+  "assessment_report_sha256": "c68425f21a87bde7bef8e2f159c25abf25bdba1c7bd695fdefbf5ecd5f8c3c76",
+  "assessment_harness_sha256": "d4ddb63982307b9ec0da7c89afccc382bba2c48a539f22087a526ffb2ae4d761",
+  "scenario_sha256": "89058a7ae26ebafadfd0dbc1019b7dc4f4b8123f37b98c17e00f31dbeee182fa",
+  "installed_binary": {
+    "binary_version": "0.66.0",
+    "binary_commit": "bac52cac7934ce3f75c315d474cc23f2561268c9",
+    "executable_sha256": "21067bda7e1d38de044567a60a3575d7dfee80161ba34630742a4000828aa391",
+    "runtime_instance_id": "01a18bc6-19f4-7000-be2c-d9f7a0ade50c"
+  },
+  "requested_runtime_id": "glm-coding.glm-5.3-flash",
+  "measurement_status": "recorded",
+  "keeper_shutdown": "observed",
+  "source_capture_integrity": "retained_observation_joins_verified; remote_authenticity_not_established",
+  "body_response_binding": "not_established",
+  "librarian_causal_attribution": "not_established",
+  "continuity_pass": null,
+  "timeline": [
+    {
+      "step_id": "begin",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-7ce395924bd7762ab259d4a1abb34d05",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#1",
+      "working_state_parts": [],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "observe-own-context",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-64e35fac41cc29c051895128a9db72d8",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#2",
+      "working_state_parts": [],
+      "recorded_calls": [
+        {
+          "execution_id": "execution-node-153936d0714bc9f7e40057459f796735",
+          "tool": "keeper_context_status"
+        }
+      ],
+      "judgments": []
+    },
+    {
+      "step_id": "reject-first-hypothesis",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-f0c2e98b01740322665441a0be85e42c",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#3",
+      "working_state_parts": [],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "open-investigation",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-a09b17a52f8bc6c7e46b153020c7d968",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#4",
+      "working_state_parts": [],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "other-topic-a",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-21af0d455c6c15872aaa37aa4fabc504",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#5",
+      "working_state_parts": [],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "other-topic-b",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-c5ef4a1d99e3a60f0ddde70c0b292645",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#6",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2022,
+          "sha256": "0ceeb92c831e1b86ad7ae52a65dad0723de2512a809bec8c24bb942732f4155b"
+        }
+      ],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "return-before-restart",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-8480620646cbabe7571fdf13790f60c9",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#7",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2022,
+          "sha256": "0ceeb92c831e1b86ad7ae52a65dad0723de2512a809bec8c24bb942732f4155b"
+        }
+      ],
+      "recorded_calls": [],
+      "judgments": [
+        {
+          "criterion_id": "open-work",
+          "scope": "reply",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.93,
+          "request_sha256": "40f403a44012d9468755e226af730610993f93120363a63c5fb4e12cc4ef9e08"
+        },
+        {
+          "criterion_id": "rejected-hypothesis",
+          "scope": "working_state",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.54,
+          "request_sha256": "44665e7216883490fe480c542bb0ecfbaa2aea6d97e298404a01ffbee661534a"
+        }
+      ]
+    },
+    {
+      "step_id": "stop-and-resume",
+      "kind": "restart",
+      "status": "restart_observed",
+      "working_state_parts": [],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "resume-work",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-76c3d515725a6e362264c7f9fdfa57cc",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#8",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2022,
+          "sha256": "0ceeb92c831e1b86ad7ae52a65dad0723de2512a809bec8c24bb942732f4155b"
+        }
+      ],
+      "recorded_calls": [
+        {
+          "execution_id": "execution-node-663825893bafef1743ddd1fba1215061",
+          "tool": "keeper_artifact_read"
+        },
+        {
+          "execution_id": "execution-node-2d3c5a7251b69dfe7bf3a95c3ec576fb",
+          "tool": "keeper_memory_search"
+        }
+      ],
+      "judgments": [
+        {
+          "criterion_id": "continued-intent",
+          "scope": "reply",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.85,
+          "request_sha256": "ae82bcf0bf8305d28306bd5f4892c1c7487bd9adfe7e2d2cc6b7ef6212ef8c8f"
+        },
+        {
+          "criterion_id": "valid-constraint",
+          "scope": "reply",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.77,
+          "request_sha256": "1384b4b66c596e7959239b560d0411b566cc272082a23199ba06f1ac813122bb"
+        },
+        {
+          "criterion_id": "state-constraint",
+          "scope": "working_state",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.88,
+          "request_sha256": "e074e9ebabc36bdbedcd3336674b93941150f3586eddc0f58f119bd2b0e6f4ad"
+        }
+      ]
+    },
+    {
+      "step_id": "reason-for-decision",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-20c647a969e615efd5bf26fa77efda72",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#9",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2022,
+          "sha256": "0ceeb92c831e1b86ad7ae52a65dad0723de2512a809bec8c24bb942732f4155b"
+        }
+      ],
+      "recorded_calls": [],
+      "judgments": [
+        {
+          "criterion_id": "reason-survives",
+          "scope": "reply",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.95,
+          "request_sha256": "27626f00b8804befdb54ed8962e32fb8ed849c800692bc6ec20984c861d26159"
+        }
+      ]
+    },
+    {
+      "step_id": "correction-after-resume",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-84377bba55e5407861c52089acb94e12",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#10",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2674,
+          "sha256": "f664c04e50ea273e2f124fbf1bfd24e25f5829bbf638b540081c796f86eca746"
+        }
+      ],
+      "recorded_calls": [],
+      "judgments": []
+    },
+    {
+      "step_id": "safe-real-action",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-9fa3f16516aaeb409861b3766d667d2a",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#11",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2674,
+          "sha256": "f664c04e50ea273e2f124fbf1bfd24e25f5829bbf638b540081c796f86eca746"
+        }
+      ],
+      "recorded_calls": [
+        {
+          "execution_id": "execution-node-9bd7f1c13d860dffa2382a96d216c111",
+          "tool": "keeper_artifact_read"
+        },
+        {
+          "execution_id": "execution-node-35b948e9af69b5c07c7d75cf51f6d6b8",
+          "tool": "keeper_context_status"
+        }
+      ],
+      "judgments": [
+        {
+          "criterion_id": "observed-read",
+          "scope": "tool_calls",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.81,
+          "request_sha256": "4d4d86bc3042f8f4c5030e4d38440e385a6967520850165e97c96a215e47bd0d"
+        },
+        {
+          "criterion_id": "second-correction",
+          "scope": "reply",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.9,
+          "request_sha256": "b1dac2aa9bdacd739c1b1817f7407407b83845657bedfc9c321f5f3099420c92"
+        }
+      ]
+    },
+    {
+      "step_id": "late-checkpoint",
+      "kind": "message",
+      "status": "captured",
+      "operation_id": "kmsg-5b557d6af272ea3d588b71484bff89e2",
+      "operation_state": "Succeeded",
+      "turn_ref": "trace-1793348839581-00000#12",
+      "working_state_parts": [
+        {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 2674,
+          "sha256": "f664c04e50ea273e2f124fbf1bfd24e25f5829bbf638b540081c796f86eca746"
+        }
+      ],
+      "recorded_calls": [],
+      "judgments": [
+        {
+          "criterion_id": "late-state",
+          "scope": "reply",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.93,
+          "request_sha256": "30ec44a2f3f0222a6a3557126e633a2de2926527aa64454d38ef29bde84a3039"
+        },
+        {
+          "criterion_id": "late-constraint",
+          "scope": "working_state",
+          "status": "measured",
+          "requested_model": "jev-latest",
+          "actual_response_model": "jev-1.14.0",
+          "probability": 0.86,
+          "request_sha256": "f9347a583e0deca3520ae23fc25cdf4a03fbcddaecfd86a3be6edb366784a404"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "One installed-main Keeper trial; unmerged PR candidate was not executed.",
+    "Last prepared request only, not all intermediate provider attempts.",
+    "Raw history and Recall remained available; no forced compaction or pressure.",
+    "Keeper lane stop/start only; server process stayed running.",
+    "Noul probabilities are model judgments, not ground-truth labels or retention percentages.",
+    "The selected summary cannot replace the original private raw capture for reassessment."
+  ]
+}

@@ -178,8 +178,8 @@ status: reference
   개별 의사결정(Decisions) 카드, 마지막 방문 대화 상대 재개(Continue), Keeper 선택/생성,
   간결한 작업 흐름 요약(Dashboard Goals 등)을 제공한다(#39817·#40137·#40152).
   - 요청 식별과 탐색(`home_request`·`home_action`): 사람이 판단해야 하는 대기 요청은
-    `home_request` 닫힌 합타입 6개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
-    `Home_question`·`Home_goal_confirmation`·`Home_operator_task`)로 식별한다. 탐색 액션 대상
+    `home_request` 닫힌 합타입 5개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
+    `Home_question`·`Home_goal_confirmation`)로 식별한다. 탐색 액션 대상
     `home_action` 7개(`Home_approvals`·`Home_request`·`Home_agenda`·`Home_resume`·`Home_read_last`·
     `Home_choose_keeper`·`Home_create_keeper`)를 `j`/`k` 또는 방향키로 선택하고 `Enter`로
     원천 화면(Approvals·Agenda·Chat)을 열며, `Enter` 진입은 순수 탐색일 뿐 의사결정(승인/거절)을
@@ -3426,9 +3426,10 @@ status: reference
   [Tool_task_completion_review](../../lib/task/tool_task_completion_review.mli)
 
 **Operator Attention**
-: 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는
-  `Held_without_actor`, `Producer_record_unreadable`(Assignee 의 기록을 읽지
-  못한 것)이다.
+: Task 담당자의 Keeper 경로를 확인할 수 있는 목록(`Operator_task_attention.item`). 종류는
+  `Held_without_keeper_route`, `Producer_record_unreadable`(Keeper 기록을 읽지
+  못한 것)이다. Keeper 대기열이 없다는 사실만으로 담당 세션이 끝났거나 운영자의 답변을
+  기다린다고 판단하지 않는다. TUI의 질문 수에는 넣지 않으며 Agenda에서 확인할 수 있다.
   **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
   Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목
   (`Dashboard_attention.attention_item`)과 TUI 개요 화면의 attention 항목

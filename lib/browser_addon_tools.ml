@@ -66,9 +66,9 @@ let prepare_read json =
   if contextual then
     let* ()=match request.route,mode with
       | Browser_selection.Exact B.Automation_route,_ -> Ok ()
-      | Exact (Live_route _),(`Text|`Elements|`Frames) -> Ok ()
-      | Exact (Live_route _),(`Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
-          Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs/masc_browser_tabs row"
+      | Exact (Live_route _),(`Text|`Elements|`Frames|`Dialog) -> Ok ()
+      | Exact (Live_route _),(`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
+          Error "a live contextual read supports text, elements, frames, or a top-level native dialog"
       | Automatic,_|Exact Stagehand_route,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
     let* tab_id=tab request in
     let* mode=match mode with

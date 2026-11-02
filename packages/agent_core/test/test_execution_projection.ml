@@ -162,6 +162,10 @@ let test_live_and_restart_projection () =
             projection_ref := Some projection;
             check bool "running root has no terminal receipt" true
               (Option.is_none (projection_value (Agent.read_execution_terminal projection)));
+            (match projection_value (Agent.observe_execution projection) with
+             | Agent.Execution_awaiting -> ()
+             | Execution_owner_lost | Execution_terminal _ ->
+               fail "live writer did not remain awaiting");
             let first =
               projection_value
                 (Projection.read_page
@@ -237,6 +241,12 @@ let test_live_and_restart_projection () =
        (match terminal.disposition with
         | {Agent.outcome=Terminal_succeeded; recovery=Retire} -> ()
         | _ -> fail "settled recursive call must retain its canonical disposition");
+       (match projection_value (Agent.observe_execution projection) with
+        | Agent.Execution_terminal observed ->
+          check bool "owner observation preserves canonical terminal evidence" true
+            (observed = terminal)
+        | Execution_awaiting | Execution_owner_lost ->
+          fail "settled writer lost its canonical terminal evidence");
        let through = projection_value (Projection.current_cursor projection) in
        check bool "final cursor advanced" true (Projection.cursor_seq through > 2);
        Eio.Fiber.all
@@ -897,11 +907,42 @@ let test_reserved_publication_replays_after_unlock interrupt =
        | _ -> false)))
 ;;
 
+let test_released_writer_without_terminal () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun runtime_sw ->
+      let domain_mgr = Eio.Stdenv.domain_mgr env in
+      let runtime = Agent.create_execution_runtime ~sw:runtime_sw ~domain_mgr ~domain_count:1
+        |> Result.map_error Error.to_string |> value in
+      let internal_runtime = Runtime.create ~sw:runtime_sw ~domain_mgr ~domain_count:1
+        |> Result.map_error Runtime.create_error_to_string |> value in
+      let codec = Codec.of_runtime internal_runtime in
+      let dir = make_dir (Eio.Stdenv.fs env) "agent_core-projection-owner-lost-" in
+      Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) (fun () ->
+        let projection = writer_value (Writer.run ~codec ~dir (fun ~sw:_ writer ->
+          let root = scope_value (Scope.start ~writer ~agent_name:"interrupted-root") in
+          projection_value (Agent.open_execution_projection ~runtime ~dir (public_locator root)))) in
+        let read () = projection_value (Projection.read_page projection
+          ~after:(Projection.beginning_cursor projection) ~limit:8 ()) in
+        let before = read () in
+        List.iter (fun () ->
+          (match projection_value (Agent.observe_execution projection) with
+           | Agent.Execution_owner_lost -> ()
+           | Execution_awaiting | Execution_terminal _ ->
+             fail "released writer without terminal did not require reconciliation");
+          check bool "owner loss does not invent a terminal" true
+            (Option.is_none (projection_value (Agent.read_execution_terminal projection)))) [(); ()];
+        let after = read () in
+        check bool "owner observation never rewrites or appends the original" true
+          (before.events = after.events && before.next_cursor = after.next_cursor))))
+;;
+
 let () =
   Alcotest.run
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
+        ; test_case "released writer without terminal requires reconciliation" `Quick
+            test_released_writer_without_terminal
         ; test_case "typed checkpoint facts enforce ownership and reopen" `Quick
             test_checkpoint_fact_ownership_and_reopen
         ; test_case "Sys.Break publication retries after normal mutex unlock" `Quick

@@ -101,13 +101,12 @@ let observe_call ~base_path ~original reference =
     ~keeper_name:reference.keeper_name ~call_id in
   let* projection = Keeper_request_execution.projection journal in
   let map_error result = Result.map_error Agent.Execution_projection.error_to_string result in
-  let* terminal = Agent.read_execution_terminal projection |> map_error in
-  match terminal with
-  | None ->
-    (* Missing terminal evidence never authorizes replay. Confirmed owner-loss
-       reconciliation is tracked by #46152; elapsed time alone is not that fact. *)
-    Ok (Call_awaiting)
-  | Some terminal ->
+  let* observation = Agent.observe_execution projection |> map_error in
+  match observation with
+  | Agent.Execution_awaiting -> Ok Call_awaiting
+  | Execution_owner_lost ->
+    Ok (Call_repair "original execution lost its writer without a terminal settlement; operator reconciliation is required")
+  | Execution_terminal terminal ->
     (match terminal.disposition.recovery with
      | Agent.Operator_repair_required _ -> Ok (Call_repair "original execution has an unsettled effect")
      | Retire ->

@@ -775,18 +775,38 @@ let run_keeper_invocation_turn_admitted_inner
 	            let settlement, latency_ms =
 	              Keeper_direct_native_continuation.reconcile_after_dispatch native_binding @@ fun () ->
 	              Inference_utils.timed (fun () ->
-                      let consume = match direct_resume with
-                        | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
-                        | Some (Keeper_agent_run.Checkpoint_continuation admission) ->
-                          Keeper_direct_checkpoint_continuation.consume
-                            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission
-                        | Some (Keeper_agent_run.Runtime_continuation admission) -> Keeper_direct_runtime_continuation.consume
-                            ~base_path:ctx.config.base_path ~keeper_name:meta.name
-                            ~operation_id admission in
-                      match consume with
-                      | Error detail ->
-                        Keeper_agent_run.not_dispatched (Agent_core.Error.Internal detail)
-                      | Ok () ->
+                      let dispatch_input =
+                        let open Result.Syntax in
+                        (* Official consume retains a not-entered preparation
+                           checkpoint. A Core checkpoint stays suspended until the
+                           runtime has prepared guidance and is ready to enter. *)
+                        let* () =
+                          (match direct_resume with
+                           | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
+                           | Some (Keeper_agent_run.Checkpoint_continuation admission) ->
+                             (match Keeper_direct_checkpoint_continuation.official_client admission with
+                              | Some _ -> Keeper_direct_checkpoint_continuation.consume
+                                  ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission
+                              | None -> Ok ())
+                           | Some (Keeper_agent_run.Runtime_continuation admission) ->
+                             Keeper_direct_runtime_continuation.consume
+                               ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission)
+                          |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+                        in
+                        let* user_message =
+                          (match official_checkpoint_resume with
+                           | Some _ ->
+                             Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
+                           | None -> Ok message)
+                          |> Result.map_error
+                               (Keeper_internal_error.guidance_preparation_unavailable
+                                  ~field:Prompt_names.keeper_official_client_resume)
+                        in
+                        Ok user_message
+                      in
+                      match dispatch_input with
+                      | Error error -> Keeper_agent_run.not_dispatched error
+                      | Ok user_message ->
                   run_direct_turn_with_fsm
                     ~keeper_name:meta.name
                     ~turn_id:keeper_turn_id
@@ -827,9 +847,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~base_dir
 		                                ~max_context:initial_execution.max_context
 		                                ~build_turn_prompt
-		                                ~user_message:(match official_checkpoint_resume with
-                                      | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
-                                      | None -> message)
+		                                ~user_message
 		                                ~input_speaker:(match official_checkpoint_resume with
                                       | Some _ ->
                                         Keeper_input_speaker.Host_prompt
@@ -980,10 +998,20 @@ let run_keeper_invocation_turn_admitted_inner
                      Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
                      "tool_call_evidence", `List []]) ())
             | Error err ->
+              let preparation_retained =
+                match Keeper_internal_error.guidance_preparation_failure err, direct_resume with
+                | Some _, Some (Keeper_agent_run.Checkpoint_continuation admission) ->
+                  Keeper_direct_checkpoint_continuation.wait_preparation
+                    ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                    ~execution_digest:native_binding.execution_digest ~failure:err admission
+                | Some _, (None | Some (Keeper_agent_run.Gate_continuation _ | Runtime_continuation _))
+                | None, _ -> Ok () in
               let e_str = Agent_core.Error.to_string err in
-              let { Keeper_request_failure.cause } =
-                Keeper_request_failure.of_core_error err
-              in
+              let cause = match preparation_retained with
+                | Ok () -> (Keeper_request_failure.of_core_error
+                    (Keeper_internal_error.without_guidance_preparation_authority err)).cause
+                | Error detail -> Keeper_request_failure.Turn_continuation_unpersisted
+                    {stage=Keeper_request_failure.Checkpoint_retain;detail} in
               Keeper_turn_helpers.finalize_trajectory_acc
                 ~config:ctx.config ~keeper_name:meta.name trajectory_acc
                 (Trajectory.Failed e_str);

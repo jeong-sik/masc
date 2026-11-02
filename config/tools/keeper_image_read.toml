@@ -2,10 +2,17 @@ defer_loading = true
 name = "keeper_image_read"
 description = """
 Read an image's original pixels into the current model, without calling another \
-model. Provide exactly one sandbox path or your own image artifact from a \
-screenshot/upload. Use this for visual inspection when the current runtime \
-accepts image input. A runtime that cannot accept images must use \
-keeper_analyze_image for a delegated text reading instead."""
+model. Provide exactly one sandbox path or Keeper-local image artifact handle \
+returned by an image tool. An image attachment already present in the model input \
+needs no read call. Image artifact handles are 64-character lowercase SHA-256 \
+content hashes. Reuse the exact returned artifact value; an attachment ID, \
+tool-blob reference or unrelated digest alone does not establish that the image \
+is present in this Keeper's image store. \
+For an unread artifact or path, use this tool when offered. A runtime whose \
+resolved capability excludes native image input may omit this tool; use \
+keeper_analyze_image in that case or after an explicit image-admission rejection. \
+Model/provider names, an unloaded schema, missing artifacts, file-read failures \
+and quota errors do not establish that image input is unsupported."""
 additional_properties = false
 
 [[params]]

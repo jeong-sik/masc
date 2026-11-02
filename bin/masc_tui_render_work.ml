@@ -123,9 +123,7 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
         Option.to_list
           (Option.map
              (fun (row : Masc_tui_agenda.stalled) ->
-               " Needs your decision · "
-               ^ Terminal_text.single_line row.what
-               ^ " · press x to cancel")
+               " Task owner route · " ^ Terminal_text.single_line row.what)
              (List.find_opt
                 (fun (row : Masc_tui_agenda.stalled) ->
                   String.equal row.task_id task.id)
@@ -2062,8 +2060,8 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   @ [ field "Digest" row.sch_payload_digest
     ; Ansi.bold, "  PAYLOAD JSON"
     ]
-  @ (document_markdown ~width:(max 1 (width - 4))
-       ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
+  @ (document_json ~width:(max 1 (width - 4))
+       (Yojson.Safe.pretty_to_string row.sch_payload)
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
 
 let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
@@ -2230,5 +2228,5 @@ let render_planning (state : state) =
            | Some
                ( Home_held_call _ | Home_gate_request _
                | Home_operator_request _ | Home_question _
-               | Home_goal_confirmation _ | Home_operator_task _ )
+               | Home_goal_confirmation _ )
            | None -> render_planning_list state)

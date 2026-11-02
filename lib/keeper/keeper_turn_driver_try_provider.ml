@@ -2403,6 +2403,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = (input_trace_id ctx.request_input)
           ; cache_system_prompt = ctx.cache_system_prompt
+          ; provider_cfg =
+              { base_config.provider_cfg with
+                system_prompt_cache_prefix = Some ctx.system_prompt
+              }
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context
@@ -2431,7 +2435,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 (fun observation ->
                    let range = !(state.request_range) in
                    state.request_range := None;
-                   Option.iter (fun range ->
+                   let turn_ref = Option.bind ctx.runtime_manifest_context
+                     (fun (context : Keeper_runtime_manifest.turn_context) ->
+                       Option.map (fun absolute_turn ->
+                         Ids.Turn_ref.make ~trace_id:context.manifest_trace_id ~absolute_turn)
+                         context.manifest_keeper_turn_id) in
                      let selection = match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
                        | Some (Summarized { snapshot; _ }) ->
                          Keeper_continuity_request.Summarized snapshot
@@ -2440,10 +2448,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        | Some Without_snapshot -> Keeper_continuity_request.Without_snapshot
                        | None -> Keeper_continuity_request.Not_applied in
                      Keeper_continuity_request.record_best_effort
+                       ~turn_ref
                        ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))
                        ~config:(Workspace.default_config ctx.base_path)
                        ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
-                       ~selection ~range ~wire:observation) range;
+                       ~selection ~range ~wire:observation;
                    let input = match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
                      | Some (Summarized {snapshot; _}) ->
                        Keeper_continuity_observation.Summarized

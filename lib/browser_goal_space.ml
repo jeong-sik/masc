@@ -1,6 +1,6 @@
 type t = {
   goal_id : string;
-  addon_instance_id : string;
+  installation : Lane_addon_tool_request_owner.installation;
   space : Browser_lane.ego_space;
   actor : string;
 }
@@ -14,7 +14,7 @@ let error_message = function
 open Result.Syntax
 let path config = Filename.concat (Workspace.masc_dir config) "browser_goal_spaces.json"
 let to_json binding = `Assoc ["goalId",`String binding.goal_id;
-  "addonInstanceId",`String binding.addon_instance_id;
+  "installationId",`String (Lane_addon_tool_request_owner.installation_id binding.installation);
   "space",Browser_lane.ego_space_to_json binding.space;"actor",`String binding.actor]
 let fields names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
@@ -23,15 +23,17 @@ let text name fields = match List.assoc_opt name fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | None | Some _ -> Error (Invalid (name ^ " must be nonblank text"))
 let binding_of_json json =
-  let* fields = fields ["goalId";"addonInstanceId";"space";"actor"] json in
+  let* fields = fields ["goalId";"installationId";"space";"actor"] json in
   let* goal_id = text "goalId" fields in
-  let* addon_instance_id = text "addonInstanceId" fields in
+  let* installation_id = text "installationId" fields in
+  let* installation = Lane_addon_tool_request_owner.installation_of_id installation_id
+    |> Result.map_error (fun detail -> Invalid detail) in
   let* actor = text "actor" fields in
   let* space = match List.assoc_opt "space" fields with
     | Some value -> Browser_lane.ego_space_of_json value |> Result.map_error (fun e -> Invalid e)
     | None -> Error (Invalid "space is required") in
-  Ok {goal_id;addon_instance_id;space;actor}
-let same_space a b = a.addon_instance_id = b.addon_instance_id && a.space.id = b.space.id
+  Ok {goal_id;installation;space;actor}
+let same_space a b = a.installation = b.installation && a.space.id = b.space.id
 let decode json =
   let* fields = fields ["bindings"] json in
   match List.assoc_opt "bindings" fields with
@@ -59,8 +61,8 @@ let find config ~goal_id = with_goal config ~goal_id (fun () ->
   let* bindings = read config in
   Ok (List.find_opt (fun binding -> binding.goal_id = goal_id) bindings))
 type commit = { binding : t; created : bool; mirror_error : string option }
-let bind config ~goal_id ~addon_instance_id ~space ~actor =
-  let* binding = binding_of_json (to_json {goal_id;addon_instance_id;space;actor}) in
+let bind config ~goal_id ~installation ~space ~actor =
+  let* binding = binding_of_json (to_json {goal_id;installation;space;actor}) in
   with_goal config ~goal_id (fun () ->
     match Workspace.with_file_lock_r config (path config) (fun () ->
       let* bindings = read config in
@@ -93,8 +95,8 @@ let unbind config ~goal_id =
       | _ :: _ :: _, _ -> Error (Invalid "duplicate Goal in binding store")) with
     | Ok result -> result
     | Error error -> Error (Unavailable (Masc_domain.masc_error_to_string error)))
-let resolve binding ~addon_instance_id clients =
-  if addon_instance_id <> binding.addon_instance_id then
+let resolve binding ~installation clients =
+  if installation <> binding.installation then
     Error (Conflict "Goal Space belongs to a different browser Add-on; no browser command was dispatched")
   else match List.filter (fun (client:Browser_lane.client_info) ->
     match client.transport,client.space with

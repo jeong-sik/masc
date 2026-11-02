@@ -27,8 +27,10 @@ type source =
 val prepare_source : ?previous:prepared -> ?end_atom:int -> config:Workspace.config ->
   keeper_name:string -> trace_id:string -> unit -> (source, string) result
 (** Read boundaries before the locked checkpoint. Supply previous valid state
-    plus the suffix through the next real completed turn. Capacity is a ceiling,
-    not a reason to include later turns. An explicit [end_atom] selects a prefix;
+    plus the contiguous suffix through the latest recorded completed turn in
+    this capture, stopping first at a transition into or out of the ordinary
+    consumer's validated Memory coverage. In-flight atoms are excluded.
+    An explicit [end_atom] selects a prefix;
     an unpublished exact Memory receipt takes precedence over either choice.
     Pending in-flight atoms are excluded.
 
@@ -79,6 +81,11 @@ val select_prefix : end_atom:int -> prepared -> (prepared, string) result
     interval. An exact recovery receipt keeps its entire original interval,
     taking precedence over the requested end as in {!prepare_source}.
     Publication still revalidates the original source and snapshot CAS. *)
+val oldest_completed_turn : prepared -> prepared
+(** Select the suffix through the first real completed boundary after the
+    start, using this frozen source. An exact Memory recovery receipt keeps
+    its entire original range. The covering boundary and turn identity move
+    together with the selected end. *)
 val source_spans : ?include_unread:bool -> prepared ->
   (Keeper_librarian_task_context.scope * Agent_core.Types.message list) list
 (** Ordered historical attribution and its exact selected messages, derived
@@ -118,12 +125,14 @@ val completed_end_atom : prepared -> int
 val end_atom : prepared -> int
 val fit : fits:(prepared -> (bool, string) result) -> prepared ->
   (prepared option, string) result
-(** Keep the selected work unit unchanged when it fits. Only an oversized unit
-    is split at whole-atom midpoints, stopping at the first fitting part without
+(** Keep the selected work unit unchanged when it fits. An oversized batch
+    first selects its oldest completed turn, then splits at whole-atom
+    midpoints within that turn, stopping at the first fitting part without
     growing it back toward the limit. Source bytes and prior state stay intact;
     an exact Memory recovery range cannot be split. *)
 val narrow : prepared -> prepared option
-(** Retry a refused source at the midpoint between whole atoms. Call only after
+(** Narrow a refused batch to its oldest completed turn first, then at the
+    midpoint between whole atoms inside that turn. Call only after
     a typed capacity refusal; [None] means one indivisible atom remains, or the exact range already has
     a Memory receipt that must be recovered without reapplying a smaller range. *)
 val memory_range_id : config:Workspace.config -> keeper_name:string -> prepared ->

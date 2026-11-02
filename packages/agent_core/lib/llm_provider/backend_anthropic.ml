@@ -147,18 +147,25 @@ let parse_response json =
     in
     loop [] content_list
   in
+  let u = json |> member "usage" in
+  let raw_cache_creation, raw_cache_read =
+    if u = `Null
+    then None, None
+    else
+      ( u |> member "cache_creation_input_tokens" |> to_int_option
+      , u |> member "cache_read_input_tokens" |> to_int_option )
+  in
   let usage =
-    let u = json |> member "usage" in
     if u = `Null
     then None
     else (
       let input_tokens = u |> member "input_tokens" |> to_int in
       let output_tokens = u |> member "output_tokens" |> to_int in
       let cache_creation_input_tokens =
-        Cli_common_json.member_int "cache_creation_input_tokens" u
+        Option.value raw_cache_creation ~default:0
       in
       let cache_read_input_tokens =
-        Cli_common_json.member_int "cache_read_input_tokens" u
+        Option.value raw_cache_read ~default:0
       in
       Some
         (usage_of_wire_counts
@@ -189,7 +196,12 @@ let parse_response json =
   ; stop_reason
   ; content
   ; usage
-  ; telemetry = Some (Types.with_reported_model ~model None)
+  ; telemetry =
+      Some
+        (Types.with_reported_cache_usage
+           ~cache_creation_input_tokens:raw_cache_creation
+           ~cache_read_input_tokens:raw_cache_read
+           (Some (Types.with_reported_model ~model None)))
   }
 ;;
 
@@ -538,8 +550,8 @@ let project_tools_for_kind kind tools =
    bytes: parameters outside those ([output_config], [tool_choice], [thinking]
    settings, sampling, budgets) and [cache_control] markers are not part of
    the check, so hashing them would drop thinking the API accepts and force
-   needless regeneration. Deliberately not shared with the body builders: if
-   the wire gains a marker, the head must not follow.
+   needless regeneration. The text-block shape is shared with serialization;
+   cache markers are supplied separately and excluded from the digest.
 
    The system prompt keeps the form it has on the wire: a string, or a list of
    text blocks when [cache_system_prompt] is set. The API documents a change
@@ -548,18 +560,45 @@ let project_tools_for_kind kind tools =
    them as different drops thinking once when the option is toggled, while
    treating them as equal would send a block the API may reject with an
    unretryable 400. The [cache_control] marker on that block is left out. *)
+let system_prompt_field ~cache_control (config : Provider_config.t) =
+  match config.system_prompt with
+  | Some s when not (Api_common.string_is_blank s) ->
+    let text = Utf8_sanitize.sanitize s in
+    if config.cache_system_prompt
+    then (
+      let texts =
+        match config.kind, config.system_prompt_cache_prefix with
+        | Provider_config.Anthropic, Some prefix ->
+          let prefix = Utf8_sanitize.sanitize prefix in
+          let length = String.length prefix in
+          (* Verify the caller's exact prefix, never infer a boundary from
+             prompt wording. A sanitized matching prefix ends at a UTF-8
+             boundary; an override that replaced it stays one complete block. *)
+          if not (Api_common.string_is_blank prefix)
+             && length < String.length text
+             && String.equal prefix (String.sub text 0 length)
+          then [prefix; String.sub text length (String.length text - length)]
+          else [text]
+        | Provider_config.Anthropic, None
+        | (Provider_config.Kimi | Provider_config.OpenAI_compat
+          | Provider_config.Ollama | Provider_config.Gemini | Provider_config.Glm), _ -> [text]
+      in
+      let marker = match cache_control with
+        | None -> []
+        | Some marker -> ["cache_control", marker]
+      in
+      Some (`List (List.map (fun text ->
+        `Assoc (["type", `String "text"; "text", `String text] @ marker)) texts)))
+    else Some (`String text)
+  | _ -> None
+;;
+
 let prefix_head ~tools (config : Provider_config.t) =
-  let system =
-    match config.system_prompt with
-    | Some s when not (Api_common.string_is_blank s) ->
-      let text = Utf8_sanitize.sanitize s in
-      if config.cache_system_prompt
-      then
-        Some
-          ( "system"
-          , `List [ `Assoc [ "type", `String "text"; "text", `String text ] ] )
-      else Some ("system", `String text)
-    | _ -> None
+  (* Share the emitted text-block shape, excluding cache markers. Splitting
+     System changes the signed-thinking prefix even when concatenated text is
+     identical; changing only cache TTL does not. *)
+  let system = Option.map (fun value -> "system", value)
+      (system_prompt_field ~cache_control:None config)
   in
   let tools =
     match tools with
@@ -788,8 +827,8 @@ let build_request_payload
            last cacheable block and advances it as the conversation grows, so
            the message history is read from cache each turn (0.1x input
            price) instead of being re-prefilled. Coexists with the explicit
-           system/tools breakpoints below (well under the 4-breakpoint cap,
-           which is when automatic caching would be refused). Gated on the
+           system/tools breakpoints below (at most three explicit breakpoints
+           plus this automatic one, within the API's four-slot limit). Gated on the
            [supports_prompt_caching] capability because this builder also
            serves Kimi's Anthropic-compatible wire, which does not document
            the top-level field — the block-level breakpoints below keep their
@@ -800,25 +839,9 @@ let build_request_payload
     | Count_tokens -> [ "model", `String config.model_id; "messages", `List msgs_json ]
   in
   let body =
-    match config.system_prompt with
-    | Some s when not (Api_common.string_is_blank s) ->
-      let s = Utf8_sanitize.sanitize s in
-      if config.cache_system_prompt
-      then (
-        (* The caller owns the cache opt-in. Anthropic applies the
-           model/platform-specific minimum-token rule server-side; AGENT_CORE has no
-           tokenizer-independent way to turn that rule into a character
-           threshold. *)
-        let block =
-          `Assoc
-            [ "type", `String "text"
-            ; "text", `String s
-            ; "cache_control", cache_control_json
-            ]
-        in
-        ("system", `List [ block ]) :: body)
-      else ("system", `String s) :: body
-    | _ -> body
+    match system_prompt_field ~cache_control:(Some cache_control_json) config with
+    | Some system -> ("system", system) :: body
+    | None -> body
   in
   let dialect = Reasoning_dialect.for_provider_config config in
   let body =

@@ -27,7 +27,9 @@ let all decode items =
 
 let request_kind = "keeper-librarian-floor-step"
 let hash text = Agent_core_sha256.(to_hex (digest_string text))
-let scope_for_hash hash = "keeper-librarian-floor-step-" ^ hash
+let scope_prefix = "keeper-librarian-floor-step-"
+let is_scope value = String.starts_with ~prefix:scope_prefix value
+let scope_for_hash hash = scope_prefix ^ hash
 let owner_hash owner = hash (Durable.scope owner)
 let scope owner = scope_for_hash (owner_hash owner)
 let fresh_request_id owner = Yojson.Safe.to_string
@@ -196,6 +198,23 @@ let restore ~owner (record:Owner.retained) =
   let* step=decode ~owner ~digest:(Some record.request_digest) record.request in
   let* ()=binds step record in
   let+ ()=equal record.request (to_json step) "Original floor step request encoding differs" in step
+let validate_ancestry_payload ~read (step:t) =
+  let load ~scope (link:link) =
+    let* record=read ~scope ~request_id:link.request_id in
+    let* record=Option.to_result ~none:"Original floor chain predecessor is absent" record in
+    let+ ()=require (record.Owner.request_digest=link.request_digest)
+      "Original floor chain predecessor digest changed" in record in
+  let rec visit seen (current:t) =
+    let* ()=require (not (List.mem current.id seen)) "Original floor chain ancestry contains a cycle" in
+    match current.previous with
+    | None -> Ok ()
+    | Some link ->
+      let* record=load ~scope:(scope step.owner) link in
+      let* previous=restore ~owner:step.owner record in
+      let* ()=require (previous.range=current.range && previous.transaction_id=current.transaction_id
+        && previous.position=current.position-1) "Original floor chain predecessor belongs to another chain or position" in
+      visit (current.id::seen) previous in
+  visit [] step
 let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
   let* f=fields header_fields record.request in
   let* original=Durable.owner_of_json (value "owner" f) in
@@ -216,6 +235,9 @@ let host_proof_target step =
   let* ()=confirm_owner step in
   let* exact=request step in
   Final.target ~installation_id:step.destination.installation_id exact
+let decode_final ~store step json =
+  let* target=host_proof_target step in
+  Final.decode_final ~store target json
 let refusal_evidence ~store step final =
   Final.refusal_evidence ~store ~target:(fun () -> host_proof_target step) final
 let confirm_final ~store step final =

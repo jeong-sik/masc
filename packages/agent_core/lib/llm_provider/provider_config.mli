@@ -97,6 +97,12 @@ type t =
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
+  ; system_prompt_cache_prefix : string option
+    (** Caller-issued stable System prefix. With Anthropic caching enabled,
+        serialization verifies this exact sanitized prefix before splitting the
+        System into two cached text blocks. All suffix text keeps System
+        authority. An absent, empty or nonmatching prefix keeps the single-block
+        representation. Other provider wires ignore this internal hint. *)
   ; cache_extended_ttl : bool
   ; model_capabilities_override : Capabilities.capabilities option
     (** Explicit capability declaration for this concrete provider endpoint.
@@ -248,6 +254,7 @@ val make
   -> ?disable_parallel_tool_use:bool
   -> ?response_format:Types.response_format
   -> ?cache_system_prompt:bool
+  -> ?system_prompt_cache_prefix:string
   -> ?cache_extended_ttl:bool
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?model_anthropic_thinking_control_override:Capabilities.anthropic_thinking_control

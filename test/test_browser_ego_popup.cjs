@@ -4,7 +4,8 @@ const path=require('node:path');
 const vm=require('node:vm');
 const test=require('node:test');
 const source=fs.readFileSync(path.join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let script = {js|')[1].split('|js}')[0];
-const run=vm.runInNewContext('('+source+')');
+const nativeErrorSource=fs.readFileSync(path.join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let native_error_script = {js|')[1].split('|js}')[0];
+const run=vm.runInNewContext(nativeErrorSource+'\n('+source+')');
 const start='https://fixture.test/opener',childUrl='https://fixture.test/child';
 function fixture({clickError,eventError,raw={},duplicate=false,dialog,watchError=false,receipt}={}) {
  const calls=[];let resolve,reject,settled=false,value='';
@@ -91,10 +92,11 @@ test('child observation setup failure preserves acquired identity without claimi
  assert.equal(result.pages.current.label,'p1');assert.equal(result.pages.transitions[0].selected,false);
  assert.equal(result.pendingAction.index,0);assert.equal(result.completed.length,0);assert.equal(count(f.calls,'child.fill'),0);
 });
-test('ordinary receipt-less child typing retains the established input guard',async()=>{
+test('raw typing without its Host context refuses before the popup trigger',async()=>{
  const f=fixture(),result=await run(f.lightweight,request([popup,{method:'keyboard.type',text:'abc'},fill]),f.task,f.watch);
- assert.equal(result.pages.current.label,'p2');assert.equal(result.completed.length,1);assert.equal(result.inputReleased,false);
- assert.equal(result.failure.method,'keyboard.type');assert.equal(count(f.calls,'child.type'),1);assert.equal(count(f.calls,'child.fill'),0);
+ assert.equal(result.failure.method,'pageIdentity');assert.equal(result.effectStarted,false);
+ assert.equal(result.completed.length,0);assert.equal(count(f.calls,'click'),0);
+ assert.equal(count(f.calls,'child.type'),0);assert.equal(count(f.calls,'child.fill'),0);
 });
 
 test('the full host-observed source identity is checked before a popup trigger',async()=>{

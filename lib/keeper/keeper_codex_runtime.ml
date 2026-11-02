@@ -204,7 +204,7 @@ let carried_model_input_projection ~input_source
          Some
            (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
               ~capacity:capacity_bytes));
-    Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
+    Host.project_source ~input_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
   in
   let* sent =
     Host.start_range_projection
@@ -830,12 +830,9 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
    change; a note about which tool to reach for would then be wrong. *)
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
-    [ "Your built-in file edits run under a read-only sandbox in this session, \
-       so apply_patch and every other built-in write is refused. File changes \
-       go through the Write and Edit tools, which are not sandboxed that way. \
-       A refused built-in write does not mean the workspace is read-only."
-    ]
-  | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
+    Prompt_registry.render_prompt_template Prompt_names.keeper_codex_native_read []
+    |> Result.map (fun note -> [ String.trim note ])
+  | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> Ok []
 ;;
 
 (* A dispatched turn may have effects even if no tool/text notification made
@@ -862,7 +859,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -946,6 +943,12 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
         ~default:Runtime_native_tools.codex_default
         ~none_supported:(Runtime_execution.supports_native_none (Codex_app_server config))
     in
+    let* posture_notes =
+      native_posture_note native_posture
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:Prompt_names.keeper_codex_native_read)
+    in
+    let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
         ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
@@ -1010,7 +1013,6 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                 })
               images )
     in
-    let posture_notes = native_posture_note native_posture in
     let composed_context = prepared.composed_context in
     let compose_developer_instructions developer_messages =
       (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages
@@ -1661,6 +1663,14 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                { Agent_core.Types.default_inference_telemetry with
                  request_latency_ms = Some latency_ms
                ; canonical_model_id = Some turn.model
+               ; reported_cache_usage =
+                   Option.map
+                     (fun (u : Agent_core.Types.api_usage) ->
+                        { Agent_core.Types.cache_creation_input_tokens =
+                            Some u.cache_creation_input_tokens
+                        ; cache_read_input_tokens = Some u.cache_read_input_tokens
+                        })
+                     spend
                }
          }
        in
@@ -1845,7 +1855,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1932,7 +1942,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
+        run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope

@@ -221,7 +221,23 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
     (Layout.clamped_scrolled_rows ~markdown ~inner_width:(inner_width + 6)
        ~height ~requested:93 entries
       : Layout.scroll_window);
-  check bool "a new width measures again" true (!laid_out > second_cost)
+  check bool "a new width measures again" true (!laid_out > second_cost);
+  (* Switching between plain-text and markdown on the same entries list must
+     not reuse plain-text row counts for markdown or vice versa. *)
+  let expanding_markdown ~(entry : Layout.entry) ~width =
+    incr laid_out;
+    List.concat_map (fun line -> [ line; line ]) (Layout.wrap_words ~max_cells:width entry.body)
+  in
+  let plain_scroll =
+    Layout.scroll_for_body_row ~inner_width ~entry_index:0 ~body_row:0 entries
+  in
+  laid_out := 0;
+  let markdown_scroll =
+    Layout.scroll_for_body_row ~markdown:expanding_markdown ~inner_width
+      ~entry_index:0 ~body_row:0 entries
+  in
+  check bool "markdown scroll query re-measures after plain-text memo" true
+    (!laid_out > 0 && markdown_scroll <> plain_scroll)
 
 let escape_control_bytes text =
   String.to_seq text

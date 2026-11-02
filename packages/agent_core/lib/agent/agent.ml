@@ -57,6 +57,11 @@ type execution_terminal_evidence =
   ; settled_tool_results : Llm_provider.Types.content_block list
   }
 
+type execution_observation =
+  | Execution_awaiting
+  | Execution_owner_lost
+  | Execution_terminal of execution_terminal_evidence
+
 module Execution_projection = Agent_execution_projection
 
 let create_execution_runtime = Agent_execution_runner.create_runtime
@@ -72,16 +77,28 @@ let open_execution_projection ~runtime ~dir locator =
     ()
 ;;
 
-let read_execution_terminal projection =
-  Execution_projection.terminal_recovery projection
-  |> Result.map (Option.map (fun (terminal, (evidence : Execution_agent_scope.recovery_evidence)) ->
+let execution_terminal_evidence (terminal, (evidence : Execution_agent_scope.recovery_evidence)) =
     let outcome = match terminal with
       | Execution_event.Succeeded -> Terminal_succeeded
       | Execution_event.Failed _ -> Terminal_failed
       | Execution_event.Cancelled _ -> Terminal_cancelled in
     {disposition={outcome; recovery=evidence.recovery};
      has_tool_attempts=evidence.has_tool_attempts;
-     settled_tool_results=evidence.settled_tool_results}))
+     settled_tool_results=evidence.settled_tool_results}
+;;
+
+let read_execution_terminal projection =
+  Execution_projection.terminal_recovery projection
+  |> Result.map (Option.map execution_terminal_evidence)
+;;
+
+let observe_execution projection =
+  Execution_projection.observe_ownership projection
+  |> Result.map (function
+    | Execution_projection.Owner_awaiting -> Execution_awaiting
+    | Owner_lost -> Execution_owner_lost
+    | Terminal_observed (terminal, evidence) ->
+      Execution_terminal (execution_terminal_evidence (terminal, evidence)))
 ;;
 
 let project_detailed_error result =

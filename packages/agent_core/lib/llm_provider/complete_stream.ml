@@ -1239,7 +1239,15 @@ let complete_stream_http
               | Some _ as u -> u
               | None -> resp.usage
             in
-            { resp with usage }
+            { resp with
+              usage
+            ; telemetry =
+                Some
+                  (Types.with_reported_cache_usage
+                     ~cache_creation_input_tokens:None
+                     ~cache_read_input_tokens:None
+                     resp.telemetry)
+            }
           | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> resp
         in
         (* Wire timings (Ollama done line, llama-server final SSE chunk)

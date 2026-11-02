@@ -1514,7 +1514,9 @@ let test_official_client_usage_preserves_vendor_cache_conventions () =
   let module Usage = Masc.Fusion_official_client.For_testing in
   let claude = Usage.claude_usage
       { Runtime_claude_code.input_tokens = 100; output_tokens = 7;
-        cache_creation_input_tokens = 20; cache_read_input_tokens = 50 } in
+        cache_creation_input_tokens = 20; cache_read_input_tokens = 50;
+        reported_cache_creation_input_tokens = Some 20;
+        reported_cache_read_input_tokens = Some 50 } in
   check int "Claude exclusive input adds both cache components" 170 claude.Fusion_types.input_tokens;
   check int "Claude reported output unchanged" 7 claude.output_tokens;
   let tokens = { Runtime_codex_app_server.input_tokens = 100; cached_input_tokens = 50;

@@ -1,0 +1,14 @@
+(rule
+ (targets server_session_switch.ml server_session_switch.mli)
+ (deps ../../lib/server/server_session_switch.ml
+       ../../lib/server/server_session_switch.mli)
+ (action
+  (progn
+   (copy %{dep:../../lib/server/server_session_switch.ml} server_session_switch.ml)
+   (copy %{dep:../../lib/server/server_session_switch.mli} server_session_switch.mli))))
+
+(test
+ (name test_server_execution_shutdown)
+ (modules test_server_execution_shutdown server_session_switch)
+ (libraries agent_core_test_deps agent_core alcotest eio_main)
+ (flags (:standard -alias-deps)))

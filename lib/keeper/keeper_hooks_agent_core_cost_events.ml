@@ -66,8 +66,8 @@ let assemble_cost_event_payload
     ?spend_observation
     ?vendor_total_tokens
     ?resolution_status
-    ?(cache_creation_input_tokens : int = 0)
-    ?(cache_read_input_tokens : int = 0)
+    ?(cache_creation_input_tokens : int option)
+    ?(cache_read_input_tokens : int option)
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_core.Types.inference_telemetry option)
@@ -80,12 +80,34 @@ let assemble_cost_event_payload
     | Some v -> [ (name, `Float v) ]
     | None -> []
   in
+  let reported_cache_creation, reported_cache_read =
+    if usage_missing then None, None
+    else
+      match telemetry, usage_projection with
+      | Some { reported_cache_usage = Some reported; _ }, Cost_ledger.Raw_observation _ ->
+          reported.cache_creation_input_tokens, reported.cache_read_input_tokens
+      | Some { reported_cache_usage = Some reported; _ },
+        (Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _) ->
+          let resolved_creation =
+            match reported.cache_creation_input_tokens with
+            | Some _ -> cache_creation_input_tokens
+            | None -> None
+          in
+          let resolved_read =
+            match reported.cache_read_input_tokens with
+            | Some _ -> cache_read_input_tokens
+            | None -> None
+          in
+          resolved_creation, resolved_read
+      | (Some { reported_cache_usage = None; _ } | None), _ ->
+          cache_creation_input_tokens, cache_read_input_tokens
+  in
   let usage_for_trust : Agent_core.Types.api_usage =
     {
       input_tokens;
       output_tokens;
-      cache_creation_input_tokens;
-      cache_read_input_tokens;
+      cache_creation_input_tokens = Option.value reported_cache_creation ~default:0;
+      cache_read_input_tokens = Option.value reported_cache_read ~default:0;
       cost_usd = Some cost_usd;
     }
   in
@@ -96,12 +118,6 @@ let assemble_cost_event_payload
         classify_usage_trust
           ?usage:(if usage_missing then None else Some usage_for_trust)
           ()
-  in
-  let cache_miss_input_tokens =
-    cache_miss_input_tokens
-      ~input_tokens
-      ~cache_creation_input_tokens
-      ~cache_read_input_tokens
   in
   let provider = runtime_lane_label in
   let runtime_unknown = false in
@@ -127,29 +143,40 @@ let assemble_cost_event_payload
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
   let cache_token_fields =
-    if usage_missing then
-      [
-        ("cache_creation_tokens", `Null);
-        ("cache_read_tokens", `Null);
-        ("cache_miss_input_tokens", `Null);
-      ]
-    else
-      [
-        ("cache_creation_tokens", `Int cache_creation_input_tokens);
-        ("cache_read_tokens", `Int cache_read_input_tokens);
-        ("cache_miss_input_tokens", `Int cache_miss_input_tokens);
-      ]
+    [
+      ( "cache_creation_tokens",
+        match reported_cache_creation with
+        | Some n -> `Int n
+        | None -> `Null );
+      ( "cache_read_tokens",
+        match reported_cache_read with
+        | Some n -> `Int n
+        | None -> `Null );
+      ( "cache_miss_input_tokens",
+        match reported_cache_read with
+        | None -> `Null
+        | Some read ->
+            let creation = Option.value reported_cache_creation ~default:0 in
+            `Int
+              (cache_miss_input_tokens
+                 ~input_tokens
+                 ~cache_creation_input_tokens:creation
+                 ~cache_read_input_tokens:read) );
+    ]
   in
   (* Input includes cache creation after provider normalization. Cache misses
      alone exclude those writes, so they are not the non-cached input total.
      An invalid partition is unknown, never a clamped zero observation. *)
   let non_cached_input_tokens =
-    if usage_missing || input_tokens < 0 || cache_read_input_tokens < 0
-       || cache_creation_input_tokens < 0
-       || cache_read_input_tokens > input_tokens
-       || cache_creation_input_tokens > input_tokens - cache_read_input_tokens
-    then `Null
-    else `Int (input_tokens - cache_read_input_tokens)
+    match reported_cache_read with
+    | None -> `Null
+    | Some read ->
+        let creation = Option.value reported_cache_creation ~default:0 in
+        if usage_missing || input_tokens < 0 || read < 0 || creation < 0
+           || read > input_tokens
+           || creation > input_tokens - read
+        then `Null
+        else `Int (input_tokens - read)
   in
   (* A raw observation and an attempt's resolved reading both belong to one
      attempt, one client response and one conversation, and name them. The
@@ -309,8 +336,8 @@ let cost_event_payload
     ?spend_observation
     ?vendor_total_tokens
     ?resolution_status
-    ?(cache_creation_input_tokens : int = 0)
-    ?(cache_read_input_tokens : int = 0)
+    ?(cache_creation_input_tokens : int option)
+    ?(cache_read_input_tokens : int option)
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_core.Types.inference_telemetry option)
@@ -332,8 +359,8 @@ let cost_event_payload
      ?spend_observation
      ?vendor_total_tokens
      ?resolution_status
-     ~cache_creation_input_tokens
-     ~cache_read_input_tokens
+     ?cache_creation_input_tokens
+     ?cache_read_input_tokens
      ~usage_missing
      ?usage_trust
      ?telemetry
@@ -357,8 +384,8 @@ let emit_cost_event
     ?spend_observation
     ?vendor_total_tokens
     ?resolution_status
-    ?(cache_creation_input_tokens : int = 0)
-    ?(cache_read_input_tokens : int = 0)
+    ?(cache_creation_input_tokens : int option)
+    ?(cache_read_input_tokens : int option)
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_core.Types.inference_telemetry option)
@@ -382,8 +409,8 @@ let emit_cost_event
       ?spend_observation
       ?vendor_total_tokens
       ?resolution_status
-      ~cache_creation_input_tokens
-      ~cache_read_input_tokens
+      ?cache_creation_input_tokens
+      ?cache_read_input_tokens
       ~usage_missing
       ?usage_trust
       ?telemetry

@@ -77,10 +77,18 @@ date_ymd_days_ago() {
 recent_dated_jsonl_files() {
   local dir="$1"
   local days=$(( (WINDOW_HOURS + 23) / 24 ))
-  local i rel file
+  local i rel file sequence
   for i in $(seq 0 "$days"); do
     rel="$(date_path_days_ago "$i" || true)"
     [[ -n "$rel" ]] || continue
+    for file in "$dir/$rel".*.jsonl; do
+      [[ -f "$file" ]] || continue
+      sequence="${file%.jsonl}"
+      sequence="${sequence##*.}"
+      if [[ "$sequence" =~ ^(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$ ]]; then
+        printf '%s\n' "$file"
+      fi
+    done
     file="$dir/$rel.jsonl"
     [[ -f "$file" ]] && printf '%s\n' "$file"
   done

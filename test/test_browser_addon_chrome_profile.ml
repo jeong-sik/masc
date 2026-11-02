@@ -159,11 +159,11 @@ let decoders () =
   refused "a relative Chrome binary is refused" (Chrome.configuration_of_json (chrome ~chrome:"chrome"));
   refused "a Chrome key set without profile is refused" (Chrome.configuration_of_json (`Assoc ["chrome",`String "/chrome"]));
   admitted "a model broker configuration decodes"
-    (Models.configuration_of_json (`Assoc ["store_root",`String "/r";"outputs",`Assoc []]));
+    (Models.configuration_of_json (`Assoc ["locate_system",`Null;"store_root",`String "/r";"outputs",`Assoc []]));
   refused "a relative model receipt root is refused"
-    (Models.configuration_of_json (`Assoc ["store_root",`String "r";"outputs",`Assoc []]));
+    (Models.configuration_of_json (`Assoc ["locate_system",`Null;"store_root",`String "r";"outputs",`Assoc []]));
   refused "a model output without request_schema is refused"
-    (Models.configuration_of_json (`Assoc ["store_root",`String "/r";"outputs",`Assoc ["result",`Assoc ["schema",`Assoc []]]]));
+    (Models.configuration_of_json (`Assoc ["locate_system",`Null;"store_root",`String "/r";"outputs",`Assoc ["result",`Assoc ["schema",`Assoc []]]]));
   refused "a model key set without outputs is refused" (Models.configuration_of_json (`Assoc ["store_root",`String "/r"]))
 let () =
   if Array.length Sys.argv<>3 then (prerr_endline "expected native launcher and guardian";exit 1);

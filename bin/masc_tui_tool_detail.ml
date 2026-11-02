@@ -91,6 +91,10 @@ let block_lines text =
   |> List.map (fun line -> String.concat tab_mark (String.split_on_char '\t' line))
 ;;
 
+(* Sanitize each complete Yojson scalar before applying the renderer's style. *)
+let terminal_json json =
+  Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview
+
 (* One member per line, the way the JSON pretty printer lays it out, with
    two departures a reader wants and a parser would not: a string document
    has already been unfolded into the tree above, and a string that spans
@@ -123,7 +127,7 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
         ~palette
         ~indent:(indent + 2)
         ~prefix:
-          (paint palette palette.key (Yojson.Safe.to_string (`String key))
+          (paint palette palette.key (terminal_json (`String key))
            ^ punct ": ")
         ~suffix
         value)
@@ -141,15 +145,15 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
          (block_lines text)
   | `String _ as scalar ->
     [ pad ^ prefix
-      ^ paint palette palette.string_ (Yojson.Safe.to_string scalar)
+      ^ paint palette palette.string_ (terminal_json scalar)
       ^ suffix ]
   | (`Int _ | `Intlit _ | `Float _) as scalar ->
     [ pad ^ prefix
-      ^ paint palette palette.number (Yojson.Safe.to_string scalar)
+      ^ paint palette palette.number (terminal_json scalar)
       ^ suffix ]
   | (`Bool _ | `Null) as scalar ->
     [ pad ^ prefix
-      ^ paint palette palette.literal (Yojson.Safe.to_string scalar)
+      ^ paint palette palette.literal (terminal_json scalar)
       ^ suffix ]
 ;;
 
@@ -163,12 +167,9 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
    block: it is the only path here that the tree's own escaping does not
    cover. *)
 let structured ?(palette = plain) value =
-  (* A payload the tree draws is safe by the way it is drawn: a JSON leaf goes
-     out through [Yojson.Safe.to_string], which writes a control byte as an
-     escape of its own, and a block's lines go through [terminal_safe_text].
-     What falls through here is the payload itself, so it is made safe here --
-     it arrives from the wire as a tool's recorded input or result, and
-     nothing else stands between it and the row. *)
+  (* The tree sanitizes serialized JSON leaves before styling them, while
+     block lines use [terminal_safe_text]. The fallback is the payload itself,
+     so it must be made safe before it reaches a terminal row too. *)
   let served text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   match Yojson.Safe.from_string value with
   | (`Assoc _ | `List _) as json ->

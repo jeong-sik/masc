@@ -9,7 +9,10 @@ val of_state : Masc_tui_types.state -> Masc_tui_composer.t
 (** Snapshot the bound recipient while the composer is live (focused row or chat),
     or selected recipient while idle,
     authoritative availability, current metadata
-    observation, focus, and draft. Pending stages come only from the original
+    observation, focus, and that recipient's draft and staged image count.
+    An idle recipient's saved draft belongs to the current chat workspace;
+    selecting it does not retarget or edit the live composer.
+    Pending stages come only from the original
     metadata source; optional Work never supplies them.
     This is the only owner of the state-to-composer projection; it performs no
     reads or effects beyond the supplied in-memory state. *)

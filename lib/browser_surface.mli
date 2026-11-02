@@ -9,6 +9,12 @@ val dialog_kind_of_wire : string -> dialog_kind option
     can say anything. *)
 type dialog = { kind : dialog_kind; message : string; default_value : string option }
 val dialog_json : dialog -> Yojson.Safe.t
+type dialog_observation = Unobserved | Observed of dialog option
+(** [Unobserved] says nothing about whether a dialog is open. [Observed None]
+    requires an actual producer observation of no dialog; missing metadata is
+    never that observation. This knowledge is separate from inventory validity. *)
+val dialog_observation_fields : dialog_observation -> (string * Yojson.Safe.t) list
+(** Canonical observation coverage and optional observed dialog payload. *)
 type ego_page_origin = Agent_created | Unknown_origin
 type ego_page = { label : string option; target_id : string; opened_by : ego_page_origin }
 (** SDK Page provenance observed in a tab inventory. A missing label means the
@@ -22,7 +28,7 @@ val ego_page_of_json : Yojson.Safe.t -> (ego_page, string) result
 (** [window_id] names the browser window a tab is in, when the browser says which. Tabs that share a
     [window_id] share a window. It is opaque, and only comparable within one connection. *)
 type tab = { id : int; title : string; url : string; active : bool; window_id : int option;
-  dialog : dialog option; ego_page : ego_page option }
+  dialog : dialog_observation; ego_page : ego_page option }
 
 (** Which tab a read answers for. [None_active] means no tab was requested
     and none is active, so the answer carries [page = null] and reads nothing. *)

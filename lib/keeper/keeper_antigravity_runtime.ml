@@ -36,14 +36,13 @@ let runtime_error_to_core_error = function
              (Runtime_antigravity.noncompletion_status_to_string evidence.status)
          ; detail = Runtime_antigravity.noncompletion_result_to_json evidence |> Yojson.Safe.to_string
          })
-  (* A file-table safety kill, not a spawn failure: refiring the same turn
-     re-kills it, so report it as the provider's terminal failure rather
-     than an unavailable provider that invites blind retries. *)
+  (* A file-table safety kill, not a spawn failure. The typed terminal must
+     survive the candidate walk even before init has observed any effect. *)
   | Runtime_antigravity.Child_fd_ceiling_exceeded { count; ceiling } ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
+      (Llm_provider.Error.ProviderTerminal
          { provider = "antigravity_cli"
-         ; error_type = Some "child_fd_ceiling_exceeded"
+         ; kind = Llm_provider.Http_client.Other "child_fd_ceiling_exceeded"
          ; detail =
              (match count with
               | Some count ->
@@ -397,7 +396,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -485,13 +484,6 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
       | Runtime_native_tools.Native_full -> observe_effect_unavailable ()
       | Runtime_native_tools.Native_none | Runtime_native_tools.Native_read -> ()
     in
-    let runtime_root = Common.masc_dir_from_base_path ~base_path in
-    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
-        ~keeper_name ~oauth_source:config.oauth_source in
-    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
-        ~oauth_source:config.oauth_source
-      |> Result.map_error home_error_to_core_error in
-    let account_home = Runtime_antigravity_home.home_dir home in
     let* sandbox_profile = match required_native_posture with
       | Some _ -> Ok None
       | None ->
@@ -512,22 +504,36 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
             |> Result.map_error home_error_to_core_error in
           let* rest = canonicalize rest in Ok (actual :: rest) in
       canonicalize config.add_dirs in
-    let native_workspace, native_workspace_note =
+    let native_workspace, workspace_guidance, workspace_vars =
       match sandbox_profile with
       | Some profile when Keeper_types_profile_sandbox.tree_location_of_profile profile
           = Keeper_types_profile_sandbox.Shared_mount ->
         let path = Filename.concat base_path
             (Keeper_sandbox.host_root_rel_of_profile profile keeper_name) in
         Runtime_antigravity_home.Shared_workspace path,
-        Printf.sprintf
-          "Antigravity native tools use the host workspace %s, the same files mounted at %s for MASC tools. Native commands run in the official client's host sandbox, not inside the Keeper container."
-          path (Keeper_sandbox.container_root keeper_name)
+        Prompt_names.keeper_antigravity_workspace_shared,
+        ["host_workspace", path; "keeper_workspace", Keeper_sandbox.container_root keeper_name]
       | None | Some _ ->
         Runtime_antigravity_home.Private_workspace,
-        "Antigravity native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned working tree. Use MASC tools for that tree; native commands run in the official client's host sandbox." in
-    let native_workspace_note = native_workspace_note ^
-      " Explicit operator-granted additional native directories: " ^
+        Prompt_names.keeper_antigravity_workspace_private, [] in
+    let render_guidance key vars =
+      Prompt_registry.render_prompt_template key vars
+      |> Result.map String.trim
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:"antigravity.native_workspace_guidance") in
+    let* native_workspace_note = render_guidance workspace_guidance workspace_vars in
+    let* additional_directories_label = render_guidance
+        Prompt_names.keeper_antigravity_additional_directories_label [] in
+    let native_workspace_note = native_workspace_note ^ " " ^ additional_directories_label ^ " " ^
       Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in
+    let* () = on_guidance_prepared () in
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
+        ~keeper_name ~oauth_source:config.oauth_source in
+    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+        ~oauth_source:config.oauth_source
+      |> Result.map_error home_error_to_core_error in
+    let account_home = Runtime_antigravity_home.home_dir home in
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~account_home ~native_posture tools
     in
@@ -1210,6 +1216,11 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                   { Agent_core.Types.default_inference_telemetry with
                     request_latency_ms = Some latency_ms
                   ; canonical_model_id = Some turn.model
+                  ; reported_cache_usage =
+                      Some
+                        { Agent_core.Types.cache_creation_input_tokens = None
+                        ; cache_read_input_tokens = Some usage.cache_read_input_tokens
+                        }
                   }
             }
           in
@@ -1301,7 +1312,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                   recovery_detail))))
 ;;
 
-let run ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1339,7 +1350,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
+      run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name

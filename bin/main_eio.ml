@@ -395,16 +395,13 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
-  (* Use the parent switch directly so that ALL fibers spawned by
-     Server_runtime_bootstrap (background maintenance, keeper loops,
-     dashboard refresh, etc.) are children of this switch.  Graceful
-     shutdown explicitly fails this switch after the signal handler
-     finishes its phases (see [Graceful_shutdown] below); failing the
-     switch propagates cancellation to every child fiber, preventing
-     the 10s force-exit timeout. *)
+let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
+  (* Service fibers attach to the session switch. Graceful shutdown fails
+     that switch after the signal handler finishes its phases. Codec workers
+     belong to the outer runtime switch, so they remain available until every
+     cancelled service has finished its journal cleanup. *)
   try
-    Server_runtime_bootstrap.run ~sw ~env ~address ~port ~base_path
+    Server_runtime_bootstrap.run ~sw ~runtime_sw ~env ~address ~port ~base_path
       ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
@@ -874,7 +871,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
 
   let start () =
     (try
-      Eio.Switch.run @@ fun sw ->
+      Server_session_switch.run @@ fun ~runtime_sw sw ->
       let clock = Eio.Stdenv.clock env in
       let rec await_shutdown_signal () =
         match Atomic.exchange pending_shutdown_signal None with
@@ -971,6 +968,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             (fun () ->
               run_server
                 ~sw
+                ~runtime_sw
                 ~env
                 ~address:bind_address
                 ~port
@@ -1059,10 +1057,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
          the finalizer only after exclusive creation succeeds. *)
       Unix.mkdir directory 0o700;
       let observer = Agent_core.Base.Schema_observation.create ~mode in
-      Fun.protect
-        (fun () -> Agent_core.Base.Schema_observation.within observer
-          (fun () -> run_inside_scheduler env))
-        ~finally:(fun () ->
+      let write_report () =
           (* All server-owned switches and pool jobs have settled. The
              observer binding is gone before snapshot serialization and I/O. *)
           let report = Agent_core.Base.Schema_observation.snapshot observer in
@@ -1073,7 +1068,48 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
                       ~write:(output_string channel) report) with
           | Ok () -> ()
           | Error failure ->
-            Printexc.raise_with_backtrace failure.exception_ failure.backtrace)
+            Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+      in
+      match Agent_core.Base.Schema_observation.within observer
+              (fun () -> run_inside_scheduler env) with
+      | result ->
+          (* Keep report-only failures on the existing finalizer path. In
+             particular, report I/O EINTR is not a scheduler-loop EINTR. *)
+          Fun.protect (fun () -> result) ~finally:write_report
+      | exception primary ->
+          let primary_backtrace = Printexc.get_raw_backtrace () in
+          (match write_report () with
+           | () -> Printexc.raise_with_backtrace primary primary_backtrace
+           | exception report_error ->
+               let report_backtrace = Printexc.get_raw_backtrace () in
+               let primary_failure = primary, primary_backtrace in
+               let report_failure = report_error, report_backtrace in
+               let log_other (error, backtrace) =
+                 Eio.traceln "schema-observe: additional failure: %s\n%s"
+                   (Printexc.to_string error)
+                   (Printexc.raw_backtrace_to_string backtrace)
+               in
+               let preserve_reserved (error, backtrace) other =
+                 match Agent_core.Llm_provider.Reserved_exn.reraise_if_reserved error with
+                 | () -> ()
+                 | exception reserved ->
+                     log_other other;
+                     Printexc.raise_with_backtrace reserved backtrace
+               in
+               (* A primary control exception wins over any report failure.
+                  [combine] would discard bare cancellation; wrapping EINTR
+                  would bypass the typed scheduler diagnostic below. *)
+               preserve_reserved primary_failure report_failure;
+               match primary with
+               | Unix.Unix_error (error, _, _) when error = Unix.EINTR ->
+                   log_other report_failure;
+                   Printexc.raise_with_backtrace primary primary_backtrace
+               | other_primary ->
+                   preserve_reserved report_failure primary_failure;
+                   let combined, backtrace =
+                     Eio.Exn.combine primary_failure report_failure
+                   in
+                   Printexc.raise_with_backtrace combined backtrace)
   in
   (match Eio_main.run run_observed with
    | () -> ()

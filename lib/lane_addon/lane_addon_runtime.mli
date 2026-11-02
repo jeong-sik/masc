@@ -230,9 +230,12 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
 type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner;
+  installation:Lane_addon_tool_request_owner.installation;
   backend:Browser_lane.Backend.t}
 (** A running browser installation: its instance, the owner its export calls
-    run under, and the source its package serves. *)
+    run under, and the source its package serves. [installation] is the existing
+    configured-declaration or manual-instance identity. It selects a durable
+    binding; it does not replace the current instance/export-owner authority. *)
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 val browser_service_reading : config:Workspace.config -> access:Lane_addon_sources.access -> browser_reading
 (** Usable browser services and, from the same read, the visible browser

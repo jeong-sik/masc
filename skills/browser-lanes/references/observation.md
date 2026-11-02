@@ -250,7 +250,13 @@ Ego 이외의 연결에서 `select_option`은 CSS로 고른 `<select>` 하나를
 연결이 `web_extension`뿐이면 이 일은 할 수 없다. `webdriver_bidi` 연결이 필요하다고 운영자에게 알린다.
 
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
-Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만 읽고 이미지의
+현재 런타임에 `keeper_image_read`가 제공되면 Keeper 응답의 이미지 `artifact`를
+넘겨 현재 모델이 픽셀을 직접 읽는다. 현재 capability·도구 제공 정보에서 이미지
+입력 미지원으로 직접 읽기가 제외됐음이 확인되거나, 도구의 미지원 거절을 받았거나,
+다른 모델의 해석이 필요할 때 `keeper_analyze_image`로 분석을 위임한다.
+모델 이름이나 스크린샷 핸들만으로 이미지 미지원을 추측하지 않는다. 아직 로드하지
+않은 도구 스키마, 아티팩트 조회 실패나 계정 한도 오류도 미지원으로 해석하지 않는다.
+텍스트나 핸들만 읽고 이미지의
 배치를 봤다고 하지 않는다. 큰 BrowserRead 응답이 artifact로 분리됐다면 그 응답이
 가리킨 브라우저 자료만 읽어 관측을 이어간다.
 다음 행동에 필요한 대상과 참조를 확보했다면 artifact의 끝까지 읽는 것을 선행 조건으로

@@ -393,20 +393,36 @@ let split_first_line text =
 
 (* The word after the slash and whatever follows it on the line. The word
    ends at the first blank; a line that is only the word has an empty rest. *)
-let split_word line =
+let split_word_source line =
   let is_blank c = c = ' ' || c = '\t' in
   let length = String.length line in
   let rec word_end i = if i < length && not (is_blank line.[i]) then word_end (i + 1) else i in
   let stop = word_end 0 in
-  let rest = String.sub line stop (length - stop) in
-  (String.sub line 0 stop, String.trim rest)
+  (* The same whitespace grammar as [String.trim], retaining its source
+     offsets before the argument is projected into a message. *)
+  let is_space = function ' ' | '\012' | '\n' | '\r' | '\t' -> true | _ -> false in
+  let rec leading i = if i < length && is_space line.[i] then leading (i + 1) else i in
+  let offset = leading stop in
+  let rec trailing i = if i >= offset && is_space line.[i] then trailing (i - 1) else i in
+  let rest_length = trailing (length - 1) - offset + 1 in
+  (String.sub line 0 stop, String.sub line offset rest_length,
+   { Masc_tui_message_input.offset; length = rest_length })
 
-let parse text =
-  if String.length text = 0 || text.[0] <> slash then Say text
+let split_word line =
+  let word, rest, _ = split_word_source line in
+  word, rest
+
+let parse_with_message_source text =
+  let source = ref None in
+  let payload ranges command = source := Some ranges; command in
+  let command =
+  if String.length text = 0 || text.[0] <> slash then
+    payload [{ Masc_tui_message_input.offset = 0; length = String.length text }] (Say text)
   else
     let first, body = split_first_line text in
     let line = String.sub first 1 (String.length first - 1) in
-    match split_word line with
+    let word, rest, argument = split_word_source line in
+    match word, rest with
     | "task-recover", "" -> Task_recover
     | "task-inspect", "" -> Task_inspect
     | "task", "" -> Task_missing_title
@@ -514,8 +530,11 @@ let parse text =
     | "interrupt", name -> Interrupt_keeper_turn name
     | "steer", "" -> Steer_missing_message
     | "steer", message ->
-        Steer_turn
-          (if String.equal body "" then message else message ^ "\n" ^ body)
+        let ranges = { argument with offset = argument.offset + 1 }
+          :: (if String.equal body "" then [] else
+                [{ Masc_tui_message_input.offset = String.length first; length = String.length body + 1 }]) in
+        payload ranges (Steer_turn
+          (if String.equal body "" then message else message ^ "\n" ^ body))
     | "thinking", "" -> Set_thinking `Cycle
     | "thinking", "hidden" -> Set_thinking `Hidden
     | "thinking", "folded" -> Set_thinking `Folded
@@ -564,6 +583,10 @@ let parse text =
         | "delete", name -> Preset_delete name
         | verb, _ -> Unknown ("preset " ^ verb))
     | word, _ -> Unknown word
+  in
+  command, !source
+
+let parse text = fst (parse_with_message_source text)
 
 type hint =
   | No_command

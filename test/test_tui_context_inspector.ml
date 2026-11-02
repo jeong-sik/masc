@@ -535,6 +535,196 @@ let test_late_pending_snapshot_cannot_erase_progress () =
   check bool "another source does not inherit original input" true
     (Option.is_none (Inspector.observed_input changed))
 
+let test_exact_bytes_preserves_distinct_sizes_and_digit_order () =
+  check string "zero bytes" "0 B" (Inspector.exact_bytes 0);
+  check string "negative clamps to zero" "0 B" (Inspector.exact_bytes (-7));
+  check string "below one thousand" "999 B" (Inspector.exact_bytes 999);
+  check string "one thousand" "1,000 B" (Inspector.exact_bytes 1_000);
+  check string "125,705 stays distinct from 125,780" "125,705 B"
+    (Inspector.exact_bytes 125_705);
+  check string "125,780 keeps group order" "125,780 B"
+    (Inspector.exact_bytes 125_780);
+  check string "nine digits keep group order" "123,456,789 B"
+    (Inspector.exact_bytes 123_456_789)
+
+let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
+  let ollama_json =
+    {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":100,"eval_count":20}|}
+  in
+  let ollama_resp =
+    match Llm_provider.Backend_ollama.parse_ollama_response ollama_json with
+    | Ok resp -> resp
+    | Error err -> fail ("ollama parse: " ^ err)
+  in
+  let ollama_turn_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Per_request
+      ~usage:(Option.get ollama_resp.usage)
+      ~telemetry:ollama_resp.telemetry
+  in
+  check (option int) "ollama cache read stays None" None
+    ollama_turn_usage.cache_read_input_tokens;
+  check (option int) "ollama cache creation stays None" None
+    ollama_turn_usage.cache_creation_input_tokens;
+  check string "ollama renders unreported without ratio"
+    "Provider usage (last reported request in this turn) · input 100 · cache read unreported"
+    (Inspector.provider_usage_summary ollama_turn_usage);
+  let openai_zero_json =
+    {|{"id":"c1","model":"glm-5.3","choices":[{"index":0,"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":0}}}|}
+  in
+  let openai_zero_resp =
+    match Llm_provider.Backend_openai_parse.parse_openai_response_result openai_zero_json with
+    | Ok resp -> resp
+    | Error _ -> fail "openai zero parse failed"
+  in
+  let openai_turn_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Per_request
+      ~usage:(Option.get openai_zero_resp.usage)
+      ~telemetry:openai_zero_resp.telemetry
+  in
+  check (option int) "reported zero cache read stays Some 0" (Some 0)
+    openai_turn_usage.cache_read_input_tokens;
+  check (option int) "unreported cache creation stays None" None
+    openai_turn_usage.cache_creation_input_tokens;
+  check string "reported zero renders 0 (0.0% of input)"
+    "Provider usage (last reported request in this turn) · input 100 · cache read 0 (0.0% of input)"
+    (Inspector.provider_usage_summary openai_turn_usage);
+  let muse_turn ?prompt_tokens ?cache_read_tokens ?cache_write_tokens ()
+      : Runtime_muse_serve.turn_result =
+    { session_id = "s-muse"
+    ; turn_id = "t-muse"
+    ; model = Some "claude-sonnet-4"
+    ; text = Some "ok"
+    ; usage =
+        Some
+          { Runtime_muse_msp.input_tokens = 120
+          ; output_tokens = 30
+          ; cached_tokens = 0
+          ; reasoning_tokens = 0
+          ; prompt_tokens
+          ; cache_read_tokens
+          ; cache_write_tokens
+          }
+    ; last_call_usage = None
+    ; tool_calls = 0
+    ; approvals_decided = 0
+    ; call_models = []
+    ; resumed = false
+    ; server_version = "1.4.0"
+    }
+  in
+  let muse_terminal_only_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~cache_read_tokens:40 ~cache_write_tokens:10 ())
+  in
+  let muse_terminal_only_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get muse_terminal_only_resp.usage)
+      ~telemetry:muse_terminal_only_resp.telemetry
+  in
+  check (option int) "terminal-only muse cache read stays None" None
+    muse_terminal_only_usage.cache_read_input_tokens;
+  check string "terminal-only muse renders unreported without fabricated 0"
+    "Provider usage (client turn total) · input 120 · cache read unreported"
+    (Inspector.provider_usage_summary muse_terminal_only_usage);
+  let muse_zero_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~prompt_tokens:120 ~cache_read_tokens:0 ~cache_write_tokens:0 ())
+  in
+  let muse_zero_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get muse_zero_resp.usage)
+      ~telemetry:muse_zero_resp.telemetry
+  in
+  check (option int) "muse explicit zero cache read stays Some 0" (Some 0)
+    muse_zero_usage.cache_read_input_tokens;
+  check string "muse explicit zero renders 0"
+    "Provider usage (client turn total) · input 120 · cache read 0 · cache created 0"
+    (Inspector.provider_usage_summary muse_zero_usage);
+  let claude_turn_resp ?cache_creation ?cache_read () =
+    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
+      ~latency_ms:10
+      ~turn_id:"turn-claude"
+      ~model:"claude-sonnet-4-6"
+      ~text:"ok"
+      ~turn_total:
+        (Some
+           { Runtime_claude_code.input_tokens = 120
+           ; output_tokens = 30
+           ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+           ; cache_read_input_tokens = Option.value cache_read ~default:0
+           ; reported_cache_creation_input_tokens = cache_creation
+           ; reported_cache_read_input_tokens = cache_read
+           })
+  in
+  let claude_unreported_resp = claude_turn_resp () in
+  let claude_unreported_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get claude_unreported_resp.usage)
+      ~telemetry:claude_unreported_resp.telemetry
+  in
+  check (option int) "claude unreported cache read stays None" None
+    claude_unreported_usage.cache_read_input_tokens;
+  check string "claude unreported renders unreported without fabricated 0"
+    "Provider usage (client turn total) · input 120 · cache read unreported"
+    (Inspector.provider_usage_summary claude_unreported_usage);
+  let claude_zero_resp = claude_turn_resp ~cache_creation:0 ~cache_read:0 () in
+  let claude_zero_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get claude_zero_resp.usage)
+      ~telemetry:claude_zero_resp.telemetry
+  in
+  check string "claude explicit zero renders 0"
+    "Provider usage (client turn total) · input 120 · cache read 0 · cache created 0"
+    (Inspector.provider_usage_summary claude_zero_usage);
+  let claude_request_input ?cache_creation ?cache_read ()
+    : Runtime_claude_code.request_input
+    =
+    { input_tokens = 120
+    ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+    ; cache_read_input_tokens = Option.value cache_read ~default:0
+    ; reported_cache_creation_input_tokens = cache_creation
+    ; reported_cache_read_input_tokens = cache_read
+    }
+  in
+  let claude_unreported_ctx =
+    Masc.Keeper_claude_code_runtime.For_testing.request_context_of_request_input
+      (claude_request_input ())
+  in
+  check bool "claude assistant request without cache fields has cache = None" true
+    (Option.is_none claude_unreported_ctx.cache);
+  let claude_zero_ctx =
+    Masc.Keeper_claude_code_runtime.For_testing.request_context_of_request_input
+      (claude_request_input ~cache_creation:0 ~cache_read:0 ())
+  in
+  check (option int) "claude assistant explicit zero cache read stays Some 0"
+    (Some 0)
+    (Option.map
+       (fun (c : Runtime_observation.request_cache) -> c.cache_read_input_tokens)
+       claude_zero_ctx.cache);
+  let claude_pos_ctx =
+    Masc.Keeper_claude_code_runtime.For_testing.request_context_of_request_input
+      (claude_request_input ~cache_creation:10 ~cache_read:40 ())
+  in
+  check int "claude assistant positive cache inclusive input" 170
+    claude_pos_ctx.input_tokens;
+  check (option int) "claude assistant positive cache read is Some 40"
+    (Some 40)
+    (Option.map
+       (fun (c : Runtime_observation.request_cache) -> c.cache_read_input_tokens)
+       claude_pos_ctx.cache)
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -568,5 +758,10 @@ let () =
             test_pinned_unattributed_record_stays_exact
         ; test_case "late pending snapshots preserve progress" `Quick
             test_late_pending_snapshot_cannot_erase_progress
+        ; test_case "exact_bytes preserves distinct sizes and digit order" `Quick
+            test_exact_bytes_preserves_distinct_sizes_and_digit_order
+        ; test_case "provider usage distinguishes unreported cache from reported zero"
+            `Quick
+            test_provider_usage_distinguishes_unreported_cache_from_reported_zero
         ] )
     ]

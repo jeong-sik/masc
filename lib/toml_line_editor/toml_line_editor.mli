@@ -199,6 +199,10 @@ type table_removal =
           removes only a table that has its own header. *)
 
 val remove_table : string -> path:string -> table_removal
+(** Drop the standard table [[path]]: its header, its body, and any table named
+    under its path. Comments above the header and a comment block documenting
+    the next header stay where they are, for the reasons
+    {!remove_table_array_entry} gives. *)
 
 type table_rename =
   | Table_renamed of string
@@ -212,7 +216,3 @@ val rename_table : string -> path:string -> to_path:string -> table_rename
     none to rewrite -- and [Table_rename_conflict] when it already declares
     [to_path], which renaming onto would declare the same table twice and fail
     the whole load. *)
-(** Drop the standard table [[path]]: its header, its body, and any table named
-    under its path. Comments above the header and a comment block documenting
-    the next header stay where they are, for the reasons
-    {!remove_table_array_entry} gives. *)

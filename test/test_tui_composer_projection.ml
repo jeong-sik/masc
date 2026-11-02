@@ -86,6 +86,40 @@ let test_workspace_loss_withdraws_queued_message_target () =
   check bool "unobserved remote usage is not zero" true
     (Option.is_none (Tui_types.aggregate_keeper_stats state.keepers))
 
+let test_idle_recipient_owns_its_draft () =
+  let state = state () in
+  let other = {keeper with k_name="reviewer"} in
+  state.keepers <- [keeper];
+  state.msg_target_keeper_name <- Some keeper.k_name;
+  Masc_tui_message_input.insert state.msg_input "analyst 한글 초안";
+  state.msg_attachments <- [{attachment_id="analyst-image";name="image.png";
+    mime_type="image/png";size=1;data="AA=="}];
+  Tui_types.save_message_draft state;
+  state.keepers <- [other];
+  let unsaved = Projection.of_state state in
+  check target_testable "new selected recipient" (Composer.Ready other.k_name) unsaved.target;
+  check string "no borrowed draft" "" unsaved.draft;
+  check int "no borrowed image" 0 unsaved.staged_images;
+  state.msg_target_keeper_name <- Some other.k_name;
+  Tui_types.restore_message_draft state other.k_name;
+  Masc_tui_message_input.insert state.msg_input "reviewer draft";
+  state.keepers <- [keeper];
+  let saved = Projection.of_state state in
+  check string "selected recipient's saved draft" "analyst 한글 초안" saved.draft;
+  check int "selected recipient's saved image" 1 saved.staged_images;
+  check string "live input is retained" "reviewer draft"
+    (Masc_tui_message_input.contents state.msg_input);
+  check (option string) "preview does not retarget" (Some other.k_name)
+    state.msg_target_keeper_name;
+  state.keepers <- [keeper;other];
+  state.keeper_cursor <- 0;
+  state.composer_focused <- true;
+  let focused = Projection.of_state state in
+  check target_testable "focused owner stays bound" (Composer.Ready other.k_name) focused.target;
+  check string "focused owner's input" "reviewer draft" focused.draft;
+  check bool "send stays with focused owner" true
+    (Projection.classify_key state Composer.send_key = Composer.Send other.k_name)
+
 let () =
   run "tui-composer-projection"
     [ ( "state projection"
@@ -95,6 +129,8 @@ let () =
             test_unread_roster_keeps_the_selected_name
         ; test_case "focus and draft" `Quick
             test_focus_and_draft_are_projected_together
+        ; test_case "idle recipient owns its draft" `Quick
+            test_idle_recipient_owns_its_draft
         ; test_case "workspace loss withdraws queued message target" `Quick
             test_workspace_loss_withdraws_queued_message_target
         ;] )

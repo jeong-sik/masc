@@ -1,7 +1,8 @@
 exception Session_ended
 
 let run body =
-  match Eio.Switch.run (fun sw -> body sw; raise Session_ended) with
-  | () -> ()
-  | exception Session_ended -> ()
+  Eio.Switch.run (fun runtime_sw ->
+    match Eio.Switch.run (fun sw -> body ~runtime_sw sw; raise Session_ended) with
+    | () -> ()
+    | exception Session_ended -> ())
 ;;

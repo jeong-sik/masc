@@ -237,23 +237,28 @@ let test_list_windows_table () =
     ["the extension",Cap.Connected Lane.Web_extension;"the owned Firefox",Cap.Owned_gecko;
      "Stagehand",Cap.Owned_chromium;"Safari",Cap.Safari_unavailable]
 
-(* The catalog claims on an ego connection only what its peer does
-   (Browser_lane.live_transport_serves Ego_task_space), and every read and
-   effect on a page says that the operator's tabs in the space are refused. *)
+(* The catalog claims on an Ego connection only what its peer does
+   (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
+   explicit conditions; the peer tests exercise their actual admission. *)
 let test_ego_table () =
   let backend = Cap.Connected Lane.Ego_task_space in
+  (match Cap.support backend Cap.Close_tab with
+   | Cap.Conditional {invocation={tool=Act;mode=None;action=Some "close_tab"};_} -> ()
+   | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego closing must use its explicit close_tab action");
+  (match Cap.support backend Cap.Read_dialog with
+   | Cap.Conditional {invocation={tool=Read;mode=Some "dialog";action=None};_} -> ()
+   | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego dialog metadata must use its explicit read mode");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
-     "fill";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
-    | Cap.Conditional {constraints;_} ->
-      check bool (Cap.operation_name operation ^ " names the operator's tabs") true
-        (List.exists (fun constraint_ -> String_util.contains_substring constraint_ "operator opened") constraints)
-    | Cap.Available _ | Cap.Unsupported _ -> failf "%s is not conditional on ego" (Cap.operation_name operation))
+    | Cap.Conditional {constraints=_::_;_} -> ()
+    | Cap.Conditional {constraints=[];_} | Cap.Available _ | Cap.Unsupported _ ->
+      failf "%s needs explicit Ego Page conditions" (Cap.operation_name operation))
     (* Space metadata, completion and the control wait act on the Space, not on
        a page; adopting or releasing a page manages an unmanaged tab the
        operator opened on purpose. *)
@@ -297,12 +302,16 @@ let test_native_input_admission_surface () =
   let methods=Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "steps"
     |> member "items" |> member "properties" |> member "method" |> member "enum"
     |> to_list |> List.map to_string) in
-  check bool "unattestable raw type is not an executable model method" false (List.mem "keyboard.type" methods);
+  check int "native-window typing is an explicit executable model method" 1
+    (List.length (List.filter ((=) "keyboard.type") methods));
   List.iter (fun name -> check bool (name ^ " remains explicit") true (List.mem name methods))
     ["fill";"keyboard.insertText";"keyboard.paste";"keyboard.press";"dragAndDrop"];
   (match Cap.support (Cap.Connected Lane.Ego_task_space) Cap.Type_text with
-   | Cap.Unsupported _ -> ()
-   | Available _ | Conditional _ -> fail "Ego must not advertise raw type_text");
+   | Cap.Conditional {invocation;constraints=_::_} ->
+     check bool "typing remains an exact observed native interaction" true
+       (invocation.Cap.tool=Cap.Interact && invocation.Cap.action=Some "type_text")
+   | Conditional {constraints=[];_} | Available _ | Unsupported _ ->
+     fail "native-window typing must retain its Page and focus conditions");
   List.iter (fun backend -> check bool "other native backends retain type_text" true
     (match Cap.support backend Cap.Type_text with Cap.Available _|Conditional _->true|Unsupported _->false))
     [Cap.Connected Lane.Webdriver_bidi;Cap.Owned_gecko;Cap.Owned_chromium];
@@ -317,9 +326,9 @@ let test_native_input_admission_surface () =
   let fill=`Assoc ["method",`String "fill";"selector",`String "#editor";"text",`String "earlier effect"] in
   let raw=`Assoc ["method",`String "keyboard.type";"text",`String "raw"] in
   let safe=`Assoc ["method",`String "keyboard.insertText";"text",`String "literal"] in
-  check bool "whole-workflow refusal happens before looking for a browser Add-on" true
-    (Tool_result.failure_class (invoke [fill;raw])=Some Tool_result.Policy_rejection);
-  check bool "the explicit native alternative reaches ordinary Add-on lookup" true
+  check bool "native-window typing reaches ordinary Add-on lookup" true
+    (Tool_result.failure_class (invoke [fill;raw])=Some Tool_result.Dependency_unavailable);
+  check bool "nonholding insertion retains ordinary Add-on lookup" true
     (Tool_result.failure_class (invoke [fill;safe])=Some Tool_result.Dependency_unavailable)
 
 let () = run "task-aware browser choice" ["scenarios",[

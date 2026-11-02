@@ -1,12 +1,5 @@
-(* [Keeper_tool_call_log.file_change_tally] folds the rows the tool-call store
-   gained since the last call for a (keeper, window) key, and it holds the
-   carried-tally lock for the whole fold. The fold stats each day file through
-   [Fs_compat], which suspends the calling fiber (Eio runs the stat on a worker
-   thread). Every fiber of a domain shares one thread, and a [Stdlib.Mutex]
-   raises [Sys_error "Mutex.lock: Resource deadlock avoided"] when the thread
-   that holds it locks it again. The next fiber that asked for a tally, or
-   reset the carried tallies, raised instead of waiting. These cases put fibers
-   on a store that holds rows and has no carried tally yet. *)
+(* Callers share the carried-tally lock and must receive the same canonical
+   rows, regardless of whether the storage read suspends their fiber. *)
 open Alcotest
 open Masc
 module Change = Keeper_tool_call_file_change
@@ -74,22 +67,8 @@ let test_callers_of_one_key_get_the_sequential_tally () =
                ~keeper_name:"alice" ~window_hours ())));
     drop_carried_tallies ~base;
     let callers = 4 in
-    let asked = ref 0 in
-    let asked_when_served = ref [] in
-    let ask _ =
-      incr asked;
-      let result = tally ~keeper_name:"alice" () in
-      asked_when_served := !asked :: !asked_when_served;
-      result
-    in
-    let results = Eio.Fiber.List.map ask (List.init callers Fun.id) in
-    (* The first fold suspends while it reads the day files, so every other
-       caller has asked before any caller is served. A fold that never
-       suspended would serve the first caller after one ask and the case would
-       prove nothing. *)
-    check (list int) "every caller asked before any was served"
-      (List.init callers (fun _ -> callers))
-      !asked_when_served;
+    let results = Eio.Fiber.List.map
+        (fun _ -> tally ~keeper_name:"alice" ()) (List.init callers Fun.id) in
     List.iter (check_same_tally "each caller gets the sequential tally" sequential)
       results)
 

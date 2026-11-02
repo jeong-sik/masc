@@ -215,6 +215,13 @@ type event =
       (** An internal agent run registry -- verification, goal verification,
           exact lanes -- changed. A server push with no payload, named by
           {!Masc.Internal_agent_runs_event}. *)
+  | Board_changed of { post_id : string option }
+      (** A Board write: a post, a comment, a vote, a reaction, or a change
+          to an existing post. It arrives as the JSON-RPC
+          [notifications/board] envelope rather than a typed event. A server
+          push: the Board re-reads on it. [post_id] is the post its params
+          name, and [None] when they name none -- a vote on a comment and a
+          reaction carry a target instead. *)
   | Lane_resource of lane_resource
       (** A Lane Add-on container was acquired, failed to start, was removed,
           or could not be shown removed. It arrives in the agent-core family
@@ -256,6 +263,10 @@ val tool_call_keeper : event -> string option
 (** The keeper a [keeper_tool_call] names — [Some] only for
     {!Keeper_tool_call}. The Keeper_calls surface reads that Keeper's calls
     again on this. *)
+
+val board_changed_post : event -> string option option
+(** [Some post] for {!Board_changed}, where [post] is the post it names or
+    [None] when it names none; [None] for every other event. *)
 
 val memory_journal_appended_keeper : event -> string option
 (** The keeper whose memory journal just gained a row — [Some] only for

@@ -148,6 +148,9 @@ type event =
   (* Server push with no payload: a run registry changed, and a reader that
      shows internal runs re-fetches them. *)
   | Internal_agent_runs_changed
+  (* Server push: a Board write. The Board re-reads on it; [post_id] is the
+     post the params name, if any. *)
+  | Board_changed of { post_id : string option }
   (* A Lane Add-on container was acquired, failed to start, was removed, or
      could not be shown removed. It rides the agent-core family on the wire,
      but it is the lane runtime's fact, not an agent's. *)
@@ -179,7 +182,7 @@ let chat_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_memory_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       None
 
@@ -189,7 +192,7 @@ let composite_changed_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       None
 
@@ -199,13 +202,24 @@ let tool_call_keeper = function
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       None
 
 let memory_journal_appended_keeper = function
   | Keeper_memory_journal_appended { keeper; _ } -> Some keeper
   | Keeper_chat_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      None
+
+let board_changed_post = function
+  | Board_changed { post_id } -> Some post_id
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -624,15 +638,23 @@ let reading_of_type type_name =
       | true -> Named (Snapshot other)
       | false -> Named (Other other))
 
+(* The server sends Board writes as a JSON-RPC notification, so the event
+   has a method where the others have a type. *)
+let board_notification fields =
+  match List.assoc_opt "params" fields with
+  | Some (`Assoc params) -> Ok (Board_changed { post_id = string_field params "post_id" })
+  | Some _ | None -> Error "notifications/board carries no params object"
+
 let event_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields -> (
-      match string_field fields "type" with
-      | None -> Error "event carries no type"
-      | Some type_name -> (
+      match string_field fields "type", string_field fields "method" with
+      | Some type_name, _ -> (
           match reading_of_type type_name with
           | From_fields decode -> decode fields
-          | Named event -> Ok event))
+          | Named event -> Ok event)
+      | None, Some "notifications/board" -> board_notification fields
+      | None, (Some _ | None) -> Error "event carries no type")
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "event is not a JSON object"
 

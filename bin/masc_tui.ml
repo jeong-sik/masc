@@ -8460,6 +8460,62 @@ let owe_keeper_calls_read state ~mailbox ~keeper_name =
   update_calls_owed state ~keeper_name Masc_tui_owed_read.changed;
   launch_owed_keeper_calls state ~mailbox
 
+(* The open Board post reads when it opens or [r] asks, when
+   [notifications/board] names it or names no post, after the operator's own
+   comment or vote, on a revalidation or a resumed authority, and again after
+   a failed read (RFC-0480 §3.1). *)
+let board_post_on_screen state =
+  if state.view = Board then
+    match state.board_mode with
+    | Board_read post_id -> Some post_id
+    | Board_list | Board_compose -> None
+  else None
+
+let settle_board_post_owed state ~post_id transition =
+  match state.board_post_owed with
+  | Some owed when String.equal owed.bpo_post post_id ->
+      state.board_post_owed <- Some { owed with bpo_read = transition owed.bpo_read }
+  | Some _ | None -> ()
+
+(* Runs on every loop iteration. A read already in flight for the post is let
+   finish first. A post no longer open drops its record: opening it again
+   reads it. *)
+let launch_owed_board_post state ~mailbox =
+  match state.board_post_owed with
+  | None -> ()
+  | Some owed
+    when not (Option.equal String.equal (board_post_on_screen state) (Some owed.bpo_post)) ->
+      state.board_post_owed <- None
+  | Some owed ->
+      let post_id = owed.bpo_post in
+      let reading = Board_detail.reading state.board_detail ~post_id in
+      (* A read the detail retired (a mode swap, leaving and reopening) never
+         completes, so its record is owed again. *)
+      let read =
+        if reading then owed.bpo_read else Masc_tui_owed_read.abandoned owed.bpo_read
+      in
+      state.board_post_owed <- Some { owed with bpo_read = read };
+      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+         && server_authority_ready state
+         && not reading
+      then begin
+        state.board_post_owed <-
+          Some { owed with bpo_read = Masc_tui_owed_read.started read };
+        Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
+          ~port:state.port ~post_id
+          ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+      end
+
+let owe_board_post_read state ~mailbox ~post_id =
+  let owed =
+    match state.board_post_owed with
+    | Some owed when String.equal owed.bpo_post post_id -> owed
+    | Some _ | None -> { bpo_post = post_id; bpo_read = Masc_tui_owed_read.settled }
+  in
+  state.board_post_owed <-
+    Some { owed with bpo_read = Masc_tui_owed_read.changed owed.bpo_read };
+  launch_owed_board_post state ~mailbox
+
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
   if keeper_available_for_new_message state keeper_name then begin
@@ -17551,7 +17607,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          (fun (keeper : keeper) ->
            owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name;
            owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
-         (selected_keeper state)
+         (selected_keeper state);
+       Option.iter
+         (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
+         (board_post_on_screen state)
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -17965,10 +18024,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
      | Board ->
          (match state.board_mode with
-          | Board_read post_id ->
-              Masc_tui_board_requests.start_board_post_refresh state
-                ~host:server_peer_host ~port:state.port ~post_id
-                ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+          | Board_read post_id -> owe_board_post_read state ~mailbox ~post_id
           | Board_list | Board_compose -> ())
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
@@ -18272,8 +18328,7 @@ let open_board_post_id state ~mailbox ~focus post_id =
   state.board_comments_focused <- false;
   state.board_attachment_status <- None;
   state.board_image_selection <- None;
-  Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
-    ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+  owe_board_post_read state ~mailbox ~post_id
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   open_board_post_id state ~mailbox ~focus post.bp_id
@@ -21484,6 +21539,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let open_chat_memory_grew = ref false in
       let selected_composite_changed = ref false in
       let selected_tool_called = ref false in
+      let open_board_post_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21563,6 +21619,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
                    selected_tool_called := true
                | Some _, (Some _ | None) | None, _ -> ());
+              (* A Board event that names no post may still be about the open
+                 one (a vote on one of its comments), so it reads too. *)
+              (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
+               | Some (Some post), Some open_post when String.equal post open_post ->
+                   open_board_post_changed := true
+               | Some None, Some _ -> open_board_post_changed := true
+               | Some (Some _), (Some _ | None) | Some None, None | None, _ -> ());
               (match event with
                | Masc_tui_observer.Keeper_chat_stream_frame { keeper; operation_id; seq; at; _ } ->
                    observe_journal keeper (Keeper_chat_log.Operation operation_id) seq at
@@ -21578,7 +21641,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21628,7 +21691,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
-               | Masc_tui_observer.Internal_agent_runs_changed
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21738,6 +21801,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (fun (keeper : keeper) ->
              owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
            (selected_keeper state));
+      (if !open_board_post_changed && not !observer_source_loss_seen then
+         Option.iter
+           (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
+           (board_post_on_screen state));
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
@@ -22009,7 +22076,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Board_post_refresh_done (request, result) ->
-      Masc_tui_board_updates.apply_board_post_load state ~report_error:(add_event state "error") request result
+      let current = Board_detail.is_current state.board_detail request in
+      Masc_tui_board_updates.apply_board_post_load state ~report_error:(add_event state "error") request result;
+      if current then begin
+        let post_id = Board_detail.request_post_id request in
+        (match result with
+         | Ok (post, _, _) when String.equal post.bp_id post_id ->
+             settle_board_post_owed state ~post_id Masc_tui_owed_read.succeeded
+         | Ok _ | Error _ ->
+             settle_board_post_owed state ~post_id
+               (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+                  ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())));
+        launch_owed_board_post state ~mailbox
+      end
   | Keeper_deletion_retry_done (operation_id, result) ->
       let message = match result with
         | Ok () -> Printf.sprintf "Deletion retry %s accepted; refreshing inventory." operation_id
@@ -22276,9 +22355,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
-        ~refresh_detail:(fun post_id ->
-          Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
-            ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)) result
+        ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id) result
   | Board_vote_done (target, result) ->
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
@@ -22287,9 +22364,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
-        ~refresh_detail:(fun post_id ->
-          Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
-            ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id))
+        ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id)
         target result
   | Goal_transition_done (goal_id, ticket, workspace, result) ->
       record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
@@ -30850,6 +30925,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_fusion state ~mailbox:async_messages;
       launch_owed_keeper_composite state ~mailbox:async_messages;
       launch_owed_keeper_calls state ~mailbox:async_messages;
+      launch_owed_board_post state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration
@@ -34463,8 +34539,7 @@ Use relative paths for resources already held in the package. -->
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
-                Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
-                  ~post_id:reference.fhe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
+                owe_board_post_read state ~mailbox:async_messages ~post_id:reference.fhe_post_id
             | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
                 report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
@@ -34480,8 +34555,7 @@ Use relative paths for resources already held in the package. -->
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
-                Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
-                  ~post_id:reference.fhe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
+                owe_board_post_read state ~mailbox:async_messages ~post_id:reference.fhe_post_id
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
                 (match detail.fud_evidence with
                  | None -> report_action state "system" "No Board evidence has been recorded for this run"
@@ -34496,8 +34570,7 @@ Use relative paths for resources already held in the package. -->
                      state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
                      goto_surface ~from_reference:true state ~mailbox:async_messages Board;
-                     Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
-                       ~post_id:evidence.fe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id))
+                     owe_board_post_read state ~mailbox:async_messages ~post_id:evidence.fe_post_id)
             | (Fusion_list | Fusion_detail _), _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some ("h" | "H") when state.view = Repositories && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
@@ -35929,8 +36002,7 @@ Use relative paths for resources already held in the package. -->
                 state.board_comment_scroll <- 0;
                 state.board_comment_landing <- None;
                 state.board_detail <- Board_detail.clear state.board_detail;
-                Masc_tui_board_requests.start_board_post_refresh state ~host ~port ~post_id
-                  ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
+                owe_board_post_read state ~mailbox:async_messages ~post_id
             | Board_list | Board_compose | Board_read _ -> ());
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
@@ -36694,8 +36766,6 @@ Use relative paths for resources already held in the package. -->
              (planning_action_of_key key)
        | Some "r" | Some "R" ->
            refresh_shared_sources ();
-           let host = server_peer_host in
-           let port = state.port in
            (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
             | Code ->
@@ -36726,8 +36796,7 @@ Use relative paths for resources already held in the package. -->
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
-                     Masc_tui_board_requests.start_board_post_refresh state ~host ~port ~post_id
-                       ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
+                     owe_board_post_read state ~mailbox:async_messages ~post_id
                  | Board_list | Board_compose -> ())
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
@@ -39381,12 +39450,9 @@ Use relative paths for resources already held in the package. -->
          (* Calls re-read on [keeper_tool_call] and retry a failed read
             ([launch_owed_keeper_calls]). *)
          | Keepers Keeper_calls -> ()
-         | Board ->
-             (match state.board_mode with
-              | Board_read post_id ->
-                  Masc_tui_board_requests.start_board_post_refresh state ~host ~port ~post_id
-                    ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
-              | Board_list | Board_compose -> ())
+         (* The open post re-reads on [notifications/board] and retries a
+            failed read ([launch_owed_board_post]). *)
+         | Board -> ()
          | Verification ->
              (* The queue moves while an operator watches it -- a task settles,
                 another arrives. Planning reads this list on entry and on an

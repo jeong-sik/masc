@@ -31,7 +31,7 @@ let decoder_name = function
   | Action_receipt -> "Lane_addon_action.of_json"
   | Exact_record -> "Lane_addon_exact.check_retained_record"
   | Tool_request_inventory -> "Lane_addon_store.tool_request_owner_entry"
-  | Tool_request_owner -> "Lane_addon_tool_request_owner.check_published"
+  | Tool_request_owner -> "Lane_addon_tool_request_owner.Published_reader.read"
   | Tool_request_payload -> "consumer original request payload"
 
 type tool_request_reader = scope:string -> request_id:string ->
@@ -297,50 +297,55 @@ let scan_with ?(validate_tool_request=(fun ~read:_ ~read_scope:_ ~read_body:_ _ 
           Error (path ^ ": " ^ operation ^ ": " ^ Unix.error_message error) in
       let read_body_bytes ~scope ~request_digest =
         read_text (Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest)) in
-      let read_body ~scope ~request_digest =
-        let* bytes=read_body_bytes ~scope ~request_digest in
-        Lane_addon_tool_request_owner.request_of_body ~request_digest bytes
-        |> Result.map_error (fun detail ->
-          Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest) ^ ": " ^ detail) in
-      let read_name ~scope ~name =
-        let group=Lane_addon_store.digest scope in
-        let path=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory
-          (Filename.concat group name)) in
-        let* bytes=read_text path in
-        match bytes with
-        | None -> Ok None
-        | Some bytes ->
-          let result =
-            let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-            let* record=Lane_addon_tool_request_owner.read_published ~read_body:read_body_bytes ~directory_name:group ~file_name:name json in
-            if record.scope=scope then Ok (Some record)
-            else Error "original parent belongs to another scope" in
-          Result.map_error (fun detail -> path ^ ": " ^ detail) result
-      in
-      let read ~scope ~request_id =
-        let* record=read_name ~scope ~name:(Lane_addon_store.digest request_id ^ ".json") in
-        match record with
-        | Some record when record.request_id<>request_id -> Error "original parent belongs to another request"
-        | None | Some _ -> Ok record in
-      let read_scope ~scope =
-        let directory=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory
-          (Lane_addon_store.digest scope)) in
-        let* names=entries directory in
-        List.fold_right (fun name rest ->
-          let* rest=rest in
-          match tool_request_owner_entry name with
-          | Skipped -> Ok rest
-          | Refused (_,detail) -> Error (Filename.concat directory name ^ ": " ^ detail)
-          | Record -> let* record=read_name ~scope ~name in
-            Ok (Option.fold ~none:rest ~some:(fun record -> record::rest) record)) names (Ok []) in
       scan_grouped ~after_read root Lane_addon_store.tool_request_owners_directory
         ~entry:tool_request_owner_entry
-        (fun ~group ~name ~path:_ json ->
-           let* record=Lane_addon_tool_request_owner.read_published ~read_body:read_body_bytes ~directory_name:group ~file_name:name json
-             |> decoded Tool_request_owner in
-           validate_tool_request ~read ~read_scope ~read_body record |> Result.map_error (fun detail ->
-             Tool_request_payload, Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
-               record.scope record.request_id record.request_digest detail))
+        (fun ~group ->
+          (* Share verified body decoding while checking this physical scope.
+             Every parent/body/scope read still observes the current bytes.
+             Discard these retained bytes and JSON before the next group. *)
+          let module Reader=Lane_addon_tool_request_owner.Published_reader in
+          let reader=Reader.create ~read_body:read_body_bytes in
+          let read_body ~scope ~request_digest =
+            Reader.request reader ~scope ~request_digest
+            |> Result.map_error (fun detail ->
+              Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest) ^ ": " ^ detail) in
+          let read_name ~scope ~name =
+            let group=Lane_addon_store.digest scope in
+            let path=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory
+              (Filename.concat group name)) in
+            let* bytes=read_text path in
+            match bytes with
+            | None -> Ok None
+            | Some bytes ->
+              let result =
+                let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+                let* record=Reader.read reader ~directory_name:group ~file_name:name json in
+                if record.scope=scope then Ok (Some record)
+                else Error "original parent belongs to another scope" in
+              Result.map_error (fun detail -> path ^ ": " ^ detail) result
+          in
+          let read ~scope ~request_id =
+            let* record=read_name ~scope ~name:(Lane_addon_store.digest request_id ^ ".json") in
+            match record with
+            | Some record when record.request_id<>request_id -> Error "original parent belongs to another request"
+            | None | Some _ -> Ok record in
+          let read_scope ~scope =
+            let directory=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory
+              (Lane_addon_store.digest scope)) in
+            let* names=entries directory in
+            List.fold_right (fun name rest ->
+              let* rest=rest in
+              match tool_request_owner_entry name with
+              | Skipped -> Ok rest
+              | Refused (_,detail) -> Error (Filename.concat directory name ^ ": " ^ detail)
+              | Record -> let* record=read_name ~scope ~name in
+                Ok (Option.fold ~none:rest ~some:(fun record -> record::rest) record)) names (Ok []) in
+          fun ~name ~path:_ json ->
+            let* record=Reader.read reader ~directory_name:group ~file_name:name json
+              |> decoded Tool_request_owner in
+            validate_tool_request ~read ~read_scope ~read_body record |> Result.map_error (fun detail ->
+              Tool_request_payload, Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
+                record.scope record.request_id record.request_digest detail))
   in
   Result.map finish report
 

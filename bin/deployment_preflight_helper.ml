@@ -880,6 +880,14 @@ let media_reading_maintenance_cmd =
 let validate_stores base_path =
   let module D = Masc.Keeper_durable_store in
   let module L = Masc.Lane_addon_store_preflight in
+  let timed_scan name scan =
+    Printf.printf "%s scan_started\n%!" name;
+    let started = Mtime_clock.elapsed_ns () in
+    let result = scan () in
+    let elapsed_s = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1_000_000_000. in
+    Printf.printf "%s scan_elapsed_s=%.3f\n%!" name elapsed_s;
+    result
+  in
   let print_store (name, on_refusal, result) =
     match result with
     | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
@@ -898,7 +906,8 @@ let validate_stores base_path =
       (fun id ->
          Option.map
            (fun scan ->
-              let report = D.name id, D.on_refusal scan, D.run scan ~base_path in
+              let result = timed_scan (D.name id) (fun () -> D.run scan ~base_path) in
+              let report = D.name id, D.on_refusal scan, result in
               print_store report;
               report)
            (D.preflight_scan id))
@@ -927,8 +936,9 @@ let validate_stores base_path =
   let lane_addon_reports =
     List.map
       (fun store ->
-         let report = L.name store, L.on_refusal store,
-           L.scan ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validate store ~base_path in
+         let result = timed_scan (L.name store) (fun () ->
+           L.scan ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validate store ~base_path) in
+         let report = L.name store, L.on_refusal store, result in
          print_lane_addon report;
          report)
       L.Store.all

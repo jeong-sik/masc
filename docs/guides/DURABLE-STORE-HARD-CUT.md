@@ -7,8 +7,15 @@ binary when this check fails. `rows` is the number examined by a store;
 refusals across stores, not just the last lines printed. A store with
 `refused=0` needs no cleanup because another store failed.
 
-Each completed store reports immediately. A scan can still take time before
-that store's result appears. `scan_failed` means the scan could not complete;
+Each store prints `scan_started` before reading and `scan_elapsed_s` when the
+read returns, followed by its row/refusal report. Large histories can take time
+between those lines. Original-request body decoding is reused within one scope
+scan only after freshly read bytes exactly match a previously verified body;
+records, scope listings and body bytes are still read on every request. Changed,
+missing or unreadable bodies receive the current decoder's refusal. This reuse
+does not persist between scope scans or installations.
+
+`scan_failed` means the scan could not complete;
 it is not an empty store or permission to reset it. `first refusal` is one
 example, not an inventory of every affected file. `on refusal` describes the
 runtime consequence, not an instruction to delete data.

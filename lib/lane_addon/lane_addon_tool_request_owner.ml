@@ -191,13 +191,33 @@ let observe ~store ~scope =
          collect records (Malformed_owner_metadata::issues) rest) in
   collect [] [] entries
 
-let read_published ~read_body ~directory_name ~file_name json =
-  let* record = decode_published ~directory_name ~file_name json in
-  let* bytes = read_body ~scope:record.Record.scope ~request_digest:record.request_digest in
-  let+ request = request_of_body ~request_digest:record.request_digest bytes in
-  with_request record request
-let check_published ~read_body ~directory_name ~file_name json =
-  Result.map (fun _ -> ()) (read_published ~read_body ~directory_name ~file_name json)
+module Published_reader = struct
+  type verified = { bytes : string; request : Yojson.Safe.t }
+  type t = {
+    read_body : scope:string -> request_digest:string -> (string option, string) result;
+    verified : (string * string, verified) Hashtbl.t;
+  }
+  let create ~read_body = {read_body; verified=Hashtbl.create 0}
+  let request reader ~scope ~request_digest =
+    let key=scope,request_digest in
+    match reader.read_body ~scope ~request_digest with
+    | Error detail -> Hashtbl.remove reader.verified key; Error detail
+    | Ok None ->
+      Hashtbl.remove reader.verified key;
+      request_of_body ~request_digest None
+    | Ok (Some bytes) ->
+      (match Hashtbl.find_opt reader.verified key with
+       | Some verified when String.equal bytes verified.bytes -> Ok verified.request
+       | None | Some _ ->
+         Hashtbl.remove reader.verified key;
+         let+ request=request_of_body ~request_digest (Some bytes) in
+         Hashtbl.replace reader.verified key {bytes;request};
+         request)
+  let read reader ~directory_name ~file_name json =
+    let* record=decode_published ~directory_name ~file_name json in
+    let+ request=request reader ~scope:record.Record.scope ~request_digest:record.request_digest in
+    with_request record request
+end
 let unavailable result = Result.map_error (fun detail -> Store_unavailable detail) result
 let load_listed ~store (record : Record.t) =
   let* original = load ~store ~scope:record.scope ~request_id:record.request_id in

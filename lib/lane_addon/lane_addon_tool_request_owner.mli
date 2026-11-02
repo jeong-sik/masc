@@ -108,22 +108,22 @@ val load_successor_request : store:Lane_addon_store.t -> scope:string ->
 (** Verify the complete canonical input named by a retained successor intent.
     Missing, changed or noncanonical bytes are errors, never permission to
     regenerate an input or create another child. *)
-val check_published :
-  read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
-  directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result
-(** Decode one published record the way {!discover} reads it, with the scope
-    and request ID the record names: the complete record, the body
-    [read_body] returns for its digest, and its scope directory and filename.
-    Reads nothing else and writes nothing. *)
-val read_published :
-  read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
-  directory_name:string -> file_name:string -> Yojson.Safe.t -> (retained, string) result
-(** The same strict record/body check as {!check_published}, returning its
-    verified original for a consumer's pure payload decoder. The body port is
-    read-only; this does not observe live authority or recover progress. *)
-val request_of_body : request_digest:string -> string option -> (Yojson.Safe.t, string) result
-(** Pure current body validation shared with {!load}: required, canonical JSON
-    whose exact bytes match the named digest. No old-body reader or I/O. *)
+module Published_reader : sig
+  type t
+  val create :
+    read_body:(scope:string -> request_digest:string -> (string option, string) result) -> t
+  (** A read-only decoder owned by one preflight scope scan. Every read calls
+      the supplied port again. Only successful digest/JSON/canonical checks
+      are reused, and only when the newly read bytes equal the verified bytes
+      exactly, under the same scope and digest. Missing, changed and unreadable
+      bodies cannot borrow a previous verdict. Discard the reader after the
+      scope scan; it observes no live authority and authorizes no effects. *)
+  val request : t -> scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
+  val read : t -> directory_name:string -> file_name:string -> Yojson.Safe.t -> (retained, string) result
+  (** Decode the complete current record and its physical scope/file identity,
+      then read its current body through {!request}. Returns the verified
+      original for the consumer's pure payload decoder. *)
+end
 val decode_published : directory_name:string -> file_name:string -> Yojson.Safe.t ->
   (Record.t, string) result
 (** Strictly decode a record and verify the scope-directory and request-file

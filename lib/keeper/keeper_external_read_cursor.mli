@@ -20,6 +20,13 @@ val observation_matches_preparation : observation -> after:int -> through:int ->
 (** Exact stored preparation comparison only. Does not construct a token or
     inspect/repair current Memory receipts. Equal through/after expects no pending. *)
 
+val observation_matches_floor_preparation : observation -> after:int -> through:int ->
+  atom:Keeper_memory_os_current.durable_range_id option ->
+  official:Keeper_memory_os_current.official_range_id option -> bool
+(** A pending message-floor preparation has the original range identity with
+    unread-message coverage added by its completed program. This compares the
+    original range and cursor coordinates while ignoring only those holes. *)
+
 type token
 val read : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_name:string ->
   (token, string) result

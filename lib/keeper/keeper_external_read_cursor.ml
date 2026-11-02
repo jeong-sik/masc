@@ -68,6 +68,16 @@ let observation_matches_preparation (Observed state) ~after ~through ~atom ~offi
     && same M.durable_range_id_to_json atom pending.atom
     && same M.official_range_id_to_json official pending.official
 
+let observation_matches_floor_preparation (Observed state) ~after ~through ~atom ~official =
+  let without_atom_holes (range : M.durable_range_id) = {range with unread_messages=[]} in
+  let without_official_holes (range : M.official_range_id) = {range with unread_messages=[]} in
+  match state.pending with
+  | None -> false
+  | Some pending ->
+    state.after = after && pending.through = through && through > after
+    && Option.map without_atom_holes atom = Option.map without_atom_holes pending.atom
+    && Option.map without_official_holes official = Option.map without_official_holes pending.official
+
 let save ~runtime_keepers_dir ~keeper_name state =
   let file = path ~runtime_keepers_dir ~keeper_name in
   try

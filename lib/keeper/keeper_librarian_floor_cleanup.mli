@@ -12,10 +12,15 @@
     of it. *)
 
 val cleanup : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
-  candidates:Keeper_librarian_floor_descent.t list -> (int, string) result
+  candidates:Keeper_librarian_floor_descent.t list ->
+  settled:(Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t) list ->
+  (int, string) result
 (** Settle every step no candidate owns: its range original was archived, its
     range was published, or the read position moved on. Then settle the gate
-    records of a step that is archived. Returns the records moved. *)
+    records of a step that is archived. Before cleanup, a published floor with
+    its external cursor still pending must retain any step whose frozen prompt
+    omitted counterpart input; a range receipt alone cannot authorize its ACK.
+    Returns the records moved. *)
 
 val settle_chain : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
   Keeper_librarian_floor_descent.t -> (int, string) result

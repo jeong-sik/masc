@@ -383,7 +383,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Some (scope,owner,inventory,settled) ->
         (* The steps go before the originals that name them, so a stop between
            the two never leaves a step without its original. *)
-        let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates in
+        let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates ~settled in
         let* orphans=settle_orphan_gates ~store ~inventory ~scope originals in
         let settled=List.filter (fun original -> not (is_candidate original || is_stopped original)) settled in
         let* chains=settle_chains ~store ~inventory (finished_chains ~settled ~superseded originals) in

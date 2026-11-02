@@ -2352,6 +2352,83 @@ let test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_positio
   consumer_tail fixture;
   check bool "the consumer moved the position" true (progress fixture<>position);
   check bool "and the published range is no candidate" true (Option.is_none (candidate_of fixture)))
+
+let test_published_floor_with_valid_prompts_recovers_its_pending_ack () =
+  with_fixture (fun ~sw:_ fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate, request = candidate_and_request fixture in
+    fixture.set_step_response (answering_steps ["Original question to retain"; "Original completed answer"]);
+    let fin = finished (descend fixture candidate) in
+    published (publish fixture candidate fin);
+    let source = Capture.source request in
+    let runtime_keepers_dir = Workspace.keepers_runtime_dir fixture.config in
+    let cursor () = io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir ~keeper_name |> get) in
+    let after = Keeper_external_read_cursor.observation_offset (Source.external_before source) in
+    let through = Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+    check bool "the published floor has a pending external acknowledgement" true
+      (Keeper_external_read_cursor.observation_matches_floor_preparation (cursor ()) ~after ~through
+         ~atom:(Source.range_id source) ~official:(Source.official_range_id source));
+    let posts = F.post_count fixture.server in
+    check bool "a valid committed floor recovers the source position" true (advanced (run_worker fixture));
+    check int "recovery does not ask the model again" posts (F.post_count fixture.server);
+    check int "the external acknowledgement advances after recovery" through
+      (Keeper_external_read_cursor.observation_offset (cursor ())))
+
+let test_published_floor_with_omitted_observations_keeps_pending_ack () =
+  with_fixture (fun ~sw:_ fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate, request = candidate_and_request fixture in
+    fixture.set_step_response (answering_steps ["Original question to retain"; "Original completed answer"]);
+    let fin = finished (descend fixture candidate) in
+    published (publish fixture candidate fin);
+    let module Step = Keeper_librarian_floor_step_request in
+    let module R = Keeper_librarian_runtime in
+    let owner = Capture.physical_owner request in
+    let record, _ = List.find (fun (_, (header : Step.header)) -> header.position = 0)
+      (steps_of fixture request) in
+    let step = io (fun () -> Step.restore ~owner record |> get) in
+    let valid = Step.step step in
+    let input = valid.preparation.source_input in
+    check bool "the original step carried external observations" true (input.counterpart_observations <> []);
+    let previous = (Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+    Fun.protect ~finally:(fun () -> match previous with
+      | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+      | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+      Prompt_registry.set_override Prompt_names.librarian "Old floor question without counterpart substitution" |> get;
+      let seed = R.prepare_durable_step ~now:(Time_compat.now ()) ~context:valid.context
+        {input with counterpart_observations=[]} |> get in
+      let preparation = seed.preparation in
+      let omitted = R.restore_durable_step_preparation ~context:valid.context ~source_input:input
+        ~parsing_now:preparation.parsing_now ~policy:preparation.policy
+        ~rule_prompt:preparation.rule_prompt ~prompt:preparation.prompt
+        ~output_schema:preparation.output_schema |> get in
+      let request_id = Step.fresh_request_id owner in
+      let payload = match Step.to_json step with
+        | `Assoc fields -> `Assoc (List.map (function
+            | "request_id", _ -> "request_id", `String request_id
+            | "preparation", _ -> "preparation", Keeper_librarian_durable_question.to_json omitted.preparation
+            | field -> field) fields)
+        | _ -> fail "floor step must encode as an object" in
+      let destination = Step.destination step in
+      io (fun () -> Owner.retain ~store:fixture.store ~scope:(Step.scope owner) ~request_id
+        ~installation_id:destination.installation_id ~package_id:destination.package_id
+        ~tool:destination.tool ~summary:`Null ~request:payload) |> owned;
+      let legacy = io (fun () -> Owner.load ~store:fixture.store ~scope:(Step.scope owner) ~request_id)
+        |> owned |> Option.get in
+      ignore (io (fun () -> Step.restore ~owner legacy |> get));
+      let runtime_keepers_dir = Workspace.keepers_runtime_dir fixture.config in
+      let cursor () = io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir ~keeper_name |> get) |> Keeper_external_read_cursor.observation_to_json in
+      let before = cursor () and posts = F.post_count fixture.server in
+      (match run_worker fixture with
+       | Error error -> check bool "the omitted input is visible in the refusal" true
+           (contains (Consumer.error_to_string error) "counterpart_observations")
+       | Ok _ -> fail "an omitted floor question must not authorize an ACK");
+      check json "the pending external cursor is unchanged" before (cursor ());
+      check int "recovery does not repeat the model request" posts (F.post_count fixture.server);
+      check bool "the omitted step remains retained" true
+        (List.exists (fun ((held : Owner.retained), _) -> held.request_id=request_id) (steps_of fixture request))))
 let test_a_hole_travels_in_the_receipt_and_in_the_external_cursor () = with_fixture (fun ~sw:_ fixture ->
   let huge=message (filler "huge-message" oversized_turn_bytes) in
   add_unread_turn ~external_admission:true fixture [huge;reply "Oversized answer"];
@@ -3081,6 +3158,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_the_descent_reads_on_while_the_external_cursor_moves;
   test_case "a finished chain commits its program and the consumer moves the position" `Quick
     test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_position;
+  test_case "a published floor with valid prompts recovers its pending ACK" `Quick
+    test_published_floor_with_valid_prompts_recovers_its_pending_ack;
+  test_case "a published floor with omitted observations retains its pending ACK" `Quick
+    test_published_floor_with_omitted_observations_keeps_pending_ack;
   test_case "a hole travels in the receipt and in the external cursor" `Quick
     test_a_hole_travels_in_the_receipt_and_in_the_external_cursor;
   test_case "a memory that changed since the chain began supersedes the program" `Quick

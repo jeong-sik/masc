@@ -2060,8 +2060,8 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   @ [ field "Digest" row.sch_payload_digest
     ; Ansi.bold, "  PAYLOAD JSON"
     ]
-  @ (document_markdown ~width:(max 1 (width - 4))
-       ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
+  @ (document_json ~width:(max 1 (width - 4))
+       (Yojson.Safe.pretty_to_string row.sch_payload)
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
 
 let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =

@@ -3920,6 +3920,11 @@
  (libraries alcotest masc masc.string_util yojson))
 
 (test
+ (name test_tui_json_document)
+ (modules test_tui_json_document)
+ (libraries alcotest masc_tui_render_prim masc_tui_message_layout yojson))
+
+(test
  (name test_tui_music_launcher)
  (modules test_tui_music_launcher)
  (libraries alcotest masc_tui_score masc_tui_command unix))

@@ -68,8 +68,12 @@ let fleet_composite_cache_key ~base_path =
   Printf.sprintf "dashboard:fleet-composite:%s" base_path
 ;;
 
+let invalidate_keeper_composite_cache ~base_path ~name =
+  Dashboard_cache.invalidate (keeper_composite_cache_key ~base_path name)
+;;
+
 let invalidate_keeper_composite_caches ~base_path ~name =
-  Dashboard_cache.invalidate (keeper_composite_cache_key ~base_path name);
+  invalidate_keeper_composite_cache ~base_path ~name;
   Dashboard_cache.invalidate (fleet_composite_cache_key ~base_path)
 ;;
 

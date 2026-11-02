@@ -69,9 +69,13 @@ val keeper_composite_cache_key : base_path:string -> string -> string
 val fleet_composite_cache_key : base_path:string -> string
 (** Cache key for the fleet composite envelope of one workspace. *)
 
+val invalidate_keeper_composite_cache : base_path:string -> name:string -> unit
+(** Drop the Keeper's composite, so the next read of
+    [/api/v1/keepers/<name>/composite] computes it from the registry. *)
+
 val invalidate_keeper_composite_caches : base_path:string -> name:string -> unit
-(** Drop the Keeper's composite and its workspace's fleet composite, so the
-    next read computes both from the registry. *)
+(** {!invalidate_keeper_composite_cache} and the workspace's fleet composite,
+    for a change to the Keeper's configuration or secrets. *)
 
 val keeper_runtime_trace_cache_key :
   Workspace.config ->

@@ -1,4 +1,4 @@
-; The Keeper's composite read models are dropped before the change is announced.
+; The Keeper's composite is dropped before its change is announced.
 
 (test
  (name test_keeper_composite_cleared_before_announce)

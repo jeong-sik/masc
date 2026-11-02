@@ -1,6 +1,6 @@
-(** The Keeper's composite read models are dropped before
-    [keeper_composite_changed] goes out, so a reader that fetches on the
-    event computes them again instead of being served the cached ones. *)
+(** The Keeper's composite is dropped before [keeper_composite_changed] goes
+    out, so a reader that fetches it on the event computes it again instead
+    of being served the cached one. The fleet composite keeps its TTL. *)
 
 open Masc
 module Keys = Server_dashboard_http_keeper_api_types
@@ -38,7 +38,7 @@ let test_caches_are_empty_when_the_event_is_heard () =
       Fs_compat.remove_tree base_path)
     (fun () ->
        Keeper_registry_broadcast.install_before_composite_changed
-         Keys.invalidate_keeper_composite_caches;
+         Keys.invalidate_keeper_composite_cache;
        List.iter
          (fun key -> Dashboard_cache.seed_stale_if_missing key ~stale_for:60.0 (`String "cached"))
          [ keeper_key; other_key; fleet_key ];
@@ -52,20 +52,18 @@ let test_caches_are_empty_when_the_event_is_heard () =
          ~id:subscriber_id
          ~callback:(fun (ev : Sse.external_event) ->
            if is_composite_changed ev.Sse.ext_frame
-           then
-             heard :=
-               (Dashboard_cache.peek keeper_key, Dashboard_cache.peek fleet_key) :: !heard)
+           then heard := Dashboard_cache.peek keeper_key :: !heard)
          ();
        Keeper_registry_broadcast.composite_changed ~base_path ~name:"alpha" ~ts_unix:1.0;
        (match !heard with
-        | [ (keeper, fleet) ] ->
+        | [ keeper ] ->
           Alcotest.(check bool) "the Keeper's composite is gone when the event is heard"
-            true (Option.is_none keeper);
-          Alcotest.(check bool) "the fleet composite is gone when the event is heard"
-            true (Option.is_none fleet)
+            true (Option.is_none keeper)
         | heard -> Alcotest.failf "expected one composite event, heard %d" (List.length heard));
        Alcotest.(check bool) "another Keeper's composite stays" true
-         (Option.is_some (Dashboard_cache.peek other_key)))
+         (Option.is_some (Dashboard_cache.peek other_key));
+       Alcotest.(check bool) "the fleet composite keeps its TTL" true
+         (Option.is_some (Dashboard_cache.peek fleet_key)))
 ;;
 
 let () =

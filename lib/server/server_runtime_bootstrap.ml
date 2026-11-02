@@ -539,7 +539,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Keeper_registry.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
   Keeper_registry_broadcast.install_before_composite_changed
-    Server_dashboard_http_keeper_api_types.invalidate_keeper_composite_caches;
+    Server_dashboard_http_keeper_api_types.invalidate_keeper_composite_cache;
   Keeper_waiting_inventory_broadcast.install_health_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Schedule_store.install_change_observer

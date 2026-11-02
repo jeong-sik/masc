@@ -105,4 +105,12 @@ describe('exact turn intake', () => {
       expect(() => decodeTurnFlow(trace({ intake_sources: invalid }), target)).toThrow()
     }
   })
+
+  it('keeps exact intake visible when outcome evidence cannot be decoded', () => {
+    const page = trace({ intake_sources: [source] })
+    page.source_outcomes = { state: 'observed', sources: [] }
+    const flow = decodeTurnFlow(page, target)
+    expect(flow.intake.state).toBe('observed')
+    expect(flow.outcomes.state).toBe('unavailable')
+  })
 })

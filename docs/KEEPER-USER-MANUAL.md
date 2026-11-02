@@ -859,7 +859,13 @@ absolute turn together — rather than joining nearby timestamps.
 
 - **Input stimuli** lists the queue sources observed at turn entry, their
   snapshot references, admission revisions and first-admission clocks. This
-  records intake; it does not prove dispatch or queue acknowledgement.
+  records intake. Queue outcomes are joined from the reaction ledger by the
+  exact stimulus ID, snapshot reference and admission revision. The view keeps
+  completed-turn ACK, failed-attempt ACK, cancellation and transfer distinct.
+  It shows when the ledger was read and any damaged rows or storage failures.
+  No matching receipt means only that none was observed in that read; it does
+  not establish current queue status. An ACK is not proof of PR approval or
+  another business result. Conflicting receipts remain unresolved.
 - **Runtime choices** shows the same turn's manifest events and recorded routing
   reasons. Multiple starts remain ambiguous; incomplete or damaged scans cannot
   establish that a start was unique.

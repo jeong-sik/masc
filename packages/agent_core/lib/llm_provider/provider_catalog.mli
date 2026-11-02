@@ -17,7 +17,7 @@ type auth_mode =
 type entry =
   { id : string
   ; aliases : string list
-  ; kind : Provider_config.provider_kind
+  ; kind : Provider_kind.t
   ; base_url : string
   ; request_path : string
   ; api_key_env : string
@@ -26,7 +26,7 @@ type entry =
   ; discovery_timeout_s : float option
     (** Positive finite total deadline for one discovery HTTP request. *)
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capability_profile.capabilities
   ; credential_scope : string option
   }
 

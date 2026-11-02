@@ -23,12 +23,6 @@ type provider_kind = Provider_kind.t =
   | Glm
   (** ZhipuAI GLM native: OpenAI_compat wire format + JWT auth + GLM error parsing. @since 0.83.0 *)
 
-(** Default HTTP request path for a given provider kind.
-    Single source of truth shared by [make] and direct record-literal
-    callers; pin the [kind] and the [request_path] together via this
-    helper to avoid the two fields drifting out of sync. *)
-val request_path_default_for_kind : provider_kind -> string
-
 (** Authentication is independent of the inference wire. Vertex uses the
     Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
 type auth_scheme = Provider_default | Bearer_token

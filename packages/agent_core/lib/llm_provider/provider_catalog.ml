@@ -15,7 +15,7 @@ type auth_mode =
 type entry =
   { id : string
   ; aliases : string list
-  ; kind : Provider_config.provider_kind
+  ; kind : Provider_kind.t
   ; base_url : string
   ; request_path : string
   ; api_key_env : string
@@ -23,7 +23,7 @@ type entry =
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capability_profile.capabilities
   ; credential_scope : string option
   }
 
@@ -59,7 +59,7 @@ let validate_typed_entry (entry : entry) =
            "provider %S field %S must not have leading or trailing whitespace"
            entry.id
            "request_path")
-    else if trimmed = "" && entry.kind <> Provider_config.Gemini
+    else if trimmed = "" && entry.kind <> Provider_kind.Gemini
     then
       Error
         (Printf.sprintf "provider %S field %S must not be empty" entry.id "request_path")
@@ -553,15 +553,15 @@ let capability_base json =
   else
     let* label = member_exact_non_empty_string_strict "capabilities_base" json in
     match label with
-    | None -> Ok Capabilities.default_capabilities
+    | None -> Ok Capability_profile.default_capabilities
     | Some raw ->
-      (match Capabilities.capabilities_for_provider_label raw with
+      (match Capability_profile.capabilities_for_provider_label raw with
        | Some caps -> Ok caps
        | None ->
          Error
            (Printf.sprintf
               "unknown capabilities_base %S (see \
-               Capabilities.capabilities_for_provider_label for valid presets)"
+               Capability_profile.capabilities_for_provider_label for valid presets)"
               raw))
 ;;
 
@@ -692,129 +692,129 @@ let parse_capabilities provider_json =
     base
     |> fun caps ->
     override max_context_tokens caps (fun caps value ->
-      { caps with Capabilities.max_context_tokens = Some value })
+      { caps with Capability_profile.max_context_tokens = Some value })
     |> fun caps ->
     override max_output_tokens caps (fun caps value ->
-      { caps with Capabilities.max_output_tokens = Some value })
+      { caps with Capability_profile.max_output_tokens = Some value })
     |> fun caps ->
     override supports_tools caps (fun caps value ->
-      { caps with Capabilities.supports_tools = value })
+      { caps with Capability_profile.supports_tools = value })
     |> fun caps ->
     override supports_tool_choice caps (fun caps value ->
-      { caps with Capabilities.supports_tool_choice = value })
+      { caps with Capability_profile.supports_tool_choice = value })
     |> fun caps ->
     override supports_required_tool_choice caps (fun caps value ->
-      { caps with Capabilities.supports_required_tool_choice = value })
+      { caps with Capability_profile.supports_required_tool_choice = value })
     |> fun caps ->
     override supports_named_tool_choice caps (fun caps value ->
-      { caps with Capabilities.supports_named_tool_choice = value })
+      { caps with Capability_profile.supports_named_tool_choice = value })
     |> fun caps ->
     override supports_parallel_tool_calls caps (fun caps value ->
-      { caps with Capabilities.supports_parallel_tool_calls = value })
+      { caps with Capability_profile.supports_parallel_tool_calls = value })
     |> fun caps ->
     (match assistant_tool_content_format with
      | Some assistant_tool_content_format ->
-       { caps with Capabilities.assistant_tool_content_format }
+       { caps with Capability_profile.assistant_tool_content_format }
      | None -> caps)
     |> fun caps ->
     (match reasoning_output_format with
-     | Some reasoning_output_format -> { caps with Capabilities.reasoning_output_format }
+     | Some reasoning_output_format -> { caps with Capability_profile.reasoning_output_format }
      | None -> caps)
     |> fun caps ->
     (match reasoning_streaming_format with
      | Some reasoning_streaming_format ->
-       { caps with Capabilities.reasoning_streaming_format }
+       { caps with Capability_profile.reasoning_streaming_format }
      | None -> caps)
     |> fun caps ->
     override supports_reasoning caps (fun caps value ->
-      { caps with Capabilities.supports_reasoning = value })
+      { caps with Capability_profile.supports_reasoning = value })
     |> fun caps ->
     override supports_response_format_json caps (fun caps value ->
-      { caps with Capabilities.supports_response_format_json = value })
+      { caps with Capability_profile.supports_response_format_json = value })
     |> fun caps ->
     override supports_structured_output caps (fun caps value ->
-      { caps with Capabilities.supports_structured_output = value })
+      { caps with Capability_profile.supports_structured_output = value })
     |> fun caps ->
     override supports_multimodal_inputs caps (fun caps value ->
-      { caps with Capabilities.supports_multimodal_inputs = value })
+      { caps with Capability_profile.supports_multimodal_inputs = value })
     |> fun caps ->
     override supports_image_input caps (fun caps value ->
-      { caps with Capabilities.supports_image_input = value })
+      { caps with Capability_profile.supports_image_input = value })
     |> fun caps ->
     override supports_audio_input caps (fun caps value ->
-      { caps with Capabilities.supports_audio_input = value })
+      { caps with Capability_profile.supports_audio_input = value })
     |> fun caps ->
     override supports_video_input caps (fun caps value ->
-      { caps with Capabilities.supports_video_input = value })
+      { caps with Capability_profile.supports_video_input = value })
     |> fun caps ->
     override supports_document_input caps (fun caps value ->
-      { caps with Capabilities.supports_document_input = value })
+      { caps with Capability_profile.supports_document_input = value })
     |> fun caps ->
     (match modality_priority with
-     | Some modality_priority -> { caps with Capabilities.modality_priority }
+     | Some modality_priority -> { caps with Capability_profile.modality_priority }
      | None -> caps)
     |> fun caps ->
     override supports_native_streaming caps (fun caps value ->
-      { caps with Capabilities.supports_native_streaming = value })
+      { caps with Capability_profile.supports_native_streaming = value })
     |> fun caps ->
     override supports_system_prompt caps (fun caps value ->
-      { caps with Capabilities.supports_system_prompt = value })
+      { caps with Capability_profile.supports_system_prompt = value })
     |> fun caps ->
     override supports_assistant_prefill caps (fun caps value ->
-      { caps with Capabilities.supports_assistant_prefill = value })
+      { caps with Capability_profile.supports_assistant_prefill = value })
     |> fun caps ->
     override supports_prompt_caching caps (fun caps value ->
-      { caps with Capabilities.supports_prompt_caching = value })
+      { caps with Capability_profile.supports_prompt_caching = value })
     |> fun caps ->
     override supports_top_k caps (fun caps value ->
-      { caps with Capabilities.supports_top_k = value })
+      { caps with Capability_profile.supports_top_k = value })
     |> fun caps ->
     override supports_min_p caps (fun caps value ->
-      { caps with Capabilities.supports_min_p = value })
+      { caps with Capability_profile.supports_min_p = value })
     |> fun caps ->
     override supports_seed caps (fun caps value ->
-      { caps with Capabilities.supports_seed = value })
+      { caps with Capability_profile.supports_seed = value })
     |> fun caps ->
     (match ignored_sampling_parameters with
      | Some ignored_sampling_parameters ->
-       { caps with Capabilities.ignored_sampling_parameters }
+       { caps with Capability_profile.ignored_sampling_parameters }
      | None -> caps)
     |> fun caps ->
     override emits_usage_tokens caps (fun caps value ->
-      { caps with Capabilities.emits_usage_tokens = value })
+      { caps with Capability_profile.emits_usage_tokens = value })
   in
   let caps =
     match json_schema_dialect with
     | None -> caps
-    | Some json_schema_dialect -> { caps with Capabilities.json_schema_dialect }
+    | Some json_schema_dialect -> { caps with Capability_profile.json_schema_dialect }
   in
   let caps =
     match thinking_control_format with
     | None -> caps
-    | Some thinking_control_format -> { caps with Capabilities.thinking_control_format }
+    | Some thinking_control_format -> { caps with Capability_profile.thinking_control_format }
   in
   let caps =
     match preserve_thinking_control_format with
     | None -> caps
     | Some preserve_thinking_control_format ->
-      { caps with Capabilities.preserve_thinking_control_format }
+      { caps with Capability_profile.preserve_thinking_control_format }
   in
   let caps =
     match reasoning_replay with
     | None -> caps
     | Some reasoning_replay_override ->
-      { caps with Capabilities.reasoning_replay_override }
+      { caps with Capability_profile.reasoning_replay_override }
   in
   let caps =
     match supported_models with
-    | Some models -> { caps with Capabilities.supported_models = Some models }
+    | Some models -> { caps with Capability_profile.supported_models = Some models }
     | None -> caps
   in
   let caps =
     match accepted_reasoning_efforts with
     | Some accepted_reasoning_efforts ->
       { caps with
-        Capabilities.accepted_reasoning_efforts = Some accepted_reasoning_efforts
+        Capability_profile.accepted_reasoning_efforts = Some accepted_reasoning_efforts
       }
     | None -> caps
   in
@@ -863,7 +863,7 @@ let parse_entry json =
     with_id
       (member_string_default
          "request_path"
-         ~default:(Provider_config.request_path_default_for_kind kind)
+         ~default:(Provider_kind.request_path_default kind)
          json)
   in
   let* default_model = with_id (member_string "default_model" json) in
@@ -873,7 +873,7 @@ let parse_entry json =
   let max_context =
     match max_context_override with
     | Some _ as max_context -> max_context
-    | None -> capabilities.Capabilities.max_context_tokens
+    | None -> capabilities.Capability_profile.max_context_tokens
   in
   Ok
     { id

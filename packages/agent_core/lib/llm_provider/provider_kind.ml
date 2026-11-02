@@ -44,3 +44,12 @@ let of_yojson (json : Yojson.Safe.t) : t Ppx_deriving_yojson_runtime.error_or =
      | None -> Error (Printf.sprintf "provider_kind: unknown value %S" s))
   | _ -> Error "provider_kind: expected JSON string"
 ;;
+
+let request_path_default = function
+  | Anthropic -> "/v1/messages"
+  | Kimi -> "/v1/messages"
+  | OpenAI_compat -> "/v1/chat/completions"
+  | Ollama -> "/api/chat"
+  | Gemini -> ""
+  | Glm -> "/chat/completions"
+;;

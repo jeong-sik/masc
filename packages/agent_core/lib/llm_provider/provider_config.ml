@@ -13,19 +13,6 @@ type provider_kind = Provider_kind.t =
   | Gemini
   | Glm
 
-(** Default [request_path] for a given provider kind. Centralised so that
-    [make] and any caller building a record literal stay aligned with the
-    same wire-format defaults. Gemini returns [""] because
-    it does not dispatch over an HTTP path. *)
-let request_path_default_for_kind = function
-  | Anthropic -> "/v1/messages"
-  | Kimi -> "/v1/messages"
-  | OpenAI_compat -> "/v1/chat/completions"
-  | Ollama -> "/api/chat"
-  | Gemini -> ""
-  | Glm -> "/chat/completions"
-;;
-
 (** Authentication is independent of the inference wire. Vertex uses the
     Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
 type auth_scheme = Provider_default | Bearer_token
@@ -154,7 +141,7 @@ let make
   let request_path =
     match request_path with
     | Some p -> p
-    | None -> request_path_default_for_kind kind
+    | None -> Provider_kind.request_path_default kind
   in
   let provider_id =
     Option.map

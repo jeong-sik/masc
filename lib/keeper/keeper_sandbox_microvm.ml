@@ -2005,10 +2005,9 @@ let apple_volume_delete_argv ~volume_name =
 ;;
 
 (* Both volume names are exact, but same-named Keepers in other workspaces
-   may own the same volumes. Ownership is established by the claims marker
-   ({!release_apple_work_volume_claim}); this operation still checks no
-   workspace itself. Each delete is attempted
-   whatever the other returned. A
+   may own the same volumes. The claims marker cannot prove that all owners
+   are recorded, and this operation checks no workspace itself. Each delete
+   is attempted whatever the other returned. A
    delete's exit code cannot prove absence: an already-absent volume and one
    a guest still holds can both exit non-zero. One listing after both deletes
    settles it, the same way the trim helper's removal is settled. *)
@@ -2098,16 +2097,73 @@ let valid_volume_claimant claimant =
    The [add] script only inserts: it re-emits every element it recognized
    and ours. The [release] script filters ours out and regenerates; when
    ours was the last claim the marker file is removed instead. Both refuse
-   a line that is not a bare quoted claimant rather than rewrite a marker
-   they do not understand, and both land the new file with one [mv], which
-   is atomic on the same filesystem. Reading is [cat] alone, so the host's
-   strict decoder is the only parser. Only [sh] builtins, [printf], [mv],
-   [rm] and [cat] are used, from the same image the guest boots. *)
+   a marker outside the complete line-oriented array they know how to write,
+   and both land the new file with one [mv], which is atomic on the same
+   filesystem. Reading is [cat] alone, so the host's strict decoder parses
+   that response. The byte comparison requires [cmp]; if the image lacks it,
+   an existing marker is refused without modification. *)
+let volume_claim_validate_script =
+  {sh|validate_claim_line() {
+  case "$1" in
+    '"'*'"') value=${1#\"}; value=${value%\"} ;;
+    *) return 1 ;;
+  esac
+  case "$value" in
+    ''|*'"'*|*\\*|*[[:cntrl:]]*) return 1 ;;
+  esac
+  return 0
+}
+validate_marker() {
+  state=open
+  while :; do
+    line=
+    if IFS= read -r line; then newline=1
+    elif [ -n "$line" ]; then newline=0
+    else break; fi
+    case "$state" in
+      open)
+        [ "$line" = '[' ] || return 1
+        state=first ;;
+      first)
+        if [ "$line" = ']' ]; then state=closed
+        else validate_claim_line "$line" || return 1; state=next; fi ;;
+      next)
+        if [ "$line" = ']' ]; then state=closed
+        else
+          case "$line" in
+            ,*) validate_claim_line "${line#,}" || return 1 ;;
+            *) return 1 ;;
+          esac
+        fi ;;
+      closed) return 1 ;;
+    esac
+    if [ "$newline" -eq 1 ]; then printf '%s\n' "$line"
+    else printf '%s' "$line"; fi
+  done < "$marker"
+  [ "$state" = closed ]
+}|sh}
+;;
+
 let volume_claim_add_script_with ~marker =
   Printf.sprintf
     {sh|set -eu
+LC_ALL=C
+export LC_ALL
 marker=%s
+%s
 tmp=$marker.tmp
+if ! command -v cmp >/dev/null 2>&1; then
+  printf 'claims marker byte comparison is unavailable\n' >&2
+  exit 1
+fi
+if [ -f "$marker" ]; then
+  if ! validate_marker > "$tmp" || ! cmp -s "$marker" "$tmp"; then
+    rm -f "$tmp"
+    printf 'claims marker is not a complete supported array\n' >&2
+    exit 1
+  fi
+  rm -f "$tmp"
+fi
 printf '[\n' > "$tmp"
 first=1
 present=0
@@ -2138,15 +2194,24 @@ else printf ',"%%s"\n' "$MASC_VOLUME_CLAIMANT" >> "$tmp"; fi
 printf ']\n' >> "$tmp"
 mv -f "$tmp" "$marker"
 printf 'added\n'|sh}
-    (Filename.quote marker)
+    (Filename.quote marker) volume_claim_validate_script
 ;;
 
 let volume_claim_release_script_with ~marker =
   Printf.sprintf
     {sh|set -eu
+LC_ALL=C
+export LC_ALL
 marker=%s
+%s
 if [ ! -f "$marker" ]; then printf 'absent\n'; exit 0; fi
 tmp=$marker.tmp
+if ! validate_marker > "$tmp" || ! cmp -s "$marker" "$tmp"; then
+  rm -f "$tmp"
+  printf 'claims marker is not a complete supported array\n' >&2
+  exit 1
+fi
+rm -f "$tmp"
 printf '[\n' > "$tmp"
 first=1
 found=0
@@ -2179,7 +2244,7 @@ printf ']\n' >> "$tmp"
 mv -f "$tmp" "$marker"
 printf 'kept\n'
 cat "$marker"|sh}
-    (Filename.quote marker)
+    (Filename.quote marker) volume_claim_validate_script
 ;;
 
 let volume_claims_read_script_with ~marker =
@@ -2361,12 +2426,9 @@ let apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name =
     Ok (guests @ helpers)
 ;;
 
-(* Record one workspace's claim, idempotently. Used at a fresh boot, right
-   after the work volume is ensured: the volume exists and this workspace
-   is about to run a keeper on it, which is exactly what a claim states. A
-   failure is the caller's to warn about and never blocks the boot -- the
-   degraded state is a dissolution that cannot prove this claim and skips
-   deletion. *)
+(* Record one workspace's claim, idempotently. Fresh Apple provisioning stops
+   on an error. This does not establish that legacy or adopted users of an
+   existing shared volume were recorded. *)
 let add_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~image ~claimant
   : (unit, string) result
   =
@@ -2383,9 +2445,15 @@ let add_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~ima
       let status, stdout, stderr =
         run ~timeout_sec (apple_volume_claim_add_argv ~keeper_name ~volume_name ~image ~claimant)
       in
-      match status with
-      | Unix.WEXITED 0 -> Ok ()
-      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
+      match status, stdout with
+      | Unix.WEXITED 0, ("added\n" | "present\n") -> Ok ()
+      | Unix.WEXITED 0, _ ->
+        Error
+          (Printf.sprintf
+             "microvm_volume_claim_helper_unrecognized: %s returned %S"
+             (volume_claim_helper_name ~keeper_name)
+             (output_for_log ~stdout ~stderr))
+      | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _ ->
         Error
           (Printf.sprintf
              "microvm_volume_claim_helper_failed: %s (%s; %s)"
@@ -2400,30 +2468,32 @@ type apple_volume_claim_release =
   | Kept_for_containers of string list
   | Skipped_unverified of string
 
-(* Release one workspace's claim; the volumes are deleted only when nothing
-   else wants them. The release helper always runs -- with owner containers
-   present, and even when the owner listing itself fails. A dissolved
-   workspace must not leave its claim behind: dissolution is one-shot, and a
+(* Release one workspace's claim; deletion is attempted after the last
+   recorded claim is released and no owner container is observed. Those
+   observations do not exclude an unrecorded owner. The release helper runs
+   even when owner containers are present or the owner listing fails. A dissolved
+   workspace should release its claim: dissolution is one-shot, and a
    workspace that never comes back would keep the marker naming it forever.
-   The claim is only this workspace's expression of interest, so removing it
-   is safe; on an unreadable listing the volumes are kept by never deleting,
-   and a leftover with no claims is re-validated by the reclamation tool's
-   own listing. One helper reads the marker, filters our claim out and
+   A helper failure does not prove that the release took effect.
+   Removing the claim does not itself delete a volume; on an unreadable
+   listing this call does not attempt deletion. One helper reads the marker,
+   filters our claim out and
    rewrites it: the read and the write are one container, so no other helper
    can land a claim between them. Deletion needs both our claim being the
-   last one and a readable owner listing with no owner container; in that
-   case the marker dies with the volume and is not rewritten again. Other
+   last one and a readable owner listing with no owner container. The helper
+   removes the marker before the deletion attempts. Other
    claimants, owner containers, a legacy volume with no marker, an
-   unreadable marker, or any helper failure all keep the volumes, and the
-   outcome says which.
+   unreadable marker, or a claims release helper failure prevent this call
+   from attempting deletion; the outcome reports the observation.
 
-   Residual window, documented rather than leased: between the owner
-   listing and the helper or the deletes, another workspace can boot the
+   Residual window, documented rather than leased: after the release and/or
+   owner listing and before deletion, another workspace can boot the
    same-named keeper and claim. The shared helper name serializes claim
    writes against each other, the delete's settling listing reports a
    volume that survived, and whether the runtime refuses to delete a
-   volume a guest holds is unmeasured -- an operator reconciles from the
-   report, which is why every uncertain answer keeps the volumes. *)
+   volume a guest holds is unmeasured. A paused owner may have no container,
+   and an unrecorded owner is absent from the marker; these checks do not
+   prove exclusive ownership. *)
 let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~image ~claimant
   : apple_volume_claim_release
   =

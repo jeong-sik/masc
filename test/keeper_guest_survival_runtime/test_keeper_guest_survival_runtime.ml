@@ -290,6 +290,9 @@ let provider root args =
       if Filename.check_suffix leaf ".img" then Some (`Assoc ["id", `String (Filename.chop_suffix leaf ".img")]) else None)))
   | ["volume"; "delete"; name] ->
     if Sys.file_exists (file (name ^ ".img")) then Unix.unlink (file (name ^ ".img"));
+    if name = value (Microvm.work_volume_name ~keeper_name:keeper)
+       && Sys.file_exists (file "work-volume-claims.json") then
+      Unix.unlink (file "work-volume-claims.json");
     if models_build_filesystem root && name = value (Microvm.build_volume_name ~keeper_name:keeper)
        && Sys.file_exists (fixture_build_root root) then
       Fs_compat.remove_tree (fixture_build_root root)
@@ -303,8 +306,35 @@ let provider root args =
     if models_build_filesystem root && name = value (Microvm.build_volume_name ~keeper_name:keeper) then
       Fs_compat.mkdir_p (fixture_build_root root)
   | "run" :: rest ->
-    if not (List.mem "-d" rest) then fail "discard-set volume must never start a helper";
-    save_json (file "guest.json") (inspect_from_run root rest)
+    if List.mem "-d" rest then save_json (file "guest.json") (inspect_from_run root rest)
+    else (
+      let rec claimant = function
+        | "--env" :: value :: _ when String.starts_with ~prefix:"MASC_VOLUME_CLAIMANT=" value ->
+          String.sub value (String.length "MASC_VOLUME_CLAIMANT=")
+            (String.length value - String.length "MASC_VOLUME_CLAIMANT=")
+        | _ :: rest -> claimant rest
+        | [] -> fail "claims helper did not carry a claimant" in
+      let claimant = claimant rest in
+      let image = match List.rev rest with
+        | _script :: "-c" :: "-eu" :: image :: _ -> image
+        | _ -> fail "claims helper did not carry its command" in
+      let volume_name = value (Microvm.work_volume_name ~keeper_name:keeper) in
+      let expected = Microvm.apple_volume_claim_add_argv ~keeper_name:keeper
+        ~volume_name ~image ~claimant in
+      (match expected with
+       | "container" :: expected when args = expected -> ()
+       | [] | _ :: _ -> fail "unexpected non-guest helper");
+      let marker = file "work-volume-claims.json" in
+      let claims = if Sys.file_exists marker then match json marker with
+        | `List rows -> List.map text rows
+        | _ -> fail "invalid fixture claims" else [] in
+      let present = List.mem claimant claims in
+      if not present then
+        save_json marker (`List (List.map (fun item -> `String item) (claims @ [claimant])));
+      if Sys.file_exists (file "claim-report-failure") then (
+        prerr_endline "fixture claim result unavailable"; exit 17);
+      print_string (if present then "present\n" else "added\n");
+      flush stdout)
   | "stop" :: _ ->
     if Sys.file_exists (file "replacement-keep-guest") then exit 19
   | "delete" :: rest ->
@@ -1647,6 +1677,10 @@ let entries root name = read (Filename.concat root name) |> String.split_on_char
 let calls root = entries root "calls" |> List.map (function
   | `List items -> List.map text items | _ -> fail "bad provider log")
 let count operation root = calls root |> List.filter (function first :: _ -> first = operation | [] -> false) |> List.length
+let count_guest_runs root = calls root |> List.filter (function "run" :: "-d" :: _ -> true | _ -> false) |> List.length
+let fixture_claimants root = match json (Filename.concat root "work-volume-claims.json") with
+  | `List rows -> List.map text rows
+  | _ -> fail "invalid fixture claims"
 let maintenance_audit_entries root =
   let directory = Filename.concat (Workspace.masc_dir (Workspace.default_config root)) Audit_log.store_dirname in
   let rec rows path =
@@ -1730,12 +1764,49 @@ let test_absent_discard_never_runs_the_legacy_helper () = with_fixture @@ fun ro
   boot root;
   let operations = calls root in
   let runs = List.filter (function "run" :: _ -> true | _ -> false) operations in
-  check int "only the guest starts" 1 (List.length runs);
-  check bool "the run is the persistent guest" true
-    (List.for_all (function "run" :: "-d" :: _ -> true | _ -> false) runs);
+  check int "one persistent guest starts" 1 (count_guest_runs root);
+  let claim_name = Microvm.volume_claim_helper_name ~keeper_name:keeper in
+  check int "one claims helper starts" 1
+    (List.length (List.filter (function
+      | "run" :: "--rm" :: "--name" :: name :: _ -> String.equal name claim_name
+      | [] | _ :: _ -> false) runs));
+  check bool "only the guest and claims helper start" true
+    (List.for_all (function
+      | "run" :: "-d" :: _ -> true
+      | "run" :: "--rm" :: "--name" :: name :: _ -> String.equal name claim_name
+      | [] | _ :: _ -> false) runs);
+  check (list string) "claim carries the actual workspace"
+    [Keeper_sandbox_runtime_setup.normalize_base_path_for_hash root] (fixture_claimants root);
   let trim = Microvm.work_volume_trim_name ~keeper_name:keeper in
+  check bool "no name-scoped trim helper starts" false
+    (List.exists (fun args -> List.mem trim args) runs);
   check bool "no name-scoped trim helper is deleted" false
     (List.mem ["delete"; "--force"; trim] operations)
+
+let test_unconfirmed_claim_blocks_guest_and_retains_evidence () = with_fixture @@ fun root ->
+  let failure = Filename.concat root "claim-report-failure" in
+  write failure "";
+  let status, stderr = step_captured root "turn" in
+  check bool "claim failure is returned from the public boot path" true
+    (status = Unix.WEXITED 2
+     && Astring.String.is_infix ~affix:"microvm_volume_claim_unconfirmed" stderr);
+  let work = value (Microvm.work_volume_name ~keeper_name:keeper) in
+  let build = value (Microvm.build_volume_name ~keeper_name:keeper) in
+  let attempted = calls root in
+  check int "no guest starts on an unconfirmed claim" 0 (count_guest_runs root);
+  check bool "no build volume operation follows the failed claim" false
+    (List.exists (function "volume" :: _operation :: rest -> List.mem build rest | [] | _ :: _ -> false) attempted);
+  check bool "the ensured work volume is not rolled back" true
+    (Sys.file_exists (Filename.concat root (work ^ ".img")));
+  check bool "no work-volume deletion is issued" false
+    (List.mem ["volume"; "delete"; work] attempted);
+  check (list string) "the possibly recorded claim is retained"
+    [Keeper_sandbox_runtime_setup.normalize_base_path_for_hash root] (fixture_claimants root);
+  Unix.unlink failure;
+  boot root;
+  check int "a later successful helper report permits one guest boot" 1 (count_guest_runs root);
+  check (list string) "retry preserves the original claim"
+    [Keeper_sandbox_runtime_setup.normalize_base_path_for_hash root] (fixture_claimants root)
 
 let test_postboot_helper_refusal_preserves_the_new_guest () = with_fixture @@ fun root ->
   let marker = Filename.concat root "helper-after-run" in
@@ -1746,7 +1817,7 @@ let test_postboot_helper_refusal_preserves_the_new_guest () = with_fixture @@ fu
     (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" stderr);
   let original = read (Filename.concat root "guest.json") in
   let inode = (Unix.lstat (snapshot_path root)).st_ino in
-  check int "the guest was started once" 1 (count "run" root);
+  check int "the guest was started once" 1 (count_guest_runs root);
   check int "no first handoff ran before refusal" 0 (List.length (entries root "requests"));
   check int "the guest was not stopped" 0 (count "stop" root);
   check int "the guest or helper was not deleted" 0 (count "delete" root);
@@ -1755,7 +1826,7 @@ let test_postboot_helper_refusal_preserves_the_new_guest () = with_fixture @@ fu
     (step root "turn" = Unix.WEXITED 0);
   check string "the same guest is retained" original (read (Filename.concat root "guest.json"));
   check int "the same credential snapshot is retained" inode (Unix.lstat (snapshot_path root)).st_ino;
-  check int "the guest is not booted again" 1 (count "run" root)
+  check int "the guest is not booted again" 1 (count_guest_runs root)
 
 let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root ->
   boot root;
@@ -1768,7 +1839,7 @@ let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root
   let after = calls root |> List.drop (List.length before) in
   check bool "adoption performs only guest/image observation and exec" true
     (List.for_all adoption_read after);
-  check int "one cold run total" 1 (count "run" root);
+  check int "one cold run total" 1 (count_guest_runs root);
   check int "one first-handoff frame per process" 2 (List.length (entries root "requests"))
 
 let scan_fixture_output =
@@ -1825,7 +1896,13 @@ let test_work_resource_alias_does_not_cleanup_later_output () =
     List.iter (assert_modeled_build_link root) ["ready"; "new"];
     check int "cleanup is sent once for the shared work resource" 1
       (List.length (entries root "requests"));
-    check int "the alias boots a different guest" 2 (count "run" root)))
+    let original = Keeper_sandbox_runtime_setup.normalize_base_path_for_hash root in
+    let expected = if operation = "resource-base-alias" then
+        [original; Keeper_sandbox_runtime_setup.normalize_base_path_for_hash
+          (Filename.concat root "resource-next-workspace")]
+      else [original] in
+    check (list string) "claims retain every actual workspace" expected (fixture_claimants root);
+    check int "the alias boots a different guest" 2 (count_guest_runs root)))
     ["resource-network-alias"; "resource-base-alias"]
 
 let test_confirmed_reboot_recreates_targets_without_cleanup_replay () = with_fixture @@ fun root ->
@@ -1838,7 +1915,7 @@ let test_confirmed_reboot_recreates_targets_without_cleanup_replay () = with_fix
   check string "later output on the persistent work volume survives reboot"
     "output after the first handoff"
     (read (Filename.concat (fixture_work_root root) "later/_build/new-output"));
-  check int "both initial boot and reboot ran" 2 (count "run" root);
+  check int "both initial boot and reboot ran" 2 (count_guest_runs root);
   check int "the reboot did not repeat first-handoff cleanup" 1
     (List.length (entries root "requests"));
   check int "the recreated volume triggered a fresh scan" 2 (List.length (build_scan_calls root))
@@ -1872,7 +1949,7 @@ let test_cached_runtime_retries_an_incomplete_scan () = with_fixture @@ fun root
   check int "the cached runtime re-enters preparation after a failed scan" 3
     (List.length (build_scan_calls root));
   check int "retry does not repeat cleanup" 1 (List.length (entries root "requests"));
-  check int "the guest remains the existing running guest" 1 (count "run" root);
+  check int "the guest remains the existing running guest" 1 (count_guest_runs root);
   check int "only the initial link application is sent" 1
     (List.length (calls root |> List.filter (List.mem "masc-build-link")))
 
@@ -1892,7 +1969,7 @@ let test_temporary_target_failure_recovers_without_invalidation () =
     check int "link creation happens after verified target preparation" 1
       (List.length (calls root |> List.filter (List.mem "masc-build-link")));
     check int "retry does not repeat cleanup" 1 (List.length (entries root "requests"));
-    check int "retry keeps the original guest" 1 (count "run" root);
+    check int "retry keeps the original guest" 1 (count_guest_runs root);
     check int "retry does not stop the guest" 0 (count "stop" root);
     check int "retry does not delete the guest" 0 (count "delete" root)))
     ["target-retry-same-owner"; "target-retry-next-turn"]
@@ -2083,7 +2160,7 @@ let test_failed_replacement_keeps_uncertain_build_effect () =
       true (status = Unix.WEXITED 2);
     check bool "the first effect outcome is reported unverified" true
       (Astring.String.is_infix ~affix:"microvm_build_link_effect_unverified" stderr);
-    check int "the same guest is booted once" 1 (count "run" root);
+    check int "the same guest is booted once" 1 (count_guest_runs root);
     check int "replacement attempted to stop the guest" 1 (count "stop" root);
     check int "replacement attempted to delete the guest" 1 (count "delete" root);
     check int "first-handoff cleanup is not repeated" 1 (List.length (entries root "requests"));
@@ -2124,7 +2201,7 @@ let test_guest_readiness_changes_do_not_replay_work_volume_effects () =
       let targets = "/masc-build/ready\000/masc-build/new\000" in
       assert_build_inputs root "mkdir" (if scans = 2 then [targets; targets] else [targets]);
       assert_build_inputs root "link" (if links = 0 then [] else ["new\000/masc-build/new\000"]);
-      check int "the returning guest is not booted again" 1 (count "run" root);
+      check int "the returning guest is not booted again" 1 (count_guest_runs root);
       check int "recovery does not stop the returning guest" 0 (count "stop" root);
       check int "recovery does not delete the returning guest" 0 (count "delete" root)))
       [Some "build-effect-status-2-mkdir", 0;
@@ -2166,7 +2243,7 @@ let test_build_effect_failure_is_not_replayed_in_the_same_process () =
     check int "the link effect is never retried" expected_links
       (List.length (calls root |> List.filter (List.mem "masc-build-link")));
     check int "the first handoff is not replayed" 1 (List.length (entries root "requests"));
-    check int "the guest is only started once" 1 (count "run" root);
+    check int "the guest is only started once" 1 (count_guest_runs root);
     check int "the guest is not stopped" 0 (count "stop" root);
     check int "the guest is not deleted" 0 (count "delete" root);
     let targets = "/masc-build/ready\000/masc-build/new\000" in
@@ -2296,7 +2373,7 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
   let after = calls root |> List.drop before in
   check bool "wrapped adoption performs only guest/image observations and exec" true
     (List.for_all adoption_read after);
-  check int "wrapped guest is never booted twice" 1 (count "run" root);
+  check int "wrapped guest is never booted twice" 1 (count_guest_runs root);
   check int "each process still performs its first handoff" 2 (List.length (entries root "requests"))
 
 let test_helper_uncertainty_preserves_guest_on_adopt_and_replace () =
@@ -2334,7 +2411,7 @@ let test_helper_uncertainty_preserves_guest_on_adopt_and_replace () =
           | "inspect" :: _ -> true | _ -> false) after);
       check string "existing guest remains unchanged" original (read (Filename.concat root "guest.json"));
       check int "existing credential snapshot remains" inode (Unix.lstat (snapshot_path root)).st_ino;
-      check int "no replacement boot" 1 (count "run" root);
+      check int "no replacement boot" 1 (count_guest_runs root);
       check int "no guest stop" 0 (count "stop" root);
       check int "no guest or helper deletion" 0 (count "delete" root)))
       [ Some (Microvm.work_volume_trim_name ~keeper_name:keeper)
@@ -2354,7 +2431,7 @@ let assert_wrapped_refusals_preserve_guest root original inode before =
   check string "refusal preserves exact guest creation and plan bytes"
     original (read (Filename.concat root "guest.json"));
   check int "refusal preserves the host snapshot inode" inode (Unix.lstat (snapshot_path root)).st_ino;
-  check int "no replacement run after either refusal" 1 (count "run" root)
+  check int "no replacement run after either refusal" 1 (count_guest_runs root)
 
 let test_image_prefix_does_not_permit_command_tampering () =
   List.iter (fun changed_init -> with_fixture (fun root ->
@@ -2555,7 +2632,7 @@ let test_absent_teardown_reacquires_with_fresh_scoped_readiness () = with_fixtur
   (match status with
    | Unix.WEXITED 0 -> ()
    | _ -> failf "same-process absent teardown and reacquisition failed: %s" stderr);
-  check int "the provider booted only once" 1 (count "run" root);
+  check int "the provider booted only once" 1 (count_guest_runs root);
   check int "confirmed absence caused no stop" 0 (count "stop" root);
   check int "confirmed absence caused no delete" 0 (count "delete" root);
   check int "readiness recovery does not repeat persistent-work cleanup" 1 (List.length (entries root "requests"))
@@ -2567,7 +2644,7 @@ let test_checkout_observation_invalidates_before_reacquisition () =
     let retries_stopped_guest = operation = "endpoint-stopped" in
     let retries_absent_guest = operation = "endpoint-absent" in
     check int "a still-stopped or absent guest is booted again"
-      (if retries_stopped_guest || retries_absent_guest then 2 else 1) (count "run" root);
+      (if retries_stopped_guest || retries_absent_guest then 2 else 1) (count_guest_runs root);
     check int "only reacquisition may stop the still-stopped guest"
       (if retries_stopped_guest then 1 else 0) (count "stop" root);
     check int "only reacquisition may delete the still-stopped guest"
@@ -2589,7 +2666,7 @@ let test_checkout_observation_cannot_late_forget_handoff () = with_fixture @@ fu
 let test_captured_authority_rechecks_sequential_replacement () = with_fixture @@ fun root ->
   let status, stderr = step_captured root "authority-collision" in
   (match status with Unix.WEXITED 0 -> () | _ -> failf "captured authority fixture failed: %s" stderr);
-  check int "both owners boot their own guest" 2 (count "run" root);
+  check int "both owners boot their own guest" 2 (count_guest_runs root);
   check int "only A is stopped during its normal teardown" 1 (count "stop" root);
   check int "only A is deleted during its normal teardown" 1 (count "delete" root)
 
@@ -2597,7 +2674,7 @@ let test_legacy_review_binding_and_live_revision_guard () = with_fixture @@ fun 
   ignore (configure_identity root "first-fixture-token");
   let status, stderr = step_captured root "authority-revision" in
   (match status with Unix.WEXITED 0 -> () | _ -> failf "review identity fixture failed: %s" stderr);
-  check int "identity refresh starts the replacement" 2 (count "run" root);
+  check int "identity refresh starts the replacement" 2 (count_guest_runs root);
   check int "identity refresh stops the first guest" 1 (count "stop" root);
   check int "identity refresh deletes the first guest" 1 (count "delete" root)
 
@@ -2606,7 +2683,7 @@ let test_review_continues_when_guest_is_unavailable () =
     ignore (configure_identity root "first-fixture-token");
     let status, stderr = step_captured root operation in
     (match status with Unix.WEXITED 0 -> () | _ -> failf "%s failed: %s" operation stderr);
-    check int "review fixture boots only its own guest" 1 (count "run" root);
+    check int "review fixture boots only its own guest" 1 (count_guest_runs root);
     check int "review fixture never stops a guest" 0 (count "stop" root);
     check int "review fixture never deletes a guest" 0 (count "delete" root)))
     ["review-stopped"; "review-inspect-unavailable"]
@@ -2618,14 +2695,14 @@ let test_attached_reader_does_not_reread_central_identity () = with_fixture @@ f
   check bool "attached reader admits validated host snapshot" true (step root "attached" = Unix.WEXITED 0);
   check string "exact host snapshot credential bytes survive central failure" hosts
     (read (Filename.concat (snapshot_path root) "hosts.yml"));
-  check int "attached read cannot replace guest" 1 (count "run" root)
+  check int "attached read cannot replace guest" 1 (count_guest_runs root)
 
 let test_identity_refresh_replaces_after_actual_absence () = with_fixture @@ fun root ->
   ignore (configure_identity root "first-fixture-token");
   boot root;
   let _, updated = configure_identity root "second-fixture-token" in
   check bool "authorized turn identity refresh completes" true (step root "prepare-identity" = Unix.WEXITED 0);
-  check int "one replacement boot only" 2 (count "run" root);
+  check int "one replacement boot only" 2 (count_guest_runs root);
   check int "one current guest stop" 1 (count "stop" root);
   check string "replacement mounts the refreshed immutable bytes" updated
     (read (Filename.concat (snapshot_path root) "hosts.yml"))
@@ -2648,7 +2725,7 @@ let test_identity_refresh_preserves_guest_if_helper_appears () = with_fixture @@
   check int "the old host credential snapshot is preserved" inode (Unix.lstat (snapshot_path root)).st_ino;
   check int "refresh did not stop the guest" 0 (count "stop" root);
   check int "refresh did not delete a guest or helper" 0 (count "delete" root);
-  check int "refresh did not start a replacement" 1 (count "run" root)
+  check int "refresh did not start a replacement" 1 (count_guest_runs root)
 
 let test_boot_refused_for_unusable_identity_reports_the_identity () = with_fixture @@ fun root ->
   let central, _ = configure_identity root "first-fixture-token" in
@@ -2658,12 +2735,12 @@ let test_boot_refused_for_unusable_identity_reports_the_identity () = with_fixtu
   check bool "the identity reports it, not the guest boundary" true
     (Astring.String.is_infix ~affix:"identity_unavailable: " stderr
      && not (Astring.String.is_infix ~affix:"sandbox_unavailable: " stderr));
-  check int "no guest was started for it" 0 (count "run" root)
+  check int "no guest was started for it" 0 (count_guest_runs root)
 
 let test_endpoint_uses_effective_network_override () = with_fixture @@ fun root ->
   check bool "runtime override reaches matching host snapshot" true (step root "override" = Unix.WEXITED 0);
   check bool "second process adopts override guest" true (step root "override" = Unix.WEXITED 0);
-  check int "override does not cause repeated boots" 1 (count "run" root);
+  check int "override does not cause repeated boots" 1 (count_guest_runs root);
   let actual = Keeper_microvm_github_identity.host_path ~base_path:root ~keeper_name:keeper
       ~backend ~network_mode:Profile.Network_inherit in
   check bool "effective snapshot exists" true (Sys.file_exists actual);
@@ -2681,7 +2758,7 @@ let test_uncertain_postboot_retains_guest_and_recovers_without_replay () =
     Unix.unlink (Filename.concat root "inspect-fails-after-run");
     if inventory_fails then Unix.unlink (Filename.concat root "inventory-fails-after-run");
     check bool "later process adopts after actual facts recover" true (step root "turn" = Unix.WEXITED 0);
-    check int "original run is never replayed" 1 (count "run" root))) [false; true]
+    check int "original run is never replayed" 1 (count_guest_runs root))) [false; true]
 
 let test_unreadable_inventory_never_authorizes_a_boot () = with_fixture @@ fun root ->
   write (Filename.concat root "list-override") "[{}]";
@@ -2690,7 +2767,7 @@ let test_unreadable_inventory_never_authorizes_a_boot () = with_fixture @@ fun r
   let guest = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name:keeper ~network_mode in
   check (list (list string)) "failure reached actual complete inventory"
     [["inspect"; guest]; ["list"; "--all"; "--format"; "json"]] (calls root);
-  check int "no run" 0 (count "run" root);
+  check int "no run" 0 (count_guest_runs root);
   check int "no stop" 0 (count "stop" root);
   check int "no delete" 0 (count "delete" root);
   check bool "no credential publication" false (Sys.file_exists (snapshot_path root))
@@ -2722,7 +2799,7 @@ let test_unverified_work_mount_blocks_handoff () =
     check bool "the refused guest remains available" true (Sys.file_exists (Filename.concat root "guest.json"));
     Option.iter (fun original -> check string "the existing guest is preserved" original
       (read (Filename.concat root "guest.json"))) original_guest;
-    check int "one boot total" 1 (count "run" root);
+    check int "one boot total" 1 (count_guest_runs root);
     check bool "no stop or delete after refusal" true
       (List.for_all (function ("stop" | "delete") :: _ -> false | [] | _ :: _ -> true) operations))) [false; true])
     ["work-mount-absent", "microvm_work_volume_not_mounted:"
@@ -2735,6 +2812,7 @@ let () =
   | _ -> run "guest survival runtime against provider process fixture"
       ["process boundaries", [
         test_case "absent discard never runs legacy helper" `Quick test_absent_discard_never_runs_the_legacy_helper;
+        test_case "unconfirmed claim blocks guest and retains evidence" `Quick test_unconfirmed_claim_blocks_guest_and_retains_evidence;
         test_case "postboot helper refusal preserves the new guest" `Quick test_postboot_helper_refusal_preserves_the_new_guest;
         test_case "uncertain postboot recovers without replay" `Quick test_uncertain_postboot_retains_guest_and_recovers_without_replay;
         test_case "unreadable inventory refuses boot" `Quick test_unreadable_inventory_never_authorizes_a_boot;

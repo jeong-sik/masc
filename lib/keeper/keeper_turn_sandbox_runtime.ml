@@ -1331,39 +1331,28 @@ let ensure_apple_volume_helpers_absent ~keeper_name ~timeout_sec =
           ; Keeper_sandbox_microvm.volume_repair_name ~keeper_name ]
 ;;
 
-(* A fresh boot claims the work volume for this workspace: volume names
-   carry the keeper name but not the workspace, and the claim is what a
-   later dissolution matches to decide whether the volumes may be deleted.
-   Best-effort by design -- a claim that could not be written leaves a
-   dissolution that cannot prove ownership and keeps the volumes, so the
-   boot is not refused over it. *)
+(* A fresh Apple boot requires a successful claim-helper report before it can
+   use a volume shared across workspaces. This is not an independent marker
+   readback or proof about a legacy or already-paused Keeper. *)
 let claim_work_volume_at_boot (t : t) ~backend ~volume_name ~timeout_sec =
   match (backend : Keeper_microvm_backend.t) with
-  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> ()
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
   | Keeper_microvm_backend.Apple_container ->
     let claimant =
       Keeper_sandbox_runtime_setup.normalize_base_path_for_hash t.config.base_path
     in
     (match t.image with
      | Error error ->
-       Log.Keeper.warn ~keeper_name:t.meta.name
-         "work volume claim not recorded: %s"
-         (image_unresolved_message error)
+       Error ("microvm_volume_claim_unconfirmed: " ^ image_unresolved_message error)
      | Ok image ->
-       (match
-          Keeper_sandbox_microvm.add_apple_work_volume_claim
-            ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
-            ~timeout_sec
-            ~keeper_name:t.meta.name
-            ~volume_name
-            ~image
-            ~claimant
-        with
-        | Ok () -> ()
-        | Error detail ->
-          Log.Keeper.warn ~keeper_name:t.meta.name
-            "work volume claim not recorded; a later dissolution will keep the volumes: %s"
-            detail))
+       Keeper_sandbox_microvm.add_apple_work_volume_claim
+         ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+         ~timeout_sec
+         ~keeper_name:t.meta.name
+         ~volume_name
+         ~image
+         ~claimant
+       |> Result.map_error (fun detail -> "microvm_volume_claim_unconfirmed: " ^ detail))
 ;;
 
 (** Everything a guest boot mounts besides config and identity, established
@@ -1384,13 +1373,11 @@ let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
     (match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
      | Error _ as err -> err
      | Ok work_volume_name ->
-       claim_work_volume_at_boot t ~backend ~volume_name:work_volume_name ~timeout_sec;
-       (match microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
-        | Error _ as err -> err
-        | Ok build_volume_name ->
-          (match prepare_microvm_shim_dir t ~backend with
-           | Error _ as err -> err
-           | Ok shim_host_dir -> Ok { work_volume_name; build_volume_name; shim_host_dir })))
+       let open Result.Syntax in
+       let* () = claim_work_volume_at_boot t ~backend ~volume_name:work_volume_name ~timeout_sec in
+       let* build_volume_name = microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec in
+       let* shim_host_dir = prepare_microvm_shim_dir t ~backend in
+       Ok { work_volume_name; build_volume_name; shim_host_dir })
 ;;
 
 (** Boot invariant (RFC-0052), fail-closed:
@@ -3023,10 +3010,10 @@ let remove_keeper_volumes_by_name
             keeper_name)
      | Some Keeper_microvm_backend.Apple_container ->
        (* Work and build names contain the Keeper name but not its workspace.
-          The claims marker -- written at every fresh boot -- is what proves
-          which workspaces still want these disks. The release helper runs on
-          the keeper's own sandbox image, so an unresolvable image keeps the
-          volumes rather than guessing at ownership. *)
+          The marker records confirmed claims, but a legacy or adopted owner
+          may be unrecorded and a paused owner may have no container. The release
+          helper runs on the Keeper's own sandbox image; an unresolvable image
+          prevents this call from attempting deletion. *)
        (match sandbox_image with
         | None ->
           Error

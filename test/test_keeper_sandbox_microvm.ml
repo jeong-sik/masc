@@ -1901,13 +1901,16 @@ let test_volume_claim_helper_report_decode_is_strict () =
    plain file standing in for the marker. What these cases pin is the
    on-disk format: claims are never dropped, [add] only inserts, [release]
    regenerates without ours and removes the file when ours was the last. *)
-let run_claim_script ~dir ?(claimant = "/ws/fixture") script =
+let run_claim_script ~dir ?(claimant = "/ws/fixture") ?path script =
   let script_path = Filename.concat dir "script.sh" in
   let stdout_path = Filename.concat dir "stdout" in
   Out_channel.with_open_bin script_path (fun out -> output_string out script);
+  let path_env = Option.fold ~none:"" ~some:(fun path ->
+    Printf.sprintf "PATH=%s " (Filename.quote path)) path in
   let code =
     Sys.command
-      (Printf.sprintf "MASC_VOLUME_CLAIMANT=%s /bin/sh %s > %s 2> %s"
+      (Printf.sprintf "%sMASC_VOLUME_CLAIMANT=%s /bin/sh %s > %s 2> %s"
+         path_env
          (Filename.quote claimant)
          (Filename.quote script_path)
          (Filename.quote stdout_path)
@@ -1948,6 +1951,20 @@ let test_claim_scripts_add_is_idempotent_and_only_inserts () =
        Alcotest.(check string) "both claims, none dropped"
          "[\n\"/ws/fixture\"\n,\"/ws/other\"\n]\n"
          (Option.value (read_file marker) ~default:"");
+       let unicode = "/ws/한글 \194\133 $[]*%" in
+       Alcotest.(check bool) "non-ASCII bytes and shell punctuation are valid" true
+         (M.valid_volume_claimant unicode);
+       let code, stdout =
+         run_claim_script ~dir ~claimant:unicode (M.volume_claim_add_script_with ~marker)
+       in
+       Alcotest.(check int) "Unicode claimant is recorded" 0 code;
+       Alcotest.(check string) "Unicode addition is reported" "added\n" stdout;
+       let code, stdout =
+         run_claim_script ~dir ~claimant:unicode (M.volume_claim_release_script_with ~marker)
+       in
+       Alcotest.(check int) "Unicode claimant is released" 0 code;
+       Alcotest.(check string) "other claims survive Unicode release"
+         "kept\n[\n\"/ws/fixture\"\n,\"/ws/other\"\n]\n" stdout;
        Alcotest.(check bool) "no temporary file is left behind" true
          (not (Sys.file_exists (marker ^ ".tmp"))))
 ;;
@@ -1958,21 +1975,62 @@ let test_claim_scripts_refuse_a_marker_they_do_not_understand () =
     ~finally:(fun () -> Fs_compat.remove_tree dir)
     (fun () ->
        let marker = Filename.concat dir ".masc-volume-claims.json" in
-       Out_channel.with_open_bin marker (fun out -> output_string out "[\ngarbage\n]\n");
-       let code, _stdout =
-         run_claim_script ~dir (M.volume_claim_add_script_with ~marker)
+       let malformed =
+         [ "garbage row", "[\ngarbage\n]\n"
+         ; "standalone claimant", "\"/ws/fixture\"\n"
+         ; "truncated array", "[\n\"/ws/fixture\"\n"
+         ; "missing comma", "[\n\"/ws/fixture\"\n\"/ws/other\"\n]\n"
+         ; "extra row after array", "[\n\"/ws/fixture\"\n]\n\"/ws/other\"\n"
+         ; "duplicate opening bracket", "[\n[\n\"/ws/fixture\"\n]\n"
+         ; "escaped quote", "[\n\"/ws/fixture\\\"extra\"\n]\n"
+         ; "control character", "[\n\"/ws/fixture\tbad\"\n]\n"
+         ; "nul after array", "[\n\"/ws/fixture\"\n]\000\n" ]
        in
-       Alcotest.(check bool) "add refuses" true (code <> 0);
-       Alcotest.(check string) "the marker is left exactly as it was"
-         "[\ngarbage\n]\n"
-         (Option.value (read_file marker) ~default:"");
-       let code, _stdout =
-         run_claim_script ~dir (M.volume_claim_release_script_with ~marker)
-       in
-       Alcotest.(check bool) "release refuses" true (code <> 0);
-       Alcotest.(check string) "the marker still stands"
-         "[\ngarbage\n]\n"
-         (Option.value (read_file marker) ~default:""))
+       List.iter
+         (fun (label, original) ->
+            Out_channel.with_open_bin marker (fun out -> output_string out original);
+            List.iter
+              (fun (operation, script) ->
+                 let code, stdout = run_claim_script ~dir script in
+                 Alcotest.(check bool) (label ^ ": " ^ operation ^ " refuses") true (code <> 0);
+                 Alcotest.(check string) (label ^ ": no success report") "" stdout;
+                 Alcotest.(check (option string)) (label ^ ": marker is unchanged")
+                   (Some original) (read_file marker);
+                 Alcotest.(check bool) (label ^ ": no temporary file") false
+                   (Sys.file_exists (marker ^ ".tmp")))
+              [ "add", M.volume_claim_add_script_with ~marker
+              ; "release", M.volume_claim_release_script_with ~marker ])
+         malformed)
+;;
+
+let test_claim_scripts_refuse_existing_marker_without_cmp () =
+  let dir = temp_dir "volume-claims-no-cmp-" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree dir)
+    (fun () ->
+       let marker = Filename.concat dir ".masc-volume-claims.json" in
+       let tools = Filename.concat dir "tools" in
+       Unix.mkdir tools 0o700;
+       Unix.symlink "/bin/rm" (Filename.concat tools "rm");
+       let original = "[\n\"/ws/fixture\"\n]\n" in
+       let code, stdout =
+         run_claim_script ~dir ~path:tools (M.volume_claim_add_script_with ~marker) in
+       Alcotest.(check bool) "add refuses a missing marker without cmp" true (code <> 0);
+       Alcotest.(check string) "no success report for a missing marker" "" stdout;
+       Alcotest.(check bool) "add did not create an unmaintainable marker" false
+         (Sys.file_exists marker);
+       Out_channel.with_open_bin marker (fun out -> output_string out original);
+       List.iter
+         (fun (operation, script) ->
+            let code, stdout = run_claim_script ~dir ~path:tools script in
+            Alcotest.(check bool) (operation ^ " refuses without cmp") true (code <> 0);
+            Alcotest.(check string) (operation ^ " gives no success report") "" stdout;
+            Alcotest.(check (option string)) (operation ^ " preserves the marker")
+              (Some original) (read_file marker);
+            Alcotest.(check bool) (operation ^ " removes its temporary file") false
+              (Sys.file_exists (marker ^ ".tmp")))
+         [ "add", M.volume_claim_add_script_with ~marker
+         ; "release", M.volume_claim_release_script_with ~marker ])
 ;;
 
 let test_claim_scripts_release_the_last_claim_and_keep_others () =
@@ -2079,6 +2137,34 @@ let run_claim_release ~keeper_name ~containers ~helper ?(deletes = []) ~volumes 
       ~claimant:"/ws/retiring"
   in
   outcome, List.rev !sent
+;;
+
+let test_malformed_marker_cannot_authorize_volume_deletion () =
+  let dir = temp_dir "volume-claims-no-delete-" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree dir)
+    (fun () ->
+       let marker = Filename.concat dir ".masc-volume-claims.json" in
+       let original = "\"/ws/retiring\"\n" in
+       Out_channel.with_open_bin marker (fun out -> output_string out original);
+       let code, stdout =
+         run_claim_script ~dir ~claimant:"/ws/retiring"
+           (M.volume_claim_release_script_with ~marker)
+       in
+       let outcome, sent =
+         run_claim_release ~keeper_name:"retired"
+           ~containers:(Unix.WEXITED 0, "[]", "")
+           ~helper:(Unix.WEXITED code, stdout, "invalid marker")
+           ~volumes:(Unix.WEXITED 0, "[]", "") ()
+       in
+       (match outcome with
+        | M.Skipped_unverified _ -> ()
+        | M.Removed | M.Kept_for_claimants _ | M.Kept_for_containers _ ->
+          Alcotest.fail "malformed marker was accepted as a claim release");
+       Alcotest.(check (list string)) "no volume deletion is requested" []
+         (deleted_volume_names sent);
+       Alcotest.(check (option string)) "original malformed evidence is retained"
+         (Some original) (read_file marker))
 ;;
 
 let test_release_removes_both_volumes_when_the_claim_was_sole () =
@@ -2337,6 +2423,34 @@ let test_add_records_and_refuses_a_present_helper () =
      Alcotest.(check bool) "a present helper is named" true
        (Astring.String.is_infix ~affix:"microvm_volume_claim_helper_present" detail)
    | Ok () -> Alcotest.fail "a present claims helper must refuse the write")
+;;
+
+let test_add_requires_an_exact_success_report () =
+  let cases =
+    [ Unix.WEXITED 0, "added\n", true
+    ; Unix.WEXITED 0, "present\n", true
+    ; Unix.WEXITED 0, "", false
+    ; Unix.WEXITED 0, "added", false
+    ; Unix.WEXITED 0, "added\nextra\n", false
+    ; Unix.WEXITED 1, "added\n", false ]
+  in
+  List.iter
+    (fun (status, stdout, accepted) ->
+       let run ~timeout_sec:_ argv =
+         if List.exists (String.equal "--all") argv
+         then Unix.WEXITED 0, "[]", ""
+         else if List.exists (String.equal "run") argv
+         then status, stdout, ""
+         else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
+       in
+       let result =
+         M.add_apple_work_volume_claim ~run ~timeout_sec:1.0 ~keeper_name:"booting"
+           ~volume_name:"masc-keeper-work-booting" ~image:"masc-test-minimal:image"
+           ~claimant:"/ws/booting"
+       in
+       Alcotest.(check bool) (Printf.sprintf "claim report %S" stdout)
+         accepted (Result.is_ok result))
+    cases
 ;;
 
 
@@ -3579,6 +3693,72 @@ esac
         || String.starts_with ~prefix:"run " call) calls)) cases
 ;;
 
+let test_apple_provision_requires_a_confirmed_work_claim () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "volume-claim-provision-" in
+  let cli = Filename.concat dir "container" in
+  let mode = Filename.concat dir "mode" in
+  let log = Filename.concat dir "calls" in
+  let keeper_name = "volume-claim-provision" in
+  let config = Masc.Workspace.default_config dir in
+  let meta = microvm_meta ~name:keeper_name in
+  Out_channel.with_open_bin cli (fun out ->
+    Printf.fprintf out {|#!/bin/sh
+mode=%s
+log=%s
+printf '%%s %%s %%s\n' "$1" "${2-}" "${3-}" >> "$log"
+case "$1:${2-}:${3-}" in
+  list:--all:--format) printf '[]\n' ;;
+  volume:inspect:masc-keeper-work-*) exit 0 ;;
+  volume:inspect:masc-keeper-build-*) exit 2 ;;
+  run:--rm:--name)
+    case "$(/bin/cat "$mode")" in
+      fail) printf 'claim failed\n' >&2; exit 17 ;;
+      empty) exit 0 ;;
+      unknown) printf 'unexpected\n' ;;
+      added) printf 'added\n' ;;
+      present) printf 'present\n' ;;
+      *) exit 91 ;;
+    esac ;;
+  *) exit 92 ;;
+esac
+|} (Filename.quote mode) (Filename.quote log));
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
+  List.iter (fun (answer, accepted) ->
+    Out_channel.with_open_bin mode (fun out -> output_string out answer);
+    Out_channel.with_open_bin log (fun _ -> ());
+    let result = Turn.For_testing_microvm.provision_guest runtime
+      ~backend:Backend.Apple_container ~timeout_sec:5. in
+    let calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+    let build_probe = "volume inspect masc-keeper-build-" ^ keeper_name in
+    Alcotest.(check int) (answer ^ ": one claim helper attempt") 1
+      (List.length (List.filter (String.equal "run --rm --name") calls));
+    (match result with
+     | Error detail ->
+       let expected = if accepted then "microvm_build_volume_probe_failed"
+         else "microvm_volume_claim_unconfirmed" in
+       Alcotest.(check bool) (answer ^ ": expected stop") true
+         (Astring.String.is_infix ~affix:expected detail)
+     | Ok () -> Alcotest.fail "fixture must stop at the claim or build probe");
+    Alcotest.(check bool) (answer ^ ": build probe follows confirmed claim")
+      accepted (List.mem build_probe calls);
+    Alcotest.(check bool) (answer ^ ": no volume deletion") false
+      (List.exists (String.starts_with ~prefix:"volume delete ") calls))
+    [ "fail", false; "empty", false; "unknown", false; "added", true; "present", true ]
+;;
+
 let test_teardown_preserves_unowned_volume_helpers () =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
@@ -4050,6 +4230,7 @@ let test_preboot_refusals_retain_durable_identity_and_recheck_shim () =
       Printf.fprintf channel {|#!/bin/sh
 log=%s
 listing_fails=%s
+claims=%s
 printf '%%s\n' "$*" >> "$log"
 case "$1" in
   stop|delete) exit 0 ;;
@@ -4058,7 +4239,11 @@ case "$1" in
   volume)
     case "$2" in inspect|delete) exit 0 ;; *) exit 99 ;; esac ;;
   list) printf '[]\n'; exit 0 ;;
-  run) exit 0 ;;
+  run)
+    if [ "${2-}" = "--rm" ] && [ "${3-}" = "--name" ] && [ "${4-}" = "$claims" ]; then
+      printf 'added\n'; exit 0
+    fi
+    exit 99 ;;
   network)
     case "$2" in
       list) printf '[]\n'; exit "$listing_fails" ;;
@@ -4068,7 +4253,8 @@ case "$1" in
     esac ;;
   *) exit 99 ;;
 esac
-|} (Filename.quote log) (if policy_listing_fails then "1" else "0"));
+|} (Filename.quote log) (if policy_listing_fails then "1" else "0")
+        (Filename.quote (M.volume_claim_helper_name ~keeper_name)));
     Unix.chmod cli 0o755;
     let previous_path = Sys.getenv "PATH" in
     Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
@@ -4103,7 +4289,10 @@ esac
     Alcotest.(check bool) "policy lookup ran after durable snapshot publication" true
       (List.mem "network list --format json" calls);
     let runs = List.filter (String.starts_with ~prefix:"run ") calls in
-    Alcotest.(check int) "unreadable superblock starts neither helper nor guest" 0 (List.length runs);
+    let claim_prefix = "run --rm --name " ^ M.volume_claim_helper_name ~keeper_name ^ " " in
+    Alcotest.(check int) "only the claims helper starts before the policy refusal" 1 (List.length runs);
+    Alcotest.(check bool) "the started helper is the claims helper" true
+      (List.for_all (String.starts_with ~prefix:claim_prefix) runs);
     Alcotest.(check bool) "current volume source was actually requested" true
       (List.mem ("volume inspect masc-keeper-work-" ^ keeper_name) calls);
     (* Rewrite the same inode with equal-length bytes and restore its mtime.
@@ -4128,8 +4317,10 @@ esac
      | Ok _ -> Alcotest.fail "equal-metadata rewritten shim was admitted to a guest");
     let retry_calls = In_channel.with_open_bin log In_channel.input_all
       |> String.split_on_char '\n' in
-    Alcotest.(check (list string)) "rejected shim starts no further container"
-      runs (List.filter (String.starts_with ~prefix:"run ") retry_calls))
+    let retry_runs = List.filter (String.starts_with ~prefix:"run ") retry_calls in
+    Alcotest.(check int) "each fresh attempt starts its claims helper" 2 (List.length retry_runs);
+    Alcotest.(check bool) "the rejected shim starts no guest or other helper" true
+      (List.for_all (String.starts_with ~prefix:claim_prefix) retry_runs))
     [ true; false ]
 ;;
 
@@ -5632,6 +5823,8 @@ let () =
             test_trim_names_fit_apple_and_distinguish_long_keepers
         ; Alcotest.test_case "Apple provisioning refuses unowned volume helpers" `Quick
             test_apple_provision_refuses_unowned_volume_helpers
+        ; Alcotest.test_case "Apple provisioning requires a confirmed work claim" `Quick
+            test_apple_provision_requires_a_confirmed_work_claim
         ; Alcotest.test_case "teardown preserves unowned volume helpers" `Quick
             test_teardown_preserves_unowned_volume_helpers
         ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick
@@ -5706,6 +5899,10 @@ let () =
             test_claim_scripts_add_is_idempotent_and_only_inserts
         ; Alcotest.test_case "claim scripts refuse a marker they do not understand" `Quick
             test_claim_scripts_refuse_a_marker_they_do_not_understand
+        ; Alcotest.test_case "claim scripts refuse an existing marker without cmp" `Quick
+            test_claim_scripts_refuse_existing_marker_without_cmp
+        ; Alcotest.test_case "malformed marker cannot authorize volume deletion" `Quick
+            test_malformed_marker_cannot_authorize_volume_deletion
         ; Alcotest.test_case "release script drops only our claim" `Quick
             test_claim_scripts_release_the_last_claim_and_keep_others
         ; Alcotest.test_case "claims argv carries the claimant and validates it" `Quick
@@ -5722,6 +5919,8 @@ let () =
             test_release_releases_the_claim_when_the_owner_listing_fails
         ; Alcotest.test_case "add records a claim and refuses a present helper" `Quick
             test_add_records_and_refuses_a_present_helper
+        ; Alcotest.test_case "add requires an exact success report" `Quick
+            test_add_requires_an_exact_success_report
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick
             test_recreate_apple_build_volume_shares_the_work_volume_commands
         ; Alcotest.test_case "work create timeout reconciles confirmed presence" `Quick

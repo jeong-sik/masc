@@ -669,9 +669,10 @@ val remove_apple_keeper_volumes :
   -> (unit, string) result
 (** Low-level operation to delete the work and build volumes named for
     [keeper_name]. These names are shared across workspaces: the caller must
-    establish that every owner has released them before calling this function
-    -- {!release_apple_work_volume_claim} is that establishment, through the
-    claims marker below. A missing guest alone is not such proof. The
+    establish that every owner has released them before calling this function.
+    The claims marker and container listing do not prove that unrecorded or
+    paused owners are absent, and do not fence a concurrent boot. A missing
+    guest alone is not such proof. The
     operation names them by {!work_volume_name} and {!build_volume_name},
     then proves both absent from one volume listing. Both deletes are
     attempted whatever either returns; an already-absent volume is a success.
@@ -686,20 +687,16 @@ val remove_apple_keeper_volumes :
     recorded as one JSON array of claimant strings in
     {.masc-volume-claims.json} at the volume root. The file is written only
     by the root helpers here, above the keeper's jailed work root, so a
-    guest cannot forge or remove a claim. Workspaces claim at every fresh
+    guest cannot forge or remove a claim. Workspaces attempt a claim at fresh
     boot ({!add_apple_work_volume_claim}) and release at dissolution
-    ({!release_apple_work_volume_claim}); every failure path keeps the
-    volumes.
+    ({!release_apple_work_volume_claim}). Fresh Apple provisioning stops if the
+    claim helper fails or gives an unexpected report. The marker can still omit a legacy or adopted owner,
+    so a last recorded claim is not proof that no other workspace needs it.
 
-    Dissolution and reclamation answer different questions on purpose.
-    Dissolution never deletes on missing evidence: a volume with no marker,
-    or a marker it cannot read, is kept, because a dissolved keeper has no
-    one left to answer for a wrong deletion. Reclamation
-    ({!Keeper_volume_gc}) exists precisely to collect those unverifiable
-    leftovers under an operator's eyes, report first and delete only on
-    request. Both read owner evidence from [container list --all], which
-    includes stopped guests: a stopped guest is still a workspace's
-    reference to its volume, not an orphan. *)
+    Dissolution keeps a volume when the marker is missing or unreadable, but
+    a present marker can still omit an owner. [container list --all] includes
+    stopped guests, while a paused Keeper can have no guest container at all.
+    Neither observation alone establishes that a volume is safe to reclaim. *)
 
 val volume_claims_marker_name : string
 val claims_guest_root : string
@@ -715,16 +712,19 @@ val volume_claim_helper_name : keeper_name:string -> string
     workspaces: a second run collides on the name and fails. *)
 
 val valid_volume_claimant : string -> bool
-(** A claimant is a non-empty base path without a quote, a backslash or any
-    control character. The helper scripts do no escaping of their own, so
+(** A claimant is a non-empty base path without a quote, a backslash or an
+    ASCII control byte. The helper scripts do no escaping of their own, so
     anything else is refused before a helper runs. *)
 
 val volume_claim_add_script_with : marker:string -> string
 val volume_claim_release_script_with : marker:string -> string
 val volume_claims_read_script_with : marker:string -> string
 (** The three helper payloads with an explicit marker path, so a test can
-    run the exact script through [/bin/sh] against a plain file. The
-    production spellings mount the work volume at {!claims_guest_root}. *)
+    run the exact script through [/bin/sh] against a plain file. Add requires
+    [cmp] before creating or checking a marker; release requires it when a
+    marker exists. Both validate existing bytes before changing them and
+    refuse if [cmp] is unavailable. The production spellings mount the work
+    volume at {!claims_guest_root}. *)
 
 val apple_volume_claims_read_argv :
   keeper_name:string -> volume_name:string -> image:string -> string list
@@ -769,10 +769,10 @@ val add_apple_work_volume_claim :
   -> (unit, string) result
 (** Record [claimant]'s claim on the work volume, idempotently. A fresh boot
     calls this right after the work volume is ensured. A claims helper
-    already present under the shared name, or any helper failure, is [Error]
-    leaving the marker untouched; the caller warns and continues, and the
-    degraded state is a later dissolution that cannot prove this claim and
-    keeps the volumes. *)
+    already present under the shared name, or a helper failure status, is
+    [Error]. A failed or interrupted helper does not prove whether its write
+    occurred. A fresh Apple guest does not proceed when this returns [Error].
+    [Ok] requires the helper's exact [added] or [present] report. *)
 
 type apple_volume_claim_release =
   | Removed
@@ -795,17 +795,15 @@ val release_apple_work_volume_claim :
     referencing the keeper. One helper reads the marker, filters the claim
     out and rewrites it, so no other helper can land a claim between the
     read and the write; the release helper runs even when owner containers
-    are present and even when the owner listing itself fails, so a
-    dissolved workspace never leaves its claim behind. On an unreadable
-    listing the claim is still released but nothing is ever deleted -- the
-    outcome is [Skipped_unverified] naming both the listing failure and
-    what the claim's release did. When ours was the last claim and owners
-    are present, the helper's removal of the marker file stands and the
-    volumes stay with [Kept_for_containers]; when deletion is decided the
-    marker is not rewritten again -- it dies with the volume.
-    [Kept_for_claimants] carries the claimants that remain, and every
-    refusal or failure is [Skipped_unverified] with its detail; the volumes
-    are kept in all of those cases. *)
+    are present and even when the owner listing itself fails. A failed or
+    interrupted helper does not prove whether the claim was released. An
+    unreadable listing prevents this call from attempting deletion and returns
+    [Skipped_unverified]. When ours was the last claim the helper removes the
+    marker before the owner check and deletion attempts. If owner containers
+    are present, this call keeps the volumes with [Kept_for_containers].
+    [Kept_for_claimants] carries the claimants that remain. A removal failure
+    is [Skipped_unverified]: either volume may already have been deleted, so
+    that outcome does not prove both volumes remain. *)
 
 val recreate_apple_build_volume
   :  volume_name:string

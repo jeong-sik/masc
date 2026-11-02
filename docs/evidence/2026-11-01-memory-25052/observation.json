@@ -1,0 +1,4063 @@
+{
+  "issue": 25052,
+  "health_before": {
+    "runtime_instance_id": "01a19489-2a83-7000-9869-7048022414f7",
+    "binary_commit": "dbd032511fea4e3d04687448275c0f41abff56cc",
+    "started_at": "2026-11-01T00:36:19Z",
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": true,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_cli"
+    },
+    "memory_availability": {
+      "schema": "keeper.memory_execution_availability.v1",
+      "status": "ok",
+      "operator_action_required": false,
+      "status_reasons": [],
+      "operator_action_reasons": [],
+      "operations": [
+        {
+          "tool": "admit_memory",
+          "output": "admission",
+          "status": "ok",
+          "state": "serving",
+          "operator_action_required": false,
+          "binding": {
+            "installation_id": "keeper-librarian",
+            "output": "admission",
+            "route_table": "runtime.addon_exact_lanes.keeper-librarian.admission"
+          },
+          "provider_execution": "not_proven_by_availability",
+          "worker_serving": true,
+          "instance_id": "01a19489-7cf7-7000-9a2d-327317433d48",
+          "last_cycle_waiting": [],
+          "last_cycle_at": 1793493403.877467,
+          "last_cycle_issue": null
+        },
+        {
+          "tool": "derive_memory",
+          "output": "durable",
+          "status": "ok",
+          "state": "serving",
+          "operator_action_required": false,
+          "binding": {
+            "installation_id": "keeper-librarian",
+            "output": "durable",
+            "route_table": "runtime.addon_exact_lanes.keeper-librarian.durable"
+          },
+          "provider_execution": "not_proven_by_availability",
+          "worker_serving": true,
+          "instance_id": "01a19489-7cf7-7000-9a2d-327317433d48",
+          "last_cycle_waiting": [],
+          "last_cycle_at": 1793493403.877467,
+          "last_cycle_issue": null
+        }
+      ],
+      "semantics": "Configuration and last-cycle observation only; no provider success, source consumption or Memory commit is implied"
+    }
+  },
+  "health_after": {
+    "runtime_instance_id": "01a19489-2a83-7000-9869-7048022414f7",
+    "binary_commit": "dbd032511fea4e3d04687448275c0f41abff56cc",
+    "started_at": "2026-11-01T00:36:19Z",
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": true,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_cli"
+    },
+    "memory_availability": {
+      "schema": "keeper.memory_execution_availability.v1",
+      "status": "ok",
+      "operator_action_required": false,
+      "status_reasons": [],
+      "operator_action_reasons": [],
+      "operations": [
+        {
+          "tool": "admit_memory",
+          "output": "admission",
+          "status": "ok",
+          "state": "serving",
+          "operator_action_required": false,
+          "binding": {
+            "installation_id": "keeper-librarian",
+            "output": "admission",
+            "route_table": "runtime.addon_exact_lanes.keeper-librarian.admission"
+          },
+          "provider_execution": "not_proven_by_availability",
+          "worker_serving": true,
+          "instance_id": "01a19489-7cf7-7000-9a2d-327317433d48",
+          "last_cycle_waiting": [],
+          "last_cycle_at": 1793493403.877467,
+          "last_cycle_issue": null
+        },
+        {
+          "tool": "derive_memory",
+          "output": "durable",
+          "status": "ok",
+          "state": "serving",
+          "operator_action_required": false,
+          "binding": {
+            "installation_id": "keeper-librarian",
+            "output": "durable",
+            "route_table": "runtime.addon_exact_lanes.keeper-librarian.durable"
+          },
+          "provider_execution": "not_proven_by_availability",
+          "worker_serving": true,
+          "instance_id": "01a19489-7cf7-7000-9a2d-327317433d48",
+          "last_cycle_waiting": [],
+          "last_cycle_at": 1793493403.877467,
+          "last_cycle_issue": null
+        }
+      ],
+      "semantics": "Configuration and last-cycle observation only; no provider success, source consumption or Memory commit is implied"
+    }
+  },
+  "runtime_identity_stable": true,
+  "record_window": {
+    "from": "2026-11-01T00:36:19+00:00",
+    "through": "2026-11-01T01:47:38.047978+00:00"
+  },
+  "scan_window": {
+    "from": "2026-11-01T01:47:38.048146+00:00",
+    "through": "2026-11-01T01:47:38.219658+00:00"
+  },
+  "config_root": "/Users/dancer/me/.masc/config",
+  "source_hashes": {
+    "lib/keeper/keeper_memory_os_recall.ml": {
+      "installed_sha256": "515fc2ad7b134ee8a38ae6de1e633d80df4eb32346781cb6f11d2994a0bb2a85",
+      "checkout_sha256": "515fc2ad7b134ee8a38ae6de1e633d80df4eb32346781cb6f11d2994a0bb2a85"
+    },
+    "lib/keeper/keeper_memory_os_current.ml": {
+      "installed_sha256": "3a1ca8549915baeebe3a383033ab3bf48deb29fe97364afd891f740399cd81a9",
+      "checkout_sha256": "3a1ca8549915baeebe3a383033ab3bf48deb29fe97364afd891f740399cd81a9"
+    },
+    "lib/keeper/keeper_memory_recall_blocks.ml": {
+      "installed_sha256": "2a74fc18d2ba3cfcf3e0bdb17be70390aaadc861967c95d2662c6e094ae6cbf8",
+      "checkout_sha256": "2a74fc18d2ba3cfcf3e0bdb17be70390aaadc861967c95d2662c6e094ae6cbf8"
+    },
+    "lib/keeper/keeper_run_tools_hooks.ml": {
+      "installed_sha256": "32cd9f05ef139d3b4d57d06f3e7b4534ca08c8faad1d3438549a802fbb282cb5",
+      "checkout_sha256": "32cd9f05ef139d3b4d57d06f3e7b4534ca08c8faad1d3438549a802fbb282cb5"
+    },
+    "lib/config_dir_resolver/config_dir_resolver.ml": {
+      "installed_sha256": "ca48f1349cfe6d5600355334a15f68dfab8b5336c03eb872961824d293b0d9b5",
+      "checkout_sha256": "ca48f1349cfe6d5600355334a15f68dfab8b5336c03eb872961824d293b0d9b5"
+    },
+    "lib/types/turn_record.ml": {
+      "installed_sha256": "7ccc43a0d9bdc5157c9fc4a0f9cac37a5e6cb06e1cb0af6ff4811fbd23eb987a",
+      "checkout_sha256": "7ccc43a0d9bdc5157c9fc4a0f9cac37a5e6cb06e1cb0af6ff4811fbd23eb987a"
+    }
+  },
+  "snapshots": [
+    {
+      "keeper": "build-maniac",
+      "path": "/Users/dancer/me/.masc/config/keepers/build-maniac.memory-current.json",
+      "bytes": 5189,
+      "sha256": "7117be55d4241c311a3434e9d8ea981354be559094182e34545280e52c191b5b",
+      "revision": 3,
+      "fact_count": 4,
+      "observed_at": "2026-11-01T01:47:38.049464+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-brother.memory-current.json",
+      "bytes": 83641,
+      "sha256": "b8da3e77503d7dac30a9b24061e309e14c5ca4478250bd232eee014ee4c0321a",
+      "revision": 158,
+      "fact_count": 65,
+      "observed_at": "2026-11-01T01:47:38.049850+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-father.memory-current.json",
+      "bytes": 31051,
+      "sha256": "77d73c166b9070f4a6826fd1501dd822770d6dd53c2c850c97dcb63ed8265da9",
+      "revision": 32,
+      "fact_count": 24,
+      "observed_at": "2026-11-01T01:47:38.050347+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "code-reviewer-mother",
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-mother.memory-current.json",
+      "bytes": 16472,
+      "sha256": "c1aa3606089d82bfd2d4ab578dd566efae2716844c81b34c587e6748bf39904c",
+      "revision": 13,
+      "fact_count": 15,
+      "observed_at": "2026-11-01T01:47:38.050869+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "code-reviewer-sister",
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-sister.memory-current.json",
+      "bytes": 59610,
+      "sha256": "125b758ac3c8e52554fe1aeafc103bea9e9f564a03db9f2edacb08a5691efdf4",
+      "revision": 109,
+      "fact_count": 54,
+      "observed_at": "2026-11-01T01:47:38.051325+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-uncle.memory-current.json",
+      "bytes": 24451,
+      "sha256": "16074fcce540f5e881af7ad9d6445ad584c2f68562bd411f49c1510298b09932",
+      "revision": 8,
+      "fact_count": 25,
+      "observed_at": "2026-11-01T01:47:38.051740+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "code-reviewer",
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer.memory-current.json",
+      "bytes": 206316,
+      "sha256": "7e48a95aaf89a306e76d028117adecc15fbeed8f9006677ed6cc0727094c0973",
+      "revision": 1958,
+      "fact_count": 116,
+      "observed_at": "2026-11-01T01:47:38.052173+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "context-reviewer",
+      "path": "/Users/dancer/me/.masc/config/keepers/context-reviewer.memory-current.json",
+      "bytes": 208692,
+      "sha256": "1defcc8ec2a307c269f1eb3e66475b36d065b29865f6b208ed8207710abf2647",
+      "revision": 2096,
+      "fact_count": 125,
+      "observed_at": "2026-11-01T01:47:38.053214+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "path": "/Users/dancer/me/.masc/config/keepers/e-masc-the-leader.memory-current.json",
+      "bytes": 210698,
+      "sha256": "113d24d2691ffb538a69029ea58d73efd50f021b0909491d6fd8ee3444690729",
+      "revision": 3508,
+      "fact_count": 107,
+      "observed_at": "2026-11-01T01:47:38.054243+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "gayo-yoga-leader",
+      "path": "/Users/dancer/me/.masc/config/keepers/gayo-yoga-leader.memory-current.json",
+      "bytes": 39499,
+      "sha256": "86baff48c869439e82cdeb072cbc7b1337eb206b443ecc3c964a2cd9de6c6f31",
+      "revision": 180,
+      "fact_count": 40,
+      "observed_at": "2026-11-01T01:47:38.055215+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "glossary-maniac",
+      "path": "/Users/dancer/me/.masc/config/keepers/glossary-maniac.memory-current.json",
+      "bytes": 85613,
+      "sha256": "c827ff278a743439c01afe8a2b8e11c3a93b7ac64aae4c03144d83543e34e667",
+      "revision": 2054,
+      "fact_count": 48,
+      "observed_at": "2026-11-01T01:47:38.055589+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "goo-yang-bong",
+      "path": "/Users/dancer/me/.masc/config/keepers/goo-yang-bong.memory-current.json",
+      "bytes": 175500,
+      "sha256": "959f85167fbf0d16ec6429af5d473ad4a4c6ed4698b47b19f63400dbf0344e36",
+      "revision": 2898,
+      "fact_count": 76,
+      "observed_at": "2026-11-01T01:47:38.056072+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "hole-finder",
+      "path": "/Users/dancer/me/.masc/config/keepers/hole-finder.memory-current.json",
+      "bytes": 92400,
+      "sha256": "c25d65dc6e465832f0ded3e2712d799091631a16287f6fe0bf2c45d3f7d24f90",
+      "revision": 887,
+      "fact_count": 73,
+      "observed_at": "2026-11-01T01:47:38.056767+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "indie-geek-blue",
+      "path": "/Users/dancer/me/.masc/config/keepers/indie-geek-blue.memory-current.json",
+      "bytes": 104391,
+      "sha256": "39d932529b4edf3f5bc4462f3379e8d171e6ca51ed638a79ee40f353a98ee7f8",
+      "revision": 1270,
+      "fact_count": 76,
+      "observed_at": "2026-11-01T01:47:38.057276+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "jazz-developer",
+      "path": "/Users/dancer/me/.masc/config/keepers/jazz-developer.memory-current.json",
+      "bytes": 148353,
+      "sha256": "997f9ea1dd2d720de0b7402a17491e12770b2f7557a5debb3a4cf9075da431db",
+      "revision": 2152,
+      "fact_count": 94,
+      "observed_at": "2026-11-01T01:47:38.058012+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "judas-priest",
+      "path": "/Users/dancer/me/.masc/config/keepers/judas-priest.memory-current.json",
+      "bytes": 52370,
+      "sha256": "901e6c9a6f919eef6b2dd9ab10ece2552f7843d21a78dab8fc169cab27dc7445",
+      "revision": 271,
+      "fact_count": 48,
+      "observed_at": "2026-11-01T01:47:38.058674+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "kidsnote-incoming-dd-manager",
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-incoming-dd-manager.memory-current.json",
+      "bytes": 25697,
+      "sha256": "da426999ddba550ff9799e9c7b90aa6ee38fbbf57b13360eb4ee477180c886ac",
+      "revision": 156,
+      "fact_count": 15,
+      "observed_at": "2026-11-01T01:47:38.059144+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "kidsnote-job-manager",
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-job-manager.memory-current.json",
+      "bytes": 28384,
+      "sha256": "d966c872b8a4217dc56a76c446e0963f0383d40d6d3f06de96279ce90459a787",
+      "revision": 92,
+      "fact_count": 23,
+      "observed_at": "2026-11-01T01:47:38.059428+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "kidsnote-qa-hub-manager",
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-qa-hub-manager.memory-current.json",
+      "bytes": 18179,
+      "sha256": "d098783086f90edb8b4905e4c3c9f1325797dafc76587a0a24bff36efebf8c1d",
+      "revision": 18,
+      "fact_count": 12,
+      "observed_at": "2026-11-01T01:47:38.059703+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "kidsnote-slack-reader",
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-slack-reader.memory-current.json",
+      "bytes": 10607,
+      "sha256": "0dd2fccc69a8f1fe0de94438f4adb7707154dd2ae1eb2be70245fa6a86b19104",
+      "revision": 28,
+      "fact_count": 9,
+      "observed_at": "2026-11-01T01:47:38.060042+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "lab-sangsu",
+      "path": "/Users/dancer/me/.masc/config/keepers/lab-sangsu.memory-current.json",
+      "bytes": 26484,
+      "sha256": "6f4329624d95f7d9ba3c09e05c9c8a0dc342d9fb938467898b31f608eaa8809d",
+      "revision": 759,
+      "fact_count": 43,
+      "observed_at": "2026-11-01T01:47:38.060267+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "mad-scientist",
+      "path": "/Users/dancer/me/.masc/config/keepers/mad-scientist.memory-current.json",
+      "bytes": 58402,
+      "sha256": "c0675f8c76b3d1eed1dde37d88b15df77be839a4a1bd797d7e28211f0dde923d",
+      "revision": 190,
+      "fact_count": 40,
+      "observed_at": "2026-11-01T01:47:38.060700+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "masc-pro-builder",
+      "path": "/Users/dancer/me/.masc/config/keepers/masc-pro-builder.memory-current.json",
+      "bytes": 159322,
+      "sha256": "993932bca7950539fe7b22b141d81e211f1104c504cec74adb2b493502a365f2",
+      "revision": 2059,
+      "fact_count": 104,
+      "observed_at": "2026-11-01T01:47:38.061117+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "path": "/Users/dancer/me/.masc/config/keepers/masc-productor-owner.memory-current.json",
+      "bytes": 12025,
+      "sha256": "332adfba469d2fcb5d862c3521128131414f28b01de2b48bfa44b0443cba0348",
+      "revision": 9,
+      "fact_count": 6,
+      "observed_at": "2026-11-01T01:47:38.061925+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "microvm-probe-829",
+      "path": "/Users/dancer/me/.masc/config/keepers/microvm-probe-829.memory-current.json",
+      "bytes": 190,
+      "sha256": "a7704c9f9c53e954749520f81a1263a30cc71841b2fbb84230d44e35cf580b61",
+      "revision": 4,
+      "fact_count": 0,
+      "observed_at": "2026-11-01T01:47:38.062159+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "msx-retro-mania",
+      "path": "/Users/dancer/me/.masc/config/keepers/msx-retro-mania.memory-current.json",
+      "bytes": 111876,
+      "sha256": "09a40e382caffb0b04a4672e8ca8d5bcf0db266e86bf55602a44b262d0962e43",
+      "revision": 4094,
+      "fact_count": 54,
+      "observed_at": "2026-11-01T01:47:38.062464+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "music-sensei",
+      "path": "/Users/dancer/me/.masc/config/keepers/music-sensei.memory-current.json",
+      "bytes": 34707,
+      "sha256": "174e8b988c63d490c6770add2b9805f231c6eca4775e4071e99fc48bd84c8962",
+      "revision": 107,
+      "fact_count": 27,
+      "observed_at": "2026-11-01T01:47:38.062978+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "ocaml-agent-ic",
+      "path": "/Users/dancer/me/.masc/config/keepers/ocaml-agent-ic.memory-current.json",
+      "bytes": 178429,
+      "sha256": "460c3575060804a3a6278dacf83a021623db38faec20b8baacd472408ae1fd19",
+      "revision": 2383,
+      "fact_count": 96,
+      "observed_at": "2026-11-01T01:47:38.063342+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "ocaml-refactor-woman",
+      "path": "/Users/dancer/me/.masc/config/keepers/ocaml-refactor-woman.memory-current.json",
+      "bytes": 124526,
+      "sha256": "f2edc9339f7584dc01dc476f594670f6d811c10a516e3e6fc298640021a11929",
+      "revision": 600,
+      "fact_count": 66,
+      "observed_at": "2026-11-01T01:47:38.064234+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "polisher",
+      "path": "/Users/dancer/me/.masc/config/keepers/polisher.memory-current.json",
+      "bytes": 157452,
+      "sha256": "8a33878d088255a907312d8d81bb6287794bdbf5a943fa2e0c5d55c1a08bdbca",
+      "revision": 4389,
+      "fact_count": 91,
+      "observed_at": "2026-11-01T01:47:38.064928+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "pr-updater",
+      "path": "/Users/dancer/me/.masc/config/keepers/pr-updater.memory-current.json",
+      "bytes": 129641,
+      "sha256": "2bd0c57ef0896fa68274572474694fa0ea1f425d36bfba41df03ef5fa130f806",
+      "revision": 5072,
+      "fact_count": 69,
+      "observed_at": "2026-11-01T01:47:38.065716+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "rondo",
+      "path": "/Users/dancer/me/.masc/config/keepers/rondo.memory-current.json",
+      "bytes": 100316,
+      "sha256": "755ed184369efaf5a8d1bc1a4061f4f6d4acccf84c00a5486b5d933a10adb3b9",
+      "revision": 7653,
+      "fact_count": 64,
+      "observed_at": "2026-11-01T01:47:38.066383+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "rust-hwp-guy",
+      "path": "/Users/dancer/me/.masc/config/keepers/rust-hwp-guy.memory-current.json",
+      "bytes": 49562,
+      "sha256": "eb2bf999d60e8f7ecfdf55e66a78b6085c00a8bccd4698f54d1d2a2fbb32a992",
+      "revision": 614,
+      "fact_count": 35,
+      "observed_at": "2026-11-01T01:47:38.066865+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "sangsu",
+      "path": "/Users/dancer/me/.masc/config/keepers/sangsu.memory-current.json",
+      "bytes": 54396,
+      "sha256": "144af129ed47d7a0f9b318968b289b3ba071639edf10453324f667ad0ac86d1d",
+      "revision": 4889,
+      "fact_count": 50,
+      "observed_at": "2026-11-01T01:47:38.067330+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "simplifyer",
+      "path": "/Users/dancer/me/.masc/config/keepers/simplifyer.memory-current.json",
+      "bytes": 42927,
+      "sha256": "a6598cdf9460054089eca797e9c08c9ff3e1542b3e7cbab9c5815708c6601a2e",
+      "revision": 918,
+      "fact_count": 30,
+      "observed_at": "2026-11-01T01:47:38.067827+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "taskmaster",
+      "path": "/Users/dancer/me/.masc/config/keepers/taskmaster.memory-current.json",
+      "bytes": 38896,
+      "sha256": "5e31d7519c7f6e91cfc7b47d176a9dc2fcb5b9fb6fe90d9342352a5010a20022",
+      "revision": 1062,
+      "fact_count": 72,
+      "observed_at": "2026-11-01T01:47:38.068304+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "temporal-continuity-20261030-1727",
+      "path": "/Users/dancer/me/.masc/config/keepers/temporal-continuity-20261030-1727.memory-current.json",
+      "bytes": 7664,
+      "sha256": "3c873b3988925b142b76c137f3e2d92df9757c5ee519147b776b5950dee95c4d",
+      "revision": 4,
+      "fact_count": 2,
+      "observed_at": "2026-11-01T01:47:38.068654+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "tui-developer",
+      "path": "/Users/dancer/me/.masc/config/keepers/tui-developer.memory-current.json",
+      "bytes": 161573,
+      "sha256": "4edff1e0a9e6f9118ef3015c76e7e29db21bb1c1d53cb0794e966bc4a2864b51",
+      "revision": 1206,
+      "fact_count": 112,
+      "observed_at": "2026-11-01T01:47:38.068963+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "wkbl-data",
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-data.memory-current.json",
+      "bytes": 80732,
+      "sha256": "948a70715c44c44d1b9a1acfded52e4e2c23e4d8fb26ab48ea98df25b55354c1",
+      "revision": 843,
+      "fact_count": 42,
+      "observed_at": "2026-11-01T01:47:38.069979+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "wkbl-front",
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-front.memory-current.json",
+      "bytes": 113062,
+      "sha256": "499b2b8df675a8100685a7c9c25ddf8b424e199ca21581f98501dd25faa42796",
+      "revision": 1113,
+      "fact_count": 68,
+      "observed_at": "2026-11-01T01:47:38.070353+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "wkbl-growth",
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-growth.memory-current.json",
+      "bytes": 115769,
+      "sha256": "05a384e4b567dc0c5a617f2e952266b0c5810424f19596a0f6f2a225e15f2810",
+      "revision": 919,
+      "fact_count": 74,
+      "observed_at": "2026-11-01T01:47:38.071066+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-web-leader.memory-current.json",
+      "bytes": 124404,
+      "sha256": "ae9d380d0b1a78316d2b181deb47d2b44174e8eb847296d1afe04d79d8ed908a",
+      "revision": 1360,
+      "fact_count": 80,
+      "observed_at": "2026-11-01T01:47:38.071848+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "won-chik",
+      "path": "/Users/dancer/me/.masc/config/keepers/won-chik.memory-current.json",
+      "bytes": 88564,
+      "sha256": "14de86694db75db0f2c0f42255a9bac38105ab6a1b6160eab63f6580a9428766",
+      "revision": 2288,
+      "fact_count": 56,
+      "observed_at": "2026-11-01T01:47:38.072453+00:00",
+      "path_stable_during_read": true
+    },
+    {
+      "keeper": "you-never-change",
+      "path": "/Users/dancer/me/.masc/config/keepers/you-never-change.memory-current.json",
+      "bytes": 10694,
+      "sha256": "99c4f8f7d7985d748d788c816bcda1479dfc0e8bc393341ee2a9e57bf1d8b7a7",
+      "revision": 1,
+      "fact_count": 7,
+      "observed_at": "2026-11-01T01:47:38.073118+00:00",
+      "path_stable_during_read": true
+    }
+  ],
+  "snapshot_errors": [],
+  "journal_file_metadata": [
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/build-maniac.memory-journal.jsonl",
+      "bytes": 4237,
+      "mtime_ns": 1793350646586198364
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-brother.memory-journal.jsonl",
+      "bytes": 505961,
+      "mtime_ns": 1793163616666669555
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-father.memory-journal.jsonl",
+      "bytes": 93521,
+      "mtime_ns": 1793495886379346362
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-mother.memory-journal.jsonl",
+      "bytes": 32285,
+      "mtime_ns": 1793496553046702898
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-sister.memory-journal.jsonl",
+      "bytes": 303810,
+      "mtime_ns": 1793126625680928411
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer-uncle.memory-journal.jsonl",
+      "bytes": 21304,
+      "mtime_ns": 1793454449643017505
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/code-reviewer.memory-journal.jsonl",
+      "bytes": 8683519,
+      "mtime_ns": 1793497475741417832
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/context-reviewer.memory-journal.jsonl",
+      "bytes": 7807540,
+      "mtime_ns": 1793469903298308548
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/e-masc-the-leader.memory-journal.jsonl",
+      "bytes": 13515242,
+      "mtime_ns": 1793147035335744694
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/gayo-yoga-leader.memory-journal.jsonl",
+      "bytes": 640803,
+      "mtime_ns": 1793497143374706973
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/geek-scout.memory-journal.jsonl",
+      "bytes": 1625542,
+      "mtime_ns": 1792981993944236126
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/glossary-maniac.memory-journal.jsonl",
+      "bytes": 6548086,
+      "mtime_ns": 1792980360099273359
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/goo-yang-bong.memory-journal.jsonl",
+      "bytes": 7685248,
+      "mtime_ns": 1793456127319777183
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/hole-finder.memory-journal.jsonl",
+      "bytes": 3123161,
+      "mtime_ns": 1792493981856298358
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/indie-geek-blue.memory-journal.jsonl",
+      "bytes": 4377162,
+      "mtime_ns": 1792763123489595262
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/jazz-developer.memory-journal.jsonl",
+      "bytes": 2973188,
+      "mtime_ns": 1792981215410251863
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/judas-priest.memory-journal.jsonl",
+      "bytes": 1159226,
+      "mtime_ns": 1792849490418877771
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-incoming-dd-manager.memory-journal.jsonl",
+      "bytes": 788556,
+      "mtime_ns": 1793496226259789900
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-job-manager.memory-journal.jsonl",
+      "bytes": 658809,
+      "mtime_ns": 1793455568435571121
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-qa-hub-manager.memory-journal.jsonl",
+      "bytes": 233856,
+      "mtime_ns": 1793494963047001922
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/kidsnote-slack-reader.memory-journal.jsonl",
+      "bytes": 110037,
+      "mtime_ns": 1793324234244401611
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/mad-scientist.memory-journal.jsonl",
+      "bytes": 1070362,
+      "mtime_ns": 1793456564537530287
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/masc-pro-builder.memory-journal.jsonl",
+      "bytes": 7340070,
+      "mtime_ns": 1793127498244111027
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/masc-productor-owner.memory-journal.jsonl",
+      "bytes": 1849422,
+      "mtime_ns": 1793492804565651316
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/msx-retro-mania.memory-journal.jsonl",
+      "bytes": 9877773,
+      "mtime_ns": 1793461620301241277
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/music-sensei.memory-journal.jsonl",
+      "bytes": 910488,
+      "mtime_ns": 1793453681927287618
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/ocaml-agent-ic.memory-journal.jsonl",
+      "bytes": 7706916,
+      "mtime_ns": 1793493377587393781
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/ocaml-refactor-woman.memory-journal.jsonl",
+      "bytes": 4154223,
+      "mtime_ns": 1793234823995211017
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/polisher.memory-journal.jsonl",
+      "bytes": 3650785,
+      "mtime_ns": 1793196469425272266
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/pr-updater.memory-journal.jsonl",
+      "bytes": 7672788,
+      "mtime_ns": 1793492929587487022
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/rondo.memory-journal.jsonl",
+      "bytes": 4193193,
+      "mtime_ns": 1792980371960667574
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/rust-hwp-guy.memory-journal.jsonl",
+      "bytes": 1240324,
+      "mtime_ns": 1792499317019295465
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/sangsu.memory-journal.jsonl",
+      "bytes": 6666153,
+      "mtime_ns": 1793454648133085682
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/simplifyer.memory-journal.jsonl",
+      "bytes": 1985649,
+      "mtime_ns": 1793455944741862147
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/temporal-continuity-20261030-1727.memory-journal.jsonl",
+      "bytes": 12743,
+      "mtime_ns": 1793351416080698837
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/tui-developer.memory-journal.jsonl",
+      "bytes": 5569894,
+      "mtime_ns": 1793085780239117899
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-data.memory-journal.jsonl",
+      "bytes": 2611601,
+      "mtime_ns": 1793364740851760673
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-front.memory-journal.jsonl",
+      "bytes": 4493306,
+      "mtime_ns": 1793466153678654902
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-growth.memory-journal.jsonl",
+      "bytes": 3048890,
+      "mtime_ns": 1793486893418600908
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/wkbl-web-leader.memory-journal.jsonl",
+      "bytes": 6488842,
+      "mtime_ns": 1793145485664029476
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/won-chik.memory-journal.jsonl",
+      "bytes": 4006677,
+      "mtime_ns": 1792768955769488769
+    },
+    {
+      "path": "/Users/dancer/me/.masc/config/keepers/you-never-change.memory-journal.jsonl",
+      "bytes": 2034871,
+      "mtime_ns": 1793495232886575595
+    }
+  ],
+  "turn_record_files": [
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "read_bytes": 97837,
+      "sha256": "630a52a8ddbff18682cff49c3c0415d8904aa285c5fb17f541aa492d83dcc085"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "read_bytes": 32526,
+      "sha256": "45574bb0fe10a43d507f45af44ccf346dca2048d52494a1aa77a485de83f42ee"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "read_bytes": 24778,
+      "sha256": "b5cba2a07386a3c67c41062aa5598133d45d268f5ba3c2705e1d86ca786c284f"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "read_bytes": 25835,
+      "sha256": "1ed5c69fd67056237e03ed7df588d1dea53514bd3782e5a9ea787a8406a1c48f"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "read_bytes": 39497,
+      "sha256": "007c1ef125e00df4abc347366bfcdba13c20b9eba4951e4def04f4e1f70f9629"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "read_bytes": 22919,
+      "sha256": "5708683a5ce6aa329545d4849790d25e051ffd459eaf817d9fda835c1ce58586"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/e-masc-the-leader/turn-records/2026-11/01.jsonl",
+      "read_bytes": 22361,
+      "sha256": "25f1479d7fc5ef65a2992ae284a659cbe8fbceba740e5d3ead99103be00c6ef2"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/gayo-yoga-leader/turn-records/2026-11/01.jsonl",
+      "read_bytes": 11584,
+      "sha256": "f8ad29b0dd29312891fc0c96c447f2d0f283e345e98fd8940aa29db84741e6d3"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-incoming-dd-manager/turn-records/2026-11/01.jsonl",
+      "read_bytes": 23609,
+      "sha256": "80697fa690d7213f4d851c5d565d0e8ee787b39edc5268be9c3b8ffc497a499f"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-slack-reader/turn-records/2026-11/01.jsonl",
+      "read_bytes": 11868,
+      "sha256": "ce5224a0955b4cc90a3e493fc3a3ee6be3f7f604c4a6c592ce8d4bc230f24dfb"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/masc-productor-owner/turn-records/2026-11/01.jsonl",
+      "read_bytes": 17839,
+      "sha256": "fd87c8753585e3af592b24ea8f3697990f40359e0467bf804edf9d93a90d8150"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "read_bytes": 78958,
+      "sha256": "e9a81360689abc71380bc6552b8c0a416934eb907b9641f5419fae680e6b69e6"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/music-sensei/turn-records/2026-11/01.jsonl",
+      "read_bytes": 7898,
+      "sha256": "1493662c873951eaaa1e5e0047ea7def8980e3648bc1ed97351dddba4afa0952"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/ocaml-refactor-woman/turn-records/2026-11/01.jsonl",
+      "read_bytes": 7773,
+      "sha256": "26ea9979803a2746b5a7191d115e045bc010151d5009ea87fe8467f6bc2031fd"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "read_bytes": 81913,
+      "sha256": "8072f45bddb6b0fcaa3a898fe5bc6fc74ee1055f5793592a2924aa2730136335"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/sangsu/turn-records/2026-11/01.jsonl",
+      "read_bytes": 19281,
+      "sha256": "43ad3a04496bfded62e0caf09829d14f1f0d51dc8c55c1fe3891eceef8ee65a8"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-data/turn-records/2026-11/01.jsonl",
+      "read_bytes": 21069,
+      "sha256": "45daa331ccb564559a75baa192a819bded676a6c1362bf7ba2936a6beaa92ed9"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "read_bytes": 38282,
+      "sha256": "19bf76be8527a1d7982c94e5a9dea4aa7e71c17e3ad3194c99b40754f67bb45c"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-growth/turn-records/2026-11/01.jsonl",
+      "read_bytes": 30168,
+      "sha256": "e6e6ae0ab3fa39f074ef6c6dbe66e19c5be6c610c39dba4a6fcb1ebdcff347bd"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "read_bytes": 38101,
+      "sha256": "91475e169b0f49cc52f8f292c93c7774fe7ab8ebdd95cac629cff3c5b868db30"
+    }
+  ],
+  "records": [
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793493467.23872,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12461",
+      "runtime_profile": "openrouter.openrouter-deepseek-v4-1-flash",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 761
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1055
+        }
+      ],
+      "request_body_bytes": 760726
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793494376.875505,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12462",
+      "runtime_profile": "openrouter.openrouter-deepseek-v4-1-flash",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 761
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1055
+        }
+      ],
+      "request_body_bytes": 763982
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793494499.967189,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12463",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 761
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1055
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793494512.221807,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12464",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793494538.129555,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12465",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 9,
+      "ts": 1793494580.187833,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12466",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 10,
+      "ts": 1793494646.076014,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12467",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 11,
+      "ts": 1793494703.57429,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12468",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 12,
+      "ts": 1793494949.000543,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12469",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "7402ed3b4e3cbe4d6f1b85718b60beab4df67b71d73f7f6434f8718870fed4ad"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 13,
+      "ts": 1793495248.072258,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12470",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 14,
+      "ts": 1793495278.938039,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12471",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 15,
+      "ts": 1793495379.858668,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12472",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 16,
+      "ts": 1793495554.834388,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12473",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 17,
+      "ts": 1793495850.488829,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12474",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 18,
+      "ts": 1793496216.680346,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12475",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 19,
+      "ts": 1793496277.663005,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12476",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 20,
+      "ts": 1793496491.316192,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12477",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 21,
+      "ts": 1793496520.155979,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12478",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 22,
+      "ts": 1793496751.601568,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12479",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 23,
+      "ts": 1793497065.530538,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12480",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 24,
+      "ts": 1793497102.817603,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12481",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer/turn-records/2026-11/01.jsonl",
+      "line": 25,
+      "ts": 1793497358.617745,
+      "keeper": "code-reviewer",
+      "turn_ref": "trace-1790137685250-00000#12482",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1055,
+          "digest": "9c242a8d5fd6b1c030485cca0926bd3885acf4567c757de032e9d36930e6be87"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 1,
+      "ts": 1793494617.691417,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1829",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 761
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1053
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793494698.849472,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1830",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793494767.278247,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1831",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793495013.99443,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1832",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495351.538787,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1833",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495382.525433,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1834",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793495953.890161,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1835",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793496318.533791,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1836",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 9,
+      "ts": 1793496428.285192,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1837",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 10,
+      "ts": 1793496635.192361,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1838",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-brother/turn-records/2026-11/01.jsonl",
+      "line": 11,
+      "ts": 1793497151.952743,
+      "keeper": "code-reviewer-brother",
+      "turn_ref": "trace-1792566606674-00000#1839",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "08763faa59e48fce26e9a43e5c3b1c20aa2ba1d3c4e86040e82ca3f85e805bb2"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "32ad4ece901db4b710aeb1c0aa7b22081fdecd81e179ccf58fe3b9f90c38ca6a"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "line": 1,
+      "ts": 1793494559.934337,
+      "keeper": "code-reviewer-father",
+      "turn_ref": "trace-1793025151961-00000#292",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "9b2e41498883428cc38b66d67d52f07da44e19f12a76e32d553d7272184f63e1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "188f51e541abf7a3e26fa589133ea7a838feeec7aa8f1173cb34d96493fd1502"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 759
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793494600.348594,
+      "keeper": "code-reviewer-father",
+      "turn_ref": "trace-1793025151961-00000#293",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "9b2e41498883428cc38b66d67d52f07da44e19f12a76e32d553d7272184f63e1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "188f51e541abf7a3e26fa589133ea7a838feeec7aa8f1173cb34d96493fd1502"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 759
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793494706.821717,
+      "keeper": "code-reviewer-father",
+      "turn_ref": "trace-1793025151961-00000#294",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "9b2e41498883428cc38b66d67d52f07da44e19f12a76e32d553d7272184f63e1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "188f51e541abf7a3e26fa589133ea7a838feeec7aa8f1173cb34d96493fd1502"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 759
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793494818.886052,
+      "keeper": "code-reviewer-father",
+      "turn_ref": "trace-1793025151961-00000#295",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "9b2e41498883428cc38b66d67d52f07da44e19f12a76e32d553d7272184f63e1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "188f51e541abf7a3e26fa589133ea7a838feeec7aa8f1173cb34d96493fd1502"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 759
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495018.447127,
+      "keeper": "code-reviewer-father",
+      "turn_ref": "trace-1793025151961-00000#296",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "9b2e41498883428cc38b66d67d52f07da44e19f12a76e32d553d7272184f63e1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "188f51e541abf7a3e26fa589133ea7a838feeec7aa8f1173cb34d96493fd1502"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 759
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793497533.341989,
+      "keeper": "code-reviewer-father",
+      "turn_ref": "trace-1793025151961-00000#297",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 2011788
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793493462.200306,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#733",
+      "runtime_profile": "openrouter.openrouter-deepseek-v4-1-flash",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 352
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": 294770
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793494584.559484,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#734",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 352
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1052
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793494732.708966,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#735",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495297.722984,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#736",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495377.616358,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#737",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793497168.20341,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#738",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-mother/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793497227.812148,
+      "keeper": "code-reviewer-mother",
+      "turn_ref": "trace-1793027879955-00003#739",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1052,
+          "digest": "87e2de32bbbce667415303fd79bdccdde492cb9f73b2700c787de3d5232931c6"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 1,
+      "ts": 1793494662.359481,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1575",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 352
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1053
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793494810.063266,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1576",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793495053.054072,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1577",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793495219.815391,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1578",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495315.397156,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1579",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495446.292409,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1580",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793495875.628966,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1581",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793496364.424761,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1582",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 9,
+      "ts": 1793496602.549718,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1583",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 10,
+      "ts": 1793497095.439557,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1584",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 11,
+      "ts": 1793497333.490868,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1585",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-sister/turn-records/2026-11/01.jsonl",
+      "line": 12,
+      "ts": 1793497417.016227,
+      "keeper": "code-reviewer-sister",
+      "turn_ref": "trace-1792568487679-00001#1586",
+      "runtime_profile": "codex_e641909e.gpt-6.1-terra-xhigh_e641909e",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1053,
+          "digest": "bf702e740c96e691ab13fc8f1a01462a16980d7f05d76aafd6ee6d4015bb3ca1"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 1,
+      "ts": 1793494710.218379,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#335",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "4ae8cb8e75c06a0fca230cd47b971fe954a4ea8a188f7412cef991243c763104"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 759
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1051
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793494730.021981,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#336",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 759,
+          "digest": "4ae8cb8e75c06a0fca230cd47b971fe954a4ea8a188f7412cef991243c763104"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793495012.897927,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#337",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "71620a658c085a4989c348bcc6d1fbf961915e72fb537c44a2f3b197e0ae7472"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793495414.383142,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#338",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "71620a658c085a4989c348bcc6d1fbf961915e72fb537c44a2f3b197e0ae7472"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495928.729689,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#339",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "71620a658c085a4989c348bcc6d1fbf961915e72fb537c44a2f3b197e0ae7472"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793496729.403941,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#340",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "71620a658c085a4989c348bcc6d1fbf961915e72fb537c44a2f3b197e0ae7472"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793497063.492433,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#341",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "71620a658c085a4989c348bcc6d1fbf961915e72fb537c44a2f3b197e0ae7472"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/code-reviewer-uncle/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793497526.081082,
+      "keeper": "code-reviewer-uncle",
+      "turn_ref": "trace-1793027880185-00004#342",
+      "runtime_profile": "antigravity_subscription.gemini-4-argon-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "75160198c6cb7f2abd7adc258ff1a4e2b723ae05e691e64d10f4e2a3df515de4"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "71620a658c085a4989c348bcc6d1fbf961915e72fb537c44a2f3b197e0ae7472"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/e-masc-the-leader/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793493961.135508,
+      "keeper": "e-masc-the-leader",
+      "turn_ref": "trace-1789804858308-00001#10555",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1223238
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/e-masc-the-leader/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793495025.295471,
+      "keeper": "e-masc-the-leader",
+      "turn_ref": "trace-1789804858308-00001#10556",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1242868
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/e-masc-the-leader/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793496096.662983,
+      "keeper": "e-masc-the-leader",
+      "turn_ref": "trace-1789804858308-00001#10557",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1254343
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/gayo-yoga-leader/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793493564.964639,
+      "keeper": "gayo-yoga-leader",
+      "turn_ref": "trace-1790675782891-00000#284",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "33b250f089e4fe4cad07b90414efa175d644106c70d7d48482a7246dde1ba255"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 352
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1147
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/gayo-yoga-leader/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793495418.255362,
+      "keeper": "gayo-yoga-leader",
+      "turn_ref": "trace-1790675782891-00000#285",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "33b250f089e4fe4cad07b90414efa175d644106c70d7d48482a7246dde1ba255"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/gayo-yoga-leader/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793497242.667051,
+      "keeper": "gayo-yoga-leader",
+      "turn_ref": "trace-1790675782891-00000#286",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "33b250f089e4fe4cad07b90414efa175d644106c70d7d48482a7246dde1ba255"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-incoming-dd-manager/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793493468.943403,
+      "keeper": "kidsnote-incoming-dd-manager",
+      "turn_ref": "trace-1791340864208-00000#1441",
+      "runtime_profile": "antigravity_subscription.claude-sonnet-5-5-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1146,
+          "digest": "344958ac5d2f487005ad2b0b1ccb41a6b48fc8d637107f1d1e0f0e3ef2adc3ef"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "01613400b60a30c9142480765052e92288b2175138c5f50fa4249a9b4d674947"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 760
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1146
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-incoming-dd-manager/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495096.333755,
+      "keeper": "kidsnote-incoming-dd-manager",
+      "turn_ref": "trace-1791340864208-00000#1442",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1146,
+          "digest": "344958ac5d2f487005ad2b0b1ccb41a6b48fc8d637107f1d1e0f0e3ef2adc3ef"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "01613400b60a30c9142480765052e92288b2175138c5f50fa4249a9b4d674947"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 760
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1146
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-incoming-dd-manager/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495115.352469,
+      "keeper": "kidsnote-incoming-dd-manager",
+      "turn_ref": "trace-1791340864208-00000#1443",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1146,
+          "digest": "344958ac5d2f487005ad2b0b1ccb41a6b48fc8d637107f1d1e0f0e3ef2adc3ef"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "01613400b60a30c9142480765052e92288b2175138c5f50fa4249a9b4d674947"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-incoming-dd-manager/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793495289.277494,
+      "keeper": "kidsnote-incoming-dd-manager",
+      "turn_ref": "trace-1791340864208-00000#1444",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1146,
+          "digest": "344958ac5d2f487005ad2b0b1ccb41a6b48fc8d637107f1d1e0f0e3ef2adc3ef"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "01613400b60a30c9142480765052e92288b2175138c5f50fa4249a9b4d674947"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-incoming-dd-manager/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793497124.804426,
+      "keeper": "kidsnote-incoming-dd-manager",
+      "turn_ref": "trace-1791340864208-00000#1445",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1146,
+          "digest": "344958ac5d2f487005ad2b0b1ccb41a6b48fc8d637107f1d1e0f0e3ef2adc3ef"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-slack-reader/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793493466.313049,
+      "keeper": "kidsnote-slack-reader",
+      "turn_ref": "trace-1792651452565-00000#693",
+      "runtime_profile": "antigravity_subscription.claude-sonnet-5-5-low",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "a3f246a5ae9861d7c293dc83f52a6c396fa39dfb277fecc01f5ed4934e461d05"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "5d0b753a43e2029eabb112dbb36d2c25a5b392c6e547694be4f8defd92412b99"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 760
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1051
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/kidsnote-slack-reader/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793495090.093084,
+      "keeper": "kidsnote-slack-reader",
+      "turn_ref": "trace-1792651452565-00000#694",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1051,
+          "digest": "a3f246a5ae9861d7c293dc83f52a6c396fa39dfb277fecc01f5ed4934e461d05"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "5d0b753a43e2029eabb112dbb36d2c25a5b392c6e547694be4f8defd92412b99"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 760
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1051
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/masc-productor-owner/turn-records/2026-11/01.jsonl",
+      "line": 3,
+      "ts": 1793495941.593545,
+      "keeper": "masc-productor-owner",
+      "turn_ref": "trace-1791467603506-00000#1781",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 260757
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 13,
+      "ts": 1793493489.301164,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8032",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 14,
+      "ts": 1793493637.700337,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8033",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 15,
+      "ts": 1793493930.786746,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8034",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 16,
+      "ts": 1793494245.008986,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8035",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 17,
+      "ts": 1793494520.548175,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8036",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 18,
+      "ts": 1793494807.445774,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8037",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 19,
+      "ts": 1793495109.755671,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8038",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 20,
+      "ts": 1793495303.877702,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8039",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 21,
+      "ts": 1793495415.347486,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8040",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 22,
+      "ts": 1793495718.166014,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8041",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 23,
+      "ts": 1793496040.701451,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8042",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 24,
+      "ts": 1793496325.018871,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8043",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 25,
+      "ts": 1793496621.850619,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8044",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 26,
+      "ts": 1793496906.225665,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8045",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 27,
+      "ts": 1793497117.450955,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8046",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 28,
+      "ts": 1793497212.823814,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8047",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/msx-retro-mania/turn-records/2026-11/01.jsonl",
+      "line": 29,
+      "ts": 1793497592.054002,
+      "keeper": "msx-retro-mania",
+      "turn_ref": "trace-1788882319100-00000#8048",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "ac7974ca96b79fa90ebd420af4af26478e57fa0d7ccbacaa101b67350f6af27b"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 760,
+          "digest": "e8ec690f0b5543942d7ee5549a6e49d8c4878bf2499364206feef6d39cf3a501"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 760
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1147
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/music-sensei/turn-records/2026-11/01.jsonl",
+      "line": 2,
+      "ts": 1793494006.904599,
+      "keeper": "music-sensei",
+      "turn_ref": "trace-1792146801692-00000#799",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 915981
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 12,
+      "ts": 1793493492.12497,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14638",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 13,
+      "ts": 1793493531.428131,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14639",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 14,
+      "ts": 1793493683.996277,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14640",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 15,
+      "ts": 1793493987.533481,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14641",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 16,
+      "ts": 1793494275.890042,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14642",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 17,
+      "ts": 1793494588.754455,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14643",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 18,
+      "ts": 1793494879.120646,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14644",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 19,
+      "ts": 1793495179.678426,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14645",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 20,
+      "ts": 1793495307.44356,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14646",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 21,
+      "ts": 1793495377.831471,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14647",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 22,
+      "ts": 1793495496.841821,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14648",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 23,
+      "ts": 1793495787.423525,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14649",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 24,
+      "ts": 1793496074.634569,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14650",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 25,
+      "ts": 1793496380.655819,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14651",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 26,
+      "ts": 1793496681.917686,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14652",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 27,
+      "ts": 1793496985.910455,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14653",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 28,
+      "ts": 1793497121.079559,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14654",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 29,
+      "ts": 1793497281.271337,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14655",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/pr-updater/turn-records/2026-11/01.jsonl",
+      "line": 30,
+      "ts": 1793497580.827387,
+      "keeper": "pr-updater",
+      "turn_ref": "trace-1788332832541-00001#14656",
+      "runtime_profile": "antigravity_subscription.gemini-3-8-flash-medium",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "deedb95b76ec3d46ce851ec113598f845f64c111249b7ba8a535f9ce95751962"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/sangsu/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793493532.270901,
+      "keeper": "sangsu",
+      "turn_ref": "trace-1788310783624-00004#5059",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "567ccc03b069547474d50f0d16e3876be467976354c121537ad07696dc90b024"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 762,
+          "digest": "c6b8a42e6d59d06bbed6524ef332a53535b3600b49eebbb8e3b93b9439c71d85"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 762
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1147
+        }
+      ],
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/sangsu/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793495375.395935,
+      "keeper": "sangsu",
+      "turn_ref": "trace-1788310783624-00004#5060",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "567ccc03b069547474d50f0d16e3876be467976354c121537ad07696dc90b024"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 762,
+          "digest": "c6b8a42e6d59d06bbed6524ef332a53535b3600b49eebbb8e3b93b9439c71d85"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/sangsu/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495675.462018,
+      "keeper": "sangsu",
+      "turn_ref": "trace-1788310783624-00004#5061",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "567ccc03b069547474d50f0d16e3876be467976354c121537ad07696dc90b024"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 762,
+          "digest": "c6b8a42e6d59d06bbed6524ef332a53535b3600b49eebbb8e3b93b9439c71d85"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/sangsu/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793497207.984505,
+      "keeper": "sangsu",
+      "turn_ref": "trace-1788310783624-00004#5062",
+      "runtime_profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "567ccc03b069547474d50f0d16e3876be467976354c121537ad07696dc90b024"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 762,
+          "digest": "c6b8a42e6d59d06bbed6524ef332a53535b3600b49eebbb8e3b93b9439c71d85"
+        }
+      ],
+      "attributed_memory_components": null,
+      "request_body_bytes": null
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-data/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793494223.287935,
+      "keeper": "wkbl-data",
+      "turn_ref": "trace-1790266916225-00000#2317",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1167483
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-data/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793497150.418338,
+      "keeper": "wkbl-data",
+      "turn_ref": "trace-1790266916225-00000#2318",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1172811
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793494169.540748,
+      "keeper": "wkbl-front",
+      "turn_ref": "trace-1790267159649-00001#2622",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 440153
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793494816.579532,
+      "keeper": "wkbl-front",
+      "turn_ref": "trace-1790267159649-00001#2623",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 450857
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495368.038951,
+      "keeper": "wkbl-front",
+      "turn_ref": "trace-1790267159649-00001#2624",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 450169
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793496603.348828,
+      "keeper": "wkbl-front",
+      "turn_ref": "trace-1790267159649-00001#2625",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 454445
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793497171.136801,
+      "keeper": "wkbl-front",
+      "turn_ref": "trace-1790267159649-00001#2626",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 453770
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-front/turn-records/2026-11/01.jsonl",
+      "line": 9,
+      "ts": 1793497650.674291,
+      "keeper": "wkbl-front",
+      "turn_ref": "trace-1790267159649-00001#2627",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 462569
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-growth/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793493474.551235,
+      "keeper": "wkbl-growth",
+      "turn_ref": "trace-1790267405188-00002#2292",
+      "runtime_profile": "openrouter.openrouter-deepseek-v4-1-flash",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "465fc6c7f10c5481929fed21aba79863e57b8ff61f20b0012038fc20c95c10a8"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "bfe10eb97b181e04cd6f626afb3c88ffe6b18c44e4010c198765e5f5f9b1c53a"
+        },
+        {
+          "block": "recalled_memory",
+          "bytes": 74958,
+          "digest": "38f89f932e22cffbb9dbc5e7f2c028928f36236ddf950e7aaba08c59baa9f6ed"
+        },
+        {
+          "block": "recalled_memory_status",
+          "bytes": 3742,
+          "digest": "8c4f4ce62db607f912a49521bd4a6bf7b75aca34002087bc8310ec91e3ac0c4e"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 761
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1147
+        },
+        {
+          "component": "prompt.recalled_memory",
+          "bytes": 74958
+        },
+        {
+          "component": "prompt.recalled_memory_status",
+          "bytes": 3742
+        }
+      ],
+      "request_body_bytes": 1324895
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-growth/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793494384.422385,
+      "keeper": "wkbl-growth",
+      "turn_ref": "trace-1790267405188-00002#2293",
+      "runtime_profile": "openrouter.openrouter-deepseek-v4-1-flash",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1147,
+          "digest": "465fc6c7f10c5481929fed21aba79863e57b8ff61f20b0012038fc20c95c10a8"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 761,
+          "digest": "bfe10eb97b181e04cd6f626afb3c88ffe6b18c44e4010c198765e5f5f9b1c53a"
+        },
+        {
+          "block": "recalled_memory",
+          "bytes": 72365,
+          "digest": "bc0a9b2ba8c4f4ebfe8b2280c7d9c0314646c2665c6f6791e29f38f1e4cfa252"
+        },
+        {
+          "block": "recalled_memory_status",
+          "bytes": 3596,
+          "digest": "5bbdbac7cd3e4d59f4fdf440c5b21614a9f63b2a7398205910590da762be3819"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 761
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1147
+        },
+        {
+          "component": "prompt.recalled_memory",
+          "bytes": 72365
+        },
+        {
+          "component": "prompt.recalled_memory_status",
+          "bytes": 3596
+        }
+      ],
+      "request_body_bytes": 1322139
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-growth/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495402.162041,
+      "keeper": "wkbl-growth",
+      "turn_ref": "trace-1790267405188-00002#2294",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 730363
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-growth/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793497085.687657,
+      "keeper": "wkbl-growth",
+      "turn_ref": "trace-1790267405188-00002#2295",
+      "runtime_profile": "glm-coding.glm-5.3-flash",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 743583
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "line": 4,
+      "ts": 1793493733.175962,
+      "keeper": "wkbl-web-leader",
+      "turn_ref": "trace-1790129719149-00000#2721",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1149,
+          "digest": "7c8396c0ab9799838754caca7f59790667597ebc225d847ec2485209606cbe39"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 762,
+          "digest": "26cb2084f3eb9b5b0d5321fc75c9e9f2ef28b19cc7faf73f420f6807b3d33688"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 762
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1149
+        }
+      ],
+      "request_body_bytes": 1775672
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "line": 5,
+      "ts": 1793494239.493153,
+      "keeper": "wkbl-web-leader",
+      "turn_ref": "trace-1790129719149-00000#2722",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1739215
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "line": 6,
+      "ts": 1793495184.284727,
+      "keeper": "wkbl-web-leader",
+      "turn_ref": "trace-1790129719149-00000#2723",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1749412
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "line": 7,
+      "ts": 1793495505.987789,
+      "keeper": "wkbl-web-leader",
+      "turn_ref": "trace-1790129719149-00000#2724",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1749135
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "line": 8,
+      "ts": 1793496339.883875,
+      "keeper": "wkbl-web-leader",
+      "turn_ref": "trace-1790129719149-00000#2725",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [],
+      "attributed_memory_components": [],
+      "request_body_bytes": 1758674
+    },
+    {
+      "path": "/Users/dancer/me/.masc/keepers/wkbl-web-leader/turn-records/2026-11/01.jsonl",
+      "line": 9,
+      "ts": 1793496694.000631,
+      "keeper": "wkbl-web-leader",
+      "turn_ref": "trace-1790129719149-00000#2726",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "block_observations": [
+        {
+          "block": "memory_os_recall",
+          "bytes": 1149,
+          "digest": "7c8396c0ab9799838754caca7f59790667597ebc225d847ec2485209606cbe39"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 762,
+          "digest": "26cb2084f3eb9b5b0d5321fc75c9e9f2ef28b19cc7faf73f420f6807b3d33688"
+        }
+      ],
+      "attributed_memory_components": [
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 762
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1149
+        }
+      ],
+      "request_body_bytes": 1796286
+    }
+  ],
+  "record_errors": [],
+  "summary": {
+    "json_rows_in_runtime_window": 139,
+    "distinct_turn_refs": 139,
+    "ordinary_snapshot_count": 44,
+    "ordinary_snapshot_bytes": 3608726,
+    "ordinary_snapshot_fact_count": 2337,
+    "ordinary_snapshot_sizes": {
+      "observations": 44,
+      "min": 190,
+      "max": 210698,
+      "median": 70171.0
+    },
+    "memory_os_recall_block_sizes": {
+      "observations": 119,
+      "min": 1051,
+      "max": 1149,
+      "median": 1055
+    },
+    "attributed_memory_os_recall_sizes": {
+      "observations": 24,
+      "min": 1051,
+      "max": 1149,
+      "median": 1054.0
+    },
+    "complete_request_wire_sizes": {
+      "observations": 27,
+      "min": 260757,
+      "max": 2011788,
+      "median": 1167483
+    },
+    "legacy_memory_journal_bytes": 147476063,
+    "snapshot_errors": 0,
+    "json_row_errors": 0
+  },
+  "limits": [
+    "Read-only sequential observation; snapshot reads are not a fleet-wide transaction.",
+    "JSON metadata inspection is not execution of the OCaml Turn_record decoder.",
+    "Missing memory components are unknown, not zero; the latest request can be a post-tool round.",
+    "Single snapshot observation does not establish a growth rate or a controlled workload comparison.",
+    "No claim bodies, prompt bodies, credentials or provider requests are retained or generated.",
+    "Availability is not provider execution, semantic relevance, use in decisions or cross-Keeper admission proof."
+  ]
+}

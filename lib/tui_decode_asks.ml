@@ -278,12 +278,12 @@ let decode_installation_answer_receipt ~expected_declaration_id ~expected_ask_id
       let* text = error_text () in
       let* reasons = ask_list json "invalid_answers" in
       let* reasons =
-        List.fold_right (fun reason acc ->
-            let* acc = acc in
-            match reason with
-            | `String reason -> Ok (reason :: acc)
-            | _ -> Error "installation answer: every invalid answer is a string")
-          reasons (Ok [])
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | `String reason :: rest -> loop (reason :: acc) rest
+          | _ :: _ -> Error "installation answer: every invalid answer is a string"
+        in
+        loop [] reasons
       in
       Ok (Installation_answer_refused (String.concat "; " (text :: reasons)))
   | 404 ->

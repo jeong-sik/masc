@@ -82,7 +82,7 @@ let dump_receipts ~base_path ~keeper ~turn_id =
       Sys.readdir dir
       |> Array.to_list
       |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-      |> List.sort compare
+      |> List.sort String.compare
     in
     let matches =
       List.concat_map
@@ -141,7 +141,7 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
       Sys.readdir dir
       |> Array.to_list
       |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-      |> List.sort compare
+      |> List.sort String.compare
     in
     let matches =
       List.concat_map
@@ -253,7 +253,7 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
              && String.length f >= String.length "system_log_"
              && String.sub f 0 (String.length "system_log_")
                 = "system_log_")
-      |> List.sort compare
+      |> List.sort String.compare
     in
     let matches =
       List.concat_map
@@ -355,7 +355,7 @@ let dump_tool_calls ~base_path ~keeper ~turn_id =
       |> Array.to_list
       |> List.filter (fun d ->
              Sys.is_directory (Filename.concat root d))
-      |> List.sort compare
+      |> List.sort String.compare
     in
     let files =
       List.concat_map
@@ -364,7 +364,7 @@ let dump_tool_calls ~base_path ~keeper ~turn_id =
           Sys.readdir mpath
           |> Array.to_list
           |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-          |> List.sort compare
+          |> List.sort String.compare
           |> List.map (fun f -> Filename.concat mpath f))
         month_dirs
     in

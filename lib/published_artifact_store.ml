@@ -233,9 +233,13 @@ let read_share_guard ~base_path ~id =
   match guard with
   | None -> Ok Guard_absent
   | Some (`Assoc fields) when
-      List.sort compare fields =
-      List.sort compare ["schema", `String "masc.published_artifact_share_guard.v2";
-                         "id", `String id; "phase", `String "active"] -> Ok Guard_active
+      List.equal
+        (fun (k1, v1) (k2, v2) -> String.equal k1 k2 && Yojson.Safe.equal v1 v2)
+        (List.sort (fun (k1, _) (k2, _) -> String.compare k1 k2) fields)
+        [ "id", `String id
+        ; "phase", `String "active"
+        ; "schema", `String "masc.published_artifact_share_guard.v2"
+        ] -> Ok Guard_active
   | Some (`Assoc fields) when
       List.sort String.compare (List.map fst fields) = ["id"; "next"; "phase"; "previous"; "schema"] ->
     (match List.assoc "schema" fields, List.assoc "id" fields, List.assoc "phase" fields with

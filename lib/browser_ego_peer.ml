@@ -201,10 +201,13 @@ let matching_spaces ~space output =
       Error (Spaces_malformed "ego listed a task space that is not an object") in
   match value with
   | `List spaces ->
-    List.fold_right (fun listed spaces ->
-      let* spaces = spaces in
-      let* named = row listed in
-      Ok (match named with Some named -> named :: spaces | None -> spaces)) spaces (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | listed :: rest ->
+        let* named = row listed in
+        loop (match named with Some named -> named :: acc | None -> acc) rest
+    in
+    loop [] spaces
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
     Error (Spaces_malformed "ego answered the task spaces without a list")
 
@@ -981,10 +984,14 @@ let chosen_file path = match Unix.stat path with
 let chosen_files = function
   | [] -> Error (Live.Before_effect "upload needs at least one file")
   | _ :: _ as paths ->
-    List.fold_right (fun path acc -> match acc, chosen_file path with
-      | Ok rows, Some row -> Ok (row :: rows)
-      | Ok _, None -> Error (Live.Before_effect ("the upload file " ^ Filename.basename path ^ " is not there"))
-      | (Error _ as error), _ -> error) paths (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | path :: rest ->
+        match chosen_file path with
+        | Some row -> loop (row :: acc) rest
+        | None -> Error (Live.Before_effect ("the upload file " ^ Filename.basename path ^ " is not there"))
+    in
+    loop [] paths
 let upload t id ~selector ~paths =
   let* label = label_of t id in
   let* chosen = chosen_files paths in

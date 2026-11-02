@@ -308,7 +308,7 @@ let verify_discovered ?expected_slots ?expected_ctx ?expected_model endpoints =
       ([], true, true, 0, 0, [], [], true) endpoints
   in
   let actual_ctx =
-    match List.sort_uniq compare actual_ctxs with [ value ] -> Some value | _ -> None
+    match List.sort_uniq Int.compare actual_ctxs with [ value ] -> Some value | _ -> None
   in
   let actual_model_id =
     match List.sort_uniq String.compare actual_models with

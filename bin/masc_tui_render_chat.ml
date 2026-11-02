@@ -1497,6 +1497,10 @@ let committed_request_diagnostics ~tools ~request_id ~execution_id ~edge =
       request_diagnostics ~tools ~request_id ~execution_id
   | Turn_continues | Turn_closes -> []
 
+let compare_request_owner_alias (r1, e1) (r2, e2) =
+  let c = String.compare r1 r2 in
+  if c <> 0 then c else String.compare e1 e2
+
 let chat_request_owners (state : state) ~keeper_name =
   (* All watchers retain their validated request-to-execution binding, even
      when the selected journal has no visible output. Self identities add no
@@ -1510,11 +1514,11 @@ let chat_request_owners (state : state) ~keeper_name =
       if String.equal (Masc_tui_types.turn_log_keeper_name log) keeper_name
          && not (String.equal request_id execution_id)
       then Some (request_id, execution_id) else None)
-  |> List.sort_uniq compare
+  |> List.sort_uniq compare_request_owner_alias
   |> fun aliases ->
      (* Keep the existing first sorted binding if two watchers disagree. *)
-     List.fold_right (fun (request_id, execution_id) owners ->
-       Request_owners.add request_id execution_id owners) aliases Request_owners.empty
+     List.fold_left (fun owners (request_id, execution_id) ->
+       Request_owners.add request_id execution_id owners) Request_owners.empty (List.rev aliases)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_owners
     ~chat_cols ~start_index visible_entries =

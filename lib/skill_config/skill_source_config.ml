@@ -328,13 +328,16 @@ let path_rejection anchor path =
 ;;
 
 let collect_results results =
-  List.fold_right
-    (fun result (values, diagnostics) ->
-       match result with
-       | Ok value -> value :: values, diagnostics
-       | Error diagnostic -> values, diagnostic :: diagnostics)
-    results
-    ([], [])
+  let values_rev, diagnostics_rev =
+    List.fold_left
+      (fun (values, diagnostics) result ->
+         match result with
+         | Ok value -> value :: values, diagnostics
+         | Error diagnostic -> values, diagnostic :: diagnostics)
+      ([], [])
+      results
+  in
+  List.rev values_rev, List.rev diagnostics_rev
 ;;
 
 let parse_source ~index fields =
@@ -469,15 +472,17 @@ let parse_doc doc =
   let parsed_entries =
     List.mapi (fun index entry -> index, parse_entry ~index entry) entries
   in
-  let indexed_sources, entry_diagnostics =
-    List.fold_right
-      (fun (index, result) (sources, diagnostics) ->
+  let indexed_sources_rev, entry_diagnostics_rev =
+    List.fold_left
+      (fun (sources, diagnostics) (index, result) ->
          match result with
          | Ok source -> (index, source) :: sources, diagnostics
-         | Error errors -> sources, errors @ diagnostics)
-      parsed_entries
+         | Error errors -> sources, List.rev_append errors diagnostics)
       ([], [])
+      parsed_entries
   in
+  let indexed_sources = List.rev indexed_sources_rev in
+  let entry_diagnostics = List.rev entry_diagnostics_rev in
   let diagnostics =
     unexpected
     @ source_container_diagnostics

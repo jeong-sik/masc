@@ -120,9 +120,13 @@ let basis_of_json json =
   let* expected_facts=match List.assoc "facts" fields with
     | `Null -> Ok None
     | `List facts ->
-      let* facts=List.fold_right (fun json tail ->
-        let* fact=Memory_types.fact_of_json json |> Result.map_error Memory_types.wire_error_to_string in
-        let* tail=tail in Ok (fact::tail)) facts (Ok []) in Ok (Some facts)
+      let rec loop acc = function
+        | [] -> Ok (Some (List.rev acc))
+        | json :: rest ->
+          let* fact = Memory_types.fact_of_json json |> Result.map_error Memory_types.wire_error_to_string in
+          loop (fact :: acc) rest
+      in
+      loop [] facts
     | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
       Error "Original history basis facts are invalid" in
   let* ()=match expected_revision,expected_facts with

@@ -46,9 +46,23 @@ let error_to_string = function
 
 open Result.Syntax
 
+let compare_fact_ref (a : Ledger.fact_ref) (b : Ledger.fact_ref) =
+  match a, b with
+  | Ledger.Ordinary a, Ledger.Ordinary b ->
+    let c = String.compare a.keeper_id b.keeper_id in
+    if c <> 0 then c else String.compare a.claim_sha256 b.claim_sha256
+  | Ledger.Ordinary _, Ledger.Source_bound _ -> -1
+  | Ledger.Source_bound _, Ledger.Ordinary _ -> 1
+  | Ledger.Source_bound a, Ledger.Source_bound b ->
+    let c = String.compare a.keeper_id b.keeper_id in
+    if c <> 0 then c
+    else
+      let c = String.compare a.path b.path in
+      if c <> 0 then c else String.compare a.claim_sha256 b.claim_sha256
+
 module Fact_map = Map.Make (struct
     type t = Ledger.fact_ref
-    let compare = Stdlib.compare
+    let compare = compare_fact_ref
   end)
 module String_map = Map.Make (String)
 

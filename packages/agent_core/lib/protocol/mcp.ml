@@ -234,20 +234,23 @@ type skipped_tool =
     returned in the skipped list (and logged) instead of failing the whole
     server's tool list. Input order is preserved in both lists. *)
 let convert_tools ~server_name ~call_fn_for (tools : mcp_tool list) =
-  List.fold_right
-    (fun (mt : mcp_tool) (converted, skipped) ->
-       match mcp_tool_to_agent_core_tool_result ~call_fn:(call_fn_for mt) mt with
-       | Ok tool_ -> tool_ :: converted, skipped
-       | Error detail ->
-         Llm_provider.Diag.warn
-           "mcp"
-           "server %s: skipping tool %s with unconvertible input schema: %s"
-           server_name
-           mt.name
-           detail;
-         converted, { tool_name = mt.name; detail } :: skipped)
-    tools
-    ([], [])
+  let converted_rev, skipped_rev =
+    List.fold_left
+      (fun (converted, skipped) (mt : mcp_tool) ->
+         match mcp_tool_to_agent_core_tool_result ~call_fn:(call_fn_for mt) mt with
+         | Ok tool_ -> tool_ :: converted, skipped
+         | Error detail ->
+           Llm_provider.Diag.warn
+             "mcp"
+             "server %s: skipping tool %s with unconvertible input schema: %s"
+             server_name
+             mt.name
+             detail;
+           converted, { tool_name = mt.name; detail } :: skipped)
+      ([], [])
+      tools
+  in
+  List.rev converted_rev, List.rev skipped_rev
 ;;
 
 (** Check if the MCP server subprocess is still responsive.

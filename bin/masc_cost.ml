@@ -192,33 +192,37 @@ let usage_missing (entry : cost_entry) =
   | Usage_reported _ -> false
 ;;
 
+module Agent_map = Map.Make (String)
+
 let aggregate_by_agent (entries : cost_entry list) =
-  let totals = Hashtbl.create 8 in
-  List.iter
-    (fun (entry : cost_entry) ->
-       let previous =
-         match Hashtbl.find_opt totals entry.agent with
-         | Some value -> value
-         | None ->
-           { agent = entry.agent
-           ; tokens = 0
-           ; cost_usd = 0.0
-           ; usage_missing_entries = 0
+  let totals =
+    List.fold_left
+      (fun acc (entry : cost_entry) ->
+         let previous =
+           match Agent_map.find_opt entry.agent acc with
+           | Some value -> value
+           | None ->
+             { agent = entry.agent
+             ; tokens = 0
+             ; cost_usd = 0.0
+             ; usage_missing_entries = 0
+             }
+         in
+         Agent_map.add
+           entry.agent
+           { previous with
+             tokens = previous.tokens + known_tokens entry
+           ; cost_usd = previous.cost_usd +. known_cost entry
+           ; usage_missing_entries =
+               previous.usage_missing_entries
+               +
+               if usage_missing entry then 1 else 0
            }
-       in
-       Hashtbl.replace
-         totals
-         entry.agent
-         { previous with
-           tokens = previous.tokens + known_tokens entry
-         ; cost_usd = previous.cost_usd +. known_cost entry
-         ; usage_missing_entries =
-             previous.usage_missing_entries
-             +
-             if usage_missing entry then 1 else 0
-         })
-    entries;
-  Hashtbl.fold (fun _ value acc -> value :: acc) totals []
+           acc)
+      Agent_map.empty
+      entries
+  in
+  Agent_map.fold (fun _ value acc -> value :: acc) totals []
   |> List.sort (fun left right ->
     let by_cost = Float.compare right.cost_usd left.cost_usd in
     if by_cost <> 0 then by_cost else String.compare left.agent right.agent)

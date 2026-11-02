@@ -2,9 +2,13 @@
 
 type occurrence = int * int
 
+let compare_occurrence (m1, b1) (m2, b2) =
+  let c = Int.compare m1 m2 in
+  if c <> 0 then c else Int.compare b1 b2
+
 module Occurrences = Map.Make (struct
   type t = occurrence
-  let compare = Stdlib.compare
+  let compare = compare_occurrence
 end)
 
 type completed_arguments =

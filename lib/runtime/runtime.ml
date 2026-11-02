@@ -454,18 +454,20 @@ let degrade_loaded_for_missing_catalog
     then Some { route_name = runtime_default_route_name; runtime_id = configured_default.id }
     else None
   in
-  let kept_lanes, dropped_lane_candidates, dropped_lanes =
-    List.fold_right
-      (fun (lane : Runtime_lane.t) (kept, dropped_candidates, dropped_lanes) ->
-         let kept_candidates, dropped_candidates_for_lane =
-           List.fold_right
-             (fun runtime_id (kept_ids, dropped_ids) ->
+  let kept_lanes_rev, dropped_lane_candidates_rev, dropped_lanes_rev =
+    List.fold_left
+      (fun (kept, dropped_candidates, dropped_lanes) (lane : Runtime_lane.t) ->
+         let kept_candidates_rev, dropped_candidates_for_lane_rev =
+           List.fold_left
+             (fun (kept_ids, dropped_ids) runtime_id ->
                 if is_missing runtime_id
                 then kept_ids, runtime_id :: dropped_ids
                 else runtime_id :: kept_ids, dropped_ids)
-             (Runtime_lane.ordered_candidates lane)
              ([], [])
+             (Runtime_lane.ordered_candidates lane)
          in
+         let kept_candidates = List.rev kept_candidates_rev
+         and dropped_candidates_for_lane = List.rev dropped_candidates_for_lane_rev in
          let dropped_candidates =
            match dropped_candidates_for_lane with
            | [] -> dropped_candidates
@@ -487,22 +489,27 @@ let degrade_loaded_for_missing_catalog
              :: kept
            , dropped_candidates
            , dropped_lanes ))
-      lanes
       ([], [], [])
+      lanes
   in
+  let kept_lanes = List.rev kept_lanes_rev
+  and dropped_lane_candidates = List.rev dropped_lane_candidates_rev
+  and dropped_lanes = List.rev dropped_lanes_rev in
   let dropped_routes =
     [ default_drop ]
     |> List.filter_map Fun.id
   in
-  let kept_media_failover, dropped_media_failover =
-    List.fold_right
-      (fun runtime_id (kept, dropped) ->
+  let kept_media_failover_rev, dropped_media_failover_rev =
+    List.fold_left
+      (fun (kept, dropped) runtime_id ->
          if is_missing runtime_id
          then kept, runtime_id :: dropped
          else runtime_id :: kept, dropped)
-      media_failover
       ([], [])
+      media_failover
   in
+  let kept_media_failover = List.rev kept_media_failover_rev
+  and dropped_media_failover = List.rev dropped_media_failover_rev in
   let has_routing_references =
     (not (List.is_empty dropped_routes))
     || (not (List.is_empty dropped_media_failover))

@@ -266,9 +266,13 @@ let receipt_json retained (receipt : receipt) =
 
 let tools_of_json = function
   | `List values ->
-    List.fold_right (fun value tail ->
-      let* observation = Verification_run_registry.tool_observation_of_yojson value in
-      let* tail = tail in Ok (observation::tail)) values (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* observation = Verification_run_registry.tool_observation_of_yojson value in
+        loop (observation :: acc) rest
+    in
+    loop [] values
   | _ -> Error "Goal verifier receipt tools must be a list"
 
 let receipt_of_json retained json =

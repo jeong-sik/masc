@@ -993,11 +993,19 @@ let log_call
           | None -> []
         in
         let refs =
-          List.map (fun reference ->
-            Tool_output.with_preview reference ""
-            |> Tool_output.normalized_artifact_ref_to_json)
+          List.fold_left
+            (fun (seen, acc) reference ->
+              let normalized = Tool_output.with_preview reference "" in
+              let json = Tool_output.normalized_artifact_ref_to_json normalized in
+              let key = Yojson.Safe.to_string json in
+              if Set_util.StringSet.mem key seen
+              then seen, acc
+              else Set_util.StringSet.add key seen, (key, json) :: acc)
+            (Set_util.StringSet.empty, [])
             (artifact_refs @ typed_refs)
-          |> List.sort_uniq Stdlib.compare
+          |> snd
+          |> List.sort (fun (k1, _) (k2, _) -> String.compare k1 k2)
+          |> List.map snd
         in
         if refs = [] then [] else [ "artifact_refs", `List refs ]
       in

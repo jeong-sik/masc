@@ -11,28 +11,35 @@ let indent_cells = 2
 let rail ~depth =
   String.make (indent_cells * max 0 (min depth max_depth)) ' '
 
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 (* Children by parent id, each in arrival order. Built once so the walk below
    is a lookup per comment rather than a scan of the whole page per comment --
    a 300-reply post is a real size here. *)
 let children_by_parent comments =
-  let table = Hashtbl.create 64 in
-  List.iter
-    (fun comment ->
-      match comment.bc_parent_id with
-      | None -> ()
-      | Some parent ->
-          let existing =
-            Option.value (Hashtbl.find_opt table parent) ~default:[]
-          in
-          Hashtbl.replace table parent (comment :: existing))
-    comments;
-  Hashtbl.iter (fun parent kids -> Hashtbl.replace table parent (List.rev kids))
-    table;
-  table
+  let table =
+    List.fold_left
+      (fun acc comment ->
+        match comment.bc_parent_id with
+        | None -> acc
+        | Some parent ->
+            let existing =
+              Option.value (String_map.find_opt parent acc) ~default:[]
+            in
+            String_map.add parent (comment :: existing) acc)
+      String_map.empty
+      comments
+  in
+  String_map.map List.rev table
 
 let order comments =
-  let present = Hashtbl.create 64 in
-  List.iter (fun comment -> Hashtbl.replace present comment.bc_id ()) comments;
+  let present =
+    List.fold_left
+      (fun acc comment -> String_set.add comment.bc_id acc)
+      String_set.empty
+      comments
+  in
   let children = children_by_parent comments in
   (* A root is a comment with no parent, or one whose parent is not on this
      page: a reply whose parent expired under the board's TTL, or one the
@@ -44,7 +51,7 @@ let order comments =
       (fun comment ->
         match comment.bc_parent_id with
         | None -> true
-        | Some parent -> not (Hashtbl.mem present parent))
+        | Some parent -> not (String_set.mem parent present))
       comments
   in
   (* [visited] is what makes this total. Two comments naming each other as
@@ -52,21 +59,26 @@ let order comments =
      them -- but a self-parented comment is its own root, and without the mark
      it would descend forever. Rows the walk never reached are appended at the
      end rather than dropped, for the same reason an orphan is drawn. *)
-  let visited = Hashtbl.create 64 in
-  let rec walk depth comment acc =
-    if Hashtbl.mem visited comment.bc_id then acc
-    else begin
-      Hashtbl.replace visited comment.bc_id ();
+  let rec walk depth comment (acc, visited) =
+    if String_set.mem comment.bc_id visited then (acc, visited)
+    else
+      let visited = String_set.add comment.bc_id visited in
       let acc = (depth, comment) :: acc in
-      Option.value (Hashtbl.find_opt children comment.bc_id) ~default:[]
-      |> List.fold_left (fun acc child -> walk (depth + 1) child acc) acc
-    end
+      Option.value (String_map.find_opt comment.bc_id children) ~default:[]
+      |> List.fold_left
+           (fun state child -> walk (depth + 1) child state)
+           (acc, visited)
   in
-  let ordered = List.fold_left (fun acc root -> walk 0 root acc) [] roots in
+  let ordered, visited =
+    List.fold_left
+      (fun state root -> walk 0 root state)
+      ([], String_set.empty)
+      roots
+  in
   let unreached =
     List.filter_map
       (fun comment ->
-        if Hashtbl.mem visited comment.bc_id then None else Some (0, comment))
+        if String_set.mem comment.bc_id visited then None else Some (0, comment))
       comments
   in
   List.rev ordered @ unreached

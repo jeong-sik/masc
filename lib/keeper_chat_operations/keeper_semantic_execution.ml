@@ -1072,8 +1072,12 @@ let runtime_retry_of_json json =
       let* next_runtime_id = string "next_runtime_id" fields in
       let* later_runtime_ids = match field "later_runtime_ids" fields with
         | `List values ->
-          List.fold_right (fun value result -> let* ids = result in match value with
-            | `String id -> Ok (id :: ids) | _ -> Error "runtime suffix identity must be a string") values (Ok [])
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | `String id :: rest -> loop (id :: acc) rest
+            | _ :: _ -> Error "runtime suffix identity must be a string"
+          in
+          loop [] values
         | _ -> Error "runtime suffix must be a list" in
       (* Records persisted before [not_before] existed simply lack the field;
          they decode to [None] and stay immediately claimable, exactly the

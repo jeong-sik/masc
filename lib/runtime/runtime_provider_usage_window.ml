@@ -98,13 +98,13 @@ let optional_string ~path name fields =
 ;;
 
 let map_result f items =
-  List.fold_right
-    (fun item acc ->
-       let* rest = acc in
-       let* value = f item in
-       Ok (value :: rest))
-    items
-    (Ok [])
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      let* value = f item in
+      loop (value :: acc) rest
+  in
+  loop [] items
 ;;
 
 (* Claude Code names the windows by key.  Only the two keys observed on the

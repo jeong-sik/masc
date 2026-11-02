@@ -348,21 +348,21 @@ let rec otoml_value_of_toml_value = function
   | Toml_string_array values ->
     Ok (Otoml.TomlArray (List.map (fun value -> Otoml.TomlString value) values))
   | Toml_array values ->
-    List.fold_right
-      (fun value result ->
+    let rec loop acc = function
+      | [] -> Ok (Otoml.TomlArray (List.rev acc))
+      | value :: rest ->
         Result.bind (otoml_value_of_toml_value value) (fun value ->
-          Result.map (fun values -> value :: values) result))
-      values
-      (Ok [])
-    |> Result.map (fun values -> Otoml.TomlArray values)
+          loop (value :: acc) rest)
+    in
+    loop [] values
   | Toml_inline_table fields ->
-    List.fold_right
-      (fun (key, value) result ->
+    let rec loop acc = function
+      | [] -> Ok (Otoml.TomlInlineTable (List.rev acc))
+      | (key, value) :: rest ->
         Result.bind (otoml_value_of_toml_value value) (fun value ->
-          Result.map (fun fields -> (key, value) :: fields) result))
-      fields
-      (Ok [])
-    |> Result.map (fun fields -> Otoml.TomlInlineTable fields)
+          loop ((key, value) :: acc) rest)
+    in
+    loop [] fields
   | Toml_offset_datetime value -> Ok (Otoml.TomlOffsetDateTime value)
   | Toml_local_datetime value -> Ok (Otoml.TomlLocalDateTime value)
   | Toml_local_date value -> Ok (Otoml.TomlLocalDate value)
@@ -425,15 +425,13 @@ let create_keeper_toml_file_strict_staged ~(path : string) fields =
          (Printf.sprintf "refusing to overwrite existing keeper TOML: %s" path))
   else
     let rendered_fields =
-      List.fold_right
-        (fun (key, value) result ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (key, value) :: rest ->
           Result.bind (render_toml_value value) (fun rendered_value ->
-            Result.map
-              (fun rendered ->
-                Printf.sprintf "%s = %s" key rendered_value :: rendered)
-              result))
-        fields
-        (Ok [])
+            loop (Printf.sprintf "%s = %s" key rendered_value :: acc) rest)
+      in
+      loop [] fields
     in
     Result.bind
       (Result.map_error (before_rename_failure ~path) rendered_fields)

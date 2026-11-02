@@ -16,10 +16,26 @@ let text = function `String value when String.trim value<>"" -> Ok value | _ -> 
 let number = function `Int value when value>=0 -> Ok value | _ -> Error "expected nonnegative sequence"
 let boolean = function `Bool value -> Ok value | _ -> Error "expected subscription boolean"
 let get key parse value = let* value=field key value in parse value
-let rec array parse = function
-  | `List [] -> Ok []
-  | `List (head::tail) -> let* head=parse head in let* tail=array parse (`List tail) in Ok (head::tail)
+let array parse = function
+  | `List items ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | head :: tail ->
+            let* head = parse head in
+            loop (head :: acc) tail
+      in
+      loop [] items
   | _ -> Error "expected subscription list"
+
+let compare_subscription (a : Subscription.subscription) (b : Subscription.subscription) =
+  let c = String.compare a.keeper_name b.keeper_name in
+  if c <> 0 then c else
+  let c = String.compare a.run_id b.run_id in
+  if c <> 0 then c else
+  let c = String.compare a.installation_id b.installation_id in
+  if c <> 0 then c else
+  String.compare a.output_id b.output_id
+
 let decode value =
   let* revision = get "source_revision" (function `Null -> Ok None | value ->
     let* value=text value in Ok (Some value)) value in
@@ -39,8 +55,8 @@ let decode value =
           then Error "inconsistent subscription position"
           else Ok (Position {instance_id;acknowledged;latest;replaced}) in
     Ok (subscription,state))) value in
-  if List.sort Stdlib.compare subscriptions<>List.sort Stdlib.compare (List.map fst states)
-    || List.length subscriptions<>List.length (List.sort_uniq Stdlib.compare subscriptions)
+  if List.sort compare_subscription subscriptions<>List.sort compare_subscription (List.map fst states)
+    || List.length subscriptions<>List.length (List.sort_uniq compare_subscription subscriptions)
   then Error "subscription reader states do not match configuration"
   else Ok {revision;entries=states}
 let request_json = function

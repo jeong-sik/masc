@@ -36,13 +36,18 @@ let plan ~root ~sweepable =
     match sorted_entries root with
     | exception (Unix.Unix_error _ | Sys_error _ as exn) -> { kept = [failure root exn]; instances = [] }
     | names ->
-      List.fold_right (fun name plan ->
-          let path = Filename.concat root name in
-          if not (Gecko.is_masc_name name) then
-            { plan with kept = Kept { path; reason = "it is not an instance directory masc made" } :: plan.kept }
-          else if sweepable name then { plan with instances = path :: plan.instances }
-          else plan)
-        names { kept = []; instances = [] }
+      let kept_rev, instances_rev =
+        List.fold_left
+          (fun (kept, instances) name ->
+             let path = Filename.concat root name in
+             if not (Gecko.is_masc_name name) then
+               Kept { path; reason = "it is not an instance directory masc made" } :: kept, instances
+             else if sweepable name then kept, path :: instances
+             else kept, instances)
+          ([], [])
+          names
+      in
+      { kept = List.rev kept_rev; instances = List.rev instances_rev }
 
 let forget t path =
   match Hashtbl.find_opt t.terminated path with

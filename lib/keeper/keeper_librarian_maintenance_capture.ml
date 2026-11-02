@@ -246,13 +246,13 @@ let preparation_of_json ~source_input json =
   let* variables =
     match List.assoc_opt "variables" fields with
     | Some (`List items) ->
-      List.fold_right
-        (fun item tail ->
-          let* tail = tail in
-          match item with
-          | `List [ `String name; `String value ] -> Ok ((name, value) :: tail)
-          | _ -> Error (error "substitution is not a name/value pair"))
-        items (Ok [])
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | `List [ `String name; `String value ] :: rest ->
+          loop ((name, value) :: acc) rest
+        | _ :: _ -> Error (error "substitution is not a name/value pair")
+      in
+      loop [] items
     | _ -> Error (error "variables is not a list") in
   let* rendered_prompt =
     match List.assoc_opt "rendered_prompt" fields with

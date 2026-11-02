@@ -376,6 +376,8 @@ let delete config ~key : (bool, string) result =
   | e -> Error (Printexc.to_string e)
 ;;
 
+module Key_map = Map.Make (String)
+
 (** List all cache entries - synchronous.
     Guarded: concurrent calls return empty list to prevent FD stampede. *)
 let list config ?(tag : string option) () : cache_entry list =
@@ -385,25 +387,30 @@ let list config ?(tag : string option) () : cache_entry list =
   else
     with_scan_guard ~fallback:[] (fun () ->
       let entries = read_cache_filenames dir in
-      let deduped = Hashtbl.create (List.length entries) in
-      List.iter
-        (fun filename ->
-           let path = Filename.concat dir filename in
-           match read_entry_file path with
-           | Some entry ->
-             if is_expired entry
-             then (if remove_file_if_exists path then decrement_cached_entry_count ())
-             else (
-               let include_entry =
-                 match tag with
-                 | None -> true
-                 | Some t -> List.mem t entry.tags
-               in
-               if include_entry && is_primary_cache_file filename entry
-               then Hashtbl.replace deduped entry.key (entry, true))
-           | None -> ())
-        entries;
-      Hashtbl.fold (fun _ (entry, _) acc -> entry :: acc) deduped [])
+      let deduped =
+        List.fold_left
+          (fun acc filename ->
+             let path = Filename.concat dir filename in
+             match read_entry_file path with
+             | Some entry ->
+               if is_expired entry
+               then (
+                 if remove_file_if_exists path then decrement_cached_entry_count ();
+                 acc)
+               else (
+                 let include_entry =
+                   match tag with
+                   | None -> true
+                   | Some t -> List.mem t entry.tags
+                 in
+                 if include_entry && is_primary_cache_file filename entry
+                 then Key_map.add entry.key entry acc
+                 else acc)
+             | None -> acc)
+          Key_map.empty
+          entries
+      in
+      Key_map.fold (fun _ entry acc -> entry :: acc) deduped [])
 ;;
 
 (** Clear all cache entries - synchronous *)

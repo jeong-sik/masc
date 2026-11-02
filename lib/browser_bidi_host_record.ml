@@ -267,12 +267,13 @@ let entry_of_json json =
   let* unacknowledged =
     match List.assoc_opt "unacknowledged" fields with
     | Some (`List listed) ->
-      List.fold_right
-        (fun json rest ->
-          let* rest = rest in
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: rest ->
           let* read = unacknowledged_of_json json in
-          Ok (read :: rest))
-        listed (Ok [])
+          loop (read :: acc) rest
+      in
+      loop [] listed
     | Some _ | None -> Error "unacknowledged is not a list"
   in
   let* ended = Result.bind (field fields "ended") (nullable ending_of_json) in

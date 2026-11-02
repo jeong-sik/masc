@@ -1154,7 +1154,7 @@ let json_preview_lines ~width text =
   let palette =
     { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
   text
-  |> Masc.Tui_terminal_text.sanitize_terminal_lines
+  |> Masc.Tui_terminal_json.sanitize_canonical_preview
   |> fenced_document_text ~language:"json"
   |> Masc_tui_markdown.render ~palette ~width
   |> List.map (fun line -> Ansi.reset, line)
@@ -1195,8 +1195,10 @@ let lane_run_payload_lines ~width json =
     let fields =
       List.mapi
         (fun index (name, value) ->
-          let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
-          let heading_bytes = String.length heading + 1 in
+          let heading_source = Yojson.Safe.to_string (`String name) in
+          (* The preview budget counts source bytes, before visible escapes. *)
+          let heading_bytes = String.length heading_source + 1 in
+          let heading = Masc.Tui_terminal_json.sanitize_canonical_preview heading_source in
           let prepared = prepare_document value in
           { index; heading; heading_bytes; prepared
           ; minimum_bytes = heading_bytes + minimum_document_bytes prepared

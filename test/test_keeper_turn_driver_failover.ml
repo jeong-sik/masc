@@ -4404,7 +4404,7 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
       let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
         "name", `String keeper_name; "trace_id", `String "direct-wait-trace";
         "activation_mode", `String "manual"]) |> string_ok in
-      let owner = Owner.start ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      let owner = Owner.start ~base_path:(Filename.dirname path) ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now ~operation_runner:(Some runner)
         ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta) |> ok in
       Eio.Promise.resolve resolve_owner owner;

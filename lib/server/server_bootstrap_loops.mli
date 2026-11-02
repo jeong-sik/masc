@@ -256,8 +256,16 @@ module For_testing : sig
     broadcast:(unit -> unit) ->
     keeper_lifecycle_refresh list
   (** One turn of the lifecycle listener fiber: drain [subscription], refresh
-      the batch, and [broadcast] when the batch carried events or lost some.
-      This is what the fiber runs between sleeps. *)
+      the batch, and [broadcast] when the batch carried events or lost some. *)
+
+  val run_keeper_lifecycle_listener :
+    clock:float Eio.Time.clock_ty Eio.Time.clock ->
+    subscription:Runtime_event_bus.handle ->
+    retry_interval_s:float ->
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    broadcast:(unit -> unit) -> unit
+  (** Wait for batches until unsubscribed; delay only after an iteration fails. *)
 end
 
 val start_background_maintenance :

@@ -80,6 +80,7 @@ let describe_view : Client.view -> string = function
     Printf.sprintf "unavailable since %g, disconnected=%s" since
       (match disconnected_since with None -> "no" | Some at -> string_of_float at)
   | Client.Cannot_read (Client.Refused { status; _ }) -> Printf.sprintf "refused %d" status
+  | Client.Cannot_read (Client.Invalid_response detail) -> "invalid response: " ^ detail
   | Client.Cannot_read (Client.Schema_mismatch { expected; received }) ->
     Printf.sprintf "schema %d, expected %d" received expected
   | Client.Cannot_read (Client.Frame_rejected detail) -> "rejected: " ^ detail
@@ -206,6 +207,35 @@ let test_the_screen_draws_only_what_a_following_job_posted () =
     (Masc_tui_types.fleet_stream_view state);
   check bool "and a job can start again" true
     (state.Masc_tui_types.fleet_stream_reader = Masc_tui_types.Fleet_stream_idle)
+;;
+
+let test_invalid_response_replaces_refusal_until_snapshot () =
+  let client = Client.create () in
+  Client.started client;
+  Client.refused client ~status:403 ~detail:"forbidden";
+  Client.lost client ~now:1.0;
+  Client.started client;
+  Client.invalid_response client "response is not text/event-stream";
+  Client.lost client ~now:2.0;
+  check view_t "the current response replaces the earlier refusal"
+    (Client.Cannot_read (Client.Invalid_response "response is not text/event-stream"))
+    (Client.view client);
+  Client.started client;
+  ignore (Client.feed client (frame (snapshot ~revision:1 ~measured_at:10.0 (fleet ()))) : Client.step);
+  check view_t "a later snapshot replaces the invalid response"
+    (following (reading ~revision:1 ~measured_at:10.0 (fleet ())))
+    (Client.view client);
+  Client.started client;
+  Client.invalid_response client "ambiguous Content-Type";
+  Client.lost client ~now:3.0;
+  check view_t "an invalid response does not present an old snapshot as current"
+    (Client.Cannot_read (Client.Invalid_response "ambiguous Content-Type"))
+    (Client.view client);
+  Client.started client;
+  ignore (Client.feed client (frame (snapshot ~revision:1 ~measured_at:20.0 (fleet ~running:2 ()))) : Client.step);
+  check view_t "a new snapshot restores the reading"
+    (following (reading ~revision:1 ~measured_at:20.0 (fleet ~running:2 ())))
+    (Client.view client)
 ;;
 
 let test_first_scan_failure_is_visible_until_a_real_reading () =
@@ -470,7 +500,7 @@ let test_a_frame_this_build_cannot_read_asks_for_a_new_connection () =
     | Client.Cannot_read (Client.Frame_rejected _) -> true
     | Client.Awaiting_first_reading | Client.Unreachable _ | Client.Reading _
     | Client.Unavailable _
-    | Client.Cannot_read (Client.Refused _ | Client.Schema_mismatch _) -> false
+    | Client.Cannot_read (Client.Refused _ | Client.Invalid_response _ | Client.Schema_mismatch _) -> false
   in
   List.iter
     (fun (label, bytes) ->
@@ -617,6 +647,8 @@ let () =
     ; ( "cannot read"
       , [ test_case "a schema this build does not read is refused" `Quick
             test_a_schema_this_build_does_not_read_is_refused_until_a_good_snapshot
+        ; test_case "invalid response replaces an earlier refusal until a snapshot" `Quick
+            test_invalid_response_replaces_refusal_until_snapshot
         ; test_case "a frame this build cannot read asks for a new connection" `Quick
             test_a_frame_this_build_cannot_read_asks_for_a_new_connection
         ; test_case "a new connection needs its own snapshot" `Quick

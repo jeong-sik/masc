@@ -84,7 +84,8 @@ type server =
 
 (* The real accept loop and the route's [serve], on a loopback port: everything
    the server does for this stream but the authorization. *)
-let start_server ~sw env ?port ?subscribe ?(stalled_after_s = kept_stalled_after_s) hub =
+let start_server ~sw env ?port ?subscribe ?scope_is_current ?scope_replaced
+    ?(stalled_after_s = kept_stalled_after_s) hub =
   let subscribe = Option.value subscribe ~default:(Hub.subscribe hub) in
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
@@ -117,6 +118,8 @@ let start_server ~sw env ?port ?subscribe ?(stalled_after_s = kept_stalled_after
            ~addr_label:"loopback test"
            ~request_handler:(fun _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
              Route.serve
+               ?scope_is_current
+               ?scope_replaced
                ~sw:server_sw
                ~clock
                ~subscribe
@@ -325,6 +328,44 @@ let test_a_reader_recovers_from_a_server_restart_with_the_new_snapshot () =
       second.stop ()))
 ;;
 
+let test_scope_replacement_closes_an_idle_stream () =
+  with_env (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let old_hub = new_hub () in
+      let counts = { live = 0; total = 0 } in
+      let current = ref true in
+      let replaced, replace = Eio.Promise.create () in
+      let server = start_server ~sw env ~subscribe:(counted old_hub counts)
+          ~scope_is_current:(fun () -> !current) ~scope_replaced:replaced old_hub in
+      let finished, finish = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        let url = Printf.sprintf "http://127.0.0.1:%d%s" server.port F.stream_path in
+        let result = Masc_http_client.get_stream ~clock ~idle_timeout_sec:patience_s
+            ~url ~headers:[] ~on_chunk:ignore () in
+        Eio.Promise.resolve finish result);
+      wait_until env "the old subscription" (fun () -> counts.live = 1);
+      current := false;
+      Eio.Promise.resolve replace ();
+      (match Eio.Time.with_timeout clock 2.0 (fun () -> Ok (Eio.Promise.await finished)) with
+       | Ok (Ok (Masc_http_client.Pool.Streamed _)) -> ()
+       | Ok (Ok (Masc_http_client.Pool.Buffered _)) -> fail "the stream was buffered"
+       | Ok (Error error) -> failf "the closed stream failed: %s" error
+       | Error `Timeout -> fail "the replaced stream did not close");
+      check int "replacement unsubscribes the old hub" 0 counts.live;
+      Hub.observe old_hub ~measured_at:2.0 (fleet ~running:99 ());
+      let new_hub = new_hub () in
+      Hub.observe new_hub ~measured_at:3.0 (fleet ~running:7 ());
+      let next = start_server ~sw env new_hub in
+      let reader = Client.create () in
+      follow ~sw env ~port:next.port reader;
+      wait_until env "the new scope's own snapshot" (fun () -> position reader = Some (1, 7, Fine));
+      check position_t "the old hub did not supply the new snapshot"
+        (Some (1, 7, Fine)) (position reader);
+      next.stop ();
+      server.stop ()))
+;;
+
 (* Large enough that the kernel's buffers for one connection fill up long
    before the changes run out: 3,000 changes of about 13 KB each. *)
 let stalled_keepers = 300
@@ -433,6 +474,45 @@ let test_a_reader_that_does_not_read_again_is_let_go () =
       server.stop ()))
 ;;
 
+let test_scope_replacement_cancels_a_stalled_writer () =
+  with_env (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let hub = new_hub () in
+      let counts = { live = 0; total = 0 } in
+      let current = ref true in
+      let replaced, replace = Eio.Promise.create () in
+      Hub.observe hub ~measured_at:0.0 (fleet ~keepers:blocking_keepers ~running:0 ());
+      let server = start_server ~sw env ~subscribe:(counted hub counts)
+          ~scope_is_current:(fun () -> !current) ~scope_replaced:replaced hub in
+      let gate, open_gate = Eio.Promise.create () in
+      let stopped = ref false in
+      let finished, finish = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        let url = Printf.sprintf "http://127.0.0.1:%d%s" server.port F.stream_path in
+        let result = Masc_http_client.get_stream ~clock ~idle_timeout_sec:patience_s
+            ~url ~headers:[] ~on_chunk:(fun _ ->
+              if not !stopped then (stopped := true; Eio.Promise.await gate)) () in
+        Eio.Promise.resolve finish result);
+      wait_until env "the reader to stop" (fun () -> !stopped);
+      for change = 1 to blocking_changes do
+        Hub.observe hub ~measured_at:(float_of_int change)
+          (fleet ~keepers:blocking_keepers ~running:change ());
+        Eio.Time.sleep clock poll_s
+      done;
+      check int "the stalled connection is still subscribed" 1 counts.live;
+      current := false;
+      Eio.Promise.resolve replace ();
+      wait_until env "the stalled writer to unsubscribe on replacement" (fun () -> counts.live = 0);
+      Eio.Promise.resolve open_gate ();
+      (match Eio.Time.with_timeout clock patience_s (fun () -> Ok (Eio.Promise.await finished)) with
+       | Ok (Ok (Masc_http_client.Pool.Streamed _)) -> ()
+       | Ok (Ok (Masc_http_client.Pool.Buffered _)) -> fail "the stream was buffered"
+       | Ok (Error error) -> failf "the closed stream failed: %s" error
+       | Error `Timeout -> fail "the stalled stream did not close");
+      server.stop ()))
+;;
+
 let () =
   run
     "fleet_stream_loopback"
@@ -446,10 +526,14 @@ let () =
             test_a_keepalive_crosses_http_without_becoming_an_event
         ; test_case "a reader recovers from a server restart" `Quick
             test_a_reader_recovers_from_a_server_restart_with_the_new_snapshot
+        ; test_case "scope replacement closes an idle stream" `Quick
+            test_scope_replacement_closes_an_idle_stream
         ; test_case "a reader that stops reading recovers with a new snapshot" `Quick
             test_a_reader_that_stops_reading_recovers_with_a_new_snapshot
         ; test_case "a reader that does not read again is let go" `Quick
             test_a_reader_that_does_not_read_again_is_let_go
+        ; test_case "scope replacement cancels a stalled writer" `Quick
+            test_scope_replacement_cancels_a_stalled_writer
         ] )
     ]
 ;;

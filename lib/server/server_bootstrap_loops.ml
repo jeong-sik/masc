@@ -1475,18 +1475,51 @@ let handle_keeper_lifecycle_batch
   results
 ;;
 
-(* One turn of the lifecycle listener: drain the subscription, refresh the
-   batch, and broadcast namespace truth when the batch carried events or lost
-   some. Separate from the fiber so a test can run a turn against a real
-   subscription. *)
-let refresh_keeper_lifecycle_once ~subscription ~refresh ~invalidate_all ~broadcast =
-  let drained = Runtime_event_bus.drain_reporting_drops subscription in
+(* Refresh one batch and broadcast namespace truth if it carried events or
+   lost some. Both the nonblocking probe and the listener's wait use the same
+   processing boundary. *)
+let refresh_keeper_lifecycle_batch ~drained ~refresh ~invalidate_all ~broadcast =
   let results = handle_keeper_lifecycle_batch ~refresh ~invalidate_all drained in
   (match drained.Runtime_event_bus.events, drained.overflow_loss with
    | [], Runtime_event_bus.Nothing_dropped -> ()
    | _ :: _, (Runtime_event_bus.Nothing_dropped | Runtime_event_bus.Dropped _)
    | [], Runtime_event_bus.Dropped _ -> broadcast ());
   results
+;;
+
+let refresh_keeper_lifecycle_once ~subscription ~refresh ~invalidate_all ~broadcast =
+  let drained = Runtime_event_bus.drain_reporting_drops subscription in
+  refresh_keeper_lifecycle_batch ~drained ~refresh ~invalidate_all ~broadcast
+;;
+
+let await_keeper_lifecycle_once ~subscription ~refresh ~invalidate_all ~broadcast =
+  match Runtime_event_bus.await_reporting_drops subscription with
+  | Runtime_event_bus.Unsubscribed -> None
+  | Runtime_event_bus.Batch drained ->
+      Some (refresh_keeper_lifecycle_batch ~drained ~refresh ~invalidate_all ~broadcast)
+;;
+
+let run_keeper_lifecycle_listener ~clock ~subscription ~retry_interval_s
+    ~refresh ~invalidate_all ~broadcast =
+  let rec loop () =
+    let result =
+      try Ok (await_keeper_lifecycle_once ~subscription ~refresh ~invalidate_all ~broadcast)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Error exn
+    in
+    match result with
+    | Ok None -> ()
+    | Ok (Some _) -> loop ()
+    | Error exn ->
+        Log.Dashboard.error
+          "keeper lifecycle listener iteration failed: %s" (Printexc.to_string exn);
+        (* A failed iteration may retry; a healthy idle listener waits for a
+           publication instead of draining the subscription on a timer. *)
+        Eio.Time.sleep clock retry_interval_s;
+        loop ()
+  in
+  loop ()
 ;;
 
 let install_workspace_message_mutation_invalidation
@@ -1662,29 +1695,12 @@ let start_keeper_loops_owned
       Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces
         ~config
     in
-    let rec loop () =
-      (try
-         let (_ : keeper_lifecycle_refresh list) =
-           refresh_keeper_lifecycle_once
-             ~subscription:keeper_lifecycle_sub
-             ~refresh:(refresh_dashboard_for_keeper_lifecycle ~config)
-             ~invalidate_all:invalidate_keeper_execution_surfaces
-             ~broadcast:(fun () ->
-               Server_dashboard_http.broadcast_namespace_truth_snapshot state)
-         in
-         ()
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Dashboard.error
-           "keeper lifecycle listener iteration failed: %s"
-           (Printexc.to_string exn));
-      Eio.Time.sleep
-        clock
-        Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec;
-      loop ()
-    in
-    loop ());
+    run_keeper_lifecycle_listener
+      ~clock ~subscription:keeper_lifecycle_sub
+      ~retry_interval_s:Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec
+      ~refresh:(refresh_dashboard_for_keeper_lifecycle ~config)
+      ~invalidate_all:invalidate_keeper_execution_surfaces
+      ~broadcast:(fun () -> Server_dashboard_http.broadcast_namespace_truth_snapshot state));
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_board_signal_hook (fun signal ->
@@ -2292,6 +2308,7 @@ module For_testing = struct
   let raise_if_surfaces_partly_dropped = raise_if_surfaces_partly_dropped
   let handle_keeper_lifecycle_batch = handle_keeper_lifecycle_batch
   let refresh_keeper_lifecycle_once = refresh_keeper_lifecycle_once
+  let run_keeper_lifecycle_listener = run_keeper_lifecycle_listener
 end
 
 

@@ -55,6 +55,95 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+(* One event-driven waiting read, plus a change observed while it was running.
+   A failed event-triggered read keeps the demand for a later retry. *)
+module Keeper_waiting_read : sig
+  type t
+  type request
+
+  val idle : t
+  val note_change : t -> t
+  val start : t -> t * request option
+  val finish : t -> request -> observed:bool -> success:bool -> (t * bool) option
+  val suspend : t -> t
+  val clear : t -> t
+  val in_flight : t -> bool
+  val change_pending : t -> bool
+  val awaiting_change : t -> bool
+  val needs_revalidation : t -> bool
+  val poll_receipt : t -> (int * int) option
+  val accepts_poll : t -> (int * int) option -> bool
+  val settle_poll : t -> success:bool -> t
+  val accepts_event : t -> request -> bool
+  val publish_event : t -> observed:bool -> t
+  val poll_needs_reconciliation : t -> (int * int) option -> bool
+  val event_needs_reconciliation : t -> request -> bool
+  val exclusive : t -> t
+end = struct
+  type request = { ticket : Snapshot_read.request; after_change : bool; revision : int; publication : int }
+  type t = { reading : Snapshot_read.t; pending : bool; active_after_change : bool;
+             awaiting : bool; revision : int; publication : int; exclusive : bool }
+
+  let idle = { reading = Snapshot_read.idle; pending = false; active_after_change = false;
+               awaiting = false; revision = 0; publication = 0; exclusive = false }
+  let note_change t = { t with pending = true; awaiting = true; revision = t.revision + 1 }
+  let in_flight t = Snapshot_read.in_flight t.reading
+  let change_pending t = t.pending
+  let awaiting_change t = t.awaiting
+  let needs_revalidation t = t.pending || t.active_after_change
+  let poll_receipt t = if t.exclusive then None else Some (t.revision, t.publication)
+  let accepts_poll t = function
+    | Some (revision, publication) ->
+        revision = t.revision && publication = t.publication && not t.exclusive
+    | None -> false
+  let settle_poll t ~success =
+    if success then { t with pending = false; awaiting = false; publication = t.publication + 1 }
+    else { t with pending = t.pending || t.active_after_change;
+                  publication = t.publication + 1 }
+  let accepts_event (t : t) (request : request) = request.publication = t.publication
+  let publish_event (t : t) ~observed =
+    if observed then { t with publication = t.publication + 1 } else t
+  let poll_needs_reconciliation (t : t) = function
+    | Some (revision, publication) -> revision = t.revision && publication <> t.publication
+    | None -> false
+  let event_needs_reconciliation (t : t) (request : request) =
+    request.revision = t.revision && request.publication <> t.publication
+  let exclusive t = { t with exclusive = true }
+
+  let start t =
+    let reading, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll t.reading in
+    match ticket with
+    | None -> t, None
+    | Some ticket ->
+      let request = { ticket; after_change = t.pending; revision = t.revision; publication = t.publication } in
+      { t with reading; pending = false; active_after_change = request.after_change }, Some request
+
+  let finish t request ~observed ~success =
+    match Snapshot_read.settle t.reading request.ticket with
+    | None -> None
+    | Some reading ->
+      let follow_up = t.pending in
+      let pending = t.pending || (request.after_change && not success) in
+      let awaiting = t.pending || (request.after_change && not observed) in
+      Some ({ t with reading; pending; active_after_change = false; awaiting;
+                     exclusive = t.exclusive && follow_up }, follow_up)
+
+  let suspend t =
+    { reading = Snapshot_read.invalidate t.reading
+    ; pending = t.pending || t.active_after_change
+    ; active_after_change = false
+    ; awaiting = t.awaiting
+    ; revision = t.revision + 1
+    ; publication = t.publication + 1
+    ; exclusive = false
+    }
+
+  let clear t =
+    { reading = Snapshot_read.invalidate t.reading; pending = false; active_after_change = false;
+      awaiting = false; revision = t.revision + 1; publication = t.publication + 1;
+      exclusive = false }
+end
+
 (* Original read ownership and a fresh observation owed after a binding write.
    Tokens are supplied by the UI edge; these transitions do not launch work. *)
 module Connector_read : sig
@@ -3591,10 +3680,13 @@ type observer_replay_status =
   | Observer_replay_unobserved
   | Observer_replay_scoped of Sse_wire.observer_handshake
   | Observer_replay_unavailable of string
+  | Observer_replay_rejected of string
 
-let observer_replay_description = function
+let observer_replay_description ?(source_loss = false) replay =
+  let description = match replay with
   | Observer_replay_unobserved -> "Replay: not negotiated"
   | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
@@ -3604,9 +3696,21 @@ let observer_replay_description = function
         "Replay resumed after a gap: events up to #%d expired while disconnected"
         missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
-      "Replay reset: server instance changed; disconnected history not recovered"
+      "Replay reset: server or workspace changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
       "Replay reset: previous cursor had no instance; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->
+      "Replay reset: cursor ahead of server; disconnected history not recovered"
+  in
+  if source_loss then "SOURCE EVENTS LOST · " ^ description
+  else description
+
+(* A retry after a partially published SSE event can have a new transport
+   cursor. Remember the highest notice sequence independently per source. *)
+let note_observer_source_loss ~source_id ~sequence seen =
+  match List.assoc_opt source_id seen with
+  | Some previous when previous >= sequence -> false, seen
+  | Some _ | None -> true, (source_id, sequence) :: List.remove_assoc source_id seen
 
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
@@ -9239,6 +9343,8 @@ type state = {
      complete a tool call and on the operator cadence. *)
   mutable acting_pane_changes:
     (acting_pane_key, acting_pane_read) Masc_tui_fetched.t;
+  (* A loss during a read owes one more reading after that read settles. *)
+  mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
@@ -9894,8 +10000,13 @@ type state = {
      field stays absent here; neither it nor a failed refresh means idle. *)
   mutable keeper_waiting: Tui_decode.keeper_waiting_row list;
   mutable keeper_waiting_failure: Tui_decode.keeper_waiting_failure option;
+  mutable keeper_waiting_unverified: string list;
+  mutable keeper_waiting_error: string option;
+  mutable keeper_waiting_epoch: int;
+  mutable keeper_waiting_versions: (string * int) list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
@@ -10499,6 +10610,10 @@ type state = {
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
   mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
+  (* A change observed after the current list read started needs one later read. *)
+  mutable fusion_runs_reread_pending: bool;
+  mutable fusion_runs_awaiting_observer: bool;
+  mutable fusion_runs_open_at_start: string option;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
@@ -10507,6 +10622,7 @@ type state = {
   mutable fusion_mode: fusion_mode;
   mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
+  mutable fusion_detail_stale: bool;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
   mutable fusion_detail_generation: int;
@@ -10514,8 +10630,13 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
+  mutable fusion_detail_reread_pending: bool;
+  mutable fusion_detail_awaiting_observer: bool;
   mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_detail_stale: bool;
   mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
+  mutable fusion_historical_reread_pending: bool;
+  mutable fusion_historical_awaiting_observer: bool;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -10533,6 +10654,8 @@ type state = {
   mutable observer_cursor: Sse_wire.observer_cursor option;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
+  mutable observer_source_loss: bool;
+  mutable observer_source_loss_sequences: (string * int) list;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] + [acting_retained_quiet] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -10638,6 +10761,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
+  mutable msg_history_loss_followup: (string * workspace_authority * unit ref) option;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -12085,10 +12209,11 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
           state.keeper_waiting
       in
       let waiting, activity_waiting =
-        match state.keeper_waiting_failure, observed_waiting with
-        | Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
-        | None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
-        | None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
+        match List.mem name state.keeper_waiting_unverified,
+              state.keeper_waiting_failure, observed_waiting with
+        | true, _, _ | false, Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
+        | false, None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
+        | false, None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
       in
       let approval =
         List.find_opt
@@ -12293,10 +12418,95 @@ let select_keeper_waiting_observation ~fresh ~stale ~previous_failure observatio
   | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
       select waiting (fun rows -> Tui_decode.Keeper_waiting_fleet_unreported rows)
 
-let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
-  preserve_keeper_list_selection state (fun () ->
-    state.keeper_turns <- rows;
-    (match waiting with
+let keeper_turns_projection_complete ~current = function
+  | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_observed waiting } ->
+      List.for_all (fun (turn : Tui_decode.keeper_turn_row) ->
+        current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+          String.equal row.kwr_keeper_name turn.ktr_keeper_name
+          && List.for_all (fun item ->
+            item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error)
+              row.kwr_waiting_on) waiting) rows
+  | Ok { Tui_decode.waiting = (Tui_decode.Keeper_waiting_fleet_unreported _
+                             | Tui_decode.Keeper_waiting_unavailable _); _ }
+  | Error _ -> false
+
+type keeper_waiting_snapshot = {
+  kws_epoch : int;
+  kws_versions : (string * int) list;
+  kws_controls : (string * int) list;
+  kws_pending_controls : string list;
+}
+
+type keeper_waiting_change = Waiting_all | Waiting_keepers of string list
+
+let note_keeper_waiting_change state change =
+  let names = match change with
+    | Waiting_all ->
+        state.keeper_waiting_epoch <- state.keeper_waiting_epoch + 1;
+        List.map (fun (keeper : Tui_decode.keeper) -> keeper.k_name) state.keepers
+        @ List.map (fun (turn : Tui_decode.keeper_turn_row) -> turn.ktr_keeper_name) state.keeper_turns
+        @ List.map (fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name) state.keeper_waiting
+    | Waiting_keepers names ->
+        List.iter (fun name ->
+          let version = Option.value ~default:0 (List.assoc_opt name state.keeper_waiting_versions) in
+          state.keeper_waiting_versions <- (name, version + 1) ::
+            List.remove_assoc name state.keeper_waiting_versions) names;
+        names in
+  state.keeper_waiting_unverified <-
+    List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
+  state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read
+
+let capture_keeper_waiting_snapshot state =
+  { kws_epoch = state.keeper_waiting_epoch
+  ; kws_versions = state.keeper_waiting_versions
+  ; kws_controls = state.keeper_chat_control_generations
+  ; kws_pending_controls = List.map fst state.keeper_chat_control_pending
+  }
+
+let keeper_waiting_name_current state snapshot name =
+  let version versions = Option.value ~default:0 (List.assoc_opt name versions) in
+  snapshot.kws_epoch = state.keeper_waiting_epoch
+  && version snapshot.kws_versions = version state.keeper_waiting_versions
+  && version snapshot.kws_controls = version state.keeper_chat_control_generations
+  && not (List.mem name snapshot.kws_pending_controls)
+  && not (List.mem_assoc name state.keeper_chat_control_pending)
+
+let keeper_waiting_row_current state snapshot (turn : Tui_decode.keeper_turn_row) =
+  keeper_waiting_name_current state snapshot turn.ktr_keeper_name
+
+let keeper_waiting_unverified_names ~current = function
+  | Ok { Tui_decode.rows; waiting = (Tui_decode.Keeper_waiting_observed waiting
+                                    | Tui_decode.Keeper_waiting_fleet_unreported waiting) } ->
+      List.filter_map (fun (turn : Tui_decode.keeper_turn_row) ->
+        if current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+            String.equal row.kwr_keeper_name turn.ktr_keeper_name) waiting
+        then None else Some turn.ktr_keeper_name) rows
+  | Ok { Tui_decode.waiting = Tui_decode.Keeper_waiting_unavailable _; _ }
+  | Error _ -> []
+
+let keeper_waiting_unverified_after state ~current ~current_name result =
+  let resolved name =
+    match result with
+    | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_observed waiting } ->
+        let found = List.find_opt (fun (turn : Tui_decode.keeper_turn_row) ->
+          String.equal turn.ktr_keeper_name name) rows in
+        (match found with
+         | None -> current_name name
+         | Some turn -> current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+             String.equal row.kwr_keeper_name name) waiting)
+    | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_fleet_unreported waiting } ->
+        List.exists (fun (turn : Tui_decode.keeper_turn_row) ->
+          String.equal turn.ktr_keeper_name name && current turn) rows
+        && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+          String.equal row.kwr_keeper_name name) waiting
+    | Ok { Tui_decode.waiting = Tui_decode.Keeper_waiting_unavailable _; _ }
+    | Error _ -> false in
+  List.sort_uniq String.compare
+    (List.filter (fun name -> not (resolved name)) state.keeper_waiting_unverified
+     @ keeper_waiting_unverified_names ~current result)
+
+let update_keeper_waiting state ~rows ~waiting =
+    match waiting with
      | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting
@@ -12314,7 +12524,15 @@ let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
      | Tui_decode.Keeper_waiting_unavailable failure ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting:[];
-       state.keeper_waiting_failure <- Some failure);
+       state.keeper_waiting_failure <- Some failure
+
+let accept_keeper_waiting_observation state ~rows ~waiting =
+  preserve_keeper_list_selection state (fun () -> update_keeper_waiting state ~rows ~waiting)
+
+let accept_keeper_turn_observation ?(accept_waiting = true) state ~rows ~waiting ~observed_at =
+  preserve_keeper_list_selection state (fun () ->
+    state.keeper_turns <- rows;
+    if accept_waiting then update_keeper_waiting state ~rows ~waiting;
     state.keeper_turns_observed_at <- Some observed_at;
     state.keeper_turns_error <- None)
 
@@ -13933,6 +14151,7 @@ let suspend_workspace_readings state =
   state.lane_addons_reading <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
   state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
@@ -13954,6 +14173,9 @@ let suspend_workspace_readings state =
   state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
   state.code_location_offer <- None;
   state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
@@ -13999,9 +14221,14 @@ let suspend_workspace_readings state =
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
+  state.keeper_waiting_read <- Keeper_waiting_read.suspend state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
@@ -14012,6 +14239,7 @@ let suspend_workspace_readings state =
     | Some request -> Keeper_history_read.page_pending request
     | None -> false in
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   (* A cold page is refresh preparation, not an explicit older-page demand.
      Normal eligible history dispatch can request it again. A scrolled view
      retains its cached source and uses explicit refresh/paging instead. *)
@@ -14664,11 +14892,20 @@ let abandon_fusion_launch (state : state) =
 let withdraw_fusion_workspace (state : state) =
   ignore (abandon_fusion_launch state);
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None;
   state.fusion_detail_generation <- state.fusion_detail_generation + 1;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.fusion_detail <- None;
+  state.fusion_detail_stale <- false;
   state.fusion_historical_detail <- None;
+  state.fusion_historical_detail_stale <- false;
   state.fusion_detail_error <- None;
   state.fusion_launch_error <- None;
   state.fusion_mode <- Fusion_list;
@@ -15964,6 +16201,11 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
+let advance_keeper_interactive_control state keeper_name =
+  let generation = advance_keeper_chat_control state keeper_name in
+  note_keeper_waiting_change state (Waiting_keepers [keeper_name]);
+  generation
+
 (* A server control that stops or resumes the owner supersedes the priority
    requests still waiting locally for that Keeper. *)
 let clear_keeper_priority_requests state keeper_name =
@@ -15998,6 +16240,7 @@ let begin_keeper_chat_control ?(preserve_input_holds = false)
     ?(preserve_priority_requests = false) state keeper_name =
   let previous_generation = keeper_chat_control_generation state keeper_name in
   let generation = advance_keeper_chat_control state keeper_name in
+  note_keeper_waiting_change state (Waiting_keepers [keeper_name]);
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
   if not preserve_priority_requests then clear_keeper_priority_requests state keeper_name;
@@ -18222,6 +18465,7 @@ let create_state
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
@@ -18572,8 +18816,13 @@ let create_state
   keeper_turns = [];
   keeper_waiting = [];
   keeper_waiting_failure = None;
+  keeper_waiting_unverified = [];
+  keeper_waiting_error = None;
+  keeper_waiting_epoch = 0;
+  keeper_waiting_versions = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
@@ -18897,22 +19146,33 @@ let create_state
   harness_detail = None;
   harness_detail_scroll = 0;
   fusion_runs = Masc_tui_fetched.initial;
+  fusion_runs_reread_pending = false;
+  fusion_runs_awaiting_observer = false;
+  fusion_runs_open_at_start = None;
   fusion_launch_error = None;
   fusion_cursor = 0;
   fusion_scroll = 0;
   fusion_mode = Fusion_list;
   fusion_detail = None;
   fusion_detail_error = None;
+  fusion_detail_stale = false;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
+  fusion_detail_reread_pending = false;
+  fusion_detail_awaiting_observer = false;
   fusion_historical_detail = None;
+  fusion_historical_detail_stale = false;
   fusion_historical_inflight = None;
+  fusion_historical_reread_pending = false;
+  fusion_historical_awaiting_observer = false;
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;
+  observer_source_loss = false;
+  observer_source_loss_sequences = [];
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -18967,6 +19227,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
+  msg_history_loss_followup = None;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -19306,6 +19567,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   state.msg_older_loading <- false;
   match List.assoc_opt keeper_name state.msg_loaded_pages with
   | Some page ->

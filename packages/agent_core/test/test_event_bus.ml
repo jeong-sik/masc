@@ -1299,6 +1299,315 @@ let test_subscribe_without_purpose_defaults_none () =
   | _ -> fail "one sub"
 ;;
 
+let expect_turns expected = function
+  | Event_bus.Unsubscribed -> fail "subscription ended while waiting for events"
+  | Event_bus.Events events ->
+    let turns =
+      List.map
+        (fun (event : Event_bus.event) ->
+          match event.payload with
+          | TurnStarted { turn; _ } -> turn
+          | _ -> fail "unexpected event in waiting batch")
+        events
+    in
+    check (list int) "FIFO batch" expected turns
+;;
+
+let test_await_batch_prequeued () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    List.iter
+      (fun turn -> Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn })))
+      [ 1; 2 ];
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      expect_turns [ 1; 2 ] (Event_bus.await_batch sub));
+    check int "await drained both events" 0 (List.length (Event_bus.drain sub));
+    Event_bus.unsubscribe bus sub)
+;;
+
+let test_await_batch_wakes_for_cross_domain_publish () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
+      for turn = 1 to 8 do
+        let waiting, mark_waiting = Eio.Promise.create () in
+        Eio.Fiber.both
+          (fun () ->
+            Eio.Promise.resolve mark_waiting ();
+            expect_turns [ turn ] (Event_bus.await_batch sub))
+          (fun () ->
+            Eio.Promise.await waiting;
+            Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+              Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn }))))
+      done);
+    Event_bus.unsubscribe bus sub)
+;;
+
+let test_two_waiters_recheck_after_one_event () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    let waiting_a, mark_a = Eio.Promise.create () in
+    let waiting_b, mark_b = Eio.Promise.create () in
+    let delivered, mark_delivered = Eio.Promise.create () in
+    let batches = ref 0 and closures = ref 0 in
+    let waiter mark =
+      Eio.Promise.resolve mark ();
+      match Event_bus.await_batch sub with
+      | Events events ->
+        expect_turns [ 42 ] (Events events);
+        incr batches;
+        Eio.Promise.resolve mark_delivered ()
+      | Unsubscribed -> incr closures
+    in
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      Eio.Fiber.both
+        (fun () -> Eio.Fiber.both (fun () -> waiter mark_a) (fun () -> waiter mark_b))
+        (fun () ->
+          Eio.Promise.await waiting_a;
+          Eio.Promise.await waiting_b;
+          Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 42 }));
+          Eio.Promise.await delivered;
+          Event_bus.unsubscribe bus sub));
+    check int "one waiter received the batch" 1 !batches;
+    check int "the other waiter observed unsubscribe" 1 !closures)
+;;
+
+let test_await_batch_wakes_on_unsubscribe () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    List.iter
+      (fun unsubscribe ->
+        let sub = subscribe_routing bus in
+        let started, start = Eio.Promise.create () in
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          Eio.Fiber.both
+            (fun () ->
+              Eio.Promise.resolve start ();
+              match Event_bus.await_batch sub with
+              | Unsubscribed -> ()
+              | Events _ -> fail "empty cancelled subscription returned events")
+            (fun () ->
+              Eio.Promise.await started;
+              Eio.Fiber.yield ();
+              unsubscribe bus sub)))
+      [ Event_bus.unsubscribe
+      ; (fun bus sub -> ignore (Event_bus.unsubscribe_and_drain bus sub))
+      ])
+;;
+
+let test_cancelled_await_releases_delivery_lock () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    let started, start = Eio.Promise.create () in
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      Eio.Fiber.first
+        (fun () ->
+          Eio.Promise.resolve start ();
+          ignore (Event_bus.await_batch sub);
+          fail "empty subscription returned before cancellation")
+        (fun () -> Eio.Promise.await started; Eio.Fiber.yield ());
+      Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 7 }));
+      expect_turns [ 7 ] (Event_bus.await_batch sub));
+    Event_bus.unsubscribe bus sub)
+;;
+
+exception Cancel_await_batch
+
+let test_cancelled_await_preserves_prequeued_batch () =
+  Eio_main.run (fun _env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 8 }));
+    let cancelled = ref false in
+    (try
+       Eio.Cancel.sub (fun context ->
+         Eio.Cancel.cancel context Cancel_await_batch;
+         ignore (Event_bus.await_batch sub))
+     with Eio.Cancel.Cancelled Cancel_await_batch -> cancelled := true);
+    check bool "cancelled consumer did not claim batch" true !cancelled;
+    expect_turns [ 8 ] (Event_bus.await_batch sub);
+    Event_bus.unsubscribe bus sub)
+;;
+
+let test_cancelled_after_notification_preserves_batch () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        let context, mark_context = Eio.Promise.create () in
+        let finished, mark_finished = Eio.Promise.create () in
+        let cancelled = ref false in
+        Eio.Fiber.fork ~sw (fun () ->
+          (try
+             Eio.Cancel.sub (fun cancel ->
+               Eio.Promise.resolve mark_context cancel;
+               ignore (Event_bus.await_batch sub))
+           with Eio.Cancel.Cancelled Cancel_await_batch -> cancelled := true);
+          Eio.Promise.resolve mark_finished ());
+        let cancel = Eio.Promise.await context in
+        (* The waiter parks first. Publish and cancel without yielding between
+           them, so the broadcast wins before the waiter resumes. *)
+        Eio.Fiber.yield ();
+        Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 10 }));
+        Eio.Cancel.cancel cancel Cancel_await_batch;
+        Eio.Promise.await finished;
+        check bool "notified consumer observed cancellation" true !cancelled;
+        expect_turns [ 10 ] (Event_bus.await_batch sub)));
+    Event_bus.unsubscribe bus sub)
+;;
+
+exception Cancel_unsubscribe
+
+let test_cancelled_unsubscribe_wakes_waiter_under_contention () =
+  Eio_main.run (fun env ->
+    List.iter
+      (fun unsubscribe ->
+        let bus = Event_bus.create () in
+        let sub = subscribe_routing bus in
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          Eio.Switch.run (fun sw ->
+            let waiting, mark_waiting = Eio.Promise.create () in
+            let closed, mark_closed = Eio.Promise.create () in
+            let held, mark_held = Eio.Promise.create () in
+            let release, mark_release = Eio.Promise.create () in
+            let context, mark_context = Eio.Promise.create () in
+            let finished, mark_finished = Eio.Promise.create () in
+            let cancelled = ref false in
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve mark_waiting ();
+              (match Event_bus.await_batch sub with
+               | Unsubscribed -> ()
+               | Events _ -> fail "cancelled subscription returned an event");
+              Eio.Promise.resolve mark_closed ());
+            Eio.Promise.await waiting;
+            Eio.Fiber.fork ~sw (fun () ->
+              Event_bus.For_testing.with_delivery_lock sub (fun () ->
+                Eio.Promise.resolve mark_held ();
+                Eio.Promise.await release));
+            Eio.Promise.await held;
+            Eio.Fiber.fork ~sw (fun () ->
+              (try
+                 Eio.Cancel.sub (fun cancel ->
+                   Eio.Promise.resolve mark_context cancel;
+                   unsubscribe bus sub)
+               with Eio.Cancel.Cancelled Cancel_unsubscribe -> cancelled := true);
+              Eio.Promise.resolve mark_finished ());
+            let cancel = Eio.Promise.await context in
+            Eio.Fiber.yield ();
+            Eio.Cancel.cancel cancel Cancel_unsubscribe;
+            Eio.Promise.resolve mark_release ();
+            Eio.Promise.await closed;
+            Eio.Promise.await finished;
+            check bool "cancellation propagated after cleanup" true !cancelled;
+            check int "subscription removed" 0 (Event_bus.subscriber_count bus))))
+      [ Event_bus.unsubscribe
+      ; (fun bus sub -> ignore (Event_bus.unsubscribe_and_drain bus sub))
+      ])
+;;
+
+let test_cancelled_unsubscribe_and_drain_retains_pending_events () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 9 }));
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        let held, mark_held = Eio.Promise.create () in
+        let release, mark_release = Eio.Promise.create () in
+        let context, mark_context = Eio.Promise.create () in
+        let finished, mark_finished = Eio.Promise.create () in
+        let cancelled = ref false in
+        Eio.Fiber.fork ~sw (fun () ->
+          Event_bus.For_testing.with_delivery_lock sub (fun () ->
+            Eio.Promise.resolve mark_held ();
+            Eio.Promise.await release));
+        Eio.Promise.await held;
+        Eio.Fiber.fork ~sw (fun () ->
+          (try
+             Eio.Cancel.sub (fun cancel ->
+               Eio.Promise.resolve mark_context cancel;
+               ignore (Event_bus.unsubscribe_and_drain bus sub))
+           with Eio.Cancel.Cancelled Cancel_unsubscribe -> cancelled := true);
+          Eio.Promise.resolve mark_finished ());
+        let cancel = Eio.Promise.await context in
+        Eio.Fiber.yield ();
+        Eio.Cancel.cancel cancel Cancel_unsubscribe;
+        Eio.Promise.resolve mark_release ();
+        Eio.Promise.await finished;
+        check bool "cancellation propagated" true !cancelled;
+        check int "subscription removed" 0 (Event_bus.subscriber_count bus);
+        expect_turns [ 9 ] (Events (Event_bus.drain sub)))))
+;;
+
+let test_unsubscribe_and_drain_owns_batch_before_later_drainer () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 11 }));
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        let held, mark_held = Eio.Promise.create () in
+        let release, mark_release = Eio.Promise.create () in
+        let closing, mark_closing = Eio.Promise.create () in
+        let draining, mark_draining = Eio.Promise.create () in
+        let closed, mark_closed = Eio.Promise.create () in
+        let drained, mark_drained = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Event_bus.For_testing.with_delivery_lock sub (fun () ->
+            Eio.Promise.resolve mark_held ();
+            Eio.Promise.await release));
+        Eio.Promise.await held;
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve mark_closing ();
+          Eio.Promise.resolve mark_closed (Event_bus.unsubscribe_and_drain bus sub));
+        Eio.Promise.await closing;
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve mark_draining ();
+          Eio.Promise.resolve mark_drained (Event_bus.drain sub));
+        Eio.Promise.await draining;
+        Eio.Promise.resolve mark_release ();
+        expect_turns [ 11 ] (Events (Eio.Promise.await closed));
+        check int "later drainer cannot steal closed batch" 0
+          (List.length (Eio.Promise.await drained)))))
+;;
+
+let test_unsubscribe_and_drain_owns_batch_while_hub_is_busy () =
+  Eio_main.run (fun env ->
+    let bus = Event_bus.create () in
+    let sub = subscribe_routing bus in
+    Event_bus.publish bus (ev (TurnStarted { agent_name = "a"; turn = 12 }));
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        let held, mark_held = Eio.Promise.create () in
+        let release, mark_release = Eio.Promise.create () in
+        let closing, mark_closing = Eio.Promise.create () in
+        let draining, mark_draining = Eio.Promise.create () in
+        let closed, mark_closed = Eio.Promise.create () in
+        let drained, mark_drained = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Event_bus.For_testing.with_hub_lock bus (fun () ->
+            Eio.Promise.resolve mark_held ();
+            Eio.Promise.await release));
+        Eio.Promise.await held;
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve mark_closing ();
+          Eio.Promise.resolve mark_closed (Event_bus.unsubscribe_and_drain bus sub));
+        Eio.Promise.await closing;
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve mark_draining ();
+          Eio.Promise.resolve mark_drained (Event_bus.drain sub));
+        Eio.Promise.await draining;
+        Eio.Promise.resolve mark_release ();
+        expect_turns [ 12 ] (Events (Eio.Promise.await closed));
+        check int "later drainer cannot steal batch while hub is busy" 0
+          (List.length (Eio.Promise.await drained)))))
+;;
+
 (* ── Suite ────────────────────────────────────────────────────────── *)
 
 let () =
@@ -1340,6 +1649,17 @@ let () =
     ; ( "drain"
       , [ test_case "fifo order" `Quick test_drain_fifo
         ; test_case "empty" `Quick test_drain_empty
+        ; test_case "await prequeued batch" `Quick test_await_batch_prequeued
+        ; test_case "await cross-domain publish" `Quick test_await_batch_wakes_for_cross_domain_publish
+        ; test_case "two waiters recheck after one event" `Quick test_two_waiters_recheck_after_one_event
+        ; test_case "await unsubscribe" `Quick test_await_batch_wakes_on_unsubscribe
+        ; test_case "cancel await releases lock" `Quick test_cancelled_await_releases_delivery_lock
+        ; test_case "cancelled await preserves prequeued batch" `Quick test_cancelled_await_preserves_prequeued_batch
+        ; test_case "cancelled notified await preserves batch" `Quick test_cancelled_after_notification_preserves_batch
+        ; test_case "cancel unsubscribe wakes waiter" `Quick test_cancelled_unsubscribe_wakes_waiter_under_contention
+        ; test_case "cancel unsubscribe retains queued events" `Quick test_cancelled_unsubscribe_and_drain_retains_pending_events
+        ; test_case "unsubscribe owns closed batch" `Quick test_unsubscribe_and_drain_owns_batch_before_later_drainer
+        ; test_case "unsubscribe owns batch while hub busy" `Quick test_unsubscribe_and_drain_owns_batch_while_hub_is_busy
         ] )
     ; ( "filters"
       , [ test_case "agent name" `Quick test_filter_agent_name

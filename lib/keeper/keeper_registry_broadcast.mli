@@ -2,8 +2,9 @@
 
     Pure side-effect wrappers — no registry state read or written. *)
 
-(** Broadcast a signal-only [keeper_composite_changed] SSE event on both
-    the main broadcast channel and the presence stream.
+(** Broadcast a signal-only [keeper_composite_changed] SSE event to observers
+    and presence sessions belonging to [base_path]. External subscribers must
+    carry the same runtime authority to receive the observer event.
 
     The payload is intentionally minimal: keeper [name] + wall-clock
     [ts_unix]. It is *not* the authoritative composite snapshot.
@@ -11,12 +12,12 @@
     the new state. See docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md
     §Read Model Rules.
 
-    Exceptions from [Sse.broadcast] are caught, counted on the
+    Broadcast exceptions are caught, counted on the
     [keeper_lifecycle_dispatch_rejections] Otel_metric_store counter (with
     the [broadcast_composite_failed] event label), and logged at WARN.
     [Eio.Cancel.Cancelled] propagates so cancellation semantics are
     preserved. *)
-val composite_changed : name:string -> ts_unix:float -> unit
+val composite_changed : base_path:string -> name:string -> ts_unix:float -> unit
 
 (** Account for a [keeper_phase_changed] SSE broadcast failure: bump the
     [keeper_sse_broadcast_failures] Otel_metric_store counter (site label

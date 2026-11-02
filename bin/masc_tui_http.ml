@@ -1666,29 +1666,112 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
 type observer_error =
   | Transport_failed of string
   | Http_refused of { status : int; detail : string }
+  | Invalid_handshake of string
+
+let observer_workspace_refused ~status ~detail =
+  if status <> 409 then false
+  else
+    match Yojson.Safe.from_string detail with
+    | `Assoc fields ->
+      List.assoc_opt "code" fields =
+      Some (`String (Masc.Request_workspace_precondition.refusal_code
+        Masc.Request_workspace_precondition.Workspace_mismatch))
+    | _ -> false
+    | exception Yojson.Json_error _ -> false
+
+exception Invalid_sse_response of string
+
+(* A comma outside a quoted parameter makes the field ambiguous: an HTTP
+   intermediary may have combined multiple Content-Type fields. *)
+let unambiguous_content_type value =
+  let quoted = ref false and escaped = ref false and valid = ref true in
+  String.iter (fun ch ->
+    if !escaped then escaped := false
+    else if !quoted && Char.equal ch '\\' then escaped := true
+    else if Char.equal ch '"' then quoted := not !quoted
+    else if not !quoted && Char.equal ch ',' then valid := false) value;
+  !valid && not !quoted && not !escaped
+;;
+
+let validate_sse_response ~status ~headers =
+  if status = 200 then
+    match List.filter_map (fun (name, value) ->
+      if String.equal (String.lowercase_ascii name) "content-type"
+      then Some value else None) headers with
+    | [ value ] when unambiguous_content_type value ->
+        let essence =
+          match String.index_opt value ';' with
+          | None -> value
+          | Some index -> String.sub value 0 index
+        in
+        if String.equal (String.lowercase_ascii (String.trim essence)) "text/event-stream"
+        then Ok ()
+        else Error "response is not text/event-stream"
+    | [] -> Error "response has no Content-Type"
+    | _ -> Error "response has ambiguous Content-Type"
+  else if Masc.Tui_decode.is_success_http_status status then
+    Error (Printf.sprintf "unexpected stream status %d" status)
+  else Ok ()
+;;
+
+let check_sse_response ~status ~headers =
+  match validate_sse_response ~status ~headers with
+  | Ok () -> ()
+  | Error detail -> raise (Invalid_sse_response detail)
+;;
 
 type execute_output_stream_error =
   | Execute_transport_failed of string
   | Execute_http_refused of { status : int; detail : string }
   | Execute_unattested of { status : int; detail : string }
+  | Execute_invalid_response of { status : int; detail : string }
+
+(* The server compares the two query fields with its own workspace and says
+   so in [x-masc-workspace-read]. The receipt belongs to this response: a
+   server that ignores the fields cannot supply a bound reading. *)
+let workspace_read_attested headers =
+  let name, expected = Masc.Workspace.read_precondition_admission_header in
+  match
+    List.filter_map
+      (fun (key, value) ->
+        if String.equal (String.lowercase_ascii key) name then Some value else None)
+      headers
+  with
+  | [ value ] -> String.equal value expected
+  | [] | _ :: _ :: _ -> false
 
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events ~clock ~(host : string) ~(port : int)
+let observe_runtime_events ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
-    ~on_response ~(on_chunk : string -> unit) : (unit, observer_error) result =
-  let url = url_of ~host ~port ~path:observer_stream_path in
+    ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
+  let url =
+    url_of ~host ~port
+      ~path:(observer_stream_path ^ "&" ^ expected_workspace_query expected_workspace)
+  in
   let headers =
     ("Accept", "text/event-stream")
     :: ("Mcp-Session-Id", sanitize_header_value session_id)
     :: auth_headers ()
     @ Sse_wire.observer_cursor_headers cursor
   in
+  let checked_response ~status ~headers =
+    check_sse_response ~status ~headers;
+    if Masc.Tui_decode.is_success_http_status status then begin
+      if not (workspace_read_attested headers) then
+        raise (Invalid_sse_response "workspace admission receipt is missing or invalid");
+      (match Sse_wire.validate_observer_response ~cursor headers with
+       | Error detail -> raise (Invalid_sse_response detail)
+       | Ok handshake -> on_open handshake)
+    end
+  in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url ~headers ~on_response ~on_chunk ()
+      ~url ~headers ~on_response:checked_response ~on_chunk ()
   with
+  | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
   | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
@@ -1711,10 +1794,9 @@ let fleet_stream_idle_timeout_sec =
     the connection. A refusal comes back as [Http_refused] with [on_chunk]
     never called.
 
-    The server answers 409 unless it is [expected_workspace], so a stream
-    reopened after another workspace took the port cannot show that server's
-    fleet. The fleet read this replaced was bound to the confirmed workspace
-    the same way. *)
+    The server answers 409 unless it is [expected_workspace]. A 200 response
+    must carry the matching workspace receipt before its bytes are read. This
+    admission does not attest the stream after a later workspace replacement. *)
 let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~(host : string) ~(port : int) ~(on_chunk : string -> unit)
     : (unit, observer_error) result =
@@ -1723,29 +1805,21 @@ let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_id
       ~path:(Masc.Fleet_stream.stream_path ^ "?" ^ expected_workspace_query expected_workspace)
   in
   let headers = ("Accept", "text/event-stream") :: auth_headers () in
+  let checked_response ~status ~headers =
+    check_sse_response ~status ~headers;
+    if status = 200 && not (workspace_read_attested headers) then
+      raise (Invalid_sse_response "workspace admission receipt is missing or invalid")
+  in
   match
     Masc_http_client.get_stream ~clock
-      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers ~on_chunk ()
+      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers
+      ~on_response:checked_response ~on_chunk ()
   with
+  | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
   | Error detail -> Error (Transport_failed (report_err "fleet stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
-
-(* The server compares the two query fields with its own workspace and says so
-   in [x-masc-workspace-read]. A server that does not know the fields would
-   answer for whichever workspace it holds, so a stream that comes back without
-   the receipt is not read, as a bound read without it is not. *)
-let workspace_read_attested headers =
-  let name, expected = Masc.Workspace.read_precondition_admission_header in
-  match
-    List.filter_map
-      (fun (key, value) ->
-        if String.equal (String.lowercase_ascii key) name then Some value else None)
-      headers
-  with
-  | [ value ] -> String.equal value expected
-  | [] | _ :: _ :: _ -> false
 
 let execute_output_stream_idle_timeout_sec =
   stream_missed_keepalives
@@ -1769,6 +1843,7 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
     ~(port : int) ~(keeper : string) ~(on_chunk : string -> unit)
     : (unit, execute_output_stream_error) result =
   let exception Not_attested of int in
+  let exception Invalid_execute_response of int * string in
   let url =
     url_of ~host ~port
       ~path:
@@ -1786,6 +1861,9 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
   let refusal_received, signal_refusal = Eio.Promise.create () in
   let on_response ~status ~headers =
     if Masc.Tui_decode.is_success_http_status status then (
+      (match validate_sse_response ~status ~headers with
+       | Ok () -> ()
+       | Error detail -> raise (Invalid_execute_response (status, detail)));
       if not (workspace_read_attested headers) then raise (Not_attested status)
     ) else (
       refused_status := Some status;
@@ -1810,6 +1888,8 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
       Error
         (Execute_unattested
            { status; detail = "Server did not attest the requested workspace read" })
+  | exception Invalid_execute_response (status, detail) ->
+      Error (Execute_invalid_response { status; detail })
   | `Refusal_timeout status ->
       Error (Execute_http_refused
         { status

@@ -18,3 +18,11 @@ type = "boolean"
 description = """
 Return keeper summaries (model/context) instead of names \
 only."""
+
+[[params]]
+name = "fresh"
+type = "boolean"
+description = """
+Recompute the roster without using or updating the short-lived list cache. \
+Successful responses carry projection_cache_bypassed=true. Use after receiving \
+a change notification; inputs are not one atomic snapshot."""

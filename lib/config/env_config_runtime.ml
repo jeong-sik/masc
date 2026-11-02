@@ -455,7 +455,7 @@ end
 (** {1 AGENT_CORE SSE Bridge Configuration} *)
 
 module Agent_core_sse = struct
-  (** SSE drain interval (seconds). Default: 2.0. *)
+  (** SSE relay retry delay in seconds. Default: 2.0. *)
   let drain_interval_sec =
     let v = get_float ~default:2.0 "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC" in
     if v < 0.1 then 2.0 else v

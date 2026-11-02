@@ -244,17 +244,23 @@ val invalidate_full_health_snapshot : unit -> unit
     live state mutation. [full=1] retains its fields and measurement timestamp,
     with stale metadata; only a cold cache returns warming placeholders.
     A worker invalidated during its scan cannot certify a current snapshot.
-    Cancellation
-    does not interrupt it, and a caller outside Eio invalidates without waking
-    the refresh loop, which then refreshes at its next interval. *)
+    The wake is coalesced and also works when the caller is outside Eio. *)
 
-val fleet_stream_hub : Fleet_stream_hub.t
-(** The fleet events the Keepers screen reads in place of polling
-    [/health?full=1] (RFC-0477). Every scan that stores a measured snapshot
-    tells it the fleet reading, and every failed or timed-out scan tells it the
-    failure, through the same two functions that publish the cached snapshot. A
-    subscriber that connects through {!Fleet_stream_hub.subscribe} sees the
-    state the cached snapshot would have shown, then each change. *)
+val invalidate_full_health_snapshot_for_workspace : base_path:string -> unit
+(** Invalidate only the matching canonical workspace, or conservatively
+    invalidate before the current workspace is known. *)
+
+val invalidate_full_health_snapshot_for_registry_change :
+  base_path:string -> Keeper_registry.state_change -> unit
+(** Keep lifecycle phase invalidations global. Failure reason changes invalidate
+    only the matching canonical workspace, or globally before server state is
+    published. *)
+
+val fleet_stream_hub_for_scope :
+  state:Mcp_server.server_state -> scope:Mcp_server.workspace_scope -> Fleet_stream_hub.t option
+(** The hub for the current workspace generation. A new generation starts
+    without the preceding generation's reading and requests a fresh scan.
+    [None] means that the supplied state or scope is no longer current. *)
 
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
@@ -268,6 +274,24 @@ val start_full_health_snapshot_refresh_loop :
     read of listener environment. *)
 
 module For_testing : sig
+  val make_cached_full_health_json_after_selection :
+    after_selection:(unit -> unit) ->
+    request_authority:Server_request_authority.authority ->
+    Httpun.Request.t -> Yojson.Safe.t
+  (** Runs a callback after choosing the health snapshot and before rendering it. *)
+
+  val fleet_stream_hub_for_scope_before_registration :
+    before_registration:(unit -> unit) ->
+    state:Mcp_server.server_state -> scope:Mcp_server.workspace_scope -> Fleet_stream_hub.t option
+  (** Holds a selected hub before its demand is bound to the active worker. *)
+
+  val take_full_health_wakeup : unit -> unit
+  val take_full_health_wakeup_nonblocking : unit -> bool
+  (** Consume a wakeup from the production refresh mailbox. *)
+
+  val full_health_wakeup_stream : unit -> unit Eio.Stream.t
+  (** Exposes the mailbox to an isolated refresh worker test. *)
+
   val reset_full_health_snapshot : unit -> unit
   (** Clears the cached full-health snapshot and in-flight refresh marker. *)
 
@@ -300,9 +324,19 @@ module For_testing : sig
       failed observation (not a thrown worker exception). The worker is attached
       to [sw], not to a caller timeout. *)
 
+  val run_full_health_refresh_worker_before_scope :
+    before_scope:(unit -> unit) ->
+    sw:Eio.Switch.t ->
+    compute:(unit -> ((string * Yojson.Safe.t) list, Proactive_refresh.failure) result) -> unit
+  (** Like [run_full_health_refresh_worker], but holds the worker at a test
+      boundary before it captures the generation at the start of its scan. *)
+
   val full_health_refresh_worker_stats : unit -> int * int * bool * int * bool * bool
   (** Returns [(submissions, joins, active, invalidation_generation,
       snapshot_present, refresh_requested)]. *)
+
+  val full_health_observation_failures : unit -> int
+  (** Failures belonging to the current workspace generation. *)
 end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list

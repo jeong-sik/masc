@@ -10,7 +10,6 @@ type 'completion worker = private
   ; started_at : float
   ; completion : 'completion
   ; freshness : freshness
-  ; failure_reported : bool
   ; was_requested : bool
   }
 
@@ -67,8 +66,7 @@ val start :
 val take_worker :
   id:int -> 'completion t -> ('completion t * 'completion worker) option
 (** [None] means no matching active worker; its completion must be ignored.
-    A match removes only worker ownership and returns its freshness and
-    once-only failure evidence unchanged. *)
+    A match removes only worker ownership and returns its freshness unchanged. *)
 
 val cancel_worker :
   id:int -> 'completion t -> ('completion t * bool) option
@@ -77,10 +75,6 @@ val cancel_worker :
     flight), and restoring any pre-existing or invalidation-triggered refresh
     request. The returned boolean is [true] when the worker was invalidated
     while active. *)
-
-val note_wait_failure : 'completion t -> 'completion t option
-(** Mark the active worker's first waiter failure. [None] means no active
-    worker or that its failure was already reported; do not publish it again. *)
 
 val invalidate : now:float -> 'completion t -> 'completion t
 (** Request another refresh, advance the observation generation and retain

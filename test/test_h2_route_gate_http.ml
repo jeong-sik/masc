@@ -66,7 +66,7 @@ let with_gateway ~make_routes run =
           Eio.Flow.shutdown client_flow `All) (fun () -> run ~player client);
         Eio.Promise.await_exn server))
 
-let request ?token ~meth client path =
+let request_with_headers ?token ~meth client path =
   let result, resolve = Eio.Promise.create () in
   let headers = [":authority", "localhost:8935"]
     @ (match token with None -> [] | Some token -> ["authorization", "Bearer " ^ token]) in
@@ -78,12 +78,16 @@ let request ?token ~meth client path =
       let bytes = Buffer.create 256 in
       let rec read () = H2.Body.Reader.schedule_read reader
         ~on_eof:(fun () -> Eio.Promise.resolve resolve
-          (Ok (H2.Status.to_code response.status, Buffer.contents bytes)))
+          (Ok (H2.Status.to_code response.status, H2.Headers.to_list response.headers, Buffer.contents bytes)))
         ~on_read:(fun chunk ~off ~len ->
           Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len); read ()) in
       read ()) in
   H2.Body.Writer.close writer;
   match Eio.Promise.await result with Ok response -> response | Error detail -> fail detail
+
+let request ?token ~meth client path =
+  let status, _, body = request_with_headers ?token ~meth client path in
+  status, body
 
 let status ?token ~meth client path = fst (request ?token ~meth client path)
 
@@ -159,6 +163,59 @@ let test_a_table_that_disagrees_with_an_arm_refuses () =
       check int "a kind HTTP/2 does not serve" 500
         (status ~meth:`GET client "/api/v1/lanes"))
 
+let test_fusion_workspace_admission () =
+  with_gateway ~make_routes:production (fun ~player client ->
+    strict None (fun () ->
+      let state = match Server_auth.For_testing.snapshot_server_state () with
+        | Some state -> state | None -> fail "fixture server has no workspace" in
+      let config = Masc.Mcp_server.workspace_config state in
+      let base = Unix.realpath config.base_path in
+      let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let target path fields = Uri.with_query (Uri.of_string path) fields |> Uri.to_string in
+      let expected = [ "expected_base_path", [ base ]; "expected_masc_root", [ root ] ] in
+      let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
+      let receipt = Masc.Workspace.read_precondition_admission_header in
+      let read path fields = request_with_headers ~token:player ~meth:`GET client (target path fields) in
+      Masc.Board.reset_global_for_test ();
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
+      let post = match Masc.Board_dispatch.create_post ~author:"fixture" ~content:"original"
+          ~post_kind:Masc.Board.System_post () with
+        | Ok post -> post
+        | Error error -> fail (Masc.Board.Post_publication_failure.to_string error) in
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs" expected in
+      check int "bound list succeeds" 200 code;
+      check bool "bound list attests workspace" true (List.mem receipt headers);
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs" foreign in
+      check int "foreign list is refused before projection" 409 code;
+      check bool "foreign list has no admission receipt" false (List.mem receipt headers);
+      let code, _, _ = read "/api/v1/dashboard/fusion-runs" [ "expected_base_path", [ base ] ] in
+      check int "partial workspace precondition is refused" 400 code;
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs/unknown" expected in
+      check int "bound missing detail remains a 404" 404 code;
+      check bool "bound detail attests workspace" true (List.mem receipt headers);
+      let code, _, _ = read "/api/v1/dashboard/fusion-runs/unknown" foreign in
+      check int "foreign detail is refused before lookup" 409 code;
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs" [] in
+      check int "unbound legacy list remains available" 200 code;
+      check bool "unbound list is not attested" false (List.mem receipt headers);
+      let board = "/api/v1/board/" ^ Masc.Board.Post_id.to_string post.id ^ "?format=flat" in
+      let board_target fields = Uri.with_query (Uri.of_string board) (("format", ["flat"]) :: fields) |> Uri.to_string in
+      let read_board fields = request_with_headers ~meth:`GET client (board_target fields) in
+      let code, headers, _ = read_board expected in
+      check int "bound Board original is readable" 200 code;
+      check bool "bound Board original attests workspace" true (List.mem receipt headers);
+      let code, headers, _ = read_board foreign in
+      check int "foreign Board original is refused before lookup" 409 code;
+      check bool "foreign Board original has no receipt" false (List.mem receipt headers);
+      let code, _, _ = read board expected in
+      check int "optional reaction actor still rejects the Player token" 403 code;
+      let code, _, _ = read board foreign in
+      check int "reaction auth refusal still precedes workspace checks" 403 code;
+      strict (Some "1") (fun () ->
+        let code, _, _ = read_board expected in
+        check int "strict mode still requires authentication" 401 code)))
+
 let () =
   run "H2 route gate"
     [ ( "gate"
@@ -171,5 +228,6 @@ let () =
             test_a_path_the_router_lacks_is_not_found
         ; test_case "a table that disagrees with an arm refuses" `Quick
             test_a_table_that_disagrees_with_an_arm_refuses
+        ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission
         ] )
     ]

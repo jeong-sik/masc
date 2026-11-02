@@ -106,6 +106,7 @@ type broadcast_target =
   | Observers    (** Only [Observer] sessions *)
   | Runtime_observers of runtime_authority
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
+  | Runtime_presence of runtime_authority
 
 type delivery_audience =
   | Broadcast_audience of broadcast_target
@@ -156,6 +157,7 @@ type client = {
   last_event_id: int Atomic.t;
   created_at: float;
   last_seen_at: float Atomic.t;
+  on_disconnect: (unit -> unit) option;
 }
 
 type client_registry_state = {
@@ -379,6 +381,8 @@ let session_kind_matches_target target ~runtime_authority ~jsonrpc_payload kind 
   | Runtime_observers authority ->
       kind = Observer && Option.exists (equal_runtime_authority authority) runtime_authority
   | Presence_only -> kind = Presence
+  | Runtime_presence authority ->
+      kind = Presence && Option.exists (equal_runtime_authority authority) runtime_authority
 
 let event_matches_session ~runtime_authority ~session_id ~kind event =
   match event.audience with
@@ -499,51 +503,11 @@ let next_id () =
   (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
   Atomic.fetch_and_add event_counter 1 + 1
 
-(** Per-session disconnect hook registry.
-
-    A disconnect hook fires when [unregister] / [unregister_if_current]
-    removes a session from [clients].  Its purpose is to wake the
-    transport-layer drain fiber that is otherwise blocked on
-    [Eio.Stream.take]: removing the session from the broadcast registry
-    stops new events from arriving, but the drain fiber holds the HTTP
-    connection's [info.stop] flag and must be signalled separately.
-
-    Without this hook, queue-overflow [unregister] calls (broadcast skip
-    fixup at [broadcast_impl]) leak HTTP connections with stale drain
-    fibers — manifesting as "WS events stop arriving but the browser
-    still shows connected" until keep-alive timeout reaps the socket
-    minutes later.  This was the silent half of the
-    [Transport_metrics.inc_broadcast_failure] path.
-
-    The hook is invoked exactly once: it is removed from the registry
-    inside the same atomic update that observes its presence, so even
-    racing [unregister] / [unregister_if_current] calls cannot double-fire.
-    Hook callbacks are wrapped in try/with — exceptions are logged and
-    swallowed (except [Eio.Cancel.Cancelled]) so a misbehaving callback
-    cannot strand the broadcast fan-out. *)
-let session_disconnect_hooks : (unit -> unit) SMap.t Atomic.t =
-  Atomic.make SMap.empty
-
-let set_disconnect_hook session_id hook =
-  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
-    { next_state = SMap.add session_id hook map; result = () })
-
-let clear_disconnect_hook session_id =
-  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
-    { next_state = SMap.remove session_id map; result = () })
-
-let take_disconnect_hook session_id =
-  let hook_ref = ref None in
-  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
-    match SMap.find_opt session_id map with
-    | None -> { next_state = map; result = () }
-    | Some hook ->
-        hook_ref := Some hook;
-        { next_state = SMap.remove session_id map; result = () });
-  !hook_ref
-
-let invoke_disconnect_hook_for session_id =
-  match take_disconnect_hook session_id with
+(** The callback is carried by the client removed in the atomic registry
+    update. A successor can reuse the session id without replacing the
+    callback that belongs to the connection being removed. *)
+let invoke_disconnect_hook_for session_id client =
+  match client.on_disconnect with
   | None -> ()
   | Some hook ->
       (try hook () with
@@ -596,11 +560,7 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
                   Ok credential
 
 (** Register a new SSE client.
-    Returns (client_id, event_stream, evicted_session_id option).
-    [?on_disconnect], if supplied, is installed BEFORE the client is
-    published to [clients] — closes the race window where a concurrent
-    [broadcast] could observe the new entry, hit queue overflow, fire
-    [unregister], and find no hook to wake the drain fiber. *)
+    Returns (client_id, event_stream, evicted_session_id option). *)
 let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) session_id ~last_event_id =
   match validate_registration ~auth session_id with
   | Error e -> Error e
@@ -614,7 +574,6 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
   let floor = if last_event_id > current_id () then 0 else last_event_id in
   let last_event_id = Atomic.make floor in
   let event_stream = Eio.Stream.create stream_capacity in
-  Option.iter (fun hook -> set_disconnect_hook session_id hook) on_disconnect;
   let base_client = {
     id = client_id;
     kind;
@@ -623,6 +582,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
     last_event_id;
     created_at = 0.0;
     last_seen_at = Atomic.make 0.0;
+    on_disconnect;
   } in
   let evicted =
     Lockfree_atomic.update_with_commit clients (fun state ->
@@ -640,13 +600,13 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
                     else acc)
               state.entries None
           in
-          Option.map fst oldest
+          oldest
         else
           None
       in
       let entries_after_eviction =
         match evicted with
-        | Some sid -> SMap.remove sid state.entries
+        | Some (sid, _) -> SMap.remove sid state.entries
         | None -> state.entries
       in
       let install_time = Time_compat.now () in
@@ -665,26 +625,24 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
       })
   in
   (match evicted with
-   | Some sid ->
+   | Some (sid, client) ->
        Transport_metrics.inc_sse_client_evicted ();
        Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
-       (* Eviction is a form of disconnect: the broadcast-registry entry
-          is gone, so the evicted session's drain fiber will block on
-          [Eio.Stream.take] forever unless we wake it.  Callers also
-          invoke [stop_sse_session evicted_sid] explicitly today (legacy
-          path); that double-invocation is idempotent because
-          [close_sse_conn] guards on [info.closed]. *)
-       invoke_disconnect_hook_for sid
+       (* Wake the connection whose broadcast entry was removed. Callers also
+          stop the evicted session by id for lifecycle reporting; a successor
+          racing that second stop is tracked separately in #47514. *)
+       invoke_disconnect_hook_for sid client
    | None ->
        ());
   sync_transport_snapshot ~force:true ();
-  Ok (client_id, event_stream, evicted)
+  Ok (client_id, event_stream, Option.map fst evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =
   let removed =
     Lockfree_atomic.update_with_commit clients (fun state ->
-      if SMap.mem session_id state.entries then
+      match SMap.find_opt session_id state.entries with
+      | Some client ->
         let next_entries = SMap.remove session_id state.entries in
         (* [state.count] is the authoritative cardinality maintained
            by every other [update_with_commit] in this module, so
@@ -698,28 +656,21 @@ let unregister session_id =
             entries = next_entries;
             count = state.count - 1;
           };
-          result = true;
+          result = Some client;
         }
-      else
+      | None ->
         {
           next_state = state;
-          result = false;
+          result = None;
         })
   in
-  if removed then begin
-    (* Invoke the per-session disconnect hook BEFORE [sync_transport_snapshot].
-       The hook typically calls back into [Server_mcp_transport_http_conn.
-       stop_sse_session], which closes the HTTP body writer and re-enters
-       [unregister_if_current].  That re-entry is a no-op here because we
-       already removed the entry above, so there is no double-decrement risk
-       and no infinite-loop risk.  Snapshot recording is sequenced AFTER the
-       hook so observers see [info.closed = true] in the same tick. *)
-    invoke_disconnect_hook_for session_id;
+  match removed with
+  | Some client ->
+    (* Wake the removed connection before recording the transport snapshot.
+       Its close may re-enter [unregister_if_current], which is now a no-op. *)
+    invoke_disconnect_hook_for session_id client;
     sync_transport_snapshot ~force:true ()
-  end else
-    (* Even on no-op unregister we still clear any orphaned hook to avoid
-       slow leaks across reconnects.  [clear_disconnect_hook] is idempotent. *)
-    clear_disconnect_hook session_id
+  | None -> ()
 
 (** Unregister only if the current client matches the given client_id.
     Prevents an old connection's cleanup from unregistering a newer connection
@@ -737,19 +688,20 @@ let unregister_if_current session_id client_id =
               entries = next_entries;
               count = state.count - 1;
             };
-            result = true;
+            result = Some client;
           }
       | _ ->
           {
             next_state = state;
-            result = false;
+            result = None;
           })
   in
-  if removed then begin
+  match removed with
+  | Some client ->
     (* See [unregister] for the hook ordering rationale. *)
-    invoke_disconnect_hook_for session_id;
+    invoke_disconnect_hook_for session_id client;
     sync_transport_snapshot ~force:true ()
-  end
+  | None -> ()
 
 (** Check if client exists *)
 let exists session_id =
@@ -908,7 +860,7 @@ let remove_external_subscribers ids =
     removed during iteration, preventing resource leaks. *)
 let external_matches_target target (subscriber : external_subscriber) =
   match target with
-  | Runtime_observers authority ->
+  | Runtime_observers authority | Runtime_presence authority ->
       Option.exists (equal_runtime_authority authority) subscriber.runtime_authority
   | All | Observers | Presence_only -> true
 
@@ -917,6 +869,11 @@ let notify_external_subscribers ~target event =
   let record_duration () =
     Transport_metrics.observe_external_subscriber_fanout_duration
       (Time_compat.now () -. t0)
+  in
+  let report_subscriber_failure (sub : external_subscriber) exn =
+    Transport_metrics.inc_external_subscriber_callback_failure ();
+    Log.Misc.warn "External subscriber %s failed: %s" sub.sub_id
+      (Printexc.to_string exn)
   in
   try
     (* [Atomic.get] returns an immutable [SMap.t] snapshot — concurrent
@@ -930,18 +887,20 @@ let notify_external_subscribers ~target event =
     let dead = ref [] in
     SMap.iter
       (fun _ (sub : external_subscriber) ->
-        if not (sub.is_alive ())
-        then dead := sub.sub_id :: !dead
-        else if external_matches_target target sub then
-          try sub.callback event with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-              (* P1 silent-failure fix: previously only logged.  Increment a
-                 counter so dashboards distinguish "all subscribers healthy"
-                 from "subscribers exist but every callback throws." *)
-              Transport_metrics.inc_external_subscriber_callback_failure ();
-              Log.Misc.warn "External subscriber %s failed: %s" sub.sub_id
-                (Printexc.to_string exn))
+        try
+          if not (sub.is_alive ())
+          then dead := sub.sub_id :: !dead
+          else if external_matches_target target sub then sub.callback event
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+            (* A subscriber can raise its own cancellation even when the
+               publisher is still live. Do not skip later subscribers in
+               that case, but preserve cancellation of the publisher. *)
+            (match Fs_compat.execution_context () with
+             | Eio_fiber -> Eio.Fiber.check ()
+             | Non_eio -> ());
+            report_subscriber_failure sub exn
+        | exn -> report_subscriber_failure sub exn)
       subscribers;
     (* Remove dead subscribers *)
     if !dead <> [] then begin
@@ -1018,7 +977,7 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
   && (not notify_external)
   &&
   match target with
-  | Presence_only ->
+  | Presence_only | Runtime_presence _ ->
     (* [session_kind_matches_target] is the only definition of which session a
        target reaches. Asking it here rather than re-testing [kind = Presence]
        keeps the skip and the delivery on one predicate: if [Presence_only]
@@ -1047,7 +1006,7 @@ type broadcast_payload =
   | Value of Yojson.Safe.t
   | Encoded of Sse_wire.encoded_json
 
-let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
+let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target payload =
   let t0 = Time_compat.now () in
   let json =
     match payload with
@@ -1060,7 +1019,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
   let target_label = match target with
     | All -> "all"
     | Observers | Runtime_observers _ -> "observers"
-    | Presence_only -> "presence"
+    | Presence_only | Runtime_presence _ -> "presence"
   in
   let delivery, failed =
     Stdlib.Mutex.protect delivery_fanout_mutex (fun () ->
@@ -1105,7 +1064,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
        if queue_len >= stream_capacity then begin
          (* Tier-A perf fix: queue overflow is now a {b disconnect}
             signal, not a silent drop.  The session is added to
-            [failed] (so [unregister] runs below); the disconnect hook
+            [failed] (so [unregister_if_current] runs below); the disconnect hook
             installed at register-time wakes the drain fiber via
             [stop_sse_session], closing the HTTP writer.  The client's
             EventSource will reconnect with [Last-Event-Id]; the bumped
@@ -1117,7 +1076,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
             saw "WS events stop arriving" with no error indication and
             had to manually refresh.  See plan
             [planning/claude-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
-         failed := (session_id, `Full queue_len) :: !failed
+         failed := (session_id, client.id, `Full queue_len) :: !failed
        end else
          try
            Eio.Stream.add client.event_stream delivery;
@@ -1126,13 +1085,13 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | e ->
-             failed := (session_id, `Raised e) :: !failed)
+             failed := (session_id, client.id, `Raised e) :: !failed)
     end
   ) clients_entries;
   delivery, !failed)
   in
   List.iter
-    (fun (session_id, failure) ->
+    (fun (session_id, _, failure) ->
        Transport_metrics.inc_broadcast_failure ~target:target_label ();
        match failure with
        | `Full queue_len ->
@@ -1143,8 +1102,14 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
          Log.Server.error "Broadcast enqueue failed for session %s: %s"
            session_id (Printexc.to_string e))
     failed;
-  (* Remove failed connections *)
-  List.iter (fun (session_id, _) -> unregister session_id) failed;
+  (* A session can reconnect after the fan-out snapshot. Retire only the
+     client whose queue failed, not a successor using the same session id. *)
+  List.iter (fun (session_id, client_id, _) ->
+    unregister_if_current session_id client_id) failed;
+  (* The replay buffer owns the delivery and every live queue was either
+     enqueued or unregistered. Later metrics and external subscribers do not
+     undo that publication. The callback is a non-yielding receipt. *)
+  Option.iter (fun notify -> notify ()) on_committed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
@@ -1160,10 +1125,10 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
       }
 
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
-    ?(event_type = "message") target payload =
+    ?(event_type = "message") ?on_committed target payload =
   if broadcast_is_unobservable target ~buffer ~notify_external
   then Transport_metrics.inc_sse_broadcast_skipped_no_observer ()
-  else broadcast_deliver ~buffer ~notify_external ~event_type target payload
+  else broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target payload
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All (Value json)
@@ -1171,9 +1136,25 @@ let broadcast json = broadcast_impl All (Value json)
 (** Broadcast event to sessions matching [target].
     - [All]: every session (same as [broadcast])
     - [Observers]: dashboard / read-only viewers only *)
-let broadcast_to target json = broadcast_impl target (Value json)
+let broadcast_to target json =
+  match target with
+  | Runtime_presence _ -> invalid_arg "broadcast_to: use broadcast_presence_to_runtime"
+  | All | Observers | Runtime_observers _ | Presence_only ->
+      broadcast_impl target (Value json)
 
-let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded)
+let broadcast_to_with_commit target ~on_committed json =
+  match target with
+  | Presence_only | Runtime_presence _ ->
+      invalid_arg "broadcast_to_with_commit: presence is not replayed"
+  | All | Observers | Runtime_observers _ ->
+      broadcast_impl ~on_committed target (Value json)
+
+let broadcast_encoded_to target encoded =
+  match target with
+  | Runtime_presence _ ->
+      invalid_arg "broadcast_encoded_to: use broadcast_presence_to_runtime"
+  | All | Observers | Runtime_observers _ | Presence_only ->
+      broadcast_impl target (Encoded encoded)
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
     only: they are not replay-buffered and do not fan out through generic
@@ -1182,6 +1163,10 @@ let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded
 let broadcast_presence json =
   broadcast_impl ~buffer:false ~notify_external:false ~event_type:"presence"
     Presence_only (Value json)
+
+let broadcast_presence_to_runtime authority json =
+  broadcast_impl ~buffer:false ~notify_external:false ~event_type:"presence"
+    (Runtime_presence authority) (Value json)
 
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)
@@ -1209,7 +1194,7 @@ let send_to session_id json =
       | Some client ->
           let queue_len = Eio.Stream.length client.event_stream in
           if queue_len >= stream_capacity then
-            `Full queue_len
+            `Full (client.id, queue_len)
           else
             try
               Eio.Stream.add client.event_stream delivery;
@@ -1218,7 +1203,7 @@ let send_to session_id json =
               `Enqueued
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
-            | e -> `Raised e)
+            | e -> `Raised (client.id, e))
   in
   match outcome with
   | `Absent -> ()
@@ -1232,17 +1217,17 @@ let send_to session_id json =
         "Targeted JSON-RPC delivery rejected for non-agent session %s (%s)"
         session_id kind_label
   | `Enqueued -> sync_transport_snapshot ()
-  | `Full queue_len ->
+  | `Full (client_id, queue_len) ->
       Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
       Log.Server.warn
         "Targeted enqueue skip: session %s stream full (%d/%d) — disconnecting"
         session_id queue_len stream_capacity;
-      unregister session_id
-  | `Raised e ->
+      unregister_if_current session_id client_id
+  | `Raised (client_id, e) ->
       Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
       Log.Server.error "Enqueue to %s failed: %s — disconnecting"
         session_id (Printexc.to_string e);
-      unregister session_id
+      unregister_if_current session_id client_id
 
 (** Pop the next event from a client's stream.
     Blocks the calling fiber until an event is available.

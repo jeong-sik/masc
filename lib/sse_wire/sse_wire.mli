@@ -46,7 +46,7 @@ val format_event_encoded : ?id:int -> ?event_type:string -> encoded_json -> stri
 (** {!format_event_yojson} of [encoded.json], written from [encoded.text]. *)
 
 type observer_cursor = { instance_id : string; event_id : int }
-type observer_reset = Instance_changed | Unscoped_cursor
+type observer_reset = Instance_changed | Unscoped_cursor | Cursor_ahead
 type observer_replay =
   | Fresh
   | Resumed  (** No event after the cursor left the retained window. *)
@@ -55,18 +55,23 @@ type observer_replay =
           The replay holds what is left after it. *)
   | Reset of observer_reset
 type observer_handshake = { instance_id : string; replay : observer_replay }
+(** [instance_id] is a nonempty HTTP token. The server changes it when its
+    process or the observer's workspace scope changes. *)
 
 val observer_cursor_headers : observer_cursor option -> (string * string) list
-(** Send a numeric cursor only with the process instance that delivered it. *)
+(** Send a numeric cursor only with the observer instance that delivered it. *)
 
 val negotiate_observer :
   instance_id:string ->
+  current_event_id:int ->
   headers:(string * string) list ->
   last_event_id:int option ->
   observer_handshake * int option
 (** The returned cursor is the only cursor suitable for both registration and
-    replay. A cursor from another or unspecified instance is discarded before
-    either path can suppress new events. [Fresh] and [Reset] start live only.
+    replay. A cursor from another or unspecified instance, or ahead of the
+    current process counter, is discarded before either path can suppress
+    new events. [Fresh] and [Reset] start live only.
+    Repeated instance headers are unscoped even when their values agree.
     [Resumed] reads the retained replay window; whether events after the
     cursor expired from it is known only after the replay is read, and
     {!observer_after_replay} records it. *)
@@ -81,4 +86,15 @@ val observer_response_headers : observer_handshake -> (string * string) list
 val decode_observer_response :
   (string * string) list -> (observer_handshake option, string) result
 (** [Ok None] means the peer did not advertise scoped replay. Partial or invalid
-    metadata is an error, never an assumed continuation of a previous epoch. *)
+    metadata, including duplicate or contradictory headers, is an error, never
+    an assumed continuation of a previous epoch. *)
+
+val validate_observer_response :
+  cursor:observer_cursor option -> (string * string) list ->
+  (observer_handshake option, string) result
+(** Validate response metadata against the cursor actually requested.
+    An unadvertised capability is usable only without a requested cursor;
+    a resumed stream must name that cursor's instance and a gap must pass it.
+    Fresh and reset responses must also be consistent with the request. A
+    peer without replay metadata cannot silently downgrade a scoped cursor to
+    live-only; the caller retains it for a later validated response. *)

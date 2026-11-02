@@ -28,6 +28,7 @@ type broadcast_target =
   | Observers
   | Runtime_observers of runtime_authority
   | Presence_only
+  | Runtime_presence of runtime_authority
 
 type delivery_audience =
   | Broadcast_audience of broadcast_target
@@ -53,6 +54,7 @@ type client = {
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
+  on_disconnect : (unit -> unit) option;
 }
 
 type client_registry_state = {
@@ -111,9 +113,8 @@ val register :
     was handed out by an earlier process, since ids only grow within one, and
     is registered as 0: every new event reaches the client.
 
-    [?on_disconnect] is installed atomically with registration via
-    {!set_disconnect_hook} before the client becomes broadcast-visible,
-    so a concurrent queue-overflow [unregister] always finds the hook.
+    [?on_disconnect] is part of the client published atomically in the
+    registry, so a removal wakes that client even if its session is reused.
 
     On validation failure a typed [registration_error] is returned so the
     transport layer can respond with an auth error and close the connection
@@ -161,10 +162,22 @@ val current_id : unit -> int
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
 
+val broadcast_to_with_commit
+  : broadcast_target -> on_committed:(unit -> unit) -> Yojson.Safe.t -> unit
+(** The non-yielding callback runs once the replay buffer and live queues have
+    accepted the delivery and failed sessions have been unregistered. A later
+    diagnostic or external-subscriber exception does not undo that receipt.
+    This callback is not a receipt for external subscribers. [Presence_only]
+    and [Runtime_presence] are rejected because presence is not replayable. *)
+
 val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
 (** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
     so the value is not encoded again under the fan-out lock. *)
 val broadcast_presence : Yojson.Safe.t -> unit
+val broadcast_presence_to_runtime : runtime_authority -> Yojson.Safe.t -> unit
+(** Deliver an ephemeral presence event only to sessions in this runtime.
+    It is not replay-buffered and does not reach external subscribers.
+    [Runtime_presence] cannot be passed to the generic broadcast functions. *)
 val send_to : string -> Yojson.Safe.t -> unit
 val pop : string -> string option
 val try_pop : string -> string option

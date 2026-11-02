@@ -22,6 +22,7 @@
  (libraries
    masc.agent_core.digest
   fs_compat
+  eio
   masc_workspace
   dated_jsonl
   masc_log

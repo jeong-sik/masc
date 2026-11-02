@@ -746,7 +746,26 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
-  let base_path = deps.get_base_path () in
+  let observer_scope =
+    match sse_kind with
+    | Sse.Observer ->
+      Option.map (fun state -> state, Mcp_server.workspace_scope state)
+        (deps.get_server_state ())
+    | Sse.Agent_stream | Sse.Presence -> None
+  in
+  let scope_is_current () =
+    match sse_kind, observer_scope with
+    | Sse.Observer, Some (state, scope) ->
+      Option.exists (fun current -> current == state) (deps.get_server_state ())
+      && Mcp_server.Workspace_scope_epoch.equal scope.epoch
+           (Mcp_server.workspace_scope state).epoch
+    | Sse.Observer, None -> false
+    | (Sse.Agent_stream | Sse.Presence), _ -> true
+  in
+  let base_path = match observer_scope with
+    | Some (_, scope) -> scope.config.base_path
+    | None -> deps.get_base_path ()
+  in
   let auth_result =
     match profile with
     | Full | Managed_agent ->
@@ -807,12 +826,45 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 (Server_mcp_transport_http_headers.last_event_id_error_to_string
                    error)
           | Ok last_event_id ->
+      let admission =
+        match sse_kind, observer_scope with
+        | Sse.Observer, None -> Error `Not_ready
+        | Sse.Observer, Some (_, scope) ->
+          (match Server_auth.validate_read_workspace_precondition
+                   ~config:scope.config request with
+           | Ok Server_auth.Workspace_read_unbound -> Ok []
+           | Ok Server_auth.Workspace_read_matched ->
+             Ok [Workspace.read_precondition_admission_header]
+           | Error error -> Error (`Workspace error))
+        | (Sse.Agent_stream | Sse.Presence), _ -> Ok []
+      in
+      let refuse_workspace error =
+        let json, status = Server_auth.read_workspace_precondition_error_response error in
+        Http_server_eio.Response.json_value ~status ~request
+          ~extra_headers:(deps.cors_headers origin) json reqd
+      in
+      (match admission with
+       | Error `Not_ready -> respond_not_ready ~deps request reqd
+       | Error (`Workspace error) -> refuse_workspace error
+       | Ok _ when not (scope_is_current ()) ->
+         refuse_workspace Workspace.Workspace_precondition_failed
+       | Ok admission_headers ->
       let observer_handshake, last_event_id =
         match sse_kind with
         | Sse.Observer ->
+            (* Replay is retained by process and base path. A same-path
+               workspace replacement must still reset the previous cursor. *)
+            let instance_id =
+              match observer_scope with
+              | Some (_, scope) ->
+                Build_identity.runtime_instance_id ^ "."
+                ^ Mcp_server.Workspace_scope_epoch.to_string scope.epoch
+              | None -> Build_identity.runtime_instance_id
+            in
             let handshake, cursor =
               Sse_wire.negotiate_observer
-                ~instance_id:Build_identity.runtime_instance_id
+                ~instance_id
+                ~current_event_id:(Sse.current_id ())
                 ~headers:(Httpun.Headers.to_list request.headers) ~last_event_id
             in
             Some handshake, cursor
@@ -843,17 +895,26 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let expected_resource =
             Server_oauth_metadata.resource request_authority
           in
+          let owned_info = Atomic.make None in
+          let disconnected = Atomic.make false in
+          let on_disconnect () =
+            Atomic.set disconnected true;
+            Option.iter stop_sse_conn_if_current (Atomic.get owned_info)
+          in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
                Sse.register ~kind:sse_kind ~auth session_id
                  (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
                  ~last_event_id:(Option.value ~default:0 last_event_id)
-                 ~on_disconnect:(fun () -> stop_sse_session session_id))
+                 ~on_disconnect)
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
+           | Ok (client_id, _, _) when not (scope_is_current ()) ->
+              Sse.unregister_if_current session_id client_id;
+              refuse_workspace Workspace.Workspace_precondition_failed
            | Ok (client_id, event_stream, evicted) ->
               (* Read after registering, which the live handoff below needs,
                  and before responding: an observer's response headers say
@@ -880,13 +941,12 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               in
               let headers =
                 Httpun.Headers.of_list
-                  (observer_headers
+                  (admission_headers @ observer_headers
                    @ sse_stream_headers ~deps session_id protocol_version origin)
               in
               let response = Httpun.Response.create ~headers `OK in
               let writer = Httpun.Reqd.respond_with_streaming reqd response in
               let mutex = Eio.Mutex.create () in
-              let info_ref : sse_conn_info option ref = ref None in
           (match evicted with
           | Some evicted_sid ->
               (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
@@ -895,16 +955,21 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 ~reason:Session_lifecycle_event.Cap_exceeded
           | None -> ());
           let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
-          info_ref := Some info;
           register_sse_conn ~session_id ~info;
-          if not (send_raw info (sse_prime_event ())) then
+          Atomic.set owned_info (Some info);
+          if Atomic.get disconnected then stop_sse_conn_if_current info;
+          let send_if_current data =
+            if scope_is_current () then send_raw info data
+            else (stop_sse_conn_if_current info; false)
+          in
+          if not (send_if_current (sse_prime_event ())) then
             Log.Server.debug "SSE prime send failed for session %s" info.session_id;
           let replayed =
             match replay with
             | Some { Sse.deliveries; continuity = _ } ->
               deliveries
               |> List.filter (fun delivery ->
-                if send_raw info delivery.Sse.frame
+                if send_if_current delivery.Sse.frame
                 then true
                 else (
                   Log.Server.debug
@@ -918,6 +983,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
+              Option.iter (fun (_, scope) ->
+                Eio.Fiber.fork_daemon ~sw (fun () ->
+                  (match Eio.Fiber.first
+                    (fun () -> Eio.Promise.await (Mcp_server.workspace_scope_replaced scope); `Replaced)
+                    (fun () -> Eio.Promise.await info.stop_promise; `Stopped) with
+                   | `Replaced -> stop_sse_conn_if_current info
+                   | `Stopped -> ());
+                  `Stop_daemon)) observer_scope;
               run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
@@ -925,14 +998,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                     (try
                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
                         if Sse.accept_live_delivery replay_handoff delivery
-                           && not (send_raw info delivery.Sse.frame)
+                           && not (send_if_current delivery.Sse.frame)
                         then
                           Log.Server.debug "SSE drain send failed for session %s"
                             info.session_id
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                       Log.Server.error "drain write error: %s"
                         (Printexc.to_string exn);
-                      stop_sse_session info.session_id);
+                      stop_sse_conn_if_current info);
                     if not (Atomic.get info.stop) then drain ()
                   in
                   try drain ()
@@ -955,16 +1028,16 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                            (Printexc.to_string exn));
                       (try
                          if Atomic.get info.closed then
-                           stop_sse_session info.session_id
+                           stop_sse_conn_if_current info
                          else if not (Atomic.get info.stop) then
-                           if not (send_raw info ": ping\n\n") then
+                           if not (send_if_current ": ping\n\n") then
                              Log.Server.debug "SSE ping send failed for session %s"
                                info.session_id
                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping send error: %s"
                            (Printexc.to_string exn);
-                         stop_sse_session info.session_id);
+                         stop_sse_conn_if_current info);
                       loop ())
                   in
                    try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -974,11 +1047,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                          (Printexc.to_string exn))
           | Error msg ->
               Log.Server.debug "SSE runtime unavailable for session %s: %s"
-                session_id msg);
+                session_id msg;
+              (match observer_scope with
+               | Some _ -> stop_sse_conn_if_current info
+               | None -> ()));
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
               Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients)))))
+              session_id client_count Sse.max_clients))))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

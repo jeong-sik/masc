@@ -4903,6 +4903,121 @@ let test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts () =
     Alcotest.(check int) "a turn that carried events broadcasts once" 1 !broadcasts;
     Alcotest.(check int) "a turn that lost nothing invalidates nothing" 0 !invalidations)
 
+let test_keeper_lifecycle_listener_waits_for_publication () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let bus = Agent_core.Event_bus.create () in
+      Event_bus_slots.set_masc bus;
+      let subscription = Runtime_event_bus.subscribe
+          ~capacity:8 ~overflow:Agent_core.Event_bus.Drop_oldest
+          ~purpose:"lifecycle_wait_test"
+          ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle") bus in
+      let active = ref true in
+      let unsubscribe () =
+        if !active then (active := false; Runtime_event_bus.unsubscribe bus subscription)
+      in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        let first, first_seen = Eio.Promise.create () in
+        let second, second_seen = Eio.Promise.create () in
+        let stopped, mark_stopped = Eio.Promise.create () in
+        let observed = ref [] and broadcasts = ref 0 and invalidations = ref 0 in
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_loops.For_testing.run_keeper_lifecycle_listener
+            ~clock:(Eio.Stdenv.clock env) ~subscription ~retry_interval_s:60.0
+            ~refresh:(fun ~keeper_name _ ->
+              observed := keeper_name :: !observed;
+              if String.equal keeper_name "wait-a" then Eio.Promise.resolve first_seen ();
+              if String.equal keeper_name "wait-b" then Eio.Promise.resolve second_seen ())
+            ~invalidate_all:(fun () -> incr invalidations)
+            ~broadcast:(fun () -> incr broadcasts);
+          Eio.Promise.resolve mark_stopped ());
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          Eio.Fiber.yield ();
+          Alcotest.(check int) "idle listener does not broadcast" 0 !broadcasts;
+          publish_keeper_started "wait-a";
+          Eio.Promise.await first;
+          Eio.Fiber.yield ();
+          publish_keeper_started "wait-b";
+          Eio.Promise.await second;
+          unsubscribe ();
+          Eio.Promise.await stopped);
+        Alcotest.(check (list string)) "events are refreshed in order"
+          [ "wait-a"; "wait-b" ] (List.rev !observed);
+        Alcotest.(check int) "each event batch broadcasts" 2 !broadcasts;
+        Alcotest.(check int) "no invalidation on successful events" 0 !invalidations)))
+
+let test_keeper_lifecycle_listener_resumes_after_iteration_failure () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let bus = Agent_core.Event_bus.create () in
+      Event_bus_slots.set_masc bus;
+      let subscription = Runtime_event_bus.subscribe
+          ~capacity:8 ~overflow:Agent_core.Event_bus.Drop_oldest
+          ~purpose:"lifecycle_retry_test"
+          ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle") bus in
+      let active = ref true in
+      let unsubscribe () =
+        if !active then (active := false; Runtime_event_bus.unsubscribe bus subscription)
+      in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        let failed, mark_failed = Eio.Promise.create () in
+        let second, second_seen = Eio.Promise.create () in
+        let stopped, mark_stopped = Eio.Promise.create () in
+        let attempts = ref 0 in
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_loops.For_testing.run_keeper_lifecycle_listener
+            ~clock:(Eio.Stdenv.clock env) ~subscription ~retry_interval_s:0.02
+            ~refresh:(fun ~keeper_name _ ->
+              if String.equal keeper_name "retry-b" then Eio.Promise.resolve second_seen ())
+            ~invalidate_all:(fun () -> ())
+            ~broadcast:(fun () ->
+              incr attempts;
+              if !attempts = 1 then (
+                Eio.Promise.resolve mark_failed ();
+                failwith "injected lifecycle broadcast failure"));
+          Eio.Promise.resolve mark_stopped ());
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          publish_keeper_started "retry-a";
+          Eio.Promise.await failed;
+          publish_keeper_started "retry-b";
+          Eio.Promise.await second;
+          unsubscribe ();
+          Eio.Promise.await stopped);
+        Alcotest.(check int) "later event broadcasts after failure" 2 !attempts)))
+
+let test_keeper_lifecycle_wait_reports_queued_overflow () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let bus = Agent_core.Event_bus.create () in
+      Event_bus_slots.set_masc bus;
+      let subscription = Runtime_event_bus.subscribe
+          ~capacity:2 ~overflow:Agent_core.Event_bus.Drop_oldest
+          ~purpose:"lifecycle_wait_overflow_test"
+          ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle") bus in
+      let active = ref true in
+      let unsubscribe () =
+        if !active then (active := false; Runtime_event_bus.unsubscribe bus subscription)
+      in
+      Fun.protect ~finally:unsubscribe (fun () ->
+        let broadcasted, mark_broadcasted = Eio.Promise.create () in
+        let stopped, mark_stopped = Eio.Promise.create () in
+        let observed = ref [] and invalidations = ref 0 in
+        List.iter publish_keeper_started [ "overflow-a"; "overflow-b"; "overflow-c" ];
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_loops.For_testing.run_keeper_lifecycle_listener
+            ~clock:(Eio.Stdenv.clock env) ~subscription ~retry_interval_s:60.0
+            ~refresh:(fun ~keeper_name _ -> observed := keeper_name :: !observed)
+            ~invalidate_all:(fun () -> incr invalidations)
+            ~broadcast:(fun () -> Eio.Promise.resolve mark_broadcasted ());
+          Eio.Promise.resolve mark_stopped ());
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+          Eio.Promise.await broadcasted;
+          unsubscribe ();
+          Eio.Promise.await stopped);
+        Alcotest.(check (list string)) "the newest queued events are handled"
+          [ "overflow-b"; "overflow-c" ] (List.rev !observed);
+        Alcotest.(check int) "a lost event invalidates all dependent caches" 1 !invalidations)))
+
 let test_startup_state_json () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
@@ -5322,8 +5437,8 @@ let test_create_server_state_invalidates_health_on_skill_publication () =
         true
         (full_health_invalidation_generation () > before))
 
-(* An observer can fire outside Eio (a test, a systhread). The invalidation
-   still lands there, and the Eio wakeup it skips stays usable. *)
+(* An observer can fire outside Eio (a test, a systhread). Its invalidation
+   and a subsequent Eio invalidation both retain their generation. *)
 let test_full_health_invalidation_outside_eio_keeps_the_wakeup () =
   let before = full_health_invalidation_generation () in
   Server_routes_http_runtime.invalidate_full_health_snapshot ();
@@ -6978,6 +7093,18 @@ let () =
             "keeper lifecycle listener turn refreshes and broadcasts"
             `Quick
             test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts;
+          Alcotest.test_case
+            "keeper lifecycle listener waits for publication"
+            `Quick
+            test_keeper_lifecycle_listener_waits_for_publication;
+          Alcotest.test_case
+            "keeper lifecycle listener resumes after iteration failure"
+            `Quick
+            test_keeper_lifecycle_listener_resumes_after_iteration_failure;
+          Alcotest.test_case
+            "keeper lifecycle wait reports queued overflow"
+            `Quick
+            test_keeper_lifecycle_wait_reports_queued_overflow;
           Alcotest.test_case
             "keeper lifecycle undecodable invalidates every keeper cache"
             `Quick

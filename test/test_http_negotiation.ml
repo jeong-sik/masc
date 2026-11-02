@@ -742,6 +742,22 @@ let test_sse_guard_negative_disables_in_production_path () =
         (Sse_reject_reason.to_label reason) wait_s
   | Ok () -> ()
 
+let test_last_event_id_headers () =
+  let parse headers =
+    let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/mcp" in
+    Transport_headers.get_last_event_id request
+  in
+  check bool "no cursor" true (parse [] = Ok None);
+  check bool "one cursor" true (parse [ "Last-Event-ID", "20" ] = Ok (Some 20));
+  List.iter (fun headers ->
+    check bool "duplicate cursors are rejected" true
+      (parse headers = Error Transport_headers.Duplicate_last_event_id))
+    [ [ "Last-Event-ID", "20"; "last-event-id", "50" ]
+    ; [ "last-event-id", "50"; "Last-Event-ID", "20" ]
+    ; [ "last-event-id", "20"; "Last-Event-ID", "20" ] ];
+  check bool "malformed cursor is rejected" true
+    (parse [ "last-event-id", "20,50" ] = Error Transport_headers.Malformed_last_event_id)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -750,6 +766,7 @@ let () =
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
       ("is_json_content_type", [test_case "content-type contract" `Quick test_is_json_content_type]);
+      ("last_event_id", [test_case "cursor header is unambiguous" `Quick test_last_event_id_headers]);
       ("protocol_continuity", [
         test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
         test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;

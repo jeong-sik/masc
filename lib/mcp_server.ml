@@ -379,11 +379,31 @@ type publication_recovery_runtime_snapshot =
   | Publication_recovery_initialization_crashed_snapshot
   | Publication_recovery_non_runtime_snapshot
 
+module Workspace_scope_epoch = struct
+  type t = string
+
+  let create () = Random_id.uuid_v7 ()
+  let equal = String.equal
+  let to_string epoch = epoch
+end
+
+type workspace_scope_lifetime =
+  { replaced : unit Eio.Promise.t
+  ; resolve_replaced : unit Eio.Promise.u
+  }
+
+let make_workspace_scope_lifetime () =
+  let replaced, resolve_replaced = Eio.Promise.create () in
+  { replaced; resolve_replaced }
+;;
+
 (** The active workspace and its publication-recovery registry are one atomic
     fact. The registry snapshot is the sole activation-health source. *)
 type workspace_scope =
   { config : Workspace.config
   ; publication_recovery : publication_recovery_runtime
+  ; epoch : Workspace_scope_epoch.t
+  ; lifetime : workspace_scope_lifetime
   }
 
 type workspace_runtime =
@@ -420,6 +440,7 @@ let workspace_switch_error_to_string = function
 
 let workspace_scope state = Atomic.get state.workspace_runtime.scope
 let workspace_config state = (workspace_scope state).config
+let workspace_scope_replaced scope = scope.lifetime.replaced
 
 let workspace_scope_publication_recovery_registry scope =
   match Atomic.get scope.publication_recovery.state with
@@ -874,14 +895,17 @@ let set_workspace_config state config =
       let replacement =
         { config
         ; publication_recovery = current_scope.publication_recovery
+        ; epoch = Workspace_scope_epoch.create ()
+        ; lifetime = make_workspace_scope_lifetime ()
         }
       in
-      if not
-           (Atomic.compare_and_set
-              state.workspace_runtime.scope
-              current_scope
-              replacement)
-      then replace_config ()
+      if
+        Atomic.compare_and_set
+          state.workspace_runtime.scope
+          current_scope
+          replacement
+      then Eio.Promise.resolve current_scope.lifetime.resolve_replaced ()
+      else replace_config ()
     in
     replace_config ();
     Ok ()
@@ -999,6 +1023,8 @@ module For_testing = struct
                     { state = Atomic.make Publication_recovery_non_runtime
                     ; initialized = None
                     }
+                ; epoch = Workspace_scope_epoch.create ()
+                ; lifetime = make_workspace_scope_lifetime ()
                 }
           }
       ; session_registry = registry
@@ -1088,7 +1114,11 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       { process_masc_root
       ; scope =
           Atomic.make
-            { config; publication_recovery }
+            { config
+            ; publication_recovery
+            ; epoch = Workspace_scope_epoch.create ()
+            ; lifetime = make_workspace_scope_lifetime ()
+            }
       };
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;

@@ -107,6 +107,58 @@ let check_status label expected actual =
   check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
 ;;
 
+let test_change_observer_runs_after_unlock_and_skips_noops () =
+  with_workspace @@ fun config ->
+  let observed = ref [] in
+  let initial_version = (read_state config).version in
+  Fun.protect
+    ~finally:(fun () -> install_change_observer (fun ~base_path:_ -> ()))
+    (fun () ->
+      install_change_observer (fun ~base_path ->
+        check string "workspace is retained" config.Workspace_utils.base_path base_path;
+        (* Deliberately re-enter in this test to prove the store lock was released. *)
+        with_ledger_lock config (fun () ->
+          let snapshot = read_state config in
+          observed := snapshot.version :: !observed));
+      let request = make_request () in
+      ignore (insert_ok config request);
+      check_error "duplicate" Schedule_already_exists
+        (insert_request config ~runner_tick_sec request);
+      ignore (store_ok "quiet tick" (refresh_due config ~now:150.0));
+      let pruned_state, count = store_ok "empty prune" (prune_completed config) in
+      check int "nothing was pruned" 0 count;
+      check int "empty prune does not write" (initial_version + 1) pruned_state.version;
+      check (list int) "only the insert notified" [ initial_version + 1 ]
+        (List.rev !observed);
+      ignore (store_ok "due tick" (refresh_due config ~now:201.0));
+      ignore (store_ok "cancel" (cancel_request config ~schedule_id:request.schedule_id));
+      check (list int) "each publication is visible after unlocking"
+        [ initial_version + 1; initial_version + 2; initial_version + 3 ]
+        (List.rev !observed))
+;;
+
+let test_change_observer_preserves_caller_cancellation () =
+  with_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> install_change_observer (fun ~base_path:_ -> ()))
+    (fun () ->
+      install_change_observer (fun ~base_path:_ -> raise (Eio.Cancel.Cancelled Exit));
+      ignore (insert_ok config (make_request ~schedule_id:"callback-cancel" ()));
+      check bool "callback-only cancellation preserves the committed request" true
+        (Option.is_some (get_schedule config ~schedule_id:"callback-cancel"));
+      let reason = Failure "caller cancelled" in
+      (match Eio.Cancel.sub (fun context ->
+         install_change_observer (fun ~base_path:_ ->
+           Eio.Cancel.cancel context reason;
+           raise (Eio.Cancel.Cancelled Exit));
+         ignore (insert_ok config (make_request ~schedule_id:"caller-cancel" ()))) with
+       | () -> fail "caller cancellation did not propagate"
+       | exception Eio.Cancel.Cancelled actual when actual == reason -> ()
+       | exception exn -> fail ("unexpected cancellation: " ^ Printexc.to_string exn));
+      check bool "caller cancellation occurred after publication" true
+        (Option.is_some (get_schedule config ~schedule_id:"caller-cancel")))
+;;
+
 let find_wake_for_occurrence
       state
       ~schedule_instance_id
@@ -1683,6 +1735,25 @@ let test_find_schedule_and_notes_for_schedule_use_prepared_indexes () =
     (List.map (fun (n : Schedule_domain.schedule_note) -> n.body) notes)
 ;;
 
+let test_prune_removes_orphan_wakes_without_terminal_requests () =
+  with_workspace @@ fun config ->
+  ignore (cancelled_request_with_wake_receipt config ~schedule_id:"orphan-only");
+  let state = read_state config in
+  check bool "fixture has a wake receipt" true (state.wakes <> []);
+  let ledger = Workspace_core.read_json config (schedules_path config) in
+  let without_requests = match ledger with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key, value) ->
+        if String.equal key "schedules" then key, `List [] else key, value) fields)
+    | _ -> fail "expected schedule ledger object" in
+  Workspace_core.write_text config (schedules_path config)
+    (Yojson.Safe.to_string without_requests);
+  let result, pruned = store_ok "prune orphan" (prune_completed config) in
+  check int "no terminal request remained" 0 pruned;
+  check int "orphan wake was removed" 0 (List.length result.wakes);
+  check int "orphan removal writes a new version" (state.version + 1) result.version
+;;
+
 let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
   with_workspace
   @@ fun config ->
@@ -2051,6 +2122,24 @@ let test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence () =
     (Workspace_core.read_text config (schedules_recovery_path config))
 ;;
 
+let test_change_observer_revalidates_after_attempted_write_failure () =
+  with_workspace @@ fun config ->
+  ignore (insert_ok config (make_request ~schedule_id:"before-failure" ()));
+  let ledger = Workspace_core.read_json config (schedules_path config) in
+  Workspace_core.write_text config (schedules_path config)
+    (Yojson.Safe.pretty_to_string (with_due_at (`Float Float.infinity) ledger));
+  let notifications = ref 0 in
+  Fun.protect
+    ~finally:(fun () -> install_change_observer (fun ~base_path:_ -> ()))
+    (fun () ->
+      install_change_observer (fun ~base_path:_ -> incr notifications);
+      (match insert_request config ~runner_tick_sec (make_request ~schedule_id:"fails" ()) with
+       | Error (Persistence_failed _) -> ()
+       | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+       | Ok _ -> fail "the invalid ledger unexpectedly encoded");
+      check int "a failed attempted publication requests revalidation" 1 !notifications)
+;;
+
 (* A schedule that ran and finished leaves the ledger a week after that wake,
    with its wakes. Its notes stay, and so does anything still being written
    about, still live, or never run. *)
@@ -2343,6 +2432,12 @@ let () =
     [
       ( "state",
         [
+          test_case "change observer runs after unlock and skips noops" `Quick
+            test_change_observer_runs_after_unlock_and_skips_noops;
+          test_case "change observer preserves caller cancellation" `Quick
+            test_change_observer_preserves_caller_cancellation;
+          test_case "change observer revalidates after attempted write failure" `Quick
+            test_change_observer_revalidates_after_attempted_write_failure;
           test_case "concurrent notes retain accepted appends" `Quick
             test_concurrent_notes_keep_both_accepted_appends;
           test_case "note read failure differs from absence" `Quick
@@ -2483,6 +2578,8 @@ let () =
             `Quick test_prune_deletes_terminal_request_and_wake_receipt;
           test_case "find_schedule and notes_for_schedule use prepared indexes"
             `Quick test_find_schedule_and_notes_for_schedule_use_prepared_indexes;
+          test_case "prune removes orphan wakes without terminal requests"
+            `Quick test_prune_removes_orphan_wakes_without_terminal_requests;
           test_case
             "prune scopes wake receipt ownership by schedule instance"
             `Quick

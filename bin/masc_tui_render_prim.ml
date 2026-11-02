@@ -1197,7 +1197,7 @@ let acting_pane_input (state : state) =
           state.workspace_identity = Workspace_identity_match
           && server_authority_ready state in
         let waiting =
-          if not workspace_ready then
+          if not workspace_ready || List.mem keeper.k_name state.keeper_waiting_unverified then
             Masc_tui_keeper_list_model.Waiting_unavailable
           else match state.keeper_waiting_failure with
             | Some _ -> Masc_tui_keeper_list_model.Waiting_unavailable
@@ -1720,7 +1720,11 @@ let connection_badge (state : state) =
       connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  connection ^ refresh_progress_badge state
+  let source_loss =
+    if state.observer_source_loss then Theme.warn () ^ "[events lost] " ^ Ansi.reset
+    else ""
+  in
+  source_loss ^ connection ^ refresh_progress_badge state
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives

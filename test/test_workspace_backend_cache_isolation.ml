@@ -146,6 +146,56 @@ let memory_backlog_reads_with_enabled_guard_and_pool () =
           | Some previous -> Domain_pool_ref.set previous)
         (fun () -> check int "memory backlog reads under the pool" 0 (List.length (read_backlog memory).tasks))))
 
+let invalidation_rejects_an_older_inflight_cache_fill () =
+  with_workspace (fun _env filesystem ->
+    let task = create_task filesystem "race-token-OLD" in
+    let path = Workspace_utils.backlog_path filesystem in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+    Unix.utimes path stamp stamp;
+    let before = Unix.stat path in
+    let old_title = "race-token-OLD" and new_title = "race-token-NEW" in
+    let rec find_title index =
+      if index + String.length old_title > String.length original then
+        fail "task title absent from persisted backlog"
+      else if String.sub original index (String.length old_title) = old_title then index
+      else find_title (index + 1) in
+    let changed = Bytes.of_string original in
+    Bytes.blit_string new_title 0 changed (find_title 0) (String.length new_title);
+    Workspace_backlog.invalidate_backlog_cache filesystem;
+    Eio.Switch.run (fun sw ->
+      let entered, signal_entered = Eio.Promise.create () in
+      let resume, signal_resume = Eio.Promise.create () in
+      let finished, signal_finished = Eio.Promise.create () in
+      let claimed = Atomic.make false in
+      let previous = Atomic.exchange Workspace_backlog.before_backlog_cache_registration_hook
+          (fun () ->
+            if Atomic.compare_and_set claimed false true then begin
+              Eio.Promise.resolve signal_entered ();
+              Eio.Promise.await resume
+            end) in
+      Fun.protect
+        ~finally:(fun () -> Atomic.set Workspace_backlog.before_backlog_cache_registration_hook previous)
+        (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            let older = read_backlog filesystem in
+            Eio.Promise.resolve signal_finished older);
+          Eio.Promise.await entered;
+          Out_channel.with_open_bin path (fun channel -> Out_channel.output_bytes channel changed);
+          Unix.utimes path before.Unix.st_atime before.Unix.st_mtime;
+          let after = Unix.stat path in
+          check int "replacement keeps cache size" before.Unix.st_size after.Unix.st_size;
+          check bool "replacement keeps cache mtime" true
+            (Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+          Workspace_backlog.invalidate_backlog_cache filesystem;
+          check bool "new read observes the replacement" true
+            (has_named_task (read_backlog filesystem) task new_title);
+          Eio.Promise.resolve signal_resume ();
+          check bool "in-flight read held the old value" true
+            (has_named_task (Eio.Promise.await finished) task old_title);
+          check bool "older read cannot overwrite the fresh cache" true
+            (has_named_task (read_backlog filesystem) task new_title))))
+
 let initialization_gate_uses_the_selected_backend () =
   with_workspace (fun _env filesystem ->
     let empty_memory, _ = memory_config filesystem in
@@ -171,6 +221,7 @@ let () =
       ; test_case "memory read cannot erase a filesystem task" `Quick memory_read_does_not_poison_a_filesystem_mutation
       ; test_case "recovery is not promoted by a filesystem cache" `Quick filesystem_cache_cannot_promote_memory_recovery
       ; test_case "memory read with Eio guard and domain pool" `Quick memory_backlog_reads_with_enabled_guard_and_pool
+      ; test_case "invalidation fences an older cache fill" `Quick invalidation_rejects_an_older_inflight_cache_fill
       ]
     ; "initialization",
       [ test_case "gate follows the selected backend" `Quick initialization_gate_uses_the_selected_backend ]

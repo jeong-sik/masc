@@ -2,10 +2,10 @@
 
     Extracted from keeper_registry.ml (lines 610-652) as part of the
     godfile decomp campaign. Two pure side-effect wrappers around
-    [Sse.broadcast] / [Sse.broadcast_presence] with Otel_metric_store counter
+    scoped SSE broadcasts with Otel_metric_store counter
     + log on failure. No registry state touched. *)
 
-let composite_changed ~name ~ts_unix =
+let composite_changed ~base_path ~name ~ts_unix =
   (* Signal-only freshness tick: name + timestamp. The authoritative read
      model is the per-keeper composite HTTP endpoint; consumers must
      re-fetch [/api/v1/keepers/:name/composite]. See
@@ -18,8 +18,9 @@ let composite_changed ~name ~ts_unix =
         ; "ts_unix", `Float ts_unix
         ]
     in
-    Sse.broadcast json;
-    Sse.broadcast_presence json
+    let authority = Sse.runtime_authority_exn ~base_path in
+    Sse.broadcast_to (Sse.Runtime_observers authority) json;
+    Sse.broadcast_presence_to_runtime authority json
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

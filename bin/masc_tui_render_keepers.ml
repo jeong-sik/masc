@@ -744,6 +744,15 @@ let render_keeper_list (state : state) =
          (Theme.warn () ^ "  turn/waiting observation: "
           ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
+  (match state.keeper_waiting_error with
+   | Some err ->
+       box_line buf cols
+         (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
+   | None when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
+       let detail = if Keeper_waiting_read.in_flight state.keeper_waiting_read
+         then "refreshing" else "refresh pending" in
+       box_line buf cols (Theme.warn () ^ "  waiting inventory: " ^ detail ^ Ansi.reset)
+   | None -> ());
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->
@@ -1165,6 +1174,7 @@ let terminal_drawing (state : state) ~width =
       let cause = match reason with
         | Masc_tui_execute_stream_job.Http_status status -> Printf.sprintf "HTTP %d" status
         | Unattested_response _ -> "unattested"
+        | Invalid_stream_response _ -> "invalid stream"
         | Unexpected_error -> "error" in
       let prefix = "Retry[] " ^ cause in
       let lead = Theme.bad () ^ prefix ^ Ansi.reset in

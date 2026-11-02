@@ -8,10 +8,12 @@ type observe_error =
   | Transport_failure of string
   | Http_refusal of { status : int; detail : string }
   | Unattested of { status : int; detail : string }
+  | Invalid_response of { status : int; detail : string }
 
 type stop_reason =
   | Http_status of int
   | Unattested_response of int
+  | Invalid_stream_response of int
   | Unexpected_error
 
 type ending =
@@ -34,12 +36,13 @@ let detail = function
   | Reader_refusal failure -> Reader.failure_to_string failure
   | Server_closed -> "the server closed the Execute output stream"
   | Observe_error (Transport_failure detail | Http_refusal { detail; _ }
-                   | Unattested { detail; _ }) -> detail
+                   | Unattested { detail; _ } | Invalid_response { detail; _ }) -> detail
 ;;
 
 let stop_reason = function
   | Reader_refusal _ | Server_closed | Observe_error (Transport_failure _) -> None
   | Observe_error (Unattested { status; _ }) -> Some (Unattested_response status)
+  | Observe_error (Invalid_response { status; _ }) -> Some (Invalid_stream_response status)
   | Observe_error (Http_refusal { status; _ }) ->
     if status = 408 || status = 425 || status = 429 || (status >= 500 && status <= 599)
     then None else Some (Http_status status)

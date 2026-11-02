@@ -6,6 +6,8 @@ import {
   type TraceSkillActivations, type TurnFlow, type TurnIntake,
 } from '../api/keeper-turn-flow'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { projectSkillAsyncEvidence } from '../lib/skill-async-evidence'
+import { skillAsyncOccurrenceIdentity } from '../api/dashboard-tools-prompts'
 
 type FlowRecord = Pick<TurnRecordEntry,
   'keeper' | 'trace_id' | 'absolute_turn' | 'turn_ref' | 'execution_ids' | 'blocks'>
@@ -30,15 +32,17 @@ function Intake({ intake }: { intake: TurnIntake }) {
   switch (intake.state) {
     case 'not_recorded':
       return html`<p class="rt-note">${intake.reason}. 자극이 없었다는 뜻은 아닙니다.</p>`
+    case 'unavailable':
+      return html`<p class="rt-note">${intake.reason}. 입력 자극을 확정하지 않습니다.</p>`
     case 'ambiguous':
-      return html`<p class="rt-note">같은 턴 참조에 시작 기록이 ${intake.starts}개입니다. 어느 시도의 입력인지 확정할 수 없습니다.</p>`
+      return html`<p class="rt-note">같은 턴 참조에 시작 기록을 ${intake.starts}개 이상 관측했습니다. 어느 시도의 입력인지 확정할 수 없습니다.</p>`
     case 'observed':
       return html`
         <p class="rt-note">선택 채널: ${intake.channel ?? '기록 없음'} · ${intake.sources.length}개</p>
         ${intake.sources.length === 0
           ? html`<p class="rt-note">턴 시작 시 관측한 큐 자극이 없습니다. 직접 입력은 메시지 탭에서 확인하세요.</p>`
           : html`<ol class="space-y-3">${intake.sources.map(source => html`
-              <li key=${`${source.stimulusId}:${source.admittedRevision}`} class="ti-meta break-all">
+              <li key=${`${source.stimulusId}:${source.admittedRevision}`} class="ti-kv break-all">
                 <span class="k">종류</span><span class="v">${source.sourceKind ?? '기록 없음'}</span>
                 <span class="k">자극 ID</span><span class="v font-mono">${source.stimulusId}</span>
                 <span class="k">원본 참조</span><span class="v font-mono">${source.snapshotRef}</span>
@@ -54,17 +58,21 @@ function Intake({ intake }: { intake: TurnIntake }) {
 function Skills({ data, turnRef }: { data: TraceSkillActivations; turnRef: string }) {
   switch (data.status) {
     case 'not_recorded':
-      return html`<p class="rt-note">이 trace의 Skill 사용 원장이 없습니다. 미사용으로 판정하지 않습니다.</p>`
+      return html`<p class="rt-note">이 trace의 Skill 사용 원장이 없습니다. 미사용으로 판정하지 않습니다. 다른 원래 trace의 비동기 수신·사용은 조회하지 않았습니다.</p>`
     case 'unavailable':
       return html`<p class="rt-note">Skill 원장 조회 실패: ${data.reason} · ${data.detail}</p>`
     case 'available': {
       const activations = data.ledger.activations.filter(item => item.turn_ref === turnRef)
       const deliveries = data.ledger.async_result_deliveries.filter(item => item.physical_turn_ref === turnRef)
-      const actions = data.ledger.async_actions.filter(item => item.physical_turn_ref === turnRef)
+      const asyncEvidence = projectSkillAsyncEvidence({
+        async_result_deliveries: deliveries,
+        async_actions: data.ledger.async_actions.filter(item => item.physical_turn_ref === turnRef),
+      })
       return html`
-        <p class="rt-note">이 턴의 호출 ${activations.length}개 · 이 턴에서 받은 비동기 결과 ${deliveries.length}개 · 비동기 결과 사용 ${actions.length}개</p>
+        <p class="rt-note break-all">조회 범위: 원래 trace ${data.ledger.session_id}의 원장. 다른 원래 trace의 비동기 수신·사용은 조회하지 않았습니다.</p>
+        <p class="rt-note">원장 내 이 턴의 호출 ${activations.length}개 · 이 턴과 일치한 비동기 결과 전달 ${deliveries.length}개 · 비동기 결과 사용 ${asyncEvidence.actions.length}건 · 인과 연결 ${asyncEvidence.actionLinkCount}개</p>
         ${activations.map(item => html`
-          <div key=${item.skill_tool_use_id} class="ti-meta mb-3 break-all">
+          <div key=${item.skill_tool_use_id} class="ti-kv mb-3 break-all">
             <span class="k">Skill</span><span class="v">${item.identity.source_id}/${item.identity.package_id}:${item.identity.name}@${item.content_revision}</span>
             <span class="k">호출 ID</span><span class="v font-mono">${item.skill_tool_use_id}</span>
             <span class="k">호출 종류</span><span class="v">${item.invocation.kind}</span>
@@ -75,9 +83,12 @@ function Skills({ data, turnRef }: { data: TraceSkillActivations; turnRef: strin
         ${deliveries.map(item => html`<p class="rt-note break-all" key=${`${item.request_id}:${item.receipt.tool_use_id}`}>
           비동기 결과 원래 턴 ${item.original_turn_ref} · 요청 ${item.request_id} · ${item.presentation}
         </p>`)}
-        ${actions.map((item, index) => html`<p class="rt-note" key=${index}>
-          비동기 결과 사용 ${item.tool_name} · ${item.occurrence.kind}
-        </p>`)}
+        ${asyncEvidence.actions.map(group => html`<div key=${skillAsyncOccurrenceIdentity(group.first)}>
+          <p class="rt-note">비동기 결과 사용 ${group.first.tool_name} · ${group.first.occurrence.kind}</p>
+          ${[group.first, ...group.additionalLinks].map(link => html`<p class="rt-note break-all" key=${link.delivery_sha256}>
+            연결된 결과 ${link.delivery_sha256} · ${link.observed_at}
+          </p>`)}
+        </div>`)}
       `
     }
   }

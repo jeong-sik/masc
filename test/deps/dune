@@ -12,7 +12,7 @@
 
 (library
  (name masc_test_deps)
- (modules masc_test_deps server_grpc_tool_dispatch)
+ (modules masc_test_deps board_test_preparation server_grpc_tool_dispatch)
  (foreign_stubs
   (language c)
   (names test_env_stubs))

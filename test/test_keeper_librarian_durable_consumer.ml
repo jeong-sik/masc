@@ -1223,7 +1223,63 @@ let test_blocked_original_suspends_following_phases () =
   check (list string) "an unrestorable original suspends following effects" [] !events;
   run (Consumer.Memory_snapshot_unreadable "ordinary reader failure");
   check (list string) "ordinary reader errors retain the existing following-phase policy"
+    ["continuity";"cleanup"] !events;
+  events := [];
+  run (Consumer.Counterpart_observations_unreadable
+    (Masc.Keeper_librarian_input_sources.External_attention_unreadable
+      (Keeper_external_attention.Io_failed {path="attention fixture";cause=Failure "unreadable"})));
+  check (list string) "other counterpart read errors retain their existing policy"
     ["continuity";"cleanup"] !events
+;;
+
+let test_cursor_failure_suspends_same_wake () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-cursor-failure-wake" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let progress_before = read_progress config in
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let cursor_path = Masc.Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname cursor_path);
+  let before = Fs_compat.load_file_opt cursor_path in
+  let invalid = "{invalid cursor" in
+  Fs_compat.save_file cursor_path invalid;
+  let events = ref [] and observed = ref None in
+  let record event = events := !events @ [event] in
+  let commit original =
+    record ("commit:" ^ String.concat "," (text_markers (Original.input original)));
+    commit_pending_memory config ~expected_revision:(Original.expected_revision original)
+      ~range_id:(Original.range_id original) ~official_range_id:(Original.official_range_id original)
+      (Original.input original) in
+  let run () = Queue_refresh.For_testing.run_with_readers
+      ~durable:(fun () ->
+        let outcome = Queue_refresh.For_testing.run_durable_with_commit
+            ~config ~keeper_name ~commit in
+        observed := Some outcome; outcome)
+      ~continuity:(fun () -> record "continuity")
+      ~cleanup:(fun () -> record "cleanup")
+      ~base_path:config.Workspace.base_path ~keeper_name in
+  run ();
+  (match !observed with
+   | Some (Queue_refresh.Stopped
+       (Consumer.Counterpart_observations_unreadable
+         (Masc.Keeper_librarian_input_sources.External_cursor_failed _))) -> ()
+   | Some _ | None -> fail "the durable pass did not report the cursor error");
+  check (list string) "cursor failure suspends commit and following phases" [] !events;
+  check string "the refused cursor is preserved" invalid (Fs_compat.load_file cursor_path);
+  check string "the same wake leaves Memory unchanged" memory_before (Fs_compat.load_file memory_path);
+  check bool "the same wake leaves progress unchanged" true (read_progress config = progress_before);
+  (match before with
+   | None -> Unix.unlink cursor_path
+   | Some bytes -> Fs_compat.save_file cursor_path bytes);
+  run ();
+  check (list string) "a later healthy wake resumes the real phase pipeline"
+    ["commit:turn-2";"commit:turn-3";"commit:turn-4";"continuity";"cleanup"] !events;
+  check_progress_end config 4
 ;;
 
 let test_pending_wake_suspends_following_phases () =
@@ -5221,6 +5277,8 @@ let () =
             (test_pending_preserves_selection_and_memory ~after_failure:true)
         ; test_case "blocked originals suspend following effects while ordinary failures keep their policy" `Quick
             test_blocked_original_suspends_following_phases
+        ; test_case "cursor failure suspends the same wake and a healthy wake resumes" `Quick
+            test_cursor_failure_suspends_same_wake
         ; test_case "Pending suspends the same wake and normal commit reopens phases" `Quick
             test_pending_wake_suspends_following_phases
         ; test_case "failure stops and a later wake drains successful cuts" `Quick

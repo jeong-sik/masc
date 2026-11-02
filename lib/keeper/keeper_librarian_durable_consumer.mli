@@ -131,8 +131,9 @@ type error =
 
 val error_to_string : error -> string
 val publication_unfinished : error -> bool
-(** A blocked original publication retains uncertain work. Queue consumers
-    report the actual error and suspend later Memory phases of this wake. *)
+(** A blocked original or a [Keeper_librarian_input_sources.External_cursor_failed]
+    suspends later Memory phases of this wake. This does not establish the
+    cursor's state after the error or recovery on a later wake. *)
 
 val refused_original
   : Keeper_librarian_durable_capture.t

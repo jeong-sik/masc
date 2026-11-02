@@ -501,6 +501,7 @@ let a_result_is_read_before_the_board_backlog () =
             ; content = ""
             ; hearth = None
             ; updated_at = Some (100.0 +. float_of_int index)
+            ; audience = Some (Keeper_event_queue.Audience_discoverable)
             }
       }
     in

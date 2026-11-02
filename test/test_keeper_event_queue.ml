@@ -336,6 +336,7 @@ let () =
       ; content = "c"
       ; hearth = None
       ; updated_at = None
+      ; audience = Some Keeper_event_queue.Audience_discoverable
       }
   in
 
@@ -354,6 +355,7 @@ let () =
           ; content
           ; hearth = None
           ; updated_at = None
+      ; audience = Some Keeper_event_queue.Audience_discoverable
           }
       }
   in
@@ -395,6 +397,7 @@ let () =
       ; content = "body"
       ; hearth = Some "research"
       ; updated_at = Some 5.0
+      ; audience = Some Keeper_event_queue.Audience_thread_participants
       }
   in
   (match
@@ -450,6 +453,7 @@ let () =
       ; content = "body"
       ; hearth = None
       ; updated_at = Some 6.0
+      ; audience = Some Keeper_event_queue.Audience_thread_participants
       }
   in
   (match

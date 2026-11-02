@@ -106,6 +106,7 @@ let test_typed_payload_surface () =
            ; content = "c"
            ; hearth = None
            ; updated_at = None
+           ; audience = Some Keeper_event_queue.Audience_thread_participants
            })
       "p9"
   in
@@ -123,7 +124,8 @@ let test_durable_comment_identity () =
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
     let board comment_id parent_id =
       { kind = Comment_added { comment_id; parent_id }; author = "alice";
-        title = "thread"; content = "identical body"; hearth = None; updated_at = Some 1.0 }
+        title = "thread"; content = "identical body"; hearth = None; updated_at = Some 1.0;
+        audience = Some Keeper_event_queue.Audience_thread_participants }
     in
     let first = make_stim ~payload:(Board_signal (board "c-first" None)) "post" in
     let second = make_stim ~payload:(Board_signal (board "c-second" None)) "post" in
@@ -167,7 +169,8 @@ let test_durable_post_edit_identity () =
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
     let board content_updated_at =
       {kind=Post_updated {content_updated_at}; author="alice"; title="post";
-       content="edited body"; hearth=None; updated_at=Some 99.} in
+       content="edited body"; hearth=None; updated_at=Some 99.;
+       audience=Some Keeper_event_queue.Audience_discoverable} in
     let first = make_stim ~payload:(Board_signal (board 1.)) "post" in
     let second = make_stim ~payload:(Board_signal (board 2.)) "post" in
     let replay = make_stim ~payload:(Board_signal

@@ -1056,7 +1056,8 @@ let candidate_parent_visibility_filter (candidate : candidate) =
   | Board_dispatch.Board_comment_added _ ->
     (match Board_dispatch.read_post ~post_id:candidate.signal.post_id with
      | Ok post -> filter_comment_parent_visibility post.visibility
-     | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _) ->
+     | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _
+             | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _) ->
        Skip_non_discoverable_comment)
 ;;
 

@@ -19,6 +19,7 @@ let board_payload ?updated_at ~post_id:(_ : string) () :
     ; content = "Please react"
     ; hearth = None
     ; updated_at
+    ; audience = Some (Keeper_event_queue.Audience_discoverable)
     }
 ;;
 

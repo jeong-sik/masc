@@ -1279,7 +1279,7 @@ let test_completion_is_selected_before_ambient_backlog () =
            urgency=Normal;arrived_at;
            payload=Board_signal
              {kind=Post_created;author="other-keeper";title="ambient";
-              content="unrelated Board activity";hearth=None;updated_at=None}}) in
+              content="unrelated Board activity";hearth=None;updated_at=None;audience=Some Keeper_event_queue.Audience_discoverable}}) in
         (match Keeper_event_queue_persistence.update_result ~base_path:base_dir ~keeper_name:keeper
             (fun queue -> List.fold_left Keeper_event_queue.enqueue queue (prior::ambient)) with
          | Ok () -> () | Error detail -> fail detail);

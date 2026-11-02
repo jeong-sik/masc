@@ -1379,6 +1379,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
                   ; content = ""
                   ; hearth = None
                   ; updated_at = None
+                  ; audience = Some (Keeper_event_queue.Audience_discoverable)
                   }
             }
           in

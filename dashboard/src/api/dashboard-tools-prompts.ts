@@ -1845,7 +1845,7 @@ function requireAsyncActionDelivery(action: DashboardSkillAsyncAction, deliverie
   return delivery
 }
 
-function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): void {
+export function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): void {
   if (projection?.status !== 'available' || projection.ledger.async_actions.length === 0) return
   const deliveries = new Map<string, DashboardSkillAsyncResultDelivery>()
   for (const delivery of projection.ledger.async_result_deliveries) {

@@ -16890,6 +16890,10 @@ let reconcile_observer_recovery state ~refresh_inflight ~mailbox =
    the stream, and whether to open another is the main loop's decision. *)
 let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~host ~port ~mailbox =
   let enqueue_async = workspace_enqueue state in
+  let workspace =
+    { wi_base_path = Canonical_path.to_string expected_workspace.sid_base_path;
+      wi_masc_root = Canonical_path.to_string expected_workspace.sid_masc_root }
+  in
   state.observer_retry_owner <- None;
   state.observer <- Observer_opening;
   let session = state.mcp_session in
@@ -16932,13 +16936,13 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
-    enqueue_async mailbox (Observer_closed result)
+    enqueue_async mailbox (Observer_closed (workspace, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job ~observation:true state ~sw run
   | None -> enqueue_async mailbox
-      (Observer_closed (Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
+      (Observer_closed (workspace, Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
 
 (* Open only after server contact and workspace admission. Initial opens may
    follow a refresh; closed streams also have their own delayed retry. *)
@@ -21031,11 +21035,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | None ->
            state.observer_cursor <- None;
            state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
-      state.observer <-
-        Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
-      add_event state "observer"
-        (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
-      add_event state "observer" "runtime event feed open";
+      record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
       launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
       (* A change can land between the initial read and subscription, or
          during a disconnected interval. Read under the current authority. *)
@@ -21359,7 +21359,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           | Unconfirmed detail ->
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
-  | Observer_closed outcome ->
+  | Observer_closed (workspace, outcome) ->
       let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with
@@ -21392,18 +21392,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
-      let at = Unix.gettimeofday () in
-      (* Only a stream that went live answered; one that closed while opening
-         has no count to keep, and the title must not read one. *)
-      let closed =
-        (match state.observer with
-         | Observer_live { events; _ } ->
-           Observer_closed_after_live { reason; at; events }
-         | Observer_off | Observer_opening | Observer_closed_before_answer _
-         | Observer_closed_after_live _ ->
-           Observer_closed_before_answer { reason; at }) in
-      state.observer <- closed;
-      add_event state "observer" ("runtime event feed closed: " ^ reason);
+      record_observer_closed state ~workspace outcome ~reason ~at:(Unix.gettimeofday ());
       let owner = ref () in
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;

@@ -783,7 +783,7 @@ type async_msg =
       handshake : Sse_wire.observer_handshake option;
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
-  | Observer_closed of (unit, Masc_tui_http.observer_error) result
+  | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string

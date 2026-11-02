@@ -332,6 +332,34 @@ let add_event (state : state) event_type content =
   let ev = { timestamp; event_type; content } in
   state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
 
+let record_observer_opened (state : state) ~session_id ~at =
+  state.observer_last_close <- None;
+  state.observer <- Observer_live { session_id; since = at; events = 0 };
+  add_event state "observer"
+    (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
+  add_event state "observer" "runtime event feed open"
+
+let record_observer_closed (state : state) ~workspace outcome ~reason ~at =
+  let repeated =
+    match state.observer_last_close with
+    | Some (previous_workspace, previous) ->
+        previous_workspace = workspace && previous = outcome
+    | None -> false
+  in
+  (* Keep the latest transport observation even when the same outage has
+     already been reported. A retry must not fill the bounded session log
+     and evict unrelated operator actions or failures. *)
+  state.observer <-
+    (match state.observer with
+     | Observer_live { events; _ } ->
+         Observer_closed_after_live { reason; at; events }
+     | Observer_off | Observer_opening | Observer_closed_before_answer _
+     | Observer_closed_after_live _ ->
+         Observer_closed_before_answer { reason; at });
+  state.observer_last_close <- Some (workspace, outcome);
+  if not repeated then
+    add_event state "observer" ("runtime event feed closed: " ^ reason)
+
 (* An outcome the operator pressed a key for, rather than something that
    happened on its own. It goes to the session log like any other event, and
    to the footer, because the log is drawn by Metrics alone: the operator who

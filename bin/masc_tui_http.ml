@@ -1697,7 +1697,7 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
   | Ok { Masc_http_client.headers; _ } ->
       Masc_tui_observer.session_id_of_headers headers
 
-type observer_error =
+type observer_error = Masc_tui_types.observer_error =
   | Transport_failed of string
   | Http_refused of { status : int; detail : string }
   | Invalid_handshake of string

@@ -3645,6 +3645,13 @@ type workspace_health =
   | Workspace_health_ok
   | Workspace_health_unknown
 
+(** The observer transport's failure, shared with its retained observation. *)
+type observer_error =
+  | Transport_failed of string
+  | Http_refused of { status : int; detail : string }
+  | Invalid_handshake of string
+  | Retry_without_cursor of Sse_wire.observer_cursor * string
+
 (** What the runtime event feed ([GET /mcp?sse_kind=observer]) is doing.
     The feed opens after server contact and has a workspace-scoped delayed
     retry after it closes. The reason remains visible while retry is pending. *)
@@ -10751,6 +10758,11 @@ type state = {
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
   mutable observer: observer_status;
+  mutable observer_last_close:
+    (workspace_input_identity * (unit, observer_error) result) option;
+      (** Last reported closure in this workspace. Opening a retry or
+          revalidating the same requested workspace does not end the outage.
+          This log key never admits readings or grants request authority. *)
   mutable observer_retry_owner: unit ref option;
   mutable observer_recovery_owner: unit ref option;
   mutable observer_scope_binding: observer_scope_binding;
@@ -19702,6 +19714,7 @@ let create_state
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;
+  observer_last_close = None;
   observer_retry_owner = None;
   observer_recovery_owner = None;
   observer_scope_binding = Observer_scope_unbound;

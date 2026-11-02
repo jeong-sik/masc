@@ -54,6 +54,7 @@ type client = {
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
+  on_disconnect : (unit -> unit) option;
 }
 
 type client_registry_state = {
@@ -112,9 +113,8 @@ val register :
     was handed out by an earlier process, since ids only grow within one, and
     is registered as 0: every new event reaches the client.
 
-    [?on_disconnect] is installed atomically with registration via
-    {!set_disconnect_hook} before the client becomes broadcast-visible,
-    so a concurrent queue-overflow [unregister] always finds the hook.
+    [?on_disconnect] is part of the client published atomically in the
+    registry, so a removal wakes that client even if its session is reused.
 
     On validation failure a typed [registration_error] is returned so the
     transport layer can respond with an auth error and close the connection

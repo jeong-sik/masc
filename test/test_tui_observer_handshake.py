@@ -25,7 +25,7 @@ from typing import Callable, Literal, cast
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
 CURSORS = {"37", "38", "500", "501", "502"}
-Mode = Literal["invalid", "resumed", "ahead", "media"]
+Mode = Literal["invalid", "resumed", "ahead", "media", "workspace"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,6 +151,12 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
             self.respond(200, {})
             return
 
+        expected = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        if expected.get("expected_base_path") != [server.base] or expected.get(
+            "expected_masc_root"
+        ) != [server.base + "/.masc"]:
+            self.respond(409, {"error": "workspace precondition failed"})
+            return
         cursor = self.headers.get("Last-Event-ID")
         if cursor is not None and cursor not in CURSORS:
             cursor = "<unexpected>"
@@ -173,6 +179,12 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
             server.condition.notify_all()
         if index >= len(server.gates) or not server.gates[index].wait(30):
             self.respond(503, {"error": "fixture gate unavailable"})
+            return
+        if server.mode == "workspace" and index == 0:
+            self.respond(409, {"code": "workspace_precondition_failed"})
+            with server.condition:
+                server.sent.append(index)
+                server.condition.notify_all()
             return
         response_count = 3 if server.mode in ("resumed", "media") else 2
         if index >= response_count:
@@ -216,7 +228,7 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         body = f'id: {event_id}\ndata: {{"type":"{name}"}}\n\n'.encode()
         wire = (
             f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{headers}"
-            f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
+            f"x-masc-workspace-read: matched-v1\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n"
         ).encode() + body
         try:
             self.wfile.write(wire)
@@ -315,6 +327,7 @@ class ObserverHandshakeTest(unittest.TestCase):
                     stable,
                     "observer was replaced while the initial workspace settled",
                 )
+                initial_health = server.snapshot()[1]
 
                 expected = (
                     [
@@ -333,6 +346,8 @@ class ObserverHandshakeTest(unittest.TestCase):
                     if mode == "media"
                     else [(None, "missing"), ("500", "fixture"), ("38", "fixture")]
                     if mode == "ahead"
+                    else [(None, "missing"), (None, "missing")]
+                    if mode == "workspace"
                     else [(None, "missing"), (None, "missing"), (None, "missing")]
                 )
                 for index, (cursor, instance) in enumerate(expected):
@@ -347,6 +362,12 @@ class ObserverHandshakeTest(unittest.TestCase):
                         StreamRequest(True, cursor, instance),
                         f"observer request {index + 1} lost its session or cursor",
                     )
+                    if mode == "workspace" and index == 1:
+                        self.assertGreater(
+                            server.snapshot()[1],
+                            initial_health,
+                            "workspace refusal must require a new identity read",
+                        )
                     if index + 1 < len(expected):
                         server.gates[index].set()
                         wait_until(
@@ -382,6 +403,9 @@ class ObserverHandshakeTest(unittest.TestCase):
 
     def test_wrong_media_keeps_cursor_then_recovers(self) -> None:
         self.run_scenario(mode="media")
+
+    def test_workspace_refusal_rechecks_identity_without_reinitializing(self) -> None:
+        self.run_scenario(mode="workspace")
 
 
 if __name__ == "__main__":

@@ -103,6 +103,9 @@ val stop_sse_session : string -> unit
     AND clears the connect-rate guard state for [session_id].
     Calls {!close_sse_conn} on the removed connection. *)
 
+val stop_sse_conn_if_current : sse_conn_info -> unit
+(** Close this connection without removing a successor that reused its session. *)
+
 val stop_sse_session_evict :
   string -> reason:Session_lifecycle_event.evict_reason -> unit
 (** [stop_sse_session_evict session_id ~reason] is

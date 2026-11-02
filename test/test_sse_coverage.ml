@@ -176,6 +176,32 @@ let test_register_uses_successful_commit_time_after_retry () =
       | None ->
           fail "client should be installed")
 
+(* Registration can overlap the old connection's removal before the new
+   client is published. Each removal must wake its own connection. *)
+let test_disconnect_hook_follows_the_registered_client () =
+  let session_id = "disconnect-owner-" ^ string_of_int (Random.bits ()) in
+  let original_hook = Atomic.get Sse.register_commit_test_hook in
+  let old_calls = ref 0 and new_calls = ref 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Sse.register_commit_test_hook original_hook;
+      Sse.unregister session_id)
+    (fun () ->
+      let old_id, _, _ = register_exn session_id ~last_event_id:0
+          ~on_disconnect:(fun () -> incr old_calls) in
+      let once = Atomic.make false in
+      Atomic.set Sse.register_commit_test_hook (Some (fun () ->
+        if Atomic.compare_and_set once false true then
+          Sse.unregister_if_current session_id old_id));
+      let new_id, _, _ = register_exn session_id ~last_event_id:0
+          ~on_disconnect:(fun () -> incr new_calls) in
+      Atomic.set Sse.register_commit_test_hook original_hook;
+      check int "old connection was notified" 1 !old_calls;
+      check int "new connection was not notified early" 0 !new_calls;
+      check bool "new client is registered" true (Sse.exists session_id);
+      Sse.unregister_if_current session_id new_id;
+      check int "new connection was notified when removed" 1 !new_calls)
+
 (* ============================================================
    client_count Tests
    ============================================================ *)
@@ -595,6 +621,8 @@ let () =
       test_case "unique ids" `Quick test_register_returns_unique_id;
       test_case "retry uses successful commit time" `Quick
         test_register_uses_successful_commit_time_after_retry;
+      test_case "disconnect hook belongs to the registered client" `Quick
+        test_disconnect_hook_follows_the_registered_client;
     ];
     "unregister_if_current", [
       test_case "matches" `Quick test_unregister_if_current_matches;

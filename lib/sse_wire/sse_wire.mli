@@ -55,10 +55,11 @@ type observer_replay =
           The replay holds what is left after it. *)
   | Reset of observer_reset
 type observer_handshake = { instance_id : string; replay : observer_replay }
-(** [instance_id] is a nonempty HTTP token; the server uses a UUIDv7. *)
+(** [instance_id] is a nonempty HTTP token. The server changes it when its
+    process or the observer's workspace scope changes. *)
 
 val observer_cursor_headers : observer_cursor option -> (string * string) list
-(** Send a numeric cursor only with the process instance that delivered it. *)
+(** Send a numeric cursor only with the observer instance that delivered it. *)
 
 val negotiate_observer :
   instance_id:string ->

@@ -53,12 +53,21 @@ class TaskHandler(FixtureHandler):
             super().do_GET()
             return
         server = cast(TaskServer, self.server)
+        expected = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        if expected.get("expected_base_path") != [
+            os.path.realpath(server.base)
+        ] or expected.get("expected_masc_root") != [
+            os.path.realpath(server.base) + "/.masc"
+        ]:
+            self.respond(409, {"error": "workspace precondition failed"})
+            return
         server.observer_requested.set()
         server.release_observer.wait()
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("x-masc-sse-instance-id", "task-event-fixture")
         self.send_header("x-masc-sse-replay", "fresh")
+        self.send_header("x-masc-workspace-read", "matched-v1")
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.flush()

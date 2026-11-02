@@ -325,6 +325,13 @@ let decision_public_allowlist =
     ; "routing_run_id"; "attempt_total_usage"; "attempt_usage_status"
     ; "skill_preparation"
     ; "preparation_report"
+    ; "channel"; "intake_sources"
+    ]
+
+let intake_source_public_allowlist =
+  StringSet.of_list
+    [ "stimulus_id"; "source_kind"; "source_snapshot_ref"
+    ; "admitted_revision"; "first_admitted_at"
     ]
 
 let clock_refs_public_allowlist =
@@ -357,6 +364,7 @@ type decision_projection_scope =
   | Preparation_span
   | Preparation_observation
   | Preparation_execution_scope
+  | Intake_source
 
 let decision_allowlist = function
   | Decision -> decision_public_allowlist
@@ -366,9 +374,11 @@ let decision_allowlist = function
   | Preparation_span -> preparation_span_public_allowlist
   | Preparation_observation -> preparation_observation_public_allowlist
   | Preparation_execution_scope -> preparation_execution_scope_public_allowlist
+  | Intake_source -> intake_source_public_allowlist
 
 let decision_child_scope scope key =
-  if String.equal key "preparation_report" then Preparation_report
+  if scope = Decision && String.equal key "intake_sources" then Intake_source
+  else if String.equal key "preparation_report" then Preparation_report
   else if scope = Preparation_report && String.equal key "scopes" then Preparation_span
   else if scope = Preparation_report && String.equal key "execution_scope" then Preparation_execution_scope
   else if scope = Preparation_span && String.equal key "preparation" then Preparation_observation

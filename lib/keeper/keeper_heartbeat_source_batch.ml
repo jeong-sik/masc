@@ -24,6 +24,8 @@ let observed_sources_to_yojson batch =
           `Assoc
             [ "stimulus_id",
               `String (Keeper_reaction_ledger.stimulus_id_of_event_queue selection.source)
+            ; "source_kind",
+              `String (Keeper_event_queue.payload_kind_label selection.source.payload)
             ; "source_snapshot_ref",
               `String (Keeper_event_queue_state.source_snapshot_ref selection.source)
             ; "admitted_revision", `String (Int64.to_string selection.admitted_revision)

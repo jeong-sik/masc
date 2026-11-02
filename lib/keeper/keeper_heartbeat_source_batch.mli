@@ -21,8 +21,8 @@ val count : t -> int
 val first : t -> Keeper_event_queue_state.pending_selection option
 
 val observed_sources_to_yojson : t -> Yojson.Safe.t
-(** Private diagnostic projection of every exact intake selection, in order:
-    canonical stimulus id, source snapshot reference, admitted revision and
+(** Diagnostic projection of every exact intake selection, in order:
+    canonical stimulus id, payload kind, source snapshot reference, admitted revision and
     optional first-admission clock. No source payload is copied. This records
     observation at turn entry, not provider dispatch, delivery or acknowledgement;
     [validate] may subsequently withdraw a selection. It grants no replay or

@@ -564,11 +564,11 @@ def offline_counter_intervals(coordinator: Path) -> None:
         def stamp(offset):
             return {"epoch": -float(offset), "clock_domain": "driver_counter", "clock_ref": clock_ref,
                     "monotonic_ns": str(base + offset)}
-        admission = {"stimulus_id": "stimulus-" + arm, "source_snapshot_ref": "source-" + arm,
+        admission = {"stimulus_id": "stimulus-" + arm, "source_kind": "board_signal", "source_snapshot_ref": "source-" + arm,
                      "admitted_revision": "1", "first_admitted_at": 1000.0,
                      "enqueue_entered": stamp(0), "enqueue_returned": stamp(1)}
         sources = [{key: admission[key] for key in
-                    ("stimulus_id", "source_snapshot_ref", "admitted_revision", "first_admitted_at")}]
+                    ("stimulus_id", "source_kind", "source_snapshot_ref", "admitted_revision", "first_admitted_at")}]
         marker = {"event": "turn_started", "keeper_name": "preparation-harness", "trace_id": "original-trace", "keeper_turn_id": 1,
                   "ts": "2026-10-19T00:00:00Z",
                   "decision": {"intake_sources": sources, "clock_refs": {"source_clock": "wall"}}}
@@ -629,6 +629,11 @@ def offline_counter_intervals(coordinator: Path) -> None:
         span = item["intervals"]["enqueue_to_reported_useful_commit"]
         require(span["duration_ns"] == "20" and span["start_ns"] == str(base), "counter precision was rounded")
     receipt = receipts["exact_skill"]
+    receipt["timing"]["intake_turn_entry"]["sources"][0]["source_kind"] = "schedule_due"
+    write_json("pair-0000/exact_skill/attempt.json", receipt)
+    require(report()["exact_skill"]["identity"]["state"] == "invalid",
+            "a different stimulus kind supplied the original intake identity")
+    receipt["timing"]["intake_turn_entry"]["sources"][0]["source_kind"] = "board_signal"
     receipt["timing"]["first_useful_leaf"]["task_id"] = "foreign-task"
     write_json("pair-0000/exact_skill/attempt.json", receipt)
     require(report()["exact_skill"]["intervals"]["enqueue_to_reported_useful_commit"]["state"] == "unavailable",
@@ -836,7 +841,7 @@ def main():
                 marker["keeper_turn_id"] == turn["absolute_turn"] and marker["ts"] == intake["ts"],
                 "intake marker lost its exact canonical turn identity")
         require(intake["sources"] == marker["decision"]["intake_sources"] == [{
-                key: admission[key] for key in ("stimulus_id", "source_snapshot_ref",
+                key: admission[key] for key in ("stimulus_id", "source_kind", "source_snapshot_ref",
                                                "admitted_revision", "first_admitted_at")}],
                 "intake marker does not name the exact original admitted selection")
         require(intake["manifest_sha256"] == hashlib.sha256((directory / "turn-entry-manifest.json").read_bytes()).hexdigest(),

@@ -26,6 +26,8 @@
 
 ### Upgrade notes
 
+- Docker, Kata and SSH Keeper proof scripts require a pinned `masc` binary with `inspect-checkpoint`; an older binary is refused before the Keeper workflow starts. (#47665)
+
 - AGENT_CORE callers must construct `Types.JsonSchema (Types.Raw_schema domain)` or an explicit `Types.Named_schema` value; named metadata retains its optional strict and description fields (#47488).
 
 - `MASC_KEEPER_MICROVM_MEMORY` and `MASC_KEEPER_MICROVM_CPUS` are no longer read. Set the workspace guest size with `microvm_memory` and `microvm_cpus` in the `[sandbox]` table of `runtime.toml`, which the server reads when it starts (#46805).
@@ -47,6 +49,8 @@
 - Admission execution schema 1 and absorption gate version 2 are unsupported. The candidate's read-only `validate-stores` now rejects these domain payloads, including historical gates and unpublished preparation/retry bodies, before binary activation. It does not reconstruct absent guidance or migrate records. Reconcile and back up the affected captured physical-owner bundle: execution and gate originals/bodies, candidate parts/partition and replacement records, and their dependent Memory receipts, source/history progress and queue/external ACK evidence. Follow `docs/guides/DURABLE-STORE-HARD-CUT.md` with all writers stopped before setting aside a reviewed scope; do not reset an epoch or clear an entire worker volume. (#46965).
 
 ### Added
+
+- `masc inspect-checkpoint --base-path PATH --keeper NAME` prints a decoded canonical checkpoint and its closed-message boundary. Its output can contain conversation context and tool results. See the [SSH Keeper proof guide](docs/evidence/2026-10-24-remote-ssh-keeper/README.md). (#47665)
 
 - Add a private Keeper temporal-continuity observation harness with exact operation/turn/input/reply/tool joins, a twelve-message interruption/resume scenario and separate offline semantic assessment. Preserve raw probabilities and evidence limits in JSON and a readable timeline without a runtime gate or pass threshold. (#46956)
 
@@ -326,6 +330,8 @@
 - Retire the unused RFC format enforcer and superseded development drafts; consolidate native TUI artifact verification in the current guide (#47043).
 
 ### Fixed
+
+- Bind installed Keeper smoke proofs to the pinned binary's canonical reader, the exact successful tool result, a closed turn and a completed chat stream. SSH restart evidence also checks that the earlier turn remains on the same trace. (#47665)
 
 - Read named model declarations from the published catalog snapshot in runtime discovery and setup, restoring compilation after removal of the old global catalog API. (#47577)
 

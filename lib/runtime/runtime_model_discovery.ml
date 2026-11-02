@@ -149,7 +149,8 @@ let with_catalog_image_input (connection : connection) (model : model) =
   | None, Named_provider provider_id ->
     let catalog_capability =
       let provider = Llm_provider.Model_catalog.Declared_provider provider_id in
-      match Llm_provider.Model_catalog.global (),
+      match Llm_provider.Catalog_snapshot.model_catalog_for_provider
+              (Llm_provider.Catalog_snapshot.current ()) provider,
             Llm_provider.Model_identifiers.Model_id.of_string model.id with
       | Some catalog, Ok model_id ->
         let wire = wire_of_connection connection in

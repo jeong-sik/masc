@@ -174,12 +174,11 @@ let test_frozen_runtime_media_survives_registry_replacement () =
     Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
     Masc_test_deps.init_eio_clock ~sw env;
     let previous=Runtime.For_testing.snapshot () in
-    let catalog=Llm_provider.Model_catalog.global () in
+    let catalog=Llm_provider.Catalog_snapshot.current () in
     let root=Filename.temp_dir "keeper-frozen-media-" "" in
     Eio.Switch.on_release sw (fun () ->
       Runtime.For_testing.restore previous;
-      (match catalog with Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      Llm_provider.Catalog_snapshot.publish catalog;
       Fs_compat.remove_tree root);
     let expected=initial=Some true in
     let tool_calls=ref 0 in
@@ -195,7 +194,10 @@ let test_frozen_runtime_media_survives_registry_replacement () =
       "[[models]]\nmodel_id=\"frozen-image-model\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nsupports_tools=true\nsupports_native_streaming=false\n"
       provider) ["image";"standby"]) in
     (match Llm_provider.Model_catalog.of_toml_string ~source:label catalog_text with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog | Error error -> fail error);
+     | Ok models ->
+       let _,providers=Llm_provider.Catalog_snapshot.sources catalog in
+       Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers)
+     | Error error -> fail error);
     let path=Filename.concat root "runtime.toml" in
     let config_text image present =
       Printf.sprintf "[runtime]\ndefault=%S\nmedia_failover=[]\n"

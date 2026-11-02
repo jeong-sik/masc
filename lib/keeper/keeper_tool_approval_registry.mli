@@ -50,8 +50,10 @@ type outcome =
 val await :
   t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  on_registered:(unit -> unit) ->
   keeper_name:string ->
   tool_call_id:string ->
+  approval_id:string ->
   tool_name:string ->
   args:string ->
   question:string ->
@@ -59,6 +61,12 @@ val await :
   timeout_sec:float ->
   outcome
 (** Register a wait and block until it settles.
+
+    [on_registered] runs once after insertion, outside the registry mutex and
+    inside this wait's cleanup scope. A publisher can expose the question and
+    receive an immediate answer there. Raising or cancellation removes this
+    wait. The timeout starts after the callback returns. When the callback
+    returns, an answer already settled during publication remains the outcome.
 
     [timeout_sec] is required. A wait with no bound would park the keeper's
     turn for the life of the process if nobody is watching, and how long an
@@ -68,7 +76,8 @@ val await :
     {!pending}: a listing of bare call ids gave an operator nothing to decide
     on, so a wait only visible to the stream that opened it timed out
     unanswered whenever that stream's watcher was gone (masc#30034). They
-    identify nothing — the wait's identity stays (keeper, call id). [because]
+    describe the call; [approval_id] identifies this exact wait independently
+    of a recycled provider call ID. [because]
     is the policy's reason for asking rather than running; an operator reading
     the pending list has no other view of the policy table.
 
@@ -77,19 +86,22 @@ val await :
     behind. *)
 
 val settle :
-  t -> keeper_name:string -> tool_call_id:string -> decision -> bool
-(** Answer a wait. Returns whether one was actually waiting: [false] means it
-    had already timed out, been answered, or never opened. Callers report that
+  t -> keeper_name:string -> tool_call_id:string -> approval_id:string -> decision -> bool
+(** Answer the exact wait the operator saw. The Keeper, provider call ID and
+    immutable approval ID are compared under the registry lock before removal.
+    Returns [false] for a replacement, timed-out, answered or unknown wait. Callers report that
     rather than treating it as success, so an operator is not told a call was
     approved when nothing was listening. *)
 
 (** One wait, for the operator-facing listing. The description fields say
-    what is being asked; identity stays (keeper, call id). [asked_at] is the
-    registry clock's reading when the wait opened, so a consumer derives age
-    against the same clock family. *)
+    what is being asked; [approval_id] identifies the exact wait. [asked_at] is the
+    registry clock's reading at registration, before [on_registered] publishes
+    the question. It can precede publication and the timeout's start, so a
+    consumer derives observation age, not an absolute deadline, from it. *)
 type pending =
   { keeper_name : string
   ; tool_call_id : string
+  ; approval_id : string
   ; tool_name : string
   ; args : string
   ; question : string

@@ -2,6 +2,8 @@ open Alcotest
 
 module Live = Masc_tui_keeper_chat_live
 
+let approval_fixture_text = "019a0000-0000-7000-8000-000000000001"
+
 (* Most fixtures compare stream content and sequence only; timestamp parity is
    exercised separately through the observed-delta API. *)
 let feed decoder chunk =
@@ -75,11 +77,11 @@ let delta_to_string : Live.delta -> string = function
           quarantined_occurrence
       in
       Printf.sprintf "stream_protocol_error(%s,%s)" occurrence detail
-  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
-      Printf.sprintf "approval_requested(%s,%s,%s,%s,%s)" call_id tool_name
+  | Live.Approval_requested { call_id; approval_id; tool_name; args; question; because } ->
+      Printf.sprintf "approval_requested(%s,%s,%s,%s,%s,%s)" call_id approval_id tool_name
         args question because
-  | Live.Approval_settled { call_id; outcome } ->
-      Printf.sprintf "approval_settled(%s,%s)" call_id outcome
+  | Live.Approval_settled { call_id; approval_id; outcome } ->
+      Printf.sprintf "approval_settled(%s,%s,%s)" call_id approval_id outcome
   | Live.Accepted { admission; queue_length; _ } ->
       let admission =
         match admission with
@@ -686,7 +688,7 @@ let test_an_approval_request_is_read_whole () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"
+            [ "tool_call_id", `String "c1"; "approval_id", `String approval_fixture_text
             ; "tool_call_name", `String "Edit"
             ; "args", `String "{\"file_path\":\"a.ml\"}"
             ; "question", `String "Run Edit on a.ml?"
@@ -694,7 +696,7 @@ let test_an_approval_request_is_read_whole () =
   in
   check (list delta) "every field the prompt needs comes through"
     [ Live.Approval_requested
-        { call_id = "c1"
+        { call_id = "c1"; approval_id = approval_fixture_text
         ; tool_name = "Edit"
         ; args = "{\"file_path\":\"a.ml\"}"
         ; question = "Run Edit on a.ml?"
@@ -710,7 +712,7 @@ let test_a_request_missing_its_question_is_reported () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"; "tool_call_name", `String "Edit" ]))
+            [ "tool_call_id", `String "c1"; "approval_id", `String approval_fixture_text; "tool_call_name", `String "Edit" ]))
   in
   match feed_whole body with
   | [ Live.Undecodable detail ] ->
@@ -729,7 +731,7 @@ let test_the_because_reaches_the_pane () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"
+            [ "tool_call_id", `String "c1"; "approval_id", `String approval_fixture_text
             ; "tool_call_name", `String "Edit"
             ; "args", `String "{}"
             ; "question", `String "Run Edit on a.ml?"
@@ -738,7 +740,7 @@ let test_the_because_reaches_the_pane () =
   in
   check (list delta) "why the call was held travels with the ask"
     [ Live.Approval_requested
-        { call_id = "c1"
+        { call_id = "c1"; approval_id = approval_fixture_text
         ; tool_name = "Edit"
         ; args = "{}"
         ; question = "Run Edit on a.ml?"
@@ -752,14 +754,14 @@ let test_a_request_with_no_arguments_is_still_a_prompt () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"
+            [ "tool_call_id", `String "c1"; "approval_id", `String approval_fixture_text
             ; "tool_call_name", `String "Execute"
             ; "question", `String "Run Execute?"
             ]))
   in
   check (list delta) "a reader still has to answer it"
     [ Live.Approval_requested
-        { call_id = "c1"
+        { call_id = "c1"; approval_id = approval_fixture_text
         ; tool_name = "Execute"
         ; args = ""
         ; question = "Run Execute?"
@@ -773,11 +775,37 @@ let test_the_settled_event_carries_its_outcome () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_SETTLED"
          (`Assoc
-            [ "tool_call_id", `String "c1"; "outcome", `String "timed_out" ]))
+            [ "tool_call_id", `String "c1"; "approval_id", `String approval_fixture_text; "outcome", `String "timed_out" ]))
   in
   check (list delta) "including the paths where nobody answered"
-    [ Live.Approval_settled { call_id = "c1"; outcome = "timed_out" } ]
+    [ Live.Approval_settled { call_id = "c1"; approval_id = approval_fixture_text; outcome = "timed_out" } ]
     (feed_whole body)
+
+let test_approval_events_require_the_waiter_identity () =
+  let events =
+    [ ( "KEEPER_TOOL_APPROVAL_REQUESTED"
+      , [ "tool_call_id", `String "c1"; "tool_call_name", `String "Edit"
+        ; "question", `String "Run Edit?" ] )
+    ; ( "KEEPER_TOOL_APPROVAL_SETTLED"
+      , [ "tool_call_id", `String "c1"; "outcome", `String "approve" ] )
+    ]
+  in
+  List.iter
+    (fun (name, fields) ->
+      List.iter
+        (fun identity ->
+          let fields =
+            match identity with
+            | None -> fields
+            | Some value -> ("approval_id", value) :: fields
+          in
+          match feed_whole (sse (custom name (`Assoc fields))) with
+          | [ Live.Undecodable _ ] -> ()
+          | other ->
+              failf "%s acquired approval authority without an identity: [%s]"
+                name (String.concat "; " (List.map delta_to_string other)))
+        [ None; Some `Null; Some (`Int 7); Some (`String " ") ])
+    events
 
 (* The acceptance is what the pane has to answer "why has this not started"
    with. Before it, a wait of minutes and a wait of seconds look the same. *)
@@ -1072,8 +1100,6 @@ let test_unknown_custom_event_is_reported () =
     [ Live.Undecodable "unknown CUSTOM event name: KEEPER_FUTURE_EVENT" ]
     (feed_whole body)
 
-let approval_fixture_text = "019a0000-0000-7000-8000-000000000001"
-
 let test_duplicate_live_metadata_does_not_acquire_identity () =
   let tool = event "TOOL_CALL_START"
     (["runId", `String run_id; "toolCallName", `String "Read"] @ occurrence_fields ()) in
@@ -1160,6 +1186,8 @@ let () =
             test_a_request_with_no_arguments_is_still_a_prompt
         ; test_case "the settled event carries its outcome" `Quick
             test_the_settled_event_carries_its_outcome
+        ; test_case "approval events require their waiter identity" `Quick
+            test_approval_events_require_the_waiter_identity
         ; test_case "a request missing its question is reported" `Quick
             test_a_request_missing_its_question_is_reported
         ] )

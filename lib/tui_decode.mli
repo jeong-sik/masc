@@ -1057,6 +1057,7 @@ val decode_keeper_secret_projections :
 type keeper_tool_approval = {
   kta_keeper : string;
   kta_tool_call_id : string;
+  kta_approval_id : string;
   kta_tool : string;
   kta_args : string;
   kta_question : string;

@@ -349,12 +349,12 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
          })
   | E.Tool_call_end { occurrence = o; tool_call_id } ->
     Some (Live.Tool_ended { occurrence = occurrence o ~tool_call_id })
-  | E.Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
+  | E.Tool_approval_requested { tool_call_id; approval_id; tool_call_name; args; question; because } ->
     Some
       (Live.Approval_requested
-         { call_id = tool_call_id; tool_name = tool_call_name; args; question; because })
-  | E.Tool_approval_settled { tool_call_id; outcome } ->
-    Some (Live.Approval_settled { call_id = tool_call_id; outcome })
+         { call_id = tool_call_id; approval_id; tool_name = tool_call_name; args; question; because })
+  | E.Tool_approval_settled { tool_call_id; approval_id; outcome } ->
+    Some (Live.Approval_settled { call_id = tool_call_id; approval_id; outcome })
   | E.Tool_result_ready { occurrence = o; tool_call_id; execution_id } ->
     Some
       (Live.Tool_result

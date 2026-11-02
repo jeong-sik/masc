@@ -75,7 +75,8 @@ let test_rest_listing_serializes_because () =
             Eio.Fiber.both
               (fun () ->
                  ignore
-                   (Masc.Keeper_tool_approval_registry.await registry ~clock
+                   (Masc.Keeper_tool_approval_registry.await registry ~clock ~on_registered:Fun.id
+                      ~approval_id:(Random_id.uuid_v7 ())
                       ~tool_name:"Execute" ~args:"{}"
                       ~question:"Run Execute on git status?"
                       ~because:"fs tools change something outside this turn"
@@ -117,9 +118,15 @@ let test_rest_listing_serializes_because () =
                    "the row carries because — the only place an operator sees why"
                    "fs tools change something outside this turn"
                    (row |> member "because" |> to_string);
+                 let approval_id = row |> member "approval_id" |> to_string in
+                 Alcotest.(check bool) "the listing carries the actual pending identity" true
+                   (List.exists (fun (pending : Masc.Keeper_tool_approval_registry.pending) ->
+                      pending.tool_call_id = "call-because" && pending.approval_id = approval_id)
+                      (Masc.Keeper_tool_approval_registry.pending registry));
                  ignore
                    (Masc.Keeper_tool_approval_registry.settle registry
                       ~keeper_name:"keeper.one" ~tool_call_id:"call-because"
+                      ~approval_id
                       Masc.Keeper_tool_approval_registry.Approve
                     : bool)))))
 ;;

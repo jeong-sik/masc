@@ -53,6 +53,7 @@ let protocol_error_sparse : E.stream_protocol_error =
 (* One instance per [keeper_chat_event] constructor, covering both
    population variants of every option field. *)
 let all_events : E.keeper_chat_event list =
+  let approval_id = Random_id.uuid_v7 () in
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
   ; E.Batch_bound {
       operation_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-member" with Ok id -> id | Error detail -> Alcotest.fail detail);
@@ -134,12 +135,13 @@ let all_events : E.keeper_chat_event list =
   ; E.Native_tool_end ({ occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }, Runtime_native_tools.end_observed)
   ; E.Tool_approval_requested
       { tool_call_id = "tc-2"
+      ; approval_id
       ; tool_call_name = "bash"
       ; args = "{\"cmd\":\"ls\"}"
       ; question = "allow?"
       ; because = "policy"
       }
-  ; E.Tool_approval_settled { tool_call_id = "tc-2"; outcome = "approved" }
+  ; E.Tool_approval_settled { tool_call_id = "tc-2"; approval_id; outcome = "approved" }
   ; E.Tool_result_ready
       { occurrence
       ; tool_call_id = Some "tc-1"
@@ -200,7 +202,41 @@ let test_codec_round_trip_all_constructors () =
     | Ok (E.Agent_core_stream_message_delta {usage=Some usage; _}) ->
         Alcotest.(check (option (float 1e-9))) "delta charge and authoritative zero round-trip"
           (Some charge) usage.cost_usd
-    | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0]
+    | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0];
+  let approval_id = Random_id.uuid_v7 () in
+  List.iter (fun event ->
+    let encoded = L.keeper_chat_event_to_json event in
+    Alcotest.(check string) "the approval identity is present in the serialized event"
+      approval_id Yojson.Safe.Util.(encoded |> member "approval_id" |> to_string);
+    Alcotest.(check bool) "the typed approval identity survives journal decoding" true
+      (L.keeper_chat_event_of_json encoded = Ok event))
+    [E.Tool_approval_requested {tool_call_id = "identity-call"; approval_id;
+        tool_call_name = "Edit"; args = "{}"; question = "edit?"; because = "policy"};
+     E.Tool_approval_settled {tool_call_id = "identity-call"; approval_id; outcome = "approve"}]
+
+let test_approval_codec_requires_one_nonblank_identity () =
+  let approval_id = Random_id.uuid_v7 () in
+  let invalid_identities =
+    ["missing", []; "null", ["approval_id", `Null];
+     "integer", ["approval_id", `Int 1]; "empty", ["approval_id", `String ""];
+     "whitespace", ["approval_id", `String " \t\r\n"];
+     "duplicate", ["approval_id", `String approval_id; "approval_id", `String approval_id]] in
+  List.iter (fun (kind, event) ->
+    let encoded = L.keeper_chat_event_to_json event in
+    Alcotest.(check string) (kind ^ " encodes the exact approval ID")
+      approval_id Yojson.Safe.Util.(encoded |> member "approval_id" |> to_string);
+    Alcotest.(check bool) (kind ^ " restores the unchanged typed approval") true
+      (L.keeper_chat_event_of_json encoded = Ok event);
+    let other_fields = Yojson.Safe.Util.to_assoc encoded |> List.remove_assoc "approval_id" in
+    List.iter (fun (invalid, identity_fields) ->
+      Alcotest.(check bool) (kind ^ " rejects " ^ invalid ^ " approval ID") true
+        (Result.is_error (L.keeper_chat_event_of_json
+          (`Assoc (identity_fields @ other_fields))))) invalid_identities)
+    ["requested", E.Tool_approval_requested
+       {tool_call_id = "identity-call"; approval_id; tool_call_name = "Edit";
+        args = "{}"; question = "edit?"; because = "policy"};
+     "settled", E.Tool_approval_settled
+       {tool_call_id = "identity-call"; approval_id; outcome = "approve"}]
 
 (* Native ends written before the writer kept a completion have none
    (11,865 rows in the live keeper_turn_events on 2026-10-10). Whether the
@@ -1138,6 +1174,7 @@ let test_bus_journal_integration_records_all_events () =
    [None]). [Event_error] is omitted: it is the alternative terminal, already
    covered by the codec round-trip. *)
 let golden_events : E.keeper_chat_event list =
+  let approval_id = Random_id.uuid_v7 () in
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:golden" }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
@@ -1170,12 +1207,13 @@ let golden_events : E.keeper_chat_event list =
   ; E.Agent_core_content_block_stop { index = 1 }
   ; E.Tool_approval_requested
       { tool_call_id = "tc-1"
+      ; approval_id
       ; tool_call_name = "read_file"
       ; args = "{\"path\":\"/tmp/x\"}"
       ; question = "allow read?"
       ; because = "policy: fs read"
       }
-  ; E.Tool_approval_settled { tool_call_id = "tc-1"; outcome = "approved" }
+  ; E.Tool_approval_settled { tool_call_id = "tc-1"; approval_id; outcome = "approved" }
   ; E.Tool_result_ready
       { occurrence
       ; tool_call_id = Some "tc-1"
@@ -1597,6 +1635,8 @@ let () =
             "codec rejects unknown tag"
             `Quick
             test_codec_rejects_unknown_tag
+        ; Alcotest.test_case "approval codec requires one nonblank identity" `Quick
+            test_approval_codec_requires_one_nonblank_identity
         ] )
     ; ( "journal"
       , [ Alcotest.test_case "persisted codec epochs preserve old files" `Quick test_persisted_epoch_is_preserved

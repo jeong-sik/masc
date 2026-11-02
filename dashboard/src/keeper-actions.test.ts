@@ -56,6 +56,7 @@ import {
   keeperStatusDetails,
   keeperStreamLastEventAt,
   keeperThreads,
+  keeperToolApprovals,
   liveSendOwnsRequest,
   appendThreadEntry,
   THREAD_ENTRY_CAP,
@@ -696,6 +697,7 @@ describe('refreshActiveKeeperChatHistory', () => {
 describe('sendKeeperThreadMessage operation stream', () => {
   beforeEach(() => {
     keeperThreads.value = {}
+    keeperToolApprovals.value = {}
     keeperActionErrors.value = {}
     keeperStreamLastEventAt.value = {}
     _resetChatHydrationForTests()
@@ -795,6 +797,81 @@ describe('sendKeeperThreadMessage operation stream', () => {
       text: 'answer',
       delivery: 'delivered',
     })
+  })
+
+  it('keeps another operation approval when an older direct response arrives after its broadcast', async () => {
+    const operationB = 'kmsg-other-client-b'
+    const callId = 'reused-provider-call'
+    let operationA = ''
+    const pendingForCall = () => Object.values(keeperToolApprovals.value.echo ?? {})
+      .filter(approval => approval.toolCallId === callId)
+    const requested = (approvalId: string): KeeperChatStreamEvent => ({
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: { approval_id: approvalId, tool_call_id: callId,
+        tool_call_name: 'Execute', args: '{}', question: 'run?', because: 'approval required' },
+    })
+    const framesA: KeeperChatStreamEvent[] = [
+      { type: 'RUN_STARTED' },
+      requested('approval-a'),
+      { type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+        value: { approval_id: 'approval-a', tool_call_id: callId, outcome: 'approve' } },
+      { type: 'TEXT_MESSAGE_CONTENT', delta: 'A completed' },
+      { type: 'RUN_FINISHED' },
+    ]
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent, sequence?: number) => void
+      },
+    ) => {
+      operationA = opts.operationId
+      opts.onEvent({
+        type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      expect(liveSendOwnsRequest(opts.operationId)).toBe(true)
+      // Another client answers A. Its ordered global frames are ignored here
+      // because this session still owns A's buffered direct response.
+      for (const [sequence, event] of framesA.entries()) {
+        expect(applyKeeperOperationTurnEvent('echo', {
+          operationId: opts.operationId, sequence, event,
+        })).toBeNull()
+      }
+      expect(pendingForCall()).toEqual([])
+      expect(liveSendOwnsRequest(opts.operationId)).toBe(true)
+      expect(liveSendOwnsRequest(operationB)).toBe(false)
+      // After A completes on the server, another client starts B. This global
+      // stream can arrive before A's buffered direct frames; each operation
+      // has its own canonical sequence and both transports keep their order.
+      expect(applyKeeperOperationTurnEvent('echo', {
+        operationId: operationB, sequence: 0, event: { type: 'RUN_STARTED' },
+      })).toBeNull()
+      expect(applyKeeperOperationTurnEvent('echo', {
+        operationId: operationB, sequence: 1, event: requested('approval-b'),
+      })).toBeNull()
+      expect(pendingForCall()).toEqual([expect.objectContaining({
+        approvalId: 'approval-b', settled: false,
+      })])
+      for (const [sequence, event] of framesA.entries()) opts.onEvent(event, sequence)
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', 'first operation')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
+    expect(liveSendOwnsRequest(operationA)).toBe(false)
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant'
+      && entry.deliveryProvenance?.delivery_key.kind === 'operation'
+      && entry.deliveryProvenance.delivery_key.operation_id === operationA)).toMatchObject({
+      text: 'A completed', delivery: 'delivered',
+    })
+    expect(keeperThreads.value.echo?.find(entry => entry.deliveryProvenance?.delivery_key.kind === 'operation'
+      && entry.deliveryProvenance.delivery_key.operation_id === operationB)).toBeDefined()
+    expect(pendingForCall()).toEqual([expect.objectContaining({
+      approvalId: 'approval-b', settled: false,
+    })])
   })
 
   it('preserves text when user blocks supply the message fallback', async () => {

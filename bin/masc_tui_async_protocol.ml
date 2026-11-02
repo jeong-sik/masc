@@ -559,6 +559,7 @@ type async_msg =
   | Surface_tool_approval_answered of
       string
       * string
+      * string
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
       * Masc_tui_operator_projection.Flow.generation
@@ -1285,7 +1286,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
     | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
-    | Surface_tool_approval_answered (_, _, _, _, _)
+    | Surface_tool_approval_answered (_, _, _, _, _, _)
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
     | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _
@@ -1423,7 +1424,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)
   | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
-  | Surface_tool_approval_answered (_, _, _, _, _)
+  | Surface_tool_approval_answered (_, _, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
   | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _ | (Board_vote_done _ | Artifact_check_changed _)

@@ -738,7 +738,7 @@ describe('SSEMessageSchema', () => {
 
   it('accepts a tool approval request with the fields the server sends', () => {
     const r = SSEMessageSchema.safeParse(
-      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', { approval_id: 'approval-1',
         tool_call_id: 'tool-use-7',
         tool_call_name: 'execute',
         args: '{"command":"ls"}',
@@ -751,7 +751,7 @@ describe('SSEMessageSchema', () => {
 
   it('accepts an older tool approval request without because', () => {
     const r = SSEMessageSchema.safeParse(
-      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', { approval_id: 'approval-1',
         tool_call_id: 'tool-use-old',
         tool_call_name: 'execute',
         args: '{}',
@@ -763,7 +763,7 @@ describe('SSEMessageSchema', () => {
 
   it('rejects a non-string tool approval reason', () => {
     const r = SSEMessageSchema.safeParse(
-      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', { approval_id: 'approval-1',
         tool_call_id: 'tool-use-7',
         tool_call_name: 'execute',
         args: '{}',
@@ -819,12 +819,21 @@ describe('SSEMessageSchema', () => {
 
   it('accepts a settled tool approval', () => {
     const r = SSEMessageSchema.safeParse(
-      customEvent('KEEPER_TOOL_APPROVAL_SETTLED', {
+      customEvent('KEEPER_TOOL_APPROVAL_SETTLED', { approval_id: 'approval-1',
         tool_call_id: 'tool-use-7',
         outcome: 'approved',
       }),
     )
     expect(r.success).toBe(true)
+  })
+
+  it.each([undefined, null, 1, '', ' '])('rejects missing or malformed approval identity %s on both events', approvalId => {
+    for (const name of ['KEEPER_TOOL_APPROVAL_REQUESTED', 'KEEPER_TOOL_APPROVAL_SETTLED']) {
+      const value = name === 'KEEPER_TOOL_APPROVAL_REQUESTED'
+        ? { approval_id: approvalId, tool_call_id: 'call-1', tool_call_name: 'Execute', args: '{}', question: 'run?' }
+        : { approval_id: approvalId, tool_call_id: 'call-1', outcome: 'Approved' }
+      expect(SSEMessageSchema.safeParse(customEvent(name, value)).success).toBe(false)
+    }
   })
 
   it('accepts a shared execution binding and rejects unknown fields', () => {
@@ -890,7 +899,7 @@ describe('SSEMessageSchema', () => {
 
   it('still rejects a field the approval contract does not carry', () => {
     const r = SSEMessageSchema.safeParse(
-      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', { approval_id: 'approval-1',
         tool_call_id: 'tool-use-7',
         tool_call_name: 'execute',
         args: '{}',

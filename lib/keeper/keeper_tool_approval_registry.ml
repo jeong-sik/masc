@@ -14,8 +14,8 @@ type outcome =
   | Timed_out
   | Displaced
 
-(* What identifies one wait. The ask's description is carried beside it, not
-   in it: two waits are the same wait by (keeper, call id) alone. *)
+(* Reused provider call IDs displace the old wait. Decisions additionally
+   name the immutable approval ID of the question the operator saw. *)
 type key =
   { key_keeper_name : string
   ; key_tool_call_id : string
@@ -24,6 +24,7 @@ type key =
 type pending =
   { keeper_name : string
   ; tool_call_id : string
+  ; approval_id : string
   ; tool_name : string
   ; args : string
   ; question : string
@@ -64,15 +65,15 @@ let same_key (left : key) (right : key) =
   String.equal left.key_keeper_name right.key_keeper_name
   && String.equal left.key_tool_call_id right.key_tool_call_id
 
-(* Take the waiter for [key] out of the list, returning it. Under the mutex;
+(* Take the matching waiter out of the list, returning it. Under the mutex;
    the promise is resolved by the caller outside it, because resolving can
    schedule the waiting fiber and nothing should run holding this lock. *)
-let take_locked t key =
+let take_locked t matches =
   let taken = ref None in
   t.waiters <-
     List.filter
       (fun waiter ->
-        if Option.is_none !taken && same_key waiter.key key then begin
+        if Option.is_none !taken && matches waiter then begin
           taken := Some waiter;
           false
         end
@@ -80,12 +81,13 @@ let take_locked t key =
       t.waiters;
   !taken
 
-let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~because
+let await t ~clock ~on_registered ~keeper_name ~tool_call_id ~approval_id ~tool_name ~args ~question ~because
     ~timeout_sec =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   let entry =
     { keeper_name
     ; tool_call_id
+    ; approval_id
     ; tool_name
     ; args
     ; question
@@ -97,7 +99,7 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
   let promise, resolve = Eio.Promise.create () in
   let displaced =
     Stdlib.Mutex.protect t.mutex (fun () ->
-        let displaced = take_locked t key in
+        let displaced = take_locked t (fun waiter -> same_key waiter.key key) in
         t.waiters <- t.waiters @ [ { key; entry; resolve } ];
         displaced)
   in
@@ -116,6 +118,7 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
      operator was told it applied, and the call must run under it rather
      than be reported as timed out. *)
   Fun.protect ~finally:remove_self (fun () ->
+      on_registered ();
       match
         Watched_work.run
           (fun () -> Eio.Promise.await promise)
@@ -130,9 +133,12 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
         Timed_out
       | (Displaced | Answered _) as outcome -> outcome)
 
-let settle t ~keeper_name ~tool_call_id decision =
+let settle t ~keeper_name ~tool_call_id ~approval_id decision =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
-  match Stdlib.Mutex.protect t.mutex (fun () -> take_locked t key) with
+  let matches waiter =
+    same_key waiter.key key && String.equal waiter.entry.approval_id approval_id
+  in
+  match Stdlib.Mutex.protect t.mutex (fun () -> take_locked t matches) with
   | None -> false
   | Some waiter ->
     (* Counted on the resolved answer, not on [settle]'s return value: the

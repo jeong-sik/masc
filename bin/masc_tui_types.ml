@@ -10638,6 +10638,8 @@ type state = {
      Cleared when the turn settles; the settled value moves to
      [msg_settled_logs]. *)
   mutable msg_live: turn_log option;
+  mutable msg_presented_tool_approval:
+    (workspace_authority * unit ref) Masc_tui_chat_row_actions.approval option;
   (* The current Keeper's durable rows already read, including older pages.
      Refresh merges by structural row identity. Inactive conversations keep
      their reading and cursor in [msg_loaded_pages] until revisited. *)
@@ -19017,6 +19019,7 @@ let create_state
   msg_recall_walk = None;
   msg_recall_edits = [];
   msg_live = None;
+  msg_presented_tool_approval = None;
   msg_loaded_sources = empty_keeper_chat_sources;
   msg_loaded = [];
   msg_loaded_pages = [];

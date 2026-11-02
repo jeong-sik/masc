@@ -29,7 +29,10 @@ let settle_when_pending registry ~clock ~tool_call_id decision =
     end
   in
   wait_for_registration 100;
-  Registry.settle registry ~keeper_name:keeper ~tool_call_id decision
+  let pending = Registry.pending registry |> List.find (fun (p : Registry.pending) ->
+      p.keeper_name = keeper && p.tool_call_id = tool_call_id) in
+  Registry.settle registry ~keeper_name:keeper ~tool_call_id
+    ~approval_id:pending.approval_id decision
 
 let test_an_answer_releases_the_wait () =
   with_env (fun ~clock ->
@@ -38,7 +41,7 @@ let test_an_answer_releases_the_wait () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-1" ~timeout_sec:5.0)
           (fun () ->
@@ -58,7 +61,7 @@ let test_a_denial_is_carried_as_itself () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-2" ~timeout_sec:5.0)
           (fun () ->
@@ -74,7 +77,7 @@ let test_a_wait_nobody_answers_times_out () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let result =
-        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-3" ~timeout_sec:0.05
       in
@@ -88,14 +91,15 @@ let test_a_wait_nobody_answers_times_out () =
 let test_answering_a_wait_that_already_timed_out_reports_it () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
+      let approval_id = Random_id.uuid_v7 () in
       let timed_out =
-        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await registry ~clock ~on_registered:Fun.id ~approval_id ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-4" ~timeout_sec:0.02
       in
       check outcome "the wait ended on its own" Registry.Timed_out timed_out;
       check bool "a late answer says nothing was listening" false
-        (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-4"
+        (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-4" ~approval_id
            Registry.Approve))
 
 let test_answering_an_unknown_call_reports_it () =
@@ -103,7 +107,7 @@ let test_answering_an_unknown_call_reports_it () =
       let registry = Registry.create () in
       check bool "no wait, no success" false
         (Registry.settle registry ~keeper_name:keeper
-           ~tool_call_id:"never-asked" Registry.Approve))
+           ~tool_call_id:"never-asked" ~approval_id:(Random_id.uuid_v7 ()) Registry.Approve))
 
 let test_a_second_wait_on_the_same_id_displaces_the_first () =
   with_env (fun ~clock ->
@@ -114,7 +118,7 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
       let first, second =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-5" ~timeout_sec:5.0)
           (fun () ->
@@ -127,13 +131,13 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
             wait_for_first 100;
             Eio.Fiber.pair
               (fun () ->
-                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-5" ~timeout_sec:5.0)
               (fun () ->
                 Eio.Time.sleep clock 0.02;
                 ignore
-                  (Registry.settle registry ~keeper_name:keeper
+                  (settle_when_pending registry ~clock
                      ~tool_call_id:"call-5" Registry.Approve))
             |> fst)
       in
@@ -148,7 +152,7 @@ let test_waits_are_scoped_to_their_keeper () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:"keeper.one"
               ~tool_call_id:"shared-id" ~timeout_sec:0.15)
           (fun () ->
@@ -162,11 +166,51 @@ let test_waits_are_scoped_to_their_keeper () =
             (* Same call id, different keeper. Tool call ids are unique per
                provider stream, not across keepers. *)
             Registry.settle registry ~keeper_name:"keeper.two"
-              ~tool_call_id:"shared-id" Registry.Approve)
+              ~tool_call_id:"shared-id"
+              ~approval_id:(List.hd (Registry.pending registry)).approval_id Registry.Approve)
       in
       check outcome "the other keeper's answer does not release this wait"
         Registry.Timed_out (fst result);
       check bool "and it reports that nothing was waiting" false (snd result))
+
+let test_stale_approval_cannot_answer_a_replacement () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    Eio.Switch.run (fun sw ->
+      let wait () = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ())
+          ~tool_name:"Edit" ~args:"{}" ~question:"edit?" ~because:"replacement fixture"
+          ~keeper_name:keeper ~tool_call_id:"recycled" ~timeout_sec:5.0) in
+      let first = wait () in
+      let presented = List.hd (Registry.pending registry) in
+      let second = wait () in
+      let replacement = List.hd (Registry.pending registry) in
+      check bool "each actual wait has its own identity" false
+        (presented.approval_id = replacement.approval_id);
+      List.iter (fun approval_id ->
+        List.iter (fun decision ->
+          check bool "an old or unknown identity cannot answer the replacement" false
+            (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"recycled"
+               ~approval_id decision)) [Registry.Approve; Registry.Deny])
+        [presented.approval_id; Random_id.uuid_v7 ()];
+      check (list string) "rejected answers preserve the current wait"
+        [replacement.approval_id]
+        (Registry.pending registry |> List.map (fun (p : Registry.pending) -> p.approval_id));
+      check int "rejected answers count no approval" 0
+        (Registry.outcome_totals registry).answered_total;
+      check bool "the current observed identity answers exactly its wait" true
+        (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"recycled"
+           ~approval_id:replacement.approval_id Registry.Approve);
+      check outcome "the old wait was displaced" Registry.Displaced (Eio.Promise.await_exn first);
+      check outcome "the replacement receives only its own answer"
+        (Registry.Answered Registry.Approve) (Eio.Promise.await_exn second);
+      check bool "a consumed answer is not reused" false
+        (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"recycled"
+           ~approval_id:replacement.approval_id Registry.Approve);
+      check int "only the actual answer is counted" 1
+        (Registry.outcome_totals registry).answered_total))
 
 let test_pending_lists_open_waits_oldest_first () =
   with_env (fun ~clock ->
@@ -174,13 +218,13 @@ let test_pending_lists_open_waits_oldest_first () =
       Eio.Fiber.all
         [ (fun () ->
             ignore
-              (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+              (Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                  ~tool_call_id:"call-a" ~timeout_sec:0.2))
         ; (fun () ->
             Eio.Time.sleep clock 0.01;
             ignore
-              (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+              (Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                  ~tool_call_id:"call-b" ~timeout_sec:0.2))
         ; (fun () ->
@@ -195,6 +239,8 @@ let test_pending_lists_open_waits_oldest_first () =
             | first :: _ ->
                 check string "the listing carries the tool" "Execute"
                   first.tool_name;
+                check bool "the listing carries the exact approval identity" true
+                  (first.approval_id <> "");
                 check string "the listing carries the question" "run?"
                   first.question;
                 check bool "the listing carries when it was asked" true
@@ -213,7 +259,7 @@ let test_a_cancelled_wait_leaves_nothing_behind () =
       Eio.Fiber.first
         (fun () ->
           ignore
-            (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            (Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                ~tool_call_id:"call-cancel" ~timeout_sec:5.0))
         (fun () -> Eio.Time.sleep clock 0.02);
@@ -281,18 +327,99 @@ let test_an_answer_settled_as_the_timeout_passed_is_the_answer () =
       Eio.Switch.run (fun sw ->
           let waited =
             Eio.Fiber.fork_promise ~sw (fun () ->
-                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                Registry.await registry ~clock ~on_registered:Fun.id ~approval_id:(Random_id.uuid_v7 ()) ~tool_name:"Execute" ~args:"{}"
                   ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-late" ~timeout_sec:1.0)
           in
           check int "the wait is registered" 1 (List.length (Registry.pending registry));
+          let approval_id = (List.hd (Registry.pending registry)).approval_id in
           Eio_mock.Clock.set_time clock 1.0;
           check bool "the operator is told the answer applied" true
-            (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-late"
+            (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-late" ~approval_id
                Registry.Approve);
           check outcome "the answer that arrived is the outcome"
             (Registry.Answered Registry.Approve)
             (Eio.Promise.await_exn waited)))
+
+let test_on_registered_failure_cleans_up_the_wait () =
+  with_env (fun ~clock ->
+    let exception Publication_failed in
+    let registry = Registry.create () in
+    let approval_id = Random_id.uuid_v7 () in
+    let seen = ref [] in
+    let raised =
+      try
+        ignore (Registry.await registry ~clock ~approval_id
+          ~on_registered:(fun () ->
+            seen := Registry.pending registry;
+            raise Publication_failed)
+          ~keeper_name:keeper ~tool_call_id:"publication-failed" ~tool_name:"Edit"
+          ~args:"{}" ~question:"edit?" ~because:"publication failure" ~timeout_sec:1.0);
+        false
+      with Publication_failed -> true in
+    check bool "the publisher's failure propagates" true raised;
+    check (list string) "the callback observes its registered identity" [approval_id]
+      (List.map (fun (row : Registry.pending) -> row.approval_id) !seen);
+    check int "publication failure leaves no orphaned wait" 0
+      (List.length (Registry.pending registry));
+    check int "publication failure is not a timeout" 0
+      (Registry.outcome_totals registry).timed_out_total)
+
+let test_cancellation_during_on_registered_cleans_up_the_wait () =
+  with_env (fun ~clock ->
+    let registry = Registry.create () in
+    let approval_id = Random_id.uuid_v7 () in
+    let entered, announce = Eio.Promise.create () in
+    let blocked, _ = Eio.Promise.create () in
+    let seen = ref [] in
+    Eio.Fiber.first
+      (fun () ->
+        ignore (Registry.await registry ~clock ~approval_id
+          ~on_registered:(fun () ->
+            seen := Registry.pending registry;
+            Eio.Promise.resolve announce ();
+            Eio.Promise.await blocked)
+          ~keeper_name:keeper ~tool_call_id:"publication-cancelled" ~tool_name:"Edit"
+          ~args:"{}" ~question:"edit?" ~because:"publication cancellation" ~timeout_sec:1.0))
+      (fun () -> Eio.Promise.await entered);
+    check (list string) "cancellation reached an actual registered publication" [approval_id]
+      (List.map (fun (row : Registry.pending) -> row.approval_id) !seen);
+    check int "cancelling publication removes its own wait" 0
+      (List.length (Registry.pending registry));
+    check int "publication cancellation is not a timeout" 0
+      (Registry.outcome_totals registry).timed_out_total)
+
+let test_an_answer_during_delayed_publication_stays_answered () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    let approval_id = Random_id.uuid_v7 () in
+    let entered, announce = Eio.Promise.create () in
+    let release, finish_publication = Eio.Promise.create () in
+    let callbacks = ref 0 in
+    let settled = ref false in
+    Eio.Switch.run (fun sw ->
+      let waited = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await registry ~clock ~approval_id
+          ~on_registered:(fun () ->
+            incr callbacks;
+            settled := Registry.settle registry ~keeper_name:keeper
+              ~tool_call_id:"publication-delayed" ~approval_id Registry.Approve;
+            Eio.Promise.resolve announce ();
+            Eio.Promise.await release)
+          ~keeper_name:keeper ~tool_call_id:"publication-delayed" ~tool_name:"Edit"
+          ~args:"{}" ~question:"edit?" ~because:"delayed publication" ~timeout_sec:1.0) in
+      Eio.Promise.await entered;
+      Eio_mock.Clock.set_time clock 1.0;
+      Eio.Promise.resolve finish_publication ();
+      check outcome "a successful answer survives publication crossing the old deadline"
+        (Registry.Answered Registry.Approve) (Eio.Promise.await_exn waited);
+      check bool "the immediate answer actually settled" true !settled;
+      check int "the publication callback runs once" 1 !callbacks;
+      let totals = Registry.outcome_totals registry in
+      check int "the answer is counted once" 1 totals.answered_total;
+      check int "publication time never turns the answer into a timeout" 0 totals.timed_out_total))
 
 let () =
   run "keeper_tool_approval_registry"
@@ -323,11 +450,19 @@ let () =
     ; ( "identity and cleanup"
       , [ test_case "a second wait on the same id displaces the first" `Quick
             test_a_second_wait_on_the_same_id_displaces_the_first
+        ; test_case "a stale approval cannot answer a replacement wait" `Quick
+            test_stale_approval_cannot_answer_a_replacement
         ; test_case "waits are scoped to their keeper" `Quick
             test_waits_are_scoped_to_their_keeper
         ; test_case "pending lists open waits oldest first" `Quick
             test_pending_lists_open_waits_oldest_first
         ; test_case "a cancelled wait leaves nothing behind" `Quick
             test_a_cancelled_wait_leaves_nothing_behind
+        ; test_case "a failed registered publisher leaves no wait" `Quick
+            test_on_registered_failure_cleans_up_the_wait
+        ; test_case "cancelling a registered publisher leaves no wait" `Quick
+            test_cancellation_during_on_registered_cleans_up_the_wait
+        ; test_case "an answer during delayed publication stays answered" `Quick
+            test_an_answer_during_delayed_publication_stays_answered
         ] )
     ]

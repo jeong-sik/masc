@@ -368,6 +368,7 @@ type unreadable =
     why it was held; it is drawn under the question in the pane. *)
 type awaiting_approval =
   { call_id : string
+  ; approval_id : string
   ; tool_name : string
   ; question : string
   ; because : string

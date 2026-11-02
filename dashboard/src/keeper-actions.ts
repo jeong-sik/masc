@@ -21,7 +21,7 @@ import {
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
 } from './api/keeper'
-import type { KeeperStreamSurfaceContext } from './api/keeper'
+import type { KeeperStreamSurfaceContext, KeeperToolApprovalRow } from './api/keeper'
 import { answerKeeperToolApproval } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
@@ -31,7 +31,7 @@ import {
   recordToolCallOutputs,
 } from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
-import { invalidateDashboardCache, refreshDashboard } from './store'
+import { executionWorkspaceAuthority, executionWorkspaceRevision, invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
   ChatBlock,
@@ -40,6 +40,7 @@ import type {
   KeeperConversationEntry,
   KeeperDiagnostic,
   KeeperStatusDetail,
+  KeeperToolApprovalPending,
   KeeperUserInputBlock,
 } from './types'
 import {
@@ -63,6 +64,7 @@ import {
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
+  dropKeeperToolApproval,
   finalizeAssistantEntry,
   mergeServerHistoryEntries,
   retireKeeperChatHistory,
@@ -241,10 +243,42 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
 
 // --- Held tool approvals (task-343) ---
 
+function pendingToolApproval(row: KeeperToolApprovalRow): KeeperToolApprovalPending {
+  return {
+    approvalId: row.approval_id,
+    toolCallId: row.tool_call_id,
+    toolName: row.tool,
+    args: row.args,
+    question: row.question,
+    because: row.because,
+    askedAtMs: row.asked_at !== null ? row.asked_at * 1000 : null,
+    timeoutSec: row.timeout_sec,
+    answering: false,
+    answeredDecision: null,
+    answeredOutcome: null,
+    settled: false,
+  }
+}
+
+function sameToolApprovalCallRows(
+  before: Record<string, KeeperToolApprovalPending> | undefined,
+  after: Record<string, KeeperToolApprovalPending> | undefined,
+  toolCallId: string,
+): boolean {
+  const beforeRows = Object.values(before ?? {}).filter(row => row.toolCallId === toolCallId)
+  const afterRows = Object.values(after ?? {}).filter(row => row.toolCallId === toolCallId)
+  return beforeRows.length === afterRows.length
+    && beforeRows.every(row => after?.[row.approvalId] === row)
+}
+
 // Re-hydrates waits whose REQUESTED event this view never saw: the listing is
 // public-read, so a dashboard opened after the gate fired still draws the
 // card instead of discovering the wait only as a 180s timeout.
 export async function hydrateKeeperToolApprovals(): Promise<void> {
+  const beforeRead = keeperToolApprovals.value
+  const workspace = executionWorkspaceAuthority.peek()
+  const workspaceRevision = executionWorkspaceRevision.peek()
+  const authRevision = currentStoredTokenRevision()
   let rows
   try {
     rows = await fetchKeeperToolApprovals()
@@ -253,57 +287,99 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     // the primary source. A failed poll must not surface as an error row.
     return
   }
+  if (executionWorkspaceAuthority.peek() !== workspace
+    || executionWorkspaceRevision.peek() !== workspaceRevision
+    || currentStoredTokenRevision() !== authRevision) return
+  const afterRead = keeperToolApprovals.value
   for (const row of rows) {
-    // A row the stream already drew carries fresher askedAt semantics; only
-    // fill gaps, never overwrite an in-flight answer with a re-hydration.
-    if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]) continue
-    upsertKeeperToolApproval(row.keeper, {
-      toolCallId: row.tool_call_id,
-      toolName: row.tool,
-      args: row.args,
-      question: row.question,
-      because: row.because,
-      askedAtMs: row.asked_at !== null ? row.asked_at * 1000 : null,
-      timeoutSec: row.timeout_sec,
-      answering: false,
-      answeredDecision: null,
-      answeredOutcome: null,
-      settled: false,
-    })
+    const currentKeeper = afterRead[row.keeper]
+    const beforeKeeper = beforeRead[row.keeper]
+    const current = Object.values(currentKeeper ?? {}).filter(held => held.toolCallId === row.tool_call_id)
+    // A concurrent stream/answer owns its newer observation. Otherwise the
+    // listing can replace an unchanged older ask with the current exact ask.
+    if (!sameToolApprovalCallRows(beforeKeeper, currentKeeper, row.tool_call_id)) continue
+    // An ask may have appeared and settled while this read was in flight.
+    // Two absent rows do not prove that its observation is still current.
+    if (current.length === 0 && currentKeeper !== beforeKeeper) continue
+    for (const held of current) {
+      if (held.approvalId !== row.approval_id) {
+        dropKeeperToolApproval(row.keeper, held.toolCallId, held.approvalId)
+      }
+    }
+    upsertKeeperToolApproval(row.keeper, pendingToolApproval(row))
   }
 }
 
 export async function answerHeldKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
+  approvalId: string,
   decision: 'approve' | 'deny',
 ): Promise<boolean> {
-  const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
-  if (!existing || existing.settled) return false
+  const existing = keeperToolApprovals.value[keeperName]?.[approvalId]
+  if (typeof approvalId !== 'string' || approvalId.trim() === ''
+    || !existing || existing.approvalId !== approvalId || existing.toolCallId !== toolCallId || existing.settled) return false
   if (existing.answering) return false
-  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  const workspace = executionWorkspaceAuthority.peek()
+  const workspaceRevision = executionWorkspaceRevision.peek()
+  const authRevision = currentStoredTokenRevision()
+  updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
     ...approval,
     answering: true,
     answeredDecision: decision,
   }))
+  const submittedKeeper = keeperToolApprovals.value[keeperName]
+  const submitted = submittedKeeper?.[approvalId]
+  if (!submitted || submitted.approvalId !== approvalId) return false
+  const ownsSubmittedRow = () => executionWorkspaceAuthority.peek() === workspace
+    && executionWorkspaceRevision.peek() === workspaceRevision
+    && currentStoredTokenRevision() === authRevision
+    && keeperToolApprovals.value[keeperName]?.[approvalId] === submitted
+  const ownsCallContext = () => ownsSubmittedRow()
+    && sameToolApprovalCallRows(submittedKeeper, keeperToolApprovals.value[keeperName], toolCallId)
   try {
-    const result = await answerKeeperToolApproval(keeperName, toolCallId, decision)
-    // settled=false (late answer) still retires the card: the call is gone,
-    // and the row would otherwise promise an interaction that no longer
-    // exists. The SETTLED stream event, when it comes, is a no-op drop.
-    settleKeeperToolApproval(keeperName, toolCallId, result.decision)
-    setRecordValue(keeperActionErrors, keeperName, null)
-    return result.settled
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
-    updateKeeperToolApproval(keeperName, toolCallId, approval => ({
-      ...approval,
-      answering: false,
-      answeredDecision: null,
-    }))
-    setRecordValue(keeperActionErrors, keeperName, message)
+    let result
+    try {
+      result = await answerKeeperToolApproval(keeperName, toolCallId, approvalId, decision)
+    } catch (err) {
+      if (!ownsCallContext()) return false
+      const message = err instanceof Error ? err.message : String(err)
+      console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
+      setRecordValue(keeperActionErrors, keeperName, message)
+      return false
+    }
+    if (!ownsSubmittedRow()) return false
+    if (result.settled || result.remembered) {
+      const ownsContext = ownsCallContext()
+      settleKeeperToolApproval(keeperName, toolCallId, approvalId, result.decision)
+      if (ownsContext) setRecordValue(keeperActionErrors, keeperName, null)
+      return true
+    }
+    if (!ownsCallContext()) return false
+    setRecordValue(keeperActionErrors, keeperName, '승인 응답이 적용되지 않았습니다. 현재 승인 요청을 확인해 주세요.')
+    try {
+      const rows = await fetchKeeperToolApprovals()
+      if (!ownsCallContext()) return false
+      const current = rows.find(row => row.keeper === keeperName && row.tool_call_id === toolCallId)
+      if (!current) dropKeeperToolApproval(keeperName, toolCallId, approvalId)
+      else if (current.approval_id !== approvalId) {
+        dropKeeperToolApproval(keeperName, toolCallId, approvalId)
+        upsertKeeperToolApproval(keeperName, pendingToolApproval(current))
+      }
+    } catch (err) {
+      if (!ownsCallContext()) return false
+      const message = err instanceof Error ? err.message : String(err)
+      setRecordValue(keeperActionErrors, keeperName, `승인 응답이 적용되지 않았고 현재 요청 조회도 실패했습니다: ${message}`)
+    }
     return false
+  } finally {
+    // Release only this operation's local busy flag, including after scope
+    // withdrawal. A superseding observation or answer owns a different row.
+    if (keeperToolApprovals.value[keeperName]?.[approvalId] === submitted) {
+      updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
+        ...approval, answering: false, answeredDecision: null,
+      }))
+    }
   }
 }
 

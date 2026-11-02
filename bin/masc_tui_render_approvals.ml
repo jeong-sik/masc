@@ -21,7 +21,7 @@ type approval_line =
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
    carrying a page of code read as its first forty characters and there was
    no second screen. This is that screen. *)
-let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
+let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
   let width = max 0 (framed_inner_width cols - 2) in
   (* [Approval_detail.of_fields] makes every value terminal-safe. *)
   let fields, gate_fields =
@@ -108,7 +108,10 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
     @ (match gate_fields with
        | None -> []
        | Some fields ->
-         Approval_detail.of_gate_fields ~width fields
+         let string_reading = match value_hint with
+           | Masc_tui_keys.No_value_reading | Readable_values -> Approval_detail.Readable_string
+           | Byte_values -> Approval_detail.Exact_string_bytes in
+         Approval_detail.of_gate_fields ~string_reading ~width fields
          |> List.map (fun line -> Gate_line line))
   in
   let input_unreadable =
@@ -127,7 +130,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
            | Approval_detail.Gate_key_with_bytes _ -> true
            | Gate_key | Gate_key_continuation | Gate_key_with_bytes_continuation _
            | Gate_key_bytes _ | Gate_key_bytes_continuation _
-           | Gate_string | Gate_json | Gate_unreadable -> false))
+           | Gate_string | Gate_string_bytes | Gate_json | Gate_unreadable -> false))
       lines
   in
   box_top buf cols;
@@ -135,12 +138,23 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
      takes precedence over it. The footer owns the way out. *)
   box_line buf cols (screen_title
     (if input_unreadable then "!WIDEN Approval"
-     else if key_has_bytes then "*N=bN bytes | Approval"
-     else " MASC Approval"));
+     else match value_hint, key_has_bytes with
+       | Masc_tui_keys.No_value_reading, false -> " MASC Approval"
+       | No_value_reading, true -> "*N=bN bytes | Approval"
+       | Readable_values, false -> "v:bytes | top-level strings"
+       | Readable_values, true -> "v:bytes *N=bN | Approval"
+       | Byte_values, false -> "v:text | top-level string bytes"
+       | Byte_values, true -> "v:text *N=bN | top-level strings"));
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
+  let total = List.length lines in
+  viewport := Some
+    { adv_count = total; adv_height = content_height;
+      adv_presentation = (match value_hint with
+        | Masc_tui_keys.Byte_values -> Approval_string_bytes
+        | No_value_reading | Readable_values -> Approval_text) };
   let scroll =
-    Masc_tui_scroll.normalize ~count:(List.length lines) ~height:content_height
+    Masc_tui_scroll.normalize ~count:total ~height:content_height
       state.approval_detail_scroll
   in
   (* The pane is where the field count and the drawn height meet, so the row
@@ -150,7 +164,6 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
      operator could read the first screen, believe it whole, and press y. The
      window line the other reading panes carry is what says there is more, so
      the footer gets it when the field list outgrows the frame. *)
-  let total = List.length lines in
   let overflow_hint =
     if total > content_height then
       Printf.sprintf "[rows %s]  "
@@ -218,9 +231,16 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let scroll = ref state.approval_detail_scroll in
+  let viewport = ref None in
+  let value_hint =
+    if not (Masc_tui_approvals_model.value_reading_available state row) then
+      Masc_tui_keys.No_value_reading
+    else if Option.is_some (Masc_tui_approvals_model.current_value_reading state) then
+      Masc_tui_keys.Byte_values
+    else Masc_tui_keys.Readable_values in
   let overflow_hint =
     if cols < keeper_split_threshold_cols then
-      approval_detail_pane state ~clamped:scroll ~rows ~cols row buf
+      approval_detail_pane state ~value_hint ~clamped:scroll ~viewport ~rows ~cols row buf
     else begin
       let left_cols = keeper_roster_pane_cols in
       let left_buf = Buffer.create 1024 in
@@ -235,7 +255,7 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
         ~labels:(List.map approval_sidebar_label (Masc_tui_approvals_model.approval_items state))
         ~selected:state.approval_cursor;
       let hint =
-        approval_detail_pane state ~clamped:scroll ~rows
+        approval_detail_pane state ~value_hint ~clamped:scroll ~viewport ~rows
           ~cols:(cols - left_cols) row right_buf
       in
       write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
@@ -244,8 +264,8 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(overflow_hint ^ Masc_tui_keys.footer_hints_approval_detail));
-  finish_surface state ~clamped:(Approval_detail_scroll !scroll)
+       ~hints:(overflow_hint ^ Masc_tui_keys.footer_hints_approval_detail ~value_hint));
+  finish_surface state ~clamped:(Approval_detail_scroll (!scroll, !viewport))
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
 (* Six cells hold [Message_layout.span_text]'s widest reading ("99d23h"), the

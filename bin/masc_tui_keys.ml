@@ -399,6 +399,9 @@ let approval_read =
   b Act "Enter" "read the whole ask"
     ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
            Home/End reach its ends, [ / ] step asks, Esc goes back"
+let approval_value_bytes =
+  b Navigate "v" "string bytes" ~detail:Detail_only
+    ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
@@ -783,6 +786,7 @@ let for_surface = function
         (* The list draws each ask on one row. Enter is where a multi-line
            argument is readable before y answers it. *)
       ; approval_read
+      ; approval_value_bytes
       ; approval_decide
       ; approval_retry
         (* The footer names this key and the sheet did not, so an operator who
@@ -1316,13 +1320,19 @@ let footer_hints_metrics ~telemetry =
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the
    queue behind it and to call [R] something the key table does not. *)
-let footer_hints_approval_detail =
+type approval_value_hint = No_value_reading | Readable_values | Byte_values
+
+let footer_hints_approval_detail ~value_hint =
   hints_of_bindings
-    [ b Navigate "j/k" "scroll"
-    ; approval_decide
+    ([ b Navigate "j/k" "scroll" ]
+    @ (match value_hint with
+       | No_value_reading -> []
+       | Readable_values -> [ approval_value_bytes ]
+       | Byte_values -> [ b Navigate "v" "text" ])
+    @ [ approval_decide
     ; approval_retry
     ; b Act "Esc" "back"
-    ]
+    ])
 
 (* The Board draft's two footers were written out in the renderer, and the
    pane above them then spelled the same key a second way: "Ctrl-E: $EDITOR"

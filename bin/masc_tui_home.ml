@@ -169,6 +169,7 @@ let reconcile_home_request_detail state =
           | Home_goal_confirmation _ -> ());
         state.home_opened_request <- None;
         state.approval_detail_open <- false;
+        state.approval_value_reading <- None;
         state.pending_approval_action <- None;
         state.followed_from <- None;
         state.view <- Overview

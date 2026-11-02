@@ -24,6 +24,136 @@ let approval_items (state : state) =
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
+(* A suspended workspace keeps its last queue on screen. A new projection of
+   those rows must wait until a queue has been accepted under the current read
+   authority, including after the same workspace is confirmed again. *)
+let value_reading_source_current (state : state) =
+  state.workspace_identity = Workspace_identity_match
+  && server_authority_ready state
+  && Option.exists (fun owner -> owner == state.workspace_read_authority)
+       state.gate_snapshot_authority
+
+let accept_gate_snapshot (state : state) (snapshot : Tui_decode.gate_snapshot) =
+  state.gate_pending <- snapshot.gs_pending;
+  state.gate_modes <- snapshot.gs_modes;
+  state.gate_queue_unavailable <- snapshot.gs_queue_unavailable;
+  state.gate_rules <- snapshot.gs_rules;
+  state.gate_rules_unavailable <- snapshot.gs_rules_unavailable;
+  state.gate_error <- None;
+  state.gate_snapshot_observed <- true;
+  state.gate_snapshot_authority <-
+    if state.workspace_identity = Workspace_identity_match && server_authority_ready state
+    then Some state.workspace_read_authority else None
+
+let value_reading_available state row =
+  value_reading_source_current state && match row with
+  | Gate_row pending ->
+    (match pending.Tui_decode.gp_input_rows with
+     | Rows fields -> Masc_tui_approval_value_reading.has_strings fields
+     | Flattened _ -> false)
+  | Keeper_tool_row _ | Operator_row _ -> false
+
+let current_value_reading (state : state) =
+  if state.view <> Approvals || not state.approval_detail_open
+     || not (value_reading_source_current state) then None
+  else match state.approval_value_reading with
+    | None -> None
+    | Some (authority, _) when authority <> state.workspace_authority -> None
+    | Some (_, reading) ->
+      (match List.nth_opt (approval_items state) state.approval_cursor with
+       | Some (Gate_row pending) ->
+         (match pending.Tui_decode.gp_input_rows with
+          | Rows fields when Masc_tui_approval_value_reading.has_strings fields
+              && Masc_tui_approval_value_reading.matches reading
+                   ~scope:state.workspace_read_authority ~gate_id:pending.gp_id ~fields ->
+            Some reading
+          | Rows _ | Flattened _ -> None)
+       | Some (Keeper_tool_row _ | Operator_row _) | None -> None)
+
+(* A detail and its byte view each take input only after their own frame was
+   accepted. The list and every other surface have no detail presentation. *)
+let detail_presentation (state : state) =
+  if state.view <> Approvals || not state.approval_detail_open then None
+  else match state.ask_answer_mode, List.nth_opt (approval_items state) state.approval_cursor with
+    | Ask_browsing, Some _ ->
+      Some (if Option.is_some (current_value_reading state)
+        then Approval_string_bytes else Approval_text)
+    | Ask_browsing, None | Ask_answering _, (Some _ | None) -> None
+
+let detail_presentation_changed ~presented ~current =
+  not (Option.equal ( = ) presented current)
+
+let reconcile_value_reading (state : state) =
+  match state.approval_value_reading with
+  | Some _ when Option.is_none (current_value_reading state) ->
+    state.approval_value_reading <- None;
+    state.approval_detail_scroll <- 0
+  | Some _ | None -> ()
+
+let close_value_reading (state : state) =
+  match current_value_reading state with
+  | None -> state.approval_value_reading <- None; false
+  | Some reading ->
+    state.approval_value_reading <- None;
+    state.approval_detail_scroll <- Masc_tui_approval_value_reading.restore_scroll reading;
+    true
+
+type value_reading_toggle =
+  | Value_reading_opened | Value_reading_closed | Value_reading_unavailable
+  | Value_reading_changed | Value_reading_waiting_for_source
+
+let toggle_value_reading (state : state) ~presented =
+  if close_value_reading state then Value_reading_closed
+  else if state.view <> Approvals || not state.approval_detail_open then Value_reading_unavailable
+  else match presented, List.nth_opt (approval_items state) state.approval_cursor with
+    | Some (Gate_row shown), Some (Gate_row current) ->
+      if not (String.equal shown.Tui_decode.gp_id current.gp_id) then Value_reading_changed
+      else if not (value_reading_source_current state) then Value_reading_waiting_for_source
+      else
+        (match shown.gp_input_rows, current.gp_input_rows with
+         | Rows shown_fields, Rows current_fields
+           when Masc_tui_approval_value_reading.has_strings shown_fields ->
+           let reading = Masc_tui_approval_value_reading.create
+               ~scope:state.workspace_read_authority ~gate_id:shown.gp_id
+               ~fields:shown_fields ~restore_scroll:state.approval_detail_scroll in
+           if Masc_tui_approval_value_reading.matches reading
+                ~scope:state.workspace_read_authority ~gate_id:current.gp_id ~fields:current_fields
+           then begin
+             state.approval_value_reading <- Some (state.workspace_authority, reading);
+             state.approval_detail_scroll <- 0;
+             Value_reading_opened
+           end else Value_reading_changed
+         | Rows _, Rows _ | Rows _, Flattened _ | Flattened _, (Rows _ | Flattened _) ->
+           Value_reading_unavailable)
+    | Some (Keeper_tool_row _ | Operator_row _), _
+    | Some (Gate_row _), (Some (Keeper_tool_row _ | Operator_row _) | None)
+    | None, _ -> Value_reading_unavailable
+
+let page_detail (state : state) ~forward ~count ~height =
+  if state.view <> Approvals || not state.approval_detail_open then false
+  else begin
+    let move = if forward then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+    state.approval_detail_scroll <-
+      move ~count ~height state.approval_detail_scroll;
+    true
+  end
+
+let step_detail (state : state) ~forward ~count ~height =
+  if state.view <> Approvals || not state.approval_detail_open then false
+  else begin
+    let move = if forward then Masc_tui_scroll.down else Masc_tui_scroll.up in
+    state.approval_detail_scroll <- move ~count ~height state.approval_detail_scroll;
+    true
+  end
+
+let detail_edge (state : state) ~to_bottom =
+  if state.view <> Approvals || not state.approval_detail_open then false
+  else begin
+    state.approval_detail_scroll <-
+      if to_bottom then clamped_scroll_end else 0;
+    true
+  end
+
 (* The questions behind the count, so the two places that say how many there
    are cannot count different things: this surface's title and the block
    heading above the questions themselves. [None] is a reading

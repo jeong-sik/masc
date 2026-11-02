@@ -28,6 +28,22 @@ type approvals_empty_queue =
 
 val operator_approval_items : Masc_tui_types.state -> Masc_tui_operator_projection.approval_item list
 val approval_items : Masc_tui_types.state -> approval_row list
+val current_value_reading : Masc_tui_types.state -> Masc_tui_approval_value_reading.t option
+val detail_presentation : Masc_tui_types.state -> Masc_tui_types.approval_detail_presentation option
+val detail_presentation_changed :
+  presented:Masc_tui_types.approval_detail_presentation option ->
+  current:Masc_tui_types.approval_detail_presentation option -> bool
+val reconcile_value_reading : Masc_tui_types.state -> unit
+val accept_gate_snapshot : Masc_tui_types.state -> Masc.Tui_decode.gate_snapshot -> unit
+val value_reading_available : Masc_tui_types.state -> approval_row -> bool
+val close_value_reading : Masc_tui_types.state -> bool
+type value_reading_toggle =
+  | Value_reading_opened | Value_reading_closed | Value_reading_unavailable
+  | Value_reading_changed | Value_reading_waiting_for_source
+val toggle_value_reading : Masc_tui_types.state -> presented:approval_row option -> value_reading_toggle
+val page_detail : Masc_tui_types.state -> forward:bool -> count:int -> height:int -> bool
+val step_detail : Masc_tui_types.state -> forward:bool -> count:int -> height:int -> bool
+val detail_edge : Masc_tui_types.state -> to_bottom:bool -> bool
 val approvals_open_questions : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list option
 (** [None] means no successful question snapshot has been observed. [Some []]
     means an observed snapshot has no open questions. *)

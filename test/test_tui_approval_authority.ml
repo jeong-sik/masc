@@ -2,6 +2,7 @@ open Alcotest
 open Masc_tui_types
 
 module Authority = Masc_tui_approval_authority
+module Approvals = Masc_tui_approvals_model
 module Chat_frame = Masc_tui_chat_row_actions
 module Presented = Masc_tui_presented
 
@@ -268,6 +269,160 @@ let test_authority_change_is_typed () =
   check bool "modal clears authority" true
     (Authority.authority_changed ~presented:(Some operator_a) ~candidate:None)
 
+let confirmed_approval_state () =
+  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:0. () in
+  let module Decode = Tui_decode in
+  state.server_identity <- Some
+    { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;
+      sid_runtime_instance_id = None;
+      sid_base_path = Decode.Canonical_path.of_path "/owned-workspace";
+      sid_masc_root = Decode.Canonical_path.of_path "/owned-workspace/.masc";
+      sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
+      sid_sse_clients = None; sid_gc = None; sid_scheduler = None };
+  state.workspace_identity <- Workspace_identity_match;
+  state.view <- Approvals;
+  state.approval_detail_open <- true;
+  state
+
+let accept_pending state pending =
+  Approvals.accept_gate_snapshot state
+    { gs_pending = pending; gs_modes = None; gs_queue_unavailable = None;
+      gs_rules = []; gs_rules_unavailable = None }
+
+let test_gate_value_reading_ownership () =
+  let pending = match gate "appr-a" with
+    | Approvals.Gate_row pending -> pending
+    | Approvals.Keeper_tool_row _ | Approvals.Operator_row _ -> fail "expected Gate row" in
+  let fields = [ "text", `String "line\n"; "number", `Float 0. ] in
+  let pending = { pending with Tui_decode.gp_input_rows = Rows fields } in
+  let state = confirmed_approval_state () in
+  state.approval_detail_scroll <- 8;
+  accept_pending state [ pending ];
+  let shown = Some (Approvals.Gate_row pending) in
+  check bool "the displayed input opens its own reading" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_opened);
+  check int "reading starts at the beginning" 0 state.approval_detail_scroll;
+  state.gate_pending <- [ { pending with gp_input_rows = Rows (List.map Fun.id fields) } ];
+  Approvals.reconcile_value_reading state;
+  check bool "an equivalent fresh snapshot keeps the reading" true
+    (Option.is_some (Approvals.current_value_reading state));
+  state.approval_detail_scroll <- 23;
+  check bool "closing restores the normal reading" true (Approvals.close_value_reading state);
+  check int "normal reading scroll" 8 state.approval_detail_scroll;
+  ignore (Approvals.toggle_value_reading state ~presented:shown);
+  state.approval_detail_scroll <- 23;
+  state.gate_pending <-
+    [ { pending with gp_input_rows = Rows [ "text", `String "line\n"; "number", `Float (-0.) ] } ];
+  Approvals.reconcile_value_reading state;
+  check bool "a changed decoded input withdraws the reading" true
+    (Option.is_none state.approval_value_reading);
+  check int "changed input starts from the beginning" 0 state.approval_detail_scroll;
+  check bool "an older presented input cannot open the new one" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_changed);
+  state.gate_pending <- [ pending ];
+  ignore (Approvals.toggle_value_reading state ~presented:shown);
+  state.workspace_read_authority <- ref ();
+  Approvals.reconcile_value_reading state;
+  check bool "a withdrawn workspace read authority closes the reading" true
+    (Option.is_none state.approval_value_reading)
+
+let test_gate_value_reading_waits_for_new_authority () =
+  let pending = match gate "appr-a" with
+    | Approvals.Gate_row pending ->
+      { pending with Tui_decode.gp_input_rows = Rows [ "text", `String "value" ] }
+    | Approvals.Keeper_tool_row _ | Approvals.Operator_row _ -> fail "expected Gate row" in
+  let state = confirmed_approval_state () in
+  accept_pending state [ pending ];
+  let shown = Some (Approvals.Gate_row pending) in
+  check bool "confirmed queue opens" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_opened);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health unavailable";
+  suspend_workspace_readings state;
+  Approvals.reconcile_value_reading state;
+  check bool "authority withdrawal closes the reading" true
+    (Option.is_none state.approval_value_reading);
+  check int "the last queue remains visible" 1 (List.length state.gate_pending);
+  check bool "unconfirmed queue cannot reopen" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_waiting_for_source);
+  state.workspace_identity <- Workspace_identity_match;
+  check bool "confirmation alone does not renew the old queue" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_waiting_for_source);
+  accept_pending state [ pending ];
+  check bool "a newly accepted queue can open" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_opened)
+
+let test_gate_detail_page_keeps_selection () =
+  let pending = match gate "appr-a" with
+    | Approvals.Gate_row pending ->
+      { pending with Tui_decode.gp_input_rows = Rows [ "text", `String "long value" ] }
+    | Approvals.Keeper_tool_row _ | Approvals.Operator_row _ -> fail "expected Gate row" in
+  let state = confirmed_approval_state () in
+  accept_pending state [ pending ];
+  let shown = Some (Approvals.Gate_row pending) in
+  check bool "normal detail owns a page" true
+    (Approvals.page_detail state ~forward:true ~count:100 ~height:13);
+  check int "normal detail advances" 12 state.approval_detail_scroll;
+  check int "normal detail keeps its target" 0 state.approval_cursor;
+  check bool "bytes open" true
+    (Approvals.toggle_value_reading state ~presented:shown = Approvals.Value_reading_opened);
+  check bool "bytes own a page" true
+    (Approvals.page_detail state ~forward:true ~count:100 ~height:13);
+  check int "bytes advance" 12 state.approval_detail_scroll;
+  check int "bytes keep their target" 0 state.approval_cursor;
+  check bool "paging preserves byte ownership" true
+    (Option.is_some (Approvals.current_value_reading state));
+  check bool "page up is owned" true
+    (Approvals.page_detail state ~forward:false ~count:100 ~height:13);
+  check int "page up returns" 0 state.approval_detail_scroll;
+  check bool "End selects the end of the next frame" true
+    (Approvals.detail_edge state ~to_bottom:true);
+  check int "End normalizes to the displayed last window" 90
+    (Masc_tui_scroll.normalize ~count:100 ~height:10 state.approval_detail_scroll);
+  ignore (Approvals.page_detail state ~forward:false ~count:100 ~height:10);
+  check int "page up immediately after End moves from the last window" 81 state.approval_detail_scroll;
+  ignore (Approvals.detail_edge state ~to_bottom:true);
+  ignore (Approvals.step_detail state ~forward:false ~count:100 ~height:10);
+  check int "one row up immediately after End moves from the last window" 89 state.approval_detail_scroll;
+  state.approval_detail_open <- false;
+  check bool "closed detail leaves paging to the list" false
+    (Approvals.page_detail state ~forward:true ~count:100 ~height:13)
+
+let test_gate_detail_waits_for_presented_mode () =
+  let pending = match gate "appr-a" with
+    | Approvals.Gate_row pending ->
+      { pending with Tui_decode.gp_input_rows = Rows [ "text", `String "value" ] }
+    | Approvals.Keeper_tool_row _ | Approvals.Operator_row _ -> fail "expected Gate row" in
+  let state = confirmed_approval_state () in
+  accept_pending state [ pending ];
+  state.approval_detail_open <- false;
+  let list = Approvals.detail_presentation state in
+  state.approval_detail_open <- true;
+  let text = Approvals.detail_presentation state in
+  let decision ~presented ~current kind =
+    Presented.decide_unpresented_input ~external_surface:false
+      ~frame_presented:(not (Approvals.detail_presentation_changed ~presented ~current)) kind in
+  check bool "a queued page cannot reach an unseen detail" true
+    (decision ~presented:list ~current:text Presented.Action = Presented.Reject_action);
+  check bool "protocol replies remain observable" true
+    (decision ~presented:list ~current:text Presented.Protocol = Presented.Accept_input);
+  check bool "the presented detail accepts input" true
+    (decision ~presented:text ~current:text Presented.Action = Presented.Accept_input);
+  let shown = Some (Approvals.Gate_row pending) in
+  ignore (Approvals.toggle_value_reading state ~presented:shown);
+  let bytes = Approvals.detail_presentation state in
+  check bool "a queued page cannot reach unseen bytes" true
+    (decision ~presented:text ~current:bytes Presented.Action = Presented.Reject_action);
+  check bool "the presented byte view accepts input" true
+    (decision ~presented:bytes ~current:bytes Presented.Action = Presented.Accept_input);
+  ignore (Approvals.close_value_reading state);
+  check bool "returning to text needs its own frame" true
+    (decision ~presented:bytes ~current:(Approvals.detail_presentation state) Presented.Action
+      = Presented.Reject_action);
+  let viewport = { adv_count = 100; adv_height = 10; adv_presentation = Approval_text } in
+  check bool "the accepted reader carries its own viewport" true
+    (approval_detail_viewport_of_reader (Some (Approval_detail_scroll (0, Some viewport)))
+     = Some viewport)
+
 let () =
   run "tui-approval-authority"
     [ ( "authority",
@@ -291,6 +446,14 @@ let () =
             test_operator_token_is_the_identity;
           test_case "gate approval id is identity" `Quick
             test_gate_approval_id_is_the_identity;
+          test_case "Gate value reading follows its source" `Quick
+            test_gate_value_reading_ownership;
+          test_case "Gate value reading waits for fresh authority" `Quick
+            test_gate_value_reading_waits_for_new_authority;
+          test_case "Gate detail page keeps selection" `Quick
+            test_gate_detail_page_keeps_selection;
+          test_case "Gate detail waits for presented mode" `Quick
+            test_gate_detail_waits_for_presented_mode;
           test_case "authority change is typed" `Quick
             test_authority_change_is_typed;
         ] );

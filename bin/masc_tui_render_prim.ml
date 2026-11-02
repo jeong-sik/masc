@@ -152,7 +152,8 @@ let clamped_scroll_now (state : state) = function
       Metrics_scroll { scroll = state.metrics_scroll;
                        content_height = state.metrics_content_height;
                        card_rows = state.metrics_scroll_card_rows }
-  | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
+  | Approval_detail_scroll (_, viewport) ->
+      Approval_detail_scroll (state.approval_detail_scroll, viewport)
   | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll (card, _) -> Play_invite_scroll (card, state.play_invite_scroll)
@@ -204,7 +205,14 @@ let reader_after_wheel (reader : clamped_scroll)
       Some (Repository_changes_diff_scroll (step value))
   | Metrics_scroll { scroll; content_height; card_rows } ->
       Some (Metrics_scroll { scroll = step scroll; content_height; card_rows })
-  | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
+  | Approval_detail_scroll (value, Some viewport) ->
+      let move = match direction with
+        | Masc.Tui_mouse_protocol.Wheel_down -> Masc_tui_scroll.down
+        | Masc.Tui_mouse_protocol.Wheel_up -> Masc_tui_scroll.up in
+      Some (Approval_detail_scroll
+        (move ~count:viewport.adv_count ~height:viewport.adv_height value, Some viewport))
+  | Approval_detail_scroll (value, None) ->
+      Some (Approval_detail_scroll (step value, None))
   | Patch_modal_scroll (vertical, horizontal) ->
       Some (Patch_modal_scroll (step vertical, horizontal))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))

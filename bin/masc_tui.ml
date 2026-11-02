@@ -7648,7 +7648,7 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
   | Keepers Keeper_calls -> pane (fun v -> Keeper_calls v)
   | Approvals ->
       if state.approval_detail_open then
-        pane (fun v -> Approval_detail_scroll v)
+        pane (fun v -> Approval_detail_scroll (v, None))
       else None
   | Board ->
       (match state.board_mode with
@@ -8061,7 +8061,8 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
      arm did on the Approvals -> Board step. *)
   (match state.view with
    | Approvals when destination <> Approvals ->
-       state.pending_approval_action <- None
+       state.pending_approval_action <- None;
+       state.approval_value_reading <- None
    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
    | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
    | Resources | Tools | System_logs | Keepers _ | Approvals -> ());
@@ -15467,12 +15468,14 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.gate_rules_unavailable <- None;
   state.gate_error <- None;
   state.gate_snapshot_observed <- false;
+  state.gate_snapshot_authority <- None;
   state.approval_flow <- Approval.Flow.invalidate state.approval_flow;
   state.pending_approval_action <- None;
   state.approval_snapshot <- None;
   state.approvals_error <- None;
   state.approvals_summary_read <- Snapshot_read.invalidate state.approvals_summary_read;
   state.approval_detail_open <- false;
+  state.approval_value_reading <- None;
   state.asks_snapshot <- None;
   Masc_tui_frame_timing.note_asks_application Masc_tui_frame_timing.Reset;
   state.asks_error <- None;
@@ -15935,6 +15938,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     state.gate_rules_unavailable <- Some reason;
     state.gate_error <- Some reason;
     state.gate_snapshot_observed <- false;
+    state.gate_snapshot_authority <- None;
     state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
     state.asks_snapshot <- None;
     Masc_tui_frame_timing.note_asks_application Masc_tui_frame_timing.Reset;
@@ -18588,6 +18592,7 @@ let enter_ask_answering state =
          the questions stayed hidden. Close the detail, which is where the
          operator asked to go. *)
       state.approval_detail_open <- false;
+      state.approval_value_reading <- None;
       state.ask_answer_mode <- Ask_answering { aam_ask = Masc.Tui_decode_asks.ask_key row };
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
@@ -24485,19 +24490,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        state.gate_receipt_refresh_pending <- false;
        match result with
        | Ok snapshot ->
-           state.gate_pending <- snapshot.Tui_decode.gs_pending;
-           state.gate_modes <- snapshot.Tui_decode.gs_modes;
-           state.gate_queue_unavailable <- snapshot.Tui_decode.gs_queue_unavailable;
-           state.gate_rules <- snapshot.Tui_decode.gs_rules;
-           state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
-           state.gate_error <- None;
-           state.gate_snapshot_observed <- true;
+           Masc_tui_approvals_model.accept_gate_snapshot state snapshot;
            let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail ->
            state.gate_pending <- [];
            state.gate_snapshot_observed <- false;
+           state.gate_snapshot_authority <- None;
            state.gate_error <- Some detail
        end)
   | Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation) ->
@@ -26615,6 +26615,25 @@ let main
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
       ~reader:None ~panel_owner:None) in
+  let presented_approval_detail reader =
+    Option.map (fun viewport -> viewport.adv_presentation)
+      (approval_detail_viewport_of_reader reader) in
+  let current_approval_detail () =
+    let terminal_rows, _ = get_terminal_size () in
+    let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+    match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols ~now:(Unix.gettimeofday ()) with
+    | `Surface -> Masc_tui_approvals_model.detail_presentation state
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Lane_addons _ | `Detail_reading _ | `Keeper_deletions | `Help | `About
+    | `Context | `Queue _ | `Agenda | `Answering | `Patch | `Link | `Client_detail _ -> None in
+  let approval_detail_changed () =
+    let shown = presented_approval_detail (!presented).reader in
+    let current = current_approval_detail () in
+    Masc_tui_approvals_model.detail_presentation_changed ~presented:shown ~current
+    || (Option.is_some shown && Option.is_some current
+        && Approval_authority.authority_changed ~presented:(!presented).approval
+             ~candidate:(List.nth_opt (Masc_tui_approvals_model.approval_items state)
+               state.approval_cursor)) in
   let move_task_detail offset =
     if not (task_detail_relative_scroll state offset) then
       report_action state "system" "Wait for the Task to appear before scrolling" in
@@ -27026,6 +27045,7 @@ let main
     let owned_reader reader =
       Option.is_some (queue_owner_of_reader reader)
       || Option.is_some (play_card_of_reader reader)
+      || Option.is_some (approval_detail_viewport_of_reader reader)
       || Option.is_some panel_owner in
     let owner_changed =
       queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
@@ -27038,6 +27058,9 @@ let main
       || keeper_peer_frame_owner_changed ~presented:!presented_peer_owner
            ~candidate:candidate_peer_owner
       || not (Option.equal same_keeper_peer_target !presented_peer_target candidate_peer_target)
+      || not (Option.equal ( = )
+           (approval_detail_viewport_of_reader (!presented).reader)
+           (approval_detail_viewport_of_reader reader))
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
       || ((damaged || Option.is_none presented_rows)
           && (Option.is_some (!presented).panel_owner
@@ -28983,7 +29006,8 @@ Use relative paths for resources already held in the package. -->
       let input_not_yet_admissible () =
         input_barrier_held () || frame_unavailable ()
         || (not state.image_open && not state.msx_open
-            && not (panel_owner_matches (panel_owner_current ()))) in
+            && (not (panel_owner_matches (panel_owner_current ()))
+                || approval_detail_changed ())) in
       (* A rejected event cancels any signal confirmation above. MIDI
          withdrawal and async results after this point produce newer notices. *)
       let ordinary_before_input = Masc_tui_action_notice.ordinary state.last_action in
@@ -29301,6 +29325,28 @@ Use relative paths for resources already held in the package. -->
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
+      (* A detail, or its byte view, cannot take keys from the previously
+         displayed frame while the replacement is still waiting to render. *)
+      let approval_detail_decision = match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action in
+            Presented.decide_unpresented_input
+              ~frame_presented:(not (approval_detail_changed ()))
+              ~external_surface:(state.image_open || state.msx_open) kind in
+      (match approval_detail_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match approval_detail_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
       (* A reader can be opened or replaced before the next frame. Keys from
          the previously presented owner cannot navigate that unseen reader. *)
       let peer_owner_decision =
@@ -29397,7 +29443,8 @@ Use relative paths for resources already held in the package. -->
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected panel_decision || decision_rejected peer_owner_decision
+        || decision_rejected panel_decision || decision_rejected approval_detail_decision
+        || decision_rejected peer_owner_decision
         || decision_rejected queue_viewport_decision || decision_rejected task_reader_decision
         || orphan_pointer_tail in
       let panel_owns_input = Option.is_some current_panel
@@ -29609,6 +29656,16 @@ Use relative paths for resources already held in the package. -->
        | Presented.Reject_paste ->
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Paste was not applied on this screen; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match approval_detail_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Approval view changed: input was not applied; review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Approval view changed: paste was not applied; retry";
            Render_schedule.request render_schedule Render_schedule.Background);
       (match peer_owner_decision with
        | Presented.Accept_input -> ()
@@ -30264,6 +30321,7 @@ Use relative paths for resources already held in the package. -->
          keeps a field added to [text_input_target] from silently dropping
          pasted text the way the palette, row search and the preset name
          each did. *)
+      Masc_tui_approvals_model.reconcile_value_reading state;
       reconcile_detail_reading state;
       let _,board_reader_cols=get_terminal_size () in
       prepare_board_read state ~mailbox:async_messages ~cols:board_reader_cols;
@@ -34692,6 +34750,20 @@ Use relative paths for resources already held in the package. -->
            Masc_tui_resources_updates.toggle_today state ~now:(Unix.gettimeofday ())
        | Some "w" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_layout state
+       | Some "v"
+         when state.view = Approvals && state.approval_detail_open
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match Masc_tui_approvals_model.toggle_value_reading state ~presented:(!presented).approval with
+            | Masc_tui_approvals_model.Value_reading_opened | Value_reading_closed -> ()
+            | Value_reading_unavailable ->
+              report_action state "system" "No decoded Gate string values to read"
+            | Value_reading_waiting_for_source ->
+              report_action state "system" "Waiting for a Gate queue read in this workspace"
+            | Value_reading_changed ->
+              report_action state "system" "Approval input changed; review the updated row")
        | Some "v" when state.view = Resources && state.resource_focus = Right_pane ->
            Masc_tui_resources_updates.toggle_presentation state
        | Some "i" when state.view = Resources && state.resource_focus = Right_pane ->
@@ -36197,6 +36269,12 @@ Use relative paths for resources already held in the package. -->
          when state.view = Resources && state.resource_focus = Right_pane ->
            move_resource_document state
              (if key = Some "end" then Masc_tui_scroll.Position.Last else First)
+       | Some ("home" | "end")
+         when state.view = Approvals && state.approval_detail_open ->
+           Option.iter (fun _viewport ->
+             ignore (Masc_tui_approvals_model.detail_edge state
+               ~to_bottom:(key = Some "end")))
+             (approval_detail_viewport_of_reader (!presented).reader)
        (* A reading pane before the list behind it: a detail that is open owns
           the scroll keys, and moving the list under it would leave the cursor
           somewhere the reader cannot see. The pane reports its own clamp, so
@@ -36492,6 +36570,11 @@ Use relative paths for resources already held in the package. -->
                       Masc_tui_types.scroll_down_from state.metrics_scroll
                         ~by:page
                     else max 0 (state.metrics_scroll + (direction * page)))
+             | Approvals when state.approval_detail_open ->
+                 Option.iter (fun viewport ->
+                   ignore (Masc_tui_approvals_model.page_detail state
+                     ~forward:(direction > 0) ~count:viewport.adv_count ~height:viewport.adv_height))
+                   (approval_detail_viewport_of_reader (!presented).reader)
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
@@ -36948,8 +37031,10 @@ Use relative paths for resources already held in the package. -->
                 (* Esc leaves the ask and returns to the list with the cursor
                    where it was, the way the Changes diff does. *)
                 if state.approval_detail_open then begin
-                  state.approval_detail_open <- false;
-                  state.approval_detail_scroll <- 0
+                  if not (Masc_tui_approvals_model.close_value_reading state) then begin
+                    state.approval_detail_open <- false;
+                    state.approval_detail_scroll <- 0
+                  end
                 end
                 else goto_surface state ~mailbox:async_messages Planning
             | Changes ->
@@ -37249,13 +37334,10 @@ Use relative paths for resources already held in the package. -->
                   state.runtime_params_notice <- None
                 end
             | Approvals when state.approval_detail_open ->
-                (* End writes a row past the end and the frame reports the
-                   real one back. A j pressed before that frame carries the
-                   sentinel into the addition, which wraps negative and throws
-                   the reader to the top -- the saturating step every other
-                   reading pane already uses. *)
-                state.approval_detail_scroll <-
-                  Masc_tui_types.scroll_down_from state.approval_detail_scroll ~by:1
+                Option.iter (fun viewport ->
+                  ignore (Masc_tui_approvals_model.step_detail state ~forward:true
+                    ~count:viewport.adv_count ~height:viewport.adv_height))
+                  (approval_detail_viewport_of_reader (!presented).reader)
             | Approvals ->
                 let count = List.length (Masc_tui_approvals_model.approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -37589,8 +37671,10 @@ Use relative paths for resources already held in the package. -->
                   state.runtime_params_notice <- None
                 end
             | Approvals when state.approval_detail_open ->
-                state.approval_detail_scroll <-
-                  max 0 (state.approval_detail_scroll - 1)
+                Option.iter (fun viewport ->
+                  ignore (Masc_tui_approvals_model.step_detail state ~forward:false
+                    ~count:viewport.adv_count ~height:viewport.adv_height))
+                  (approval_detail_viewport_of_reader (!presented).reader)
             | Approvals ->
                 if state.approval_cursor > 0 then begin
                   state.pending_approval_action <- None;
@@ -39492,6 +39576,7 @@ Use relative paths for resources already held in the package. -->
                (fun () ->
                  Masc_tui_message_layout.begin_frame ();
                  Masc_tui_approval_detail.begin_frame ();
+                 Masc_tui_approvals_model.reconcile_value_reading state;
                  (* Event folding is frame preparation, so its cost belongs
                     inside Build timing even though only the loop stores it. *)
                  let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in

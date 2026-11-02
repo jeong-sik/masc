@@ -446,12 +446,12 @@ let test_schedule_publication_wakes_its_workspace () =
         Schedule_store.install_change_observer Runtime.invalidate_full_health_snapshot_for_workspace;
         reset ();
         let actor : Schedule_domain.actor =
-          { id = "test"; kind = Human_operator; display_name = None } in
+          { id = "test"; kind = Schedule_domain.Human_operator; display_name = None } in
         let insert config schedule_id =
           let request = match Schedule_domain.create_request ~schedule_id
             ~requested_by:actor ~scheduled_by:actor ~requested_at:100.0 ~due_at:200.0
-            ~payload:(`Assoc [ "kind", `String "consumer.note" ])
-            ~source:Operator_request () with
+            ~payload:(`Assoc [ "kind", `String "consumer.note"; "body", `Assoc [] ])
+            ~source:Schedule_domain.Operator_request () with
             | Ok request -> request
             | Error err -> fail err in
           match Schedule_store.insert_request config ~runner_tick_sec:1.0 request with

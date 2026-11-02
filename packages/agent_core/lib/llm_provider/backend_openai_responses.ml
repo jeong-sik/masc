@@ -693,6 +693,34 @@ let telemetry_of_response_json json =
     None
 ;;
 
+type lifecycle_observation =
+  | Observed_status of Responses_stop_reason.status
+  | Ambiguous_envelope
+  | Unreadable_json
+
+type parsed_response =
+  { response : Types.api_response
+  ; lifecycle : lifecycle_observation
+  }
+
+type parse_error =
+  { detail : string
+  ; lifecycle : lifecycle_observation
+  }
+
+let lifecycle_observation = function
+  | `Assoc fields ->
+    let values name =
+      List.filter_map (fun (key, value) -> if String.equal key name then Some value else None) fields
+    in
+    (match values "status", values "error" with
+     | [ `String status ], ([] | [ `Null ]) ->
+       Observed_status (Responses_stop_reason.status_of_wire status)
+     | _ -> Ambiguous_envelope)
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+    Ambiguous_envelope
+;;
+
 let response_status json = opt_bind (json_assoc_opt "status" json) json_string_opt
 
 let response_incomplete_reason json =
@@ -724,7 +752,8 @@ let stop_reason_of_response_json ~has_tool_calls json =
 let parse_response_result json_str =
   try
     let json = Yojson.Safe.from_string json_str in
-    match json_assoc_opt "error" json with
+    let lifecycle = lifecycle_observation json in
+    let parsed = match json_assoc_opt "error" json with
     | Some (`Assoc fields) ->
       let message =
         opt_bind (List.assoc_opt "message" fields) json_string_opt
@@ -768,7 +797,7 @@ let parse_response_result json_str =
       in
       let* stop_reason = stop_reason_of_response_json ~has_tool_calls json in
       let model = opt_bind (json_assoc_opt "model" json) json_string_opt |> Option.value ~default:"" in
-      Ok
+      let response =
         { id =
             opt_bind (json_assoc_opt "id" json) json_string_opt
             |> Option.value ~default:""
@@ -780,6 +809,11 @@ let parse_response_result json_str =
             { (Types.with_reported_model ~model
                  (telemetry_of_response_json json)) with response_replay = Some replay }
         }
+      in
+      Ok { response; lifecycle }
+    in
+    Result.map_error (fun detail -> ({ detail; lifecycle } : parse_error)) parsed
   with
-  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Yojson.Json_error msg ->
+    Error { detail = "JSON parse error: " ^ msg; lifecycle = Unreadable_json }
 ;;

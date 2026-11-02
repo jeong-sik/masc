@@ -2676,7 +2676,7 @@ let test_reported_model_survives_normalization_without_inventing_missing_evidenc
         ; "call_id", `String "call-1"; "name", `String "lookup"; "arguments", `String "{}" ] ] ] in
     let fields = fields @ Option.to_list (Option.map (fun model -> "model", `String model) model) in
     match Backend_openai_responses.parse_response_result (Yojson.Safe.to_string (`Assoc fields)) with
-    | Ok response -> response | Error detail -> Alcotest.fail detail in
+    | Ok {response;_} -> response | Error {detail;_} -> Alcotest.fail detail in
   List.iter (fun model ->
     let parsed = raw model in
     let expected = match model with

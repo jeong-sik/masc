@@ -743,6 +743,93 @@ let test_warm_dashboard_surfaces_populates_caches () =
       check bool "board cache key populated" true
         (Option.is_some (Dashboard_cache.peek_payload board_key)))
 
+let with_task_history_prewarm contents f =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      cleanup_dir dir)
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      Log.set_level Log.Info;
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let config = Lib.Mcp_server.workspace_config state in
+      ignore (Lib.Workspace.init config ~agent_name:None);
+      let relative = "activity-events/2099-12/31.jsonl" in
+      let path = Filename.concat (Lib.Workspace.masc_dir config) relative in
+      mkdir_p (Filename.dirname path);
+      write_file path contents;
+      f state config relative)
+
+let dashboard_logs_since cursor =
+  Log.Ring.recent ~since_seq:cursor ~module_filter:"Dashboard" ()
+
+let log_cursor () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+
+let task_history_logs level prefix entries =
+  List.filter
+    (fun (entry : Log.Ring.entry) ->
+      entry.level = level && String.starts_with ~prefix entry.message)
+    entries
+
+let valid_task_history_event =
+  {|{"seq":1,"ts_ms":1793000000000,"ts_iso":"2026-10-26T00:00:00Z","kind":"task.started","actor":{"kind":"agent","id":"fixture"},"subject":{"kind":"task","id":"__prewarm__"},"payload":{"task_id":"__prewarm__"},"tags":["task"]}|}
+  ^ "\n"
+
+let test_task_history_prewarm_success () =
+  with_task_history_prewarm valid_task_history_event (fun state config _relative ->
+    (match Lib.Task.History_page.read ~config ~task_id:"__prewarm__" ~max_events:1 () with
+     | Ok page -> check int "fixture has one event" 1 (List.length page.events)
+     | Error _ -> fail "valid history fixture was refused");
+    let cursor = log_cursor () in
+    Server_dashboard_http.warm_dashboard_surfaces state;
+    let entries = dashboard_logs_since cursor in
+    check int "successful history warm is reported" 1
+      (List.length (task_history_logs Log.Info "task-history surface pre-warmed" entries));
+    check int "successful history warm has no failure" 0
+      (List.length (task_history_logs Log.Warn "task-history pre-warm failed" entries)))
+
+let test_task_history_prewarm_invalid_event () =
+  with_task_history_prewarm "{invalid-json}\n" (fun state config relative ->
+    (match Lib.Task.History_page.read ~config ~task_id:"__prewarm__" ~max_events:1 () with
+     | Error (Invalid_event {file; offset = 0}) ->
+       check string "reader names the malformed fixture" relative file
+     | Ok _ | Error _ -> fail "fixture did not reproduce the invalid event");
+    let cursor = log_cursor () in
+    Server_dashboard_http.warm_dashboard_surfaces state;
+    let entries = dashboard_logs_since cursor in
+    check int "failed history warm is reported" 1
+      (List.length (task_history_logs Log.Warn "task-history pre-warm failed" entries));
+    check int "failed history warm is not reported as success" 0
+      (List.length (task_history_logs Log.Info "task-history surface pre-warmed" entries));
+    check int "failed surface is not included in an all-success claim" 0
+      (List.length
+         (task_history_logs Log.Info "all primary dashboard surfaces pre-warmed" entries)))
+
+exception Cancel_prewarm
+
+let test_dashboard_prewarm_cancellation () =
+  with_task_history_prewarm valid_task_history_event (fun state _config _relative ->
+    let cursor = log_cursor () in
+    let propagated = ref false in
+    (match Eio.Switch.run (fun sw ->
+       Eio.Switch.fail sw Cancel_prewarm;
+       try Server_dashboard_http.warm_dashboard_surfaces state
+       with Eio.Cancel.Cancelled _ -> propagated := true)
+     with
+     | () -> fail "cancelled switch returned normally"
+     | exception Cancel_prewarm -> ());
+    check bool "prewarm propagates cancellation" true !propagated;
+    check int "cancellation is not reported as a history read failure" 0
+      (List.length
+         (task_history_logs Log.Warn "task-history pre-warm failed"
+            (dashboard_logs_since cursor))))
+
 let () =
   Alcotest.run "Dashboard Namespace Truth"
     [
@@ -773,5 +860,13 @@ let () =
             test_namespace_truth_snapshot_hash_avoids_string_collision;
           test_case "warm dashboard surfaces populates caches" `Quick
             test_warm_dashboard_surfaces_populates_caches;
+        ] );
+      ( "task_history_prewarm",
+        [ test_case "valid history warm reports success" `Quick
+            test_task_history_prewarm_success;
+          test_case "invalid history warm reports failure" `Quick
+            test_task_history_prewarm_invalid_event;
+          test_case "cancelled prewarm propagates" `Quick
+            test_dashboard_prewarm_cancellation;
         ] );
     ]

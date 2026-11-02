@@ -215,189 +215,118 @@ def chat_request(url, token, body, output):
 
 def wait_until(description, action, server, timeout=60):
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    while (remaining := deadline - time.monotonic()) > 0:
         if server.poll() is not None:
             raise SmokeError('MASC exited while waiting for ' + description)
-        value = action()
-        if value:
+        value = action(remaining)
+        if value and time.monotonic() < deadline:
             return value
-        time.sleep(0.2)
+        time.sleep(min(0.2, max(0, deadline - time.monotonic())))
     raise SmokeError('timed out waiting for ' + description)
 
 
-HEAD_FORMAT = 'masc.checkpoint.head'
-CHAIN_START_TAG = 'masc.rfc-0476.chain.v1'
-_HEX_DIGITS = frozenset('0123456789abcdef')
+def file_sha256(path):
+    with Path(path).open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
-def _is_digest(value):
-    return (isinstance(value, str) and len(value) == 64
-            and all(c in _HEX_DIGITS for c in value))
+def require_checkpoint_inspector(fixture):
+    """Refuse an incompatible pinned binary before running the Keeper workflow."""
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed before capability check')
+    command([fixture.checkpoint_binary, 'inspect-checkpoint', '--help'], fixture.checkpoint_env)
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed during capability check')
 
 
-def _chain_start():
-    return hashlib.sha256(CHAIN_START_TAG.encode('ascii')).hexdigest()
+def checkpoint_evidence_span(messages, fixture):
+    """Return the ordered call-to-final span in one decoded checkpoint."""
+    if not isinstance(messages, list):
+        raise SmokeError('checkpoint inspection has no message list')
+    stage, start = 0, None
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or not isinstance(message.get('content'), list):
+            raise SmokeError('checkpoint inspection has an invalid message')
+        blocks = [block for block in message['content'] if isinstance(block, dict)]
+        if stage == 0 and message.get('role') == 'assistant' and any(
+                block.get('type') == 'tool_use' and block.get('id') == fixture.call_id
+                and block.get('name') == fixture.tool_name for block in blocks):
+            stage, start = 1, index
+        elif stage == 1 and message.get('role') == 'tool' and any(
+                block.get('type') == 'tool_result' and block.get('tool_use_id') == fixture.call_id
+                and block.get('is_error') is False
+                and proof_from(block.get('text_content', block.get('content')), fixture.marker) == fixture.proof
+                for block in blocks):
+            stage = 2
+        elif stage == 2 and message.get('role') == 'assistant' and any(
+                block.get('type') == 'text' and block.get('text') == fixture.final for block in blocks):
+            return start, index
+    return None
 
 
-def _chain_step(chain_hex, digest_hex):
-    return hashlib.sha256((chain_hex + digest_hex).encode('ascii')).hexdigest()
+def require_checkpoint_resume(data, initial_trace, initial_evidence, resumed_evidence):
+    messages = data['checkpoint']['messages']
+    initial = checkpoint_evidence_span(messages, initial_evidence)
+    resumed = checkpoint_evidence_span(messages, resumed_evidence)
+    if (data['trace_id'] != initial_trace or initial is None or resumed is None
+            or initial[1] >= resumed[0]):
+        raise SmokeError('resumed checkpoint did not preserve the original turn on the same trace')
 
 
-def _read_object(session_dir, digest):
-    # One file at <session_dir>/objects/<aa>/<sha256>, digest-checked like
-    # Checkpoint_objects.load: a missing, unreadable or mismatched object is
-    # not the checkpoint this smoke waits for.
-    if not _is_digest(digest):
-        return None
-    path = session_dir / 'objects' / digest[:2] / digest
+def checkpoint_proof(base, fixture, timeout):
+    # The same pinned executable that ran the Keeper loads the canonical head
+    # with the production checkpoint codec and session lock. Its JSON is a
+    # decoded projection; the content digest is not a hash of the head file.
+    if fixture.proof is None or not fixture.call_id or not fixture.tool_name:
+        raise SmokeError('checkpoint inspection has no original tool proof')
+    deadline = time.monotonic() + timeout
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed before inspection')
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SmokeError('checkpoint inspection exceeded the remaining wait')
     try:
-        if path.is_symlink() or not path.is_file():
-            return None
-        data = path.read_bytes()
-    except OSError:
-        return None
-    if hashlib.sha256(data).hexdigest() != digest:
-        return None
-    return data
-
-
-def _bundle_messages(bundle_bytes):
-    # Mirror bundle_entries framing: one JSON header line naming each
-    # message's sha256 and byte length, then each message's bytes on its own
-    # line. Every slice is checked against the header.
-    newline = bundle_bytes.find(b'\n')
-    if newline < 0:
-        return None
+        result = subprocess.run(
+            [fixture.checkpoint_binary, 'inspect-checkpoint', '--base-path', str(base),
+             '--keeper', fixture.checkpoint_keeper],
+            capture_output=True, text=True, timeout=remaining, cwd=base,
+            env=fixture.checkpoint_env)
+    except subprocess.TimeoutExpired as error:
+        raise SmokeError('checkpoint inspection exceeded the remaining wait') from error
+    if result.returncode:
+        raise SmokeError('checkpoint inspection failed: ' + result.stderr.strip())
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed during inspection')
     try:
-        header = json.loads(bundle_bytes[:newline].decode('utf-8'))
-    except (ValueError, UnicodeError):
+        data = json.loads(result.stdout)
+    except ValueError as error:
+        raise SmokeError('checkpoint inspection did not return JSON') from error
+    if (not isinstance(data, dict) or data.get('schema') != 'masc.checkpoint-inspection.v1'
+            or data.get('keeper') != fixture.checkpoint_keeper):
+        raise SmokeError('checkpoint inspection names another keeper or schema')
+    if not isinstance(data.get('trace_id'), str) or not data['trace_id']:
+        raise SmokeError('checkpoint inspection has no trace identity')
+    if data.get('status') == 'not_found':
         return None
-    if not isinstance(header, dict) or not isinstance(header.get('messages'), list):
-        return None
-    entries = []
-    offset = newline + 1
-    for item in header['messages']:
-        if not isinstance(item, dict) or not _is_digest(item.get('sha256')):
-            return None
-        length = item.get('bytes')
-        if type(length) is not int or length < 0:
-            return None
-        if length >= len(bundle_bytes) - offset:
-            return None
-        if bundle_bytes[offset + length:offset + length + 1] != b'\n':
-            return None
-        raw = bundle_bytes[offset:offset + length]
-        if hashlib.sha256(raw).hexdigest() != item['sha256']:
-            return None
-        try:
-            message = json.loads(raw.decode('utf-8'))
-        except (ValueError, UnicodeError):
-            return None
-        if not isinstance(message, dict):
-            return None
-        entries.append((item['sha256'], message))
-        offset += length + 1
-    if offset != len(bundle_bytes):
-        return None
-    return entries
-
-
-def _head_messages(path):
-    # Decode an RFC-0476 head file (session_dir/<session_id>.json) into its
-    # closed-turn messages, verifying every referenced object. Answers
-    # (head, messages), or None when this file is not a final checkpoint.
-    try:
-        head = json.loads(path.read_text())
-    except (OSError, ValueError, UnicodeError):
-        return None
-    if not isinstance(head, dict) or head.get('format') != HEAD_FORMAT:
-        return None
-    checkpoint = head.get('checkpoint')
-    header_objects = head.get('header_objects')
-    history = head.get('history')
-    if (not isinstance(checkpoint, dict) or not isinstance(header_objects, dict)
-            or not isinstance(history, dict)):
-        return None
-    session_id = checkpoint.get('session_id')
-    if not isinstance(session_id, str) or not session_id:
-        return None
-    # Archived snapshots are heads of older checkpoints; only the
-    # session-named canonical file is the authoritative input for resume.
-    if path.name != session_id + '.json':
-        return None
-    if checkpoint.get('messages') != []:
-        return None
-    session_dir = path.parent
-    for key in ('system_prompt', 'tools'):
-        if _read_object(session_dir, header_objects.get(key)) is None:
-            return None
-    turns = history.get('turns')
-    if not isinstance(turns, list) or not turns:
-        return None
-    if history.get('segment') is not None:
-        return None
-    if history.get('open') != []:
-        return None
-    messages = []
-    chain = _chain_start()
-    for turn in turns:
-        if not isinstance(turn, dict):
-            return None
-        bundle = turn.get('bundle')
-        count = turn.get('messages')
-        expected = turn.get('chain')
-        if not _is_digest(bundle) or type(count) is not int or not isinstance(expected, str):
-            return None
-        raw = _read_object(session_dir, bundle)
-        if raw is None:
-            return None
-        entries = _bundle_messages(raw)
-        if entries is None or len(entries) != count:
-            return None
-        for digest, _message in entries:
-            chain = _chain_step(chain, digest)
-        if chain != expected:
-            return None
-        messages.extend(message for _digest, message in entries)
-    return head, messages
-
-
-def _fixture_match(messages, fixture):
-    call = any(isinstance(m, dict) and m.get('role') == 'assistant' and any(
-        obj.get('id') == fixture.call_id and obj.get('name') == fixture.tool_name
-        for obj in objects(m.get('content'))) for m in messages)
-    result = any(isinstance(m, dict) and m.get('role') == 'tool'
-                 and proof_from(m.get('content'), fixture.marker) for m in messages)
-    final = any(isinstance(m, dict) and m.get('role') == 'assistant' and any(
-        obj.get('text') == fixture.final for obj in objects(m.get('content'))) for m in messages)
-    return call and result and final
-
-
-def checkpoint_proof(base, fixture):
-    for path in (base / '.masc').rglob('*.json'):
-        decoded = _head_messages(path)
-        if decoded is not None:
-            head, messages = decoded
-            if _fixture_match(messages, fixture):
-                data = dict(head)
-                data['decoded_messages'] = messages
-                return path, data
-            continue
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, ValueError, UnicodeError):
-            continue
-        if not isinstance(data, dict) or not isinstance(data.get('session_id'), str) or not data['session_id']:
-            continue
-        # Archived snapshots also carry messages; only the session-named
-        # checkpoint is the authoritative input for the next resume.
-        if path.name != data['session_id'] + '.json':
-            continue
-        messages = data.get('messages')
-        if not isinstance(messages, list):
-            continue
-        if _fixture_match(messages, fixture):
-            return path, data
+    checkpoint, reference, trace = data.get('checkpoint'), data.get('reference'), data.get('trace_id')
+    if (data.get('status') != 'available' or not isinstance(checkpoint, dict)
+            or not isinstance(reference, dict) or not isinstance(trace, str) or not trace
+            or checkpoint.get('session_id') != trace or reference.get('trace_id') != trace
+            or type(reference.get('turn_count')) is not int
+            or checkpoint.get('turn_count') != reference['turn_count']
+            or not isinstance(reference.get('content_sha256'), str)
+            or len(reference['content_sha256']) != 64
+            or any(c not in '0123456789abcdef' for c in reference['content_sha256'])):
+        raise SmokeError('checkpoint inspection has an invalid reference')
+    raw_path = data.get('canonical_path')
+    if not isinstance(raw_path, str):
+        raise SmokeError('checkpoint inspection has no canonical path')
+    path = Path(raw_path)
+    if (not path.is_absolute() or path.name != trace + '.json'
+            or path.parent.name != trace or not path.resolve().is_relative_to(base.resolve())):
+        raise SmokeError('checkpoint inspection has an invalid canonical path')
+    if checkpoint_evidence_span(checkpoint.get('messages'), fixture) is not None:
+        return path, data
     return None
 
 
@@ -512,7 +441,7 @@ def kata_proof(args, fixture, base, output, runtime_env, server):
     volume = matching[0]['Name']
     (output / 'work-volume.json').write_text(json.dumps(matching[0], indent=2))
     checkpoint, data = wait_until('canonical final Kata checkpoint',
-                                 lambda: checkpoint_proof(base, fixture), server)
+                                 lambda remaining: checkpoint_proof(base, fixture, remaining), server)
     # Stop the MASC owner before independently recreating a guest over its
     # persisted volume. This is a persistence probe, not a second model turn.
     stop_server(server)
@@ -540,6 +469,9 @@ def run(args):
     runtime = 'docker' if args.backend == 'docker' else 'nerdctl'
     profile = 'docker' if args.backend == 'docker' else 'microvm'
     fixture = ModelFixture(marker, output)
+    fixture.checkpoint_binary = binary
+    fixture.checkpoint_binary_sha256 = file_sha256(binary)
+    fixture.checkpoint_keeper = keeper
     model_server = fixture.serve()
     server = None
     docker_env = os.environ.copy()
@@ -576,6 +508,8 @@ def run(args):
             if docker_host:
                 env['DOCKER_HOST'] = docker_host
             env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true')
+            fixture.checkpoint_env = env
+            require_checkpoint_inspector(fixture)
             command([binary, 'init', '--base-path', str(base)], env)
             # A Keeper names a catalog image; this host's catalog makes the
             # image under test the build `base` starts from.
@@ -625,9 +559,9 @@ def run(args):
                 server = subprocess.Popen([binary, 'start', '--base-path', str(base), '--host',
                                            '127.0.0.1', '--port', str(port)], env=env, stdout=log, stderr=log, cwd=base)
                 try:
-                    def health():
+                    def health(remaining):
                         try:
-                            snapshot = json.loads(request(url + '/health?full=1', timeout=2))
+                            snapshot = json.loads(request(url + '/health?full=1', timeout=min(2, remaining)))
                             return snapshot if snapshot.get('startup', {}).get('state_ready') is True else None
                         except (urllib.error.URLError, TimeoutError):
                             return None
@@ -635,6 +569,8 @@ def run(args):
                     actual_base = healthy.get('paths', {}).get('effective_base_path')
                     if actual_base != str(base):
                         raise SmokeError(f'health base path mismatch: {actual_base!r}')
+                    if healthy.get('build', {}).get('executable_sha256') != fixture.checkpoint_binary_sha256:
+                        raise SmokeError('server health names another executable')
                     (output / 'health.json').write_text(json.dumps(healthy, indent=2))
                     try:
                         creation = command([binary, 'keeper-create', '--base-path', str(base),
@@ -707,15 +643,17 @@ def run(args):
                             raise SmokeError('host-mounted file does not match actual ToolResult')
                         (output / 'tool-proof.json').write_text(host_file.read_text())
                         checkpoint, data = wait_until('durable final checkpoint',
-                            lambda: checkpoint_proof(base, fixture), server)
+                            lambda remaining: checkpoint_proof(base, fixture, remaining), server)
                         container_id = container['Id']
-                    (output / 'checkpoint.json').write_text(json.dumps(data, indent=2))
+                    (output / 'checkpoint.json').write_text(json.dumps(data['checkpoint'], indent=2))
+                    (output / 'checkpoint-inspection.json').write_text(json.dumps(data, indent=2))
                     receipt = {'schema': 'masc.first_keeper_turn.v1', 'result': 'PASS',
                         'binary_sha256': hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
                         'binary_commit': command([binary, 'build-commit'], env).strip(),
                         'keeper': keeper, 'model': 'scripted loopback fixture', 'model_requests': len(fixture.requests),
                         'image': args.image, 'container_id': container_id, 'backend': args.backend,
                         'checkpoint_relative_path': str(checkpoint.relative_to(base)),
+                        'checkpoint_reference': data['reference'],
                         'claims': ['actual ' + args.backend + ' Execute', 'ToolResult returned to model',
                                    ('host file matched' if args.backend == 'docker' else
                                     'shim receipt and volume bytes survive guest recreation'),

@@ -1,31 +1,13 @@
-(** Board_votes — voting + karma + flair on top of the
-    Board_core store.
+(** Voting, statistics, post mutations, snapshot settlement, karma and flair.
 
-    Runtime-include extends {!Board_core} (which itself
-    includes {!Board_core_classify} and {!Board_core_payload})
-    via [include module type of struct include Board_core end].
-    Type identity propagates end-to-end across the chain
-    (cycle 187 rationale).
+    Extends {!Board_core} with canonical Board types. The {!Board} facade in
+    [lib/board/board.ml] includes this module and re-exports its public API.
 
-    The {!Board} top-level facade ([lib/board.ml]) is the
-    final hop in the runtime — it does
-    [include Board_votes] and re-exports every entry below
-    plus the entire Board_core surface to the wider codebase.
-
-    External callers reach 5 dotted [Board_votes.X] symbols
-    plus 17 [Board.X] entries that resolve into Board_votes
-    defs.  All are pinned below.
-
-    Internal helpers stay private at this boundary:
-    - {b Vote-direction normaliser}: [all_vote_directions],
-      [vote_direction_of_string_opt].
-    - {b Vote log persistence}: [append_vote_log],
-      [save_vote_log_jsonl], [record_vote_side_effect].
-    - {b Persistence loading and count rebuilding}: owned by private
-      [Board_store_load], using the existing [Board_votes_json] readers.
-    - {b Global store}: private [Board_store_lifecycle] owns its lazy cell.
-    - {b Flair extractor internals}: [flair_tag_re],
-      [extract_flair]. *)
+    Private [Board_voting] owns vote queries, casts and vote-log writes.
+    Its constructor witness, append helper, renderer and snapshot saver stay
+    hidden at this public boundary. [Board_store_load] owns persistence
+    loading and count rebuilding; [Board_store_lifecycle] owns the global
+    lazy cell. Snapshot selection and retry settlement remain here. *)
 
 include module type of struct
   include Board_core
@@ -46,8 +28,7 @@ val valid_vote_direction_strings : string list
 val vote_direction_of_string_opt : string -> vote_direction option
 (** Sound partial parser: case-insensitive, trims whitespace, and
     accepts only ["up"] / ["down"].  Empty or unknown input returns
-    [None] (no silent permissive fallback).  No suite pins this
-    parser today. *)
+    [None] (no silent permissive fallback). *)
 
 (** {1 Vote log path} *)
 

@@ -2843,6 +2843,7 @@
   masc_tui_keeper_sandbox
   masc_tui_github_identity
   masc_tui_markdown
+  masc_tui_markdown_theme
   masc_tui_graphics
   masc_tui_image_ref
   masc_tui_image_preview

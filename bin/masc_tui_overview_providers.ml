@@ -336,7 +336,7 @@ let exhausted_tag ~now = function
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
            (clock_text ~now at) (span_text (at -. now)))
 
-(* ---- what can be used now ----------------------------------------------- *)
+(* ---- group the reported and observed evidence --------------------------- *)
 
 (* A limit that spending it refuses model calls on. A limit the server could
    not classify counts here too: nothing says it does not gate. *)
@@ -345,20 +345,18 @@ let gates_model_calls = function
   | Masc.Tui_decode_usage.Role_unclassified_limit -> true
   | Masc.Tui_decode_usage.Role_counts_other_use -> false
 
-(* The one decision behind the header's "At limit (reported)" count and the
-   Unusable section: the provider's own report is at its full value, on a
-   window that gates model calls. *)
+(* The header and the first group share this decision. An unclassified role
+   is retained because the report does not say whether it gates calls. *)
 let window_at_limit (window : Masc.Tui_decode_usage.provider_usage_window) =
   gates_model_calls window.puw_role && at_or_past_full window.puw_utilization
 
-let observed_blocked = function
+let is_observed_exhausted = function
   | Observed_exhausted _ -> true
   | Not_observed_exhausted -> false
 
-(* A window cannot be used now when its report is at its limit, or when the
-   runtime catalogue observed the whole account exhausted and the window
-   gates model calls. *)
-let blocks_use_now ~observed window =
+(* Group a window when its last report is at its limit, or when the runtime
+   catalogue observed the account exhausted and the window may gate calls. *)
+let in_limit_or_exhausted_group ~observed window =
   window_at_limit window
   ||
   match observed with
@@ -366,25 +364,25 @@ let blocks_use_now ~observed window =
   | Not_observed_exhausted -> false
 
 type plan_section =
-  | Unusable_now
-  | Usable
-  | No_report
+  | At_limit_or_exhausted
+  | Other_windows
+  | No_windows
 
 (* The catalogue's observation is a fact about the account, not about one
-   window, so only the Unusable_now entry draws it. An account split across
+   window, so only the At_limit_or_exhausted entry draws it. An account split across
    sections would otherwise say it twice. *)
 let drawn_observation section observed =
   match section with
-  | Unusable_now -> observed
-  | Usable | No_report -> Not_observed_exhausted
+  | At_limit_or_exhausted -> observed
+  | Other_windows | No_windows -> Not_observed_exhausted
 
 (* Draw order of the sections. *)
-let all_sections = [ Unusable_now; Usable; No_report ]
+let all_sections = [ At_limit_or_exhausted; Other_windows; No_windows ]
 
 let section_rank = function
-  | Unusable_now -> 0
-  | Usable -> 1
-  | No_report -> 2
+  | At_limit_or_exhausted -> 0
+  | Other_windows -> 1
+  | No_windows -> 2
 
 type plan_entry = {
   pe_account : Masc.Tui_decode_usage.provider_usage_account;
@@ -469,7 +467,7 @@ let entry_pressure entry =
         (pressure_of first) rest
 
 (* One account becomes one entry per section it has a window in. An account
-   observed exhausted always has an entry in Unusable_now, even with no
+   observed exhausted always has an entry in At_limit_or_exhausted, even with no
    window to show, so its catalogue state is drawn. *)
 let entries_of ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
   let entry windows =
@@ -478,39 +476,40 @@ let entries_of ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_a
   match account.pua_state with
   | Masc.Tui_decode_usage.Account_not_reported_since_start
   | Masc.Tui_decode_usage.Account_reported_no_windows _ ->
-      [ ((if observed_blocked observed then Unusable_now else No_report), entry []) ]
+      [ ((if is_observed_exhausted observed then At_limit_or_exhausted else No_windows), entry []) ]
   | Masc.Tui_decode_usage.Account_reported (first, rest) ->
-      let blocked, open_ =
-        List.partition (blocks_use_now ~observed) (first :: rest)
+      let at_limit_or_exhausted, other =
+        List.partition (in_limit_or_exhausted_group ~observed) (first :: rest)
       in
-      let blocked =
+      let at_limit_or_exhausted =
         sort_windows_by
           (fun left right ->
             longest_wait_first (window_wait ~now left) (window_wait ~now right))
-          blocked
+          at_limit_or_exhausted
       in
-      let open_ =
+      let other =
         sort_windows_by
           (fun left right -> most_pressed_first (pressure_of left) (pressure_of right))
-          open_
+          other
       in
-      (match (blocked, observed_blocked observed) with
+      (match (at_limit_or_exhausted, is_observed_exhausted observed) with
        | [], false -> []
-       | [], true | _ :: _, true | _ :: _, false -> [ (Unusable_now, entry blocked) ])
-      @ (match open_ with [] -> [] | _ :: _ -> [ (Usable, entry open_) ])
+       | [], true | _ :: _, true | _ :: _, false ->
+           [ (At_limit_or_exhausted, entry at_limit_or_exhausted) ])
+      @ (match other with [] -> [] | _ :: _ -> [ (Other_windows, entry other) ])
 
 let compare_entries ~now section left right =
   let primary =
     match section with
-    | Unusable_now -> longest_wait_first (entry_wait ~now left) (entry_wait ~now right)
-    | Usable -> most_pressed_first (entry_pressure left) (entry_pressure right)
-    | No_report -> 0
+    | At_limit_or_exhausted -> longest_wait_first (entry_wait ~now left) (entry_wait ~now right)
+    | Other_windows -> most_pressed_first (entry_pressure left) (entry_pressure right)
+    | No_windows -> 0
   in
   match primary with
   | 0 -> String.compare (scope_name left.pe_account) (scope_name right.pe_account)
   | order -> order
 
-(* Unusable windows first, then the rest with the least left first, then
+(* Reported limits and observed exhaustion first, then the rest with the least left first, then
    accounts that have not reported. Ties go by account name. *)
 let plan ~now ~runtimes accounts =
   let placed =
@@ -682,7 +681,7 @@ type drawn_entry = {
   de_name : string;
   de_body : entry_body;
   de_tag : string option;
-      (** The catalogue's observed exhaustion, in the Unusable section only. *)
+      (** The catalogue's observed exhaustion, in the first section only. *)
   de_email : string option;
       (** Drawn once per account, with its first entry. *)
 }
@@ -734,14 +733,14 @@ let drawn_groups ~now ~account_emails groups =
   List.rev drawn
 
 let section_title = function
-  | Unusable_now -> "Unusable now"
-  | Usable -> "Usable"
-  | No_report -> "No report"
+  | At_limit_or_exhausted -> "Reported at limit / observed exhausted"
+  | Other_windows -> "Other windows"
+  | No_windows -> "No windows to show"
 
 let section_tone = function
-  | Unusable_now -> Theme.bad ()
-  | Usable -> Theme.info ()
-  | No_report -> Theme.recede ()
+  | At_limit_or_exhausted -> Theme.bad ()
+  | Other_windows -> Theme.info ()
+  | No_windows -> Theme.recede ()
 
 let pad_left text cells =
   let gap = cells - cells_of text in
@@ -943,14 +942,26 @@ let draw_entry layout tone entry =
      | None -> []
      | Some email -> note_lines ~tone:(Theme.recede ()) email)
 
-let group_heading section entries =
-  " " ^ Ansi.bold ^ section_tone section
-  ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
-  ^ Ansi.reset
+let group_heading_text section entries =
+  Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
 
-let hidden_unusable_heading section entries =
-  group_heading section entries
-  ^ Theme.recede () ^ " \xc2\xb7 hidden \xc2\xb7 x:show" ^ Ansi.reset
+let wrap_group_text ~width ~tone text =
+  (* Preserve the six-cell [x:show] key on very narrow screens. *)
+  let indent = if width > 6 then " " else "" in
+  Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length indent)) text
+  |> List.map (fun line -> indent ^ tone ^ line ^ Ansi.reset)
+
+let group_heading ~width section entries =
+  wrap_group_text ~width ~tone:(Ansi.bold ^ section_tone section)
+    (group_heading_text section entries)
+
+let hidden_limit_heading ~width section entries =
+  let note = "hidden \xc2\xb7 x:show" in
+  match group_heading ~width section entries with
+  | [ heading ]
+    when cells_of (group_heading_text section entries ^ " \xc2\xb7 " ^ note) + 1 <= width ->
+      [ heading ^ Theme.recede () ^ " \xc2\xb7 " ^ note ^ Ansi.reset ]
+  | headings -> headings @ wrap_group_text ~width ~tone:(Theme.recede ()) note
 
 (* One empty line between blocks so each reads as a unit. *)
 let rec separated = function
@@ -958,13 +969,14 @@ let rec separated = function
   | [ block ] -> block
   | block :: rest -> block @ ("" :: separated rest)
 
-let draw_groups ~show_unusable ~width groups =
+let draw_groups ~show_limit_exhausted ~width groups =
   let entries = List.concat_map snd groups in
   let layout = layout_for ~show_names:true ~width entries in
   let draw_group (section, entries) =
     match section with
-    | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
-    | Unusable_now | Usable | No_report ->
+    | At_limit_or_exhausted when not show_limit_exhausted ->
+        hidden_limit_heading ~width section entries
+    | At_limit_or_exhausted | Other_windows | No_windows ->
         let tone = section_tone section in
         let draw entry =
           let label_overflows =
@@ -982,8 +994,8 @@ let draw_groups ~show_unusable ~width groups =
             in
             heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
         in
-        group_heading section entries
-        :: separated (List.map draw entries)
+        group_heading ~width section entries
+        @ separated (List.map draw entries)
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1050,29 +1062,30 @@ let draw_card_rows ~width ~tone entries =
   in
   separated (List.map row (pairs entries))
 
-let draw_cards ~show_unusable ~width groups =
+let draw_cards ~show_limit_exhausted ~width groups =
   let draw_group (section, entries) =
     match section with
-    | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
-    | Unusable_now | Usable | No_report ->
-        group_heading section entries
-        :: draw_card_rows ~width ~tone:(section_tone section) entries
+    | At_limit_or_exhausted when not show_limit_exhausted ->
+        hidden_limit_heading ~width section entries
+    | At_limit_or_exhausted | Other_windows | No_windows ->
+        group_heading ~width section entries
+        @ draw_card_rows ~width ~tone:(section_tone section) entries
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
-type blocked_count =
-  | Blocked_unknown
-  | Blocked_accounts of int
+type exhausted_count =
+  | Exhausted_unknown
+  | Exhausted_accounts of int
 
 type counts = {
   accounts : int;
   reporting : int;
   at_limit : int;
-  blocked : blocked_count;
+  exhausted : exhausted_count;
 }
 
 (* The header's four numbers. [at_limit] counts accounts, by the same
-   {!window_at_limit} that puts a window in Unusable_now. *)
+   {!window_at_limit} that puts a window in At_limit_or_exhausted. *)
 let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account list) =
   let count keep = List.length (List.filter keep accounts) in
   { accounts = List.length accounts
@@ -1089,13 +1102,13 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
               List.exists window_at_limit (first :: rest)
           | Masc.Tui_decode_usage.Account_not_reported_since_start
           | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false)
-  ; blocked =
+  ; exhausted =
       (match (runtimes : Types.overview_quota_reading) with
        | Types.Quota_read _ ->
-           Blocked_accounts
+           Exhausted_accounts
              (count (fun account ->
-                  observed_blocked (observed_exhaustion ~runtimes account.pua_scope)))
-       | Types.Quota_unread | Types.Quota_failed _ -> Blocked_unknown)
+                  is_observed_exhausted (observed_exhaustion ~runtimes account.pua_scope)))
+       | Types.Quota_unread | Types.Quota_failed _ -> Exhausted_unknown)
   }
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
@@ -1141,14 +1154,14 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
       in
       let counts = counts ~runtimes puws_accounts in
-      let blocked =
-        match counts.blocked with
-        | Blocked_unknown -> "unknown"
-        | Blocked_accounts count -> string_of_int count
+      let exhausted =
+        match counts.exhausted with
+        | Exhausted_unknown -> "unknown"
+        | Exhausted_accounts count -> string_of_int count
       in
       let summary =
-        [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Blocked (observed) %s"
-            counts.accounts counts.reporting counts.at_limit blocked
+        [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Exhausted (observed) %s"
+            counts.accounts counts.reporting counts.at_limit exhausted
         ; "Bar: used at last report \xc2\xb7 other use does not block model calls \xc2\xb7 v: Trend" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in
@@ -1165,7 +1178,9 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
             }
 
 let bound_groups ~width ~rows groups =
-  let text = text_for_viewport ~columns:width ~rows in
+  (* Below 20 columns, retain the former label bound while laying out at the
+     actual width. *)
+  let text = text_for_viewport ~columns:(max 20 width) ~rows in
   let bound_entry entry =
     let body =
       match entry.de_body with
@@ -1178,13 +1193,13 @@ let bound_groups ~width ~rows groups =
   in
   List.map (fun (section, entries) -> section, List.map bound_entry entries) groups
 
-let section ~providers ~runtimes ~account_emails ~now ~show_unusable ~width ~rows =
-  section_with ~draw:(draw_groups ~show_unusable ~width) ~bound:(bound_groups ~width ~rows)
+let section ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
+  section_with ~draw:(draw_groups ~show_limit_exhausted ~width) ~bound:(bound_groups ~width ~rows)
     ~providers ~runtimes ~account_emails ~now ~width
 
-let section_cards ~providers ~runtimes ~account_emails ~now ~show_unusable ~width ~rows =
+let section_cards ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
   let draw =
-    if cards_fit ~width then draw_cards ~show_unusable ~width
-    else draw_groups ~show_unusable ~width
+    if cards_fit ~width then draw_cards ~show_limit_exhausted ~width
+    else draw_groups ~show_limit_exhausted ~width
   in
   section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width

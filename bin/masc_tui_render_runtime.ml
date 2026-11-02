@@ -1212,8 +1212,8 @@ let usage_lines ~cols ~rows (state : state) =
     match Overview_providers.section_cards
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
-            ~show_unusable:state.usage_show_unusable
-            ~now:(Unix.gettimeofday ()) ~width:(max 20 (framed_inner_width cols)) ~rows with
+            ~show_limit_exhausted:state.usage_show_limit_exhausted
+            ~now:(Unix.gettimeofday ()) ~width:(max 1 (framed_inner_width cols)) ~rows with
     | Some section -> section.title :: section.lines
     (* [section] answers [None] only before the first read. *)
     | None -> [ " Plan usage · not observed" ]

@@ -103,17 +103,17 @@ let plan_section_t =
     (fun formatter section ->
       Format.pp_print_string formatter
         (match section with
-         | Providers.Unusable_now -> "Unusable_now"
-         | Providers.Usable -> "Usable"
-         | Providers.No_report -> "No_report"))
+         | Providers.At_limit_or_exhausted -> "At_limit_or_exhausted"
+         | Providers.Other_windows -> "Other_windows"
+         | Providers.No_windows -> "No_windows"))
     (fun left right ->
       match (left, right) with
-      | Providers.Unusable_now, Providers.Unusable_now
-      | Providers.Usable, Providers.Usable
-      | Providers.No_report, Providers.No_report -> true
-      | ( Providers.Unusable_now, (Providers.Usable | Providers.No_report)
-        | Providers.Usable, (Providers.Unusable_now | Providers.No_report)
-        | Providers.No_report, (Providers.Unusable_now | Providers.Usable) ) -> false)
+      | Providers.At_limit_or_exhausted, Providers.At_limit_or_exhausted
+      | Providers.Other_windows, Providers.Other_windows
+      | Providers.No_windows, Providers.No_windows -> true
+      | ( Providers.At_limit_or_exhausted, (Providers.Other_windows | Providers.No_windows)
+        | Providers.Other_windows, (Providers.At_limit_or_exhausted | Providers.No_windows)
+        | Providers.No_windows, (Providers.At_limit_or_exhausted | Providers.Other_windows) ) -> false)
 
 let json_time = function None -> "null" | Some at -> Printf.sprintf "%.1f" at
 
@@ -198,14 +198,14 @@ let observed_t =
       | Providers.Observed_exhausted _, Providers.Not_observed_exhausted -> false)
 
 (* The header's numbers as plain values, ((accounts, reporting), (at limit,
-   blocked)); [None] is an unknown blocked count. *)
+   exhausted)); [None] is an unknown exhaustion count. *)
 let counts_of ?(runtimes = Types.Quota_unread) accounts =
   let counts = Providers.counts ~runtimes (decode_accounts accounts).puws_accounts in
   ( (counts.accounts, counts.reporting)
   , ( counts.at_limit
-    , match counts.blocked with
-      | Providers.Blocked_accounts count -> Some count
-      | Providers.Blocked_unknown -> None ) )
+    , match counts.exhausted with
+      | Providers.Exhausted_accounts count -> Some count
+      | Providers.Exhausted_unknown -> None ) )
 
 let counts_t = pair (pair int int) (pair int (option int))
 
@@ -213,7 +213,7 @@ let section_lines ?(runtimes = Types.Quota_unread) ?(account_emails = Types.Acco
     ~width accounts =
   match
     Providers.section ~rows:24 ~providers:(Types.Providers_read (decode_accounts accounts))
-      ~runtimes ~account_emails ~now ~width ~show_unusable:true
+      ~runtimes ~account_emails ~now ~width ~show_limit_exhausted:true
   with
   | Some section -> section.lines
   | None -> fail "a read draws a section"
@@ -241,7 +241,7 @@ let test_section_draws_one_line_per_window () =
   let section =
     match
       Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
-        ~width ~show_unusable:true
+        ~width ~show_limit_exhausted:true
     with
     | Some section -> section
     | None -> fail "a read draws a section"
@@ -260,19 +260,19 @@ let test_section_draws_one_line_per_window () =
     (let counts = Providers.counts ~runtimes windows.puws_accounts in
      ( (counts.accounts, counts.reporting)
      , ( counts.at_limit
-       , match counts.blocked with
-         | Providers.Blocked_accounts count -> Some count
-         | Providers.Blocked_unknown -> None ) ));
+       , match counts.exhausted with
+         | Providers.Exhausted_accounts count -> Some count
+         | Providers.Exhausted_unknown -> None ) ));
   let groups =
     Providers.plan ~now ~runtimes windows.puws_accounts
   in
   check (list plan_section_t) "the plan is drawn in section order"
-    [ Providers.Unusable_now; Providers.Usable; Providers.No_report ]
+    [ Providers.At_limit_or_exhausted; Providers.Other_windows; Providers.No_windows ]
     (List.map (fun { Providers.pg_section; _ } -> pg_section) groups);
   let first_account =
     match groups with
     | { Providers.pg_entries = entry :: _; _ } :: _ -> Providers.scope_id entry.pe_account
-    | { Providers.pg_entries = []; _ } :: _ | [] -> fail "the plan has an unusable account"
+    | { Providers.pg_entries = []; _ } :: _ | [] -> fail "the plan has an at-limit account"
   in
   check string "the account at its limit is drawn first" "id-kimi" first_account;
   check bool "unreported accounts remain visible" true
@@ -294,14 +294,14 @@ let test_silent_account_draws_only_its_exhaustion () =
     Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
   in
   match
-    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width ~show_unusable:true
+    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width ~show_limit_exhausted:true
   with
   | None -> fail "a read draws a section"
   | Some section ->
       let lines = List.map plain section.lines in
       check bool "the silent account keeps its name" true
         (List.exists (contains ~affix:"Codex Pro") lines);
-      check bool "the unblocked silent account is visible too" true
+      check bool "the silent account without an exhaustion observation is visible too" true
         (List.exists (contains ~affix:"Ollama Cloud") lines);
       let groups = Providers.plan ~now ~runtimes windows.puws_accounts in
       let drawn_observations =
@@ -317,12 +317,12 @@ let test_silent_account_draws_only_its_exhaustion () =
       in
       check
         (list (triple plan_section_t string observed_t))
-        "the exhausted silent account is unusable and draws its observation"
-        [ ( Providers.Unusable_now, "id-codex"
+        "the exhausted silent account draws its observation in the first group"
+        [ ( Providers.At_limit_or_exhausted, "id-codex"
           , Providers.Observed_exhausted None )
-        ; (Providers.Unusable_now, "id-kimi", Providers.Not_observed_exhausted)
-        ; (Providers.Usable, "id-claude_code", Providers.Not_observed_exhausted)
-        ; (Providers.No_report, "id-ollama_cloud", Providers.Not_observed_exhausted) ]
+        ; (Providers.At_limit_or_exhausted, "id-kimi", Providers.Not_observed_exhausted)
+        ; (Providers.Other_windows, "id-claude_code", Providers.Not_observed_exhausted)
+        ; (Providers.No_windows, "id-ollama_cloud", Providers.Not_observed_exhausted) ]
         (List.filter
            (fun (_, id, _) ->
              List.mem id [ "id-kimi"; "id-codex"; "id-claude_code"; "id-ollama_cloud" ])
@@ -343,7 +343,7 @@ let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
       ]
   in
   match
-    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current ~show_unusable:true
+    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current ~show_limit_exhausted:true
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -391,7 +391,7 @@ let test_reset_clock_follows_local_dates () =
     in
     match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
             ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread
-            ~now:current ~width:160 ~show_unusable:true with
+            ~now:current ~width:160 ~show_limit_exhausted:true with
     | Some section -> String.concat "\n" (List.map plain section.lines)
     | None -> fail "a read draws a section"
   in
@@ -436,7 +436,7 @@ let test_only_a_window_heard_at_another_time_says_so () =
    window with room, heard earlier than the full window beside it, still says
    when it was heard. *)
 let test_heard_time_is_the_accounts_not_the_sections () =
-  let usable_row ~room_observed_at =
+  let other_row ~room_observed_at =
     let lines =
       List.map plain
         (section_lines ~width:160
@@ -446,11 +446,11 @@ let test_heard_time_is_the_accounts_not_the_sections () =
            ])
     in
     match bar_rows lines with
-    | [ _unusable; usable ] -> usable
+    | [ _at_limit; other ] -> other
     | rows -> failf "expected one row per section, got %d" (List.length rows)
   in
-  let together = usable_row ~room_observed_at:(now -. 60.0)
-  and apart = usable_row ~room_observed_at:(now -. 7200.0) in
+  let together = other_row ~room_observed_at:(now -. 60.0)
+  and apart = other_row ~room_observed_at:(now -. 7200.0) in
   check bool "the window in the other section says when it was heard" true
     (not (String.equal together apart))
 
@@ -498,7 +498,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let section =
     match
       Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
-        ~runtimes:Types.Quota_unread ~now ~width ~show_unusable:true
+        ~runtimes:Types.Quota_unread ~now ~width ~show_limit_exhausted:true
     with
     | Some section -> section
     | None -> fail "a read draws a section"
@@ -512,9 +512,9 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let tokens_limit = List.find (fun line -> contains ~affix:"TOKENS_LIMIT" (plain line)) section.lines in
   check bool "the non-gating window is not an alarm" false (contains ~affix:bad time_limit);
   check bool "the model-call window at full is an alarm" true (contains ~affix:bad tokens_limit);
-  check shape_t "only the gating windows at full are unusable"
-    [ (Providers.Unusable_now, [ ("id-glm", [ "WEEK_TOKENS_LIMIT"; "TOKENS_LIMIT" ]) ])
-    ; (Providers.Usable, [ ("id-glm", [ "UNKNOWN_LIMIT"; "TIME_LIMIT" ]) ]) ]
+  check shape_t "only the gating windows at full enter the first group"
+    [ (Providers.At_limit_or_exhausted, [ ("id-glm", [ "WEEK_TOKENS_LIMIT"; "TOKENS_LIMIT" ]) ])
+    ; (Providers.Other_windows, [ ("id-glm", [ "UNKNOWN_LIMIT"; "TIME_LIMIT" ]) ]) ]
     (shape (Providers.plan ~now ~runtimes:Types.Quota_unread windows.puws_accounts));
   check bool "the source label is retained" true
     (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines)
@@ -547,7 +547,7 @@ let test_account_emails_name_their_accounts () =
   let section account_emails =
     match
       Providers.section ~rows:24 ~providers:(Types.Providers_read windows)
-        ~runtimes:Types.Quota_unread ~account_emails ~now ~width ~show_unusable:true
+        ~runtimes:Types.Quota_unread ~account_emails ~now ~width ~show_limit_exhausted:true
     with
     | Some section -> section
     | None -> fail "a read draws a section"
@@ -718,17 +718,6 @@ let test_scope_id_is_the_servers () =
         [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
         (List.map Providers.scope_id windows.puws_accounts)
 
-let test_unread_catalogue_is_not_zero_blocked () =
-  let windows = match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
-    | Ok windows -> windows | Error reason -> fail reason in
-  let section = match Providers.section ~rows:24
-    ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
-    ~account_emails:Types.Account_emails_unread ~now ~width:80 ~show_unusable:true with
-    | Some section -> section | None -> fail "expected plan rows" in
-  let text = String.concat "\n" (List.map plain section.lines) in
-  check bool "catalogue absence is not reported as no blocked accounts" true
-    (contains ~affix:"Blocked (observed) unknown" text)
-
 let test_plan_preserves_unknown_reports () =
   let open Masc.Tui_decode_usage in
   let windows = match decode_provider_usage_windows (resolved "reported") with
@@ -736,7 +725,7 @@ let test_plan_preserves_unknown_reports () =
   let draw windows =
     match Providers.section ~rows:24
       ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
-      ~account_emails:Types.Account_emails_unread ~now ~width:100 ~show_unusable:true with
+      ~account_emails:Types.Account_emails_unread ~now ~width:100 ~show_limit_exhausted:true with
     | Some section -> String.concat "\n" (List.map plain section.lines)
     | None -> fail "expected plan summary" in
   let silent = { windows with puws_accounts = List.map (fun account ->
@@ -781,7 +770,7 @@ let test_usd_rows_do_not_invent_a_percentage () =
     | Ok reading -> reading | Error detail -> fail detail in
   List.iter (fun width ->
     let section = match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
-        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width ~show_unusable:true with
+        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width ~show_limit_exhausted:true with
       | Some section -> section | None -> fail "USD accounts disappeared" in
     let lines = List.map plain section.lines in
     let text = String.concat " " lines in
@@ -804,15 +793,15 @@ let test_usd_rows_do_not_invent_a_percentage () =
    and one that has not reported. Antigravity has windows in two sections. *)
 let test_plan_splits_accounts_by_window_state () =
   check shape_t "sections and order"
-    [ ( Providers.Unusable_now
+    [ ( Providers.At_limit_or_exhausted
       , [ ("openrouter", [ "credit" ])
         ; ("antigravity", [ "gemini-7d" ]) ] )
-    ; ( Providers.Usable
+    ; ( Providers.Other_windows
       , [ ("kimi", [ "usage"; "5h" ])
         ; ("ollama", [ "7d" ])
         ; ("antigravity", [ "3p-5h" ])
         ; ("openrouter", [ "key-usage" ]) ] )
-    ; (Providers.No_report, [ ("codex", []) ])
+    ; (Providers.No_windows, [ ("codex", []) ])
     ]
     (plan_shape
        [ account_json ~name:"antigravity"
@@ -828,11 +817,11 @@ let test_plan_splits_accounts_by_window_state () =
        ; silent_json "codex"
        ])
 
-(* An unusable account with the longest wait is first; a window with no
+(* An account in the first group with the longest wait is first; a window with no
    reset time waits longest; a reset that has passed waits least. *)
-let test_unusable_order_is_longest_wait_first () =
+let test_limit_group_order_is_longest_wait_first () =
   check shape_t "no reset, then longest, then shortest, then passed"
-    [ ( Providers.Unusable_now
+    [ ( Providers.At_limit_or_exhausted
       , [ ("none", [ "a" ])
         ; ("long", [ "a" ])
         ; ("short", [ "a" ])
@@ -843,8 +832,8 @@ let test_unusable_order_is_longest_wait_first () =
        ; account_json ~name:"long" [ percent_window ~id:"a" ~resets:(now +. 30.0 *. hour) 100 ]
        ; account_json ~name:"none" [ percent_window ~id:"a" 100 ]
        ]);
-  check shape_t "an account waits as long as its longest unusable window"
-    [ ( Providers.Unusable_now
+  check shape_t "an account waits as long as its longest at-limit window"
+    [ ( Providers.At_limit_or_exhausted
       , [ ("two", [ "week"; "day" ]); ("one", [ "day" ]) ] ) ]
     (plan_shape
        [ account_json ~name:"one" [ percent_window ~id:"day" ~resets:(now +. 5.0 *. hour) 100 ]
@@ -855,9 +844,9 @@ let test_unusable_order_is_longest_wait_first () =
 
 let test_ties_go_by_account_name () =
   check shape_t "equal waits, equal use and silent accounts are by name"
-    [ ( Providers.Unusable_now, [ ("alpha", [ "a" ]); ("beta", [ "a" ]) ] )
-    ; ( Providers.Usable, [ ("cedar", [ "a" ]); ("delta", [ "a" ]) ] )
-    ; (Providers.No_report, [ ("echo", []); ("fig", []) ]) ]
+    [ ( Providers.At_limit_or_exhausted, [ ("alpha", [ "a" ]); ("beta", [ "a" ]) ] )
+    ; ( Providers.Other_windows, [ ("cedar", [ "a" ]); ("delta", [ "a" ]) ] )
+    ; (Providers.No_windows, [ ("echo", []); ("fig", []) ]) ]
     (plan_shape
        [ silent_json "fig"
        ; account_json ~name:"delta" [ percent_window ~id:"a" 50 ]
@@ -867,11 +856,11 @@ let test_ties_go_by_account_name () =
        ; account_json ~name:"alpha" [ percent_window ~id:"a" ~resets:(now +. hour) 100 ]
        ])
 
-(* Usable is the least left first. A window that gates nothing, an amount
+(* Other_windows is the least left first. A window that gates nothing, an amount
    with no cap and a value that is not a number press on nothing. *)
-let test_usable_order_is_most_used_first () =
+let test_other_windows_order_is_most_used_first () =
   check shape_t "most used first, unmeasured last"
-    [ ( Providers.Usable
+    [ ( Providers.Other_windows
       , [ ("high", [ "mid"; "low" ])
         ; ("mid", [ "a" ])
         ; ("low", [ "a" ])
@@ -887,23 +876,23 @@ let test_usable_order_is_most_used_first () =
        ; account_json ~name:"mid" [ percent_window ~id:"a" 60 ]
        ])
 
-let test_a_full_window_that_gates_nothing_is_usable () =
-  check shape_t "other use at 100 percent is not unusable"
-    [ (Providers.Usable, [ ("zai", [ "tokens"; "time" ]) ]) ]
+let test_a_full_window_that_gates_nothing_is_other () =
+  check shape_t "other use at 100 percent stays in the other group"
+    [ (Providers.Other_windows, [ ("zai", [ "tokens"; "time" ]) ]) ]
     (plan_shape
        [ account_json ~name:"zai"
            [ percent_window ~role:"counts_other_use" ~id:"time" 100
            ; percent_window ~id:"tokens" 30 ]
        ]);
-  check shape_t "an unclassified limit at 100 percent is unusable"
-    [ (Providers.Unusable_now, [ ("zai", [ "mystery" ]) ]) ]
+  check shape_t "an unclassified limit at 100 percent enters the first group"
+    [ (Providers.At_limit_or_exhausted, [ ("zai", [ "mystery" ]) ]) ]
     (plan_shape
        [ account_json ~name:"zai" [ percent_window ~role:"unclassified_limit" ~id:"mystery" 100 ] ])
 
 (* The catalogue observed the account exhausted: every window that gates
-   model calls is unusable whatever it reports; a silent account is too; an
+   model calls enters the first group whatever it reports; a silent account does too; an
    account with only other-use windows keeps an entry in both sections. *)
-let test_observed_exhaustion_blocks_gating_windows () =
+let test_observed_exhaustion_groups_gating_windows () =
   let runtimes =
     Types.Quota_read
       [ exhausted_scope ~resets:(now +. 2.0 *. hour) "kimi"
@@ -912,11 +901,11 @@ let test_observed_exhaustion_blocks_gating_windows () =
       ; runtime ~scope:"scope:ollama" ~exhausted:false "ollama.model"
       ]
   in
-  check shape_t "observed accounts move to the unusable section"
-    [ ( Providers.Unusable_now
+  check shape_t "observed accounts move to the first group"
+    [ ( Providers.At_limit_or_exhausted
       , [ ("codex", []); ("zai", []); ("kimi", [ "usage"; "5h" ]) ] )
-    ; (Providers.Usable, [ ("ollama", [ "7d" ]); ("zai", [ "time" ]) ])
-    ; (Providers.No_report, [ ("echo", []) ]) ]
+    ; (Providers.Other_windows, [ ("ollama", [ "7d" ]); ("zai", [ "time" ]) ])
+    ; (Providers.No_windows, [ ("echo", []) ]) ]
     (plan_shape ~runtimes
        [ account_json ~name:"kimi"
            [ percent_window ~id:"5h" ~resets:(now +. 0.5 *. hour) 56
@@ -927,21 +916,21 @@ let test_observed_exhaustion_blocks_gating_windows () =
        ; account_json ~name:"ollama" [ percent_window ~id:"7d" 43 ]
        ]);
   check shape_t "an unread catalogue observes nothing"
-    [ (Providers.Usable, [ ("kimi", [ "usage"; "5h" ]) ]) ]
+    [ (Providers.Other_windows, [ ("kimi", [ "usage"; "5h" ]) ]) ]
     (plan_shape ~runtimes:Types.Quota_unread
        [ account_json ~name:"kimi"
            [ percent_window ~id:"5h" 56; percent_window ~id:"usage" 83 ] ]);
   check shape_t "a failed catalogue observes nothing"
-    [ (Providers.No_report, [ ("codex", []) ]) ]
+    [ (Providers.No_windows, [ ("codex", []) ]) ]
     (plan_shape ~runtimes:(Types.Quota_failed "HTTP 500") [ silent_json "codex" ])
 
 (* An account that reported no windows has nothing to measure. *)
-let test_an_empty_report_is_no_report () =
+let test_an_empty_report_has_no_windows () =
   check shape_t "reported with no windows"
-    [ (Providers.No_report, [ ("empty", []) ]) ]
+    [ (Providers.No_windows, [ ("empty", []) ]) ]
     (plan_shape [ empty_report_json "empty" ])
 
-(* The header's "At limit (reported)" and the Unusable section are one
+(* The header's "At limit (reported)" and the first group share one
    decision. *)
 let test_at_limit_is_the_header_decision () =
   let decoded =
@@ -968,36 +957,36 @@ let test_at_limit_is_the_header_decision () =
        windows);
   check int "the account is counted once" 1
     (Providers.counts ~runtimes:Types.Quota_unread decoded.puws_accounts).at_limit;
-  check shape_t "and its at-limit windows are the unusable ones"
-    [ (Providers.Unusable_now, [ ("a", [ "full"; "usd" ]) ])
-    ; (Providers.Usable, [ ("a", [ "open"; "other"; "uncapped" ]) ]) ]
+  check shape_t "and its at-limit windows are in the first group"
+    [ (Providers.At_limit_or_exhausted, [ ("a", [ "full"; "usd" ]) ])
+    ; (Providers.Other_windows, [ ("a", [ "open"; "other"; "uncapped" ]) ]) ]
     (shape (Providers.plan ~now ~runtimes:Types.Quota_unread decoded.puws_accounts))
 
 (* ---- more ordering decisions, on typed data ---------------------------- *)
 
 (* A priced window past its cap is at its limit, like one exactly at it. *)
-let test_an_amount_past_its_cap_is_unusable () =
-  check shape_t "used above the limit is unusable; below it is not"
-    [ (Providers.Unusable_now, [ ("over", [ "credit" ]) ])
-    ; (Providers.Usable, [ ("under", [ "credit" ]) ]) ]
+let test_an_amount_past_its_cap_enters_first_group () =
+  check shape_t "used above the limit enters the first group; below it does not"
+    [ (Providers.At_limit_or_exhausted, [ ("over", [ "credit" ]) ])
+    ; (Providers.Other_windows, [ ("under", [ "credit" ]) ]) ]
     (plan_shape
        [ account_json ~name:"under" [ usd_window ~id:"credit" ~used:99.0 (Some 100.0) ]
        ; account_json ~name:"over" [ usd_window ~id:"credit" ~used:120.0 (Some 100.0) ]
        ])
 
-(* A window at its limit whose reset time has passed is still unusable: the
+(* A window at its limit whose reset time has passed stays in the first group: the
    server keeps the last report until a newer one arrives. It waits least,
    so it comes after every window that waits for a future reset. *)
-let test_a_passed_reset_is_still_unusable_and_last () =
-  check shape_t "passed reset is last among unusable accounts"
-    [ ( Providers.Unusable_now
+let test_a_passed_reset_stays_in_group_and_is_last () =
+  check shape_t "passed reset is last in the first group"
+    [ ( Providers.At_limit_or_exhausted
       , [ ("future", [ "a" ]); ("passed", [ "a" ]) ] ) ]
     (plan_shape
        [ account_json ~name:"passed" [ percent_window ~id:"a" ~resets:(now -. 60.0) 100 ]
        ; account_json ~name:"future" [ percent_window ~id:"a" ~resets:(now +. hour) 100 ]
        ]);
   check shape_t "beside a window with no reset, the passed one comes after it"
-    [ ( Providers.Unusable_now
+    [ ( Providers.At_limit_or_exhausted
       , [ ("mixed", [ "no-reset"; "passed" ]); ("other", [ "day" ]) ] ) ]
     (plan_shape
        [ account_json ~name:"other" [ percent_window ~id:"day" ~resets:(now +. 30.0 *. hour) 100 ]
@@ -1017,7 +1006,7 @@ let test_catalogue_time_does_not_replace_a_windows_reset () =
       ]
   in
   check shape_t "a window with no reset waits longest whatever the catalogue says"
-    [ ( Providers.Unusable_now
+    [ ( Providers.At_limit_or_exhausted
       , [ ("stated", [ "w" ]); ("other", [ "w" ]) ] ) ]
     (plan_shape ~runtimes
        [ account_json ~name:"other" [ percent_window ~id:"w" ~resets:(now +. 5.0 *. hour) 50 ]
@@ -1035,7 +1024,7 @@ let test_catalogue_time_orders_accounts_with_no_window () =
       ]
   in
   check shape_t "no time, latest, earliest"
-    [ ( Providers.Unusable_now
+    [ ( Providers.At_limit_or_exhausted
       , [ ("unstated", []); ("late", []); ("soon", []) ] ) ]
     (plan_shape ~runtimes [ silent_json "soon"; silent_json "late"; silent_json "unstated" ])
 
@@ -1063,15 +1052,15 @@ let test_the_latest_catalogue_reopen_time_wins () =
     Providers.Not_observed_exhausted
     (observed [ exhausted_scope "y" ])
 
-(* An account that reported no windows and is observed exhausted is unusable,
+(* An account that reported no windows and is observed exhausted enters the first group,
    like a silent one. *)
 let test_an_empty_report_can_be_observed_exhausted () =
   check shape_t "reported with no windows, observed exhausted"
-    [ (Providers.Unusable_now, [ ("empty", []) ]) ]
+    [ (Providers.At_limit_or_exhausted, [ ("empty", []) ]) ]
     (plan_shape ~runtimes:(Types.Quota_read [ exhausted_scope "empty" ])
        [ empty_report_json "empty" ])
 
-(* The catalogue's observation is drawn once per account, in the Unusable
+(* The catalogue's observation is drawn once per account, in the first
    section, even when the account's other windows sit in another section. *)
 let test_the_observation_is_drawn_once_for_a_split_account () =
   let runtimes = Types.Quota_read [ exhausted_scope "zai" ] in
@@ -1084,8 +1073,8 @@ let test_the_observation_is_drawn_once_for_a_split_account () =
          ]).puws_accounts
   in
   check shape_t "the account is in both sections"
-    [ (Providers.Unusable_now, [ ("zai", [ "tokens" ]) ])
-    ; (Providers.Usable, [ ("zai", [ "time" ]) ]) ]
+    [ (Providers.At_limit_or_exhausted, [ ("zai", [ "tokens" ]) ])
+    ; (Providers.Other_windows, [ ("zai", [ "time" ]) ]) ]
     (shape groups);
   let drawn =
     List.concat_map
@@ -1096,7 +1085,7 @@ let test_the_observation_is_drawn_once_for_a_split_account () =
           pg_entries)
       groups
   in
-  check (list observed_t) "the Unusable entry draws it and the Usable one does not"
+  check (list observed_t) "the first entry draws it and the other one does not"
     [ Providers.Observed_exhausted None; Providers.Not_observed_exhausted ]
     drawn;
   List.iter
@@ -1104,10 +1093,10 @@ let test_the_observation_is_drawn_once_for_a_split_account () =
       check observed_t "no other section draws an observation"
         Providers.Not_observed_exhausted
         (Providers.drawn_observation section (Providers.Observed_exhausted None)))
-    [ Providers.Usable; Providers.No_report ];
-  check observed_t "the Unusable section draws it"
+    [ Providers.Other_windows; Providers.No_windows ];
+  check observed_t "the first section draws it"
     (Providers.Observed_exhausted None)
-    (Providers.drawn_observation Providers.Unusable_now (Providers.Observed_exhausted None))
+    (Providers.drawn_observation Providers.At_limit_or_exhausted (Providers.Observed_exhausted None))
 
 let test_the_header_counts_are_typed () =
   let accounts =
@@ -1116,9 +1105,9 @@ let test_the_header_counts_are_typed () =
     ; empty_report_json "empty"
     ; silent_json "silent" ]
   in
-  check counts_t "an unread catalogue leaves blocked unknown, not zero"
+  check counts_t "an unread catalogue leaves exhaustion unknown, not zero"
     ((4, 3), (1, None)) (counts_of accounts);
-  check counts_t "a failed catalogue leaves blocked unknown"
+  check counts_t "a failed catalogue leaves exhaustion unknown"
     ((4, 3), (1, None)) (counts_of ~runtimes:(Types.Quota_failed "HTTP 500") accounts);
   check counts_t "a read catalogue counts the accounts it observes exhausted"
     ((4, 3), (1, Some 2))
@@ -1196,9 +1185,9 @@ let test_the_at_limit_tone_is_the_reports_not_the_sections () =
           [ account_json ~name:"a"
               [ percent_window ~id:"long" ~resets:(now +. 9.0 *. hour) 100
               ; percent_window ~id:"short" ~resets:(now +. hour) 100 ] ]));
-  (* Observed exhaustion puts both windows in Unusable now, but neither
+  (* Observed exhaustion puts both windows in the first group, but neither
      report is at its limit: the tag says the rest. *)
-  check bool "a window unusable only by observation does not take the bad tone" false
+  check bool "a window grouped only by observation does not take the bad tone" false
     (contains ~affix:(bad_tone ())
        (second_bar
           ~runtimes:(Types.Quota_read [ exhausted_scope "a" ])
@@ -1217,10 +1206,9 @@ let test_an_account_email_is_drawn_once () =
   check int "split across two sections, the account names its email once" 1
     (List.length (List.filter (contains ~affix:"ag@example.com") (List.map plain lines)))
 
-(* #44071 review P3: hiding the Unusable block keeps its heading, count and
-   the way back, and nothing else of it. The header still counts every
-   account, and the shown sections are untouched. *)
-let test_hidden_unusable_collapses_to_its_heading () =
+(* #44071 review P3: hiding the first group omits its entries, while the
+   header counts every account and showing the group restores its entries. *)
+let test_hidden_limit_group_omits_entries () =
   let accounts =
     decode_accounts
       [ account_json ~name:"full"
@@ -1229,20 +1217,18 @@ let test_hidden_unusable_collapses_to_its_heading () =
           [ percent_window ~id:"short" ~resets:(now +. hour) 70 ]
       ]
   in
-  let lines_of show_unusable =
+  let lines_of show_limit_exhausted =
     match
       Providers.section ~rows:24 ~providers:(Types.Providers_read accounts)
         ~runtimes:Types.Quota_unread
         ~account_emails:Types.Account_emails_unread ~now ~width:100
-        ~show_unusable
+        ~show_limit_exhausted
     with
     | Some section -> List.map plain section.lines
     | None -> fail "a read draws a section"
   in
   let hidden = lines_of false and shown = lines_of true in
   let hidden_text = String.concat "\n" hidden in
-  check bool "the collapsed row keeps its heading, count and way back" true
-    (contains ~affix:"Unusable now (1) · hidden · x:show" hidden_text);
   check bool "the hidden account's rows are gone" false
     (contains ~affix:"full" hidden_text);
   check bool "the hidden account's full value is gone" false
@@ -1354,7 +1340,7 @@ let card_lines ?(runtimes = Types.Quota_unread) ~width accounts =
     Providers.section_cards
       ~providers:(Types.Providers_read (decode_accounts accounts))
       ~runtimes ~account_emails:Types.Account_emails_unread ~now ~width ~rows:24
-      ~show_unusable:true
+      ~show_limit_exhausted:true
   with
   | Some section -> section.lines
   | None -> fail "a read draws a section"
@@ -1422,16 +1408,8 @@ let test_a_narrow_screen_keeps_the_rows () =
   check bool "cards at a wide width" true
     (Providers.cards_fit ~width:wide_enough_for_cards)
 
-(* The summary above the plan, and its section headings, do not depend on how
-   the accounts are drawn. *)
-let test_cards_keep_the_summary_and_headings () =
-  let headings lines =
-    List.filter (fun line -> contains ~affix:"Usable (" line || contains ~affix:"No report (" line)
-      (List.map plain lines)
-  in
-  check (list string) "the same headings"
-    (headings (section_lines ~width:wide_enough_for_cards screenshot_accounts))
-    (headings (card_lines ~width:wide_enough_for_cards screenshot_accounts));
+(* The summary above the plan does not depend on how the accounts are drawn. *)
+let test_cards_keep_the_summary () =
   let first_blank lines =
     let rec upto acc = function
       | [] | "" :: _ -> List.rev acc
@@ -1448,7 +1426,6 @@ let () =
     [ ( "providers"
       , [ test_case "out-of-range Plan history" `Quick test_plan_history_preserves_out_of_range_reports;
           test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
-          test_case "an unread catalogue is not zero blocked" `Quick test_unread_catalogue_is_not_zero_blocked;
           test_case "one line per window and the account summary" `Quick test_section_draws_one_line_per_window
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ; test_case "history uses reported points" `Quick
@@ -1472,25 +1449,25 @@ let () =
             test_account_emails_name_their_accounts
         ; test_case "plan splits accounts by window state" `Quick
             test_plan_splits_accounts_by_window_state
-        ; test_case "unusable order is longest wait first" `Quick
-            test_unusable_order_is_longest_wait_first
+        ; test_case "limit group order is longest wait first" `Quick
+            test_limit_group_order_is_longest_wait_first
         ; test_case "ties go by account name" `Quick test_ties_go_by_account_name
-        ; test_case "usable order is most used first" `Quick
-            test_usable_order_is_most_used_first
-        ; test_case "a full window that gates nothing is usable" `Quick
-            test_a_full_window_that_gates_nothing_is_usable
-        ; test_case "observed exhaustion blocks gating windows" `Quick
-            test_observed_exhaustion_blocks_gating_windows
-        ; test_case "an empty report is no report" `Quick test_an_empty_report_is_no_report
+        ; test_case "other windows order is most used first" `Quick
+            test_other_windows_order_is_most_used_first
+        ; test_case "a full window that gates nothing is in the other group" `Quick
+            test_a_full_window_that_gates_nothing_is_other
+        ; test_case "observed exhaustion groups gating windows" `Quick
+            test_observed_exhaustion_groups_gating_windows
+        ; test_case "an empty report has no windows" `Quick test_an_empty_report_has_no_windows
         ; test_case "every line fits the width" `Quick test_every_line_fits_the_width
         ; test_case "rows follow the plan" `Quick test_rows_follow_the_plan
         ; test_case "an account email is drawn once" `Quick test_an_account_email_is_drawn_once
         ; test_case "heard time is the account's, not the section's" `Quick
             test_heard_time_is_the_accounts_not_the_sections
-        ; test_case "an amount past its cap is unusable" `Quick
-            test_an_amount_past_its_cap_is_unusable
-        ; test_case "a passed reset is unusable and last" `Quick
-            test_a_passed_reset_is_still_unusable_and_last
+        ; test_case "an amount past its cap enters the first group" `Quick
+            test_an_amount_past_its_cap_enters_first_group
+        ; test_case "a passed reset remains in the group and is last" `Quick
+            test_a_passed_reset_stays_in_group_and_is_last
         ; test_case "catalogue time does not replace a window's reset" `Quick
             test_catalogue_time_does_not_replace_a_windows_reset
         ; test_case "catalogue time orders accounts with no window" `Quick
@@ -1506,8 +1483,8 @@ let () =
             test_the_at_limit_tone_is_the_reports_not_the_sections
         ; test_case "at limit is the header decision" `Quick
             test_at_limit_is_the_header_decision
-        ; test_case "hidden unusable collapses to its heading" `Quick
-            test_hidden_unusable_collapses_to_its_heading
+        ; test_case "hidden limit group omits its entries" `Quick
+            test_hidden_limit_group_omits_entries
         ; test_case "trend line breaks at gaps and keeps marks" `Quick
             test_trend_line_breaks_at_gaps_and_keeps_marks
         ] )
@@ -1520,7 +1497,7 @@ let () =
             test_every_card_line_fits_the_width
         ; test_case "a narrow screen keeps the rows" `Quick
             test_a_narrow_screen_keeps_the_rows
-        ; test_case "cards keep the summary and headings" `Quick
-            test_cards_keep_the_summary_and_headings
+        ; test_case "cards keep the summary" `Quick
+            test_cards_keep_the_summary
         ] )
     ]

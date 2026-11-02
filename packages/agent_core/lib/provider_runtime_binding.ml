@@ -107,10 +107,8 @@ let to_provider_config ?model binding =
     (fun model_id ->
        let request_path = trim_non_empty binding.request_path in
        let max_context = binding.max_context in
-       let policy = match PD.request_policy binding.declarations
-           ~provider_id:binding.id ~model_id with
-         | Some policy -> policy
-         | None -> invalid_arg "runtime binding must belong to its admitted declarations" in
+       let policy = PD.request_policy binding.declarations ~wire:binding.kind
+           ~provider_id:binding.id ~model_id in
        PConfig.make
          ~kind:binding.kind
          ~provider_id:binding.id

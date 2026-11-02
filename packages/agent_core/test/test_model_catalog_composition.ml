@@ -201,8 +201,8 @@ let test_provider_overlay_cannot_inherit_seed_permission () = with_catalog (fun 
     {|{"schema_version":1,"providers":[{"id":"catalog-provider","kind":"openai_compat","base_url":"https://replacement.invalid","request_path":"/v1/chat/completions","auth":{"type":"none"},"default_model":"catalog-model","capabilities_base":"openai_chat"}]}|}) |> get in
   let declarations=Provider_declarations.of_catalogs ~models:(Some composed) ~providers:(Some providers)
     |> Result.map_error Provider_declarations.error_to_string |> get in
-  let policy=Option.get (Provider_declarations.request_policy declarations
-    ~provider_id:"catalog-provider" ~model_id:"catalog-model") in
+  let policy=Provider_declarations.request_policy declarations ~wire:Provider_kind.OpenAI_compat
+    ~provider_id:"catalog-provider" ~model_id:"catalog-model" in
   Alcotest.(check bool) "replacement provider cannot borrow seed bare authorization" true
     (Capabilities.request_policy_capabilities policy=Some Capabilities.openai_compat_chat_capabilities))
 

@@ -24,7 +24,7 @@ val http_protocol_metadata : Runtime_schema.provider ->
   ((Llm_provider.Provider_config.provider_kind * string), string) result
 (** Resolve the actual HTTP kind and request path without a model or credential. *)
 
-(** Capture a fresh named-provider selection from one current registry entry. *)
+(** Capture a fresh named-provider selection from admitted current declarations. *)
 val materialize_credentials : provider_id:string -> credential:Runtime_schema.credential option ->
   (Runtime_credential_selection.materialized, string) result
 (** Missing Env/Inline values and unknown provider requirements remain explicit
@@ -51,7 +51,8 @@ val materialize_provider_binding
 (** Materialize one binding into the hot-path {!Llm_provider.Provider_config.t}.
 
     Catalog-derived model policy, pricing authority and their absence are
-    captured at this selection boundary. A later catalog replacement affects
+    captured from one immutable admitted declaration selection before any
+    credential I/O. A catalog replacement during that I/O affects
     newly materialized bindings; existing configs retain their selected facts.
 
     HTTP file credentials contain one raw API key at an absolute path. The

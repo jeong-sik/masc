@@ -53,8 +53,13 @@ val entries : t -> entry list
 (** Preserve the admitted declaration spellings; only identity lookup keys fold case. *)
 val find : t -> string -> entry option
 (** Lookup id or alias with ASCII case folding and trimmed query whitespace. *)
-val request_policy : t -> provider_id:string -> model_id:string -> Capabilities.request_policy option
+val request_policy : t -> wire:Provider_kind.t -> provider_id:string -> model_id:string -> Capabilities.request_policy
 (** Resolve from this immutable selection's model catalog and admitted provider.
-    [None] means the provider id/alias is absent from this selection. *)
+    Missing model facts and rates stay missing. The selected wire
+    determines the provider's per-wire base; no global source is consulted. *)
+
+val supports_parallel_tool_suppression : t -> provider_id:string -> bool
+(** Only the admitted provider's explicit permission grants suppression.
+    A provider absent from this selection grants no permission. *)
 
 val requires_api_key : authentication -> bool

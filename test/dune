@@ -6421,6 +6421,8 @@
  (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))
 
+(include stanzas/test_runtime_construction_snapshot.inc)
+
 (test
  (name test_runtime_official_cli_install)
  (modules test_runtime_official_cli_install)

@@ -409,6 +409,10 @@ val resolve_request_capabilities : t -> Capabilities.capabilities * capability_s
     or registry state. *)
 
 
+val with_request_policy : Capabilities.request_policy -> t -> t
+(** Attach an already selected policy, preserving existing provider identity
+    when it still matches. This does not look up any catalog or credential. *)
+
 val with_binding_policy
   :  authentication:provider_authentication
   -> credential_scope:string option

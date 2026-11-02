@@ -1,0 +1,112 @@
+{
+  "metadata_derivative": "Capture metadata enriched with dispatch facts; raw paths made repository-relative. Original raw and selected byte digests are preserved.",
+  "runs": {
+    "baseline": {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41311278766,
+      "job_id": 124862015636,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41311278766",
+      "head": "a91a994c630107a767fe77b17fea8df493049ad7",
+      "ref": "fix/runtime-construction-snapshot-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "a91a994c630107a767fe77b17fea8df493049ad7",
+      "raw_capture": "artifacts/issues-oldest-20261101/atomic-runtime-materialization/baseline-124862015636.raw.log",
+      "raw_bytes": 95715,
+      "raw_sha256": "dea21128c20b46d0ca33f20f4b933491f58c0861a8d9bf69cba1e8fc300ea8b5",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 2510,
+      "selected_sha256": "50500fd8b4d8830c5a4bf2199289ccbe11f04430d0a56f351d3ec2d2a559fbf9",
+      "actual_pass": 1,
+      "actual_fail": 5,
+      "retained_case_pass": 1,
+      "retained_case_fail": 5,
+      "summaries": [
+        "2026-11-01T13:32:09.4774743Z 5 failures! in 0.039s. 6 tests run."
+      ],
+      "dispatch": {
+        "minimal": true,
+        "suite": "test_runtime_construction_snapshot",
+        "suite_timeout_sec": 600,
+        "requested_at": "2026-11-01T13:26:41.376873+00:00"
+      }
+    },
+    "intermediate": {
+      "name": "intermediate",
+      "workflow": "Test",
+      "run_id": 41311696892,
+      "job_id": 124863246595,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41311696892",
+      "head": "2e5d1ffaf36eecfb0cc6f094dddea9585dd91fc8",
+      "ref": "fix/runtime-construction-snapshot-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "2e5d1ffaf36eecfb0cc6f094dddea9585dd91fc8",
+      "raw_capture": "artifacts/issues-oldest-20261101/atomic-runtime-materialization/intermediate-124863246595.raw.log",
+      "raw_bytes": 243175,
+      "raw_sha256": "afe6f0ebedb7039668c2d4f25b8dcb4d0279989c75f00e51f4126ae66d1708d7",
+      "selected_capture": "intermediate.txt",
+      "selected_bytes": 20387,
+      "selected_sha256": "a14c14e88901e1fe3ad15981abf9a844d8983175c6a93e7820e9d9cbc02265c4",
+      "actual_pass": 153,
+      "actual_fail": 0,
+      "retained_case_pass": 153,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T13:33:53.3595719Z Test Successful in 0.023s. 11 tests run.",
+        "2026-11-01T13:33:54.9301750Z Test Successful in 0.148s. 34 tests run.",
+        "2026-11-01T13:36:55.7145306Z Test Successful in 0.032s. 6 tests run.",
+        "2026-11-01T13:36:55.8425240Z Test Successful in 0.022s. 4 tests run.",
+        "2026-11-01T13:36:56.2020998Z Test Successful in 0.181s. 89 tests run.",
+        "2026-11-01T13:36:56.2531852Z Test Successful in 0.000s. 9 tests run."
+      ],
+      "dispatch": {
+        "minimal": true,
+        "suite": "test_runtime_construction_snapshot,test_runtime_adapter_credential_requirement,test_runtime_provider_auth_headers,packages/agent_core/test/test_model_catalog_composition,packages/agent_core/test/test_provider_declarations,packages/agent_core/test/test_provider_runtime_binding",
+        "suite_timeout_sec": 600,
+        "requested_at": "2026-11-01T13:31:50.183273+00:00"
+      }
+    },
+    "repaired": {
+      "name": "repaired",
+      "workflow": "Test",
+      "run_id": 41312230566,
+      "job_id": 124864820301,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41312230566",
+      "head": "6a98a059ff81ebc3f863b96ff098baac0d7dea0a",
+      "ref": "fix/runtime-construction-snapshot-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "6a98a059ff81ebc3f863b96ff098baac0d7dea0a",
+      "raw_capture": "artifacts/issues-oldest-20261101/atomic-runtime-materialization/repaired-124864820301.raw.log",
+      "raw_bytes": 246023,
+      "raw_sha256": "f2758d18764926bb08daa2c77896375b5ad11fc738a1d83ef38690ec4ea08468",
+      "selected_capture": "repaired.txt",
+      "selected_bytes": 20887,
+      "selected_sha256": "8b6a95fdec88ec741c5d0cde9263c64fe1857dd8833c3ba4d408f93a02e0477e",
+      "actual_pass": 157,
+      "actual_fail": 0,
+      "retained_case_pass": 157,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T13:40:39.7350474Z Test Successful in 0.030s. 11 tests run.",
+        "2026-11-01T13:40:41.5721479Z Test Successful in 0.093s. 34 tests run.",
+        "2026-11-01T13:44:37.1432017Z Test Successful in 0.040s. 6 tests run.",
+        "2026-11-01T13:44:37.3035683Z Test Successful in 0.029s. 4 tests run.",
+        "2026-11-01T13:44:37.7523609Z Test Successful in 0.233s. 89 tests run.",
+        "2026-11-01T13:44:37.8193717Z Test Successful in 0.003s. 13 tests run."
+      ],
+      "dispatch": {
+        "minimal": true,
+        "suite": "test_runtime_construction_snapshot,test_runtime_adapter_credential_requirement,test_runtime_provider_auth_headers,packages/agent_core/test/test_model_catalog_composition,packages/agent_core/test/test_provider_declarations,packages/agent_core/test/test_provider_runtime_binding",
+        "suite_timeout_sec": 600,
+        "requested_at": "2026-11-01T13:38:21.546506+00:00"
+      }
+    }
+  },
+  "key_digests": {
+    "common_case_key_sha256": "5e95a11dd4fcc96b663284dddae9e3e47dadf0d32129094a360c1e6d5f4d76aa",
+    "all_repaired_case_key_sha256": "54668465f6d7de29d22ca9d8755433c8eb5558ed97116ae3330bfe4653557282"
+  }
+}

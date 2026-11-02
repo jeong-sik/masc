@@ -120,8 +120,24 @@ let find t label = Ids.find_opt (normalize label) t.by_identity
 let requires_api_key = function No_auth -> false
   | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true
 
-let request_policy t ~provider_id ~model_id =
+let policy_provider t provider_id =
   Option.bind (find t provider_id) (fun entry ->
-    Option.map (fun provider -> Capabilities.resolve_bound_request_policy
-      ~catalog:t.models ~provider ~capabilities:entry.capabilities ~model_id)
+    Option.map (fun provider -> entry, provider)
       (Ids.find_opt (normalize entry.id) t.policy_providers))
+
+let request_policy t ~wire ~provider_id ~model_id =
+  match policy_provider t provider_id with
+  | Some (entry, provider) ->
+    Capabilities.resolve_bound_request_policy ~catalog:t.models ~wire ~provider
+      ~capabilities:entry.capabilities ~model_id
+  | None ->
+    (* This identity was not admitted. Keep exact custom-model rows, but do
+       not let a replaced seed's old aliases/defaults grant it authority. *)
+    let catalog = Option.map Model_catalog.without_providers t.models in
+    Capabilities.resolve_request_policy_from_catalog ~catalog ~wire
+      ~provider:(Model_catalog.Declared_provider provider_id) ~model_id
+
+let supports_parallel_tool_suppression t ~provider_id =
+  match policy_provider t provider_id with
+  | Some (_, provider) -> provider.Model_catalog.supports_parallel_tool_suppression
+  | None -> false

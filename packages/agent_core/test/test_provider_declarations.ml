@@ -165,6 +165,68 @@ let test_current_rejects_invalid_combination () =
       check (fun () -> ignore (B.all ()));
       check (fun () -> ignore (B.find "snapshot-provider")))
 
+let replacement_policy_selection () =
+  let catalog = models {|[[providers]]
+id = "snapshot-provider"
+aliases = ["old-alias"]
+kind = "anthropic"
+base_url = "https://seed.invalid"
+request_path = "/v1/messages"
+auth = "api-key"
+capabilities_base = "anthropic"
+serves_bare_models = ["bare-policy"]
+[[models]]
+model_id = "scoped-policy"
+provider_name = "snapshot-provider"
+base = "anthropic"
+supports_tools = false
+anthropic_thinking_control = "adaptive_default"
+input_per_million = 1.0
+output_per_million = 2.0
+[[models]]
+model_id = "bare-policy"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+input_per_million = 2.0
+output_per_million = 4.0
+[[models]]
+model_id = "custom-model"
+provider_name = "custom-endpoint"
+base = "openai_chat"
+supports_tools = false
+input_per_million = 3.0
+output_per_million = 6.0
+|} in
+  D.of_catalogs ~models:(Some catalog) ~providers:(Some (overlay ())) |> admitted
+
+let test_removed_alias_does_not_recover_policy model_id () =
+  let declarations = replacement_policy_selection () in
+  Alcotest.(check bool) "old alias is absent from the admitted selection" true
+    (D.find declarations "old-alias" = None);
+  let policy = D.request_policy declarations ~wire:Provider_kind.Anthropic
+      ~provider_id:"old-alias" ~model_id in
+  Alcotest.(check bool) "old alias cannot recover seed capabilities" true
+    (Capabilities.request_policy_capabilities policy = None);
+  Alcotest.(check bool) "old alias cannot recover seed thinking controls" true
+    (Capabilities.request_policy_anthropic_thinking_control policy = None);
+  Alcotest.(check bool) "old alias cannot recover seed pricing" true
+    (Pricing.pricing_for_model (Capabilities.request_policy_pricing_source policy) model_id = None)
+
+let test_custom_scoped_policy_survives_absent_provider () =
+  let declarations = replacement_policy_selection () in
+  Alcotest.(check bool) "custom endpoint has no provider declaration" true
+    (D.find declarations "custom-endpoint" = None);
+  let policy = D.request_policy declarations ~wire:Provider_kind.OpenAI_compat
+      ~provider_id:"custom-endpoint" ~model_id:"custom-model" in
+  Alcotest.(check (option bool)) "exact custom row remains authoritative"
+    (Some false)
+    (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_tools)
+       (Capabilities.request_policy_capabilities policy));
+  Alcotest.(check (option (float 0.000001))) "exact custom row retains its own price"
+    (Some 3.)
+    (Option.map (fun (pricing : Pricing.pricing) -> pricing.input_per_million)
+       (Pricing.pricing_for_model (Capabilities.request_policy_pricing_source policy) "custom-model"))
+
 let () = Alcotest.run "provider declarations"
   ["admission",[
     "exact overlay replacement",`Quick,test_exact_replacement;
@@ -176,4 +238,9 @@ let () = Alcotest.run "provider declarations"
    "consumers",[
     "immutable captured selection",`Quick,test_snapshot_survives_source_replacement;
     "credential observation",`Quick,test_credential_observation_edge;
-    "independent declared provider requests",`Quick,test_distinct_providers_keep_independent_policy]]
+    "independent declared provider requests",`Quick,test_distinct_providers_keep_independent_policy];
+   "replacement policy",[
+    "removed alias cannot recover scoped policy",`Quick,test_removed_alias_does_not_recover_policy "scoped-policy";
+    "removed alias cannot recover bare policy",`Quick,test_removed_alias_does_not_recover_policy "bare-policy";
+    "removed alias cannot recover provider defaults",`Quick,test_removed_alias_does_not_recover_policy "missing-model";
+    "unknown custom endpoint retains its scoped row",`Quick,test_custom_scoped_policy_survives_absent_provider]]

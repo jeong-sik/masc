@@ -6864,6 +6864,11 @@
    masc.agent_core.digest uri yojson eio eio_main unix fs_compat))
 
 (test
+ (name test_tui_workspace_http_error)
+ (modules test_tui_workspace_http_error)
+ (libraries alcotest masc masc.string_util masc_tui_workspace_read masc_tui_kept_reads masc.http_client yojson))
+
+(test
  (name test_tui_resource_document_search)
  (modules test_tui_resource_document_search test_tui_resource_document_anchor)
  (libraries base64 masc_tui_resource_diagrams masc_tui_resource_reading masc_tui_scroll alcotest masc_tui_types masc_tui_resource_document

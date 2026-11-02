@@ -811,6 +811,23 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
   (match Progress.phase finished.Owner.progress with
    | Progress.Finished commit -> check json "finished judgment remains unchanged" wire commit.judgment
    | _ -> fail "original judgment did not finish");
+  let gate=match gate_records fixture capture with
+    | [gate] -> gate
+    | [] | _::_::_ -> fail "expected the retained gate for the original answer" in
+  let report=io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.validate
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
+  check bool "preflight examined the parent and gate" true (report.rows>=2);
+  check int "preflight reads the host-shaped original parent and gate" 0 (List.length report.refusals);
+  let fields=Yojson.Safe.Util.to_assoc gate.request in
+  let changed_gate={gate with request=`Assoc
+    (("proposal",answer capture)::List.remove_assoc "proposal" fields)} in
+  let rejected=io (fun () -> Gate.validate_payload ~owner:(Capture.physical_owner capture)
+    ~capture ~parent:finished ~record:changed_gate
+    ~read:(fun ~scope:_ ~request_id:_ -> fail "a changed proposal must refuse before ancestry lookup")
+    ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "a changed proposal must refuse before body lookup")) in
+  check (result unit string) "preflight refuses a gate with a different original answer"
+    (Error "Gate proposal differs from the original answered judgment") rejected;
   check int "the original provider request is not resubmitted" posts (F.post_count fixture.server))
 (* A settle that stopped between a history record and its gate records leaves
    gates of an archived execution. A pass with no original reads no gate

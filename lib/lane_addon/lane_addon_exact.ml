@@ -272,6 +272,14 @@ let original_final_of_json ~schema request json =
       | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
       | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
 
+let original_consumer_answer_payload request json =
+  let* schema = Option.to_result ~none:"Original request has no consumer schema" request.schema in
+  let* final = original_final_of_json ~schema request json in
+  match final with
+  | Call_final (Answered {output;_}) -> Ok (checked_json output)
+  | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Original final is not an answer"
+
 let retained_final_to_json = function
   | Retained_unknown cause ->
       `Assoc ["status", `String "outcome_unknown"; "cause", `String (cause_to_string cause)]

@@ -327,6 +327,30 @@ let test_character_frame_protocol_and_cleanup () =
     check (list string) "failed attempt leaves no temporary files"
       ["ffmpeg";"retained-original"] (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
 
+let test_character_frame_keeps_output_reserved () =
+  with_cache (fun cache_dir _ ->
+    let png = png_header ^ "\000\000\000\002\000\000\000\002" in
+    let display = Cache.Character_cells {columns=2;rows=1} in
+    List.iter (fun status ->
+      let reserved = ref false in
+      let run command =
+        let output = capture_converter_output cache_dir command in
+        reserved := (match Unix.openfile output [Unix.O_CREAT; Unix.O_EXCL; Unix.O_WRONLY] 0o600 with
+          | fd -> Unix.close fd; false
+          | exception Unix.Unix_error (Unix.EEXIST, _, _) -> true);
+        status in
+      check bool "failed or empty decode is refused" true
+        (Result.is_error (Cache.prepare_presentation ~run ~cache_dir display png));
+      check bool "another attempt cannot reserve the output while decoder runs" true !reserved;
+      check (list string) "owned attempt files are cleaned up" ["output-path"]
+        (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
+      [Unix.WEXITED 1; Unix.WEXITED 0];
+    check_raises "unexpected runner exceptions propagate" Runner_interrupted (fun () ->
+      ignore (Cache.prepare_presentation ~run:(fun _ -> raise Runner_interrupted)
+        ~cache_dir display png));
+    check (list string) "exception cleans owned attempt files" ["output-path"]
+      (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
+
 let test_mosaic_failure_retains_input_and_can_recover () =
   List.iter (fun code -> with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/preview.png" in
@@ -707,6 +731,8 @@ let () =
             test_character_frame_refuses_unrepresentable_ratio
         ; test_case "character decoder frame protocol and attempt cleanup" `Quick
             test_character_frame_protocol_and_cleanup
+        ; test_case "character decoder retains output reservation" `Quick
+            test_character_frame_keeps_output_reserved
         ; test_case "a delete during the fetch does not take the download" `Quick
             test_a_delete_during_the_fetch_does_not_take_the_download
         ; test_case "a delete during the conversion does not take the frame" `Quick

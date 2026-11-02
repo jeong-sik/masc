@@ -38,7 +38,7 @@ type stalled =
   ; since_iso : string
   }
 
-(* A Goal the verifier proved and only the operator's confirmation closes. *)
+(* A Goal whose stored phase awaits operator confirmation. *)
 type goal_to_confirm =
   { goal_id : string
   ; title : string
@@ -271,11 +271,21 @@ let waited_since ~now since =
     else Printf.sprintf "%dm waiting" (whole / 60))
 ;;
 
-(* A stamp this cannot read says nothing rather than saying zero. *)
-let waited ~now since_iso =
+(* A Goal's update time is not the time it began awaiting confirmation. *)
+let updated ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
   | None -> ""
-  | Some since -> waited_since ~now since
+  | Some since ->
+    let seconds = now -. since in
+    if Float.compare seconds 0.0 <= 0
+    then "updated just now"
+    else (
+      let whole = int_of_float seconds in
+      if whole >= 86_400
+      then Printf.sprintf "updated %dd ago" (whole / 86_400)
+      else if whole >= 3_600
+      then Printf.sprintf "updated %dh ago" (whole / 3_600)
+      else Printf.sprintf "updated %dm ago" (whole / 60))
 ;;
 
 let overlay ~now ~localtime ~cols t =
@@ -394,8 +404,8 @@ let overlay ~now ~localtime ~cols t =
            ; text =
                two_column
                  ~cols
-                 (Printf.sprintf "%s \xe2\x80\x94 the verifier proved it" row.title)
-                 (waited ~now row.since_iso)
+                 (Printf.sprintf "%s \xe2\x80\x94 awaiting confirmation" row.title)
+                 (updated ~now row.since_iso)
            })
         rows
   in

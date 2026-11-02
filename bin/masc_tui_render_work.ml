@@ -362,7 +362,7 @@ let planning_stage_rail (phase : Goal_phase.t) =
   | Goal_phase.Dropped ->
     planning_phase_color Goal_phase.Dropped
     ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
-    ^ Ansi.dim ^ "  (off the line; [o] puts it back on executing)" ^ Ansi.reset
+    ^ Ansi.dim ^ "  (off the line; [o] requests reopen)" ^ Ansi.reset
   | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed ->
     String.concat arrow
       [ stop Goal_phase.Executing
@@ -389,7 +389,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
 let planning_next_step (goal : planning_goal) =
   match goal.pg_phase, goal.pg_proof with
   | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
-    (Theme.warn (), "verification state unavailable - refresh before requesting completion")
+    (Theme.warn (), "verification state unavailable - check connection, server storage and runtime, then [r] refresh")
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
     , "refused - fix what the verdict names below, then [c] to resubmit" )
@@ -410,13 +410,13 @@ let planning_next_step (goal : planning_goal) =
   | (Goal_phase.Awaiting_confirmation, Proof_refuted _)
   | (Goal_phase.Awaiting_confirmation, Proof_stale _)
   | (Goal_phase.Awaiting_confirmation, Proof_unreadable _) ->
-    (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
+    (Theme.warn (), "awaiting confirmation - [a] requests proof or confirms after review")
   | (Goal_phase.Completed, Proof_idle) | (Goal_phase.Completed, Proof_pending)
   | (Goal_phase.Completed, Proof_proven _) | (Goal_phase.Completed, Proof_refuted _)
-  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, "reached its target - [o] reopens it")
+  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, "completed - [o] requests reopen")
   | (Goal_phase.Dropped, Proof_idle) | (Goal_phase.Dropped, Proof_pending)
   | (Goal_phase.Dropped, Proof_proven _) | (Goal_phase.Dropped, Proof_refuted _)
-  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, "abandoned - [o] reopens it")
+  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, "abandoned - [o] requests reopen")
   | (Goal_phase.Paused _, Proof_idle) | (Goal_phase.Paused _, Proof_pending)
   | (Goal_phase.Paused _, Proof_proven _) | (Goal_phase.Paused _, Proof_refuted _)
   | (Goal_phase.Paused _, Proof_stale _) | (Goal_phase.Paused _, Proof_unreadable _) -> (Theme.warn (), "paused - [r] restores the prior state; linked Tasks continue independently")

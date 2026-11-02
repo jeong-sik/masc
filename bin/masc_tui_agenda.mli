@@ -75,11 +75,10 @@ type goal_to_confirm =
   { goal_id : string  (** the Goal the row is about, so a key can open it *)
   ; title : string
   ; since_iso : string
-        (** when the Goal last changed. That is when its proof was recorded
-            unless its priority or due date was edited after that. *)
+        (** when the Goal last changed, not necessarily when proof was recorded. *)
   }
-(** A Goal the verifier proved. Its last step is the operator's confirmation
-    (constitution, goal completion), so it waits on the operator. *)
+(** A Goal whose stored phase awaits confirmation. The agenda does not read
+    its proof ledger; opening the Goal can request the current evidence. *)
 
 type open_question =
   { ask : Masc.Tui_decode_asks.ask_key  (** the ask the row is about, so a key can open it *)

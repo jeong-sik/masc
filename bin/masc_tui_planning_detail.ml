@@ -367,14 +367,16 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
   let header =
     line_of Note (match phase with
       | Goal_phase.Completed -> if ko then "[ 확인 완료 ]" else "[ Confirmation recorded ]"
-      | _ -> if ko then "[ 판정 확인 ]" else "[ Confirm the proof ]")
+      | Goal_phase.(Executing | Verifying | Awaiting_confirmation | Dropped | Paused _ | Blocked _) ->
+        if ko then "[ 판정 확인 ]" else "[ Confirm the proof ]")
   in
   let instruction =
     paragraph ~indent:0 Waiting
       (match phase with
        | Goal_phase.Completed -> if ko then "저장된 확인을 조회했습니다. 추가 요청은 보내지 않습니다."
          else "Recorded confirmation inspected. No additional request will be sent."
-       | _ -> match recorded_confirmation with
+       | Goal_phase.(Executing | Verifying | Awaiting_confirmation | Dropped | Paused _ | Blocked _) ->
+         match recorded_confirmation with
          | Some _ -> if ko
            then "저장된 확인과 증거를 끝까지 읽고 [a]를 눌러 완료 처리를 재개합니다. Esc는 취소합니다."
            else "Read the recorded confirmation and evidence, then [a] to resume completion; Esc cancels."

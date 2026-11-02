@@ -8749,6 +8749,84 @@ let launch_owed_schedules state ~mailbox =
     if schedules_reading state then state.schedules_owed <- Masc_tui_owed_read.started read
   end
 
+(* The Keeper whose schedules are drawn: the chat pane's Keeper, or the
+   Keeper the Automation tab shows. *)
+let keeper_schedules_on_screen state =
+  match state.view with
+  | Keepers Keeper_message -> state.msg_target_keeper_name
+  | Keepers Keeper_detail -> (
+      match state.detail_tab with
+      | Detail_automation -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+      | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
+      | Detail_github | Detail_identity | Detail_channels | Detail_runs | Detail_terminal ->
+          None)
+  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs ->
+      None
+
+(* One Keeper's schedules read again under the same rules as the fleet list,
+   while the chat pane or the Automation tab draws them. Opening either reads
+   them directly. *)
+let owe_keeper_schedules_read state =
+  Option.iter
+    (fun keeper ->
+      let read =
+        match state.keeper_schedules_owed with
+        | Some owed when String.equal owed.kso_keeper keeper -> owed.kso_read
+        | Some _ | None -> Masc_tui_owed_read.settled
+      in
+      state.keeper_schedules_owed <-
+        Some { kso_keeper = keeper; kso_read = Masc_tui_owed_read.changed read })
+    (keeper_schedules_on_screen state)
+
+let settle_keeper_schedules_read state ~keeper result =
+  match state.keeper_schedules_owed with
+  | Some owed when String.equal owed.kso_keeper keeper ->
+      let read =
+        match result with
+        | Ok _ -> Masc_tui_owed_read.succeeded owed.kso_read
+        | Error _ -> failed_read owed.kso_read
+      in
+      state.keeper_schedules_owed <- Some { owed with kso_read = read }
+  | Some _ | None -> ()
+
+(* A read of this Keeper's schedules is on the wire and still the current
+   one for its tab. *)
+let keeper_schedules_reading state ~keeper_name =
+  match state.keeper_schedules_pending with
+  | Some (request, _, _) when String.equal request.drr_keeper keeper_name -> (
+      match pending_detail_read state ~tab:Detail_automation ~keeper:keeper_name with
+      | Some current -> current.drr_generation = request.drr_generation
+      | None -> false)
+  | Some _ | None -> false
+
+(* Runs on every loop iteration. A Keeper no longer drawn drops its record:
+   drawing it again reads it. *)
+let launch_owed_keeper_schedules state ~mailbox =
+  match state.keeper_schedules_owed with
+  | None -> ()
+  | Some owed
+    when not (Option.equal String.equal (keeper_schedules_on_screen state) (Some owed.kso_keeper)) ->
+      state.keeper_schedules_owed <- None
+  | Some owed ->
+      let keeper_name = owed.kso_keeper in
+      let reading = keeper_schedules_reading state ~keeper_name in
+      let read =
+        if reading then owed.kso_read else Masc_tui_owed_read.abandoned owed.kso_read
+      in
+      state.keeper_schedules_owed <- Some { owed with kso_read = read };
+      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+         && server_authority_ready state
+         && not reading
+      then begin
+        launch_keeper_schedules_load state ~mailbox ~keeper_name;
+        if keeper_schedules_reading state ~keeper_name then
+          state.keeper_schedules_owed <-
+            Some { owed with kso_read = Masc_tui_owed_read.started read }
+      end
+
 let apply_board_hearths_load state result =
   Masc_tui_types.apply_board_census_load state result;
   match result with
@@ -17104,8 +17182,7 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   (if needs.Masc_tui_types.needs_keeper_chat then
      Option.iter (fun keeper_name ->
          launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
-         launch_keeper_child_content_load state ~mailbox ~keeper_name;
-         launch_keeper_chat_schedules_load state ~mailbox ~keeper_name)
+         launch_keeper_child_content_load state ~mailbox ~keeper_name)
        state.msg_target_keeper_name);
   (* An operator who consented in a browser is standing in front of a tab
      that does not know it happened: the callback lands on the server, not
@@ -17824,7 +17901,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_held_calls_read state;
        owe_tool_modes_read state;
        owe_async_requests_read state;
-       owe_schedules_read state
+       owe_schedules_read state;
+       owe_keeper_schedules_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -18194,6 +18272,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_async_requests_read state;
     owe_pending_confirms_read state;
     owe_schedules_read state;
+    owe_keeper_schedules_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -22079,7 +22158,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_async_requests_read state);
       (if !pending_confirms_changed && not !observer_source_loss_seen then
          owe_pending_confirms_read state);
-      (if !schedules_changed && not !observer_source_loss_seen then owe_schedules_read state);
+      (if !schedules_changed && not !observer_source_loss_seen then begin
+         owe_schedules_read state;
+         owe_keeper_schedules_read state
+       end);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -23945,7 +24027,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
   | Keeper_schedules_loaded (request, result) ->
-      apply_keeper_schedules_read state request result
+      let keeper = request.kspr_detail.drr_keeper in
+      let current = keeper_schedules_reading state ~keeper_name:keeper in
+      apply_keeper_schedules_read state request result;
+      if current then settle_keeper_schedules_read state ~keeper result
   | Schedule_cancel_done (schedule_id, result) -> (
       match result with
       | Ok message ->
@@ -31219,6 +31304,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_async_requests state ~mailbox:async_messages;
       launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_schedules state ~mailbox:async_messages;
+      launch_owed_keeper_schedules state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

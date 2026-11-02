@@ -1296,6 +1296,13 @@ type keeper_calls_owed = {
   kclo_read : Masc_tui_owed_read.t;
 }
 
+(* The read the schedules of one Keeper owe while the chat pane or the
+   Automation tab draws them. *)
+type keeper_schedules_owed = {
+  kso_keeper : string;
+  kso_read : Masc_tui_owed_read.t;
+}
+
 (* The read the open Board post owes. *)
 type board_post_owed = {
   bpo_post : string;
@@ -10102,6 +10109,9 @@ type state = {
   (* The read the schedule list behind the agenda strip, and the Schedules
      page, owe on every surface. *)
   mutable schedules_owed: Masc_tui_owed_read.t;
+  (* The read the schedules of the Keeper the chat pane or the Automation tab
+     draws owe. *)
+  mutable keeper_schedules_owed: keeper_schedules_owed option;
   (* The read the Gate snapshot owes. *)
   mutable gate_snapshot_owed: Masc_tui_owed_read.t;
   (* The reads the held tool calls (Overview, Approvals) and the tool
@@ -14353,6 +14363,7 @@ let suspend_workspace_readings state =
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;
   state.schedules_owed <- Masc_tui_owed_read.settled;
+  state.keeper_schedules_owed <- None;
   (* Resumed authority reads the Gate again. *)
   state.gate_snapshot_owed <- Masc_tui_owed_read.settled;
   state.held_calls_owed <- Masc_tui_owed_read.settled;
@@ -19368,6 +19379,7 @@ let create_state
   async_requests_owed = Masc_tui_owed_read.settled;
   pending_confirms_owed = Masc_tui_owed_read.settled;
   schedules_owed = Masc_tui_owed_read.settled;
+  keeper_schedules_owed = None;
   gate_snapshot_owed = Masc_tui_owed_read.settled;
   held_calls_owed = Masc_tui_owed_read.settled;
   tool_modes_owed = Masc_tui_owed_read.settled;

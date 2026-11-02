@@ -10,7 +10,9 @@ import { _testResetTaskCreateState, beginSeparateTaskDraft, createTask, recheckT
 
 const mocks = vi.hoisted(() => ({
   authority: { peek: vi.fn() },
+  workspaceRevision: { peek: vi.fn() },
   executionError: { peek: vi.fn() },
+  lastGoalsRefreshAt: { peek: vi.fn() },
   tasks: { peek: vi.fn() },
   refreshExecution: vi.fn(),
   refreshGoals: vi.fn(),
@@ -18,7 +20,8 @@ const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
 }))
 
-vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority, executionError: mocks.executionError, tasks: mocks.tasks,
+vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority, executionWorkspaceRevision: mocks.workspaceRevision,
+  executionError: mocks.executionError, tasks: mocks.tasks, lastGoalsRefreshAt: mocks.lastGoalsRefreshAt,
   refreshExecution: mocks.refreshExecution, refreshGoals: mocks.refreshGoals, refreshShell: mocks.refreshShell }))
 vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
 vi.mock('../../api/tool-host-failure', () => ({ reportToolHostFailure: async () => {} }))
@@ -51,6 +54,7 @@ beforeEach(() => {
   resetMcpClientState()
   _testResetTaskCreateState()
   mocks.authority.peek.mockReturnValue(authority)
+  mocks.workspaceRevision.peek.mockReturnValue(1)
   mocks.executionError.peek.mockReturnValue(null)
   mocks.tasks.peek.mockReturnValue([{ id: 'task-1' }])
   mocks.refreshExecution.mockResolvedValue(undefined)

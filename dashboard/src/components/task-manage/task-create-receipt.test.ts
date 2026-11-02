@@ -20,6 +20,7 @@ class MemoryStorage {
   value: string | null = null
   failRead = false
   failWrite = false
+  maxBytes = Infinity
   getItem(key: string): string | null {
     expect(key).toBe(TASK_CREATE_RECEIPT_STORAGE_KEY)
     if (this.failRead) throw new Error('storage read unavailable')
@@ -27,13 +28,13 @@ class MemoryStorage {
   }
   setItem(key: string, value: string): void {
     expect(key).toBe(TASK_CREATE_RECEIPT_STORAGE_KEY)
-    if (this.failWrite) throw new Error('storage write unavailable')
+    if (this.failWrite || value.length > this.maxBytes) throw new Error('storage write unavailable')
     this.value = value
   }
 }
 
 function owner(workspace = workspaceA): TaskReceiptOwner {
-  return { workspace, identity: { revision: 1, actor: 'dashboard' }, isCurrent: () => true }
+  return { workspace, identity: { revision: 1, actor: 'dashboard' }, access: 'create_and_read', isCurrent: () => true }
 }
 
 function response(requestId: string, state: string, taskIds: string[], workspace = workspaceA, version = 5): string {
@@ -182,12 +183,12 @@ describe('Task creation receipts', () => {
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
     await store.observe(unknown.requestId)
-    expect(store.compact()).toEqual({ removedAttempts: 2, removedErrors: 0, persisted: true })
+    expect(store.compact()).toEqual({ removedAttempts: 2, removedErrors: 0, removedReads: 0, persisted: true })
     expect(store.attempts.value).toHaveLength(1)
     expect(store.attempts.value[0]).toMatchObject({ requestId: unknown.requestId,
       original: { kind: 'unconfirmed', reason: 'response_unknown' },
-      reads: [{ kind: 'ambiguous', taskIds: ['task-a', 'task-b'] }, { kind: 'error', reason: 'lookup_failed' },
-        { kind: 'not_observed', backlogVersion: 8 }] })
+      reads: [{ kind: 'error', reason: 'lookup_failed' }, { kind: 'ambiguous', taskIds: ['task-a', 'task-b'] },
+        { kind: 'error', reason: 'lookup_failed' }, { kind: 'not_observed', backlogVersion: 8 }] })
     const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
     expect(restored.attempts.value[0]?.reads).toEqual(store.attempts.value[0]?.reads)
     restored.dispose()
@@ -205,7 +206,7 @@ describe('Task creation receipts', () => {
     expect(store.reserve()).toEqual({ kind: 'storage_unavailable' })
     expect(store.storageState.value).toBe('write_failed')
     storage.failWrite = false
-    expect(store.compact()).toEqual({ removedAttempts: 1, removedErrors: 0, persisted: true })
+    expect(store.compact()).toEqual({ removedAttempts: 1, removedErrors: 0, removedReads: 0, persisted: true })
     expect(store.storageState.value).toBe('ready')
     expect(store.attempts.value.map(item => item.requestId)).toEqual([unknown.requestId])
     expect(JSON.parse(storage.value!).attempts[0].original.kind).toBe('unconfirmed')
@@ -319,6 +320,54 @@ describe('Task creation receipts', () => {
     store.dispose()
   })
 
+  it('summarizes increasing versions but preserves reversal, status changes, and different Task IDs', async () => {
+    const { store } = setup()
+    const request = reserve(store)
+    store.settleOriginal(request.requestId, { kind: 'unconfirmed', reason: 'response_unknown' })
+    const versions: Array<[string, string[], number]> = [
+      ['recorded', ['task-a'], 5], ['recorded', ['task-a'], 6], ['recorded', ['task-a'], 7],
+      ['recorded', ['task-a'], 6], ['recorded', ['task-a'], 7], ['recorded', ['task-a'], 8],
+      ['recorded', ['task-b'], 9], ['recorded', ['task-b'], 10],
+      ['not_observed', [], 11], ['not_observed', [], 12], ['recorded', ['task-a'], 13],
+    ]
+    for (const [state, ids, version] of versions) {
+      mocks.call.mockResolvedValueOnce(response(request.requestId, state, ids, workspaceA, version))
+      await store.observe(request.requestId)
+    }
+    expect(store.attempts.value[0]?.original).toEqual({ kind: 'unconfirmed', reason: 'response_unknown' })
+    expect(store.attempts.value[0]?.reads).toEqual([
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 5 },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 7 },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 6 },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 8 },
+      { kind: 'recorded', taskId: 'task-b', backlogVersion: 9 },
+      { kind: 'recorded', taskId: 'task-b', backlogVersion: 10 },
+      { kind: 'not_observed', backlogVersion: 11 },
+      { kind: 'not_observed', backlogVersion: 12 },
+      { kind: 'recorded', taskId: 'task-a', backlogVersion: 13 },
+    ])
+    store.dispose()
+  })
+
+  it('compacts authorized legacy observations and can reserve again within a storage quota', async () => {
+    const storage = new MemoryStorage()
+    const legacyReads = Array.from({ length: 16 }, (_, i) => ({ kind: 'not_observed', backlogVersion: i + 1 }))
+    storage.value = JSON.stringify({ schema: TASK_CREATE_RECEIPT_STORAGE_KEY, attempts: [{ requestId: 'legacy',
+      workspace: workspaceA, goalId: null, createdAt: '2026-11-02T00:00:00.000Z',
+      original: { kind: 'unconfirmed', reason: 'response_unknown' }, presented: false, reads: legacyReads }] })
+    storage.maxBytes = storage.value.length - 100
+    const { store } = setup({ storage })
+    mocks.call.mockResolvedValueOnce(response('legacy', 'not_observed', [], workspaceA, 17))
+    expect(await store.observe('legacy')).toMatchObject({ kind: 'observed', persisted: false })
+    expect(store.storageState.value).toBe('write_failed')
+    expect(store.attempts.value[0]?.reads.length).toBe(16)
+    expect(store.compact()).toEqual({ removedAttempts: 0, removedErrors: 0, removedReads: 14, persisted: true })
+    expect(store.attempts.value[0]).toMatchObject({ original: { kind: 'unconfirmed', reason: 'response_unknown' },
+      reads: [{ kind: 'not_observed', backlogVersion: 1 }, { kind: 'not_observed', backlogVersion: 17 }] })
+    expect(store.reserve().kind).toBe('reserved')
+    store.dispose()
+  })
+
   it.each(['denied', 'invalid'])('does not authorize stored evidence or compaction on a %s read after owner change', async (kind) => {
     const { store, ownerSignal, storage } = setup()
     const request = reserve(store, 'goal-a')
@@ -331,7 +380,7 @@ describe('Task creation receipts', () => {
     expect(result).toMatchObject({ kind: 'observed', result: { kind: 'error' } })
     expect(store.attempts.value[0]).toMatchObject({ originalCurrent: false, latestReadCurrent: false,
       latestReadFailureCurrent: true })
-    expect(store.compact()).toEqual({ removedAttempts: 0, removedErrors: 0, persisted: true })
+    expect(store.compact()).toEqual({ removedAttempts: 0, removedErrors: 0, removedReads: 0, persisted: true })
     expect(store.attempts.value[0]?.original).toEqual({ kind: 'created', taskId: 'task-a' })
     const restored = createTaskCreateReceiptStore({ owner: signal(owner()), storage })
     expect(restored.attempts.value[0]).toMatchObject({ originalCurrent: false, latestReadCurrent: false,

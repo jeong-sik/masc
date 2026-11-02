@@ -8,11 +8,14 @@ const mocks = vi.hoisted(() => ({
   failureDisposition: vi.fn(),
   captureWorkspace: vi.fn(),
   authority: { peek: vi.fn() },
+  workspaceRevision: { peek: vi.fn() },
   executionError: { peek: vi.fn() },
   tasks: { peek: vi.fn() },
   showToast: vi.fn(),
   refreshExecution: vi.fn(),
   refreshGoals: vi.fn(),
+  fetchScopedGoals: vi.fn(),
+  lastGoalsRefreshAt: { peek: vi.fn() },
   refreshShell: vi.fn(),
 }))
 
@@ -28,13 +31,20 @@ vi.mock('../../api/published-artifacts', () => ({
     ({ base_path: workspace.basePath, masc_root: workspace.mascRoot }),
 }))
 vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
-vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority, executionError: mocks.executionError, tasks: mocks.tasks,
+vi.mock('../../store', () => ({ executionWorkspaceAuthority: mocks.authority, executionWorkspaceRevision: mocks.workspaceRevision,
+  executionError: mocks.executionError, tasks: mocks.tasks, lastGoalsRefreshAt: mocks.lastGoalsRefreshAt,
   refreshExecution: mocks.refreshExecution, refreshGoals: mocks.refreshGoals, refreshShell: mocks.refreshShell }))
+vi.mock('../../api/dashboard-goals', async () => ({
+  ...await vi.importActual<typeof import('../../api/dashboard-goals')>('../../api/dashboard-goals'),
+  fetchDashboardGoalsTree: mocks.fetchScopedGoals,
+}))
 
 import { TaskCreateForm, resetForm } from './task-create-form'
 import { TaskCreateReceiptsPanel } from './task-create-receipt-panel'
-import { _testResetTaskCreateState, showTaskCreate, taskCreateReceipts, taskCreating } from './task-manage-state'
+import { _testResetTaskCreateState, createTask, showTaskCreate, taskCreateReceipts, taskCreating } from './task-manage-state'
 import { clearStoredToken, currentDashboardActor, currentStoredTokenRevision, setStoredToken } from '../../api/core'
+import { goalTreeData, goalTreeError, goalTreeLoading, goalTreeObservationRevision } from '../../goal-tree-state'
+import type { DashboardGoalsTreeResponse } from '../../types'
 
 function created(args: Record<string, unknown>): string {
   return JSON.stringify({ ok: true, creation_request_id: args.creation_request_id,
@@ -42,6 +52,11 @@ function created(args: Record<string, unknown>): string {
 }
 
 function identity() { return { revision: currentStoredTokenRevision(), actor: currentDashboardActor() } }
+
+function goalTree(goalId: string, taskId = 'task-1', taskGoalId = goalId): DashboardGoalsTreeResponse {
+  return { tree: [{ id: goalId, tasks: [{ id: taskId, goal_id: taskGoalId }], children: [] }],
+    summary: {}, identity_observation: { ids: [goalId], complete: true } } as unknown as DashboardGoalsTreeResponse
+}
 
 function callArgs(index: number): Record<string, unknown> {
   const args: unknown = mocks.callMcpToolAtIdentity.mock.calls[index]?.[1]
@@ -73,11 +88,22 @@ describe('Task creation draft ownership', () => {
     clearStoredToken()
     _testResetTaskCreateState()
     mocks.authority.peek.mockReturnValue({ epoch: 'epoch-a', workspaceRoot: '/a', connectionGeneration: 1 })
+    mocks.workspaceRevision.peek.mockReturnValue(1)
     mocks.executionError.peek.mockReturnValue(null)
     mocks.tasks.peek.mockReturnValue([{ id: 'task-1' }])
+    mocks.lastGoalsRefreshAt.peek.mockReturnValue('2026-11-02T00:00:00.000Z')
+    goalTreeData.value = null
+    goalTreeError.value = null
+    goalTreeLoading.value = false
+    goalTreeObservationRevision.value = 0
     mocks.captureWorkspace.mockResolvedValue({ basePath: '/a', mascRoot: '/a/.masc' })
     mocks.refreshExecution.mockResolvedValue(undefined)
-    mocks.refreshGoals.mockResolvedValue(undefined)
+    mocks.refreshGoals.mockImplementation(async () => {
+      const goalId = callArgs(0).goal_id
+      if (typeof goalId === 'string') goalTreeData.value = goalTree(goalId)
+      goalTreeObservationRevision.value++
+    })
+    mocks.fetchScopedGoals.mockImplementation(async () => goalTreeData.peek())
     mocks.refreshShell.mockResolvedValue(true)
     mocks.failureDisposition.mockReturnValue('outcome_unknown')
     mocks.callMcpToolAtIdentity.mockImplementation(async (_name: string, args: Record<string, unknown>) => created(args))
@@ -110,6 +136,55 @@ describe('Task creation draft ownership', () => {
     expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('')
     expect((screen.getByPlaceholderText(/배경, 재현 조건/) as HTMLTextAreaElement).value).toBe('')
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('3')
+  })
+
+  it('automatically removes a nested Goal Task only after current and scoped trees both observe it', async () => {
+    const nested = { tree: [{ id: 'parent', tasks: [], children: goalTree('goal-a').tree }], summary: {},
+      identity_observation: { ids: ['parent', 'goal-a'], complete: true } } as unknown as DashboardGoalsTreeResponse
+    mocks.refreshGoals.mockImplementation(async () => { goalTreeData.value = nested; goalTreeObservationRevision.value++ })
+    mocks.fetchScopedGoals.mockResolvedValue(nested)
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' }, identity: identity(), isCurrent: () => true }
+    expect(await createTask({ title: 't', description: '', goal_id: 'goal-a' }, dispatch)).toBe(true)
+    expect(mocks.fetchScopedGoals).toHaveBeenCalledWith(dispatch.workspace)
+    expect(taskCreateReceipts.attempts.peek()).toHaveLength(0)
+  })
+
+  it.each(['partial error', 'superseded', 'missing task', 'wrong goal', 'duplicate goal', 'direct error', 'direct mismatch'])(
+    'retains the created receipt when Goal observation is %s', async condition => {
+      const valid = goalTree('goal-a')
+      goalTreeData.value = valid
+      mocks.refreshGoals.mockImplementation(async () => {
+        if (condition === 'superseded') return
+        goalTreeObservationRevision.value++
+        if (condition === 'partial error') { goalTreeData.value = null; goalTreeError.value = 'goal tree unavailable'; return }
+        if (condition === 'missing task') goalTreeData.value = goalTree('goal-a', 'another-task')
+        else if (condition === 'wrong goal') goalTreeData.value = goalTree('goal-a', 'task-1', 'another-goal')
+        else if (condition === 'duplicate goal') {
+          goalTreeData.value = { ...valid, identity_observation: { ids: ['goal-a', 'goal-a'], complete: true } }
+        } else goalTreeData.value = valid
+      })
+      if (condition === 'direct error') mocks.fetchScopedGoals.mockRejectedValueOnce(new Error('direct read unavailable'))
+      if (condition === 'direct mismatch') mocks.fetchScopedGoals.mockResolvedValueOnce(goalTree('another-goal'))
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' }, identity: identity(), isCurrent: () => true }
+      expect(await createTask({ title: 't', description: '', goal_id: 'goal-a' }, dispatch)).toBe(true)
+      expect(taskCreateReceipts.attempts.peek()[0]).toMatchObject({ original: { kind: 'created', taskId: 'task-1' },
+        presented: false })
+      expect(mocks.showToast).toHaveBeenCalledWith('태스크 생성 완료 · task-1', 'success')
+    },
+  )
+
+  it('does not automatically remove a Goal receipt when ownership changes during the scoped read', async () => {
+    let finishTree!: (tree: DashboardGoalsTreeResponse) => void
+    mocks.fetchScopedGoals.mockImplementationOnce(() => new Promise(resolve => { finishTree = resolve }))
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' }, identity: identity(), isCurrent: () => true }
+    const pending = createTask({ title: 't', description: '', goal_id: 'goal-a' }, dispatch)
+    await waitFor(() => expect(mocks.fetchScopedGoals).toHaveBeenCalledOnce())
+    setStoredToken('different-credential', { source: 'manual' })
+    finishTree(goalTree('goal-a'))
+    expect(await pending).toBe(true)
+    expect(taskCreateReceipts.attempts.peek()[0]).toMatchObject({ original: { kind: 'created', taskId: 'task-1' },
+      presented: false, originalCurrent: false })
   })
 
   it('shows the Task ID and retains a confirmed receipt when post-write refresh fails', async () => {
@@ -334,7 +409,7 @@ describe('Task creation draft ownership', () => {
       creation_receipt: { state: 'recorded', task_ids: ['task-1'] } }))
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
     await screen.findByText('task-1 생성 응답을 받았습니다.')
-    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 중복 조회 오류 정리' }))
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 반복 조회 정리' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
   })
 
@@ -357,7 +432,7 @@ describe('Task creation draft ownership', () => {
       creation_receipt: { state: 'not_observed', task_ids: [] } }))
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
     await screen.findByText('태스크 생성 전에 요청이 거부되었습니다.')
-    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 중복 조회 오류 정리' }))
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 반복 조회 정리' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: '이전 태스크 생성 요청' })).toBeNull())
     expect(mocks.callMcpToolAtIdentity.mock.calls.filter(call => call[0] === 'masc_add_task')).toHaveLength(1)
   })
@@ -423,7 +498,7 @@ describe('Task creation draft ownership', () => {
     fireEvent.click(screen.getByRole('button', { name: '결과 다시 확인' }))
     await screen.findByText(/생성 기록을 확인하지 못했습니다/)
     assertHidden()
-    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 중복 조회 오류 정리' }))
+    fireEvent.click(screen.getByRole('button', { name: '확인된 기록과 반복 조회 정리' }))
     expect(taskCreateReceipts.attempts.value).toHaveLength(1)
     assertHidden()
 

@@ -3,12 +3,16 @@ import { callMcpTaskCreationAtIdentity, callMcpToolAtIdentity, mcpCallFailureDis
 import { currentDashboardActor, currentStoredTokenRevision, getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { retryRejectedDevToken } from '../../api/dev-token'
 import { showToast } from '../common/toast'
-import { executionError, executionWorkspaceAuthority, refreshExecution, refreshGoals, refreshShell, tasks } from '../../store'
+import { executionError, executionWorkspaceAuthority, executionWorkspaceRevision, lastGoalsRefreshAt, refreshExecution,
+  refreshGoals, refreshShell, tasks } from '../../store'
 import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardAuthRevision,
   managedDashboardRefusal, managedDashboardUnverified } from '../../lib/dashboard-session-actor'
 import { storedTokenRevision } from '../../api/token-revision'
-import { isCanonicalGoalId } from '../../lib/goal-identity'
+import { isCanonicalGoalId, isUnambiguousGoalId } from '../../lib/goal-identity'
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
+import { fetchDashboardGoalsTree } from '../../api/dashboard-goals'
+import { goalTreeData, goalTreeError, goalTreeLoading, goalTreeObservationRevision } from '../../goal-tree-state'
+import type { DashboardGoalsTreeResponse, GoalTreeNode } from '../../types'
 import { isRecord } from '../common/normalize'
 import { createTaskCreateReceiptStore, decodeTaskCreationResponse, TASK_CREATE_RECEIPT_STORAGE_KEY, type TaskCreateReservation,
   type TaskReceiptOwner } from './task-create-receipt'
@@ -72,9 +76,10 @@ export function _testResetTaskCreateState(options?: { preserveStorage?: boolean 
   beginSeparateTaskDraft()
 }
 
-function bindReceiptOwner(workspace: ArtifactWorkspace): TaskReceiptOwner | null {
+function bindReceiptOwner(workspace: ArtifactWorkspace, readOnlyWithoutAuthority = false): TaskReceiptOwner | null {
   const authority = executionWorkspaceAuthority.peek()
-  if (!authority) return null
+  if (!authority && !readOnlyWithoutAuthority) return null
+  const workspaceRevision = executionWorkspaceRevision.peek()
   const revision = currentStoredTokenRevision()
   const actor = currentDashboardActor()
   const token = getStoredToken()
@@ -82,6 +87,7 @@ function bindReceiptOwner(workspace: ArtifactWorkspace): TaskReceiptOwner | null
   const actorRevision = managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek()
   const managedRevision = managedDashboardAuthRevision.peek()
   const isCurrent = () => executionWorkspaceAuthority.peek() === authority
+    && executionWorkspaceRevision.peek() === workspaceRevision
     && currentStoredTokenRevision() === revision && currentDashboardActor() === actor
     && (managed ? getStoredToken() === token && getStoredTokenMeta()?.source === 'dev'
       && managedDashboardActorRevision.peek() === actorRevision
@@ -91,14 +97,17 @@ function bindReceiptOwner(workspace: ArtifactWorkspace): TaskReceiptOwner | null
   if (!isCurrent()) return null
   const existing = receiptOwner.peek()
   if (existing && existing.workspace.basePath === workspace.basePath && existing.workspace.mascRoot === workspace.mascRoot
-    && existing.identity.revision === revision && existing.identity.actor === actor && existing.isCurrent()) return existing
-  const owner: TaskReceiptOwner = { workspace: { ...workspace }, identity: { revision, actor }, isCurrent }
+    && existing.identity.revision === revision && existing.identity.actor === actor
+    && existing.access === (authority === null ? 'read_only' : 'create_and_read') && existing.isCurrent()) return existing
+  const owner: TaskReceiptOwner = { workspace: { ...workspace }, identity: { revision, actor },
+    access: authority === null ? 'read_only' : 'create_and_read', isCurrent }
   receiptOwner.value = owner
   return owner
 }
 
 effect(() => {
   void executionWorkspaceAuthority.value
+  void executionWorkspaceRevision.value
   void storedTokenRevision.value
   void dashboardActorRevision.value
   void managedDashboardActorRevision.value
@@ -111,26 +120,40 @@ effect(() => {
 
 async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskReceiptOwner | null> {
   const authority = executionWorkspaceAuthority.peek()
-  if (!authority) {
+  if (!authority && !expected) {
     showToast('현재 작업 공간을 확인한 뒤 이전 요청을 다시 확인해 주세요.', 'warning')
     return null
   }
+  const workspaceRevision = executionWorkspaceRevision.peek()
   const revision = currentStoredTokenRevision()
   const actor = currentDashboardActor()
-  const actorVersion = dashboardActorRevision.peek()
-  const managedVersion = managedDashboardActorRevision.peek()
+  const token = getStoredToken()
+  const managed = token !== null && getStoredTokenMeta()?.source === 'dev'
+  const actorVersion = managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek()
   const managedAuthVersion = managedDashboardAuthRevision.peek()
-  const current = () => executionWorkspaceAuthority.peek() === authority && currentStoredTokenRevision() === revision
-    && currentDashboardActor() === actor && dashboardActorRevision.peek() === actorVersion
-    && managedDashboardActorRevision.peek() === managedVersion && managedDashboardAuthRevision.peek() === managedAuthVersion
+  const ownerAtStart = receiptOwner.peek()
+  const current = () => executionWorkspaceAuthority.peek() === authority && executionWorkspaceRevision.peek() === workspaceRevision
+    && currentStoredTokenRevision() === revision
+    && currentDashboardActor() === actor
+    && (managed ? getStoredToken() === token && getStoredTokenMeta()?.source === 'dev'
+      && managedDashboardActorRevision.peek() === actorVersion && managedDashboardAuthRevision.peek() === managedAuthVersion
+      : dashboardActorRevision.peek() === actorVersion)
+  const retireMatchingOwner = () => {
+    if (current() && expected && ownerAtStart && receiptOwner.peek() === ownerAtStart
+      && ownerAtStart.workspace.basePath === expected.basePath && ownerAtStart.workspace.mascRoot === expected.mascRoot) {
+      receiptOwner.value = null
+    }
+  }
   try {
-    const workspace = await captureArtifactWorkspace(authority.workspaceRoot, undefined, { reportCredentialRefusal: false })
+    const basePath = authority?.workspaceRoot ?? expected?.basePath
+    if (!basePath) return null
+    const workspace = await captureArtifactWorkspace(basePath, undefined, { reportCredentialRefusal: false })
     if (!current()) return null
     if (expected && (workspace.basePath !== expected.basePath || workspace.mascRoot !== expected.mascRoot)) {
+      retireMatchingOwner()
       showToast('이 요청을 보낸 작업 공간에서 다시 확인해 주세요.', 'warning')
       return null
     }
-    const managed = getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
     if (managed && managedDashboardRefusal.peek() === revision) {
       const recheckShell = await retryRejectedDevToken(workspace, current)
       if (recheckShell && current()) await refreshShell({ force: true, recoverAuth: false })
@@ -140,14 +163,19 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace): Promise<TaskRec
       await refreshShell({ force: true, recoverAuth: false })
       return null
     }
-    const owner = bindReceiptOwner(workspace)
+    // A missing execution projection admits this explicit read only. The
+    // authenticated, workspace-bound receipt still gates any disclosure.
+    const owner = bindReceiptOwner(workspace, authority === null)
     if (!owner || !current()) {
       showToast('현재 인증과 작업 공간을 다시 확인해 주세요.', 'warning')
       return null
     }
     return owner
   } catch {
-    if (current()) showToast('이전 요청의 작업 공간을 확인하지 못했습니다.', 'warning')
+    if (current()) {
+      retireMatchingOwner()
+      showToast('이전 요청의 작업 공간을 확인하지 못했습니다.', 'warning')
+    }
     return null
   }
 }
@@ -173,7 +201,7 @@ export function acknowledgeTaskCreateResult(requestId: string): void {
 
 export function compactTaskCreateReceipts(): void {
   const result = taskCreateReceipts.compact()
-  if (result.persisted && result.removedAttempts + result.removedErrors === 0) {
+  if (result.persisted && result.removedAttempts + result.removedErrors + result.removedReads === 0) {
     showToast('정리할 수 있는 기록이 없습니다. 현재 인증으로 결과를 확인해 주세요.', 'warning')
   } else if (result.persisted) showToast('확인된 기록과 중복 조회 오류를 정리했습니다.', 'success')
   else showToast('기록을 정리했지만 저장하지 못했습니다. 저장 상태를 다시 확인해 주세요.', 'warning')
@@ -204,6 +232,22 @@ export type TaskCreatePresentation = {
   readonly isCurrent?: () => boolean
   /** Finish only the draft that submitted this request. */
   readonly finish: () => boolean
+}
+
+function treeHasCreatedTask(tree: DashboardGoalsTreeResponse | null, goalId: string, taskId: string): boolean {
+  if (!tree?.identity_observation?.complete || !isUnambiguousGoalId(goalId, tree.identity_observation.ids)) return false
+  const nodes: GoalTreeNode[] = []
+  const pending = [...tree.tree]
+  while (pending.length > 0) {
+    const node = pending.pop()
+    if (!node || !Array.isArray(node.children)) return false
+    if (node.id === goalId) nodes.push(node)
+    pending.push(...node.children)
+  }
+  const node = nodes[0]
+  if (nodes.length !== 1 || !node || !Array.isArray(node.tasks)) return false
+  const matches = node.tasks.filter(task => task.id === taskId)
+  return matches.length === 1 && matches[0]?.goal_id === goalId
 }
 
 export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTaskDispatch,
@@ -341,11 +385,24 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
     }
     showToast(`태스크 생성 완료 · ${created.taskId}`, 'success')
     try {
+      const goalRevision = goalTreeObservationRevision.peek()
       const observations: Promise<void>[] = []
       if (linkedGoalId !== null || planningDecisionCurrent()) observations.push(refreshExecution({ force: true }))
       if (linkedGoalId !== null) observations.push(refreshGoals())
       await Promise.all(observations)
-      if (reservation.isCurrent() && executionError.peek() === null
+      let goalConfirmed = linkedGoalId === null
+      if (linkedGoalId !== null && reservation.isCurrent() && goalTreeObservationRevision.peek() > goalRevision
+        && !goalTreeLoading.peek() && goalTreeError.peek() === null && lastGoalsRefreshAt.peek() !== null) {
+        const treeRevision = goalTreeObservationRevision.peek()
+        const tree = goalTreeData.peek()
+        if (treeHasCreatedTask(tree, linkedGoalId, created.taskId)) {
+          const scoped = await fetchDashboardGoalsTree(reservation.workspace)
+          goalConfirmed = reservation.isCurrent() && goalTreeObservationRevision.peek() === treeRevision
+            && goalTreeData.peek() === tree && !goalTreeLoading.peek() && goalTreeError.peek() === null
+            && lastGoalsRefreshAt.peek() !== null && treeHasCreatedTask(scoped, linkedGoalId, created.taskId)
+        }
+      }
+      if (goalConfirmed && reservation.isCurrent() && executionError.peek() === null
         && tasks.peek().some(task => task.id === created.taskId)) {
         receipts.markPresented(reservation.requestId)
         receipts.forgetDefinite(reservation.requestId)

@@ -14,7 +14,9 @@ const mockRefreshShell = vi.fn()
 const mockCaptureWorkspace = vi.fn()
 const mockRetryRejectedDevToken = vi.fn()
 const mockAuthority = { peek: vi.fn() }
+const mockWorkspaceRevision = { peek: vi.fn() }
 const mockExecutionError = { peek: vi.fn() }
+const mockLastGoalsRefreshAt = { peek: vi.fn() }
 const mockTasks = { peek: vi.fn() }
 const authorityA = { epoch: 'epoch-a', workspaceRoot: '/a', connectionGeneration: 1 }
 const identity = () => ({ revision: currentStoredTokenRevision(), actor: currentDashboardActor() })
@@ -39,7 +41,9 @@ vi.mock('../../api/published-artifacts', () => ({
 vi.mock('../common/toast', () => ({ showToast: (...args: any[]) => mockShowToast(...args) }))
 vi.mock('../../store', () => ({
   executionWorkspaceAuthority: { peek: () => mockAuthority.peek() },
+  executionWorkspaceRevision: { peek: () => mockWorkspaceRevision.peek() },
   executionError: { peek: () => mockExecutionError.peek() },
+  lastGoalsRefreshAt: { peek: () => mockLastGoalsRefreshAt.peek() },
   tasks: { peek: () => mockTasks.peek() },
   refreshExecution: (...args: any[]) => mockRefreshExecution(...args),
   refreshGoals: () => mockRefreshGoals(),
@@ -62,6 +66,7 @@ describe('task-manage-state', () => {
     mockCaptureWorkspace.mockReset()
     mockRetryRejectedDevToken.mockReset()
     mockAuthority.peek.mockReturnValue(authorityA)
+    mockWorkspaceRevision.peek.mockReturnValue(1)
     mockExecutionError.peek.mockReturnValue(null)
     mockTasks.peek.mockReturnValue([{ id: 'task-1' }])
     mockCaptureWorkspace.mockResolvedValue({ basePath: '/a', mascRoot: '/a/.masc' })

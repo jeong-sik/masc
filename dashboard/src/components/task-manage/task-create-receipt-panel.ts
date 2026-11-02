@@ -61,8 +61,8 @@ export function TaskCreateReceiptsPanel() {
       </div>`
     })}
     <${ActionButton} variant="ghost" size="sm" onClick=${compactTaskCreateReceipts}>
-      확인된 기록과 중복 조회 오류 정리
+      확인된 기록과 반복 조회 정리
     <//>
-    <p class="text-xs text-text-muted">미확정 요청과 모호한 결과는 보관하고, 같은 유형의 조회 오류는 가장 최근 기록을 남깁니다.</p>
+    <p class="text-xs text-text-muted">미확정 요청과 모호한 결과는 보관하고, 연속된 같은 조회의 처음과 최근 버전을 남깁니다.</p>
   </section>`
 }

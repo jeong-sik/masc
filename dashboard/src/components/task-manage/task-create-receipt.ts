@@ -51,6 +51,7 @@ export interface TaskCreateAttempt {
 export interface TaskReceiptOwner {
   readonly workspace: ArtifactWorkspace
   readonly identity: { readonly revision: number; readonly actor: string }
+  readonly access: 'create_and_read' | 'read_only'
   readonly isCurrent: () => boolean
 }
 
@@ -94,7 +95,8 @@ export interface TaskCreateReceiptStore {
   readonly observe: (requestId: string) => Promise<TaskCreateObserveResult>
   readonly retryStorage: () => boolean
   /** Explicitly remove presented/definite records and redundant identical read errors. */
-  readonly compact: () => { readonly removedAttempts: number; readonly removedErrors: number; readonly persisted: boolean }
+  readonly compact: () => { readonly removedAttempts: number; readonly removedErrors: number;
+    readonly removedReads: number; readonly persisted: boolean }
   readonly dispose: () => void
 }
 
@@ -127,16 +129,33 @@ function canonicalTimestamp(value: unknown): value is string {
   return Number.isFinite(date.getTime()) && date.toISOString() === value
 }
 
-function sameObservation(a: TaskCreationRead, b: TaskCreationRead): boolean {
-  if (a.kind === 'error' && b.kind === 'error') return a.reason === b.reason
-  if (a.kind === 'error' || b.kind === 'error' || a.kind !== b.kind) return false
-  if (a.backlogVersion !== b.backlogVersion) return false
+function sameObservationContent(a: TaskCreationObservation, b: TaskCreationObservation): boolean {
+  if (a.kind !== b.kind) return false
   if (a.kind === 'not_observed' && b.kind === 'not_observed') return true
   if (a.kind === 'recorded' && b.kind === 'recorded') return a.taskId === b.taskId
   if (a.kind === 'ambiguous' && b.kind === 'ambiguous') {
     return a.taskIds.length === b.taskIds.length && a.taskIds.every((id, index) => id === b.taskIds[index])
   }
   return false
+}
+
+/** Keep the endpoints of consecutive equal observations with increasing versions. */
+function appendRead(reads: readonly TaskCreationRead[], next: TaskCreationRead): readonly TaskCreationRead[] {
+  const previous = reads.at(-1)
+  if (!previous) return [next]
+  if (previous.kind === 'error' && next.kind === 'error' && previous.reason === next.reason) return reads
+  if (previous.kind === 'error' || next.kind === 'error' || !sameObservationContent(previous, next)) return [...reads, next]
+  if (next.backlogVersion === previous.backlogVersion) return reads
+  if (next.backlogVersion > previous.backlogVersion) {
+    const first = reads.at(-2)
+    if (first && first.kind !== 'error' && sameObservationContent(first, previous)
+      && first.backlogVersion < previous.backlogVersion) return [...reads.slice(0, -1), next]
+  }
+  return [...reads, next]
+}
+
+function summarizeReads(reads: readonly TaskCreationRead[]): readonly TaskCreationRead[] {
+  return reads.reduce<readonly TaskCreationRead[]>((summary, read) => appendRead(summary, read), [])
 }
 
 /** Decode the exact original request and workspace, with state cardinality. */
@@ -333,7 +352,7 @@ export function createTaskCreateReceiptStore(options: {
     if (persistence === 'session' && storageState.peek() !== 'ready') return { kind: 'storage_unavailable' }
     if (goalId !== null && !nonblank(goalId)) return { kind: 'invalid_goal' }
     const owner = options.owner.peek()
-    if (!owner || !workspaceValue(owner.workspace)) return { kind: 'owner_unavailable' }
+    if (!owner || owner.access !== 'create_and_read' || !workspaceValue(owner.workspace)) return { kind: 'owner_unavailable' }
     const workspace = { basePath: owner.workspace.basePath, mascRoot: owner.workspace.mascRoot }
     const identity = { revision: owner.identity.revision, actor: owner.identity.actor }
     const isCurrent = ownerGuard(owner, ownerEpoch, workspace, identity)
@@ -428,7 +447,7 @@ export function createTaskCreateReceiptStore(options: {
     // No await occurs between the final owner check and admitting this read.
     if (!ownerIsCurrent()) return { kind: 'stale' }
     const next = attempts.peek().map(item => item.requestId === requestId
-      ? { ...item, reads: [...item.reads.filter(read => !sameObservation(read, result)), result], checking: false,
+      ? { ...item, reads: appendRead(item.reads, result), checking: false,
         latestReadCurrent: result.kind !== 'error', latestReadFailureCurrent: result.kind === 'error' } : item)
     attempts.value = next
     const persisted = existing.persistence === 'session' && save(attempts.peek())
@@ -451,6 +470,7 @@ export function createTaskCreateReceiptStore(options: {
   const compact = () => {
     let removedAttempts = 0
     let removedErrors = 0
+    let removedReads = 0
     const next: TaskCreateAttempt[] = []
     for (const item of attempts.peek()) {
       if (!canManage(item)) { next.push(item); continue }
@@ -458,20 +478,18 @@ export function createTaskCreateReceiptStore(options: {
         removedAttempts++
         continue
       }
-      const seenErrors = new Set<string>()
-      const retained = [...item.reads].reverse().filter(read => {
-        if (read.kind !== 'error') return true
-        if (!seenErrors.has(read.reason)) { seenErrors.add(read.reason); return true }
-        removedErrors++
-        return false
-      }).reverse()
+      const retained = summarizeReads(item.reads)
+      const beforeErrors = item.reads.filter(read => read.kind === 'error').length
+      const afterErrors = retained.filter(read => read.kind === 'error').length
+      removedErrors += beforeErrors - afterErrors
+      removedReads += item.reads.length - retained.length - (beforeErrors - afterErrors)
       next.push({ ...item, reads: retained })
     }
-    if (disposed) return { removedAttempts: 0, removedErrors: 0, persisted: false }
+    if (disposed) return { removedAttempts: 0, removedErrors: 0, removedReads: 0, persisted: false }
     attempts.value = next
     const persisted = storageState.peek() === 'ready' ? save(next)
       : storageState.peek() === 'write_failed' ? retryStorage() : false
-    return { removedAttempts, removedErrors, persisted }
+    return { removedAttempts, removedErrors, removedReads, persisted }
   }
 
   const dispose = () => {

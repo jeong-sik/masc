@@ -21031,11 +21031,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | None ->
            state.observer_cursor <- None;
            state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
-      state.observer <-
-        Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
-      add_event state "observer"
-        (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
-      add_event state "observer" "runtime event feed open";
+      record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
       launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
       (* A change can land between the initial read and subscription, or
          during a disconnected interval. Read under the current authority. *)
@@ -21392,18 +21388,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
-      let at = Unix.gettimeofday () in
-      (* Only a stream that went live answered; one that closed while opening
-         has no count to keep, and the title must not read one. *)
-      let closed =
-        (match state.observer with
-         | Observer_live { events; _ } ->
-           Observer_closed_after_live { reason; at; events }
-         | Observer_off | Observer_opening | Observer_closed_before_answer _
-         | Observer_closed_after_live _ ->
-           Observer_closed_before_answer { reason; at }) in
-      state.observer <- closed;
-      add_event state "observer" ("runtime event feed closed: " ^ reason);
+      record_observer_closed state outcome ~reason ~at:(Unix.gettimeofday ());
       let owner = ref () in
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;

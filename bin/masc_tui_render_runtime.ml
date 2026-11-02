@@ -1402,12 +1402,17 @@ let render_metrics (state : state) =
   in
   (* The section being read is marked on the strip under this row, so the
      title does not name it a second time. *)
+  let heading =
+    screen_title
+      (if state.usage_telemetry_open then " MASC Usage / Telemetry"
+       else " MASC Usage")
+  in
+  let connection = connection_badge state in
+  let timed_title = Printf.sprintf "%s  %s  %s" heading timestamp connection in
   let title =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title
-         (if state.usage_telemetry_open then " MASC Usage / Telemetry"
-          else " MASC Usage"))
-      timestamp (connection_badge state)
+    if Message_layout.display_width timed_title <= framed_inner_width cols then
+      timed_title
+    else Printf.sprintf "%s  %s" heading connection
   in
   (* The section's lines are formatted by the drawing, so the row it could
      start at is known only once it has. The body writes it here and the
@@ -1431,11 +1436,37 @@ let render_metrics (state : state) =
           if state.usage_section = section then Ansi.reverse ^ " " ^ label ^ " " ^ Ansi.reset
           else Theme.recede () ^ " " ^ label ^ " " ^ Ansi.reset
         in
+        let wide_navigation =
+          pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
+          ^ "  " ^ pill Usage_keepers "Keepers" ^ "   v:next view" in
+        let compact_navigation =
+          pill Usage_plan "Plan" ^ " " ^ pill Usage_trend "Trend"
+          ^ " " ^ pill Usage_keepers "Keepers" ^ " v:next" in
+        let width = framed_inner_width cols in
+        let navigation =
+          if Message_layout.display_width wide_navigation <= width then wide_navigation
+          else if Message_layout.display_width compact_navigation <= width then
+            compact_navigation
+          else
+            let current = match state.usage_section with
+              | Usage_plan -> "Plan" | Usage_trend -> "Trend" | Usage_keepers -> "Keepers" in
+            let current_width = Message_layout.display_width current in
+            let hint =
+              if current_width + 1 + Message_layout.display_width "v:next" <= width
+              then "v:next" else "v" in
+            let room = width - Message_layout.display_width hint - 1 in
+            if room <= 0 then
+              Ansi.reverse ^ Message_layout.take_cells current width ^ Ansi.reset
+            else
+              let label =
+                if room = 1 then Message_layout.take_cells current room
+                else Message_layout.fit_width current (min room current_width) in
+              Ansi.reverse
+              ^ label ^ Ansi.reset ^ " " ^ hint in
+        (* Keep one navigation row so page movement still matches the body height. *)
         let navigation_rows = if budget >= 3 then 1 else 0 in
         let spacing_rows = if budget >= 6 then 1 else 0 in
-        if navigation_rows > 0 then
-          c.push (pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
-                  ^ "  " ^ pill Usage_keepers "Keepers" ^ "   v:next view");
+        if navigation_rows > 0 then c.push navigation;
         if spacing_rows > 0 then c.push "";
         let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
         let lines = usage_lines ~cols ~rows:content_budget state in

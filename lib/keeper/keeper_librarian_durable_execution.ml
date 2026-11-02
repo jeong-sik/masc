@@ -385,7 +385,9 @@ let rec consume_one ~config ~keeper_name ~wake =
            the two never leaves a step without its original. *)
         let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates ~settled in
         let* orphans=settle_orphan_gates ~store ~inventory ~scope originals in
-        let settled=List.filter (fun original -> not (is_candidate original || is_stopped original)) settled in
+        let settled=List.filter (fun ((record,request) as original) ->
+          not (is_candidate original || is_stopped original
+            || Refusal.preserves_completed ~settled ~record ~request)) settled in
         let* chains=settle_chains ~store ~inventory (finished_chains ~settled ~superseded originals) in
         Ok (chains,orphans,steps) in
     match moved with

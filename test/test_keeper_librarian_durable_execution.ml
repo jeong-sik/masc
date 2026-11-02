@@ -1487,6 +1487,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
       {speaker_id=Some "external";speaker_name=Some "External";
        speaker_authority=Keeper_chat_store.External} in
     Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~conversation_id:"agent:original-chat" ~external_message_id:"original-chat-message"
       ~content ~speaker ();
     io (fun () ->
       official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
@@ -1629,6 +1630,73 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
       (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
         ~after:1 ~through:1 ~atom:None ~official:None);
     check int "one refused and one successful complete-input request" 2 (F.post_count fixture.server);
+    let fresh_gates=gate_records fixture fresh_capture |> List.filter (fun gate ->
+      Gate.parent_execution_id gate |> get |> String.equal fresh.request_id) in
+    check bool "the completed original has its own Gate evidence" true (fresh_gates<>[]);
+    let original_before =
+      Keeper_librarian_input_sources.counterpart_snapshot_to_json (Source.counterparts (Capture.source original))
+      |> member "before" |> Yojson.Safe.Util.to_float in
+    let duplicate_at = original_before +. 1. in
+    let surface=Keeper_external_attention.Agent in
+    let item : Keeper_external_attention.item = {
+      event_id=Keeper_external_attention.event_id_of_dedupe_key "late-original-chat";
+      dedupe_key="late-original-chat";keeper_name;
+      conversation={conversation_id="agent:original-chat";surface};
+      external_message=Some {surface;message_id="original-chat-message";reply_to_message_id=None};
+      source_label="agent";
+      actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+      urgency=Keeper_external_attention.Ambient;content_preview="later delivery";
+      content_ref=None;received_at=duplicate_at;metadata=[]} in
+    (match Keeper_external_attention.For_testing.record_with_clock
+       ~now:(fun () -> duplicate_at) ~base_path:fixture.base_path item with
+     | `Recorded -> () | `Duplicate _ -> fail "the later delivery was not recorded"
+     | `Error detail -> fail detail);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    let held_cursor=Keeper_external_read_cursor.observation_to_json (cursor ()) in
+    let check_held_with_witness () =
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "the unacknowledged later delivery must retain the refusal");
+      let originals=observed_originals fixture in
+      check bool "the refusal remains live" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id) originals);
+      check bool "the finished full-input witness remains live" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=fresh.request_id
+          && match Progress.phase record.progress with Finished _ -> true
+             | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+             | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false) originals);
+      check bool "the witness keeps every original Gate" true
+        (List.for_all (fun (gate:Owner.retained) ->
+          List.exists (fun (current:Owner.retained) -> current.request_id=gate.request_id)
+            (gate_records fixture fresh_capture)) fresh_gates);
+      check json "checking the refusal does not acknowledge the later delivery" held_cursor
+        (Keeper_external_read_cursor.observation_to_json (cursor ())) in
+    check_held_with_witness ();
+    Consumer.For_testing.reset_process_state ();
+    restart_actual_worker ~while_off:check_held_with_witness fixture ~sw;
+    check_held_with_witness ();
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    io (fun () -> official_turn fixture.config ~turn:4 ~time:(duplicate_at +. 20.));
+    drive_advanced fixture;
+    check bool "the later commit replaces the witness's current range receipt" false
+      (io (fun () -> Keeper_librarian_durable_commit.receipt_state fresh_capture |> get));
+    check int "the later delivery is acknowledged only by its completed input" 2
+      (Keeper_external_read_cursor.observation_offset (cursor ()));
+    let current_originals=observed_originals fixture in
+    let later=current_originals |> List.filter (fun ((record:Owner.retained),_) ->
+      record.request_id<>rejected.request_id && record.request_id<>fresh.request_id)
+      |> function [original] -> original | _ -> fail "one later original must own the new commit" in
+    let incomplete_stop=memory_action fixture (fun () ->
+      let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store
+        ~owner:(Capture.physical_owner original)) |> get in
+      io (fun () -> List.iter (fun (record,request) ->
+        match Keeper_librarian_durable_commit.validate_inventory ~inventory ~store:fixture.store ~request ~record |> get with
+        | Settled -> () | Unfinished -> fail "the complete inventory must be settled") current_originals);
+      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store ~completed:[later]
+        ~record:rejected ~request:original |> get) in
+    check bool "the later incomplete input cannot replace the full-input witness" true
+      (Option.is_some incomplete_stop);
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
     (match run_worker fixture with
      | Ok Consumer.Nothing_to_read -> ()
@@ -1637,12 +1705,24 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let settled,retained=archived fixture ~date:(day_of rejected.request_id) rejected in
     check json "old refusal and complete source remain in the ordinary archive" (canonical request_json) retained;
     check json "settlement never rewrites the original rejection" rejected_progress (Progress.to_json settled);
-    io (fun () -> official_empty_turn fixture.config ~turn:4 ~time:(Time_compat.now () +. 30.));
+    check bool "the witness remains live until the refusal has left" true
+      (List.exists (fun ((record:Owner.retained),_) -> record.request_id=fresh.request_id)
+        (observed_originals fixture));
+    Consumer.For_testing.reset_process_state ();
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Ok _ -> fail "the completed witness should settle on the next pass"
+     | Error error -> fail (Consumer.error_to_string error));
+    check bool "the witness is archived after the refusal" true
+      (settled_on fixture ~date:(day_of fresh.request_id) fresh);
+    check bool "the witness Gates are archived with it" true
+      (List.for_all (settled_on fixture ~date:(day_of fresh.request_id)) fresh_gates);
+    io (fun () -> official_empty_turn fixture.config ~turn:5 ~time:(duplicate_at +. 30.));
     (match run_worker fixture with
      | Ok (Consumer.Official_advanced _) -> ()
      | Ok _ -> fail "a future empty official range should advance under the restored configuration"
      | Error error -> fail (Consumer.error_to_string error));
-    check int "past refused configuration does not block or redispatch a future range" 2 (F.post_count fixture.server))
+    check int "past refused configuration does not block or redispatch a future range" 3 (F.post_count fixture.server))
 
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
   with_fixture ~history_kind (fun ~sw fixture ->

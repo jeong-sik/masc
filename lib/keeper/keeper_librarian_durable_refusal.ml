@@ -59,29 +59,43 @@ let source_covers original actual =
   && observations_cover (Source.input original).counterpart_observations
        (Source.input actual).counterpart_observations
 
-let completed_covers ~original completed =
-  let rec find = function
-    | [] -> Ok false
-    | ((record : Retained.retained), candidate) :: rest ->
-      (match Progress.phase record.progress with
-       | Finished _ when source_covers original (Request.source candidate) ->
-         (match Runtime.require_counterpart_template (Request.preparation candidate) with
-          | Error _ -> find rest
-          | Ok () ->
-            let* committed = Keeper_librarian_durable_commit.receipt_state candidate in
-            if committed then Ok true else find rest)
-       | Finished _ | Captured | Admission_wait _ | Dispatch_pending _ | Judged _
-       | Committing _ | Commit_unknown _ | Conflicted _ | Rejected _
-       | Subdividing _ | Subdivided _ -> find rest)
-  in
-  find completed
+(* Inventory validation has checked the original host final, Gate and commit
+   marker. Finished was recorded after the receipts and source positions settled;
+   the current range receipt may now belong to a later completed input. *)
+let completed_covers ~original ((record : Retained.retained), candidate) =
+  match Progress.phase record.progress with
+  | Finished _ ->
+    source_covers original (Request.source candidate)
+    && Result.is_ok (Runtime.require_counterpart_template (Request.preparation candidate))
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+  | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
+
+let counterpart_only source =
+  let input = Source.input source in
+  input.messages = [] && input.tool_observations = [] && input.counterpart_observations <> []
+
+(* Pin the witness even when its refusal is ready to move now. Settlement moves
+   records one at a time, so the refusal must leave the live inventory before
+   the finished execution it may still need is allowed to leave it. *)
+let preserves_completed ~settled ~(record:Retained.retained) ~request =
+  match Progress.phase record.progress with
+  | Finished _ ->
+    List.exists (fun ((refused : Retained.retained), original) ->
+      match Progress.phase refused.progress with
+      | Rejected {stage=Progress.Execution;_} ->
+        let source = Request.source original in
+        counterpart_only source && completed_covers ~original:source (record, request)
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+      | Subdividing _ | Subdivided _ -> false) settled
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+  | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
 
 let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   let source=Request.source request in
-  let input=Source.input source in
   match Progress.phase record.progress with
   | Rejected {stage=Progress.Execution;evidence} ->
-    if input.messages<>[] || input.tool_observations<>[] || input.counterpart_observations=[] then Ok None else
+    if not (counterpart_only source) then Ok None else
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
     let* retained=Exact.retained_final_of_json ~schema evidence in
@@ -96,7 +110,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
         | Error (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
           let* committed=io (fun () ->
             let* past=Keeper_librarian_refusal_frontier.past_original ~counterpart_digest request in
-            if past then completed_covers ~original:source completed else Ok false) in
+            Ok (past && List.exists (completed_covers ~original:source) completed)) in
           Ok (if committed then None else Some {request_id=record.request_id;
             destination=Request.destination request;refusal})
         | Error ((Consumer.Keeper_meta_absent

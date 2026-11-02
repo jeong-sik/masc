@@ -18,7 +18,9 @@ val retained_stop : store:Lane_addon_store.t ->
     This is an unresolved refusal of the original, not proof that today's
     source payload is unchanged. Release also requires a validated, completed
     request whose actual input includes every original counterpart observation
-    and whose Memory receipt covers the original range. Range coverage and an
+    and whose original range covers the refused range. Its Finished event is
+    recorded only after its Memory receipts and source settlement were confirmed;
+    later range receipts can replace those receipts. Range coverage and an
     external ACK alone do not establish what another request actually read. This does
     not promote accounted unread holes to read content. Changed positions alone
     do not release it.
@@ -37,6 +39,16 @@ val retained_stop : store:Lane_addon_store.t ->
     their existing policy. No Memory/cursor/ACK effect is authorized. *)
 
 val request_id : t -> string
+val preserves_completed :
+  settled:(Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t) list ->
+  record:Lane_addon_tool_request_owner.retained ->
+  request:Keeper_librarian_durable_request.t -> bool
+(** Call after strict validation of the entire live inventory. Keep this
+    finished original and its complete lineage while any live counterpart-only
+    execution refusal it can cover remains, even when that refusal is ready to
+    settle in this pass. Its record and Gate lineage are the historical proof;
+    this check grants no Memory or cursor effect. *)
+
 val blocks_destination : t list -> Keeper_librarian_durable_request.destination ->
   Keeper_librarian_durable_consumer.error option
 (** Pure check against every retained refusal. Recheck inside the existing

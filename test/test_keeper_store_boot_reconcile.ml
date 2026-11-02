@@ -586,7 +586,7 @@ let test_preflight_reads_admission_queue_without_consuming () =
   write_bytes path {|{"generation":"queue","last_sequence":0,"pending":{}}|};
   let malformed = Fs_compat.load_file path in
   (match D.run scan ~base_path with
-   | Ok {D.rows = 1; refused = 1; first_refusal = Some detail} ->
+   | Ok {D.rows = 1; refused = 1; first_refusal = Some detail; _} ->
      check bool "refusal identifies the keeper" true (String.starts_with ~prefix:"pending: " detail)
    | Ok _ -> fail "malformed queue silently passed" | Error detail -> fail detail);
   check string "refused input remains intact" malformed (Fs_compat.load_file path);
@@ -649,7 +649,7 @@ let test_preflight_names_the_transcript_line_appends_refuse () =
     | D.Refuse_boot _ | D.Degrade_typed _ -> fail "transcripts are read by the preflight only"
   in
   (match D.run scan ~base_path with
-   | Ok { D.rows = 2; refused = 1; first_refusal = Some detail } ->
+   | Ok { D.rows = 2; refused = 1; first_refusal = Some detail; _ } ->
      check bool "the refusal names the file" true
        (String.starts_with ~prefix:(path "unreadable" ^ ": ") detail);
      check bool "the refusal names the line" true
@@ -740,7 +740,7 @@ let test_preflight_refuses_an_older_chat_operation_journal () =
     | D.Refuse_boot _ | D.Degrade_typed _ -> fail "chat operation journals are read by the preflight only"
   in
   match D.run scan ~base_path with
-  | Ok { D.rows = 2; refused = 1; first_refusal = Some detail } ->
+  | Ok { D.rows = 2; refused = 1; first_refusal = Some detail; _ } ->
     check bool "the refusal names the older journal" true
       (String.starts_with ~prefix:(journal "older" ^ ": ") detail);
     check bool "and says its generation is not this build's" true

@@ -84,10 +84,13 @@ module Reported : sig
   val all : t list
 end
 
+type pending_recovery = Memory_publication of { path : string }
+
 type report =
   { rows : int
   ; refused : int
   ; first_refusal : string option
+  ; pending_recovery : pending_recovery list
   }
 
 type scan
@@ -110,7 +113,9 @@ val run : scan -> base_path:string -> (report, string) result
 (** Decode every file or row of the store under [base_path] with this
     build's reader. Reads only: nothing is created, moved or written.
     [Error] means the store could not be listed at all; a file or row that
-    does not decode is counted in [refused]. A [Degrade_typed] store has no
+    does not decode is counted in [refused]. A valid pending publication is
+    recorded in [pending_recovery]; it is not a decode refusal or proof of
+    recoverability. A [Degrade_typed] store has no
     {!scan}, so the preflight cannot read it. *)
 
 val on_refusal : scan -> string

@@ -300,11 +300,11 @@ PY
         # every-durable-store-has-one-boot-policy). This install read
         # runtime.toml alone, so the Memory admission queues #42020 hard-cut
         # stayed unreadable from 2026-10-10 to 10-17 while every server ran
-        # (#43483). The scan reads with this build's decoders and writes
-        # nothing, so the running server is left as it is.
+        # (#43483). The scan uses this build's decoders; Memory publication
+        # recovery remains the running owner's responsibility.
         echo "install-local-build: checking stored state of $workspace_root"
         if ! "$preflight_helper" validate-stores --base-path "$workspace_root"; then
-          echo "install-local-build: this build cannot read the stored state listed above; nothing installed. See docs/guides/DURABLE-STORE-HARD-CUT.md and each refused store's Fresh state required entry (CHANGELOG.md, or changelog.d/ before a release) or fresh state line above. Reconcile affected work, stop every writer on $workspace_root, verify backups, and set aside only the reviewed scope. Run this install again before starting the server." >&2
+          echo "install-local-build: this build could not confirm compatibility with the stored state listed above; nothing installed. See docs/guides/DURABLE-STORE-HARD-CUT.md and each refused store's Fresh state required entry (CHANGELOG.md, or changelog.d/ before a release) or fresh state line above. Reconcile affected work. If fresh state is required, stop every writer on $workspace_root, verify backups, and set aside only the reviewed scope. Run this install again before starting the server." >&2
           exit 1
         fi
       else

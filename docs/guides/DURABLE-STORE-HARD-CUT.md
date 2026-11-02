@@ -20,6 +20,16 @@ it is not an empty store or permission to reset it. `first refusal` is one
 example, not an inventory of every affected file. `on refusal` describes the
 runtime consequence, not an instruction to delete data.
 
+The `memory OS current snapshot` scan also reports `pending recovery` for a
+readable publication receipt. This is not a decoder refusal: the check leaves
+the receipt, snapshot, journal and notification for their owner and cannot
+establish that recovery will succeed. Installation waits for that uncertainty
+to be resolved. A live writer may finish it and a later scan may pass. If it
+does not, preserve the receipt and its linked state; use the compatible owner
+only after verifying the workspace and its evidence. Do not delete or set aside
+a receipt merely because it is pending, and do not dispatch its notification
+from a disconnected inspection process.
+
 ## Inspect the candidate and preserve the evidence
 
 Use the helper from the build being installed, against the resolved workspace
@@ -123,7 +133,7 @@ for an empty proposal. Execution schema 1 and gate version
 The refusal names the owner record's full path, scope, request ID, request
 digest and decoder error. Owner records live under
 `.masc/lane-addons/tool-request-owners/`; the named complete bodies are separate
-files in that store. The check includes historical gate records, full gate
+files in that store. The check includes still-live historical gate records, full gate
 preparations retained by execution parents, and digest-only retry bodies that
 have not yet acquired a child owner record. It checks current payload, source
 and host bindings through read-only ports, including reciprocal root/retry
@@ -135,6 +145,12 @@ transaction/range identity and consecutive positions. These structural checks do
 not observe or initialize
 today's Memory epoch, run parts discovery or publication recovery, replay a
 provider, save Memory, or acknowledge input.
+
+This is an inventory of live owner records and their referenced bodies, not a
+scan of settled owner archives. The external-cursor scan decodes its current
+record but does not join it to archived originals, gates, Memory receipts or
+ACKs. A passing scan does not establish that archived work was completed or
+that a cursor was safe to advance.
 
 For a parent answer that fails its strict consumer schema, this payload scan
 checks the original host's consumer shape and requires the gate proposal to

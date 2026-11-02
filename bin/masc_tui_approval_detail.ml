@@ -3,91 +3,8 @@ module Message_layout = Masc_tui_message_layout
 type line =
   { label : string option
   ; text : string
+  ; unreadable : bool
   }
-
-(* The value is indented under its label, so the label column does not eat
-   into the width every continuation line gets. *)
-let value_indent = "  "
-
-let value_rows ~width value =
-  let budget = max 1 (width - String.length value_indent) in
-  match String.split_on_char '\n' value with
-  | [] -> []
-  | lines ->
-    List.concat_map
-      (fun line ->
-        (* A whole source line that already fits needs no word wrapping:
-           wrapping it would discard indentation and other leading spaces. *)
-        let wrapped =
-          if Message_layout.fits_within_cells ~max_cells:budget line then [ line ]
-          else Message_layout.wrap_words ~max_cells:budget line
-        in
-        match wrapped with
-        (* The existing wrapper can answer nothing for a line of spaces;
-           keep a blank row rather than dropping the source line entirely. *)
-        | [] -> [ { label = None; text = value_indent } ]
-        | wrapped ->
-          List.map (fun text -> { label = None; text = value_indent ^ text }) wrapped)
-      lines
-
-(* As wide as the longest field name, and no wider than this: a pane whose
-   labels ran long would spend the value's room on the column. A field whose
-   name is longer keeps the two-row shape. *)
-let label_column_cells = 16
-
-(* A value that fits sits beside its name. Every field took two rows -- the
-   name, then the value indented under it -- so the five fields of an operator
-   ask filled ten rows of the screen the operator reads before pressing y,
-   and the payload under them started below the fold.
-
-   A value with its own line breaks, one too wide to sit beside the name, and
-   a blank one keep the two-row shape: wrapped lines must not start under the
-   label column, and a field that is present and empty has to draw a row that
-   says so. *)
-let of_fields ~width fields =
-  (* Every value is a Keeper's, a model's or another operator's text, and this
-     is the one place a row of the pane is built, so it is the one place the
-     bytes are made safe to print. A value carrying ESC [ 1 A ESC [ 2 K would
-     otherwise move the cursor and rub out rows the operator already read, and
-     [y] would approve what the store holds rather than what the screen
-     showed. The escape is drawn as [\x1B], not blanked: a blank would hide
-     that one was tried, and a Makefile's tab would read as spaces. The
-     newlines are kept -- they are how the ask was written -- and a label is
-     a single row, so it keeps none. *)
-  let fields =
-    List.map
-      (fun (label, value) ->
-        ( Masc.Tui_terminal_text.sanitize_terminal_text label
-        , Masc.Tui_terminal_text.sanitize_terminal_lines value ))
-      fields
-  in
-  let label_cells =
-    List.fold_left
-      (fun widest (label, _) -> max widest (Message_layout.display_width label))
-      0 fields
-    |> min label_column_cells
-  in
-  let pad label =
-    label
-    ^ String.make
-        (max 0 (label_cells - Message_layout.display_width label))
-        ' '
-  in
-  let beside label value =
-    Message_layout.display_width label <= label_cells
-    && (not (String.contains value '\n'))
-    && String.trim value <> ""
-    && label_cells
-       + String.length value_indent
-       + Message_layout.display_width value
-       <= width
-  in
-  List.concat_map
-    (fun (label, value) ->
-      if beside label value then
-        [ { label = Some label; text = pad label ^ value_indent ^ value } ]
-      else { label = Some label; text = label } :: value_rows ~width value)
-    fields
 
 type gate_origin =
   | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
@@ -126,15 +43,32 @@ let escape_length syntax text at =
     | ('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') when syntax = Json -> 2
     | _ -> 1
 
-let split_gate_cells ~syntax ~max_cells text =
+let split_escaped_cells ?source ~syntax ~max_cells text =
   let length = String.length text in
+  let token_end at =
+    let next = at + escape_length syntax text at in
+    match source with
+    | None -> next
+    | Some (mapped, offset) ->
+        (* A literal backslash can overlap the start of a sanitizer escape.
+           Keep the whole original source expansion even when the lexical
+           JSON escape would stop in its middle. *)
+        let rec finish ending =
+          if ending < length
+             && Masc.Tui_terminal_text.source_byte_at mapped (offset + ending - 1)
+                = Masc.Tui_terminal_text.source_byte_at mapped (offset + ending)
+          then finish (ending + 1)
+          else ending
+        in
+        finish next
+  in
   if String.for_all (fun c -> c >= ' ' && c <= '~') text then
     (* ASCII is common in commands and JSON. Do not allocate one grapheme
        record per byte on every repaint. *)
     let rec loop start at rows =
       if at = length then Some (List.rev (String.sub text start (at - start) :: rows))
       else
-        let next = at + escape_length syntax text at in
+        let next = token_end at in
         if next - at > max_cells then None
         else if next - start > max_cells then
           loop at at (String.sub text start (at - start) :: rows)
@@ -146,7 +80,7 @@ let split_gate_cells ~syntax ~max_cells text =
     let rec escapes at acc =
       if at >= length then List.rev acc
       else
-        let next = at + escape_length syntax text at in
+        let next = token_end at in
         escapes next (if next - at > 1 then (at, next) :: acc else acc)
     in
     let rec skip_ends at = function
@@ -176,7 +110,26 @@ let split_gate_cells ~syntax ~max_cells text =
               let preceding = String.sub row 0 limit in
               let before, after = safe_cut row limit (Message_layout.display_width preceding) in
               (match before, rest with
-               | "", _ | _, [] -> None
+               | _, [] -> None
+               | "", next :: rest ->
+                 (* An earlier correction can leave an escape at the start
+                    of a short row, with its end beyond the following row.
+                    Gather through that end before deciding it cannot fit. *)
+                 let needed = end_ - offset in
+                 let rec complete parts length remaining =
+                   if length >= needed then
+                     let text = String.concat "" (List.rev parts) in
+                     let reshaped = Message_layout.split_cells ~max_cells text in
+                     (match reshaped with
+                      | first :: _ when String.length first >= needed ->
+                        reflow offset (reshaped @ remaining) spans finished
+                      | [] | _ :: _ -> None)
+                   else match remaining with
+                     | [] -> None
+                     | part :: rest ->
+                       complete (part :: parts) (length + String.length part) rest
+                 in
+                 complete [ next; row ] (String.length row + String.length next) rest
                | _, next :: rest ->
                  let reshaped = Message_layout.split_cells ~max_cells (after ^ next) in
                  reflow (offset + String.length before) (reshaped @ rest) spans
@@ -184,6 +137,145 @@ let split_gate_cells ~syntax ~max_cells text =
           | _ -> reflow boundary rest spans (row :: finished)
     in
     reflow 0 rows (escapes 0 []) []
+
+(* The value is indented under its label, so the label column does not eat
+   into the width every continuation line gets. *)
+let value_indent = "  "
+
+let value_rows ~width ~source_map value =
+  let budget = width - String.length value_indent in
+  let unreadable () =
+    Message_layout.split_cells ~max_cells:(max 1 width) "WIDEN"
+    |> List.map (fun text -> { label = None; text; unreadable = true })
+  in
+  if budget < 1 then unreadable ()
+  else
+  let offset = ref 0 in
+  String.split_on_char '\n' value
+  |> List.concat_map (fun line ->
+       let line_offset = !offset in
+       offset := !offset + String.length line + 1;
+       (* Approval input can be source code or a whitespace-sensitive
+          command. Cell splitting keeps every byte of the terminal-safe
+          line, including indentation, repeated spaces and blank lines.
+          These fields also contain JSON args/payload documents, so keep
+          short JSON escapes whole without interpreting the field as JSON. *)
+       let wrapped =
+         if Message_layout.fits_within_cells ~max_cells:budget line then Some [ line ]
+         else
+           let source = Option.map (fun mapped -> Lazy.force mapped, line_offset) source_map in
+           split_escaped_cells ?source ~syntax:Json ~max_cells:budget line
+       in
+       match wrapped with
+       | Some rows ->
+           List.map (fun text ->
+             { label = None; text = value_indent ^ text; unreadable = false }) rows
+       | None ->
+           unreadable ())
+
+(* As wide as the longest field name, and no wider than this: a pane whose
+   labels ran long would spend the value's room on the column. A field whose
+   name is longer keeps the two-row shape. *)
+let label_column_cells = 16
+
+type prepared_field =
+  string * string * Masc.Tui_terminal_text.mapped_text Lazy.t option
+
+type field_cache =
+  { source_fields : (string * string) list
+  ; prepared_fields : prepared_field list
+  ; mutable used : bool
+  }
+
+let field_cache : field_cache option ref Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> ref None)
+
+let begin_frame () =
+  let cache = Domain.DLS.get field_cache in
+  match !cache with
+  | Some previous when previous.used -> previous.used <- false
+  | Some _ -> cache := None
+  | None -> ()
+
+(* Only pure terminal encoding is retained. Layout and unreadable decisions
+   still use the current width on every draw. Exact raw labels and values
+   replace the single retained entry when the approval input changes. *)
+let prepare_fields fields =
+  let cache = Domain.DLS.get field_cache in
+  match !cache with
+  | Some previous when previous.source_fields = fields ->
+      previous.used <- true;
+      previous.prepared_fields
+  | Some _ | None ->
+      let prepared_fields =
+        List.map
+          (fun (label, value) ->
+            let safe = Masc.Tui_terminal_text.sanitize_terminal_lines value in
+            let source_map =
+              if String.equal safe value then None
+              else Some (lazy (Masc.Tui_terminal_text.sanitize_terminal_lines_with_source value))
+            in
+            Masc.Tui_terminal_text.sanitize_terminal_text label, safe, source_map)
+          fields
+      in
+      cache := Some { source_fields = fields; prepared_fields; used = true };
+      prepared_fields
+
+(* A value that fits sits beside its name. Every field took two rows -- the
+   name, then the value indented under it -- so the five fields of an operator
+   ask filled ten rows of the screen the operator reads before pressing y,
+   and the payload under them started below the fold.
+
+   A value with its own line breaks, one too wide to sit beside the name, and
+   a blank one keep the two-row shape: wrapped lines must not start under the
+   label column, and a field that is present and empty has to draw a row that
+   says so. *)
+let of_fields ~width fields =
+  (* Every value is a Keeper's, a model's or another operator's text, and this
+     is the one place a row of the pane is built, so it is the one place the
+     bytes are made safe to print. A value carrying ESC [ 1 A ESC [ 2 K would
+     otherwise move the cursor and rub out rows the operator already read, and
+     [y] would approve what the store holds rather than what the screen
+     showed. The escape is drawn as [\x1B], not blanked: a blank would hide
+     that one was tried, and a Makefile's tab would read as spaces. The
+     newlines are kept -- they are how the ask was written -- and a label is
+     a single row, so it keeps none. *)
+  try
+  let fields = prepare_fields fields in
+  let label_cells =
+    List.fold_left
+      (fun widest (label, _, _) -> max widest (Message_layout.display_width label))
+      0 fields
+    |> min label_column_cells
+  in
+  let pad label =
+    label
+    ^ String.make
+        (max 0 (label_cells - Message_layout.display_width label))
+        ' '
+  in
+  let beside label value =
+    Message_layout.display_width label <= label_cells
+    && (not (String.contains value '\n'))
+    && String.trim value <> ""
+    && label_cells
+       + String.length value_indent
+       + Message_layout.display_width value
+       <= width
+  in
+  List.concat_map
+    (fun (label, value, source_map) ->
+      if beside label value then
+        [ { label = Some label; text = pad label ^ value_indent ^ value; unreadable = false } ]
+      else
+        { label = Some label; text = label;
+          unreadable = not (Message_layout.fits_within_cells ~max_cells:width label) }
+        :: value_rows ~width ~source_map value)
+    fields
+  with exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (Domain.DLS.get field_cache) := None;
+    Printexc.raise_with_backtrace exn backtrace
 
 (* The marker is owned by the renderer and is repeated for every physical
    value row. It is not part of a key or value supplied by the producer. *)
@@ -206,7 +298,7 @@ let of_gate_fields ~width fields =
       let rec collect rows = function
         | [] -> Some (List.rev rows)
         | line :: rest ->
-          (match split_gate_cells ~syntax ~max_cells:room line with
+          (match split_escaped_cells ~syntax ~max_cells:room line with
            | None -> None
            | Some split -> collect (List.rev_append split rows) rest)
       in
@@ -231,7 +323,7 @@ let of_gate_fields ~width fields =
           Gate_json, Json,
           (Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview)
       in
-      match split_gate_cells ~syntax:Text ~max_cells:key_room key with
+      match split_escaped_cells ~syntax:Text ~max_cells:key_room key with
       | None -> unreadable ()
       | Some key_rows ->
         List.mapi

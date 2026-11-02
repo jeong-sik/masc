@@ -22,8 +22,7 @@ type approval_line =
    carrying a page of code read as its first forty characters and there was
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
-  let width = max 8 (framed_inner_width cols - 2) in
-  let gate_width = max 0 (framed_inner_width cols - 2) in
+  let width = max 0 (framed_inner_width cols - 2) in
   (* [Approval_detail.of_fields] makes every value terminal-safe. *)
   let fields, gate_fields =
     match row with
@@ -109,13 +108,13 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
     @ (match gate_fields with
        | None -> []
        | Some fields ->
-         Approval_detail.of_gate_fields ~width:gate_width fields
+         Approval_detail.of_gate_fields ~width fields
          |> List.map (fun line -> Gate_line line))
   in
   let input_unreadable =
     List.exists
       (function
-        | Field_line _ -> false
+        | Field_line line -> line.unreadable
         | Gate_line line -> line.gate_origin = Approval_detail.Gate_unreadable)
       lines
   in

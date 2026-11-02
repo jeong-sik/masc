@@ -16,20 +16,30 @@ type line = private
             sits beside its name on the same row; a long or multi-line one
             keeps the name a row of its own. *)
   ; text : string
+  ; unreadable : bool
+        (** The field needs more width to show a complete grapheme or escape. *)
   }
+
+val begin_frame : unit -> unit
+(** Retain pure field encoding used by the previous frame. An entry not
+    used in a completed frame is withdrawn on the next frame. *)
 
 val of_fields : width:int -> (string * string) list -> line list
 (** [of_fields ~width fields] is [(label, value)] pairs laid out for a pane
-    [width] cells wide. A value keeps its own line breaks and each line wraps;
+    [width] cells wide. A value keeps its own line breaks and whitespace,
+    including on source lines that need wrapping. Visible control and JSON escapes
+    remain whole; if one cannot fit, [unreadable] requests a wider pane;
     a blank value is drawn as such rather than omitted, because a field that
     is present and empty is a different fact from one that is absent.
 
     Every label goes through [Masc.Tui_terminal_text.sanitize_terminal_text] and
-    every value through [Masc.Tui_terminal_text.sanitize_terminal_lines] first: a
+    every value through [Masc.Tui_terminal_text.sanitize_terminal_lines]: a
     value's newlines stay line breaks, and every other control character is
     drawn as its visible escape ([\x1B], [\x09]), so no field can carry an
     escape sequence to the terminal and none is hidden as a space. [line] is
-    private, so only this module can make a row. *)
+    private, so only this module can make a row. Wrapping an expanded value
+    uses [sanitize_terminal_lines_with_source] to retain the original source
+    boundaries; unchanged values need no byte map. *)
 
 type gate_origin =
   | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable

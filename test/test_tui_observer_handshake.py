@@ -31,6 +31,7 @@ Mode = Literal[
     "ahead",
     "media",
     "workspace",
+    "workspace_transient",
     "missing",
     "conflict",
     "missing_after_live",
@@ -60,6 +61,10 @@ class ObserverServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.condition = threading.Condition()
         self.initializes = 0
         self.health_responses = 0
+        self.health_failures = 0
+        self.fail_next_health = False
+        self.fleet_openings = 0
+        self.release_fleet = threading.Event()
         self.requests: list[StreamRequest] = []
         self.sent: list[int] = []
         # The final request is recorded but held until cleanup.
@@ -76,6 +81,10 @@ class ObserverServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
                 list(self.requests),
                 list(self.sent),
             )
+
+    def fleet_count(self) -> int:
+        with self.condition:
+            return self.fleet_openings
 
 
 class ObserverHandler(http.server.BaseHTTPRequestHandler):
@@ -139,6 +148,15 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         server = cast(ObserverServer, self.server)
         path = urllib.parse.urlsplit(self.path).path
         if path == "/health":
+            with server.condition:
+                fail_health = server.fail_next_health
+                server.fail_next_health = False
+                if fail_health:
+                    server.health_failures += 1
+                    server.condition.notify_all()
+            if fail_health:
+                self.respond(503, {"error": "temporary identity outage"})
+                return
             self.respond(
                 200,
                 {
@@ -157,6 +175,29 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
                 server.condition.notify_all()
             return
         if path == "/api/v1/stream/fleet":
+            if server.mode == "workspace_transient":
+                expected = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                if expected.get("expected_base_path") != [server.base] or expected.get(
+                    "expected_masc_root"
+                ) != [server.base + "/.masc"]:
+                    self.respond(409, {"error": "workspace precondition failed"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("x-masc-workspace-read", "matched-v1")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                try:
+                    self.wfile.write(b": fixture fleet open\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                with server.condition:
+                    server.fleet_openings += 1
+                    server.condition.notify_all()
+                server.release_fleet.wait(30)
+                self.close_connection = True
+                return
             self.respond(503, {"error": "fleet stream unavailable in fixture"})
             return
         if path != "/mcp":
@@ -192,7 +233,10 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         if index >= len(server.gates) or not server.gates[index].wait(30):
             self.respond(503, {"error": "fixture gate unavailable"})
             return
-        if server.mode == "workspace" and index == 0:
+        if server.mode in ("workspace", "workspace_transient") and index == 0:
+            if server.mode == "workspace_transient":
+                with server.condition:
+                    server.fail_next_health = True
             self.respond(409, {"code": "workspace_precondition_failed"})
             with server.condition:
                 server.sent.append(index)
@@ -240,6 +284,12 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
                 )
             event_id = (37, 500, 38)[index]
             name = "fixture-rejected" if index == 1 else "fixture-control"
+        elif server.mode == "workspace_transient":
+            headers = (
+                f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: fresh\r\n"
+            )
+            event_id = 37
+            name = "fixture-control"
         elif server.mode == "media":
             replay = "fresh" if index == 0 else "resumed"
             headers = (
@@ -362,7 +412,9 @@ class ObserverHandshakeTest(unittest.TestCase):
                 # a fixture failure, not mistaken for a replay attempt.
                 wait_until(
                     lambda: (
-                        server.snapshot()[1] >= 2 and len(server.snapshot()[2]) >= 1
+                        server.snapshot()[1] >= 2
+                        and len(server.snapshot()[2]) >= 1
+                        and (mode != "workspace_transient" or server.fleet_count() >= 1)
                     ),
                     "initial workspace and observer were not ready",
                 )
@@ -376,6 +428,19 @@ class ObserverHandshakeTest(unittest.TestCase):
                     stable,
                     "observer was replaced while the initial workspace settled",
                 )
+                if mode == "workspace_transient":
+                    last_health = server.snapshot()[1]
+                    quiet_since = time.monotonic()
+
+                    def health_is_quiet() -> bool:
+                        nonlocal last_health, quiet_since
+                        count = server.snapshot()[1]
+                        if count != last_health:
+                            last_health = count
+                            quiet_since = time.monotonic()
+                        return time.monotonic() - quiet_since >= 1.0
+
+                    wait_until(health_is_quiet, "startup health reads did not settle")
                 initial_health = server.snapshot()[1]
 
                 expected = (
@@ -407,7 +472,7 @@ class ObserverHandshakeTest(unittest.TestCase):
                     else [(None, "missing"), ("500", "fixture"), ("38", "fixture")]
                     if mode == "ahead"
                     else [(None, "missing"), (None, "missing")]
-                    if mode == "workspace"
+                    if mode in ("workspace", "workspace_transient")
                     else [(None, "missing"), (None, "missing"), (None, "missing")]
                 )
                 for index, (cursor, instance) in enumerate(expected):
@@ -438,6 +503,17 @@ class ObserverHandshakeTest(unittest.TestCase):
                             initial_health,
                             "workspace refusal must require a new identity read",
                         )
+                    if mode == "workspace_transient" and index == 1:
+                        self.assertEqual(server.health_failures, 1)
+                        self.assertGreater(
+                            server.snapshot()[1],
+                            initial_health,
+                            "a later identity read must recover after the failed read",
+                        )
+                        wait_until(
+                            lambda: server.fleet_count() >= 2,
+                            "Fleet did not reopen after identity recovery",
+                        )
                     if index + 1 < len(expected):
                         server.gates[index].set()
                         wait_until(
@@ -447,6 +523,7 @@ class ObserverHandshakeTest(unittest.TestCase):
             finally:
                 for gate in server.gates:
                     gate.set()
+                server.release_fleet.set()
                 if process is not None:
                     if process.poll() is None:
                         process.terminate()
@@ -482,6 +559,9 @@ class ObserverHandshakeTest(unittest.TestCase):
 
     def test_workspace_refusal_rechecks_identity_without_reinitializing(self) -> None:
         self.run_scenario(mode="workspace")
+
+    def test_reconnect_after_transient_identity_failure(self) -> None:
+        self.run_scenario(mode="workspace_transient")
 
     def test_missing_or_conflicting_session_is_reinitialized(self) -> None:
         for mode in ("missing", "conflict"):

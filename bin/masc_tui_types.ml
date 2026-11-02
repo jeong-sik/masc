@@ -10137,6 +10137,10 @@ type state = {
   mutable board_list_owed: Masc_tui_owed_read.t;
   (* The read the Gate snapshot owes. *)
   mutable gate_snapshot_owed: Masc_tui_owed_read.t;
+  (* The reads the held tool calls (Overview, Approvals) and the tool
+     approval modes (Keepers) owe while their surface is on screen. *)
+  mutable held_calls_owed: Masc_tui_owed_read.t;
+  mutable tool_modes_owed: Masc_tui_owed_read.t;
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
@@ -14441,6 +14445,8 @@ let suspend_workspace_readings state =
   state.board_list_owed <- Masc_tui_owed_read.settled;
   (* Resumed authority reads the Gate again. *)
   state.gate_snapshot_owed <- Masc_tui_owed_read.settled;
+  state.held_calls_owed <- Masc_tui_owed_read.settled;
+  state.tool_modes_owed <- Masc_tui_owed_read.settled;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
   state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
@@ -19449,6 +19455,8 @@ let create_state
   board_post_owed = None;
   board_list_owed = Masc_tui_owed_read.settled;
   gate_snapshot_owed = Masc_tui_owed_read.settled;
+  held_calls_owed = Masc_tui_owed_read.settled;
+  tool_modes_owed = Masc_tui_owed_read.settled;
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   keeper_logs = Masc_tui_fetched.initial;

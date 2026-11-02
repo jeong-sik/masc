@@ -7869,14 +7869,28 @@ let enter_theme_filter state filter =
    surface listed here is read again after the move without a second list.
    Surfaces whose data ride the refresh bundle ([surface_needs]) read
    nothing here. *)
+(* The held tool calls (Overview, Approvals) and the tool approval modes
+   (Keepers) read when their surface opens or the authority resumes, on a
+   revalidation, when the server announces their change, and again after a
+   failed read (RFC-0480 §3.1). *)
+let owe_held_calls_read state =
+  state.held_calls_owed <- Masc_tui_owed_read.changed state.held_calls_owed
+
+let owe_tool_modes_read state =
+  state.tool_modes_owed <- Masc_tui_owed_read.changed state.tool_modes_owed
+
 let launch_surface_reads state ~mailbox (surface : surface) =
   if server_authority_ready state then
   match surface with
   | Lanes -> launch_lanes_load state ~mailbox
   | Clients -> launch_clients_load state ~mailbox
   (* The list draws nothing from the Keeper composite; Info and Secrets read
-     it on entry and on their own cadence. *)
-  | Keepers Keeper_list -> ()
+     it on entry and when it changes. *)
+  | Keepers
+      ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
+      | Keeper_runtime_pick ) ->
+      owe_tool_modes_read state
+  | Overview -> owe_held_calls_read state
   | Approvals ->
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -7922,11 +7936,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_keeper_tool_modes_load state ~mailbox
-  | Overview | Acting | Board | System_logs
-  | Keepers
-      ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
-      | Keeper_runtime_pick ) ->
-      ()
+  | Acting | Board | System_logs -> ()
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -8527,13 +8537,14 @@ let owe_board_post_read state ~mailbox ~post_id =
 let owe_board_list_read state =
   state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed
 
-(* A failed list read leaves the list owed and waiting whoever started it, so
-   the read on entering the Board retries like an announced one. *)
-let fail_board_list_read state =
-  state.board_list_owed <-
-    Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
-      (Masc_tui_owed_read.started (Masc_tui_owed_read.changed state.board_list_owed))
+(* A failed read leaves its record owed and waiting whoever started it, so a
+   read on entering a surface retries like an announced one. *)
+let failed_read owed =
+  Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+    (Masc_tui_owed_read.started (Masc_tui_owed_read.changed owed))
+
+let fail_board_list_read state = state.board_list_owed <- failed_read state.board_list_owed
 
 (* The Gate snapshot reads again when the queue, the standing rules, a Gate
    mode or a Keeper's Gate settings change, on a revalidation or a resumed
@@ -8542,13 +8553,8 @@ let fail_board_list_read state =
 let owe_gate_snapshot_read state =
   state.gate_snapshot_owed <- Masc_tui_owed_read.changed state.gate_snapshot_owed
 
-(* A failed Gate read leaves the snapshot owed and waiting whoever started
-   it, so a read on entering a surface retries like an announced one. *)
 let fail_gate_snapshot_read state =
-  state.gate_snapshot_owed <-
-    Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
-      (Masc_tui_owed_read.started (Masc_tui_owed_read.changed state.gate_snapshot_owed))
+  state.gate_snapshot_owed <- failed_read state.gate_snapshot_owed
 
 (* Runs on every loop iteration. A Gate read already in flight is let
    finish first; one that will not deliver leaves the snapshot owed again. *)
@@ -8565,6 +8571,58 @@ let launch_owed_gate_snapshot state ~mailbox =
   then begin
     state.gate_snapshot_owed <- Masc_tui_owed_read.started read;
     launch_gate_snapshot_load state ~mailbox
+  end
+
+let held_calls_on_screen state =
+  match state.view with
+  | Overview | Approvals -> true
+  | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules | Verification
+  | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+  | Resources | Tools | System_logs | Keepers _ ->
+      false
+
+let tool_modes_on_screen state =
+  match state.view with
+  | Keepers _ -> true
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs ->
+      false
+
+(* Runs on every loop iteration. A held-call read already in flight is let
+   finish first; one that will not deliver leaves the listing owed again. *)
+let launch_owed_held_calls state ~mailbox =
+  if not (held_calls_on_screen state) then
+    state.held_calls_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = Snapshot_read.in_flight state.keeper_tool_approvals_read in
+    let read =
+      if reading then state.held_calls_owed
+      else Masc_tui_owed_read.abandoned state.held_calls_owed
+    in
+    state.held_calls_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+       && server_authority_ready state
+       && not reading
+    then begin
+      state.held_calls_owed <- Masc_tui_owed_read.started read;
+      launch_keeper_tool_approvals_load state ~mailbox
+    end
+  end
+
+(* Runs on every loop iteration. The modes are not read while an operator's
+   own mode press is in flight: the answer would be the stance from before
+   it. An answer the listing refuses leaves the modes owed again. *)
+let launch_owed_tool_modes state ~mailbox =
+  if not (tool_modes_on_screen state) then
+    state.tool_modes_owed <- Masc_tui_owed_read.settled
+  else if
+    Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.tool_modes_owed
+    && server_authority_ready state
+    && not (Approval.Flow.action_inflight state.approval_flow)
+  then begin
+    state.tool_modes_owed <- Masc_tui_owed_read.started state.tool_modes_owed;
+    launch_keeper_tool_modes_load state ~mailbox
   end
 
 let apply_board_hearths_load state result =
@@ -17665,7 +17723,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        Option.iter
          (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
          (board_post_on_screen state);
-       owe_gate_snapshot_read state
+       owe_gate_snapshot_read state;
+       owe_held_calls_read state;
+       owe_tool_modes_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -21555,16 +21615,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox;
-      (* The held-call listing rides the same cadence as the surface that
-         draws it. Fetched only while the surface is up: the waits are
-         short-lived and every other surface would fetch rows it never
-         shows. *)
-      (match state.view with
-       | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
-       | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
-       | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules | Verification
-       | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
-       | Resources | Tools | System_logs -> ());
       (* The refresh that confirmed this identity also confirmed its own
          listing request, so its confirm-queue answer was refused as
          superseded before it could ever be drawn. The other approval
@@ -21628,6 +21678,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let open_board_post_changed = ref false in
       let board_changed = ref false in
       let gate_changed = ref false in
+      let held_calls_changed = ref false in
+      let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21712,6 +21764,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Option.is_some (Masc_tui_observer.board_changed_post event) then
                 board_changed := true;
               if Masc_tui_observer.gate_snapshot_changed event then gate_changed := true;
+              if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
+              if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
                    open_board_post_changed := true
@@ -21899,6 +21953,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !board_changed && not !observer_source_loss_seen && state.view = Board then
          owe_board_list_read state);
       (if !gate_changed && not !observer_source_loss_seen then owe_gate_snapshot_read state);
+      (if !held_calls_changed && not !observer_source_loss_seen then owe_held_calls_read state);
+      (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
@@ -22138,13 +22194,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox
         ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
-        results;
-      (match state.view with
-       | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
-       | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
-       | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules | Verification
-       | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
-       | Resources | Tools | System_logs -> ());
+        results
       end;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
@@ -24133,13 +24183,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           && Option.exists (same_server_workspace expected_workspace) state.server_identity then
        match result with
        | Ok held ->
+           state.held_calls_owed <- Masc_tui_owed_read.succeeded state.held_calls_owed;
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
            state.keeper_tool_approvals_observed <- true;
            let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
-       | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+       | Error detail ->
+           state.held_calls_owed <- failed_read state.held_calls_owed;
+           state.keeper_tool_approvals_error <- Some detail)
   | Listen_prepared (request, result) ->
       if input_pending () || Option.is_some state.quit_armed then
         withdraw_pending_music_editor state;
@@ -24820,9 +24873,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ticket
       in
       state.tool_modes_order <- order;
-      if admitted then
+      if not admitted then
+        state.tool_modes_owed <- Masc_tui_owed_read.abandoned state.tool_modes_owed
+      else
         (match result with
          | Ok overrides ->
+             state.tool_modes_owed <- Masc_tui_owed_read.succeeded state.tool_modes_owed;
              state.keeper_tool_modes_observed <- true;
              state.keeper_tool_modes_error <- None;
              state.keeper_yolo_names <-
@@ -24833,6 +24889,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    | Masc.Keeper_tool_approval_mode.Auto -> None)
                  overrides
          | Error detail ->
+             state.tool_modes_owed <- failed_read state.tool_modes_owed;
              state.keeper_tool_modes_error <- Some detail)
   | Keeper_tool_mode_set (keeper_name, mode, result, generation) ->
       let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
@@ -31023,6 +31080,8 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_calls state ~mailbox:async_messages;
       launch_owed_board_post state ~mailbox:async_messages;
       launch_owed_gate_snapshot state ~mailbox:async_messages;
+      launch_owed_held_calls state ~mailbox:async_messages;
+      launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

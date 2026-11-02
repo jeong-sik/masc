@@ -606,6 +606,18 @@ let test_only_a_gate_change_changes_the_gate_snapshot () =
           ; transport_health_frame; fusion_run_status_frame
           ; turn_observation_frame; chat_appended_frame; memory_journal_frame
           ; board_post_changed_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "only the held call change reads the held calls" 1
+    (count Observer.held_calls_changed (gate_frames @ tool_approval_frames));
+  (* A mode change and the two Keeper Gate setting changes. *)
+  check int "a mode or Keeper Gate setting change reads the modes" 3
+    (count Observer.tool_modes_changed (gate_frames @ tool_approval_frames));
   check bool "a Keeper setting change without its Keeper says why it was not read" true
     (match decode_all [ {|data: {"type":"gate_keeper_mode_changed","mode":null}
 

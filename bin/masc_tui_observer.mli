@@ -285,6 +285,13 @@ val gate_snapshot_changed : event -> bool
     the approval queue, the standing rules, a Gate mode or a Keeper's Gate
     settings changed. *)
 
+val held_calls_changed : event -> bool
+(** The tool calls a Keeper holds for an operator changed. *)
+
+val tool_modes_changed : event -> bool
+(** What [/api/v1/keepers/tool-approval-mode] and the Keeper Gate settings
+    answer changed: a tool approval mode or a Keeper's Gate setting. *)
+
 val board_changed_post : event -> string option option
 (** [Some post] for {!Board_changed}, where [post] is the post it names or
     [None] when it names none; [None] for every other event. *)

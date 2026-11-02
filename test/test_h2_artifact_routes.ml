@@ -578,7 +578,9 @@ let open_draft_stream gateway ~worker ~headers ~path =
     ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE stream failed"))
     ~response_handler:(fun response reader ->
       if H2.Status.to_code response.status <> 200 then (
-        if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE admission refused"))
+        if not (Eio.Promise.is_resolved first) then
+          Eio.Promise.resolve resolve
+            (Error (Printf.sprintf "SSE admission refused: HTTP %d" (H2.Status.to_code response.status))))
       else
         let rec read () = H2.Body.Reader.schedule_read reader
           ~on_eof:(fun () -> if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE closed before initial frame"))

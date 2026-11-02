@@ -1394,6 +1394,46 @@ let candidate_rejection_disposition_to_string
   | Request_preparation_failed -> "request preparation failed"
 ;;
 
+(* Provider failure kinds can themselves contain untrusted strings, including
+   values copied from a response body. Keep those out of the cause just as we
+   keep the provider message out; only the caller renders the raw body. *)
+let safe_provider_failure_kind_to_string : Http_client.provider_failure_kind -> string =
+  function
+  | Http_client.Capacity_exhausted { scope; retry_after = _; model = _ } ->
+    let scope =
+      match scope with
+      | Http_client.Failure_scope_model -> "model"
+      | Http_client.Failure_scope_account -> "account"
+      | Http_client.Failure_scope_region -> "region"
+      | Http_client.Failure_scope_provider -> "provider"
+      | Http_client.Failure_scope_unknown -> "unknown"
+    in
+    "capacity_exhausted:" ^ scope
+  | Http_client.Hard_quota { retry_after = _ } -> "hard_quota"
+  | Http_client.Capability_mismatch { capability = _ } -> "capability_mismatch"
+  | Http_client.Cli_policy_invalid { tool_name = _; rule = None } -> "cli_policy_invalid"
+  | Http_client.Cli_policy_invalid { tool_name = _; rule = Some rule } ->
+    Printf.sprintf "cli_policy_invalid:rule_%d" rule
+  | Http_client.Cli_startup_failed { reason } ->
+    "cli_startup_failed:" ^ Http_client.cli_startup_failure_reason_to_string reason
+  | Http_client.Provider_parse_error { parser = _ } -> "provider_parse_error"
+  | Http_client.Provider_wire_error { format; kind } ->
+    Printf.sprintf
+      "provider_wire_error:%s:%s"
+      (Http_client.provider_wire_format_to_string format)
+      (Http_client.provider_wire_error_kind_to_string kind)
+  | Http_client.Provider_reported_error { error_type = _ } -> "provider_reported_error"
+  | Http_client.Provider_interrupted -> "provider_interrupted"
+  | Http_client.Response_body_too_large { limit_bytes } ->
+    Printf.sprintf "response_body_too_large:%d" limit_bytes
+  | Http_client.Empty_completion { stop_reason } ->
+    "empty_completion:" ^ Types.stop_reason_to_metric_label stop_reason
+  | Http_client.Context_overflow { limit = None } -> "context_overflow"
+  | Http_client.Context_overflow { limit = Some limit } ->
+    Printf.sprintf "context_overflow:limit_%d" limit
+  | Http_client.Unknown_provider_failure { reason = _ } -> "unknown_provider_failure"
+;;
+
 let http_error_kind_to_string : Http_client.http_error -> string = function
   | Http_client.HttpError { code; body = _; retry_after_header = _ } ->
     Printf.sprintf "http_status=%d" code
@@ -1404,10 +1444,10 @@ let http_error_kind_to_string : Http_client.http_error -> string = function
   | Http_client.AcceptRejected { reason = _ } -> "accept_rejected"
   | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message = _ } ->
     "provider_terminal:session_conflict"
-  | Http_client.ProviderTerminal { kind = Http_client.Other subtype; message = _ } ->
-    "provider_terminal:" ^ subtype
+  | Http_client.ProviderTerminal { kind = Http_client.Other _; message = _ } ->
+    "provider_terminal:other"
   | Http_client.ProviderFailure { kind; message = _ } ->
-    Http_client.provider_failure_kind_to_string kind
+    safe_provider_failure_kind_to_string kind
 ;;
 
 let generation_dispatch_fact_to_string : generation_dispatch_fact -> string = function

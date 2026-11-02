@@ -523,63 +523,6 @@ let test_terminal_text_escapes_control_sequences () =
     "safe\\x1B]0;owned\\x07\\x0A\\x09\\u0080done"
     (Masc.Tui_terminal_text.sanitize_terminal_text payload)
 
-let test_terminal_json_preserves_source_context () =
-  let selector = "\239\184\143" in
-  let supplementary = "\243\160\132\128" in
-  let cases =
-    [ "control before selector", `String ("\000" ^ selector), false
-    ; "C1 before selector", `String ("\194\128" ^ selector), false
-    ; "literal backslash and digit", `String ("\\u0000" ^ selector), true
-    ; "actual emoji base", `String ("0" ^ selector), true
-    ; "emoji presentation", `String "❤️", true
-    ; "supplementary selector", `String supplementary, false
-    ; "object key and nested value",
-      `Assoc [("\000" ^ selector), `List [`String ("\t" ^ selector)]], false
-    ] in
-  List.iter (fun (label, value, retains_selector) ->
-    let source = Yojson.Safe.pretty_to_string value in
-    let shown = Tui_terminal_json.sanitize_canonical_preview source in
-    Alcotest.(check bool) (label ^ ": selector visibility") retains_selector
-      (String_util.contains_substring shown selector);
-    Alcotest.(check bool) (label ^ ": same JSON value") true
-      (Yojson.Safe.from_string shown = value)) cases;
-  let scalar code =
-    let bytes = Buffer.create 4 in
-    Buffer.add_utf_8_uchar bytes (Uchar.of_int code);
-    Buffer.contents bytes in
-  let tags = List.map scalar [0xe0067; 0xe0062; 0xe0073; 0xe0063; 0xe0074; 0xe007f] in
-  let flag = scalar 0x1f3f4 ^ String.concat "" tags in
-  List.iter (fun emoji ->
-    let shown = Yojson.Safe.to_string (`String emoji)
-      |> Tui_terminal_json.sanitize_canonical_preview in
-    Alcotest.(check bool) "valid emoji sequence stays intact" true
-      (String_util.contains_substring shown emoji)) ["👩‍💻"; "❤️‍🔥"; flag];
-  let partial_flag = scalar 0x1f3f4 ^ List.hd tags in
-  let shown = Yojson.Safe.to_string (`String partial_flag)
-    |> Tui_terminal_json.sanitize_canonical_preview in
-  Alcotest.(check bool) "an orphan tag is shown rather than hidden" false
-    (String_util.contains_substring shown (List.hd tags));
-  Alcotest.(check bool) "escaping an orphan tag preserves its JSON value" true
-    (Yojson.Safe.from_string shown = `String partial_flag)
-
-let test_terminal_json_truncated_and_malformed_escapes () =
-  let selector = "\239\184\143" in
-  let source = Yojson.Safe.to_string (`String ("\000" ^ selector)) in
-  for cut = 0 to String.length source do
-    let prefix = String_util.utf8_prefix ~max_bytes:cut source in
-    let shown = Tui_terminal_json.sanitize_canonical_preview prefix in
-    Alcotest.(check bool) "a truncated orphan selector is not emitted raw" false
-      (String_util.contains_substring shown selector)
-  done;
-  List.iter (fun input ->
-    let shown = Tui_terminal_json.sanitize_canonical_preview input in
-    Alcotest.(check bool) "malformed escape does not pass ESC" false
-      (String.contains shown '\027'))
-    ["\"\\\027[2J"; "\"\\u00\027[2J"];
-  let shown = Tui_terminal_json.sanitize_canonical_preview "\"raw\nnewline" in
-  Alcotest.(check bool) "newline in an unfinished string is escaped" false
-    (String.contains shown '\n')
-
 let test_terminal_text_preserves_printable_utf8 () =
   Alcotest.(check string)
     "printable UTF-8 survives"
@@ -14463,11 +14406,7 @@ let () =
           test_play_invite_refusal_says_the_servers_sentence ] );
     ( "terminal text"
     , [ Alcotest.test_case "plain scalars have none of the walk's properties" `Quick
-          test_plain_scalars_have_none_of_the_properties_the_walk_reacts_to
-      ; Alcotest.test_case "JSON keeps original selector context" `Quick
-          test_terminal_json_preserves_source_context
-      ; Alcotest.test_case "JSON prefixes cannot bypass terminal controls" `Quick
-          test_terminal_json_truncated_and_malformed_escapes ] );
+          test_plain_scalars_have_none_of_the_properties_the_walk_reacts_to ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

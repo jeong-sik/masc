@@ -25,7 +25,7 @@ let traverse f values =
 
 let compare_target (id1, rev1) (id2, rev2) =
   let c = String.compare id1 id2 in
-  if c <> 0 then c else String.compare rev1 rev2
+  if c <> 0 then c else Int.compare rev1 rev2
 
 let of_json ~received_at json =
   let* root = fields ["checks"; "diagnostics"] json in

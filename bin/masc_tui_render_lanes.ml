@@ -1147,6 +1147,18 @@ type lane_run_prepared_field =
   ; full_bytes : int
   }
 
+let json_preview_lines ~width text =
+  (* A grapheme can be wider than the row allotted to it. Keep the whole
+     pane for the JSON so a decorative gutter cannot make a character
+     that otherwise fits disappear at the outer frame. *)
+  let palette =
+    { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+  text
+  |> Masc.Tui_terminal_text.sanitize_terminal_lines
+  |> fenced_document_text ~language:"json"
+  |> Masc_tui_markdown.render ~palette ~width
+  |> List.map (fun line -> Ansi.reset, line)
+
 let lane_run_payload_lines ~width json =
   let fence = fenced_document_text ~language:"json" in
   let prepare_document value =
@@ -1163,8 +1175,8 @@ let lane_run_payload_lines ~width json =
   (* Field allocation reserves the minimum above; non-object payloads receive
      the full preview budget. Both callers therefore leave a non-negative room. *)
   let render_document ~budget prepared =
-    let document, notices =
-      if String.length prepared.document <= budget then prepared.document, []
+    let text, notices =
+      if String.length prepared.document <= budget then prepared.full_text, []
       else
         let wrapper_bytes = String.length prepared.document - String.length prepared.full_text in
         let room = budget - wrapper_bytes - String.length prepared.notice - 1 in
@@ -1173,13 +1185,9 @@ let lane_run_payload_lines ~width json =
           | Some newline -> newline
           | None -> String_util.utf8_char_boundary prepared.full_text room
         in
-        fence (String.sub prepared.full_text 0 cut), [ Theme.warn (), prepared.notice ]
+        String.sub prepared.full_text 0 cut, [ Theme.warn (), prepared.notice ]
     in
-    let lines =
-      document_markdown ~width document
-      |> List.map (fun line -> Ansi.reset, line)
-    in
-    lines @ notices
+    json_preview_lines ~width text @ notices
   in
   match json with
   | `Assoc (_ :: _ as fields) ->
@@ -1696,17 +1704,7 @@ let measurement_output_preview ~width ~output_path parts =
   let render = function
     | Measurement_text line -> measurement_text_lines ~width [line]
     | Measurement_json "" -> []
-    | Measurement_json value ->
-      (* A grapheme can be wider than the row allotted to it. Keep the whole
-         pane for the JSON so a decorative gutter cannot make a character
-         that otherwise fits disappear at the outer frame. *)
-      let palette =
-        { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
-      value
-      |> Masc.Tui_terminal_text.sanitize_terminal_lines
-      |> fenced_document_text ~language:"json"
-      |> Masc_tui_markdown.render ~palette ~width
-      |> List.map (fun line -> Ansi.reset, line)
+    | Measurement_json value -> json_preview_lines ~width value
   in
   measurement_text_lines ~width notice @ List.concat_map render preview
 

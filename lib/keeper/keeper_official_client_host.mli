@@ -470,14 +470,12 @@ val project_source :
   input_source:Keeper_request_source.t ->
   unread:Keeper_librarian_request_unread.t ->
   Keeper_history_projection.t option -> Keeper_history_projection.t
-(** A Keeper history retains the same frozen unread evidence after a custom
-    source projection. It may change the history view, but cannot remove or
-    replace this evidence. Native requests explicitly carry known empty
-    observations too, allowing a resumed session to supersede older unread
-    evidence. The same carrier is pinned before capacity measurement.
-    A program-owned completion review has no Keeper unread observation: its
-    supplied messages are not rewritten by this step, and a custom projection
-    is returned unchanged. *)
+(** Apply the caller's explicit source projection, preserving its errors.
+    [Completion_review] returns that view without adding or replacing Keeper
+    unread observations; without a projection the supplied evidence is exact.
+    [Keeper_history] preserves its frozen unread evidence after a custom view,
+    including known empty observations that supersede a resumed session's older
+    evidence. That Keeper carrier is also pinned before capacity measurement. *)
 
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result

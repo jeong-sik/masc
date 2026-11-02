@@ -229,6 +229,11 @@
  (action
   (run %{exe:test_keeper_codex_current_context.exe} test "async receipt continuation")))
 
+(rule
+ (alias runtest-test_keeper_codex_completion_evidence)
+ (action
+  (run %{exe:test_keeper_codex_current_context.exe} test "completion evidence")))
+
 (test
  (name test_keeper_vision_official_client)
  (modules test_keeper_vision_official_client)

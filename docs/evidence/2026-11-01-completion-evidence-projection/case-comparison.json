@@ -1,0 +1,49 @@
+{
+  "common_cases": 4,
+  "ordered_case_keys_sha256": "f08b4b0bce278ae9871d2a7c4960eb02878ea782fd0732ec0411a63ca56b4973",
+  "encoding": "UTF-8 compact JSON array of [suite, group, historical full literal case name], ensure_ascii=false, separators comma/colon, one trailing LF. Actual group/index is resolved against historical source; ellipses are not identities.",
+  "transitions": {
+    "PASS->PASS": 1,
+    "FAIL->PASS": 3,
+    "FAIL->FAIL": 0,
+    "PASS->FAIL": 0
+  },
+  "cases": [
+    {
+      "key": [
+        "test_keeper_codex_completion_evidence",
+        "completion evidence",
+        "completion evidence without a Keeper boundary keeps every atom"
+      ],
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test_keeper_codex_completion_evidence",
+        "completion evidence",
+        "native Start preserves evidence without Keeper unread state"
+      ],
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test_keeper_codex_completion_evidence",
+        "completion evidence",
+        "native Start preserves an explicit completion projection"
+      ],
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test_keeper_codex_completion_evidence",
+        "completion evidence",
+        "projection refusal prevents every native request"
+      ],
+      "baseline": "PASS",
+      "candidate": "PASS"
+    }
+  ]
+}

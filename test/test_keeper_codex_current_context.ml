@@ -176,6 +176,7 @@ default = "codex.%s"
   let reports = ref [] in
   let run ?argument_source ?official_task_reference ?model_input_projection ?prompt_blocks
       ?(tools=[]) ?tool_choice ?hook_reasoning_effort
+      ?(input_source = Keeper_request_source.Keeper_history {trace_id="context-fixture"})
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
@@ -192,7 +193,7 @@ default = "codex.%s"
             ~default:current_params.reasoning_effort in
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice;reasoning_effort}
       | _ -> Agent_core.Hooks.Continue) } in
-    Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
+    Keeper_codex_runtime.run ~input_source
       ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~configured_reasoning_effort:runtime.model.reasoning_effort
@@ -1230,6 +1231,59 @@ let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   check int "the native completion review does not read a Keeper seed" 0 !seed_reads;
   check int "the native completion review does not query the Librarian" 0 !librarian_reads
 
+let test_completion_evidence_reaches_native_writer ~custom_projection () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let evidence_texts = ["COMPLETION_ORIGINAL_A"; "COMPLETION_ORIGINAL_B"] in
+  let evidence = List.map Agent_core.Types.user_msg evidence_texts in
+  let projected_texts = if custom_projection then ["COMPLETION_EXPLICIT_VIEW"] else evidence_texts in
+  let projection_calls = ref 0 in
+  let model_input_projection = if custom_projection then
+      Some (fun _ -> incr projection_calls;
+        Ok (List.map Agent_core.Types.user_msg projected_texts))
+    else None in
+  successful (run ~input_source:Keeper_request_source.Completion_review
+    ?model_input_projection ~initial_messages:evidence
+    ~turn_start:(Keeper_carried_front.Turn_boundary_unknown {reason="independent completion evidence"})
+    ~carried_front_seed:(fun () -> fail "completion evidence read a Keeper seed")
+    ~librarian_front:(fun _ -> fail "completion evidence queried the Librarian")
+    ~instructions:"Review the supplied evidence." ~world:"" ());
+  let rows = read_requests capture in
+  let injected = match params_of "thread/inject_items" rows with
+    | [params] -> params |> member "items" |> items
+    | _ -> fail "expected one acknowledged evidence injection" in
+  let actual_texts = List.map (fun item ->
+    check string "evidence keeps its native user role" "user" (item |> member "role" |> text);
+    item |> member "content" |> items
+    |> List.concat_map (fun block -> block |> member "text" |> text
+      |> Yojson.Safe.from_string |> member "message" |> member "content_blocks" |> items)
+    |> List.map (fun block -> block |> member "text" |> text)
+    |> String.concat "") injected in
+  check (list string) "native writer receives the exact selected evidence view"
+    projected_texts actual_texts;
+  check int "explicit source projection runs once" (if custom_projection then 1 else 0)
+    !projection_calls;
+  let start = match params_of "thread/start" rows with
+    | [params] -> params | _ -> fail "expected one fresh completion thread" in
+  check bool "the native request invents no Keeper unread observation" false
+    (String_util.contains_substring (start |> member "developerInstructions" |> text)
+      "[Librarian unread evidence:");
+  check int "completion evidence is submitted once" 1
+    (List.length (params_of "turn/start" rows));
+  check bool "the source evidence remains unchanged" true
+    (List.map Agent_core.Types.text_of_message evidence = evidence_texts)
+
+let test_completion_projection_failure_prevents_native_request () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let refusal = Agent_core.Error.Internal "explicit completion projection refusal" in
+  let attempt = run ~input_source:Keeper_request_source.Completion_review
+      ~model_input_projection:(fun _ -> Error refusal)
+      ~instructions:"Review the supplied evidence." ~world:"" () in
+  (match attempt.Keeper_codex_runtime.result with
+   | Error error -> check bool "the exact typed projection failure propagates" true (error=refusal)
+   | Ok _ -> fail "a refused completion projection reached execution");
+  check int "no provider request follows a refused projection" 0
+    (List.length (read_requests capture))
+
 let test_resume_sends_no_history () =
   (* The thread already holds the conversation. Neither the instructions nor
      the turn input carry any of it. *)
@@ -1513,13 +1567,21 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a ceiling cuts inside the range" `Quick test_a_ceiling_cuts_inside_the_range;
   test_case "an overflow floor never restores the last atom" `Quick test_the_overflow_floor_does_not_restore_the_newest_atom;
   test_case "an unknown turn start carries the newest atom" `Quick test_an_unknown_turn_start_carries_the_newest_atom;
-  test_case "completion evidence without a Keeper boundary keeps every atom" `Quick test_completion_evidence_without_a_keeper_boundary_keeps_every_atom;
   test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
   test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resume carries per-turn context in front of the goal" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:false);
   test_case "pooled context projection preserves fresh and resumed requests" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:true);
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn];
+  "completion evidence",[
+    test_case "completion evidence without a Keeper boundary keeps every atom" `Quick
+      test_completion_evidence_without_a_keeper_boundary_keeps_every_atom;
+    test_case "native Start preserves evidence without Keeper unread state" `Quick
+      (test_completion_evidence_reaches_native_writer ~custom_projection:false);
+    test_case "native Start preserves an explicit completion projection" `Quick
+      (test_completion_evidence_reaches_native_writer ~custom_projection:true);
+    test_case "projection refusal prevents every native request" `Quick
+      test_completion_projection_failure_prevents_native_request];
   "async receipt continuation",[
     test_case "host checkpoint preserves result through fresh-session intake" `Quick
       (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:false);

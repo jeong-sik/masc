@@ -36,6 +36,9 @@ val offset : token -> int
 val prepare : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_name:string -> token -> through:int ->
   atom:Keeper_memory_os_current.durable_range_id option ->
   official:Keeper_memory_os_current.official_range_id option -> (unit, string) result
+(** Reject a backwards [through] or an advancing request without a Memory
+    identity before reading or recovering an existing pending cursor. Valid
+    preparations can still recover a previously committed pending cursor. *)
 val acknowledge : runtime_keepers_dir:string -> keeper_name:string -> (unit, string) result
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string

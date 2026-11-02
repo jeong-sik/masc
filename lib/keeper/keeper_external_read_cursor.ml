@@ -113,11 +113,14 @@ let read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name =
       let* () = acknowledge ~runtime_keepers_dir ~keeper_name in Ok (Offset p.through)
     else Ok (Offset state.after)
 let prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (Offset after) ~through ~atom ~official =
+  let* () =
+    if through < after then Error "external attention log shrank behind its read cursor"
+    else if through > after && atom=None && official=None then
+      Error "external read has no Memory commit identity"
+    else Ok () in
   let* current = read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name in
   if offset current <> after then Error "external admission cursor changed before preparation"
-  else if through < after then Error "external attention log shrank behind its read cursor"
   else if through = after then save ~runtime_keepers_dir ~keeper_name {after;pending=None}
-  else if atom=None && official=None then Error "external read has no Memory commit identity"
   else
     let* prior_atom = match atom with
       | None -> Ok None

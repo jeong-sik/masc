@@ -479,6 +479,14 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
      committed but before the external cursor and ordinary progress wrote. *)
   let pending_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
   let pending_bytes = Fs_compat.load_file pending_path in
+  List.iter (fun (label,through,atom) ->
+    (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial
+       ~through ~atom ~official:None with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail (label ^ " preparation was accepted"));
+    Alcotest.(check string) (label ^ " leaves the pending cursor unchanged") pending_bytes
+      (Fs_compat.load_file pending_path))
+    ["backwards", -1, Some range; "missing identity", 3, None];
   let observed = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
   Alcotest.(check int) "observation does not recover a committed Memory receipt" 0
     (Cursor.observation_offset observed);

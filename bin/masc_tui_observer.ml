@@ -160,6 +160,9 @@ type event =
   (* Server push with no payload: a run registry changed, and a reader that
      shows internal runs re-fetches them. *)
   | Internal_agent_runs_changed
+  (* Server push with no payload: the workspace's schedules changed, and a
+     reader that shows schedules re-fetches them. *)
+  | Schedules_changed
   (* Server push: a Board write. The Board re-reads on it; [post_id] is the
      post the params name, if any. *)
   | Board_changed of { post_id : string option }
@@ -198,7 +201,7 @@ let chat_appended_keeper = function
   | Keeper_composite_changed _ | Keeper_memory_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
@@ -209,7 +212,7 @@ let composite_changed_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
@@ -220,7 +223,7 @@ let tool_call_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
@@ -232,7 +235,7 @@ let memory_journal_appended_keeper = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
@@ -248,7 +251,7 @@ let held_calls_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       false
 
@@ -264,7 +267,7 @@ let tool_modes_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       false
 
@@ -275,6 +278,18 @@ let async_requests_changed = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
+      false
+
+let schedules_changed = function
+  | Schedules_changed -> true
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
       false
@@ -291,7 +306,7 @@ let pending_confirms_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       false
 
@@ -307,7 +322,7 @@ let asks_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       false
 
@@ -319,7 +334,7 @@ let board_changed_post = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Approval_change _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Approval_change _ | Lane_resource _
   | Snapshot _ | Other _ ->
       None
 
@@ -337,7 +352,7 @@ let gate_snapshot_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
       false
 
@@ -722,6 +737,8 @@ let reading_of_type type_name =
           | None -> Error "fusion_run_status carries no run object")
   | type_name when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
       Named Internal_agent_runs_changed
+  | type_name when String.equal type_name Masc.Schedules_changed_event.event_type ->
+      Named Schedules_changed
   | "keeper_chat_appended" as event ->
       From_fields
         (fun fields ->

@@ -224,6 +224,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "brand_new_push"
     ; Observer.Internal_agent_runs_changed
+    ; Observer.Schedules_changed
     ; Observer.Keeper_chat_stream_frame
         { keeper = "test-keeper"; operation_id = "op"; seq = None
         ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
@@ -238,7 +239,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all twelve" 12 (under Acting.Everything);
+  check int "everything keeps all thirteen" 13 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
 
@@ -540,6 +541,7 @@ let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
          (Float.equal (at_of event) received))
     [ ("an unknown type", Observer.Other "brand_new_push")
     ; ("the internal runs push", Observer.Internal_agent_runs_changed)
+    ; ("the schedules push", Observer.Schedules_changed)
     ; ("a snapshot", Observer.Snapshot "execution_snapshot")
       (* These two carried a clock of their own before, and it is no longer
          what the row shows -- the row shows the order it sits in. *)
@@ -1078,6 +1080,7 @@ let test_measuring_reads_what_the_row_draws () =
     ; ("a removed container", lane_resource Lane_events.Release_confirmed)
     ; ("a heartbeat", heartbeat "keeper-one")
     ; ("a registry push", Observer.Internal_agent_runs_changed)
+    ; ("a schedules push", Observer.Schedules_changed)
     ];
   (* The dividing case: the drawn row names the keeper, and that is not the
      name [row_of_entry] gives it. Drawing without the rename would leave the

@@ -238,6 +238,10 @@ type event =
       (** An internal agent run registry -- verification, goal verification,
           exact lanes -- changed. A server push with no payload, named by
           {!Masc.Internal_agent_runs_event}. *)
+  | Schedules_changed
+      (** The workspace's schedules changed. A server push with no payload,
+          named by {!Masc.Schedules_changed_event}: the reader re-fetches
+          [/api/v1/dashboard/scheduled-automation]. *)
   | Board_changed of { post_id : string option }
       (** A Board write: a post, a comment, a vote, a reaction, or a change
           to an existing post. It arrives as the JSON-RPC
@@ -303,6 +307,9 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val schedules_changed : event -> bool
+(** The workspace's schedules changed. *)
 
 val pending_confirms_changed : event -> bool
 (** The confirmations waiting for an operator changed or one passed its

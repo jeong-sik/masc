@@ -649,7 +649,7 @@ let render_acting_evidence (state : state) entry =
         @ preview "Input preview" call.kt_tool_args_preview
         @ json "Output" call.kt_tool_result
         @ preview "Output preview" call.kt_tool_output_preview
-    | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _ | Masc_tui_observer.Agent_core _
+    | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _ | Masc_tui_observer.Agent_core _
     | Masc_tui_observer.Keeper_heartbeat _ | Masc_tui_observer.Keeper_turn_complete _
     | Masc_tui_observer.Keeper_turn_observation _ | Masc_tui_observer.Keeper_composite_changed _
     | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Keeper_memory_journal_appended _
@@ -748,7 +748,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_turn_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
       | Masc_tui_observer.Fusion_run_status _
-      | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+      | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
       | Masc_tui_observer.Lane_resource _
       | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->

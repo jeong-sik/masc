@@ -131,6 +131,7 @@ let summary = function
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event Observer.Schedules_changed -> "schedules"
   | Observer.Event (Observer.Approval_change change) ->
       Printf.sprintf "approval(%s)"
         (match change with
@@ -625,6 +626,32 @@ let test_only_a_confirmation_change_reads_the_confirmations () =
           || Observer.tool_modes_changed event || Observer.asks_changed event)
        [ pending_confirms_frame ])
 
+let schedules_frame =
+  Printf.sprintf "data: {\"type\":%S}\n\n" Masc.Schedules_changed_event.event_type
+
+let test_only_a_schedule_change_reads_the_schedules () =
+  check (list string) "a schedule change decodes as one" [ "schedules" ]
+    (List.map summary (decode_all [ schedules_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it reads the schedules" 1 (count Observer.schedules_changed [ schedules_frame ]);
+  check int "no confirmation, question, Gate, held call, mode or async request change does" 0
+    (count Observer.schedules_changed
+       ([ pending_confirms_frame; async_requests_frame ]
+        @ asks_frames @ gate_frames @ tool_approval_frames));
+  check int "it reads nothing else" 0
+    (count
+       (fun event ->
+          Observer.gate_snapshot_changed event || Observer.held_calls_changed event
+          || Observer.tool_modes_changed event || Observer.asks_changed event
+          || Observer.pending_confirms_changed event || Observer.async_requests_changed event)
+       [ schedules_frame ])
+
 let test_only_an_async_request_change_reads_the_async_requests () =
   check (list string) "an async request change decodes with its Keeper"
     [ "async_requests:lane-smith" ]
@@ -1085,6 +1112,8 @@ let () =
             test_only_an_async_request_change_reads_the_async_requests
         ; test_case "only a confirmation change reads the confirmations" `Quick
             test_only_a_confirmation_change_reads_the_confirmations
+        ; test_case "only a schedule change reads the schedules" `Quick
+            test_only_a_schedule_change_reads_the_schedules
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

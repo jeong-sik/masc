@@ -38,7 +38,7 @@ let is_change frame =
   | Ok payload ->
     (match Yojson.Safe.from_string payload with
      | `Assoc fields ->
-       List.assoc_opt "type" fields = Some (`String Server_schedule_broadcast.changed_event)
+       List.assoc_opt "type" fields = Some (`String Masc.Schedules_changed_event.event_type)
      | _ -> false
      | exception Yojson.Json_error _ -> false)
 

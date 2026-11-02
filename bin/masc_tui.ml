@@ -4086,10 +4086,10 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
 
   end
 
-let launch_schedule_agenda_load state ~mailbox =
+let launch_schedule_agenda_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   if server_authority_ready state then begin
     let enqueue_async = workspace_enqueue state in
-    let read, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.schedules_agenda_read in
+    let read, request = Snapshot_read.start ~intent state.schedules_agenda_read in
     state.schedules_agenda_read <- read;
     match request with
     | None -> ()
@@ -8709,6 +8709,44 @@ let launch_owed_async_requests state ~mailbox =
       state.async_requests_owed <- Masc_tui_owed_read.started read;
       launch_tools_async_observation_load state ~mailbox
     end
+  end
+
+(* The schedule list behind the agenda strip, drawn on every surface, and the
+   Schedules page read again when the server says the schedules changed, on a
+   revalidation or a resumed authority, and after a failed read
+   (RFC-0480 §3.1). Entering Schedules and [r] read them directly. *)
+let owe_schedules_read state =
+  state.schedules_owed <- Masc_tui_owed_read.changed state.schedules_owed
+
+let settle_schedules_read state = function
+  | Ok _ -> state.schedules_owed <- Masc_tui_owed_read.succeeded state.schedules_owed
+  | Error _ -> state.schedules_owed <- failed_read state.schedules_owed
+
+let schedules_reading state =
+  Snapshot_read.in_flight state.schedules_agenda_read
+  || Snapshot_read.in_flight state.schedules_read
+
+(* Runs on every loop iteration. A read already in flight is let finish
+   first; one that will not deliver leaves the schedules owed again. On
+   Schedules the page is read with the agenda; a later page reads the agenda
+   on its own as well. *)
+let launch_owed_schedules state ~mailbox =
+  let reading = schedules_reading state in
+  let read =
+    if reading then state.schedules_owed else Masc_tui_owed_read.abandoned state.schedules_owed
+  in
+  state.schedules_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+     && server_authority_ready state
+     && not reading
+  then begin
+    let intent = Snapshot_read.Refresh in
+    (if state.view = Schedules then begin
+       launch_schedules_load ~intent state ~mailbox;
+       if Option.is_some state.schedules_page.sp_cursor then
+         launch_schedule_agenda_load ~intent state ~mailbox
+     end else launch_schedule_agenda_load ~intent state ~mailbox);
+    if schedules_reading state then state.schedules_owed <- Masc_tui_owed_read.started read
   end
 
 let apply_board_hearths_load state result =
@@ -17088,21 +17126,7 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   (* The "answering now" badge rides every tick for the same reason as the
      held approvals: it is drawn from every surface, and its whole point is
      the operator who walked away from the chat pane. *)
-  launch_keeper_turns_load state ~mailbox;
-  (* The schedule list rides for the same reason, now that the agenda strip
-     names the next wake from every surface. Fetched only on the Schedules
-     surface it was empty everywhere else, and a strip that says nothing is
-     scheduled while thirteen wakes are queued is worse than no strip.
-
-     Measured on this workspace before it was added: 12.4 kB gzipped, 2.1 ms
-     to serve, against a two-second cadence. The projection sorts the active
-     rows ahead of the settled ones and cuts at twenty, so the earliest wake
-     is in the payload whether or not the tail is. *)
-  (if state.view = Schedules then begin
-     launch_schedules_load state ~mailbox;
-     if Option.is_some state.schedules_page.sp_cursor then
-       launch_schedule_agenda_load state ~mailbox
-   end else launch_schedule_agenda_load state ~mailbox)
+  launch_keeper_turns_load state ~mailbox
   end
 ;;
 
@@ -17799,7 +17823,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_gate_snapshot_read state;
        owe_held_calls_read state;
        owe_tool_modes_read state;
-       owe_async_requests_read state
+       owe_async_requests_read state;
+       owe_schedules_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -18168,6 +18193,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_asks_read state;
     owe_async_requests_read state;
     owe_pending_confirms_read state;
+    owe_schedules_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21767,6 +21793,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let asks_changed = ref false in
       let async_requests_changed = ref false in
       let pending_confirms_changed = ref false in
+      let schedules_changed = ref false in
       let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
@@ -21856,6 +21883,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
+              if Masc_tui_observer.schedules_changed event then schedules_changed := true;
               if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
@@ -21877,7 +21905,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21928,7 +21956,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22051,6 +22079,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_async_requests_read state);
       (if !pending_confirms_changed && not !observer_source_loss_seen then
          owe_pending_confirms_read state);
+      (if !schedules_changed && not !observer_source_loss_seen then owe_schedules_read state);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -23881,9 +23910,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Mtime_clock.elapsed_ns ()) (Result.is_ok result)
       end
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
-      apply_schedule_agenda_read state ticket result
+      let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
+      apply_schedule_agenda_read state ticket result;
+      if current then settle_schedules_read state result
   | Schedules_loaded (Schedule_page_read request, result) ->
-      apply_schedule_page_read state request result
+      let current =
+        Snapshot_read.is_current state.schedules_read request.spr_ticket
+        || Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
+             request.spr_agenda_ticket
+      in
+      apply_schedule_page_read state request result;
+      if current then settle_schedules_read state result
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from
@@ -31181,6 +31218,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_asks state ~mailbox:async_messages;
       launch_owed_async_requests state ~mailbox:async_messages;
       launch_owed_pending_confirms state ~mailbox:async_messages;
+      launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

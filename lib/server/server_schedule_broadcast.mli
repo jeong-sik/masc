@@ -4,11 +4,9 @@
     external subscribers' callbacks, which write to WebSocket and gRPC
     streams, so it never runs on a schedule store writer. *)
 
-val changed_event : string
-
 val changed : base_path:string -> unit
-(** [schedules_changed]. [base_path] names the workspace in the log line a
-    failed broadcast leaves. *)
+(** {!Schedules_changed_event}. [base_path] names the workspace in the log
+    line a failed broadcast leaves. *)
 
 val announcements : unit -> int
 (** How many times {!changed} has run in this process. A schedule runner tick

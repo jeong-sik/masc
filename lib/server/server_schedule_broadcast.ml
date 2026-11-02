@@ -1,16 +1,14 @@
-let changed_event = "schedules_changed"
-
 let announcement_count = Atomic.make 0
 let announcements () = Atomic.get announcement_count
 
 let changed ~base_path =
   Atomic.incr announcement_count;
-  try Sse.broadcast (`Assoc [ "type", `String changed_event ]) with
+  try Sse.broadcast (Schedules_changed_event.to_json ()) with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Server.warn
       "schedules: broadcast %s for %s failed: %s"
-      changed_event
+      Schedules_changed_event.event_type
       base_path
       (Printexc.to_string exn)
 ;;

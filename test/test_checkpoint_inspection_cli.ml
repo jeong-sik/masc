@@ -19,7 +19,8 @@ let checkpoint () =
   let messages =
     [ message User [Text "Run the command"]
     ; message Assistant [ToolUse {id="call"; name="Execute"; input=`Assoc []}]
-    ; message Tool [ToolResult {tool_use_id="call"; content="fixture result";
+    ; message Tool [ToolResult {tool_use_id="call";
+                                content="{\"marker\":\"marker\",\"cwd\":\"/sandbox\",\"hostname\":\"guest\",\"uid\":1000}";
                                 outcome=Tool_succeeded; json=None; content_blocks=None}]
     ; message Assistant [Text "finished"] ]
   in
@@ -39,8 +40,7 @@ let rec remove path =
     Unix.rmdir path
   | _ -> Unix.unlink path
 
-let run_cli root name =
-  let executable = Sys.getenv "MASC_TEST_MASC_EXE" |> Unix.realpath in
+let run_program root executable args =
   let stdout_path = Filename.concat root "inspect.stdout" in
   let stderr_path = Filename.concat root "inspect.stderr" in
   let flags = [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] in
@@ -48,14 +48,24 @@ let run_cli root name =
   let stderr_fd = Unix.openfile stderr_path flags 0o600 in
   let env = [|"HOME=" ^ root; "MASC_BASE_PATH=" ^ root;
                "PATH=" ^ Option.value ~default:"/usr/bin:/bin" (Sys.getenv_opt "PATH")|] in
-  let pid = Unix.create_process_env executable
-      [|executable; "inspect-checkpoint"; "--base-path"; root; "--keeper"; name|]
+  let pid = Unix.create_process_env executable (Array.of_list (executable :: args))
       env Unix.stdin stdout_fd stderr_fd in
   Unix.close stdout_fd;
   Unix.close stderr_fd;
   let _, status = Unix.waitpid [] pid in
   let read path = In_channel.with_open_bin path In_channel.input_all in
   status, read stdout_path, read stderr_path
+
+let run_cli root name =
+  let executable = Sys.getenv "MASC_TEST_MASC_EXE" |> Unix.realpath in
+  run_program root executable ["inspect-checkpoint"; "--base-path"; root; "--keeper"; name]
+
+let run_smoke_consumer root =
+  let executable = Sys.getenv "MASC_TEST_MASC_EXE" |> Unix.realpath in
+  let script = Sys.getenv "MASC_TEST_SMOKE_PY" |> Unix.realpath in
+  match run_program root "python3" [script; "--real-fixture"; executable; root] with
+  | Unix.WEXITED 0, _, _ -> ()
+  | _, stdout, stderr -> fail ("smoke consumer rejected the real checkpoint: " ^ stdout ^ stderr)
 
 let require_json root name =
   match run_cli root name with
@@ -104,6 +114,7 @@ let test_canonical_objects () =
       let reference = actual |> member "reference" in
       check int "reference turn" 1 (reference |> member "turn_count" |> to_int);
       check int "content digest length" 64 (reference |> member "content_sha256" |> to_string |> String.length);
+      run_smoke_consumer root;
       let head = Yojson.Safe.from_file head_path in
       let turns = head |> member "history" |> member "turns" |> to_list in
       let digest = match turns with

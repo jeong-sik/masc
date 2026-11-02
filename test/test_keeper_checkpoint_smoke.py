@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -109,5 +110,24 @@ class CheckpointProofTest(unittest.TestCase):
         self.assertIsNotNone(self.read())
 
 
+def check_real_fixture(binary, root):
+    base = Path(root)
+    fixture = SimpleNamespace(
+        checkpoint_binary=binary, checkpoint_binary_sha256=smoke.file_sha256(binary),
+        checkpoint_keeper='checkpoint-inspection-fixture', call_id='call', tool_name='Execute',
+        final='finished', marker='marker',
+        proof={'marker': 'marker', 'cwd': '/sandbox', 'hostname': 'guest', 'uid': 1000},
+        checkpoint_env={'HOME': root, 'MASC_BASE_PATH': root, 'PATH': str(Path(sys.executable).parent)})
+    answer = smoke.checkpoint_proof(base, fixture, 30)
+    if answer is None:
+        raise AssertionError('the real canonical checkpoint was not accepted')
+    path, data = answer
+    if not path.is_file() or data['reference']['turn_count'] != 1:
+        raise AssertionError('the real canonical checkpoint reference is incorrect')
+
+
 if __name__ == '__main__':
-    unittest.main()
+    if len(sys.argv) == 4 and sys.argv[1] == '--real-fixture':
+        check_real_fixture(sys.argv[2], sys.argv[3])
+    else:
+        unittest.main()

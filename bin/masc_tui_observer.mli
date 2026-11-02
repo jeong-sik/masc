@@ -164,6 +164,20 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
+(** What changed in the Gate, the held tool calls or the tool approval
+    modes. Each is a server push with no data: the reader re-fetches. *)
+type approval_change =
+  | Approval_queue_changed
+      (** [approval:pending], [approval:resolved], [approval:summary_updated] *)
+  | Approval_rules_changed  (** [approval_rules_changed] *)
+  | Gate_mode_changed  (** [gate_mode_changed], [gate_external_mode_changed] *)
+  | Gate_keeper_settings_changed of { keeper : string }
+      (** [gate_keeper_mode_changed], [keeper_exact_lane_preference_changed] *)
+  | Tool_approval_waits_changed of { keeper : string }
+      (** [keeper_tool_approval_waits_changed] *)
+  | Tool_approval_mode_changed of { keeper : string }
+      (** [keeper_tool_approval_mode_changed] *)
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -222,6 +236,8 @@ type event =
           push: the Board re-reads on it. [post_id] is the post its params
           name, and [None] when they name none -- a vote on a comment and a
           reaction carry a target instead. *)
+  | Approval_change of approval_change
+      (** A Gate, held tool call or tool approval mode change. *)
   | Lane_resource of lane_resource
       (** A Lane Add-on container was acquired, failed to start, was removed,
           or could not be shown removed. It arrives in the agent-core family
@@ -263,6 +279,11 @@ val tool_call_keeper : event -> string option
 (** The keeper a [keeper_tool_call] names — [Some] only for
     {!Keeper_tool_call}. The Keeper_calls surface reads that Keeper's calls
     again on this. *)
+
+val gate_snapshot_changed : event -> bool
+(** The Gate snapshot ([/api/v1/dashboard/gate]) may answer differently:
+    the approval queue, the standing rules, a Gate mode or a Keeper's Gate
+    settings changed. *)
 
 val board_changed_post : event -> string option option
 (** [Some post] for {!Board_changed}, where [post] is the post it names or

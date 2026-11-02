@@ -85,7 +85,8 @@ let visible filter (event : Observer.event) =
       | Observer.Fusion_run_status _
       (* A run registry or the Board changed. Nothing a keeper did; the
          frame says only that a reader showing it should fetch it again. *)
-      | Observer.Internal_agent_runs_changed | Observer.Board_changed _ ->
+      | Observer.Internal_agent_runs_changed | Observer.Board_changed _
+      | Observer.Approval_change _ ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -120,7 +121,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_memory_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       visible Actions event
 
@@ -390,6 +391,16 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   ; detail
   }
 
+(* The Keeper a Gate change names, or ["server"] for a change of the whole
+   queue, the rules or a Gate mode. *)
+let approval_change_keeper = function
+  | Observer.Gate_keeper_settings_changed { keeper }
+  | Observer.Tool_approval_waits_changed { keeper }
+  | Observer.Tool_approval_mode_changed { keeper } ->
+      keeper
+  | Observer.Approval_queue_changed | Observer.Approval_rules_changed | Observer.Gate_mode_changed ->
+      "server"
+
 let keeper_of_event ~traces (event : Observer.event) =
   match event with
   | Observer.Agent_core e -> (
@@ -416,6 +427,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
+  | Observer.Approval_change change -> approval_change_keeper change
   | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Other _ ->
       "server"
@@ -456,6 +468,12 @@ let label_of_event (event : Observer.event) =
       | Masc.Lane_addon_resource_events.Release_incomplete -> "release unconfirmed")
   | Observer.Internal_agent_runs_changed -> "internal runs"
   | Observer.Board_changed _ -> "board"
+  | Observer.Approval_change
+      ( Observer.Approval_queue_changed | Observer.Approval_rules_changed
+      | Observer.Gate_mode_changed | Observer.Gate_keeper_settings_changed _ ) -> "gate"
+  | Observer.Approval_change
+      (Observer.Tool_approval_waits_changed _ | Observer.Tool_approval_mode_changed _) ->
+      "tool approval"
   | Observer.Snapshot _ -> "snapshot"
   | Observer.Other name -> name
 
@@ -588,6 +606,17 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label
       ; detail = Option.value post_id ~default:"a comment or a reaction changed"
       }
+  | Observer.Approval_change change ->
+      let detail =
+        match change with
+        | Observer.Approval_queue_changed -> "the approval queue changed"
+        | Observer.Approval_rules_changed -> "the standing rules changed"
+        | Observer.Gate_mode_changed -> "a Gate mode changed"
+        | Observer.Gate_keeper_settings_changed _ -> "the Keeper's Gate settings changed"
+        | Observer.Tool_approval_waits_changed _ -> "a held tool call changed"
+        | Observer.Tool_approval_mode_changed _ -> "the tool approval mode changed"
+      in
+      { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
   | Observer.Snapshot name ->
       { at; keeper = "server"; glyph = Quiet; label; detail = name }
   | Observer.Other _ ->
@@ -767,7 +796,7 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Other _ ->
       None
 
@@ -941,7 +970,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_memory_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       None
 
@@ -1085,7 +1114,7 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
-  | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Snapshot _
+  | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Snapshot _
   | Observer.Other _ ->
       None
 
@@ -1265,7 +1294,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_memory_journal_appended _
           | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
-          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _
+          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Approval_change _
           | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
@@ -1342,7 +1371,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

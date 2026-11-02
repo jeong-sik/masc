@@ -131,6 +131,15 @@ let summary = function
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Approval_change change) ->
+      Printf.sprintf "approval(%s)"
+        (match change with
+         | Observer.Approval_queue_changed -> "queue"
+         | Observer.Approval_rules_changed -> "rules"
+         | Observer.Gate_mode_changed -> "gate_mode"
+         | Observer.Gate_keeper_settings_changed { keeper } -> "keeper_settings:" ^ keeper
+         | Observer.Tool_approval_waits_changed { keeper } -> "waits:" ^ keeper
+         | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper)
   | Observer.Event (Observer.Board_changed { post_id }) ->
       Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
@@ -533,6 +542,78 @@ let test_only_a_board_notification_names_a_board_change () =
          String.starts_with ~prefix:"notifications/board" reason
      | _ -> false)
 
+let gate_frames =
+  [ {|data: {"type":"approval:pending","payload":{"id":"approval-1"}}
+
+|}
+  ; {|data: {"type":"approval:resolved","payload":{"id":"approval-1"}}
+
+|}
+  ; {|data: {"type":"approval:summary_updated","payload":{"id":"approval-1"}}
+
+|}
+  ; {|data: {"type":"approval_rules_changed"}
+
+|}
+  ; {|data: {"type":"gate_mode_changed","mode":"hitl"}
+
+|}
+  ; {|data: {"type":"gate_external_mode_changed","mode":"hitl"}
+
+|}
+  ; {|data: {"type":"gate_keeper_mode_changed","keeper_name":"lane-smith","mode":null}
+
+|}
+  ; {|data: {"type":"keeper_exact_lane_preference_changed","keeper_name":"lane-smith","lane_id":"l","slot_id":null}
+
+|}
+  ]
+
+let tool_approval_frames =
+  [ {|data: {"type":"keeper_tool_approval_waits_changed","name":"lane-smith"}
+
+|}
+  ; {|data: {"type":"keeper_tool_approval_mode_changed","name":"lane-smith"}
+
+|}
+  ]
+
+let test_only_a_gate_change_changes_the_gate_snapshot () =
+  check (list string) "Gate changes decode to what changed"
+    [ "approval(queue)"; "approval(queue)"; "approval(queue)"; "approval(rules)"
+    ; "approval(gate_mode)"; "approval(gate_mode)"
+    ; "approval(keeper_settings:lane-smith)"; "approval(keeper_settings:lane-smith)" ]
+    (List.map summary (decode_all gate_frames));
+  check (list string) "held call and mode changes decode with their Keeper"
+    [ "approval(waits:lane-smith)"; "approval(mode:lane-smith)" ]
+    (List.map summary (decode_all tool_approval_frames));
+  let gate_changes frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> Observer.gate_snapshot_changed event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "every Gate change changes the snapshot" (List.length gate_frames)
+    (gate_changes gate_frames);
+  check int "no other sample event does" 0
+    (gate_changes
+       (tool_approval_frames
+        @ [ tool_called_frame; agent_completed_frame; agent_failed_frame
+          ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+          ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+          ; waiting_inventory_frame; operator_digest_frame
+          ; transport_health_frame; fusion_run_status_frame
+          ; turn_observation_frame; chat_appended_frame; memory_journal_frame
+          ; board_post_changed_frame ]));
+  check bool "a Keeper setting change without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"gate_keeper_mode_changed","mode":null}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"gate_keeper_mode_changed" reason
+     | _ -> false)
+
 let test_a_fusion_status_frame_decodes_its_identity_strings () =
   check (list string) "the three identity strings survive the decode"
     [ "fusion(polisher,running,kmsg-f04701e2)" ]
@@ -886,6 +967,8 @@ let () =
             test_only_a_memory_journal_event_names_a_journal_keeper
         ; test_case "only a board notification names a board change" `Quick
             test_only_a_board_notification_names_a_board_change
+        ; test_case "only a Gate change changes the Gate snapshot" `Quick
+            test_only_a_gate_change_changes_the_gate_snapshot
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

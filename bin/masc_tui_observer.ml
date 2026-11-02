@@ -117,6 +117,14 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
+type approval_change =
+  | Approval_queue_changed
+  | Approval_rules_changed
+  | Gate_mode_changed
+  | Gate_keeper_settings_changed of { keeper : string }
+  | Tool_approval_waits_changed of { keeper : string }
+  | Tool_approval_mode_changed of { keeper : string }
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -151,6 +159,9 @@ type event =
   (* Server push: a Board write. The Board re-reads on it; [post_id] is the
      post the params name, if any. *)
   | Board_changed of { post_id : string option }
+  (* Server push: the Gate, a held tool call or a tool approval mode
+     changed. *)
+  | Approval_change of approval_change
   (* A Lane Add-on container was acquired, failed to start, was removed, or
      could not be shown removed. It rides the agent-core family on the wire,
      but it is the lane runtime's fact, not an agent's. *)
@@ -182,8 +193,8 @@ let chat_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_memory_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let composite_changed_keeper = function
@@ -192,8 +203,8 @@ let composite_changed_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let tool_call_keeper = function
@@ -202,8 +213,8 @@ let tool_call_keeper = function
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let memory_journal_appended_keeper = function
@@ -213,8 +224,8 @@ let memory_journal_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let board_changed_post = function
@@ -224,9 +235,24 @@ let board_changed_post = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Approval_change _ | Lane_resource _
   | Snapshot _ | Other _ ->
       None
+
+let gate_snapshot_changed = function
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ ) ->
+      true
+  | Approval_change (Tool_approval_waits_changed _ | Tool_approval_mode_changed _)
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
 
 (* Field readers over one object's assoc list. Each answers [None] for an
    absent field and for one of the wrong shape; the required readers below
@@ -615,6 +641,29 @@ let reading_of_type type_name =
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended
                 { keeper; connector = string_field fields "connector"; at }))
+  | "approval:pending" | "approval:resolved" | "approval:summary_updated" ->
+      Named (Approval_change Approval_queue_changed)
+  | "approval_rules_changed" -> Named (Approval_change Approval_rules_changed)
+  | "gate_mode_changed" | "gate_external_mode_changed" ->
+      Named (Approval_change Gate_mode_changed)
+  | ("gate_keeper_mode_changed" | "keeper_exact_lane_preference_changed") as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "keeper_name" with
+          | Some keeper -> Ok (Approval_change (Gate_keeper_settings_changed { keeper }))
+          | None -> Error (event ^ " carries no keeper_name"))
+  | "keeper_tool_approval_waits_changed" as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Approval_change (Tool_approval_waits_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | "keeper_tool_approval_mode_changed" as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Approval_change (Tool_approval_mode_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
   | "keeper_memory_journal_appended" as event ->
       From_fields
         (fun fields ->

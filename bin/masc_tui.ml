@@ -8535,6 +8535,38 @@ let fail_board_list_read state =
       ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
       (Masc_tui_owed_read.started (Masc_tui_owed_read.changed state.board_list_owed))
 
+(* The Gate snapshot reads again when the queue, the standing rules, a Gate
+   mode or a Keeper's Gate settings change, on a revalidation or a resumed
+   authority, and after a failed read (RFC-0480 §3.1). Entering a surface
+   and [r] read it directly. *)
+let owe_gate_snapshot_read state =
+  state.gate_snapshot_owed <- Masc_tui_owed_read.changed state.gate_snapshot_owed
+
+(* A failed Gate read leaves the snapshot owed and waiting whoever started
+   it, so a read on entering a surface retries like an announced one. *)
+let fail_gate_snapshot_read state =
+  state.gate_snapshot_owed <-
+    Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      (Masc_tui_owed_read.started (Masc_tui_owed_read.changed state.gate_snapshot_owed))
+
+(* Runs on every loop iteration. A Gate read already in flight is let
+   finish first; one that will not deliver leaves the snapshot owed again. *)
+let launch_owed_gate_snapshot state ~mailbox =
+  let reading = Snapshot_read.in_flight state.gate_snapshot_read in
+  let read =
+    if reading then state.gate_snapshot_owed
+    else Masc_tui_owed_read.abandoned state.gate_snapshot_owed
+  in
+  state.gate_snapshot_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+     && server_authority_ready state
+     && not reading
+  then begin
+    state.gate_snapshot_owed <- Masc_tui_owed_read.started read;
+    launch_gate_snapshot_load state ~mailbox
+  end
+
 let apply_board_hearths_load state result =
   Masc_tui_types.apply_board_census_load state result;
   match result with
@@ -17632,7 +17664,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          (selected_keeper state);
        Option.iter
          (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
-         (board_post_on_screen state)
+         (board_post_on_screen state);
+       owe_gate_snapshot_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -17988,6 +18021,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
         update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
         launch_owed_history state ~mailbox)
       state.msg_target_keeper_name;
+    (* A Gate change while the reading was withdrawn reached nobody, and a
+       cold admission has read no Gate yet. *)
+    owe_gate_snapshot_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21519,9 +21555,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox;
-      (* Recovery may admit Gate reads here; cold initial admission already
-         launched its side reads without waiting for the enclosing bundle. *)
-      launch_gate_snapshot_load state ~mailbox;
       (* The held-call listing rides the same cadence as the surface that
          draws it. Fetched only while the surface is up: the waits are
          short-lived and every other surface would fetch rows it never
@@ -21594,6 +21627,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let selected_tool_called = ref false in
       let open_board_post_changed = ref false in
       let board_changed = ref false in
+      let gate_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21677,6 +21711,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  one (a vote on one of its comments), so it reads too. *)
               if Option.is_some (Masc_tui_observer.board_changed_post event) then
                 board_changed := true;
+              if Masc_tui_observer.gate_snapshot_changed event then gate_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
                    open_board_post_changed := true
@@ -21697,7 +21732,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21747,7 +21782,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21863,6 +21898,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (board_post_on_screen state));
       (if !board_changed && not !observer_source_loss_seen && state.view = Board then
          owe_board_list_read state);
+      (if !gate_changed && not !observer_source_loss_seen then owe_gate_snapshot_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
@@ -24686,6 +24722,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        state.gate_receipt_refresh_pending <- false;
        match result with
        | Ok snapshot ->
+           state.gate_snapshot_owed <- Masc_tui_owed_read.succeeded state.gate_snapshot_owed;
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
            state.gate_modes <- snapshot.Tui_decode.gs_modes;
            state.gate_queue_unavailable <- snapshot.Tui_decode.gs_queue_unavailable;
@@ -24697,6 +24734,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail ->
+           fail_gate_snapshot_read state;
            state.gate_pending <- [];
            state.gate_snapshot_observed <- false;
            state.gate_error <- Some detail
@@ -30984,6 +31022,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_composite state ~mailbox:async_messages;
       launch_owed_keeper_calls state ~mailbox:async_messages;
       launch_owed_board_post state ~mailbox:async_messages;
+      launch_owed_gate_snapshot state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

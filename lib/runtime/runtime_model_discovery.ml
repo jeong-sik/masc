@@ -139,8 +139,9 @@ let wire_of_connection (connection : connection) =
   | Anonymous_endpoint -> fallback
   | Named_provider provider_id ->
     (match Agent_core.Provider_runtime_binding.find provider_id, connection.protocol with
-     | Some {kind = Llm_provider.Provider_kind.Glm; _}, Openai -> Llm_provider.Provider_kind.Glm
-     | Some _, _ | None, _ -> fallback)
+     | Some binding, Openai when binding.kind = Llm_provider.Provider_kind.Glm ->
+       Llm_provider.Provider_kind.Glm
+     | (Some _ | None), (Openai | Anthropic | Kimi | Ollama) -> fallback)
 let with_catalog_image_input (connection : connection) (model : model) =
   match model.supports_image_input, connection.provider with
   | Some _, _ | None, Anonymous_endpoint -> model

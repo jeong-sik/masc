@@ -20,6 +20,7 @@ fi
 suites=()
 exes=()
 aliases=()
+alias_exes=()
 unresolved=()
 stanza_env_reader="${repo_root}/scripts/ci/stanza_env.py"
 IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
@@ -80,6 +81,7 @@ for suite in ${requested[@]+"${requested[@]}"}; do
     fi
     if [ -n "${action_alias}" ]; then
       aliases+=("${action_alias}")
+      alias_exes+=("${suite_path}.exe")
     else
       suites+=("${suite_path}")
       exes+=("${suite_path}.exe")
@@ -116,6 +118,13 @@ else
 fi
 log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
 status="${resolution_status}"
+# Compile selected OCaml executables before starting their alias budgets.
+# Dune still resolves additional action dependencies and owns the test action.
+if [ "${#alias_exes[@]}" -gt 0 ]; then
+  log "[targeted] dune build ${alias_exes[*]} (prepare alias executables)"
+  opam exec -- dune build --root . -j "${DUNE_JOBS:-2}" "${alias_exes[@]}" \
+    2>&1 | tee -a "${CI_TEST_LOG_FILE}"
+fi
 # Stream fixture records directly to tee: buffered Dune output can
 # truncate a successful suite mid-JSON. Keep actions serial so their
 # evidence records cannot interleave.

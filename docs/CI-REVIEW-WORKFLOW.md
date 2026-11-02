@@ -189,7 +189,9 @@ variables in a directly evaluated environment remain errors.
 If a named test declares a custom `action`, the targeted runner selects Dune's
 nonrecursive `@@DIRECTORY/runtest-NAME` alias instead of the bare executable.
 Dune owns that action's arguments, wrappers, variables and dependencies; the
-runner does not translate them. These per-test aliases have existed since Dune
+runner does not translate them. The selected OCaml executables are built before
+starting the alias timeout. Dune still resolves any additional action dependencies
+inside the timed alias. These per-test aliases have existed since Dune
 3.20, below this repository's 3.22 minimum. See the
 [Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
 To check this runner boundary without an OCaml build, run

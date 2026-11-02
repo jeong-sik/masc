@@ -376,6 +376,47 @@ let test_live_comment_and_catchup_share_identity_after_title_edit () =
   | _ -> fail "expected the original queued comment"
 ;;
 
+let test_queued_creation_keeps_content_and_audience_after_edit () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let alice = keeper_meta config "alice" in
+  let bob = keeper_meta config "bob" in
+  register config alice;
+  register config bob;
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let original_body = "@alice original private content" in
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:original_body
+    ~title:"Original title" ~body:original_body ~visibility:Board.Direct
+    ~post_kind:Board.Human_post ()) in
+  check int "creation is queued for alice" 1 (queue_length config alice.name);
+  let revised_body = "@bob revised private content" in
+  (match Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+    ~editor:"editor" ~title:"Revised title" ~body:revised_body ~content:revised_body () with
+   | Ok _ -> ()
+   | Error error -> fail (Board.show_board_error error));
+  check int "alice retains only her original notification" 1 (queue_length config alice.name);
+  check int "revision is queued for bob" 1 (queue_length config bob.name);
+  let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path alice.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let event = match Keeper_event_queue.to_list queue with
+    | [ stimulus ] ->
+      (match Keeper_world_observation.pending_board_event_of_stimulus
+        ~base_path:config.base_path ~meta:alice stimulus with
+       | Ok (Some event) -> event
+       | Ok None -> fail "queued creation disappeared from projection"
+       | Error unavailable ->
+         fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+    | _ -> fail "expected one queued creation for alice" in
+  check bool "projection remains a typed creation" true
+    (event.Keeper_world_observation.event_kind = Keeper_world_observation.Board_post_created);
+  check string "creation keeps its original title" post.title event.title;
+  check string "creation keeps its original body" original_body event.preview;
+  check (float 0.) "creation keeps its original time" post.created_at event.updated_at;
+  check bool "creation still explicitly mentions alice" true event.explicit_mention;
+  check (list string) "creation keeps alice as the only matched target" [ "alice" ]
+    event.matched_targets
+;;
+
 let test_queued_edits_keep_their_captured_content () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
@@ -624,6 +665,8 @@ let () =
             test_replayed_comment_discovery_respects_parent_visibility
         ; test_case "existing durable comment candidates respect parent visibility" `Quick
             test_existing_durable_comment_candidates_respect_parent_visibility
+        ; test_case "queued creation keeps content and audience after an edit" `Quick
+            test_queued_creation_keeps_content_and_audience_after_edit
         ; test_case "queued edits preserve captured content before consumption" `Quick
             test_queued_edits_keep_their_captured_content
         ; test_case "queued edits keep their recorded audience" `Quick

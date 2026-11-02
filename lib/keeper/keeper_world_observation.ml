@@ -666,10 +666,13 @@ let pending_board_event_of_board_observation
       let title, preview, hearth, post_kind, updated_at =
         let post : Board.post = post_snapshot in
         match observation.kind with
+        | Board_signal.Observed_post_created ->
+          ( observation.title, short_preview ~max_len:80 observation.content
+          , observation.hearth, post.post_kind, post.created_at )
         | Board_signal.Observed_post_updated { content_updated_at } ->
           ( observation.title, short_preview ~max_len:80 observation.content
           , observation.hearth, post.post_kind, content_updated_at )
-        | Board_signal.Observed_post_created | Board_signal.Observed_comment_added _
+        | Board_signal.Observed_comment_added _
         | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
           ( post.title, short_preview ~max_len:80 post.body
           , post.hearth, post.post_kind, post.updated_at )

@@ -100,7 +100,8 @@ let refused_original original reports =
     && report.input_capacity_evidence = Keeper_librarian_runtime.Input_capacity_refused
     && not report.smaller_range_meets_same_failure
     && match report.message_descent with
-       | Keeper_librarian_runtime.Invalid_output_blocks_descent -> false
+       | Keeper_librarian_runtime.Invalid_output_blocks_descent
+       | Unsettled_native_blocks_descent -> false
        | No_descent_evidence | Smaller_input_may_help -> true
   in
   if input.messages = [] && input.tool_observations = []

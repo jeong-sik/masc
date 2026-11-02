@@ -16,6 +16,7 @@
   board_snapshot_batch
   board_sub_boards
   board_reactions
+  board_comments
   board_posts_source
   board_vote_row
   board_store_load
@@ -48,6 +49,7 @@
   board_sub_board_json
   board_sub_boards
   board_reactions
+  board_comments
   board_vote_key
   board_vote_row
   board_store_load

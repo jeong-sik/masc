@@ -1,36 +1,10 @@
-(** Board_core — in-memory board store, persistence, and
-    canonical post / comment operations.
+(** Board post/thread queries and the existing public operation surface.
 
-    The .ml is a 687-line module that splits into four
-    layers:
-
-    - {b Type / classification} re-exported via
-      [include Board_core_classify] (which itself does
-      [include Board_types]) — every {!Board_types} surface
-      entry and every visibility / post-kind variant reach callers via this facade.
-    - {b Payload normalisation} re-exported via
-      [include Board_core_payload] — metadata validation, post-title
-      derivation, and the canonical [normalize_post_payload].
-    - {b Local store + persistence} (this .mli's locally
-      pinned surface) — sweeper / lock / cache /
-      JSONL append helpers.
-    - {b Public board operations} — create / get / list /
-      search post + comment APIs.
-
-    Runtime-include preserves type identity end-to-end with
-    [include module type of struct include M end] (cycle
-    187 rationale).  {!Board_votes} does its own
-    [include Board_core], which transitively reaches the
-    top-level {!Board} facade — every helper consumed by
-    that chain (the 13 unqualified usages from
-    [board_votes.ml] plus the 15 [Board.X] dotted callers
-    that resolve into Board_core defs) is pinned below.
-
-    Internal helpers stay private at this boundary
-    ([persist_errors] atomic counter, [record_persist_error],
-    [remove_from_list_index], [maybe_sweep],
-    [board_masc_dir], [ensure_dir],
-    [append_post], [append_comment]). *)
+    The implementation composes persistence, classification and payload
+    helpers with private comment, reaction and sub-board owners. This explicit
+    interface retains canonical Board_types identities through the existing
+    Board_votes and Board includes. Owner-specific state and helper functions
+    remain private; the declarations below define the public surface. *)
 
 include module type of struct
   include Board_core_classify
@@ -471,8 +445,8 @@ val add_comment_with_audience
     comment id among comments with the same [created_at], so every read of an
     unchanged thread returns the same order. *)
 val read_comments : store -> post_id:string -> (comment list, board_read_error) Result.t
-(** A post that does not exist answers [Ok []], the same as a post with no
-    comments. *)
+(** No indexed rows answers [Ok []]. This lookup does not check post
+    existence; retained orphan comments remain readable by their post ID. *)
 
 
 (** Returns one comment by id. *)

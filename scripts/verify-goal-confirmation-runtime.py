@@ -16,6 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
+from urllib.parse import urlencode
 
 
 def save(path, value):
@@ -126,6 +127,8 @@ def main():
             raw = response.read().decode()
             status = response.status
             session = response.headers.get('Mcp-Session-Id', session)
+            if path.startswith('/api/v1/goals/confirmation?') and authenticated and status == 200:
+                assert response.headers.get('x-masc-workspace-read') == 'matched-v1'
         if token in raw:
             raise ValueError('Credential echo withheld')
         save(out / f'http-{counter:03}.json', {'path': path, 'request': body, 'authenticated': authenticated, 'status': status, 'raw': raw})
@@ -152,12 +155,15 @@ def main():
             time.sleep(0.2)
         assert health['build']['binary_commit'] == a.expected_commit
         assert Path(health['paths']['effective_base_path']).resolve() == base
+        expected_workspace = {'base_path': health['paths']['effective_base_path'],
+                              'masc_root': health['paths']['effective_masc_root']}
         save(out / 'health.json', health)
         http('/mcp', {'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'goal-confirmation-fixture', 'version': '1'}}})
         created = mcp('masc_goal_upsert', {'title': 'Synthetic marker inspection', 'metric': 'marker count in fixture/evidence.txt', 'target_value': '1'})
         goal_id = created['goal']['id']
         mcp('masc_goal_transition', {'goal_id': goal_id, 'action': 'request_complete'})
-        path = '/api/v1/goals/confirmation?goal_id=' + goal_id
+        path = '/api/v1/goals/confirmation?' + urlencode({'goal_id': goal_id,
+            'expected_base_path': expected_workspace['base_path'], 'expected_masc_root': expected_workspace['masc_root']})
         while True:
             try:
                 evidence = http(path)
@@ -175,7 +181,9 @@ def main():
         save(out / 'awaiting-evidence.json', evidence)
         verdict = evidence['verification']['completion']['verdict']
         assert evidence['verification']['completion']['state'] == 'proof_proven'
-        binding = {'goal_id': goal_id, 'criterion_revision': evidence['goal']['criterion_revision'], 'request_id': verdict['request_id'], 'verification_run_id': verdict['verification_run_id']}
+        binding = {'goal_id': goal_id, 'criterion_revision': evidence['goal']['criterion_revision'], 'request_id': verdict['request_id'],
+            'verification_run_id': verdict['verification_run_id'], 'expected_workspace': expected_workspace,
+            'expected_operator_id': evidence['inspection_operator_id']}
         http(path, authenticated=False, expected_status=401)
         endpoint = '/api/v1/goals/confirmation'
         http(endpoint, {**binding, 'actor': 'pretend-human'}, expected_status=400)

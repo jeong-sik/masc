@@ -57,11 +57,17 @@ type submitted_original =
   | Original_unreadable of { reference : string option; reason : string }
   | Original_unknown of string
 
+type confirmation_workspace = { base_path : string; masc_root : string }
+
 type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
   submitted : submitted_original list;
+  workspace : confirmation_workspace;
+  inspection_operator_id : string;
+  credential_headers : (string * string) list;
+  credential_owner : unit ref;
 }
 
 (* Every field of a metadata item that is present is also well-formed: a
@@ -128,7 +134,16 @@ type confirmation_state =
      cancel inspection, but cannot cancel a confirmation already sent. *)
   | Submitting of string * (string, confirmation) Masc_tui_fetched.t
 
-let decode_confirmation ~goal_id json =
+let suspend_confirmation_read read =
+  let read = match Masc_tui_fetched.current_key read with
+    | None -> read
+    | Some key ->
+        (match Masc_tui_fetched.start ~equal:String.equal read ~key with
+         | Already_loading -> read
+         | Started (reading, _) -> reading) in
+  Masc_tui_fetched.suspend read
+
+let decode_confirmation ~goal_id ~workspace ~credential_headers ~credential_owner json =
   let open Result.Syntax in
   let field name = function
     | `Assoc fields ->
@@ -138,6 +153,10 @@ let decode_confirmation ~goal_id json =
     | _ -> Error "goal confirmation: expected object"
   in
   let* goal = field "goal" json in
+  let* inspection_operator = field "inspection_operator_id" json in
+  let* inspection_operator_id = match inspection_operator with
+    | `String value when String.trim value <> "" -> Ok value
+    | _ -> Error "goal confirmation: missing inspection operator" in
   let* id = field "id" goal in
   let* verification = field "verification" json in
   let* proof_goal = field "goal_id" verification in
@@ -189,23 +208,27 @@ let decode_confirmation ~goal_id json =
     in
     let ( let* ) = Result.bind in
     let* submitted = submitted in
-    Ok { goal_id; phase; verdict; submitted }
+    Ok { goal_id; phase; verdict; submitted; workspace; inspection_operator_id; credential_headers; credential_owner }
   else Error "goal confirmation: criterion mismatch"
 
-let confirmation_body { goal_id; verdict; _ } =
+let confirmation_body { goal_id; verdict; workspace; inspection_operator_id; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
   `Assoc
     [ "goal_id", `String goal_id
     ; "criterion_revision", `String criterion.revision
     ; "request_id", `String verdict.request_id
     ; "verification_run_id", `String verdict.verification_run_id
+    ; "expected_operator_id", `String inspection_operator_id
+    ; "expected_workspace", `Assoc ["base_path", `String workspace.base_path; "masc_root", `String workspace.masc_root]
     ]
 
 let same_confirmation_binding left right =
   String.equal left.goal_id right.goal_id
-  && Goal_store.criterion_equal left.verdict.criterion right.verdict.criterion
-  && String.equal left.verdict.request_id right.verdict.request_id
-  && String.equal left.verdict.verification_run_id right.verdict.verification_run_id
+  && left.workspace = right.workspace
+  && String.equal left.inspection_operator_id right.inspection_operator_id
+  && left.credential_headers = right.credential_headers
+  && left.credential_owner == right.credential_owner
+  && left.verdict = right.verdict
 
 (* The confirmation block is one decision the operator reads in layers: what
    to do, what the goal promised, which proof binding is on the table, and

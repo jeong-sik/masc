@@ -3,7 +3,7 @@ import { GoalProofDetail } from './goal-proof'
 // Goal Manager — goal-first planning surface with explicit phase, detail, and evidence.
 
 import { html } from 'htm/preact'
-import { GoalConfirmationPanel } from './goal-confirmation'
+import { GoalConfirmationPanel, confirmationHasUnsettledReceipt, confirmationPending } from './goal-confirmation'
 import { batch, signal } from '@preact/signals'
 import { useCallback, useEffect, useMemo } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
@@ -590,6 +590,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
   const pendingAction = receipt?.state === 'pending' ? receipt.action : null
   const previousPending = previous.some(item => item.state === 'pending')
   const otherPending = owner ? otherGoalActionPending(goalActionReceipts.value, ownerKey, owner) : false
+  const confirmationInFlight = binding ? confirmationPending(binding.workspace, node.id) : false
   const otherUncertain = owner ? Object.entries(goalActionHistory.value).some(([key, items]) => key !== ownerKey
     && items.some(item => item.uncertain && item.owner.workspaceRoot === owner.workspaceRoot
       && item.owner.mascRoot === owner.mascRoot && item.owner.goalId === owner.goalId)) : false
@@ -614,7 +615,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
         message: '검증 요청을 읽지 못했습니다. 새로고침 후 다시 시도해 주세요.' })
       return
     }
-    if (goalActionReceipts.value[ownerKey]?.state === 'pending'
+    if (confirmationPending(binding.workspace, node.id) || goalActionReceipts.value[ownerKey]?.state === 'pending'
       || otherGoalActionPending(goalActionReceipts.peek(), ownerKey, owner)) return
     const actorId = currentDashboardActor()
     const ticket = ++goalActionTicket
@@ -692,6 +693,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
         <p role="status" class="mb-3 text-xs text-text-muted">검증 상태를 확인할 수 없어 완료 요청을 사용할 수 없습니다. Goal을 새로고침해 주세요.</p>` : null}
       ${binding === null ? html`<p role="status" class="mb-3 text-xs text-text-muted">현재 workspace에서 Goal을 다시 확인한 뒤 변경할 수 있습니다.</p>` : null}
       ${otherPending && !previousPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 같은 Goal 요청이 끝나기를 기다리는 중입니다.</p>` : null}
+      ${confirmationInFlight ? html`<p role="status" class="mb-3 text-xs text-text-muted">이 목표의 최종 확인이 끝나기를 기다리는 중입니다.</p>` : null}
       ${otherUncertain && !otherPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 Goal 요청 결과가 확인되지 않았습니다. 현재 Goal 상태를 확인해 주세요.</p>` : null}
       ${node.resume_phase ? html`<p class="mb-3 text-xs text-text-muted" data-goal-resume-phase>재개 시 ${goalPhaseLabel(node.resume_phase)} · 연결된 Task는 별도로 진행됩니다.</p>` : null}
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -711,7 +713,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
               key=${action}
               variant=${variant}
               size="sm"
-              disabled=${pendingAction !== null || otherPending || binding === null}
+              disabled=${pendingAction !== null || otherPending || confirmationInFlight || binding === null}
               ariaBusy=${isPending}
               ariaLabel=${label}
               title=${label}
@@ -755,7 +757,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
               type="submit"
               variant="danger"
               size="sm"
-              disabled=${pendingAction !== null || otherPending || binding === null || dropReason.trim() === ''}
+              disabled=${pendingAction !== null || otherPending || confirmationInFlight || binding === null || dropReason.trim() === ''}
               ariaBusy=${pendingAction === 'drop'}
             >
               Drop goal
@@ -1229,6 +1231,23 @@ function GoalDetailPanel({
     && binding.actor === goalDecisionActor()
   const detail = authorized && binding === detailDecisionBinding.value
     && data?.goal.id === selectedNode.id ? data : null
+  const confirmationOwner = authorized && binding ? {
+    key: JSON.stringify([binding.authority.epoch, binding.workspace.basePath, binding.workspace.mascRoot,
+      binding.authRevision, binding.actor, selectedNode.id]),
+    goalId: selectedNode.id,
+    workspace: binding.workspace,
+    credentialScope: JSON.stringify([binding.authRevision, binding.actor]),
+  } : null
+  const confirmationIsCurrent = () => Boolean(binding && selectedGoalId.peek() === selectedNode.id
+    && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
+    && executionWorkspaceAuthority.peek() === binding.authority
+    && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
+  const hasLifecyclePending = () => Boolean(binding && Object.values(goalActionReceipts.peek()).some(item =>
+    item.state === 'pending' && item.owner.workspaceRoot === binding.authority.workspaceRoot
+    && item.owner.mascRoot === binding.workspace.mascRoot && item.owner.goalId === selectedNode.id))
+  const lifecyclePending = Boolean(binding && Object.values(goalActionReceipts.value).some(item =>
+    item.state === 'pending' && item.owner.workspaceRoot === binding.authority.workspaceRoot
+    && item.owner.mascRoot === binding.workspace.mascRoot && item.owner.goalId === selectedNode.id))
   return html`
     <section
       class=${`${GOAL_PANEL} flex flex-col gap-4`}
@@ -1274,8 +1293,10 @@ function GoalDetailPanel({
       <${GoalMeasurementDetail} node=${selectedNode} />
       <${GoalProofDetail} proof=${selectedNode.verification} />
       <${GoalLifecycleActionPanel} key=${selectedNode.id} node=${selectedNode} />
-      ${authorized && (selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed') ? html`
-        <${GoalConfirmationPanel} key=${selectedNode.id} goalId=${selectedNode.id}
+      ${confirmationOwner && (selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed'
+        || confirmationHasUnsettledReceipt(confirmationOwner.workspace, selectedNode.id)) ? html`
+        <${GoalConfirmationPanel} key=${confirmationOwner.key} owner=${confirmationOwner} isCurrent=${confirmationIsCurrent}
+          readAuthority=${binding} lifecyclePending=${lifecyclePending} hasLifecyclePending=${hasLifecyclePending}
           onConfirmed=${() => { void Promise.all([refreshGoalDetail(selectedNode.id), refreshTree()]) }} />` : null}
 
 

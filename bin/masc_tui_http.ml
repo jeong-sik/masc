@@ -107,7 +107,22 @@ let default_agent_name = Masc_tui_credential.agent_name
    to open -- not per request. This module is never handed a base path, and
    resolving one on its own would let the client present the credential of a
    workspace other than the one on screen. *)
-let operator_token_cell = ref None
+type operator_credential = { token : string option; owner : unit ref }
+let operator_credential_cell = Atomic.make {token=None; owner=ref ()}
+
+let operator_token () = (Atomic.get operator_credential_cell).token
+
+(* The opaque owner changes whenever the bearer changes, including A -> B -> A.
+   It can accompany a receipt without carrying the credential itself. *)
+let set_operator_token token =
+  let rec update () =
+    let previous = Atomic.get operator_credential_cell in
+    if not (Option.equal String.equal previous.token token) then
+      let next = {token; owner=ref ()} in
+      if not (Atomic.compare_and_set operator_credential_cell previous next) then update ()
+  in
+  update ()
+
 
 (* Where the held bearer came from, and the workspace it was read for. Kept so
    a refusal later in the run can be answered the way startup answers an
@@ -207,21 +222,21 @@ let install_operator_token ~base_path ~host ~port =
   in
   let act = function
     | Masc_tui_credential.Use token ->
-        operator_token_cell := Some token;
+        set_operator_token (Some token);
         Masc_tui_credential.Held
     | Masc_tui_credential.Go_without ->
-        operator_token_cell := None;
+        set_operator_token None;
         Masc_tui_credential.Not_required
     | Masc_tui_credential.No_workspace ->
-        operator_token_cell := None;
+        set_operator_token None;
         Masc_tui_credential.Workspace_pending
     | Masc_tui_credential.Mint reason -> (
         match mint_operator_token ~base_path ~host ~port with
         | Ok report ->
-            operator_token_cell := Some report.bearer_token;
+            set_operator_token (Some report.bearer_token);
             Masc_tui_credential.Minted reason
         | Error err ->
-            operator_token_cell := None;
+            set_operator_token None;
             Masc_tui_credential.Mint_failed (Masc_domain.masc_error_to_string err))
   in
   match decide () with
@@ -229,7 +244,7 @@ let install_operator_token ~base_path ~host ~port =
       match with_mint_lock ~base_path (fun () -> act (decide ())) with
       | Ok outcome -> outcome
       | Error lock_error ->
-          operator_token_cell := None;
+          set_operator_token None;
           Masc_tui_credential.Mint_failed
             ("the credential lock could not be taken: "
             ^ File_lock_eio.durable_lock_error_to_string lock_error))
@@ -255,14 +270,14 @@ let failed_refresh : (string * string) option ref = ref None
    client adopted, the old reason is about a bearer no longer sent, and a
    later refusal of the new one must not carry it. *)
 let refresh_failure () =
-  match !failed_refresh, !operator_token_cell with
+  match !failed_refresh, operator_token () with
   | Some (failed, why), Some held when String.equal failed held -> Some why
   | Some _, _ | None, _ -> None
 
 let refresh_operator_token ~sent =
   match !credential_workspace with
   | None -> false
-  | Some _ when not (Option.equal String.equal !operator_token_cell (Some sent)) ->
+  | Some _ when not (Option.equal String.equal (operator_token ()) (Some sent)) ->
       true
   | Some (base_path, host, port) -> (
       (* A config.json edited into something unreadable mid-run is the
@@ -280,7 +295,7 @@ let refresh_operator_token ~sent =
       in
       let act = function
         | Masc_tui_credential.Adopt token ->
-            operator_token_cell := Some token;
+            set_operator_token (Some token);
             true
         | Masc_tui_credential.Keep_held -> false
         | Masc_tui_credential.Remint _
@@ -290,7 +305,7 @@ let refresh_operator_token ~sent =
         | Masc_tui_credential.Remint _ -> (
             match mint_operator_token ~base_path ~host ~port with
             | Ok report ->
-                operator_token_cell := Some report.bearer_token;
+                set_operator_token (Some report.bearer_token);
                 true
             | Error err ->
                 failed_refresh :=
@@ -305,7 +320,7 @@ let refresh_operator_token ~sent =
             with_mint_lock ~base_path (fun () ->
                 (* Another request of this run may have refreshed while this
                    one waited for the lock. *)
-                if not (Option.equal String.equal !operator_token_cell (Some sent))
+                if not (Option.equal String.equal (operator_token ()) (Some sent))
                 then true
                 else act (decide ()))
           with
@@ -318,7 +333,6 @@ let refresh_operator_token ~sent =
                     ^ File_lock_eio.durable_lock_error_to_string lock_error );
               false)))
 
-let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
 
 (* Installed once by the session before it admits credential preparation.
@@ -328,13 +342,27 @@ let credential_preparation = Atomic.make None
 let install_credential_preparation preparation =
   Atomic.set credential_preparation (Some preparation)
 
-let auth_headers () =
-  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
+let headers_for_operator_token token =
   let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in
-  match operator_token () with
+  match token with
   | Some token ->
       ("Authorization", "Bearer " ^ sanitize_header_value token) :: agent_header
   | None -> agent_header
+
+let auth_headers () =
+  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
+  headers_for_operator_token (operator_token ())
+
+(* UI paths must not await credential preparation. A value read by a prior
+   credential cannot authorize display or a write while a new one is pending. *)
+let credential_owner_is_current owner =
+  let ready = match Atomic.get credential_preparation with
+    | None -> true
+    | Some preparation ->
+        (match Masc_tui_credential_preparation.status preparation with
+         | Preparing _ -> false
+         | Not_requested | Awaiting_ui _ | Settled -> true) in
+  ready && (Atomic.get operator_credential_cell).owner == owner
 
 let json_headers headers =
   ("Content-Type", "application/json") :: headers
@@ -869,8 +897,11 @@ let post_msx_json ~(host : string) ~(port : int) ~(path : string) ~(body : strin
 
 (* A Broadcast keeps one captured bearer for principal proof and the write.
    A refused bearer is not silently refreshed into another actor's authority. *)
-type bound_credential = { bound_headers : (string * string) list }
-let bind_credential () = {bound_headers=auth_headers ()}
+type bound_credential = { bound_headers : (string * string) list; bound_owner : unit ref }
+let bind_credential () =
+  Option.iter Masc_tui_credential_preparation.await_current (Atomic.get credential_preparation);
+  let credential = Atomic.get operator_credential_cell in
+  {bound_headers=headers_for_operator_token credential.token; bound_owner=credential.owner}
 let get_json_bound ~credential ~host ~port ~path =
   let url = url_of ~host ~port ~path in
   let response = timed ~verb:"GET" ~path (fun () ->
@@ -3141,12 +3172,22 @@ let upload_artifact ~(host : string) ~(port : int) ~(bytes : string)
       | Error _ as error -> error
       | Ok json -> Masc_tui_board_upload.uploaded_sha256 json)
 
-let fetch_goal_confirmation ~host ~port ~goal_id =
-  get_json ~host ~port
-    ~path:("/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id)
+let fetch_goal_confirmation ~credential ~host ~port ~goal_id =
+  let path = "/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id in
+  let send ~path =
+    let url = url_of ~host ~port ~path in
+    match Masc_http_client.get_response_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers () with
+    | Ok response -> Ok response
+    | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) in
+  match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
+  | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) -> Error detail
+  | Ok { Masc_http_client.status; body; _ } -> decode_json ~allow_empty:false ~status_code:status ~body
 
 let post_goal_confirmation ~host ~port confirmation =
-  post_json ~host ~port ~path:"/api/v1/goals/confirmation"
+  post_json_bound ~credential:{bound_headers=confirmation.Masc_tui_planning_detail.credential_headers;
+                               bound_owner=confirmation.credential_owner}
+    ~host ~port ~path:"/api/v1/goals/confirmation"
     ~body:(Yojson.Safe.to_string
       (Masc_tui_planning_detail.confirmation_body confirmation))
 

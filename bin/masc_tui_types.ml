@@ -10263,7 +10263,7 @@ type state = {
   mutable goal_action_errors: (string * string) list;
   mutable goal_transition_latest: (string * string) list;
   mutable goal_action_inflight: (string * string) list;
-  mutable goal_action_receipts: (string * string * string * (string, string) result) list;
+  mutable goal_action_receipts: (string * string * string * unit ref option * (string, string) result) list;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
@@ -10968,8 +10968,8 @@ let note_goal_action_result state ~goal_id ~ticket result =
     true
   end
 
-let record_goal_action_receipt state ~goal_id ~ticket ~workspace result =
-  state.goal_action_receipts <- (goal_id, ticket, workspace, result) :: state.goal_action_receipts
+let record_goal_action_receipt ?owner state ~goal_id ~ticket ~workspace result =
+  state.goal_action_receipts <- (goal_id, ticket, workspace, owner, result) :: state.goal_action_receipts
 
 (* The server trims names and accepts ASCII only. Group case aliases
    conservatively even when its filesystem happens to be case-sensitive. *)
@@ -14314,10 +14314,11 @@ let suspend_workspace_readings state =
   state.fusion_runs_reread_pending <- false;
   state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None;
+  state.goal_confirmation_presented <- None;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
-         (Masc_tui_fetched.suspend reading)
+         (Masc_tui_planning_detail.suspend_confirmation_read reading)
    | Masc_tui_planning_detail.Submitting _ -> ());
   state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
   state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;

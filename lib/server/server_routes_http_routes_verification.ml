@@ -156,7 +156,7 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
   match json with
                | `Assoc fields ->
                  let names = List.map fst fields in
-                 let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"] in
+                 let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"; "expected_workspace"; "expected_operator_id"] in
                  if List.exists (fun key -> not (List.mem key allowed)) names
                     || List.length names <> List.length (List.sort_uniq String.compare names)
                  then Error (Confirmation_rejected "unknown or duplicate confirmation fields")
@@ -166,10 +166,26 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
                    let* criterion_revision = rejected (non_empty_string_field fields "criterion_revision") in
                    let* request_id = rejected (non_empty_string_field fields "request_id") in
                    let* verification_run_id = rejected (non_empty_string_field fields "verification_run_id") in
+                   let* expected_operator_id = rejected (non_empty_string_field fields "expected_operator_id") in
+                   let* () = if String.equal expected_operator_id operator_id then Ok ()
+                     else Error (Confirmation_rejected "operator changed; inspect the proof again") in
+                   let* () =
+                     if not (List.mem_assoc "expected_workspace" fields) then
+                       Error (Confirmation_rejected "expected_workspace precondition is required")
+                     else
+                       match Workspace.validate_expected_workspace ~config json with
+                       | Ok _ -> Ok ()
+                       | Error Workspace.Invalid_workspace_precondition ->
+                         Error (Confirmation_rejected "invalid expected_workspace precondition")
+                       | Error Workspace.Workspace_precondition_failed ->
+                         Error (Confirmation_rejected "workspace precondition failed") in
                    Workspace_goals.confirm_completion config
                      ~after_confirmation:(Candle_payout_owed.after_confirmation config)
                      ~goal_id ~operator_id ~criterion_revision ~request_id ~verification_run_id
                    |> Result.map_error confirmation_error_of_write_error
+                   |> Result.map (function
+                     | `Assoc result -> `Assoc (("inspection_operator_id", `String operator_id) :: result)
+                     | other -> other)
                | _ -> Error (Confirmation_rejected "request body must be an object")
 
 ;;
@@ -213,13 +229,19 @@ let commit_operator_cancel_json ~config ~operator_id json =
 
 let add_routes router =
   router
-  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state _operator_id req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state operator_id req reqd ->
            let request = req in let config = Mcp_server.workspace_config state in
+           match Server_auth.validate_read_workspace_precondition ~config req with
+           | Error error ->
+               let body, status = Server_auth.read_workspace_precondition_error_response error in
+               respond_json_value_with_cors ~status request reqd body
+           | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
            let result = match trimmed_query_param req "goal_id" with
              | None -> Error (Confirmation_rejected "goal_id is required")
              | Some goal_id -> Goal_store.transact_goal config ~goal_id (fun goal ->
                  Goal_verification.get_record_authoritative config ~goal_id
-                 |> Result.map (fun record -> goal, `Assoc ["goal", Goal_store.goal_to_yojson goal;
+                 |> Result.map (fun record -> goal, `Assoc ["inspection_operator_id", `String operator_id;
+                     "goal", Goal_store.goal_to_yojson goal;
                      "verification", (match record with None -> `Null | Some record ->
                        Goal_verification.record_to_yojson_for_goal ~goal record)]))
                  |> Result.map snd

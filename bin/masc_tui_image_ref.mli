@@ -7,6 +7,10 @@ val paths : string -> string list
 (** The image files this text names, in the order they are first mentioned and
     without repeats. Found by anchoring on {!extension} and growing leftwards,
     so a path wrapped in a markdown link, in backticks, or followed by a comma
-    comes back unwrapped. A URL is not a path and does not come back: it has
-    no bytes on this disk. The extension is a guess about the bytes -- what
-    they really are is the viewer's question, asked before it draws. *)
+    comes back unwrapped. A path comes back with the bytes it was written
+    with, Unicode included, or not at all: a shape that could name either a
+    longer or a shorter file is declined, never shortened. A wrapper holds a
+    path with spaces only when it opens on a root ([/], [~/], [./], [../]).
+    A URL is not a path and does not come back: it has no bytes on this disk.
+    The extension is a guess about the bytes -- what they really are is the
+    viewer's question, asked before it draws. *)

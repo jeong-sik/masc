@@ -31,7 +31,9 @@ let inspect ~base_path ~keeper_name =
     match Store.load_agent_core_exact_snapshot_with_boundary ~session_dir ~session_id:trace_id with
     | Ok snapshot -> Ok (Some snapshot)
     | Error Store.Ref_not_found -> Ok None
-    | Error error -> Error (Store.checkpoint_ref_load_error_to_string error)
+    | Error ((Store.Ref_read_failed _ | Ref_identity_invalid _ | Ref_session_mismatch _
+             | Ref_lock_failed _) as error) ->
+      Error (Store.checkpoint_ref_load_error_to_string error)
   in
   let* after_trace = read_trace () in
   let* () =

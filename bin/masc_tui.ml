@@ -16592,9 +16592,10 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
 
 let stream_reconnect_s = 2.0
 
-(* A recovery connection owns no observations. It only signals a scoped
-   connection opening, so a fresh identity read can re-admit ordinary reads.
-   Keep it open while the server is available: health is not a timer. *)
+(* A recovery connection owns no application observations. Its scoped
+   identity receipt may re-admit reads; an older peer instead triggers one
+   revalidation for an existing workspace. A cold unadvertised stream stays
+   unconfirmed without repeatedly probing health. *)
 let stop_observer_recovery state =
   match state.observer_recovery_owner with
   | None -> ()
@@ -16602,15 +16603,21 @@ let stop_observer_recovery state =
       state.observer_recovery_owner <- None;
       Masc_tui_workspace_job.cancel state ~key:owner
 
-let launch_observer_recovery state ~expected_workspace ~host ~port ~mailbox =
+let launch_observer_recovery state ~origin ~host ~port ~mailbox =
   match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
   | Some sw, Some clock ->
       let authority = state.workspace_authority in
       let owner = ref () in
       let session = ref state.mcp_session in
       let refusal_reported = ref false in
+      let expected_base_path, expected_masc_root = match origin with
+        | Observer_existing_workspace expected -> expected.sid_base_path, expected.sid_masc_root
+        | Observer_initial_workspace paths -> paths.lw_base_path, paths.lw_masc_root in
       let report session_id =
         enqueue_async mailbox (Observer_recovery_ready (authority, owner, session_id)) in
+      let report_existing session_id = match origin with
+        | Observer_existing_workspace _ -> report session_id
+        | Observer_initial_workspace _ -> () in
       let rec follow () =
         let outcome =
           try
@@ -16623,14 +16630,14 @@ let launch_observer_recovery state ~expected_workspace ~host ~port ~mailbox =
                 session := Some session_id;
                 let live = ref true in
                 Fun.protect ~finally:(fun () -> live := false) (fun () ->
-                  Masc_tui_http.observe_runtime_events ~clock ~expected_workspace ~host ~port
+                  Masc_tui_http.observe_runtime_events ~clock ~expected_base_path ~expected_masc_root ~host ~port
                     ~session_id ~cursor:None
                     ~on_identity:(fun (handshake, identity) ->
                       enqueue_async mailbox
                         (Observer_recovery_identity
                            (authority, owner, live, session_id, handshake.Sse_wire.instance_id,
-                            expected_workspace, identity)))
-                    ~on_open:(fun _ -> refusal_reported := false; report (Some session_id))
+                            origin, identity)))
+                    ~on_open:(fun _ -> refusal_reported := false; report_existing (Some session_id))
                     ~on_chunk:(fun _ -> ()))
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -16640,7 +16647,7 @@ let launch_observer_recovery state ~expected_workspace ~host ~port ~mailbox =
            when Masc_tui_http.observer_workspace_refused ~status ~detail ->
              if not !refusal_reported then begin
                refusal_reported := true;
-               report None
+               report_existing None
              end
          | Error (Masc_tui_http.Http_refused {status = (404 | 409); _}) -> session := None
          | Ok () | Error (Masc_tui_http.Http_refused _ | Transport_failed _ | Invalid_handshake _ | Retry_without_cursor _) -> ());
@@ -16659,9 +16666,17 @@ let reconcile_observer_recovery state ~refresh_inflight ~mailbox =
   match state.workspace_identity, state.server_identity, state.observer_recovery_owner with
   | Workspace_identity_match_unconfirmed _, Some expected_workspace, None
     when not !refresh_inflight ->
-      launch_observer_recovery state ~expected_workspace ~host:server_peer_host
+      launch_observer_recovery state ~origin:(Observer_existing_workspace expected_workspace)
+        ~host:server_peer_host
         ~port:state.port ~mailbox
+  | Workspace_identity_unread, None, None
+    when not !refresh_inflight
+         && (state.connection_status = Disconnected || state.connection_status = Degraded) ->
+      Option.iter (fun paths ->
+        launch_observer_recovery state ~origin:(Observer_initial_workspace paths)
+          ~host:server_peer_host ~port:state.port ~mailbox) state.local_workspace_paths
   | Workspace_identity_match_unconfirmed _, Some _, _ -> ()
+  | Workspace_identity_unread, None, Some _ -> ()
   | (Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _), _, _
   | Workspace_identity_match_unconfirmed _, None, _ -> stop_observer_recovery state
 
@@ -16669,7 +16684,7 @@ let reconcile_observer_recovery state ~refresh_inflight ~mailbox =
    session id, then the stream, read until it ends. Every step reports back
    through the mailbox; the render fiber owns all state. The fiber ends with
    the stream, and whether to open another is the main loop's decision. *)
-let launch_observer state ~expected_workspace ~host ~port ~mailbox =
+let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~host ~port ~mailbox =
   let enqueue_async = workspace_enqueue state in
   state.observer_retry_owner <- None;
   state.observer <- Observer_opening;
@@ -16705,7 +16720,9 @@ let launch_observer state ~expected_workspace ~host ~port ~mailbox =
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events ~clock ~expected_workspace ~host ~port
+                Masc_tui_http.observe_runtime_events ~clock
+                  ~expected_base_path:expected_workspace.sid_base_path
+                  ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
                   ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -21069,17 +21086,21 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
       end
-  | Observer_recovery_identity (authority, owner, live, session_id, instance, expected, attested) ->
+  | Observer_recovery_identity (authority, owner, live, session_id, instance, origin, attested) ->
       if Masc_tui_async_protocol.observer_recovery_identity_owned state
-           ~authority ~owner ~live ~instance ~expected then begin
+           ~authority ~owner ~live ~instance ~origin then begin
         (* The response attests the exact requested workspace and readiness;
            build fields come from that response. Unreported health telemetry is
            unknown, not a fresh reading copied from the previous process. *)
-        let identity =
-          { expected with
-            Masc.Tui_decode.sid_version = attested.Sse_wire.version;
+        let base_path, masc_root = match origin with
+          | Observer_existing_workspace expected -> expected.sid_base_path, expected.sid_masc_root
+          | Observer_initial_workspace paths -> paths.lw_base_path, paths.lw_masc_root in
+        let identity : Masc.Tui_decode.server_identity =
+          { sid_version = attested.Sse_wire.version;
             sid_binary_commit = Option.value attested.binary_commit ~default:"";
             sid_binary_commit_age_s = None;
+            sid_base_path = base_path;
+            sid_masc_root = masc_root;
             sid_executable_in_worktree = None;
             sid_state_ready = Some true;
             sid_uptime = None;
@@ -21087,9 +21108,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             sid_gc = None;
             sid_scheduler = None } in
         let before = read_authority state in
-        state.mcp_session <- Some session_id;
         state.connection_status <- Masc_tui_types.Degraded;
         apply_server_identity_reading state ~mailbox (Ok identity);
+        state.mcp_session <- Some session_id;
+        (match origin with
+         | Observer_initial_workspace _ -> state.observer_scope_binding <- Observer_scope_bound instance
+         | Observer_existing_workspace _ -> ());
         resume_reads_after_authority_change state ~mailbox
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup

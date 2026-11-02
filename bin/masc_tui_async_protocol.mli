@@ -217,6 +217,10 @@ type image_preparation =
   | Image_worker_busy
   | Image_prepared of (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result
 
+type observer_recovery_origin =
+  | Observer_existing_workspace of Masc.Tui_decode.server_identity
+  | Observer_initial_workspace of local_workspace_paths
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -781,7 +785,7 @@ type async_msg =
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
-      * Masc.Tui_decode.server_identity * Sse_wire.observer_identity
+      * observer_recovery_origin * Sse_wire.observer_identity
   | Fleet_stream_view of Masc_tui_fleet_stream.view
   | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
@@ -843,7 +847,7 @@ val observer_retry_owned : state -> authority:workspace_authority -> unit ref ->
 val observer_recovery_owned : state -> authority:workspace_authority -> unit ref -> bool
 val observer_recovery_identity_owned :
   state -> authority:workspace_authority -> owner:unit ref -> live:bool ref ->
-  instance:string -> expected:Masc.Tui_decode.server_identity -> bool
+  instance:string -> origin:observer_recovery_origin -> bool
 (** A retry belongs only to the workspace and exact closed stream that scheduled it. *)
 
 val account_login_action_is_read : Masc_tui_account_login.action -> bool

@@ -575,7 +575,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; detail = "a run registry changed"
       }
   | Observer.Schedule_store_invalidated ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "schedule ledger needs refresh" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = "schedule status may have changed" }
   | Observer.Snapshot name ->
       { at; keeper = "server"; glyph = Quiet; label; detail = name }
   | Observer.Other _ ->

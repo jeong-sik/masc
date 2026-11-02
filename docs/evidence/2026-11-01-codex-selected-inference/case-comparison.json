@@ -1,0 +1,465 @@
+{
+  "common_cases": 40,
+  "transitions": {
+    "PASS->PASS": 33,
+    "FAIL->PASS": 6,
+    "FAIL->FAIL": 1,
+    "PASS->FAIL": 0
+  },
+  "ordered_common_case_keys_sha256": "1e88d600cf3cf13e29ed00b39a09137f6da18d6a7a24a6f011db4e446140b3ac",
+  "case_key_encoding": "UTF-8 compact JSON array of [suite, group, full source case name], ensure_ascii=false, separators comma/colon, one trailing LF. Group/index from timestamped actual case row is resolved against the historical fixture source; displayed ellipses are not identities.",
+  "added_candidate_cases": [
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "public driver preserves selected effort across its attempt callback"
+      ],
+      "index": 9,
+      "outcome": "PASS",
+      "display": "public driver preserv..."
+    }
+  ],
+  "cases": [
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected high survives a replacement low on start and resume"
+      ],
+      "baseline_index": 0,
+      "candidate_index": 0,
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected high survives removal of the effort declaration"
+      ],
+      "baseline_index": 1,
+      "candidate_index": 1,
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected absent effort survives a replacement low"
+      ],
+      "baseline_index": 2,
+      "candidate_index": 2,
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected explicit none survives a replacement low"
+      ],
+      "baseline_index": 3,
+      "candidate_index": 3,
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected high survives removal of its runtime"
+      ],
+      "baseline_index": 4,
+      "candidate_index": 4,
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected unbounded idle window survives a positive replacement"
+      ],
+      "baseline_index": 5,
+      "candidate_index": 5,
+      "baseline": "FAIL",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a turn hook can override the selected effort"
+      ],
+      "baseline_index": 6,
+      "candidate_index": 6,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a turn hook can clear the selected effort"
+      ],
+      "baseline_index": 7,
+      "candidate_index": 7,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "native account metadata still admits the selected effort"
+      ],
+      "baseline_index": 8,
+      "candidate_index": 8,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "completed arguments cross Start and held Resume"
+      ],
+      "baseline_index": 9,
+      "candidate_index": 10,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "fresh overflow retry materializes its own Start"
+      ],
+      "baseline_index": 10,
+      "candidate_index": 11,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "no canonical reader keeps original arguments"
+      ],
+      "baseline_index": 11,
+      "candidate_index": 12,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "hook-disabled tools keep original arguments"
+      ],
+      "baseline_index": 12,
+      "candidate_index": 13,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "history-only authority retains exact prefix guards"
+      ],
+      "baseline_index": 13,
+      "candidate_index": 14,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "selected context window survives catalog reload on start and resume"
+      ],
+      "baseline_index": 14,
+      "candidate_index": 15,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "compaction item invalidates recall without usage estimate"
+      ],
+      "baseline_index": 15,
+      "candidate_index": 16,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "compaction invalidates recall despite later request usage"
+      ],
+      "baseline_index": 16,
+      "candidate_index": 17,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "resume delivers only changed blocks and pending operator note"
+      ],
+      "baseline_index": 17,
+      "candidate_index": 18,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "fresh overflow retry receives and remembers recall"
+      ],
+      "baseline_index": 18,
+      "candidate_index": 19,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "frozen unread changes, clears and stays held across native requests"
+      ],
+      "baseline_index": 19,
+      "candidate_index": 20,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "memory changes, clears, fails and recovers across native ticks"
+      ],
+      "baseline_index": 20,
+      "candidate_index": 21,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "operator interruption preserves previous Codex settlement"
+      ],
+      "baseline_index": 21,
+      "candidate_index": 22,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a Start carries the range, not the whole history"
+      ],
+      "baseline_index": 22,
+      "candidate_index": 23,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a Resume after a Start sends no history"
+      ],
+      "baseline_index": 23,
+      "candidate_index": 24,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a Resume overflow retries with the whole range"
+      ],
+      "baseline_index": 24,
+      "candidate_index": 25,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "the seed decides the range"
+      ],
+      "baseline_index": 25,
+      "candidate_index": 26,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a later Librarian position decides the range"
+      ],
+      "baseline_index": 26,
+      "candidate_index": 27,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "accepted empty history retains a fitting summary"
+      ],
+      "baseline_index": 27,
+      "candidate_index": 28,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a ceiling cuts inside the range"
+      ],
+      "baseline_index": 28,
+      "candidate_index": 29,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "an overflow floor never restores the last atom"
+      ],
+      "baseline_index": 29,
+      "candidate_index": 30,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "an unknown turn start carries the newest atom"
+      ],
+      "baseline_index": 30,
+      "candidate_index": 31,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "completion evidence without a Keeper boundary keeps every atom"
+      ],
+      "baseline_index": 31,
+      "candidate_index": 32,
+      "baseline": "FAIL",
+      "candidate": "FAIL"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a Resume sends none of the history"
+      ],
+      "baseline_index": 32,
+      "candidate_index": 33,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a continuation's resume overflow ends on a full thread"
+      ],
+      "baseline_index": 33,
+      "candidate_index": 34,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "cooperative native resume does not replay original input"
+      ],
+      "baseline_index": 34,
+      "candidate_index": 35,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "a resume carries per-turn context in front of the goal"
+      ],
+      "baseline_index": 35,
+      "candidate_index": 36,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "pooled context projection preserves fresh and resumed requests"
+      ],
+      "baseline_index": 36,
+      "candidate_index": 37,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "native requests",
+        "context injection must be acknowledged before model turn"
+      ],
+      "baseline_index": 37,
+      "candidate_index": 38,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "async receipt continuation",
+        "host checkpoint preserves result through fresh-session intake"
+      ],
+      "baseline_index": 0,
+      "candidate_index": 0,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    },
+    {
+      "key": [
+        "test/test_keeper_codex_current_context",
+        "async receipt continuation",
+        "repeated-tool checkpoint preserves result through fresh-session intake"
+      ],
+      "baseline_index": 1,
+      "candidate_index": 1,
+      "baseline": "PASS",
+      "candidate": "PASS"
+    }
+  ]
+}

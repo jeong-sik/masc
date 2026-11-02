@@ -21,12 +21,12 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s =
   let capture = Filename.concat root "requests.jsonl" in
   write capture "";
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
-import json, sys, os
+import json, sys, os, time
 if '--masc-warmup' in sys.argv:
     sys.exit(0)
 capture = %S
@@ -38,6 +38,8 @@ hold_first_resume = %s
 compact_resume = %s
 compact_item = %s
 checkpoint_tool = %s
+accepted_efforts = %s
+turn_delay_s = %g
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -50,6 +52,12 @@ for line in sys.stdin:
         emit({'id':ident,'result':{'userAgent':'fixture/0.147.0','codexHome':'/tmp/codex','platformFamily':'unix','platformOs':'linux'}})
     elif method == 'account/read':
         emit({'id':ident,'result':{'account':{'type':'chatgpt','email':'fixture@example.test','planType':'pro'},'requiresOpenaiAuth':True}})
+    elif method == 'model/list':
+        assert request['params']['includeHidden'] is True
+        emit({'id':ident,'result':{'data':[{'id':'context-fixture','model':'context-fixture',
+            'displayName':'Context fixture','isDefault':True,'defaultReasoningEffort':accepted_efforts[0],
+            'supportedReasoningEfforts':[{'reasoningEffort':effort,'description':effort}
+                for effort in accepted_efforts]}],'nextCursor':None}})
     elif method in ('thread/start', 'thread/resume'):
         if method == 'thread/resume':
             turn_id = 'resumed-turn'
@@ -88,6 +96,7 @@ for line in sys.stdin:
             for last in ((request_usage,) if compact_item else (estimate, request_usage)):
                 emit({'method':'thread/tokenUsage/updated','params':{'threadId':'context-thread','turnId':turn_id,
                      'tokenUsage':{'last':last,'total':request_usage,'modelContextWindow':400000}}})
+        time.sleep(turn_delay_s)
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
@@ -96,11 +105,17 @@ for line in sys.stdin:
     (if hold_first_resume then "True" else "False")
     (if compact_resume then "True" else "False")
     (if compact_item then "True" else "False")
-    (if checkpoint_tool then "True" else "False"));
+    (if checkpoint_tool then "True" else "False")
+    (Yojson.Safe.to_string (`List (List.map (fun effort -> `String effort) accepted_efforts)))
+    turn_delay_s);
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window
+    ?(reasoning_effort = None) ?(turn_timeout_s = None) ?catalog_inference
+    ?(remove_runtime = false) ?(turn_delay_s = 0.)
+    ?(accepted_efforts = ["none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra"])
+    test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -123,33 +138,44 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s in
   let config_path = Filename.concat root "runtime.toml" in
-  let write_catalog max_context =
+  let write_catalog ~model_id max_context reasoning_effort turn_timeout_s =
+    let inference =
+      (match reasoning_effort with
+       | None -> ""
+       | Some effort -> Printf.sprintf "reasoning-effort = %S\n"
+           (Llm_provider.Reasoning_effort.to_string effort))
+      ^ (match turn_timeout_s with
+         | None -> ""
+         | Some seconds -> Printf.sprintf "turn-timeout-s = %.17g\n" seconds)
+    in
     write config_path (Printf.sprintf {|
 [providers.codex]
 protocol = "codex-app-server"
 command = %S
 is-non-interactive = true
-[models.context]
+[models.%s]
 api-name = "context-fixture"
 max-context = %d
-[codex.context]
+%s[codex.%s]
 [runtime]
-default = "codex.context"
-|} command max_context) in
-  write_catalog 400000;
+default = "codex.%s"
+|} command model_id max_context inference model_id model_id) in
+  write_catalog ~model_id:"context" 400000 reasoning_effort turn_timeout_s;
   Runtime.init_default ~config_path |> require;
   let runtime = Runtime.get_runtime_by_id "codex.context" |> Option.get in
   let config = match runtime.execution with
     | Runtime_execution.Codex_app_server config -> config
     | _ -> fail "fixture runtime missing" in
-  Option.iter (fun window ->
-    write_catalog window;
-    Runtime.init_default ~config_path |> require) catalog_context_window;
+  if Option.is_some catalog_context_window || Option.is_some catalog_inference || remove_runtime then (
+    let effort, timeout = Option.value catalog_inference ~default:(reasoning_effort, turn_timeout_s) in
+    write_catalog ~model_id:(if remove_runtime then "replacement" else "context")
+      (Option.value catalog_context_window ~default:400000) effort timeout;
+    Runtime.init_default ~config_path |> require);
   let reports = ref [] in
   let run ?argument_source ?official_task_reference ?model_input_projection ?prompt_blocks
-      ?(tools=[]) ?tool_choice
+      ?(tools=[]) ?tool_choice ?hook_reasoning_effort
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
@@ -162,11 +188,15 @@ default = "codex.context"
            preparation would observe None and silently resend the carrier. *)
         composed_context := Option.map (fun blocks ->
           (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)) prompt_blocks;
-        Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice}
+        let reasoning_effort = Option.value hook_reasoning_effort
+            ~default:current_params.reasoning_effort in
+        Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice;reasoning_effort}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
+      ~configured_reasoning_effort:runtime.model.reasoning_effort
+      ~turn_timeout_s:runtime.model.turn_timeout_s
       ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
@@ -211,6 +241,112 @@ let test_captured_context_window_survives_catalog_reload () =
   let methods = read_requests capture |> List.map (fun request -> request |> member "method" |> text) in
   check bool "fresh thread started" true (List.mem "thread/start" methods);
   check bool "existing thread resumed" true (List.mem "thread/resume" methods)
+
+let test_selected_reasoning_survives_catalog_reload
+    ?(remove_runtime = false) ?hook_reasoning_effort
+    ?(accepted_efforts = ["none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra"])
+    ~selected ~replacement ~expected () =
+  with_fixture ~reasoning_effort:selected ~catalog_inference:(replacement, None)
+    ~remove_runtime ~accepted_efforts @@ fun ~run ~capture ~reports:_ ->
+  let wire = Option.map Llm_provider.Reasoning_effort.to_string in
+  check (option string) "the live catalog really changed"
+    (if remove_runtime then None else wire replacement)
+    (wire (Runtime.reasoning_effort_of_runtime_id "codex.context"));
+  if remove_runtime then
+    check bool "selected runtime is absent from the new catalog" true
+      (Option.is_none (Runtime.get_runtime_by_id "codex.context"));
+  let turn_requests () = read_requests capture |> List.filter_map (fun request ->
+    if member "method" request = `String "turn/start" then Some (member "params" request)
+    else None) in
+  let check_effort params =
+    let fields = Yojson.Safe.Util.to_assoc params in
+    check (option string) "selected intent reaches the native turn writer" expected
+      (match List.assoc_opt "effort" fields with
+       | None -> None
+       | Some (`String value) -> Some value
+       | Some _ -> fail "effort must be omitted or a native string") in
+  successful (run ?hook_reasoning_effort ~instructions:"Keep the selected inference intent."
+    ~world:"Fresh selected turn" ());
+  (match turn_requests () with
+   | [params] -> check_effort params
+   | _ -> fail "expected one fresh turn/start");
+  successful (run ?hook_reasoning_effort ~instructions:"Keep the selected inference intent."
+    ~world:"Resumed selected turn" ());
+  let requests = read_requests capture in
+  let count_method method_ = List.length (List.filter (fun request ->
+    member "method" request = `String method_) requests) in
+  check int "one new native thread" 1 (count_method "thread/start");
+  check int "one native resume" 1 (count_method "thread/resume");
+  check int "two complete native turns" 2 (List.length (turn_requests ()));
+  List.iter check_effort (turn_requests ());
+  check int "explicit effort uses native model admission on each process"
+    (if Option.is_some expected then 2 else 0) (count_method "model/list")
+
+let test_selected_unbounded_idle_window_survives_catalog_reload () =
+  (* The child acknowledges turn/start, then deliberately remains silent.
+     This delay is fixture input, not a new production timeout or budget. *)
+  with_fixture ~turn_timeout_s:(Some 0.) ~catalog_inference:(None, Some 0.025)
+    ~turn_delay_s:0.25 @@ fun ~run ~capture ~reports:_ ->
+  check (option (float 0.000001)) "the live catalog has a positive idle window"
+    (Some 0.025) (Runtime.turn_timeout_s_of_runtime_id "codex.context");
+  successful (run ~instructions:"Keep the selected unbounded idle window."
+    ~world:"Fresh delayed turn" ());
+  successful (run ~instructions:"Keep the selected unbounded idle window."
+    ~world:"Resumed delayed turn" ());
+  let requests = read_requests capture in
+  let count_method method_ = List.length (List.filter (fun request ->
+    member "method" request = `String method_) requests) in
+  check int "fresh delayed turn completed" 1 (count_method "thread/start");
+  check int "resumed delayed turn completed" 1 (count_method "thread/resume");
+  check int "no timeout retry or substituted turn" 2 (count_method "turn/start")
+
+let test_routed_codex_uses_the_selected_model_after_attempt_callback () =
+  with_fixture ~reasoning_effort:(Some High) @@ fun ~run:_ ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture in
+  let replacement_path = Filename.concat base_path "replacement.toml" in
+  write replacement_path (Printf.sprintf {|
+[providers.codex]
+protocol = "codex-app-server"
+command = %S
+is-non-interactive = true
+[models.context]
+api-name = "context-fixture"
+max-context = 400000
+reasoning-effort = "low"
+[codex.context]
+[runtime]
+default = "codex.context"
+|} (Filename.concat base_path "codex-fixture"));
+  let attempts = ref 0 in
+  let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+    incr attempts;
+    check string "the callback follows selection of this runtime"
+      "codex.context" attempt.runtime_id;
+    Runtime.init_default ~config_path:replacement_path |> require;
+    check bool "the callback installed a conflicting live declaration" true
+      (Runtime.reasoning_effort_of_runtime_id "codex.context" = Some Low)
+  in
+  let env = match Eio_context.get_env_opt () with
+    | Some env -> env | None -> fail "fixture Eio environment is missing" in
+  let result = Eio.Switch.run (fun sw ->
+    Keeper_turn_driver.run_named
+      ~input_source:(Keeper_request_source.Keeper_history {trace_id="context-fixture"})
+      ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
+      ~runtime_id:"codex.context" ~keeper_name:"context-fixture" ~base_path
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+      ~goal:"Return the fixture marker." ~system_prompt:"Keep the selected Codex intent."
+      ~tools:[] ~agent_core_tools:[]
+      ~initial_messages:[Agent_core.Types.user_msg "Continue the selected turn."]
+      ~context:(Agent_core.Context.create ()) ~on_runtime_attempt ~sw ~net:env#net ()) in
+  (match result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+  check int "the public driver dispatched one selected candidate" 1 !attempts;
+  let turns = read_requests capture |> List.filter_map (fun request ->
+    if member "method" request = `String "turn/start" then Some (member "params" request)
+    else None) in
+  match turns with
+  | [params] -> check string "public driver preserves the selected high on the wire"
+      "high" (params |> member "effort" |> text)
+  | _ -> fail "expected one routed native turn/start"
 
 let test_operator_interrupt_preserves_previous_native_settlement () =
   with_fixture ~hold_first_resume:true @@ fun ~run ~capture ~reports:_ ->
@@ -1320,6 +1456,34 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
       check int "replacement never re-executes the original or independent effect" 1 !calls)
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "selected high survives a replacement low on start and resume" `Quick
+    (test_selected_reasoning_survives_catalog_reload
+       ~selected:(Some High) ~replacement:(Some Low) ~expected:(Some "high"));
+  test_case "selected high survives removal of the effort declaration" `Quick
+    (test_selected_reasoning_survives_catalog_reload
+       ~selected:(Some High) ~replacement:None ~expected:(Some "high"));
+  test_case "selected absent effort survives a replacement low" `Quick
+    (test_selected_reasoning_survives_catalog_reload
+       ~selected:None ~replacement:(Some Low) ~expected:None);
+  test_case "selected explicit none survives a replacement low" `Quick
+    (test_selected_reasoning_survives_catalog_reload
+       ~selected:(Some None_) ~replacement:(Some Low) ~expected:(Some "none"));
+  test_case "selected high survives removal of its runtime" `Quick
+    (test_selected_reasoning_survives_catalog_reload ~remove_runtime:true
+       ~selected:(Some High) ~replacement:(Some Low) ~expected:(Some "high"));
+  test_case "selected unbounded idle window survives a positive replacement" `Quick
+    test_selected_unbounded_idle_window_survives_catalog_reload;
+  test_case "a turn hook can override the selected effort" `Quick
+    (test_selected_reasoning_survives_catalog_reload ~hook_reasoning_effort:(Some Ultra)
+       ~selected:(Some High) ~replacement:(Some Low) ~expected:(Some "ultra"));
+  test_case "a turn hook can clear the selected effort" `Quick
+    (test_selected_reasoning_survives_catalog_reload ~hook_reasoning_effort:None
+       ~selected:(Some High) ~replacement:(Some Low) ~expected:None);
+  test_case "native account metadata still admits the selected effort" `Quick
+    (test_selected_reasoning_survives_catalog_reload ~accepted_efforts:["low"]
+       ~selected:(Some High) ~replacement:(Some High) ~expected:(Some "low"));
+  test_case "public driver preserves selected effort across its attempt callback" `Quick
+    test_routed_codex_uses_the_selected_model_after_attempt_callback;
   test_case "completed arguments cross Start and held Resume" `Quick
     (test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume:false);
   test_case "fresh overflow retry materializes its own Start" `Quick

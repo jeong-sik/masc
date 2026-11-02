@@ -13,6 +13,8 @@
 
 open Masc
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 (* The store-level writers ask a recipient lookup; no name is declared here. *)
@@ -103,6 +105,8 @@ let load_posts_source store =
 ;;
 
 let test_post_decoder_retains_nested_rejections () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -129,6 +133,8 @@ let test_post_decoder_retains_nested_rejections () =
 ;;
 
 let test_closed_decoder_validates_only_a_complete_close_shape () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -144,6 +150,8 @@ let test_closed_decoder_validates_only_a_complete_close_shape () =
 ;;
 
 let test_comment_decoder_retains_nested_rejections () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -218,6 +226,8 @@ let check_origin_producer_codec canonical =
 ;;
 
 let test_codec_round_trip () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -243,6 +253,8 @@ let test_codec_round_trip () =
 ;;
 
 let test_codec_absent_origin () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -257,6 +269,8 @@ let test_codec_absent_origin () =
 ;;
 
 let test_malformed_origin_rejected () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -281,6 +295,8 @@ let test_malformed_origin_rejected () =
 ;;
 
 let test_current_post_schema_is_exact () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -334,6 +350,8 @@ let test_current_post_schema_is_exact () =
 ;;
 
 let test_current_comment_schema_is_exact () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -392,6 +410,8 @@ let test_current_comment_schema_is_exact () =
 ;;
 
 let test_current_reaction_schema_is_exact () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -446,6 +466,8 @@ let test_current_reaction_schema_is_exact () =
 ;;
 
 let test_current_sub_board_schema_is_exact () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   let sub_board =
@@ -517,6 +539,8 @@ let test_current_sub_board_schema_is_exact () =
 ;;
 
 let test_sub_board_update_rejects_invalid_members () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   let sub_board =
@@ -566,6 +590,8 @@ let test_keeper_authored_origin_with_turn_ref () =
   Alcotest.(check bool) "fusion_run_id None" true (Option.is_none origin.fusion_run_id);
   (* End-to-end: the post created with this origin carries turn_ref through the
      board codec (create -> encode -> decode). *)
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -594,6 +620,8 @@ let test_keeper_authored_origin_without_turn_ref () =
 ;;
 
 let test_index_lookup_hit_and_miss () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
@@ -614,6 +642,8 @@ let test_index_lookup_hit_and_miss () =
 ;;
 
 let test_index_rebuilt_on_load () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store1 = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store1;
@@ -635,6 +665,8 @@ let test_index_rebuilt_on_load () =
 ;;
 
 let test_index_pruned_on_sweep () =
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;

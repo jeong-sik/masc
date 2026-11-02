@@ -149,7 +149,10 @@ let test_failure_observer_only_follows_successful_writes () =
   KR.For_testing.clear ();
   let captured = register "alice" in
   let calls = ref 0 in
-  KR.install_state_change_observer (fun ~base_path:_ _ -> incr calls);
+  KR.install_state_change_observer (fun ~base_path:_ change ->
+    match change with
+    | KR.Failure_reason_changed -> incr calls
+    | KR.Lifecycle_phase_changed | KR.Membership_changed -> ());
   Fun.protect
     ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
     (fun () ->
@@ -214,6 +217,133 @@ let test_heartbeat_replacement_notifies_only_when_replaced () =
       check bool "newer failure is retained" false
         (KR.replace_heartbeat_failure_reason captured None);
       check int "stale heartbeat recovery does not notify" 2 !calls)
+;;
+
+let test_membership_observer_sees_commits_outside_lock () =
+  KR.For_testing.clear ();
+  let observations = ref [] in
+  let reentry_succeeded = ref true in
+  let update_allowed = ref true in
+  KR.install_state_change_observer (fun ~base_path:observed_base_path change ->
+    let present = Option.is_some (KR.get ~base_path "alice") in
+    observations := (observed_base_path, change, present) :: !observations;
+    Reservation.with_key_lock ~base_path ~keeper_name:"alice" (fun () -> ());
+    if present && !update_allowed then
+      match KR.update_entry ~base_path "alice" (fun entry ->
+        { entry with restart_count = entry.restart_count + 1 }) with
+      | Ok () -> ()
+      | Error _ -> reentry_succeeded := false);
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      let original = register "alice" in
+      let replacement = register "alice" in
+      (match KR.unregister_exact original with
+       | KR.Exact_entry_replaced -> ()
+       | _ -> fail "stale registration was not rejected");
+      let restarted =
+        match KR.register_restarting ~base_path "alice" replacement.meta with
+        | Ok entry -> entry
+        | Error _ -> fail "restart registration failed"
+      in
+      (match KR.unregister_exact restarted with
+       | KR.Exact_unregistered -> ()
+       | _ -> fail "current registration could not be removed");
+      (match KR.unregister_exact restarted with
+       | KR.Exact_entry_missing -> ()
+       | _ -> fail "removed registration was not missing");
+      let acquire () =
+        match Reservation.acquire ~base_path ~keeper_name:"alice"
+          ~purpose:Reservation.Keepalive_launch with
+        | Ok token -> token
+        | Error _ -> fail "could not acquire lifecycle reservation"
+      in
+      let stale = acquire () in
+      ignore (Reservation.release stale : Reservation.release_outcome);
+      let token = acquire () in
+      update_allowed := false;
+      Fun.protect
+        ~finally:(fun () ->
+          ignore (Reservation.release token : Reservation.release_outcome);
+          update_allowed := true)
+        (fun () ->
+          (match KR.restore_entry_if_absent_for_lifecycle stale restarted with
+           | KR.Entry_restore_lifecycle_reserved _ -> ()
+           | _ -> fail "stale lifecycle owner was not rejected");
+          let invalid =
+            { restarted with meta = { restarted.meta with name = "wrong" } }
+          in
+          (match KR.restore_entry_if_absent_for_lifecycle token invalid with
+           | KR.Entry_restore_invalid _ -> ()
+           | _ -> fail "invalid restoration was not rejected");
+          (match KR.restore_entry_if_absent_for_lifecycle token restarted with
+           | KR.Entry_restored -> ()
+           | _ -> fail "current lifecycle owner could not restore the entry");
+          (match KR.restore_entry_if_absent_for_lifecycle token restarted with
+           | KR.Entry_restore_occupied _ -> ()
+           | _ -> fail "restoration over an occupied key was not rejected"));
+      (match KR.unregister_exact restarted with
+       | KR.Exact_unregistered -> ()
+       | _ -> fail "restored registration could not be removed");
+      check bool "observer can update the same keeper after registration" true
+        !reentry_succeeded;
+      check (list (triple string bool bool))
+        "only committed installations and removal notify"
+        [ base_path, true, true
+        ; base_path, true, true
+        ; base_path, true, true
+        ; base_path, true, false
+        ; base_path, true, true
+        ; base_path, true, false
+        ]
+        (List.rev_map (fun (path, change, present) ->
+           path, change = KR.Membership_changed, present) !observations))
+;;
+
+let test_unregistration_observer_cancellation_preserves_commit () =
+  KR.For_testing.clear ();
+  let entry = register "alice" in
+  KR.install_state_change_observer (fun ~base_path:_ _ ->
+    raise (Eio.Cancel.Cancelled Exit));
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      (match KR.unregister_exact entry with
+       | _ -> fail "observer cancellation did not propagate"
+       | exception Eio.Cancel.Cancelled Exit -> ()
+       | exception exn -> fail ("unexpected exception: " ^ Printexc.to_string exn));
+      check bool "removal remains committed" true
+        (Option.is_none (KR.get ~base_path "alice"));
+      check bool "the removed lane was stopped" true (Atomic.get entry.fiber_stop))
+;;
+
+let test_unregistration_cleanup_and_cancellation_precedence () =
+  let calls = ref 0 in
+  let install observer = KR.install_state_change_observer (fun ~base_path:_ _ ->
+    incr calls;
+    observer ()) in
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      install ignore;
+      (match KR.For_testing.finish_unregistration_cleanup ~base_path
+         (fun () -> failwith "injected cleanup failure") with
+       | () -> fail "cleanup failure did not propagate"
+       | exception Failure message when String.equal message "injected cleanup failure" -> ()
+       | exception exn -> fail ("unexpected exception: " ^ Printexc.to_string exn));
+      check int "failed cleanup still notifies" 1 !calls;
+      install (fun () -> raise (Eio.Cancel.Cancelled Not_found));
+      (match KR.For_testing.finish_unregistration_cleanup ~base_path
+         (fun () -> failwith "injected cleanup failure") with
+       | () -> fail "observer cancellation did not propagate"
+       | exception Eio.Cancel.Cancelled Not_found -> ()
+       | exception exn -> fail ("unexpected exception: " ^ Printexc.to_string exn));
+      (match KR.For_testing.finish_unregistration_cleanup ~base_path
+         (fun () -> raise (Eio.Cancel.Cancelled Exit)) with
+       | () -> fail "cleanup cancellation did not propagate"
+       | exception Eio.Cancel.Cancelled Exit -> ()
+       | exception exn -> fail ("unexpected exception: " ^ Printexc.to_string exn));
+      check int "both exceptional cleanups notified" 3 !calls)
 ;;
 
 let test_unregister_exact_preserves_replacement_lane () =
@@ -1016,6 +1146,14 @@ let () =
             "same lane immutable update remains removable"
             `Quick
             test_unregister_exact_accepts_same_lane_record_update
+        ] )
+    ; ( "membership_observer"
+      , [ test_case "sees committed membership outside the lock" `Quick
+            test_membership_observer_sees_commits_outside_lock
+        ; test_case "unregistration keeps observer cancellation unchanged" `Quick
+            test_unregistration_observer_cancellation_preserves_commit
+        ; test_case "unregistration keeps cleanup and cancellation precedence" `Quick
+            test_unregistration_cleanup_and_cancellation_precedence
         ] )
     ; ( "dispatch_event"
       , [ test_case

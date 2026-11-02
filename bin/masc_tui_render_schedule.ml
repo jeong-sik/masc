@@ -1940,6 +1940,8 @@ module Terminal_size_cache = struct
     | Changed of (int * int)
     | Unchanged of (int * int)
 
+  type work_geometry = Current | Resize_interrupted | Resize_detected
+
   type t = {
     fallback : int * int;
     mutable cached : (int * int) option;
@@ -1953,6 +1955,15 @@ module Terminal_size_cache = struct
   let normalize (rows, cols) = max 1 rows, max 4 cols
 
   let valid (rows, cols) = rows > 0 && cols > 0
+
+  let verify_for_work ~cached ~resize_changed ~probe =
+    if resize_changed () then Resize_interrupted
+    else
+      let physical = probe () in
+      if resize_changed () then Resize_interrupted
+      else match physical with
+        | Some size when valid size && normalize size <> cached -> Resize_detected
+        | Some _ | None -> Current
 
   let create ~fallback =
     if not (valid fallback) then invalid_arg "terminal fallback must be positive";

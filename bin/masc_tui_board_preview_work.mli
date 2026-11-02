@@ -19,6 +19,8 @@ val reserve : t -> admission option
 (** Reserve an idle slot before dispatching a worker. *)
 val withdraw_pending : t -> unit
 (** Revoke an unstarted reservation without releasing an active worker. *)
+val withdraw : t -> admission -> unit
+(** Revoke only the exact unstarted reservation, never a later one. *)
 val run_reserved : t -> admission -> (unit -> 'a) -> 'a option
 (** Start only the exact, still-current reservation. Returns [None] when the
     reservation was withdrawn or shutdown began before the worker started. *)

@@ -11648,7 +11648,7 @@ let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_u
   let request = {sir_generation=state.image_request_generation; sir_view=view;
     sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
     sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
-    sir_resource=None;
+    sir_resource=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
   state.sent_image_read <- Some request;
   let unsupported = !terminal_draws_images = Some false in
@@ -11795,7 +11795,6 @@ let settle_retired_sent_image state =
   match state.sent_image_read with
   | Some pending when not (image_reading_is_current state pending) ->
       cancel_board_image_read state;
-      Masc_tui_board_preview_work.withdraw_pending vector_inspection_worker;
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
@@ -11866,6 +11865,9 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       if not (Option.exists (board_image_source_reader state ~message:("Image preview unavailable: " ^ reason)) board_subject) then
         notice ~kind:Notice_failure reason
   | Some display ->
+    let board_worker = match owner with
+      | Board_image_read _ -> Some board_preview_worker
+      | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let port = state.port in
     let keeper_name = if state.view = Resources || state.view = Board then None else state.msg_target_keeper_name in
     let generation = state.image_request_generation in
@@ -11873,8 +11875,20 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let request = {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
       sir_resource=(if view = Resources then state.resource_content else None);
+      sir_skill_reference=skill_reference;
       sir_purpose=Open_image} in
     state.sent_image_read <- Some request;
+    let admit_vector () =
+      let exact_request = Option.exists (fun pending -> pending == request) state.sent_image_read in
+      if not exact_request || state.msx_open || generation <> state.image_request_generation
+         || view <> state.view || not (image_keeper_is_current state ~view ~keeper_name)
+         || not (image_reading_is_current state request) then begin
+        ignore (Masc_tui_types.take_image_read state request);
+        Error "vector image request is no longer current"
+      end
+      else match Masc_tui_board_preview_work.reserve vector_inspection_worker with
+        | None -> Error "Previous vector image is still rendering; retry when it finishes"
+        | Some admission -> Ok (vector_inspection_worker,admission) in
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
        image presenter still fits the resulting PNG to the actual cells. *)
@@ -11895,17 +11909,16 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       hex (Masc_tui_terminal_palette.foreground palette),
       hex (Masc_tui_terminal_palette.background palette))
       (Masc_tui_terminal_palette.snapshot_palette palette) in
-    let board_worker = match owner with
-      | Board_image_read _ -> Some board_preview_worker
-      | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let run = match board_worker with
       | Some _ -> Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds
       | None -> Unix.system in
     let load () =
       Masc_tui_image_requests.load ~host:server_peer_host ~port
         ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
-        ~diagram_colors ~board_worker ~run ~display source in
-    let completion result = Sent_image_ready { request; skill_reference; result=Image_prepared result } in
+        ~diagram_colors ~board_worker ~admit_vector
+        ~run ~vector_run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
+        ~display source in
+    let completion result = Sent_image_ready { request; result=Image_prepared result } in
     (match owner, source with
      | Board_image_read (_,_,job), Masc_tui_image_requests.Board_artifact _ ->
          (* The actual binary GET, not a separate health probe, carries the
@@ -11925,11 +11938,10 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
              notice ~kind:Notice_failure "image preview requires an active background session")
 
 (* Input changes the desired viewport; completion retires the old job and
-   the next loop renders only the latest window. A separate physical slot for
-   non-Board inspections survives closing their logical image, so another
-   inspection waits for its worker to return. Board openings keep their own
-   slot. All windows use the original full-scene PNG coordinate system. *)
-let prepare_inspected_frame state ~mailbox =
+   the next loop renders only the latest window. A non-Board vector worker
+   owns its physical slot until it returns, including after image close.
+   All windows use the original full-scene PNG coordinate system. *)
+let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
   match state.image_open, state.image_inspection, state.sent_image_read,
       !active_graphics_protocol, !image_cell_pixels, Eio_context.get_switch_opt () with
   | true, Some inspected, None, Masc_tui_graphics.Kitty_protocol,
@@ -11940,27 +11952,18 @@ let prepare_inspected_frame state ~mailbox =
          when origin.sir_view=state.view
            && image_keeper_is_current state ~view:state.view ~keeper_name:origin.sir_keeper
            && image_reading_is_current state origin ->
+       let geometry = Masc_tui_ansi.get_terminal_size () in
        let window = inspection_window ~cell_pixels inspected.ii_viewport in
        let current_frame = match inspected.ii_frame with
          | Raster_image (shown,_) | Raster_unavailable (shown,_) -> shown=window
          | Original_image -> false in
-       if not current_frame
+       let slot_busy = match origin.sir_owner with
+         | Board_image_read _ -> false
+         | Local_file_image_read _ | Remote_url_image_read _
+         | Draft_image_read _ | Peer_image_read _ ->
+             Masc_tui_board_preview_work.is_busy vector_inspection_worker in
+       if not current_frame && not slot_busy
           && (window.width < window.columns*cw || window.height < window.rows*ch) then begin
-         (* Reserve on the input loop before dispatch. Closing the image can
-            revoke a worker that has not entered its system thread yet. *)
-         let run_in_slot = match origin.sir_owner with
-           | Board_image_read _ -> Some (fun render ->
-               Image_prepared (Masc_tui_board_preview_work.run board_preview_worker render))
-           | Local_file_image_read _ | Remote_url_image_read _
-           | Draft_image_read _ | Peer_image_read _ ->
-               Option.map (fun admission render ->
-                 match Masc_tui_board_preview_work.run_reserved vector_inspection_worker admission render with
-                 | None -> Image_worker_busy
-                 | Some result -> Image_prepared result)
-                 (Masc_tui_board_preview_work.reserve vector_inspection_worker) in
-         match run_in_slot with
-         | None -> () (* An earlier physical worker still owns the slot. *)
-         | Some run_in_slot ->
          let generation = state.image_request_generation in
          let pending = {origin with sir_generation=generation;
            sir_purpose=Inspect_image {identity=inspected.ii_identity;window}} in
@@ -11978,8 +11981,18 @@ let prepare_inspected_frame state ~mailbox =
          draw_inspected_image ~fresh:false state inspected;
          Eio.Fiber.fork_daemon ~sw (fun () ->
            Eio.Fiber.yield ();
-           let result = Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
-             let render () =
+           (* Check and admit on this Eio fiber without yielding between them.
+              Once admitted, a later close withdraws the result, not the work. *)
+           let current = Option.exists (fun request -> request == pending) state.sent_image_read
+             && state.image_open && not state.msx_open && pending.sir_view=state.view
+             && image_keeper_is_current state ~view:pending.sir_view ~keeper_name:pending.sir_keeper
+             && image_reading_is_current state pending
+             && (match state.image_inspection, !image_cell_pixels with
+                 | Some current, Some pixels -> current.ii_identity == inspected.ii_identity
+                     && window = inspection_window ~cell_pixels:pixels current.ii_viewport
+                 | (Some _ | None), (Some _ | None) -> false)
+             && worker_geometry_current geometry in
+           let render () =
              let open Result.Syntax in
              let runner = Masc_tui_pele.command_runner
                  ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
@@ -11992,8 +12005,24 @@ let prepare_inspected_frame state ~mailbox =
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
-             run_in_slot render) in
-           deliver mailbox (Sent_image_ready {request=pending;skill_reference=None;result});
+           let result = if not current then None else match pending.sir_owner with
+             | Board_image_read _ -> Some (Image_prepared
+                 (Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
+                   Masc_tui_board_preview_work.run board_preview_worker render)))
+             | Local_file_image_read _ | Remote_url_image_read _
+             | Draft_image_read _ | Peer_image_read _ ->
+                 (match Masc_tui_board_preview_work.reserve vector_inspection_worker with
+                  | None -> None
+                  | Some admission ->
+                      Some (Fun.protect
+                        ~finally:(fun () -> Masc_tui_board_preview_work.withdraw vector_inspection_worker admission)
+                        (fun () -> Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
+                          match Masc_tui_board_preview_work.run_reserved vector_inspection_worker admission render with
+                          | None -> Image_worker_busy
+                          | Some result -> Image_prepared result)))) in
+           (match result with
+            | Some result -> deliver mailbox (Sent_image_ready {request=pending;result})
+            | None -> ignore (Masc_tui_types.take_image_read state pending));
            `Stop_daemon)
        end
      | (Some _ | None), (Some _ | None), (Some _ | None) -> ())
@@ -12279,7 +12308,6 @@ let withdraw_pending_music_editor state =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
-  Masc_tui_board_preview_work.withdraw_pending vector_inspection_worker;
   state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
@@ -14707,7 +14735,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   state.lane_nested_read_resume <- None;
-  Masc_tui_board_preview_work.withdraw_pending vector_inspection_worker;
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
@@ -22671,16 +22698,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                        | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
                        | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
       end
-  | Sent_image_ready { request; skill_reference; result } ->
+  | Sent_image_ready { request; result } ->
       let {sir_generation=generation; sir_view=view; sir_keeper=keeper_name;
            sir_name=name;_} = request in
       let pending = Masc_tui_types.take_image_read state request in
-      let same_skill = match skill_reference with
-        | None -> true
-        | Some reference ->
-            (match selected_tools_skill_profile state with
-             | Some profile -> Skill_reference.equal reference profile.esp_reference
-             | None -> false) in
       (match result with
        | Image_worker_busy -> ()
        | Image_prepared result -> match pending with
@@ -22705,7 +22726,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           | (Some _ | None), (Some _ | None) -> ())
        | Some ({sir_purpose=Open_image;_} as origin)
            when not state.msx_open && generation = state.image_request_generation
-         && view = state.view && image_keeper_is_current state ~view ~keeper_name && same_skill -> begin
+         && view = state.view && image_keeper_is_current state ~view ~keeper_name -> begin
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
           let opened_original = match origin.sir_owner with
@@ -27257,6 +27278,17 @@ Use relative paths for resources already held in the package. -->
       invalidate_frame_for_resize frame_presenter render_schedule
     end
   in
+  let make_worker_geometry_current () =
+    let module Size = Render_schedule.Terminal_size_cache in
+    let generation = Atomic.get resize_generation in
+    fun cached ->
+      match Size.verify_for_work ~cached
+          ~resize_changed:(fun () -> Atomic.get resize_requested
+            || Atomic.get resize_generation <> generation)
+          ~probe:Masc_tui_ansi.probe_terminal_size with
+      | Size.Current -> true
+      | Size.Resize_interrupted | Size.Resize_detected -> false
+  in
   let share_interrupt_barrier = ref false in
   let run_loop () =
     while true do
@@ -27444,7 +27476,8 @@ Use relative paths for resources already held in the package. -->
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       prepare_resource_diagrams state ~mailbox:async_messages;
-      prepare_inspected_frame state ~mailbox:async_messages;
+      prepare_inspected_frame state ~mailbox:async_messages
+        ~worker_geometry_current:(make_worker_geometry_current ());
       (* A prepared editor may not replace a quit or recovery notice before
          the covered surface has actually returned to the terminal. *)
       let editor_waits_for_frame =

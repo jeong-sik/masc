@@ -264,6 +264,12 @@ val start_full_health_snapshot_refresh_loop :
     read of listener environment. *)
 
 module For_testing : sig
+  val make_cached_full_health_json_after_selection :
+    after_selection:(unit -> unit) ->
+    request_authority:Server_request_authority.authority ->
+    Httpun.Request.t -> Yojson.Safe.t
+  (** Runs a callback after choosing the health snapshot and before rendering it. *)
+
   val fleet_stream_hub_for_scope_before_registration :
     before_registration:(unit -> unit) ->
     state:Mcp_server.server_state -> scope:Mcp_server.workspace_scope -> Fleet_stream_hub.t option
@@ -318,6 +324,9 @@ module For_testing : sig
   val full_health_refresh_worker_stats : unit -> int * int * bool * int * bool * bool
   (** Returns [(submissions, joins, active, invalidation_generation,
       snapshot_present, refresh_requested)]. *)
+
+  val full_health_observation_failures : unit -> int
+  (** Failures belonging to the current workspace generation. *)
 end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list

@@ -73,6 +73,10 @@ let test_email_search_keeps_exact_target () =
 
 let test_workspace_replacement_retires_usage () =
   let state = state () in
+  let transport : Masc.Tui_decode.transport_health =
+    { th_primary_path=Masc.Transport_metrics.Sse; th_queue_pressure=Steady;
+      th_sse_sessions=1; th_websocket_sessions=None; th_grpc_port=None; th_events_dropped=0 } in
+  state.transport <- Some transport;
   state.overview_quota <- Quota_read [];
   state.keeper_usage <- Keeper_usage_read Usage.Keeper_usage_loading;
   state.overview_account_emails <- Account_emails_read
@@ -92,13 +96,15 @@ let test_workspace_replacement_retires_usage () =
     (state.provider_history == previous_history
      && state.overview_providers == previous_providers
      && state.overview_account_emails == previous_emails
+     && state.transport = Some transport
      && state.overview_quota = Quota_read []
      && state.keeper_usage = Keeper_usage_read Usage.Keeper_usage_loading);
   check bool "an unconfirmed identity retires old read authority" true
     (state.workspace_read_authority != previous_reading);
   withdraw_usage_workspace state;
   check bool "replacement retires every workspace usage observation" true
-    (state.overview_quota = Quota_unread
+    (state.transport = None && state.transport_error = None
+     && state.overview_quota = Quota_unread
      && state.overview_providers = Providers_unread
      && state.keeper_usage = Keeper_usage_unread
      && state.provider_history = Provider_history_unread
@@ -117,6 +123,85 @@ let test_workspace_replacement_retires_usage () =
         | Provider_history_read trend ->
             List.map (fun row -> row.Trend.scope_id) trend.rows = ["new-workspace"]
         | Provider_history_unread | Provider_history_error _ -> false)
+
+let test_workspace_replacement_rereads_superseded_usage () =
+  let state = state () in
+  let module Order = Surface_read_order in
+  state.view <- Metrics;
+  let needs = surface_needs_of_surface Metrics in
+  let reads, full = Order.dispatch ~kind:Order.Full ~needs ~started_ns:0L Order.initial in
+  let reads, old_navigation = Order.dispatch ~kind:Order.Navigation ~needs ~started_ns:1L reads in
+  state.http_surface_reads <- reads;
+  let reads, owned = Order.take state.http_surface_reads full in
+  state.http_surface_reads <- reads;
+  check bool "the older navigation displaced the full usage result" false
+    (List.mem Order.Runtime_quota_data owned || List.mem Order.Provider_history_data owned);
+  check bool "the old navigation still owns its in-flight datasets" true
+    (Order.owns_dataset state.http_surface_reads old_navigation Order.Runtime_quota_data);
+  withdraw_usage_workspace state;
+  state.workspace_identity <- Workspace_identity_mismatch
+      {local_base_path="/workspace/a";server_base_path="/workspace/b"};
+  check bool "a moved workspace rereads its unobserved Usage" true
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs);
+  check bool "no move does not repeatedly revalidate" false
+    (revalidate_workspace_surfaces state ~workspace_moved:false ~needs);
+  let reads, fresh = Order.dispatch ~kind:Order.Full ~needs ~started_ns:2L state.http_surface_reads in
+  check bool "new read owns the current workspace datasets" true
+    (Order.owns_dataset reads fresh Order.Runtime_quota_data
+     && Order.owns_dataset reads fresh Order.Provider_history_data
+     && not (Order.owns_dataset reads old_navigation Order.Runtime_quota_data)
+     && not (Order.owns_dataset reads old_navigation Order.Provider_history_data));
+  state.overview_quota <- Quota_failed "runtime unavailable";
+  state.transport_error <- Some "transport unavailable";
+  state.overview_providers <- Providers_failed "providers unavailable";
+  state.keeper_usage <- Keeper_usage_error "keeper usage unavailable";
+  state.provider_history <- Provider_history_error "history unavailable";
+  state.overview_account_emails <- Account_emails_failed "accounts unavailable";
+  check bool "settled failures do not trigger another reread" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs);
+  state.provider_history <- Provider_history_unread;
+  check bool "a single missing dataset needs revalidation" true
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs);
+  let hidden_needs = surface_needs_of_surface Overview in
+  check bool "a hidden Usage surface does not trigger the mismatch reread" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:hidden_needs);
+  state.workspace_identity <- Workspace_identity_match;
+  check bool "the existing matched-workspace revalidation remains" true
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:hidden_needs);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "offline";
+  check bool "an unconfirmed identity does not start a read" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs)
+
+let test_shared_accounts_and_server_logs_revalidate () =
+  let state = state () in
+  let module Order = Surface_read_order in
+  let config_needs = surface_needs_of_surface Config in
+  let usage_needs = surface_needs_of_surface Metrics in
+  let reads, full = Order.dispatch ~kind:Order.Full ~needs:config_needs ~started_ns:0L Order.initial in
+  let reads, _old_navigation = Order.dispatch ~kind:Order.Navigation ~needs:config_needs ~started_ns:1L reads in
+  let _, owned = Order.take reads full in
+  check bool "the prior navigation displaced the account result" false
+    (List.mem Order.Account_emails_data owned);
+  withdraw_usage_workspace state;
+  state.workspace_identity <- Workspace_identity_mismatch
+      {local_base_path="/workspace/a";server_base_path="/workspace/b"};
+  check bool "Config rereads its missing accounts" true
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:config_needs);
+  let delta = surface_needs_delta ~previous:config_needs ~next:usage_needs in
+  check bool "entering Usage would not request the shared accounts again" false
+    delta.needs_account_emails;
+  state.overview_account_emails <- Account_emails_failed "accounts unavailable";
+  check bool "a settled account failure does not reread hidden Usage" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:config_needs);
+  let logs_needs = surface_needs_of_surface System_logs in
+  check bool "unread server logs are also recovered" true
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:logs_needs);
+  check bool "local TUI logs do not request server logs" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true
+       ~needs:{logs_needs with needs_system_logs=false});
+  state.system_logs <- System_logs_view.apply Server (Error "logs unavailable") state.system_logs;
+  check bool "a settled server-log failure does not retry" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:logs_needs)
 
 let test_window_change_replaces_only_its_history_request () =
   let state = state () in
@@ -156,4 +241,6 @@ let () = run "usage account continuity"
              test_case "source failures" `Quick test_failed_and_unread_sources_stay_failed_and_unread;
              test_case "email search target" `Quick test_email_search_keeps_exact_target;
              test_case "workspace replacement retires usage" `Quick test_workspace_replacement_retires_usage;
+             test_case "workspace replacement rereads superseded usage" `Quick test_workspace_replacement_rereads_superseded_usage;
+             test_case "workspace replacement rereads shared accounts and logs" `Quick test_shared_accounts_and_server_logs_revalidate;
              test_case "period change requests its own history" `Quick test_window_change_replaces_only_its_history_request]]

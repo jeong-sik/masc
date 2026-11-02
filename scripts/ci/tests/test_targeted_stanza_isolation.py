@@ -242,7 +242,7 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT']))
         invocation = json.loads((self.root / "alias-call.json").read_text())
         self.assertEqual(invocation, {
             "argv": ["exec", "--", "dune", "build", "--root", ".", "--force",
-                     "--no-buffer", "-j", "1", f"@@{directory}/runtest-{name}"],
+                     "--no-buffer", "--verbose", "-j", "1", f"@@{directory}/runtest-{name}"],
             "verbose": "1",
         })
         return result

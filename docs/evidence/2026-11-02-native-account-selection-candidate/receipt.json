@@ -43,5 +43,12 @@
   "raw_capture_location": "original campaign checkout: artifacts/issues-oldest-20261101/catalog-publication-20261102/native-account-product-observed-125067233800.raw.log",
   "selected_capture": "selected.txt",
   "source_inputs": "source-inputs.json",
-  "source_inputs_sha256": "c8c1d69ad2bb6acedabdb6c494ebb1481c8ee17ccc1493994be23e52ca2f3cc4"
+  "source_inputs_sha256": "c8c1d69ad2bb6acedabdb6c494ebb1481c8ee17ccc1493994be23e52ca2f3cc4",
+  "callback_warnings": {
+    "capture": "callback-warnings.txt",
+    "bytes": 525,
+    "sha256": "fcfea40ee398db6dace793ba3671f4bdc79389956354502f405432af2ddaf5f7",
+    "actual_lines": 2,
+    "derivation": "Complete matching callback-warning lines from ANSI-stripped raw capture; independent derivative digest, not raw byte identity."
+  }
 }

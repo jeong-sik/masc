@@ -29,6 +29,13 @@ the later remote `424a6cdeee9d32cbd7d84fb737b1d3e18f6e4d1b` fixture already reco
 the first observation and asserts outside the callback. No execution result is
 transferred to that rewritten source.
 
+The raw capture also reports an already-resolved promise in the idle-handoff
+fixture, which signals progress on repeated text deltas. Both observed callback
+warnings are retained in [callback-warnings.txt](callback-warnings.txt), with a
+separate derivative digest in the receipt. The original selected capture retains
+its unchanged bytes; it includes the assertion warning but omits this promise
+warning. Framework OK counts do not certify warning-free callback execution.
+
 The nine SKIPs are one Claude and eight Codex live-subscription controls. They
 are not passes or real-account observations. All reported native selection
 checks use owned synthetic contexts and child-environment projection; they

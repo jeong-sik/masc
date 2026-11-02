@@ -17,6 +17,7 @@ type runtime = {
   event : bool Atomic.t;
   mutable scanning : bool;
   owners : (string, owner) Hashtbl.t;
+  reported_holds : (string, Candle_payout.window_issue list) Hashtbl.t;
 }
 let active : runtime option Atomic.t = Atomic.make None
 let request_pass runtime reason =
@@ -51,7 +52,37 @@ let launch ~sw runtime owner =
       if owner.event_queued then request_pass runtime Event);
     `Stop_daemon)
 type pass_result = Scanned | Deferred of wake_reason
+let report_existing_holds runtime outcomes =
+  let seen = Hashtbl.create (List.length outcomes) in
+  List.iter (function
+    | Candle_candidates.Held_window {goal_id;issues;recorded} ->
+      Hashtbl.replace seen goal_id ();
+      if Hashtbl.find_opt runtime.reported_holds goal_id <> Some issues && not recorded then
+        Log.Candle.warn "payout window held goal_id=%s: %s" goal_id
+          (String.concat "; " (List.map Candle_payout.window_issue_to_string issues));
+      Hashtbl.replace runtime.reported_holds goal_id issues
+    | Candle_candidates.Wrote_candidates {goal_id} | Wrote_unattributed {goal_id}
+    | Already_prepared {goal_id} | Superseded {goal_id} | Waiting_task {goal_id;_} ->
+      Hashtbl.remove runtime.reported_holds goal_id
+    | Candle_candidates.Retry_later {goal_id;_} -> Hashtbl.replace seen goal_id ()) outcomes;
+  Hashtbl.filter_map_inplace (fun goal_id issues ->
+    if Hashtbl.mem seen goal_id then Some issues else None) runtime.reported_holds
 let pass ~sw runtime reason =
+  (* Preserve the Task observation while the appraiser is unavailable too.
+     Model execution still passes the separate availability gate below. *)
+  let reason, ready = match Candle_candidates.drain_once ~now:Time_compat.now runtime.config with
+    | Error detail -> Log.Candle.warn "preparation could not read ledger: %s" detail; reason, []
+    | Ok outcomes ->
+      report_existing_holds runtime outcomes;
+      let ready = List.filter_map (function
+        | Candle_candidates.Wrote_candidates {goal_id} | Already_prepared {goal_id} -> Some goal_id
+        | Wrote_unattributed _ | Superseded _ | Held_window _ | Waiting_task _ | Retry_later _ -> None) outcomes in
+      let reason = if List.exists (function Candle_candidates.Wrote_unattributed _ -> true
+        | Candle_candidates.Wrote_candidates _ | Candle_candidates.Already_prepared _
+        | Candle_candidates.Superseded _ | Candle_candidates.Held_window _
+        | Candle_candidates.Waiting_task _ | Candle_candidates.Retry_later _ -> false) outcomes
+        then Event else reason in
+      reason, ready in
   match Candle_status.current ~base_path:runtime.config.base_path with
   | Candle_config.Off | Candle_config.Disabled _ -> Deferred reason
   | Candle_config.Enabled policy ->
@@ -64,12 +95,6 @@ let pass ~sw runtime reason =
       Hashtbl.iter (fun _ owner ->
         if owner.in_flight then owner.event_queued <- true
         else owner.rejected <- false) runtime.owners;
-    let reason = match Candle_candidates.drain_once ~now:Time_compat.now runtime.config with
-      | Error detail -> Log.Candle.warn "preparation could not read ledger: %s" detail; reason
-      | Ok outcomes -> if List.exists (function Candle_candidates.Wrote_unattributed _ -> true
-          | Candle_candidates.Wrote_candidates _ | Candle_candidates.Already_prepared _
-          | Candle_candidates.Superseded _ | Candle_candidates.Retry_later _ -> false) outcomes
-        then Event else reason in
     match Candle_appraise.pending ~base_path:runtime.config.base_path with
     | Error detail ->
       Log.Candle.warn "payout pass could not read ledger: %s" detail;
@@ -86,8 +111,10 @@ let pass ~sw runtime reason =
             Hashtbl.replace runtime.owners w.goal_id owner; owner in
         if owner.in_flight then (match reason with Event -> owner.event_queued <- true | Pulse -> ())
         else (
+          (* An event releases a rejection even if this pass cannot prepare the
+             Goal. A later pulse may then dispatch after its source recovers. *)
           (match reason with Event -> owner.rejected <- false | Pulse -> ());
-          if not owner.rejected then launch ~sw runtime owner)) waiting;
+          if List.mem w.goal_id ready && not owner.rejected then launch ~sw runtime owner)) waiting;
       Scanned
 let run ~sw runtime : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
@@ -113,7 +140,7 @@ let start ?(appraiser_declaration_changed = fun () -> false)
     ~sw ~appraise ~(config : Workspace_utils_backend_setup.config) () =
   Eio.Switch.check sw;
   let runtime = {config;appraise;appraiser_declaration_changed;payout_policy=None;wake=Eio.Condition.create ();pending=Atomic.make true;
-    event=Atomic.make true;scanning=false;owners=Hashtbl.create 16} in
+    event=Atomic.make true;scanning=false;owners=Hashtbl.create 16;reported_holds=Hashtbl.create 16} in
   let owner = Some runtime in
   if Atomic.compare_and_set active None owner then (
     Eio.Switch.on_release sw (fun () -> ignore (Atomic.compare_and_set active owner None : bool));

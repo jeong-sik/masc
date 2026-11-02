@@ -5,7 +5,7 @@
     own: the operator's confirmation wakes it, and so does the maintenance tick,
     which is how source and transport failures are tried again. Each Goal has
     at most one in-flight appraisal fiber, so a slow provider does not block
-    another Goal. Invalid responses wait for an event wake. A wake that
+    another Goal. A held candidate window is not appraised. Invalid responses wait for an event wake. A wake that
     arrives while a pass runs is kept, so no pass misses it. *)
 
 val start : ?appraiser_declaration_changed:(unit -> bool) -> sw:Eio.Switch.t -> appraise:Candle_appraisal.runner -> config:Workspace_utils_backend_setup.config -> unit -> unit

@@ -24,7 +24,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_ids;
+          status=Candle_event.Done {completed_at=(match Candle_time.of_rfc3339 "2026-09-20T00:00:00Z" with
+            | Ok value -> value | Error detail -> Alcotest.fail detail)}}) task_ids;
        candidate_task_ids=task_ids;candidate_keepers=[keeper];
        candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}

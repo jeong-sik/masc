@@ -37,8 +37,11 @@ module Group : sig
       Actual recursive emptiness is not output sealing or payload exit proof. *)
   val release : t -> (unit, error) result
   (** Owner teardown requests tree kill, waits for actual recursive emptiness,
-      removes only its original group and closes private descriptors. Original
-      main-process reaping and complete output/result settlement stay separate.
+      removes only its original group and closes private descriptors. A failed
+      removal after emptiness still attempts descriptor cleanup and caches the
+      failure; a close failure keeps the removal error as [Cleanup_failed.primary].
+      Original main-process reaping and complete output/result settlement stay
+      separate.
       This ephemeral handle alone is not durable restart/registry authority. *)
 end
 

@@ -39,7 +39,10 @@ val await_empty : t -> (unit, error) result
 val release : t -> (unit, error) result
 (** Endpoint-owner teardown: retire, request tree kill, await actual recursive
     emptiness, remove only the pinned new group, close private handles. Errors
-    stay visible. This does not reap original mains or seal output/results. *)
+    stay visible. After emptiness, a removal failure still attempts descriptor
+    cleanup and caches the failure. A close failure retains the removal error
+    as [Cleanup_failed.primary]. This does not reap original mains or seal
+    output/results. *)
 
 val with_spawn : t -> (Unix.file_descr -> 'a) -> ('a, error) result
 (** PRIVATE to this library. Hold this group's bounded admission boundary

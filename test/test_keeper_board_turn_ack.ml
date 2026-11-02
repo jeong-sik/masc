@@ -4,6 +4,7 @@
    cycle directly, so the outer heartbeat scheduler and its admission checks
    are outside this test. No sandbox tools are invoked. *)
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* These tests check how the Board routes a text, not who is declared: every
    name with the shape of a Keeper name stands for itself. *)
@@ -105,6 +106,10 @@ let run base_path prompt_root =
   Eio_context.set_mono_clock env#mono_clock;
   Process_eio.init ~cwd_default:Eio.Path.(env#fs / base_path)
     ~proc_mgr:env#process_mgr ~clock:env#clock;
+  (* This probe drives native requests without server bootstrap; its root
+     switch owns the same durable execution capability for the whole run. *)
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+    |> get Runtime_agent_execution_runtime.initialization_error_to_string;
   Masc_test_deps.ensure_rng_initialized ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
@@ -119,6 +124,7 @@ let run base_path prompt_root =
    | Workspace.FileSystem _ -> ()
    | Workspace.Memory _ -> failwith "probe requires a FileSystem workspace backend");
   ignore (Workspace.init config ~agent_name:(Some "board-probe-operator") : string);
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   (* The call ledger is initialized by the server bootstrap, which this probe
      does not run; initialize it to capture the probe's actual tool receipts. *)
   Keeper_tool_call_log.init ~base_path ();

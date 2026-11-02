@@ -22,6 +22,7 @@
 
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* These tests check how the Board routes a text, not who is declared: every
    name with the shape of a Keeper name stands for itself. *)
@@ -55,6 +56,8 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
@@ -189,6 +192,7 @@ let test_poison_durable_source_is_retired_during_intake () =
   let base_path = fresh_test_base_path () in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
@@ -255,6 +259,7 @@ let with_intake_sources ~max_events f =
   let base_path = fresh_test_base_path () in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());

@@ -1,5 +1,6 @@
 open Alcotest
 open Masc
+module Preparation = Masc_test_deps.Board_test_preparation
 
 (* A name written after [@] is a target only when the recipient lookup the
    server installed declares it (RFC-at-name-resolves-to-declared-recipient).
@@ -30,6 +31,8 @@ let started ~lookup f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:lookup ());
@@ -811,6 +814,8 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Preparation.prepare ~base_path:(Env_config_core.base_path ())
+    ~action:Preparation.Bootstrap;
   ignore (Board_dispatch.list_posts ());
   (match refused_before_publication (write "@alice hello") with
    | Board.Recipient_lookup_failed _ -> ()

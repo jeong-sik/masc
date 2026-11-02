@@ -29,10 +29,7 @@ val register_ws_cleanup : (unit -> int * int) -> unit
 val run_all : unit -> unit
 (** Run the shutdown sequence in order:
 
-    1. Stop the registered Keeper owners and workspace observation (if any)
-       under cancellation protection. The phase timeout cannot advance to
-       cancelling the server switch before their original terminal persistence
-       attempts finish. The process deadline remains the backstop for a stuck drain.
+    1. Stop the registered Keeper owners and workspace observation (if any).
     2. Close every SSE client via [Sse.close_all_clients].
     3. Close every WebSocket session via
        [Server_mcp_transport_ws.close_all].

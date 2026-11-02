@@ -146,5 +146,6 @@ let begin_original_open t =
       {t with original_open_pending=Some attempt},Some (attempt,request,key,bytes)
 let owns_original_open t request attempt =
   owns t request && Option.exists (fun current -> current == attempt) t.original_open_pending
+let withdraw_original_open t = {t with original_open_pending=None}
 let finish_original_open t request attempt =
   if owns_original_open t request attempt then {t with original_open_pending=None} else t

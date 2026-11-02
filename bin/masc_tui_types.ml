@@ -17717,6 +17717,24 @@ let image_reading_is_current (state : state) (pending : sent_image_read) =
     reading == state.workspace_read_authority && server_authority_ready state
     && pending.sir_view = Board && board_preview_subject_is_current state subject
 
+(* A completion belongs to the exact read that launched it, even if a later
+   read happens to have the same name, surface and generation. *)
+let take_image_read (state : state) (request : sent_image_read) =
+  match state.sent_image_read with
+  | Some pending when pending == request ->
+      state.sent_image_read <- None;
+      if image_reading_is_current state pending then Some pending else None
+  | Some _ | None -> None
+
+(* Inspection rerasterization stays in flight until its worker returns. Only
+   an unopened preview is withdrawn by a new operator gesture. *)
+let withdraw_image_open (state : state) =
+  match state.sent_image_read with
+  | Some ({sir_purpose=Open_image;_} as pending) ->
+      state.sent_image_read <- None;
+      Some pending
+  | Some {sir_purpose=Inspect_image _;_} | None -> None
+
 let board_successor (state : state) =
   Option.bind (board_post_on_screen state) (fun post ->
     Option.bind post.bp_closed (fun closed ->

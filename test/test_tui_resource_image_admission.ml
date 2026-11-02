@@ -267,17 +267,26 @@ let test_board_attachment_ownership () =
   Types.suspend_workspace_readings state;
   check bool "withdrawn workspace reading retires preview" false (current ())
 
-let test_board_preview_input_barrier () =
+let test_image_preview_input_barrier () =
   let module Protocol = Masc_tui_async_protocol in
-  let preview view = Protocol.Sent_image_ready {generation=1;view;keeper_name=None;
-    name="preview";skill_reference=None;result=Error "unavailable"} in
+  let state=state () in
+  let preview view =
+    let request={ (pending state (Types.Local_file_image_read state.workspace_authority)) with
+      sir_view=view } in
+    Protocol.Sent_image_ready {request;skill_reference=None;result=Error "unavailable"} in
   let scoped message = Protocol.Workspace_scoped (Types.Workspace_authority 0,Some (ref ()),message) in
   let waits message = Protocol.message_waits_for_input ~resource_read:(fun _ -> false)
       ~recovery_loaded:(fun _ -> false) message in
   check bool "Board completion waits for pending input" true
     (waits (scoped (preview Types.Board)));
-  check bool "other image surfaces retain their existing policy" false
+  check bool "Resources completion also waits" true
     (waits (scoped (preview Types.Resources)));
+  let request=pending state (Types.Remote_url_image_read state.workspace_authority) in
+  let remote=Protocol.Image_render_ready {request;title="image";caption=[];
+    page_url="https://example.invalid";image_url="https://example.invalid/image";
+    result=Error "unavailable"} in
+  check bool "remote failure waits before browser fallback" true
+    (waits remote);
   let key : Masc_tui_board_reader.key =
     {post_id="post";sha256=String.make 64 'a';bytes=0;name=None} in
   let _,request=Masc_tui_board_reader.open_read ~key Masc_tui_board_reader.initial in
@@ -292,7 +301,99 @@ let test_board_preview_input_barrier () =
     (waits (scoped (Protocol.Workspace_operation open_ready)));
   let retry=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_retry {attempt;prepared;opener="open"})) in
   check bool "fallback opener also waits for pending input" true
-    (waits (scoped retry))
+    (waits (scoped retry));
+  let saved=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_saved_original "saved")) in
+  check bool "completed save is not deferred" false
+    (waits saved);
+  let request : Catalog.read_request = {key=uri;owner=ref ()} in
+  let read=Protocol.Resource_read (request,Error "unavailable",Types.Share_journal_not_needed) in
+  let lookup : Types.resource_share_recovery_lookup =
+    {recovery_lookup_owner=ref ();recovery_lookup_workspace=state.workspace_authority;
+     recovery_lookup_origin={wi_base_path="/test";wi_masc_root="/test/.masc"};
+     recovery_lookup_key=uri} in
+  let recovery=Protocol.Resource_share_recovery_loaded (lookup,Error "unavailable") in
+  let waits_owned message = Protocol.message_waits_for_input ~resource_read:(fun _ -> true)
+      ~recovery_loaded:(fun _ -> true) message in
+  List.iter (fun message ->
+    check bool "owned share read waits for input" true (waits_owned (scoped message));
+    check bool "operation envelope does not inherit share callbacks" false
+      (waits_owned (scoped (Protocol.Workspace_operation message)))) [read;recovery]
+
+let test_image_input_ownership () =
+  let module Reader = Masc_tui_input_reader in
+  let state=state () in
+  let make_remote () = pending state (Types.Remote_url_image_read state.workspace_authority) in
+  let input event =
+    if Reader.is_operator_input event then ignore (Types.withdraw_image_open state) in
+  let admitted request = Option.is_some (Types.take_image_read state request) in
+  let initial_generation=state.image_request_generation in
+  let first=make_remote () in
+  state.sent_image_read <- Some first;
+  input (Reader.Graphics_reply "i=31;OK");
+  check bool "terminal reply preserves the pending image" true (admitted first);
+  check bool "a completion is consumed only once" false (admitted first);
+  List.iter (fun event ->
+    let old=make_remote () in
+    state.sent_image_read <- Some old;
+    input event;
+    check bool "operator input withdraws the opening" true (Option.is_none state.sent_image_read);
+    check bool "late result cannot draw or open a browser" false (admitted old))
+    [Reader.Key "esc";Reader.Key "ctrl-g";Reader.Mouse_left_press (1,1);
+     Reader.Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,1,1)];
+  let old=make_remote () in
+  state.sent_image_read <- Some old;
+  ignore (Types.withdraw_image_open state);
+  let replacement=make_remote () in
+  state.sent_image_read <- Some replacement;
+  check int "browser generation is not changed by early withdrawal"
+    initial_generation state.image_request_generation;
+  check bool "identical-looking old read is refused" false (admitted old);
+  check bool "old read does not consume replacement" true
+    (Option.exists (fun current -> current == replacement) state.sent_image_read);
+  check bool "replacement is admitted" true (admitted replacement);
+  let window : Masc_tui_image_viewport.window =
+    {x=0;y=0;width=10;height=10;columns=5;rows=5} in
+  let inspection={ (make_remote ()) with
+    sir_purpose=Types.Inspect_image {identity=ref ();window} } in
+  state.sent_image_read <- Some inspection;
+  input (Reader.Key "left");
+  check bool "inspection worker remains in flight" true
+    (Option.exists (fun current -> current == inspection) state.sent_image_read);
+  check bool "inspection worker can settle" true (admitted inspection)
+
+let test_image_result_with_full_mailbox () =
+  let module Protocol = Masc_tui_async_protocol in
+  let module Results = Masc_tui_workspace_result in
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let shared=Eio.Stream.create 1 in
+    Eio.Stream.add shared ();
+    List.iter (fun (result,withdraw,expected_draw,expected_open) ->
+      let state=state () and results=Results.create () in
+      let request=pending state (Types.Remote_url_image_read state.workspace_authority) in
+      state.sent_image_read <- Some request;
+      let delivered,resolve=Eio.Promise.create () in
+      Eio_context.with_turn_switch sw (fun () ->
+        Results.launch_session ~results ~boundary_error:Fun.id
+          ~deliver:(fun result ->
+            Eio.Promise.resolve resolve ();
+            Protocol.Image_render_ready {request;title="image";caption=[];
+              page_url="https://example.invalid";image_url="https://example.invalid/image";result})
+          (fun () -> result));
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Promise.await delivered);
+      Eio.Fiber.yield ();
+      check int "shared mailbox remains full" 1 (Eio.Stream.length shared);
+      if withdraw then ignore (Types.withdraw_image_open state);
+      let draw=ref 0 and open_browser=ref 0 in
+      (match Results.take_ready results with
+       | [{message=Protocol.Image_render_ready {request;result;_};_}] ->
+           if Option.is_some (Types.take_image_read state request) then
+             (match result with Ok _ -> incr draw | Error _ -> incr open_browser)
+       | _ -> fail "expected the session-owned image completion");
+      check int "only an admitted result can draw" expected_draw !draw;
+      check int "only an admitted failure can open the browser" expected_open !open_browser;
+      Results.close results)
+      [Ok "png",false,1,0; Error "unavailable",false,0,1;
+       Ok "png",true,0,0; Error "unavailable",true,0,0]))
 
 let test_board_svg_and_original_reader () =
   let module Payload = Masc_tui_image_payload in
@@ -345,8 +446,16 @@ let test_board_svg_and_original_reader () =
   let reopened,stale_release=Reader.begin_original_open reopened in
   check bool "old completion cannot release the new opening" true (Option.is_none stale_release);
   let reopened=Reader.finish_original_open reopened new_request newest_attempt in
-  let _,next=Reader.begin_original_open reopened in
-  check bool "current completion permits a later open" true (Option.is_some next)
+  let reopened,next=Reader.begin_original_open reopened in
+  let interrupted=match next with Some (attempt,_,_,_) -> attempt | None -> fail "later open did not start" in
+  let reopened=Reader.withdraw_original_open reopened in
+  check bool "interrupt retires an opener or retry that has not started" false
+    (Reader.owns_original_open reopened new_request interrupted);
+  let reopened,next=Reader.begin_original_open reopened in
+  let after_interrupt=match next with Some (attempt,_,_,_) -> attempt | None -> fail "fresh open did not start" in
+  let reopened=Reader.finish_original_open reopened new_request interrupted in
+  check bool "interrupted receipt cannot release the new attempt" true
+    (Reader.owns_original_open reopened new_request after_interrupt)
 
 let test_board_worker_and_png_boundary () =
   let module Work=Masc_tui_board_preview_work in
@@ -529,9 +638,11 @@ let () =
       renderer_shutdown_supervisor executable marker result
   | _ -> run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
+  test_case "image input retains exact read ownership" `Quick test_image_input_ownership;
+  test_case "image results bypass a full shared mailbox" `Quick test_image_result_with_full_mailbox;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
   test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
-  test_case "Board preview waits for input" `Quick test_board_preview_input_barrier;
+  test_case "image completions wait for input" `Quick test_image_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;

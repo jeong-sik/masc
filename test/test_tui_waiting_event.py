@@ -57,6 +57,7 @@ class WaitingHandler(FixtureHandler):
         server = cast(WaitingServer, self.server)
         request = urllib.parse.urlsplit(self.path)
         if request.path == "/mcp":
+            server.record("/mcp")
             if urllib.parse.parse_qs(request.query).get("sse_kind") != ["observer"]:
                 self.respond(400, {"error": "observer stream required"})
                 return
@@ -68,10 +69,22 @@ class WaitingHandler(FixtureHandler):
             ]:
                 self.respond(409, {"error": "workspace precondition failed"})
                 return
+            instance = "waiting-fixture-instance"
+            requested_id = self.headers.get("Last-Event-ID")
+            requested_instance = self.headers.get("x-masc-sse-instance-id")
+            if requested_id is None:
+                replay = "fresh"
+            elif requested_instance == instance:
+                replay = "resumed"
+                server.record("observer-resume")
+            elif requested_instance is None:
+                replay = "reset-unscoped-cursor"
+            else:
+                replay = "reset-instance-changed"
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
-            self.send_header("x-masc-sse-instance-id", "waiting-fixture-instance")
-            self.send_header("x-masc-sse-replay", "fresh")
+            self.send_header("x-masc-sse-instance-id", instance)
+            self.send_header("x-masc-sse-replay", replay)
             self.send_header("x-masc-workspace-read", "matched-v1")
             self.send_header("Connection", "close")
             self.end_headers()
@@ -134,6 +147,7 @@ class WaitingHandler(FixtureHandler):
                 "schedule": "schedule-refreshed",
                 "schedule-held": "obsolete-schedule",
                 "schedule-follow": "final-schedule",
+                "reconnect": "reconnected-waiting",
             }.get(phase, "old-waiting")
             beta_detail = {
                 "held": "beta-updated",
@@ -499,6 +513,27 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 self.assertNotIn(b"obsolete-schedule", output[schedule_race_start:])
                 self.assertEqual(server.count("schedule-after", TURNS_PATH), 0)
+                server.set_phase("reconnect")
+                reconnect_output_start = len(output)
+                server.events.put(None)
+                wait_until(
+                    lambda: server.count("reconnect", "/mcp") == 1,
+                    "observer did not reconnect after the stream closed",
+                )
+                wait_until(
+                    lambda: server.count("reconnect", "observer-resume") == 1,
+                    "observer did not resume with its scoped cursor",
+                )
+                wait_until(
+                    lambda: server.response_count("reconnect", TURNS_PATH) == 1,
+                    "reconnected observer did not revalidate waiting inventory",
+                )
+                wait_until(
+                    lambda: rendered_row_contains(
+                        reconnect_output_start, b"analyst", b"reconnected-waiting"
+                    ),
+                    "reconnected observer did not refresh the waiting row",
+                )
                 self.assertTrue(server.valid_admission)
                 self.assertIsNone(process.poll())
             finally:

@@ -1,11 +1,6 @@
 import { isRecord } from '../components/common/normalize'
-import { get, type GetOptions } from './core'
+import type { GetOptions } from './core'
 import { fetchKeeperRuntimeTrace, type KeeperRuntimeTraceResponse } from './keeper-runtime-trace'
-import {
-  normalizeSkillActivationProjection,
-  validateAsyncActionLinks,
-  type DashboardSkillActivationProjection,
-} from './dashboard-tools-prompts'
 
 export interface TurnFlowTarget {
   keeper: string
@@ -41,11 +36,6 @@ export interface TurnFlow {
   events: TurnFlowEvent[]
   trace: KeeperRuntimeTraceResponse
 }
-
-export type TraceSkillActivations =
-  | Extract<DashboardSkillActivationProjection, { status: 'available' }>
-  | { status: 'not_recorded' }
-  | { status: 'unavailable'; reason: string; detail: string }
 
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length === 0) {
@@ -137,36 +127,4 @@ export async function fetchTurnFlow(target: TurnFlowTarget, opts: GetOptions = {
     traceId: target.traceId, turnId: target.absoluteTurn, limit: 500, signal: opts.signal,
   })
   return decodeTurnFlow(trace, target)
-}
-
-export function decodeTraceSkillActivations(raw: unknown, target: TurnFlowTarget): TraceSkillActivations {
-  if (!isRecord(raw) || raw.schema !== 'masc.dashboard.skill-activations/v1'
-    || raw.trace_id !== target.traceId) {
-    throw new Error('Skill 기록이 선택한 trace와 일치하지 않습니다')
-  }
-  if (raw.status === 'not_recorded') return { status: 'not_recorded' }
-  if (raw.status === 'unavailable') return {
-    status: 'unavailable', reason: requiredString(raw.reason, 'reason'),
-    detail: requiredString(raw.detail, 'detail'),
-  }
-  if (raw.status !== 'available') throw new Error('Skill 기록의 상태가 유효하지 않습니다')
-  // Reuse the canonical ledger decoder, including delivery/action order and
-  // physical async-result identities. Do not infer use from the skill catalog.
-  const projection = normalizeSkillActivationProjection({
-    status: raw.status, keeper_name: target.keeper, summary: raw.summary,
-    scoped_summaries: raw.scoped_summaries, ledger: raw.ledger,
-  })
-  if (projection?.status !== 'available' || projection.ledger.session_id !== target.traceId) {
-    throw new Error('Skill 원장이 선택한 trace와 일치하지 않습니다')
-  }
-  validateAsyncActionLinks(projection)
-  return projection
-}
-
-export async function fetchTraceSkillActivations(
-  target: TurnFlowTarget, opts: GetOptions = {},
-): Promise<TraceSkillActivations> {
-  const params = new URLSearchParams({ trace_id: target.traceId })
-  const raw = await get<unknown>(`/api/v1/dashboard/skill-activations?${params}`, opts)
-  return decodeTraceSkillActivations(raw, target)
 }

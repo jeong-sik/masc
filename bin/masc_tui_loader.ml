@@ -339,11 +339,11 @@ let record_observer_opened (state : state) ~session_id ~at =
     (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
   add_event state "observer" "runtime event feed open"
 
-let record_observer_closed (state : state) outcome ~reason ~at =
+let record_observer_closed (state : state) ~workspace outcome ~reason ~at =
   let repeated =
     match state.observer_last_close with
-    | Some (authority, previous) ->
-        authority = state.workspace_authority && previous = outcome
+    | Some (previous_workspace, previous) ->
+        previous_workspace = workspace && previous = outcome
     | None -> false
   in
   (* Keep the latest transport observation even when the same outage has
@@ -356,7 +356,7 @@ let record_observer_closed (state : state) outcome ~reason ~at =
      | Observer_off | Observer_opening | Observer_closed_before_answer _
      | Observer_closed_after_live _ ->
          Observer_closed_before_answer { reason; at });
-  state.observer_last_close <- Some (state.workspace_authority, outcome);
+  state.observer_last_close <- Some (workspace, outcome);
   if not repeated then
     add_event state "observer" ("runtime event feed closed: " ^ reason)
 

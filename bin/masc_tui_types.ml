@@ -10759,9 +10759,10 @@ type state = {
      with no features, which reads as "nothing is proven". *)
   mutable observer: observer_status;
   mutable observer_last_close:
-    (workspace_authority * (unit, observer_error) result) option;
+    (workspace_input_identity * (unit, observer_error) result) option;
       (** Last reported closure in this workspace. Opening a retry or
-          temporarily withdrawing readings does not end the same outage. *)
+          revalidating the same requested workspace does not end the outage.
+          This log key never admits readings or grants request authority. *)
   mutable observer_retry_owner: unit ref option;
   mutable observer_recovery_owner: unit ref option;
   mutable observer_scope_binding: observer_scope_binding;

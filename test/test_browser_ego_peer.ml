@@ -1816,7 +1816,7 @@ const seen=[];
 process.on('exit',()=>console.log('seen '+JSON.stringify(seen)));
 const handle={targetId:'T9',openedBy:'unknown'};
 const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
-  tabs:async()=>{seen.push('tabs');return [{label:%s,targetId:'T9',openedBy:'unknown',page:handle}];},
+  tabs:async()=>{seen.push('tabs');const label=%s;return [{...(label===null?{}:{label}),targetId:'T9',openedBy:'unknown',page:handle}];},
   adopt:async(page,options)=>{if(page!==handle)throw Error('not the SDK handle');seen.push('adopt');%s return {label:options.as??'generated',targetId:'T9',openedBy:'unknown'};},
   release:async label=>{seen.push('release');%s return handle;}});
 |js} (Yojson.Safe.to_string (str !ownership)) (Yojson.Safe.to_string !label)
@@ -1901,7 +1901,7 @@ const page={
 const taskSpace=async reference=>{
  if(reference!==51&&reference!=='SDK Space')throw Error('wrong original Space');
  return {spaceId:51,name:'SDK Space',ownership,
-  tabs:async()=>{seen.push('tabs');return closed?[]:[{label,targetId:'T9',openedBy:'unknown',url,title:'Mail',active,page:handle}];},
+  tabs:async()=>{seen.push('tabs');return closed?[]:[{...(label===null?{}:{label}),targetId:'T9',openedBy:'unknown',url,title:'Mail',active,page:handle}];},
   page:requested=>{if(label===null||requested!==label||closed)throw Error('not a managed Page');seen.push('page');return page;},
   adopt:async(original,options)=>{if(original!==handle||label!==null)throw Error('wrong adopt handle');seen.push('adopt');
    if(usedLabels.has(options.as))throw Error('Page label already used in this Space');

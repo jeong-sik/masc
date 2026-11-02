@@ -1707,7 +1707,8 @@ let page_management_script = {js|async (task, args) => {
   let page;
   if (args.action === "adopt_tab") {
     const tab = tabs.find(row => row.targetId === args.targetId);
-    if (!tab || tab.label !== null || tab.openedBy !== "unknown")
+    // Native inventory omits unmanaged labels; only our public JSON uses null.
+    if (!tab || tab.label !== undefined || tab.openedBy !== "unknown")
       return {ok:false,before:true,error:"the observed unmanaged tab changed; list tabs before adopting"};
     page = await task.adopt(tab.page, args.pageLabel === undefined ? {} : {as: args.pageLabel});
     if (page.targetId !== tab.targetId || page.openedBy !== tab.openedBy)

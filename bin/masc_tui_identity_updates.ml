@@ -59,7 +59,7 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
      failed keeps the wait for the next one instead of guessing. *)
   | Ok (Credentials_published _ | Attempt_unavailable), None -> ()
   | Ok
-      (( Credentials_published _ | Login_exchange_failed | Consent_expired
+       (( Credentials_published _ | Login_exchange_failed | Credential_publication_incomplete | Consent_expired
        | Consent_superseded | Attempt_unavailable ) as terminal), _ ->
       forget_identity_login state ~keeper_name:expectation.ile_keeper ~provider_id:expectation.ile_provider;
       (* An attached provider does not say this attempt attached it: a
@@ -75,6 +75,8 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
           | Credentials_published (Ok _) -> None
           | Credentials_published (Error ()) -> Some (Masc_tui_identity_model.Notice_bad, "credentials attached; tool discovery failed, refresh tools to retry")
           | Login_exchange_failed -> Some (Masc_tui_identity_model.Notice_bad, "login failed; start a new login")
+          | Credential_publication_incomplete -> Some (Masc_tui_identity_model.Notice_bad,
+              "credential storage incomplete; saved values may have changed; check secret storage before another login")
           | Consent_expired -> Some (Masc_tui_identity_model.Notice_bad, "consent expired; start a new login")
           | Consent_superseded -> Some (Masc_tui_identity_model.Notice_bad, "login superseded by a newer attempt")
           | Attempt_unavailable when attached -> Some (Masc_tui_identity_model.Notice_bad, "this server no longer knows how the login ended; the provider is attached, possibly from an earlier login, so check its tools before starting another")

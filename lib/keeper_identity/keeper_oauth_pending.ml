@@ -9,12 +9,18 @@ type in_flight = {
 }
 
 type completion = Tools_discovered of int | Credentials_published_discovery_failed
+type credential_write = Refresh_token | Access_token | Expiry
+type credential_publication = {
+  completed_writes : credential_write list;
+  interrupted_write : credential_write;
+}
 
 type status =
   | Awaiting_consent of float
   | Callback_admitted
   | Completed of completion
   | Failed
+  | Credential_publication_incomplete of credential_publication
   | Expired
   | Superseded
 
@@ -49,10 +55,12 @@ let with_lock t f =
 let expire ~now entry = match entry.status with
   | Awaiting_consent deadline when deadline <= now ->
       {entry with in_flight=None; status=Expired}
-  | Awaiting_consent _ | Callback_admitted | Completed _ | Failed | Expired
+  | Awaiting_consent _ | Callback_admitted | Completed _ | Failed
+  | Credential_publication_incomplete _ | Expired
   | Superseded -> entry
 
-let terminal = function Completed _ | Failed | Expired | Superseded -> true
+let terminal = function Completed _ | Failed | Credential_publication_incomplete _
+  | Expired | Superseded -> true
   | Awaiting_consent _ | Callback_admitted -> false
 
 let admit t ~keeper ~provider_id = with_lock t (fun () ->
@@ -97,6 +105,7 @@ let remember t admission ~now ~ttl_sec in_flight =
           | Callback_admitted when same_scope entry ->
               {entry with in_flight=None; status=Superseded}
           | Awaiting_consent _ | Callback_admitted | Completed _ | Failed
+          | Credential_publication_incomplete _
           | Expired | Superseded -> entry) in
       t.entries <- {attempt_id; keeper=flow.Keeper_oauth_flow.keeper;
         provider_id=flow.Keeper_oauth_flow.provider_id; state=flow.Keeper_oauth_flow.state;
@@ -115,6 +124,7 @@ let take t ~now ~state =
           (* Admission and verifier removal publish in one locked update. *)
           {entry with in_flight=None; status=Callback_admitted}
       | (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
+        | Credential_publication_incomplete _
         | Expired | Superseded), (Some _ | None) -> entry) t.entries;
     !found)
 
@@ -136,12 +146,30 @@ let waiting t ~now = with_lock t (fun () ->
   t.entries <- List.map (expire ~now) t.entries;
   List.fold_left (fun count entry -> match entry.status with
     | Awaiting_consent _ -> count+1
-    | Callback_admitted | Completed _ | Failed | Expired | Superseded -> count)
+    | Callback_admitted | Completed _ | Failed | Credential_publication_incomplete _
+    | Expired | Superseded -> count)
     0 t.entries)
 
-let while_admitted t ~state f =
+let publish_credentials t ~state ~write =
   with_lock t (fun () ->
     if List.exists (fun entry -> entry.state=state && entry.status=Callback_admitted)
          t.entries
-    then Some (f ())
+    then
+      let interrupted completed_writes interrupted_write =
+        let progress = {completed_writes=List.rev completed_writes; interrupted_write} in
+        t.entries <- List.map (fun entry ->
+          if entry.state=state && entry.status=Callback_admitted
+          then {entry with status=Credential_publication_incomplete progress}
+          else entry) t.entries in
+      let rec publish completed = function
+        | [] -> Ok ()
+        | stage :: rest ->
+            (match write stage with
+             | Ok () -> publish (stage :: completed) rest
+             | Error detail -> interrupted completed stage; Error detail
+             | exception exn ->
+                 let backtrace = Printexc.get_raw_backtrace () in
+                 interrupted completed stage;
+                 Printexc.raise_with_backtrace exn backtrace) in
+      Some (publish [] [Refresh_token; Access_token; Expiry])
     else None)

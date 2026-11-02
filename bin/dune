@@ -1111,7 +1111,7 @@
  (name masc_tui_tool_detail)
  (wrapped false)
  (modules masc_tui_tool_detail)
- (libraries masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
+ (libraries masc masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_nested_result)

@@ -39,6 +39,15 @@ let owner_ok = function
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
+(* The Owner catches child exceptions. Report them to the parent first, while
+   preserving a result already reported by an earlier child invocation. *)
+let report_fixture_failure notify_finished f =
+  try f () with exn ->
+    let trace = Printexc.get_raw_backtrace () in
+    ignore (Eio.Promise.try_resolve notify_finished (Error (exn, trace)));
+    Printexc.raise_with_backtrace exn trace
+;;
+
 let operation_source = `Assoc [ "kind", `String "dashboard" ]
 let operation_input text = `Assoc [ "message", `String text ]
 let settle_deadline_s = 5.0
@@ -297,12 +306,15 @@ let test_raised_exception_closes_the_call () =
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
   let owner_cell = ref None in
+  let finished, notify_finished = Eio.Promise.create () in
+  let expected = Failure "runner raised after dispatch" in
   let execute ~sw:_ ~keeper_name:_ ~claim =
+    report_fixture_failure notify_finished @@ fun () ->
     let operation = match owner_ok (claim ()) with
       | Some operation -> operation
       | None -> fail "the executor claimed nothing" in
     bind_active_call (Option.get !owner_cell) operation;
-    failwith "runner raised after dispatch"
+    raise expected
   in
   let owner =
     start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-raised"
@@ -313,7 +325,12 @@ let test_raised_exception_closes_the_call () =
   submit owner id "runner raises";
   let settled = await_terminal ~clock owner id in
   check bool "fails as an exception" true (failed_kind settled = Chat_operation.Turn_exception);
-  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id))
+  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id));
+  (match Eio.Promise.peek finished with
+   | Some (Error (reported, _trace)) ->
+     check bool "the parent receives the original runner exception" true (reported == expected)
+   | Some (Ok _) -> fail "the raised runner reported success to the parent"
+   | None -> fail "the Owner settled but the parent received no runner failure")
 ;;
 
 (* A resumed call that fails before anything is dispatched, such as a
@@ -535,6 +552,7 @@ let test_owned_input_wait ?response fixture () =
     let finished,notify_finished = Eio.Promise.create () in
     let hold,release = Eio.Promise.create () in
     let execute ~sw:_ ~keeper_name:_ ~claim =
+      report_fixture_failure notify_finished @@ fun () ->
       let operation : Chat_operation.t = match owner_ok (claim ()) with Some operation -> operation | None -> fail "no claimed original" in
       let owner = Option.get !owner_cell in
       if not !first then begin
@@ -647,7 +665,7 @@ let test_owned_input_wait ?response fixture () =
                (Fs_compat.load_file retained)) requests
          | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope -> ());
         let result = Owner.defer_direct_input_wait owner ~operation_id:id ~request:pending.request in
-        Eio.Promise.resolve notify_finished result;
+        Eio.Promise.resolve notify_finished (Ok result);
         match fixture with
         | Owned_wait -> ignore (owner_ok result); Owner.Operation_deferred
         | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope ->
@@ -658,7 +676,9 @@ let test_owned_input_wait ?response fixture () =
     let owner = start_owner ~sw ~path ~name ~runner:(runner ~ready execute) in
     owner_cell := Some owner;
     submit owner id "original admitted input";
-    let result = Eio.Promise.await finished in
+    let result = match Eio.Promise.await finished with
+      | Ok result -> result
+      | Error (exn, trace) -> Printexc.raise_with_backtrace exn trace in
     (match fixture,result with
      | Owned_wait,Ok _ ->
        let waiting = owner_ok (Owner.direct_input_wait owner ~operation_id:id) |> Option.get in

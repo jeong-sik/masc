@@ -9,4 +9,6 @@ val project : config:Workspace.config -> turn_ref:Ids.Turn_ref.t -> Yojson.Safe.
     Empty results prove absence only within a complete retained snapshot. *)
 
 val project_string : config:Workspace.config -> string -> (Yojson.Safe.t, string) result
-(** Parse an untrusted complete turn reference before selecting evidence. *)
+(** Parse an untrusted complete turn reference before selecting evidence.
+    A physical Skill turn requires a nonblank trace and a positive absolute
+    turn, matching the async delivery/action identity contract. *)

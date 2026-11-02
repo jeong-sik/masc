@@ -63,4 +63,9 @@ let project ~config ~turn_ref =
     ]
 
 let project_string ~config raw =
-  Result.map (fun turn_ref -> project ~config ~turn_ref) (Ids.Turn_ref.of_string raw)
+  let open Result.Syntax in
+  let* turn_ref = Ids.Turn_ref.of_yojson (`String raw) in
+  if Ids.Turn_ref.absolute_turn turn_ref > 0
+     && String.trim (Ids.Turn_ref.trace_id turn_ref) <> ""
+  then Ok (project ~config ~turn_ref)
+  else Error "physical Skill turn_ref requires a nonblank trace and a positive turn"

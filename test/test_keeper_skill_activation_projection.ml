@@ -510,8 +510,12 @@ let test_physical_turn_finds_origin_evidence_and_preserves_read_gaps () =
   check bool "preserves an actionable source gap" true
     (List.exists (fun gap -> gap |> member "code" = `String "ledger_unreadable")
       (damaged |> member "coverage" |> member "gaps" |> to_list));
-  match Server_skill_physical_turn.project_string ~config "not-a-turn" with
-  | Error _ -> () | Ok _ -> fail "malformed physical turn was accepted"
+  List.iter (fun raw -> match Server_skill_physical_turn.project_string ~config raw with
+    | Error _ -> () | Ok _ -> fail ("invalid physical turn was accepted: " ^ raw))
+    [ "not-a-turn"; "trace#0"; "trace#-1"; "   #1" ];
+  let nested = project "nested#trace#1" in
+  check string "last separator keeps the exact nested trace" "nested#trace#1"
+    (nested |> member "turn_ref" |> to_string)
 
 let () =
   run

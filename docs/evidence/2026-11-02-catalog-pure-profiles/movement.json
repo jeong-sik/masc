@@ -1,0 +1,82 @@
+{
+  "original_extraction": {
+    "base": "168e1e2b18aed0ca55dcd121ea565aeca9da89b2",
+    "changes": {
+      "packages/agent_core/lib/llm_provider/capability_profile.mli": {
+        "before_sha256": null,
+        "after_sha256": "69827f673794a58fc9451593eba72889888c0fa5532fc5466f91565d36b20c02"
+      },
+      "packages/agent_core/lib/llm_provider/capabilities.mli": {
+        "before_sha256": "594d7ed98f6cb117ab9a6203b07f86798ee5540e625d85a997865c71767d1624",
+        "after_sha256": "9db20ab5dfbeee50b6c22506fa02518ed27604921b7b69cbed8a58e2c5917111"
+      },
+      "packages/agent_core/lib/llm_provider/provider_kind.mli": {
+        "before_sha256": "29a1c58543a11e3baed31d6ea598c32b5e5d5e6d0ab3f3a4f36c75387b1374c4",
+        "after_sha256": "fe33e0c0aa53cb8df84cf3a636ddf2d3dc2ec2b640ae0fc6a996d5727a6845a2"
+      },
+      "packages/agent_core/lib/llm_provider/provider_config.mli": {
+        "before_sha256": "545df1c085da064baacab285d51d2fb42b1254e5950fd72928be2680e0c3534a",
+        "after_sha256": "72c396fdf772edf4fabf6ec2cfb94aa257af4bf8c4ebbf4b74b1aee8c2f58e3b"
+      },
+      "packages/agent_core/lib/llm_provider/provider_catalog.mli": {
+        "before_sha256": "c42e8a1507fcdd28e16fc1c3879d8509de2127feabe24191faedb641abb3a13d",
+        "after_sha256": "5c862a004d643944214807e88cb85fc58b8091d72dbcc54f5b8865ba0eabe847"
+      },
+      "packages/agent_core/lib/llm_provider/capability_profile.ml": {
+        "before_sha256": null,
+        "after_sha256": "be13c31f9f3bd938cff72104ef48979502ea5d59440a636771443f3c2827a974"
+      },
+      "packages/agent_core/lib/llm_provider/capabilities.ml": {
+        "before_sha256": "707bc57c0f1154585192e8baf208b1e8542587fab5bb32980b46fb8d2dd85274",
+        "after_sha256": "615c811bc7deac9cf0c64cd47f0122b5cdf593e26fe2681f292d1a72b28c35bb"
+      },
+      "packages/agent_core/lib/llm_provider/provider_kind.ml": {
+        "before_sha256": "fffc5db7246ab06882c9832c99e395a19e7edc21836bda6093d3ade1fee7e5b6",
+        "after_sha256": "aaeee99f1a749786aecfa21229bc1db69175fc0004239ef75497eea329f62253"
+      },
+      "packages/agent_core/lib/llm_provider/provider_config.ml": {
+        "before_sha256": "1237ca5c758be1c5578e980f5233b8c9da4bcf7063751746387e6a032b9979ab",
+        "after_sha256": "04752d4edf5cd742783461d6cbdd05b29553e78ddda193a08dfd55002db6849c"
+      },
+      "packages/agent_core/lib/llm_provider/provider_catalog.ml": {
+        "before_sha256": "efb4a0f31ca3d5545a3e9d5aa4aa2edd384178ce82b9d10a5f8bf762d7155514",
+        "after_sha256": "e219ed53b074ca87b470f685ea5c73e65f51977f67eef9579d71a19554e10c2d"
+      },
+      "lib/runtime/runtime_adapter.ml": {
+        "before_sha256": "df8e9041007a0566640c35a2b39bf6d646bdd9eb873f1683d27c97bf805ccbc0",
+        "after_sha256": "225e056331f7048bb46fd059bd33454470e0fda9797600f4cd331a23c29390c1"
+      }
+    },
+    "moved_blocks": {
+      "data_types_defaults_and_projection_sha256": "482c5717171e9aa5703f267d64a9cd264d4eb87b2480182ede77378238f5f28b",
+      "presets_and_inline_controls_sha256": "b0995d27b8a9e51965bf9e5e0d6c1417d4eb6a5bec75032c7fd8d84facc91f4d",
+      "sampling_alias_sha256": "82fefd0ac247bfc08508596e72fbec56094a84a75402dd9d4facae5b65e5471c"
+    },
+    "request_path_matches_original_closed_mapping": true,
+    "behavior_change_claimed": false,
+    "next_required_boundary": "Remove independently mutable catalog sources and publish one strictly admitted immutable snapshot. This refactor alone does not implement atomic catalog publication."
+  },
+  "review_response": {
+    "original_source_capture_preserved": "profile-refactor-source.json",
+    "original_reviewed_head": "b468eeacc409110ddf9ac4d912506781790535d9",
+    "repaired_head": "d6ce437549da7cbe303922879b2468c65820fbfd",
+    "delta_files": [
+      "packages/agent_core/lib/llm_provider/capability_profile.ml",
+      "packages/agent_core/lib/llm_provider/capability_profile.mli",
+      "packages/agent_core/lib/llm_provider/capabilities.mli",
+      "packages/agent_core/lib/llm_provider/provider_kind.mli",
+      "docs/research/2026-11-02-catalog-publication.md",
+      "changelog.d/catalog-pure-profiles.md"
+    ],
+    "source_delta_only_documented_comments": true,
+    "preset_comment_changes": [
+      "correct closed variant count",
+      "remove unrelated heading and transport tombstone"
+    ],
+    "ppx_diagnostic_module_prefix_changes": true,
+    "policy_values_and_parsing_preserved": true,
+    "local_build_or_typecheck": false
+  },
+  "original_manifest_bytes_preserved": true,
+  "limits": "The original extraction hashes certify b468, not d6 comment-edited bytes. The response records the exact later comment/document changes. Moving the PPX derivations changes diagnostic module prefixes; policy/parsing/type equality preservation is narrower than identical public observations."
+}

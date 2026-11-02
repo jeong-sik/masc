@@ -82,3 +82,160 @@ let of_fields ~width fields =
         [ { label = Some label; text = pad label ^ value_indent ^ value } ]
       else { label = Some label; text = label } :: value_rows ~width value)
     fields
+
+type gate_origin =
+  | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
+
+type gate_line =
+  { gate_label : string option
+  ; gate_text : string
+  ; gate_origin : gate_origin
+  }
+
+let prefix = function
+  | Gate_key -> "[key] "
+  | Gate_key_continuation -> "[key+] "
+  | Gate_string -> "[str] "
+  | Gate_json -> "[json] "
+  | Gate_unreadable -> "!"
+
+(* A visible control/JSON escape must not be cut between rows. The input is
+   already terminal-safe; recognizing a literal escape too only changes its
+   wrapping, not its contents. *)
+let is_hex = function
+  | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+  | _ -> false
+
+let rec has_hex text at stop =
+  at = stop || (is_hex text.[at] && has_hex text (at + 1) stop)
+
+type escape_syntax = Text | Json
+
+let escape_length syntax text at =
+  if text.[at] <> '\\' || at + 1 >= String.length text then 1
+  else match text.[at + 1] with
+    | 'x' when at + 4 <= String.length text && has_hex text (at + 2) (at + 4) -> 4
+    | 'u' when at + 6 <= String.length text && has_hex text (at + 2) (at + 6) -> 6
+    | 'U' when at + 10 <= String.length text && has_hex text (at + 2) (at + 10) -> 10
+    | ('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') when syntax = Json -> 2
+    | _ -> 1
+
+let split_gate_cells ~syntax ~max_cells text =
+  let length = String.length text in
+  if String.for_all (fun c -> c >= ' ' && c <= '~') text then
+    (* ASCII is common in commands and JSON. Do not allocate one grapheme
+       record per byte on every repaint. *)
+    let rec loop start at rows =
+      if at = length then Some (List.rev (String.sub text start (at - start) :: rows))
+      else
+        let next = at + escape_length syntax text at in
+        if next - at > max_cells then None
+        else if next - start > max_cells then
+          loop at at (String.sub text start (at - start) :: rows)
+        else loop start next rows
+    in
+    loop 0 0 []
+  else
+    let rows = Message_layout.split_cells ~max_cells text in
+    let rec escapes at acc =
+      if at >= length then List.rev acc
+      else
+        let next = at + escape_length syntax text at in
+        escapes next (if next - at > 1 then (at, next) :: acc else acc)
+    in
+    let rec skip_ends at = function
+      | (_, end_) :: rest when end_ <= at -> skip_ends at rest
+      | rest -> rest
+    in
+    let rec safe_cut row limit budget =
+      if budget <= 0 then "", row
+      else
+        let before, after = Message_layout.split_at_cells row budget in
+        if String.length before <= limit then before, after
+        else safe_cut row limit (budget - 1)
+    in
+    let rec reflow offset rows spans finished =
+      match rows with
+      | [] -> Some (List.rev finished)
+      | row :: rest ->
+        let boundary = offset + String.length row in
+        let spans = skip_ends offset spans in
+        let spans = skip_ends boundary spans in
+        if Message_layout.display_width row > max_cells then None
+        else match spans with
+          | (start, end_) :: _ when start < boundary && end_ > boundary ->
+            if end_ - start > max_cells then None
+            else
+              let limit = start - offset in
+              let preceding = String.sub row 0 limit in
+              let before, after = safe_cut row limit (Message_layout.display_width preceding) in
+              (match before, rest with
+               | "", _ | _, [] -> None
+               | _, next :: rest ->
+                 let reshaped = Message_layout.split_cells ~max_cells (after ^ next) in
+                 reflow (offset + String.length before) (reshaped @ rest) spans
+                   (before :: finished))
+          | _ -> reflow boundary rest spans (row :: finished)
+    in
+    reflow 0 rows (escapes 0 []) []
+
+(* The marker is owned by the renderer and is repeated for every physical
+   value row. It is not part of a key or value supplied by the producer. *)
+let of_gate_fields ~width fields =
+  let safe_text value =
+    value
+    |> Masc.Tui_terminal_text.escape_invisible
+    |> Masc.Tui_terminal_text.sanitize_terminal_lines
+  in
+  let unreadable () =
+    let room = width - String.length (prefix Gate_unreadable) in
+    let rows = if room < 1 then [ "" ]
+      else Message_layout.split_cells ~max_cells:room "WIDEN" in
+    List.map (fun text -> { gate_label = None; gate_text = text; gate_origin = Gate_unreadable }) rows
+  in
+  let value_rows origin syntax text =
+    let room = width - String.length (prefix origin) in
+    if room < 1 then unreadable ()
+    else
+      let rec collect rows = function
+        | [] -> Some (List.rev rows)
+        | line :: rest ->
+          (match split_gate_cells ~syntax ~max_cells:room line with
+           | None -> None
+           | Some split -> collect (List.rev_append split rows) rest)
+      in
+      match collect [] (String.split_on_char '\n' text) with
+      | None -> unreadable ()
+      | Some rows -> List.map (fun text -> { gate_label = None; gate_text = text; gate_origin = origin }) rows
+  in
+  if fields <> [] && width <= String.length (prefix Gate_key_continuation) then unreadable ()
+  else
+    let rows = List.concat_map
+    (fun (key, value) ->
+      let key =
+        key
+        |> Masc.Tui_terminal_text.escape_invisible
+        |> Masc.Tui_terminal_text.sanitize_terminal_text
+      in
+      let key_room = width - String.length (prefix Gate_key_continuation) in
+      let origin, syntax, text =
+        match value with
+        | `String value -> Gate_string, Text, safe_text value
+        | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) as json ->
+          Gate_json, Json,
+          (Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview)
+      in
+      match split_gate_cells ~syntax:Text ~max_cells:key_room key with
+      | None -> unreadable ()
+      | Some key_rows ->
+        List.mapi
+          (fun index text ->
+            { gate_label = Some text; gate_text = text;
+              gate_origin = if index = 0 then Gate_key else Gate_key_continuation })
+          key_rows
+        @ value_rows origin syntax text)
+      fields
+    in
+    if List.exists (fun line -> line.gate_origin = Gate_unreadable) rows
+    then unreadable ()
+    else rows

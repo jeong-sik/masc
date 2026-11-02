@@ -64,18 +64,12 @@ let finish ~base_path ~keeper_name (failed : failed) appended =
     |> Result.map (fun appended -> match appended with
      | Keeper_chat_store.Already_present _ -> ()
      | Keeper_chat_store.Appended _ ->
-       let surface = match Lazy.force failed.source with
-         | Ok source -> Surface_ref.lane_label source.surface
-         | Error detail ->
-           Log.Keeper.warn ~keeper_name
-             "failed operation %s has an unreadable source; failure row has no route: %s"
-             failed.operation_id detail;
-           "operation" in
-       (try Keeper_chat_broadcast.chat_appended ~keeper_name ~source:surface ~content:failed.content ()
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Log.Keeper.warn ~keeper_name "failure transcript broadcast failed: %s"
-            (Printexc.to_string exn))) in
+       (match Lazy.force failed.source with
+        | Ok (_ : Keeper_chat_operation_payload.decoded_source) -> ()
+        | Error detail ->
+          Log.Keeper.warn ~keeper_name
+            "failed operation %s has an unreadable source; failure row has no route: %s"
+            failed.operation_id detail)) in
   let journal = Journal.open_journal ~base_dir:base_path ~keeper_name
       ~operation_id:failed.operation_id () in
   let settlement = { Journal.operation_id = failed.operation; completed_at = failed.completed_at } in

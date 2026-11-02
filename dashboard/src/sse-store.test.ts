@@ -43,7 +43,7 @@ const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
-const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
+const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown) => void>()
 const refreshKnownKeeperChatHistories = vi.fn<() => void>()
 
 async function flushAsyncWork(): Promise<void> {
@@ -721,7 +721,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined)
   })
 
   it('delivers every Keeper chat-operation inventory invalidation immediately', async () => {
@@ -793,22 +793,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', audio, undefined)
-  })
-
-  it('forwards rich blocks on keeper_chat_appended to the chat handler', async () => {
-    const { sseStore } = await loadSseStore()
-    const blocks = [{ t: 'p', html: 'hello' }]
-
-    sseStore.routeServerPushEvent({
-      type: 'keeper_chat_appended',
-      name: 'echo',
-      connector: 'dashboard',
-      blocks,
-    } as any)
-    await flushAsyncWork()
-
-    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, blocks)
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', audio)
   })
 
   it('treats keeper_composite_changed as a signal-only tick and does not hydrate from the event payload', async () => {

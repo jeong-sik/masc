@@ -987,6 +987,15 @@ let append_chat_payload_durable path payload =
                cleanup_failure)))
 ;;
 
+(* Each writer below says its rows are in once the durable write has
+   returned, outside the file lock, from the row it stored: the surface it
+   persisted and the clip it kept. A caller that stores a row therefore cannot
+   leave the open transcripts without word of it. *)
+let announce_appended ~keeper_name ?surface ?audio () =
+  Keeper_chat_broadcast.chat_appended ~keeper_name
+    ?connector:(Option.map Surface_ref.lane_label surface)
+    ?audio ()
+
 (* Tool calls with empty accumulated arguments are normalised to "{}" so
    every persisted line keeps a non-empty [content] (the read-side
    validity check and the dashboard history mapping both require it). *)
@@ -1096,6 +1105,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
     in
     append_chat_payload_durable path payload;
+    announce_appended ~keeper_name ?surface ();
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1157,6 +1167,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
         tool_calls
     in
     append_chat_payload_durable path (String.concat "\n" (user_line :: tool_lines) ^ "\n");
+    announce_appended ~keeper_name ?surface ();
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1192,6 +1203,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
         tool_calls
     in
     append_chat_payload_durable path (String.concat "\n" tool_lines ^ "\n");
+    announce_appended ~keeper_name ?surface ();
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1245,6 +1257,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
       String.concat "\n" (tool_lines @ [ line ]) ^ "\n"
     in
     append_chat_payload_durable path payload;
+    announce_appended ~keeper_name ?surface ?audio ();
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1265,6 +1278,16 @@ module Row_route = struct
 
   let none = { surface = None; conversation_id = None }
 end
+
+(* A row that was already there was announced when it was stored. The route
+   of an appended row was forced to encode it, so forcing it here reads the
+   value under no lock and computes nothing. *)
+let announce_if_appended ~keeper_name ~(route : Row_route.t Lazy.t) result =
+  (match result with
+   | Ok (Appended _) ->
+     announce_appended ~keeper_name ?surface:(Lazy.force route).surface ()
+   | Ok (Already_present _) | Error _ -> ());
+  result
 
 (* [line] is encoded under the file lock only when its slot is absent, so a
    lazy route is never read for a row that is already present. Stdlib.Lazy:
@@ -1480,14 +1503,12 @@ let append_tool_calls_once
       let tool_calls = List.map (redact_tool_call redaction) tool_calls in
       let path = chat_path ~base_dir ~keeper_name in
       let ts = Time_compat.now () in
-      let lines =
-        tool_call_append_lines ~ts
-          ~route:(Lazy.from_val { Row_route.surface; conversation_id })
-          ~turn_ref ~delivery_key tool_calls
-      in
+      let route = Lazy.from_val { Row_route.surface; conversation_id } in
+      let lines = tool_call_append_lines ~ts ~route ~turn_ref ~delivery_key tool_calls in
       let ordinal = List.length tool_calls - 1 in
       let result_slot = tool_transcript_slot ~ordinal (List.nth tool_calls ordinal) in
       append_lines_once path ~delivery_key ~result_slot lines
+      |> announce_if_appended ~keeper_name ~route
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
@@ -1560,6 +1581,7 @@ let append_terminal_message_once
       ~delivery_key
       ~result_slot:transcript_slot
       (tool_lines @ [ assistant_line ])
+    |> announce_if_appended ~keeper_name ~route
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1641,13 +1663,13 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
                        { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
                      ())
               in
-              tag, delivery_key, ({ transcript_slot; row_id; line } : append_once_line))
+              tag, delivery_key, route, ({ transcript_slot; row_id; line } : append_once_line))
            failures
        in
        let inspect index =
          let rec loop added results additions = function
            | [] -> List.rev results, List.rev additions
-           | (tag, delivery_key, ({ row_id; _ } as candidate : append_once_line)) :: rest ->
+           | (tag, delivery_key, route, ({ row_id; _ } as candidate : append_once_line)) :: rest ->
              let earlier (key, _) = Keeper_chat_delivery_identity.delivery_key_equal key delivery_key in
              (match List.find_opt earlier added with
               | Some (_, row_id) ->
@@ -1665,10 +1687,19 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
                    loop
                      ((delivery_key, row_id) :: added)
                      ((tag, Ok (Appended { row_id })) :: results)
-                     (candidate :: additions)
+                     ((candidate, route) :: additions)
                      rest))
          in
          loop [] [] [] candidates
+       in
+       let announce_settled = function
+         | Error _ as error -> error
+         | Ok (results, appended_routes) ->
+           List.iter
+             (fun (route : Row_route.t Lazy.t) ->
+                announce_appended ~keeper_name ?surface:(Lazy.force route).surface ())
+             appended_routes;
+           Ok results
        in
        match
          Fs_compat.update_private_file_durable_locked_result path (fun existing ->
@@ -1678,18 +1709,19 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
              let results, additions = inspect index in
              let payload =
                additions
-               |> List.map (fun (candidate : append_once_line) -> Lazy.force candidate.line ^ "\n")
+               |> List.map (fun ((candidate : append_once_line), _) -> Lazy.force candidate.line ^ "\n")
                |> String.concat ""
              in
-             (if additions = [] then None else Some payload), Ok results)
+             (if additions = [] then None else Some payload),
+             Ok (results, List.map snd additions))
        with
-       | Private_file_succeeded result -> result
+       | Private_file_succeeded result -> announce_settled result
        | Private_file_succeeded_with_cleanup_failure { value = result; cleanup_failure } ->
          Log.Keeper.error
            "keeper_chat_store: settled failure batch succeeded with descriptor settlement failure path=%s: %s"
            path
            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-         result
+         announce_settled result
        | Private_file_failed error -> Error (Fs_compat.durable_append_error_to_string error)
        | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
          Error
@@ -1743,7 +1775,8 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content) ()
     in
-    append_chat_payload_durable path (line ^ "\n")
+    append_chat_payload_durable path (line ^ "\n");
+    announce_appended ~keeper_name ?surface ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -1804,6 +1837,7 @@ let append_user_message_once
         ()
     in
     append_line_once path ~provenance ~row_id line
+    |> announce_if_appended ~keeper_name ~route:(Lazy.from_val { Row_route.surface; conversation_id })
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -2904,7 +2938,9 @@ let append_approval_lifecycle_at_slot_once
        in
        match append_line_once path ~provenance ~row_id line with
        | Error _ as error -> error
-       | Ok (Appended _ as result) -> Ok (Approval_lifecycle_exact result)
+       | Ok (Appended _ as result) ->
+         announce_appended ~keeper_name ();
+         Ok (Approval_lifecycle_exact result)
        | Ok (Already_present { row_id } as result) ->
          (match
             load_all ~base_dir ~keeper_name

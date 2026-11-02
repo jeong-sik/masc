@@ -1311,10 +1311,7 @@ let replay_connector_post_with_outcome
              ~surface:(Keeper_native_origin_reply.surface route) () with
            | Error detail -> fail_after_effect (Keeper_native_origin_reply.connector route)
                ("message sent, but local chat persistence failed: " ^ detail)
-           | Ok () ->
-             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-               ~source:(Keeper_native_origin_reply.connector route) ~content ();
-             succeed (Keeper_native_origin_reply.connector route) ())
+           | Ok () -> succeed (Keeper_native_origin_reply.connector route) ())
   | Replay_discord_post { input; channel_id; content; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
@@ -1370,13 +1367,7 @@ let replay_connector_post_with_outcome
           fail_after_effect
             Keeper_surface_post.discord_label
             ("message sent, but local chat persistence failed: " ^ detail)
-        | Ok () ->
-          Keeper_chat_broadcast.chat_appended
-            ~keeper_name:meta.name
-            ~source:Keeper_surface_post.discord_label
-            ~content
-            ();
-          succeed Keeper_surface_post.discord_label ~message_id ()))
+        | Ok () -> succeed Keeper_surface_post.discord_label ~message_id ()))
   | Replay_slack_post
       { input; channel_id; thread_ts; content; blocks; mention_user_ids } ->
     with_connector_post_gate_execution
@@ -1433,13 +1424,7 @@ let replay_connector_post_with_outcome
              fail_after_effect
                Keeper_surface_post.slack_label
                ("message sent, but local chat persistence failed: " ^ detail)
-           | Ok () ->
-             Keeper_chat_broadcast.chat_appended
-               ~keeper_name:meta.name
-               ~source:Keeper_surface_post.slack_label
-               ~content
-               ();
-             succeed Keeper_surface_post.slack_label ())))
+           | Ok () -> succeed Keeper_surface_post.slack_label ())))
 ;;
 
 let handle_surface_post_with_outcome
@@ -1665,10 +1650,6 @@ let handle_surface_post_with_outcome
              ~effect_disposition:Tool_result.Effect_outcome_unknown
              (Keeper_surface_post.error_json detail)
          | Ok () ->
-           Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-             ~source:"dashboard"
-             ~content:safe_content
-             ();
            succeed
              Keeper_surface_post.To_dashboard
              (Keeper_surface_post.ok_json ~surface ()))

@@ -903,7 +903,6 @@ let handle_ambient ?resolved_keeper_name ~base_dir
           ; speaker_authority = Keeper_chat_store.External
           }
         ();
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
       (* Every accepted Connector event is a durable per-Keeper stimulus. The
          event identity comes from the producer-owned external-attention row;
          no content, channel activity, elapsed-time window, or rollout flag may

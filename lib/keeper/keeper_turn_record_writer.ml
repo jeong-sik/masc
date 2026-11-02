@@ -71,7 +71,7 @@ let write
     | Turn_record.Autonomous ->
       Keeper_chat_broadcast.chat_appended
         ~keeper_name
-        ~source:"agent"
+        ~connector:(Surface_ref.lane_label Surface_ref.Agent)
         ()
     | Turn_record.Direct -> ()
   with

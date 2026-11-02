@@ -641,6 +641,28 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
          ; "verification", Goal_verification.record_to_yojson_for_goal ~goal record ])
 ;;
 
+let current_committed_verdict (goal : Goal_store.goal) record =
+  match record with
+  | Some { Goal_verification.completion =
+      (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ }
+    when Goal_store.criterion_equal verdict.criterion (Goal_store.criterion_of_goal goal) ->
+      Some verdict
+  | None | Some { completion =
+      (Goal_verification.Completion_idle | Goal_verification.Proof_pending _
+      | Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _
+      | Goal_verification.Human_confirmed _); _ } -> None
+;;
+
+let apply_committed_verdict (goal : Goal_store.goal) (verdict : Goal_verification.verdict) =
+  let action, note = match verdict.outcome with
+    | Goal_verification.Proven -> Goal_phase.Record_proof_proven, None
+    | Goal_verification.Refuted { reason } -> Goal_phase.Record_proof_refuted, Some reason in
+  match Goal_phase.decide_transition ~phase:goal.phase ~action with
+  | Error detail -> Error detail
+  | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
+  | Ok (Goal_phase.Move_to phase) -> Ok (goal_after_proof goal phase note)
+;;
+
 let reconcile_committed_proof config ~goal_id =
   let effects goal (_, verdict) = match verdict with
     | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
@@ -649,24 +671,11 @@ let reconcile_committed_proof config ~goal_id =
       Ok (goal, (Reconciliation_not_needed goal.phase, None))
     else
       Result.bind (Goal_verification.get_record_authoritative config ~goal_id) (fun record ->
-        let proof = match record with
-          | Some { Goal_verification.completion = Goal_verification.Proof_proven verdict; _ }
-          | Some { Goal_verification.completion = Goal_verification.Proof_refuted verdict; _ } -> Some verdict
-          | Some { completion = (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | Goal_verification.Human_confirmed (_, _)));_}
-          | None -> None in
-        match proof with
+        match current_committed_verdict goal record with
         | None -> Ok (goal, (No_committed_proof, None))
-        | Some verdict when not (Goal_store.criterion_equal verdict.criterion (Goal_store.criterion_of_goal goal)) ->
-          Ok (goal, (No_committed_proof, None))
         | Some verdict ->
-          let action, note = match verdict.outcome with
-            | Goal_verification.Proven -> Goal_phase.Record_proof_proven, None
-            | Goal_verification.Refuted { reason } -> Goal_phase.Record_proof_refuted, Some reason in
-          match Goal_phase.decide_transition ~phase:goal.phase ~action with
-          | Error detail -> Error detail
-          | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
-          | Ok (Goal_phase.Move_to phase) ->
-            Ok (goal_after_proof goal phase note, (Reconciled phase, Some verdict)))) in
+          Result.map (fun (updated : Goal_store.goal) -> updated, (Reconciled updated.phase, Some verdict))
+            (apply_committed_verdict goal verdict))) in
   (* This locked re-read keeps its write_error typed — including a store that
      became unavailable after the verifier scan listed it. The scan records
      only its own list read as [Scan_skipped] (RFC-0444 PR-5); a failure here
@@ -758,7 +767,9 @@ let proof_request_failure ~tool_name ~start_time = function
 (* The phase comes from [Goal_phase.decide_transition], so a proof request
    and a completion request cannot disagree on where the goal goes. Only a goal
    that is, or now enters, [Verifying] gets a pending proof. *)
-let request_current_proof_bound ?evidence_refs ?expected_verification config ~goal_id =
+type proof_request_mode = Require_executing | Allow_verifying
+
+let request_current_proof_bound ?evidence_refs ?expected_verification ~mode config ~goal_id =
   transact_or_refuse config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* () = match expected_verification with
@@ -768,12 +779,17 @@ let request_current_proof_bound ?evidence_refs ?expected_verification config ~go
           |> Result.map_error (refuse Internal_error) in
         if matches_expected_verification expected goal record then Ok ()
         else Error (refuse Conflict "The Goal or verification request changed; refresh before requesting completion") in
-    match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
-    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase))
-    | Ok (Goal_phase.Already (Goal_phase.Verifying as phase)) ->
+    let request phase =
       Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
         Result.map (fun record -> { goal with phase }, record)
-          (mark_proof_pending ?submitted_evidence config ~goal_id goal))
+          (mark_proof_pending ?submitted_evidence config ~goal_id goal)) in
+    match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
+    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase)) -> request phase
+    | Ok (Goal_phase.Already (Goal_phase.Verifying as phase)) ->
+      (match mode with
+       | Allow_verifying -> request phase
+       | Require_executing ->
+         Error (refuse Conflict "The Goal changed before this completion request; refresh before retrying"))
     | Ok (Goal_phase.Move_to
             ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
             | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ )
@@ -785,20 +801,30 @@ let request_current_proof_bound ?evidence_refs ?expected_verification config ~go
 ;;
 
 let request_current_proof ?evidence_refs config ~goal_id =
-  request_current_proof_bound ?evidence_refs config ~goal_id
+  request_current_proof_bound ?evidence_refs ~mode:Allow_verifying config ~goal_id
 ;;
 
 let recover_current_proof config ~goal_id =
-  Goal_store.transact_goal config ~goal_id (fun goal ->
+  let effects goal (_, verdict) = match verdict with
+    | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
+  Goal_store.transact_goal ~effects config ~goal_id (fun goal ->
     match goal.phase with
     | Goal_phase.Verifying ->
-        Result.map (fun _record -> goal, true)
-          (Goal_verification.mark_proof_pending config ~goal_id
-             ~criterion:(Goal_store.criterion_of_goal goal))
+        Result.bind (Goal_verification.get_record_authoritative config ~goal_id) (fun record ->
+          match current_committed_verdict goal record with
+          | Some verdict ->
+              Result.map (fun updated -> updated, (false, Some verdict))
+                (apply_committed_verdict goal verdict)
+          | None ->
+              Result.map (fun _record -> goal, (true, None))
+                (Goal_verification.mark_proof_pending config ~goal_id
+                   ~criterion:(Goal_store.criterion_of_goal goal)))
     | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
     | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
-        Ok (goal, false))
-  |> Result.map snd
+        Ok (goal, (false, None)))
+  |> Result.map (fun (_, (rearmed, verdict)) ->
+       (match verdict with None -> () | Some _ -> ignore (deliver_goal_effects config));
+       rearmed)
 ;;
 
 (* A repeated [request_complete] on [Verifying] is the explicit retry that
@@ -817,8 +843,19 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
       (fun record ->
         if Option.exists (fun expected -> not (matches_expected_verification expected goal record)) expected_verification then
           Error (refuse Conflict "The Goal or verification request changed; refresh before retrying")
-        else if goal.phase <> Goal_phase.Verifying then Ok (goal, (record, None))
-        else
+        else match Goal_phase.decide_transition ~phase:goal.phase ~action with
+        | Error detail -> Error (refuse Conflict detail)
+        | Ok (Goal_phase.Move_to
+                (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+                | Goal_phase.Completed | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _))
+        | Ok (Goal_phase.Already
+                (Goal_phase.Executing | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _)) ->
+            Error (refuse Conflict "The Goal changed before this verification retry; refresh before requesting completion")
+        | Ok (Goal_phase.Already (Goal_phase.Awaiting_confirmation | Goal_phase.Completed)) ->
+            if Option.is_some evidence_refs then
+              Error (refuse Precondition_failed "this Goal has no active proof request that can accept evidence_refs")
+            else Ok (goal, (record, None))
+        | Ok (Goal_phase.Already Goal_phase.Verifying) ->
           match record with
           | Some ({ Goal_verification.completion =
               (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ } as record)
@@ -1033,10 +1070,6 @@ let cancel_dropped_goal_todos ?(before_transition = fun ~task_id:_ -> ()) (ctx :
     tasks
 ;;
 
-module For_testing = struct
-  let cancel_dropped_goal_todos = cancel_dropped_goal_todos
-end
-
 let dropped_goal_tasks_json ctx ~goal_id ~reason = function
   | Error detail -> `Assoc [ "unread", `String detail ]
   | Ok work ->
@@ -1173,7 +1206,8 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
 
 let finish_goal_request_complete ?evidence_refs ?expected_verification
     ~tool_name ~start_time (ctx : context) ~goal_id ~action =
-  match request_current_proof_bound ?evidence_refs ?expected_verification ctx.config ~goal_id with
+  match request_current_proof_bound ?evidence_refs ?expected_verification
+      ~mode:Require_executing ctx.config ~goal_id with
   | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (updated_goal, record) ->
     emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
@@ -1186,6 +1220,18 @@ let finish_goal_request_complete ?evidence_refs ?expected_verification
       ; "goal", Goal_store.goal_to_yojson updated_goal
       ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ]
 ;;
+
+module For_testing = struct
+  let answer_verifying_repeat ?evidence_refs ctx ~goal_id =
+    answer_verifying_repeat ?evidence_refs ~tool_name:"masc_goal_transition"
+      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
+
+  let finish_goal_request_complete ?evidence_refs ctx ~goal_id =
+    finish_goal_request_complete ?evidence_refs ~tool_name:"masc_goal_transition"
+      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
+
+  let cancel_dropped_goal_todos = cancel_dropped_goal_todos
+end
 
 let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =

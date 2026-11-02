@@ -1403,6 +1403,163 @@ let test_bound_retry_does_not_create_or_replace_a_request () =
   check string "the replacement remains untouched" replacement observed
 ;;
 
+(* Enter the same retry function the public handler selects after seeing a
+   Verifying Goal, but first make the intervening transition. *)
+let test_verifying_repeat_refuses_changed_goal () =
+  List.iter (fun action ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx ("Retry races " ^ action) in
+    ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    ignore (must_succeed "intervening Goal transition" (transition ctx goal_id action));
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = Fs_compat.load_file goal_path in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        List.iter (fun evidence_refs ->
+          let answer = Workspace_goals.For_testing.answer_verifying_repeat
+            ?evidence_refs ctx ~goal_id in
+          let error = must_fail ("retry after " ^ action) answer in
+          check string "current phase is a conflict" "conflict" (json_state error ["error_code"]);
+          check string "rejected retry leaves Goal unchanged" before_goal (Fs_compat.load_file goal_path);
+          check string "rejected retry leaves proof unchanged" before_ledger (Fs_compat.load_file ledger_path);
+          check int "rejected retry does not wake verification" 0 !wakes)
+          [None; Some ["task:retry-evidence"]]))
+    ["reopen"; "drop"; "pause"; "block"]
+;;
+
+(* Model an initial request that observed Executing before another actor
+   created a proof request, including a verdict whose phase write is pending. *)
+let test_initial_request_refuses_a_new_verifying_goal () =
+  List.iter (fun outcome ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Initial request races verification" in
+    ignore (must_succeed "another actor requests completion"
+      (transition ctx goal_id "request_complete"));
+    (match outcome with
+     | None -> ()
+     | Some proof_outcome ->
+       let request_id, criterion = proof_identity config goal_id in
+       (match Goal_verification.record_proof_verdict config ~goal_id
+                (verdict ~request_id ~criterion proof_outcome) with
+        | Ok _ -> () | Error detail -> fail detail));
+    check string "the current Goal is verifying" "verifying" (stored_phase config goal_id);
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = Fs_compat.load_file goal_path in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    let before_events = goal_events_text config in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        List.iter (fun evidence_refs ->
+          let answer = Workspace_goals.For_testing.finish_goal_request_complete
+            ?evidence_refs ctx ~goal_id in
+          let error = must_fail "stale initial request" answer in
+          check string "current verifying phase is a conflict" "conflict" (json_state error ["error_code"]);
+          check string "Goal is unchanged" before_goal (Fs_compat.load_file goal_path);
+          check string "pending request or committed verdict is unchanged" before_ledger
+            (Fs_compat.load_file ledger_path);
+          check string "no new Goal event is emitted" before_events (goal_events_text config);
+          check int "verification is not woken" 0 !wakes)
+          [None; Some ["task:retry-evidence"]]))
+    [None; Some Goal_verification.Proven;
+     Some (Goal_verification.Refuted {reason="target not met"})]
+;;
+
+let test_verifying_repeat_preserves_terminal_evidence_contract () =
+  List.iter (fun confirmed ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Retry races a proven Goal" in
+    ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    ignore (must_succeed "intervening proof" (verifier_transition config goal_id
+      Workspace_goals.Proof_proven "actual proof"));
+    if confirmed then begin
+      let verdict = match (ledger_record config goal_id).completion with
+        | Goal_verification.Proof_proven verdict -> verdict
+        | Goal_verification.Completion_idle | Goal_verification.Proof_pending _
+        | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _ ->
+            fail "expected proven verdict" in
+      let Goal_store.Criterion { revision; _ } = verdict.criterion in
+      (match Workspace_goals.confirm_completion config ~goal_id ~operator_id:"operator"
+               ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id
+               ~criterion_revision:revision with
+       | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error))
+    end;
+    let goal_path = Goal_store.goals_path config in
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_goal = Fs_compat.load_file goal_path in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    let wakes = ref 0 in
+    let old = Atomic.exchange Workspace_hooks.goal_verification_pending_fn
+      (fun _ ~goal_id:_ -> incr wakes) in
+    Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
+      (fun () ->
+        let rejected = Workspace_goals.For_testing.answer_verifying_repeat
+            ~evidence_refs:["task:retry-evidence"] ctx ~goal_id
+          |> must_fail "terminal Goal rejects unconsumed evidence" in
+        check string "evidence cannot be silently dropped" "precondition_failed"
+          (json_state rejected ["error_code"]);
+        check string "evidence refusal preserves Goal" before_goal (Fs_compat.load_file goal_path);
+        check string "evidence refusal preserves proof" before_ledger (Fs_compat.load_file ledger_path);
+        let accepted = Workspace_goals.For_testing.answer_verifying_repeat ctx ~goal_id
+          |> must_succeed "terminal Goal remains a no-op" in
+        check bool "no evidence permits an already-complete response" true (json_bool accepted ["noop"]);
+        check string "response uses the current Goal phase"
+          (if confirmed then "completed" else "awaiting_confirmation") (json_state accepted ["phase"]);
+        check string "terminal no-op preserves proof" before_ledger (Fs_compat.load_file ledger_path);
+        check int "terminal no-op does not wake verification" 0 !wakes))
+    [false; true]
+;;
+
+(* The scan's first reconciliation and its recovery use separate Goal locks.
+   A verifier can commit a verdict between them while the phase write fails. *)
+let test_recovery_reconciles_a_verdict_committed_after_the_scan () =
+  List.iter (fun outcome ->
+    with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let goal_id = create_goal ctx "Verdict arrives before recovery" in
+    ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    (match Workspace_goals.reconcile_committed_proof config ~goal_id with
+     | Ok Workspace_goals.No_committed_proof -> ()
+     | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _)
+     | Error _ -> fail "the first scan must see no committed verdict");
+    let request_id, criterion = proof_identity config goal_id in
+    (match Goal_verification.record_proof_verdict config ~goal_id
+             (verdict ~request_id ~criterion outcome) with
+     | Ok _ -> () | Error detail -> fail detail);
+    let ledger_path = Goal_verification.verifications_path config in
+    let before_ledger = Fs_compat.load_file ledger_path in
+    (match Workspace_goals.recover_current_proof config ~goal_id with
+     | Ok false -> ()
+     | Ok true -> fail "a committed verdict must not enqueue another review"
+     | Error error -> fail (Goal_store.write_error_to_string error));
+    check string "the original verdict is not replaced" before_ledger (Fs_compat.load_file ledger_path);
+    check string "the Goal follows the committed verdict"
+      (match outcome with Goal_verification.Proven -> "awaiting_confirmation"
+       | Goal_verification.Refuted _ -> "executing") (stored_phase config goal_id);
+    let events = goal_events_text config in
+    check bool "the normal proof event names the committed request" true
+      (String_util.contains_substring events request_id);
+    (match Workspace_goals.recover_current_proof config ~goal_id with
+     | Ok false -> ()
+     | Ok true -> fail "a reconciled Goal must not enqueue review"
+     | Error error -> fail (Goal_store.write_error_to_string error));
+    check string "recovery does not duplicate the proof event" events (goal_events_text config);
+    check string "repeated recovery preserves the original verdict" before_ledger
+      (Fs_compat.load_file ledger_path))
+    [Goal_verification.Proven; Goal_verification.Refuted {reason="target not met"}]
+;;
+
 let test_transition_refuses_a_different_workspace () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -2268,6 +2425,14 @@ let () =
             test_verifying_repeat_rearms_a_missing_proof_request
         ; test_case "retry is bound to the observed proof request" `Quick
             test_bound_retry_does_not_create_or_replace_a_request
+        ; test_case "unbound verifying retry rechecks a changed Goal" `Quick
+            test_verifying_repeat_refuses_changed_goal
+        ; test_case "initial request refuses a new verifying Goal" `Quick
+            test_initial_request_refuses_a_new_verifying_goal
+        ; test_case "terminal verifying retry does not discard evidence" `Quick
+            test_verifying_repeat_preserves_terminal_evidence_contract
+        ; test_case "recovery preserves a verdict committed after the scan" `Quick
+            test_recovery_reconciles_a_verdict_committed_after_the_scan
         ; Alcotest.test_case "workspace binding refuses another workspace" `Quick
             test_transition_refuses_a_different_workspace
         ; Alcotest.test_case "Goal cache follows the resolved store root" `Quick

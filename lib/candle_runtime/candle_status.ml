@@ -130,8 +130,20 @@ let current ~base_path =
   with_recovered_ledger ~base_path (for_appraisal ~base_path)
 ;;
 
+type recording =
+  | Recording_off
+  | Recording_disabled of { reason : string }
+  | Recording_enabled of Candle_config.policy
+  | Recording_unavailable of { reason : string }
+
 let for_recording ~base_path =
-  with_recovered_ledger ~base_path (configured ~base_path)
+  match configured ~base_path with
+  | Candle_config.Off -> Recording_off
+  | Candle_config.Disabled { reason } -> Recording_disabled { reason }
+  | Candle_config.Enabled policy ->
+    (match ensure_recovered ~base_path with
+     | Recovered | Locked_by_another_process -> Recording_enabled policy
+     | Not_recoverable reason -> Recording_unavailable { reason })
 ;;
 
 

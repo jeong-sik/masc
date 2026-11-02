@@ -36,19 +36,20 @@ let write ~now (config : Workspace_utils_backend_setup.config) goal verdict conf
 ;;
 
 let record ~now (config : Workspace_utils_backend_setup.config) goal verdict confirmation =
+  let refused detail =
+    "candle payout owed: " ^ detail
+    ^ "; human confirmation may already be recorded; repair the reported problem, inspect the same proof and confirm again"
+  in
   match Candle_status.for_recording ~base_path:config.base_path with
-  | Candle_config.Off -> Ok ()
-  | Candle_config.Disabled { reason } ->
-    Log.Candle.warn
-      "no payout owed for goal_id=%s request_id=%s because candle is disabled: %s"
-      goal.Goal_store.id
-      verdict.Goal_verification.request_id
-      reason;
-    Ok ()
-  | Candle_config.Enabled _ ->
+  | Candle_status.Recording_off -> Ok ()
+  | Candle_status.Recording_disabled { reason } ->
+    Error (refused ("configuration unavailable: " ^ reason))
+  | Candle_status.Recording_unavailable { reason } ->
+    Error (refused ("ledger recovery unavailable: " ^ reason))
+  | Candle_status.Recording_enabled _ ->
     (match
        Result.map_error
-         (fun detail -> "candle payout owed: " ^ detail)
+         refused
          (write ~now config goal verdict confirmation)
      with
      | Ok wrote ->

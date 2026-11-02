@@ -1130,6 +1130,69 @@ let test_actual_explicit_retry_and_unknown_fence () =
   exercise false;
   exercise true
 
+(* The verifier's retained judgment has already crossed the model boundary
+   when Candle refuses its commit. A later explicit retry must commit that same
+   judgment, rather than ask the reviewer again. *)
+let test_candle_config_repair_recovers_the_actual_retained_judgment () =
+  with_workspace (fun config store _ ->
+    let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path "invalid = true\n";
+    let _, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let run_id = (W.run_identity retained).run_id in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      drain config;
+      Alcotest.(check int) "reviewer entered exactly once" 1 !calls;
+      Alcotest.(check bool) "invalid configuration leaves the Goal verifying" true
+        (phase config subject.goal_id = Goal_phase.Verifying);
+      (match P.phase (W.progress (host_load store original)) with
+       | Commit_unknown _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "the refused commit did not retain the original intent");
+      Fs_compat.save_file path {|half_life = "off"
+[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|};
+      transition config subject.goal_id "request_complete";
+      drain config;
+      Alcotest.(check int) "repair and retry do not invoke another reviewer" 1 !calls;
+      Alcotest.(check bool) "the original judgment reaches human confirmation" true
+        (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
+      assert_host_proof_published config store original;
+      (match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+       | Some {completion=Goal_verification.Proof_proven verdict; _} ->
+         Alcotest.(check string) "same request" subject.request_id verdict.request_id;
+         Alcotest.(check string) "same run" run_id verdict.verification_run_id
+       | None | Some _ -> Alcotest.fail "recovered proof is missing");
+      (match Candle_ledger.read ~base_path:config.base_path with
+       | Ok view ->
+         (match Candle_ledger.events view with
+          | [{Candle_event.body=Candle_event.Snapshot snapshot; _}] ->
+            Alcotest.(check string) "one Snapshot names the original run" run_id snapshot.verification_run_id
+          | _ -> Alcotest.fail "recovered proof did not write exactly one Snapshot")
+       | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error))))
+
 let test_reasonless_goal_reply_requires_explicit_retry () =
   let exercise reason = with_workspace (fun config store _ ->
     let _, retained = host_prepared config store in
@@ -1360,6 +1423,8 @@ let () = match restart_probe with
   Alcotest.test_case "raised review retains actual tool observation" `Quick test_raised_review_retains_actual_tool_observation;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
+  Alcotest.test_case "Candle config repair recovers the actual retained judgment" `Quick
+    test_candle_config_repair_recovers_the_actual_retained_judgment;
   Alcotest.test_case "reasonless Goal reply needs an explicit linked retry" `Quick test_reasonless_goal_reply_requires_explicit_retry;
   Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop;
   Alcotest.test_case "cloned workspace refuses the original judgment" `Quick test_cloned_workspace_cannot_commit_original]]

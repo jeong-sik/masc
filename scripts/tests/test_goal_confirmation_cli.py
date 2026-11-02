@@ -33,6 +33,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, value, *, attested=False, status=200):
         raw = json.dumps(value).encode()
+        if self.server.escape_token_in_json:
+            raw = raw.replace(b'fixture-token', b'fixture\\u002dtoken')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(raw)))
@@ -50,7 +52,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.completed and self.server.fail_readback:
                 self.send_json({'error': 'readback unavailable'}, status=503)
             else:
-                self.send_json(COMPLETED if self.server.completed else PROOF, attested=self.server.attested)
+                self.send_json(COMPLETED if self.server.completed else self.server.get_response,
+                    attested=self.server.attested)
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -63,6 +66,9 @@ class Handler(BaseHTTPRequestHandler):
         if body['expected_operator_id'] != actor or body['expected_workspace'] != {
             'base_path': self.server.base, 'masc_root': self.server.base + '/.masc'}:
             self.send_json({'error': 'precondition refused'}, status=400)
+            return
+        if self.server.post_error is not None:
+            self.send_json(self.server.post_error, status=400)
             return
         self.server.completed = True
         self.send_json(self.server.post_response or (PROOF if self.server.invalid_post else COMPLETED))
@@ -77,6 +83,9 @@ class ConfirmationCliTest(unittest.TestCase):
         self.server.completed = False
         self.server.invalid_post = False
         self.server.post_response = None
+        self.server.post_error = None
+        self.server.get_response = PROOF
+        self.server.escape_token_in_json = False
         self.server.fail_readback = False
         self.server.hold_post = False
         self.server.post_entered = threading.Event()
@@ -188,6 +197,49 @@ class ConfirmationCliTest(unittest.TestCase):
         self.assertIn('Confirmation may have been sent', stderr)
         self.assertIn('request-1', stderr)
         self.assertEqual(len([call for call in self.server.calls if call[0] == 'POST']), 1)
+
+    def test_candle_refusal_shows_repair_guidance_without_credential_echo(self):
+        inspected = self.run_cli()
+        evidence_path = Path(self.directory.name) / 'evidence.json'
+        evidence_path.write_text(inspected.stdout)
+        self.server.post_error = {'error': 'candle payout owed: configuration unavailable; '
+            'human confirmation may already be recorded; repair and inspect the same proof'}
+        result = self.run_cli('--confirm-evidence', str(evidence_path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('configuration unavailable', result.stderr)
+        self.assertIn('human confirmation may already be recorded', result.stderr)
+        self.assertIn('request-1', result.stderr)
+        self.assertEqual(len([call for call in self.server.calls if call[0] == 'POST']), 1)
+
+        self.server.post_error = {'error': 'do not echo fixture-token'}
+        result = self.run_cli('--confirm-evidence', str(evidence_path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Credential echo withheld', result.stderr)
+        self.assertNotIn('fixture-token', result.stderr + result.stdout)
+
+    def test_server_error_cannot_write_terminal_controls(self):
+        inspected = self.run_cli()
+        evidence_path = Path(self.directory.name) / 'evidence.json'
+        evidence_path.write_text(inspected.stdout)
+        self.server.post_error = {'error': '설정 수리 필요\x1b[2J\x1b]0;title\x07\u202eend'}
+        result = self.run_cli('--confirm-evidence', str(evidence_path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('설정 수리 필요', result.stderr)
+        self.assertIn(r'\x1b[2J', result.stderr)
+        self.assertIn(r'\x07', result.stderr)
+        self.assertIn(r'\u202e', result.stderr)
+        self.assertNotIn('\x1b', result.stderr)
+        self.assertNotIn('\x07', result.stderr)
+        self.assertNotIn('\u202e', result.stderr)
+
+    def test_success_response_cannot_echo_json_escaped_credential(self):
+        self.server.get_response = json.loads(json.dumps(PROOF))
+        self.server.get_response['verification']['completion']['verdict']['evidence'] = 'fixture-token'
+        self.server.escape_token_in_json = True
+        result = self.run_cli()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Credential echo withheld', result.stderr)
+        self.assertNotIn('fixture-token', result.stderr + result.stdout)
 
 
 if __name__ == '__main__':

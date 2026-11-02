@@ -158,10 +158,11 @@ val apply_context_injection
 (** {1 Tool result construction} *)
 
 (** Convert tool execution results into history [ToolResult] blocks. Text
-    content is preserved exactly; result media is put in [media_store] and
+    content is kept; result media is put in [media_store] and
     held by reference. A result whose media payload is not padded standard
-    base64 becomes a [Non_retryable_tool_error] result that names the media
-    type and holds no media. Any other media error fails the conversion. *)
+    base64 becomes a [Non_retryable_tool_error] result that appends a media
+    diagnostic to the original text and holds no media. Any other media error
+    fails the conversion. *)
 val make_tool_results
   :  media_store:History.media_store
   -> Agent_tools.tool_execution_result list

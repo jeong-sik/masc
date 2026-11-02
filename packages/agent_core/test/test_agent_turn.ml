@@ -533,7 +533,7 @@ let test_make_tool_results_puts_media_in_the_store () =
   | Error error -> Alcotest.fail (Error.to_string error)
 ;;
 
-let test_make_tool_results_fails_the_tool_on_undecodable_media () =
+let test_make_tool_results_fails_the_tool_on_undecodable_media ~payload ~original_text () =
   let puts = ref 0 in
   let memory = Agent_core.History.Memory_store.create () in
   let media_store =
@@ -541,12 +541,16 @@ let test_make_tool_results_fails_the_tool_on_undecodable_media () =
   in
   let wire =
     Llm_provider.Types.Image
-      { media_type = "image/png"; source = Llm_provider.Types.Base64 "not base64!" }
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 payload }
   in
-  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  let result = { (media_result ~id:"m1" wire) with content = original_text } in
+  match Agent_turn.make_tool_results ~media_store [ result ] with
   | Ok [ Types.ToolResult { tool_use_id; content; outcome; content_blocks; _ } ] ->
     Alcotest.(check string) "same tool call" "m1" tool_use_id;
-    Alcotest.(check bool) "the tool output is replaced" false (String.equal content "inspected");
+    Alcotest.(check bool) "original text remains byte for byte" true
+      (String.starts_with ~prefix:original_text content);
+    Alcotest.(check bool) "media failure is also reported" true
+      (String.length content > String.length original_text);
     Alcotest.(check bool) "no media reaches history" true (content_blocks = None);
     Alcotest.(check bool) "nothing is put" true (!puts = 0);
     Alcotest.(check bool) "a deterministic failure the model cannot retry" true
@@ -934,8 +938,18 @@ let () =
       , [ Alcotest.test_case "tool results" `Quick test_make_tool_results
         ; Alcotest.test_case "media is put in the store" `Quick
             test_make_tool_results_puts_media_in_the_store
-        ; Alcotest.test_case "undecodable media fails the tool" `Quick
-            test_make_tool_results_fails_the_tool_on_undecodable_media
+        ; Alcotest.test_case "undecodable media keeps tool text" `Quick
+            (test_make_tool_results_fails_the_tool_on_undecodable_media
+               ~payload:"not base64!" ~original_text:"inspected ✓\nsecond line\n")
+        ; Alcotest.test_case "unpadded media keeps tool text" `Quick
+            (test_make_tool_results_fails_the_tool_on_undecodable_media
+               ~payload:"aGVsbG8" ~original_text:"inspected\n")
+        ; Alcotest.test_case "undecodable media with empty text" `Quick
+            (test_make_tool_results_fails_the_tool_on_undecodable_media
+               ~payload:"not base64!" ~original_text:"")
+        ; Alcotest.test_case "undecodable media keeps whitespace text" `Quick
+            (test_make_tool_results_fails_the_tool_on_undecodable_media
+               ~payload:"not base64!" ~original_text:"  \n ")
         ; Alcotest.test_case "a store failure fails the turn" `Quick
             test_make_tool_results_fails_the_turn_when_the_store_fails
         ] )

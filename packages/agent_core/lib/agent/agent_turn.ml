@@ -335,9 +335,15 @@ let make_tool_result ~media_store (result : Agent_tools.tool_execution_result) =
      | Ok blocks ->
        Ok (tool_result ~content:result.content ~outcome:result.outcome (Some blocks))
      | Error (History.Invalid_base64 { media_type; detail }) ->
+       let media_failure = undecodable_media_content ~media_type ~detail in
+       let content =
+         if String.equal result.content ""
+         then media_failure
+         else result.content ^ "\n\n" ^ media_failure
+       in
        Ok
          (tool_result
-            ~content:(undecodable_media_content ~media_type ~detail)
+            ~content
             ~outcome:
               (Tool_failed
                  { failure_kind = Non_retryable_tool_error
@@ -351,9 +357,9 @@ let make_tool_result ~media_store (result : Agent_tools.tool_execution_result) =
 
 (** Process tool results into ToolResult content blocks.
     All entries are valid ToolUse results — non-ToolUse blocks are filtered
-    upstream in {!Agent_tools.execute_tools}. Tool result content is preserved
-    exactly; provider-specific projection is responsible for any transport
-    adaptation. *)
+    upstream in {!Agent_tools.execute_tools}. Tool result text is retained;
+    undecodable media appends a diagnostic. Provider-specific projection is
+    responsible for any transport adaptation. *)
 let make_tool_results ~media_store results =
   let rec convert acc = function
     | [] -> Ok (List.rev acc)

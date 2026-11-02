@@ -149,6 +149,7 @@ describe('TaskCreateForm', () => {
         goal_id: 'g-1',
       }),
       goalDispatch,
+      expect.objectContaining({ finish: expect.any(Function) }),
     )
   })
 

@@ -1944,7 +1944,9 @@ function GoalDetailPanel({
               <div class="mt-1 text-sm text-text-body">이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.</div>
             </div>
           </div>
-          ${identitySafe && binding ? html`<${TaskCreateForm} goalId=${selectedNode.id} goalTitle=${selectedNode.title}
+          ${selectedNode.phase === 'completed' || selectedNode.phase === 'dropped'
+            ? html`<p role="status" class="text-xs text-text-muted">종료된 Goal에는 새 태스크를 연결할 수 없습니다.</p>`
+            : identitySafe && binding ? html`<${TaskCreateForm} goalId=${selectedNode.id} goalTitle=${selectedNode.title}
             goalDispatch=${{ workspace: binding.workspace,
               identity: { revision: binding.authRevision, actor: currentDashboardActor() }, isCurrent: confirmationIsCurrent,
               isRecoveryCurrent: () => isRecoveryCurrent() && selectedGoalId.peek() === selectedNode.id

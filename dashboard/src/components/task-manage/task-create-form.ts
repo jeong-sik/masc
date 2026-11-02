@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { batch, signal } from '@preact/signals'
+import { useLayoutEffect, useRef } from 'preact/hooks'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { ActionButton } from '../common/button'
@@ -11,6 +12,7 @@ import { Tk } from '../tk'
 export const title = signal('')
 export const description = signal('')
 export const priority = signal(3) // MASC priority: 1=P1 highest, 4=P4 lowest
+let draftRevision = 0
 const PRIORITY_OPTIONS = [
   { value: '1', label: 'P1 · 긴급' },
   { value: '2', label: 'P2 · 높음' },
@@ -18,9 +20,14 @@ const PRIORITY_OPTIONS = [
   { value: '4', label: 'P4 · 낮음' },
 ]
 
-export function resetForm() { title.value = ''; description.value = ''; priority.value = 3 }
+export function resetForm() { draftRevision++; title.value = ''; description.value = ''; priority.value = 3 }
 
 export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: string | null; goalDispatch?: GoalTaskDispatch } = {}) {
+  const mounted = useRef(true)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const linkedGoalId = props.goalId ?? null
   const linkedGoalTitle = props.goalTitle?.trim() || null
   const goalUnavailable = linkedGoalId !== null
@@ -44,7 +51,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           variant="primary"
           size="md"
           block=${true}
-          onClick=${() => { showTaskCreate.value = true }}
+          onClick=${() => { draftRevision++; showTaskCreate.value = true }}
         >태스크 추가<//>
       </div>
     `
@@ -79,7 +86,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           <${TextInput}
             value=${title.value}
             placeholder="예: runtime config introspection 정리"
-            onInput=${(e: Event) => { title.value = (e.target as HTMLInputElement).value }}
+            onInput=${(e: Event) => { draftRevision++; title.value = (e.target as HTMLInputElement).value }}
           />
         </div>
 
@@ -90,7 +97,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
               value=${description.value}
               placeholder="배경, 재현 조건, 원하는 결과를 적으면 backlog 카드와 Task 상세에서 그대로 렌더링됩니다."
               rows=${4}
-              onValueChange=${(next: string) => { description.value = next }}
+              onValueChange=${(next: string) => { draftRevision++; description.value = next }}
               helpText="Markdown, fenced code block, URL 링크 카드, 단독 이미지 URL을 지원합니다."
               previewLimit=${2}
             />
@@ -101,7 +108,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
             <${Select}
               value=${String(priority.value)}
               options=${PRIORITY_OPTIONS}
-              onInput=${(v: string) => { priority.value = Number(v) }}
+              onInput=${(v: string) => { draftRevision++; priority.value = Number(v) }}
             />
             <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-text-muted">
               backlog 카드와 동일하게 <strong class="text-text-strong">P1 → P4</strong> 순으로 표시됩니다.
@@ -116,13 +123,20 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
             disabled=${taskCreating.value || !title.value.trim() || goalUnavailable}
             onClick=${() => {
               if (linkedGoalId !== null && (!props.goalDispatch || !props.goalDispatch.isCurrent())) return
+              const submittedDraft = draftRevision
               void createTask({
                 title: title.value,
                 description: description.value,
                 priority: priority.value,
                 goal_id: linkedGoalId,
-              }, props.goalDispatch)
-                .then(ok => { if (ok) resetForm() })
+              }, props.goalDispatch, {
+                finish: () => {
+                  if (!mounted.current || draftRevision !== submittedDraft || !showTaskCreate.peek()
+                    || (linkedGoalId !== null && !props.goalDispatch?.isCurrent())) return false
+                  batch(() => { showTaskCreate.value = false; resetForm() })
+                  return true
+                },
+              })
             }}
           >
             ${taskCreating.value ? '추가 중...' : 'backlog에 추가'}

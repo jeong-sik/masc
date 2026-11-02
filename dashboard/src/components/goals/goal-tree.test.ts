@@ -1506,6 +1506,20 @@ describe('GoalTree', () => {
     expect(mocks.route.value.params.section).toBe('planning')
   })
 
+  it.each(['completed', 'dropped'])('does not offer task creation for a %s Goal', async phase => {
+    const initial = makeGoal('goal-closed', 'Closed goal')
+    const goal = { ...initial, phase, goal_fsm: { ...initial.goal_fsm, state: phase, next_actions: [] } }
+    mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: goal.id }, postId: null }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [],
+      execution_receipts: [], timeline: [] })
+    render(html`<${GoalTree} />`)
+    await screen.findByTestId('goal-detail-panel')
+    expect(screen.queryByTestId('goal-task-create')).toBeNull()
+    expect(screen.getByText(/종료된 Goal에는 새 태스크를 연결할 수 없습니다/)).toBeTruthy()
+  })
+
   it('does not substitute a different Goal when the routed Goal is absent in a new workspace', async () => {
     const first = makeGoal('goal-routed', 'Routed goal')
     const other = makeGoal('goal-other', 'Other workspace goal')

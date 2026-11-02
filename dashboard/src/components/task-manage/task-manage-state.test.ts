@@ -148,10 +148,11 @@ describe('task-manage-state', () => {
     expect(taskCreating.value).toBe(false)
   })
 
-  it('shows success toast and closes form on success', async () => {
-    await createTask({ title: 't', description: '' })
+  it('shows success and finishes the current presentation', async () => {
+    const finish = vi.fn(() => true)
+    await createTask({ title: 't', description: '' }, undefined, { finish })
     expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료', 'success')
-    expect(showTaskCreate.value).toBe(false)
+    expect(finish).toHaveBeenCalledOnce()
   })
 
   it('refreshes execution and goals on success', async () => {
@@ -187,7 +188,7 @@ describe('task-manage-state', () => {
     expect(mockCallMcpTool).toHaveBeenCalledOnce()
     expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료', 'success')
     expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('생성 실패'), 'error')
-    expect(showTaskCreate.value).toBe(false)
+    expect(showTaskCreate.value).toBe(true)
     expect(taskCreating.value).toBe(false)
   })
 

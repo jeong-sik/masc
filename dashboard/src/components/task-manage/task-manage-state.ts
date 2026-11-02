@@ -30,7 +30,13 @@ export type GoalAssignmentDispatch = GoalTaskDispatch & {
   readonly refreshAfterWrite: () => boolean
 }
 
-export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTaskDispatch): Promise<boolean> {
+export type TaskCreatePresentation = {
+  /** Finish only the draft that submitted this request. */
+  readonly finish: () => boolean
+}
+
+export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTaskDispatch,
+  presentation?: TaskCreatePresentation): Promise<boolean> {
   if (!input.title.trim()) { showToast('제목을 입력하세요', 'error'); return false }
   const linkedGoalId = input.goal_id ?? null
   if (linkedGoalId !== null && (!isCanonicalGoalId(linkedGoalId) || !goalDispatch || !goalDispatch.isCurrent())) {
@@ -53,8 +59,20 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
       showToast('이전 요청의 태스크 생성 응답이 도착했습니다. 요청한 workspace에서 결과를 확인해 주세요.', 'warning')
       return true
     }
+    let presented = true
+    try {
+      if (presentation) presented = presentation.finish()
+    } catch (error) {
+      // The server has already accepted the write; a presentation error
+      // cannot turn that result into a failed creation.
+      console.warn('[Tasks] created task presentation failed:', error)
+      presented = false
+    }
+    if (!presented) {
+      showToast('이전 요청의 태스크 생성 응답이 도착했습니다. 요청한 위치에서 결과를 확인해 주세요.', 'warning')
+      return true
+    }
     showToast('태스크 생성 완료', 'success')
-    showTaskCreate.value = false
     await Promise.all([
       refreshExecution({ force: true }),
       refreshGoals(),

@@ -569,6 +569,25 @@ type posts_source_failure =
   | Posts_workspace_binding_refused of Board_workspace_binding.rejection
   | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
 
+type posts_unsettled_write_kind =
+  | Append_write
+  | Rewrite_write
+(** How the unknown write attempted to publish [intended_bytes]: appended
+    after [expected]'s cursor, or a full-file replacement of it. *)
+
+type posts_unsettled_write = {
+  expected : posts_source_observation;
+  kind : posts_unsettled_write_kind;
+  intended_bytes : string;
+}
+(** Settlement evidence retained when a write outcome is unknown. [expected]
+    is the pre-write observation the write was issued against, and
+    [intended_bytes] is the exact full-file content the write attempted to
+    publish. A nonwrite verdict must consult the recorded transaction
+    failure together with both [expected]'s bytes and [intended_bytes];
+    comparing current bytes against one earlier snapshot alone cannot rule
+    out a late completion from a cancelled call's worker. *)
+
 type posts_source_state =
   | Posts_unobserved
   | Posts_guard_observed of {
@@ -587,6 +606,7 @@ type posts_source_state =
   | Posts_unsettled of {
       last_observed : posts_source_history;
       failure : posts_source_failure;
+      pending : posts_unsettled_write;
       diagnostics : posts_source_diagnostic list;
     }
 
@@ -600,6 +620,34 @@ type posts_write_outcome =
       failure : posts_source_failure;
       diagnostics : posts_source_diagnostic list;
     }
+
+type posts_settle_outcome =
+  | Posts_settled_written of {
+      observation : posts_source_observation;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settled_not_written of {
+      observation : posts_source_observation;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settle_superseded of {
+      failure : posts_source_failure;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settle_inconclusive of {
+      failure : posts_source_failure;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settle_nothing_to_settle
+(** Outcome of settling an unknown posts write. [Posts_settled_written]
+    carries the fresh durable observation and the store is readable.
+    [Posts_settled_not_written] carries the restored pre-write observation
+    and the store is readable; the caller may retry once with its staged
+    bytes, fenced by that observation's cursor. [Posts_settle_superseded]
+    means a coherent third-party state was proven and the store is refused
+    (reloadable). [Posts_settle_inconclusive] keeps the store unsettled with
+    its pending evidence intact. [Posts_settle_nothing_to_settle] performs
+    no IO and changes nothing. *)
 
 type posts_source_display =
   | Complete_display of post list

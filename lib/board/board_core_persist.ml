@@ -244,8 +244,10 @@ let with_persist_lock_internal ~defer_settlement store f =
           (acquired -. started)) with
       | Error failure -> Error failure
       | Ok () ->
-        (* Mutation exceptions still cross [use_rw] and poison an uncertain
-           store. Observer exceptions leave it normally before re-raising. *)
+        (* Reserved settlement travels as a carrier and leaves the lock
+           cleanly so an uncertain store stays settleable. Only an explicit
+           non-reserved exception crossing [use_rw] poisons it. Observer
+           exceptions leave normally before re-raising. *)
         let result =
           try Ok (f ()) with
           | Board_posts_source.Reserved_settlement settlement -> Error settlement
@@ -605,6 +607,10 @@ let refuse_partial_snapshot ~where ~file load_result =
 ;;
 
 type posts_snapshot = Board_posts_source.snapshot
+type settle_direction = Board_posts_source.settle_direction =
+  | Direction_landed
+  | Direction_absent
+  | Direction_diverged
 let capture_posts_snapshot = Board_posts_source.capture
 let save_posts_snapshot = Board_posts_source.rewrite
 let append_post = Board_posts_source.append
@@ -612,6 +618,9 @@ let require_posts_source_readable = Board_posts_source.require_readable
 let posts_source_failure_to_board_error = Board_posts_source.failure_to_board_error
 let read_posts_source = Board_posts_source.read
 let publish_posts_read = Board_posts_source.publish_read
+let settle_posts_source = Board_posts_source.settle
+let settle_posts_diagnostics = Board_posts_source.settle_diagnostics
+let settle_direction_for_testing = Board_posts_source.settle_direction_for_testing
 let finish_posts_write outcome =
   let diagnostics = Board_posts_source.write_diagnostics outcome in
   match Board_posts_source.reserved_diagnostics diagnostics with

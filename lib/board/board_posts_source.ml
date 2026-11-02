@@ -119,9 +119,9 @@ let refused store failure diagnostics = match store.posts_source with
     store.posts_source <- Posts_refused {
       last_observed = history store.posts_source; failure; diagnostics }
 
-let unsettled store failure diagnostics =
+let unsettled store ~pending failure diagnostics =
   store.posts_source <- Posts_unsettled {
-    last_observed = history store.posts_source; failure; diagnostics }
+    last_observed = history store.posts_source; failure; pending; diagnostics }
 
 let retain_trace store diagnostics = match store.posts_source with
   | Posts_unobserved | Posts_unsettled _ -> ()
@@ -191,10 +191,10 @@ let initialization_exception store (check : initialization_check) exception_ bac
   refused store failure diagnostics;
   { check with checked = Error failure; diagnostics }
 
-let check_initialization store = match store.posts_source with
-  | Posts_unsettled { failure; _ } ->
-    { checked = Error failure; workspace = None; diagnostics = [] }
-  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+(* The guard check proper. [refused] and [accept_guard] are no-ops on an
+   unsettled store, so [settle] may run this for its own re-verification
+   without disturbing the retained unknown write. *)
+let check_initialization_inner store =
     let diagnostics = ref [] in
     let add diagnostic = diagnostics := !diagnostics @ [diagnostic] in
     let reject ?workspace failure =
@@ -260,6 +260,12 @@ let check_initialization store = match store.posts_source with
               Error (Posts_raised { exception_; backtrace }) in
           complete candidate
 
+let check_initialization store = match store.posts_source with
+  | Posts_unsettled { failure; _ } ->
+    { checked = Error failure; workspace = None; diagnostics = [] }
+  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+    check_initialization_inner store
+
 let read_diagnostics = function
   | Posts_complete { diagnostics; _ } | Posts_partial { diagnostics; _ }
   | Posts_unadmitted { diagnostics; _ } | Posts_unavailable { diagnostics; _ } -> diagnostics
@@ -289,12 +295,11 @@ let finish_write outcome =
     | Posts_written _ -> Ok ()
     | Posts_not_written { failure; _ } | Posts_write_unknown { failure; _ } ->
       Error (failure_to_board_error failure) in
-  let reserved = reserved_diagnostics (write_diagnostics outcome) in
-  (match outcome, reserved with
-   | Posts_write_unknown _, Some (exception_, backtrace) ->
-     Printexc.raise_with_backtrace exception_ backtrace
-   | (Posts_written _ | Posts_not_written _), (None | Some _) -> carry_reserved result reserved
-   | Posts_write_unknown _, None -> ());
+  (* Reserved causes travel as [Reserved_settlement] so the enclosing persist
+     lock releases cleanly; an unknown outcome stays settleable and never
+     poisons the caller's persistence mutex. Only an explicit non-reserved
+     exception crossing [use_rw] poisons it. *)
+  carry_reserved result (reserved_diagnostics (write_diagnostics outcome));
   result
 
 let read store = match store.posts_source with
@@ -415,7 +420,7 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
-let classify_write store ~initialization ~bytes ~diagnostics result =
+let classify_write store ~pre_write ~kind ~initialization ~bytes ~diagnostics result =
   match Fs_compat.private_jsonl_cursor_success_receipt result with
   | Ok receipt ->
     let diagnostics = diagnostics @ (match receipt.settlement_error with None -> []
@@ -431,14 +436,20 @@ let classify_write store ~initialization ~bytes ~diagnostics result =
       if contradicts_observation error then refused store failure diagnostics
       else retain_trace store diagnostics;
       Posts_not_written { failure; diagnostics })
-    else (unsettled store failure diagnostics; Posts_write_unknown { failure; diagnostics })
+    else
+      let pending : posts_unsettled_write =
+        { expected = pre_write; kind; intended_bytes = bytes } in
+      (unsettled store ~pending failure diagnostics; Posts_write_unknown { failure; diagnostics })
 
-let write store ~initialization ~bytes ~diagnostics perform =
-  try classify_write store ~initialization ~bytes ~diagnostics (perform ()) with exception_ ->
+let write store ~pre_write ~kind ~initialization ~bytes ~diagnostics perform =
+  try classify_write store ~pre_write ~kind ~initialization ~bytes ~diagnostics (perform ())
+  with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     let diagnostics = diagnostics @ [Raised_diagnostic { stage = Write_posts; exception_; backtrace }] in
     let failure = Posts_raised { exception_; backtrace } in
-    unsettled store failure diagnostics; Posts_write_unknown { failure; diagnostics }
+    let pending : posts_unsettled_write =
+      { expected = pre_write; kind; intended_bytes = bytes } in
+    unsettled store ~pending failure diagnostics; Posts_write_unknown { failure; diagnostics }
 
 let not_written failure diagnostics = Posts_not_written { failure; diagnostics }
 
@@ -458,7 +469,8 @@ let append store post = match expected store with
         not_written (Posts_raised { exception_; backtrace }) diagnostics
       | Ok suffix ->
         let bytes = observation.snapshot.bytes ^ suffix in
-        write store ~initialization ~bytes ~diagnostics:check.diagnostics
+        let pre_write = { observation with initialization } in
+        write store ~pre_write ~kind:Append_write ~initialization ~bytes ~diagnostics:check.diagnostics
           (fun () -> match store.posts_source_io.posts with
           | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
               observation.source_path ~expected:observation.snapshot suffix
@@ -506,10 +518,192 @@ let rewrite store snapshot = match snapshot.expected, expected store with
         match check.checked with
         | Error failure -> not_written failure check.diagnostics
         | Ok initialization ->
-          write store ~initialization ~bytes:snapshot.bytes ~diagnostics:check.diagnostics
+          let pre_write : posts_source_observation =
+            { source_path = captured.source_path; snapshot = captured.snapshot; initialization } in
+          write store ~pre_write ~kind:Rewrite_write ~initialization ~bytes:snapshot.bytes
+            ~diagnostics:check.diagnostics
             (fun () -> match store.posts_source_io.posts with
             | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
                 captured.source_path ~expected:captured.snapshot snapshot.bytes
             | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
                 ~io ~before_sync_rewrite_parent:io.before_sync_parent
                 captured.source_path ~expected:captured.snapshot snapshot.bytes)
+
+let settle_diagnostics = function
+  | Posts_settled_written { diagnostics; _ } | Posts_settled_not_written { diagnostics; _ }
+  | Posts_settle_superseded { diagnostics; _ } | Posts_settle_inconclusive { diagnostics; _ } ->
+    diagnostics
+  | Posts_settle_nothing_to_settle -> []
+
+(* Byte-content evidence comparison for settlement. This compares observed
+   file bytes against retained write evidence; it never dispatches on
+   string tags. *)
+let bytes_have_prefix ~prefix bytes =
+  let prefix_length = String.length prefix in
+  String.length bytes >= prefix_length
+  && String.equal prefix (String.sub bytes 0 prefix_length)
+
+type settle_direction =
+  | Direction_landed
+  | Direction_absent
+  | Direction_diverged
+
+(* Joint verdict over the retained write evidence and one fresh locked
+   observation. There is no bytes-only shortcut: the pending kind,
+   pre-write bytes and intended bytes all participate, and the caller
+   re-verifies path, guard and cursor around this decision. A late
+   completion landing after an [Direction_absent] verdict cannot silently
+   duplicate: the restored pre-write cursor fences the retry, which then
+   fails closed on cursor mismatch. *)
+let settle_direction ~(pending : posts_unsettled_write) (observed : Fs_compat.private_jsonl_snapshot) =
+  let original = pending.expected.snapshot.bytes in
+  let intended = pending.intended_bytes in
+  let current = observed.bytes in
+  if String.equal current original then Direction_absent
+  else
+    let landed =
+      String.equal current intended
+      || (match pending.kind with
+          | Append_write -> bytes_have_prefix ~prefix:intended current
+          | Rewrite_write -> false)
+    in
+    if landed then Direction_landed else Direction_diverged
+
+let settle_direction_for_testing ~pending observed = settle_direction ~pending observed
+
+let settle_locked_read store path =
+  match store.posts_source_io.posts with
+  | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+  | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None
+
+let settle_proof_rewrite store path ~expected bytes =
+  match store.posts_source_io.posts with
+  | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected bytes
+  | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+      ~io ~before_sync_rewrite_parent:io.before_sync_parent path ~expected bytes
+
+type settle_proof =
+  | Proof_written of posts_settle_outcome
+  | Proof_reserved
+  | Proof_failed of posts_source_diagnostic list
+
+(* Prove durability of landed bytes with one durable rewrite of the exact
+   observed content at the exact observed snapshot. The rewrite either
+   returns a fresh durable cursor or fails closed (including on a
+   concurrent third-party write); it never truncates or repairs tails. *)
+let settle_prove store path ~failure ~initialization ~diagnostics observed =
+  let prove_result = settle_proof_rewrite store path ~expected:observed observed.bytes in
+  match Fs_compat.private_jsonl_cursor_success_receipt prove_result with
+  | Ok receipt ->
+    let diagnostics = diagnostics @ (match receipt.settlement_error with None -> []
+      | Some error -> [File_diagnostic { file = Posts_file; error }]) in
+    (match reserved_diagnostics diagnostics with
+     | Some (exception_, backtrace) ->
+       carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+       Proof_reserved
+     | None ->
+       let observation = { source_path = path;
+         snapshot = { Fs_compat.bytes = observed.bytes; cursor = receipt.value };
+         initialization } in
+       store.posts_source <- Posts_readable { observation; diagnostics };
+       Proof_written (Posts_settled_written { observation; diagnostics }))
+  | Error error ->
+    let diagnostics = diagnostics @ [File_diagnostic { file = Posts_file; error }] in
+    (match reserved_diagnostics diagnostics with
+     | Some (exception_, backtrace) ->
+       carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+       Proof_reserved
+     | None -> Proof_failed diagnostics)
+
+let settle_inner store ~failure ~(pending : posts_unsettled_write) ~last_observed =
+  let inconclusive diagnostics =
+    store.posts_source <- Posts_unsettled { last_observed; failure; pending; diagnostics };
+    Posts_settle_inconclusive { failure; diagnostics } in
+  let check = check_initialization_inner store in
+  match reserved_diagnostics check.diagnostics with
+  | Some (exception_, backtrace) ->
+    carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+    inconclusive check.diagnostics
+  | None ->
+    (match check.checked with
+     | Error guard_failure ->
+       let diagnostics = check.diagnostics in
+       store.posts_source <- Posts_refused { last_observed; failure = guard_failure; diagnostics };
+       Posts_settle_superseded { failure = guard_failure; diagnostics }
+     | Ok initialization ->
+       let path = Board_paths.persist_path store in
+       if not (String.equal path pending.expected.source_path) then (
+         let failure = Posts_source_binding_mismatch in
+         let diagnostics = check.diagnostics in
+         store.posts_source <- Posts_refused { last_observed; failure; diagnostics };
+         Posts_settle_superseded { failure; diagnostics })
+       else
+         let stage = ref Read_posts in
+         (match settle_locked_read store path with
+          | exception exception_ ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            (match reserved_exception (exception_, backtrace) with
+             | Some _ ->
+               carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+               inconclusive check.diagnostics
+             | None ->
+               let diagnostics = check.diagnostics
+                 @ [Raised_diagnostic { stage = !stage; exception_; backtrace }] in
+               inconclusive diagnostics)
+          | result ->
+            (match Fs_compat.private_jsonl_snapshot_success_receipt result with
+             | Error error ->
+               let diagnostics = check.diagnostics @ [File_diagnostic { file = Posts_file; error }] in
+               (match reserved_diagnostics diagnostics with
+                | Some (exception_, backtrace) ->
+                  carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+                  inconclusive diagnostics
+                | None -> inconclusive diagnostics)
+             | Ok receipt ->
+               let diagnostics = check.diagnostics @ (match receipt.settlement_error with None -> []
+                 | Some error -> [File_diagnostic { file = Posts_file; error }]) in
+               (match reserved_diagnostics diagnostics with
+                | Some (exception_, backtrace) ->
+                  carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+                  inconclusive diagnostics
+                | None ->
+                  let observed = receipt.value in
+                  if Fs_compat.Private_jsonl_cursor.is_missing observed.cursor then (
+                    let failure = Posts_missing in
+                    store.posts_source <- Posts_refused { last_observed; failure; diagnostics };
+                    Posts_settle_superseded { failure; diagnostics })
+                  else
+                    (match settle_direction ~pending observed with
+                     | Direction_absent ->
+                       let observation = pending.expected in
+                       store.posts_source <- Posts_readable { observation; diagnostics };
+                       Posts_settled_not_written { observation; diagnostics }
+                     | Direction_diverged ->
+                       let failure = Posts_snapshot_stale in
+                       let fresh = { source_path = path; snapshot = observed; initialization } in
+                       store.posts_source <- Posts_refused {
+                         last_observed = Posts_observed fresh; failure; diagnostics };
+                       Posts_settle_superseded { failure; diagnostics }
+                     | Direction_landed ->
+                       (match settle_prove store path ~failure ~initialization ~diagnostics observed with
+                        | Proof_written outcome -> outcome
+                        | Proof_reserved -> inconclusive diagnostics
+                        | Proof_failed proof_diagnostics -> inconclusive proof_diagnostics))))))
+
+let settle store = match store.posts_source with
+  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+    Posts_settle_nothing_to_settle
+  | Posts_unsettled { last_observed; failure; pending; _ } ->
+    (try settle_inner store ~failure ~pending ~last_observed
+     with exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       (match reserved_exception (exception_, backtrace) with
+        | Some _ ->
+          carry_reserved (Error (failure_to_board_error failure)) (Some (exception_, backtrace));
+          let diagnostics = [] in
+          store.posts_source <- Posts_unsettled { last_observed; failure; pending; diagnostics };
+          Posts_settle_inconclusive { failure; diagnostics }
+        | None ->
+          let diagnostics = [Raised_diagnostic { stage = Report_source; exception_; backtrace }] in
+          store.posts_source <- Posts_unsettled { last_observed; failure; pending; diagnostics };
+          Posts_settle_inconclusive { failure; diagnostics }))

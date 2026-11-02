@@ -102,8 +102,9 @@ concrete guard diagnostic instead of being collapsed to `review`.
 
 ## Assigning the next review
 
-`review-worklist.py` reads every open PR, every page of its reviews and issue
-comments, and the commit comparison for its exact base and head. It keeps
+`review-worklist.py` reads every open PR and every page of its reviews and issue
+comments. It collects PRs concurrently and validates the complete snapshot before
+planning or posting. It keeps
 GitHub's user/team requests and proposes missing requests across an explicit
 pool of GitHub logins:
 
@@ -115,9 +116,11 @@ python3 scripts/review/review-worklist.py --repo OWNER/REPO \
   --reviewer LOGIN_A --reviewer LOGIN_B --request
 ```
 
-The default is read-only. New PRs are distributed oldest first by outstanding
-and proposed requests. Changed-head CRs return to each actual account owner;
-same-head CRs wait for author action unless an explicit rereview request exists.
+The default is read-only. Changed-head CRs first return to their GitHub account;
+Keeper handoff must identify the actual author. Other missing first reviews and
+rereviews are processed together oldest first, balanced by outstanding and
+proposed requests. Same-head CRs wait for author action unless an explicit
+rereview request exists.
 Shared logins count once. COMMENT/PENDING does not establish approval. Existing
 approval evidence uses the complete-diff/scope guard before being admitted.
 Formal review order uses submission time, with unknown times or an ambiguous
@@ -125,14 +128,12 @@ latest decision refusing planning. Each unresolved CR remains owned until its
 explicit, strictly later replacement or dismissal; multiple CRs on one account
 are grouped into one request. A current-head CR waits for author action even
 when that account also has an older CR.
-Proposed reviewers must have a different GitHub user ID from the PR author and
-every linked author or committer in the comparison. The tool resolves reviewer
-logins to IDs, repeats that lookup immediately before a request, and checks the
-returned request IDs. An incomplete comparison or an unlinked commit identity
-stops new proposals for that PR. The same account check also
-applies to approval receipts used by this worklist; it does not prove that the
-reviewer's actual session was independent. Existing conflicting requests and
-CR ownership remain visible and untouched; when appropriate a separate
+Proposed reviewers must have a different GitHub user ID from the PR author. The
+tool resolves reviewer logins to IDs, repeats that lookup immediately before a
+request, and checks the returned request IDs. A linked commit author or
+committer account can be shared by independent sessions and does not disqualify
+the reviewer. Account checks alone do not prove session independence. Existing
+conflicting requests and CR ownership remain visible and untouched; when appropriate a separate
 independent reviewer is proposed. Existing team requests are preserved without
 assuming their membership. A separately validated current independent source
 approval avoids a redundant extra request even if another account's CR remains
@@ -141,10 +142,9 @@ still use their own CI policy.
 
 Assignments mean requested, not running or reviewed. Each action retains its
 head/base/stack identity. Before posting, the tool rereads PR/evidence and skips
-changed snapshots, including changed commit-account links. Receipt scope and
-policy must match the observed PR, and a source admission is rechecked against
-PR scope and commit identities. Requests and these observations cannot be made
-atomic with a SHA or an account mapping. After a POST
+changed snapshots. Receipt scope and policy must match the observed PR, and a
+source admission is rechecked against PR scope and review evidence. Requests
+and these observations cannot be made atomic with a SHA. After a POST
 it reads scope/requests back and reports races or uncertainty without blindly
 retrying. Existing requests are never removed; a transport/read failure stops
 further notifications and preserves earlier receipts. No timer, daemon, lease,

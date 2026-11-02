@@ -7,7 +7,9 @@ No local queue, timer, CI dispatch, request removal or merge is involved.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import cache
 import importlib.util
 import json
 import os
@@ -19,6 +21,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 
 
+@cache
 def module(name, filename):
     spec = importlib.util.spec_from_file_location(name, HERE / filename)
     result = importlib.util.module_from_spec(spec)
@@ -100,17 +103,8 @@ class GitHub:
             raise Unavailable(f"GET {path}: expected all array pages")
         return [item for page in pages for item in page]
 
-    def commit_accounts(self, base, head):
-        path = f"compare/{base}...{head}?per_page=100"
-        pages = self.api(path, pages=True)
-        identities = module("review_commit_accounts", "review-commit-accounts.py")
-        try:
-            return identities.accounts_from_pages(base, pages)
-        except identities.InvalidComparison as error:
-            raise Unavailable(f"GET {path}: {error}") from error
-
-    def admission(self, pr, reviews, commit_accounts, identities_complete):
-        if not identities_complete or pr["draft"] or pr["state"] != "open" or not any(
+    def admission(self, pr, reviews):
+        if pr["draft"] or pr["state"] != "open" or not any(
                 r["state"] == "APPROVED" for r in reviews):
             return False
         # Reuse existing complete-diff/scope authority. Refusal is not a read
@@ -142,18 +136,17 @@ class GitHub:
                 raise ValueError("invalid admitted reviewer")
         except (ValueError, KeyError, TypeError) as error:
             raise Unavailable(f"review admission #{pr['number']}: inconsistent receipt") from error
-        excluded = {actor_id for _, actor_id in commit_accounts} | {pr["user"]["id"]}
-        return any(review.get("commit_id") == pr["head"]["sha"] and actor not in excluded
+        return any(review.get("commit_id") == pr["head"]["sha"] and actor != pr["user"]["id"]
                    for review, actor in zip(admitted, actors))
 
-    def independent_source_review(self, pr, reviews, comments, commit_accounts, identities_complete):
+    def independent_source_review(self, pr, reviews, comments):
         # A valid independent source review may coexist with somebody else's
         # unresolved CR. It suppresses a duplicate request; it never admits a
         # PR or resolves a blocker. Releases still require their CI policy.
-        if (not identities_complete or pr["draft"] or pr["state"] != "open"
+        if (pr["draft"] or pr["state"] != "open"
                 or pr["head"]["ref"].startswith("release/v")):
             return False
-        excluded = {actor_id for _, actor_id in commit_accounts} | {pr["user"]["id"]}
+        excluded = {pr["user"]["id"]}
         latest = {}
         order = module("worklist_formal_order", "review-formal-order.py")
         try:
@@ -253,7 +246,6 @@ class GitHub:
         comments = self.collection(f"issues/{number}/comments?per_page=100")
         if any(not isinstance(r, dict) for r in (*reviews, *comments)):
             raise Unavailable(f"#{number}: invalid review or comment record")
-        accounts, identities_complete = self.commit_accounts(pr["base"]["sha"], pr["head"]["sha"])
         if any(not isinstance(r, dict) or not isinstance(r.get("login"), str) or not r["login"]
                or type(r.get("id")) is not int or r["id"] < 1
                for r in pr["requested_reviewers"]):
@@ -262,7 +254,6 @@ class GitHub:
         people = [pr["user"], *pr["requested_reviewers"]]
         people.extend(r.get("user") for r in reviews)
         people.extend(c.get("user") for c in comments)
-        people.extend({"login": name, "id": actor_id} for name, actor_id in accounts)
         for person in people:
             if not isinstance(person, dict):
                 continue
@@ -277,19 +268,16 @@ class GitHub:
         envelopes = ([{"kind": "review", "record": r} for r in reviews]
                      + [{"kind": "comment", "record": c} for c in comments])
         blockers = decisions.reduce_decisions(envelopes, head=pr["head"]["sha"]).to_json()["blockers"]
-        admitted = self.admission(pr, reviews, accounts, identities_complete)
-        independent_review = admitted or self.independent_source_review(
-            pr, reviews, comments, accounts, identities_complete)
+        admitted = self.admission(pr, reviews)
+        independent_review = admitted or self.independent_source_review(pr, reviews, comments)
         if admitted or independent_review:
             after = self.api(f"pulls/{number}")
-            after_accounts, after_complete = self.commit_accounts(pr["base"]["sha"], pr["head"]["sha"])
             after_reviews = self.collection(f"pulls/{number}/reviews?per_page=100")
             after_comments = self.collection(f"issues/{number}/comments?per_page=100")
             final = self.api(f"pulls/{number}")
             if (pr_identity(after) != pr_identity(pr) or pr_identity(final) != pr_identity(pr)
-                    or after_accounts != accounts or after_complete != identities_complete
                     or after_reviews != reviews or after_comments != comments):
-                raise Unavailable(f"review admission #{number}: scope or commit identities changed")
+                raise Unavailable(f"review admission #{number}: scope or review evidence changed")
         return {
             "number": number, "title": pr["title"], "url": pr["html_url"],
             "state": pr["state"], "draft": pr["draft"],
@@ -299,9 +287,7 @@ class GitHub:
             "stack": pr.get("stack"), "created_at": pr["created_at"],
             "requested_reviewers": tuple(r["login"] for r in pr["requested_reviewers"]),
             "requested_teams": tuple(t["slug"] for t in pr["requested_teams"]),
-            "commit_accounts": tuple(name for name, _ in accounts),
-            "commit_actor_ids": tuple(actor_id for _, actor_id in accounts),
-            "account_ids": known, "commit_identities_complete": identities_complete,
+            "account_ids": known,
             "reviews": tuple(reviews),
             "admission": admitted, "independent_source_review": independent_review,
             "blockers": tuple(blockers),
@@ -311,7 +297,20 @@ class GitHub:
         # Each detail read includes authoritative REST stack metadata. Finish
         # all collection/validation before emitting or applying a worklist.
         listed = self.collection("pulls?state=open&per_page=100")
-        return tuple(self.collect_pr(self.api(f"pulls/{p['number']}")) for p in listed)
+        # Load helpers before workers start: some register modules during import.
+        for name, filename in (
+            ("worklist_formal_order", "review-formal-order.py"),
+            ("worklist_cr_ownership", "review-cr-ownership.py"),
+            ("worklist_source_decisions", "review-decisions.py"),
+            ("worklist_review_refusal", "review-refusal.py"),
+            ("worklist_review_scope", "review-scope.py"),
+            ("worklist_decisions", "review-decisions.py"),
+        ):
+            module(name, filename)
+        def collect(item):
+            return self.collect_pr(self.api(f"pulls/{item['number']}"))
+        with ThreadPoolExecutor() as executor:
+            return tuple(executor.map(collect, listed))
 
 
 def evidence(snapshot):
@@ -399,22 +398,13 @@ def apply_requests(github, snapshot, worklist):
                                  and a.get("id") not in current_ids
                                  for a in after_requests["users"])
             same_scope = matches_snapshot(after, live)
-            same_identities = None
             if present and same_scope:
-                try:
-                    accounts, complete = github.commit_accounts(live["base_sha"], live["head"])
-                    same_identities = (tuple(name for name, _ in accounts) == live["commit_accounts"]
-                                       and tuple(actor_id for _, actor_id in accounts) == live["commit_actor_ids"]
-                                       and complete == live["commit_identities_complete"])
-                except (Unavailable, ValueError, KeyError, TypeError, OSError):
-                    pass
                 try:
                     final = github.api(f"pulls/{number}")
                     same_scope = matches_snapshot(final, live)
                 except (Unavailable, ValueError, KeyError, TypeError, OSError):
                     same_scope = None
-            result.update(observed=present, scope_unchanged=same_scope,
-                          identities_unchanged=same_identities)
+            result.update(observed=present, scope_unchanged=same_scope)
             prefix = "observed_after_error" if posted.returncode else "requested"
             if wrong_identity:
                 state = prefix + "_wrong_identity"
@@ -424,10 +414,6 @@ def apply_requests(github, snapshot, worklist):
                 state = prefix + "_scope_unconfirmed"
             elif not same_scope:
                 state = prefix + "_scope_changed"
-            elif same_identities is None:
-                state = prefix + "_identity_unconfirmed"
-            elif not same_identities:
-                state = prefix + "_identity_changed"
             else:
                 state = prefix
         except (Unavailable, ValueError, KeyError, TypeError, OSError):
@@ -435,8 +421,8 @@ def apply_requests(github, snapshot, worklist):
         results.append(result | {"state": state,
                                  "planned_head": live["head"],
                                  "error": posted.stderr.strip() if posted.returncode else None})
-        if posted.returncode or state in ("request_unconfirmed", "requested_identity_unconfirmed",
-                                           "requested_scope_unconfirmed", "requested_wrong_identity"):
+        if posted.returncode or state in ("request_unconfirmed", "requested_scope_unconfirmed",
+                                           "requested_wrong_identity"):
             stopped = True
     return results
 

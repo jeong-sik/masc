@@ -355,8 +355,13 @@ let report_input_rejection (state : state) kind content =
 
 (* Local metadata and the public remote roster share identity-based navigation.
    Replacing rows never reads a local directory. *)
-let replace_keeper_rows ~preserve_on_error (state : state)
+let replace_keeper_rows ?(before_view_change = fun () -> ()) ~preserve_on_error (state : state)
     ~keepers:loaded_keepers ~error:keepers_error =
+  let set_view view =
+    if state.view <> view then begin
+      before_view_change ();
+      state.view <- view
+    end in
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
   let current_keeper_ids =
@@ -469,7 +474,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
        (match current_keeper_mode with
         | Some Keeper_message when hold_created_chat -> ()
         | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
-            state.view <- Keepers Keeper_list;
+            set_view (Keepers Keeper_list);
             state.detail_scroll <- 0;
             state.log_scroll <- 0;
             state.keeper_calls_scroll <- 0
@@ -478,17 +483,17 @@ let replace_keeper_rows ~preserve_on_error (state : state)
         | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_detail
+       set_view (Keepers Keeper_detail)
    | Keeper_selection.Logs_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_logs
+       set_view (Keepers Keeper_logs)
    | Keeper_selection.Calls_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_calls
+       set_view (Keepers Keeper_calls)
    | Keeper_selection.Message_keeper { cursor; return_keeper; _ } ->
        state.keeper_cursor <- cursor;
        state.keeper_message_return <- return_keeper;
-       state.view <- Keepers Keeper_message);
+       set_view (Keepers Keeper_message));
 
   (* A partial roster may have clamped the cursor to another Keeper while a
      Skill image owned the terminal. Restore its captured owner on recovery. *)
@@ -638,8 +643,8 @@ let apply_local_workspace (state : state) (reading : local_reading) =
   state.goals_to_confirm <- reading.lr_goals_to_confirm;
   state.local_workspace <- Local_workspace_read
 
-let apply_local_keepers (state : state) (reading : local_keeper_reading) =
-  replace_keeper_rows ~preserve_on_error:true state ~keepers:reading.lkr_keepers
+let apply_local_keepers ?before_view_change (state : state) (reading : local_keeper_reading) =
+  replace_keeper_rows ?before_view_change ~preserve_on_error:true state ~keepers:reading.lkr_keepers
     ~error:reading.lkr_error;
   state.local_keepers <- Local_workspace_read
 

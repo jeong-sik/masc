@@ -144,7 +144,8 @@ val convert_to_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->
   (string, conversion_failure) result
 (** Try the existing converter sequence, preserving every failed attempt's
-    typed status. A runner failure stops the sequence; input is retained even
+    typed status. A runner failure, signal or stop ends the sequence: a
+    descendant could still be writing the attempt path. Input is retained even
     when no converter succeeds. *)
 
 val prepare_png :
@@ -183,6 +184,23 @@ val prepare_presentation :
     aspect-preserving mosaic grid and one ffmpeg RGBA frame. All temporary files
     belong to this attempt and are removed on success or failure. Blocking: call
     only from the image acquisition worker. Original bytes are never replaced. *)
+
+type remote_image =
+  | Remote_unfetched
+  | Remote_png of string
+  | Remote_cells of { png : string; cells : (presentation, string) result }
+  | Remote_busy of string option
+
+type remote_action =
+  | Fetch_remote
+  | Prepare_remote_cells of string
+  | Draw_remote_png of string
+  | Draw_remote_cells of { png : string; cells : presentation }
+  | Open_remote_page of string
+
+val decide_remote : graphics:bool option -> colour:bool -> remote_image -> remote_action
+(** Choose using the latest capability, which may have changed while the
+    worker ran. [None] preserves the native-first attempt. *)
 
 val invalidate_download : cache_dir:string -> string -> unit
 (** Explicit user refresh only: remove this URL's input and derived frames so

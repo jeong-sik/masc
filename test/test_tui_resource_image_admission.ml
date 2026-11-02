@@ -124,7 +124,7 @@ let test_skill_image_owner () =
     sir_skill_reference=Some original } in
   state.image_open <- true;
   state.image_cell_view <- Some (Types.Image_cells {
-    ic_title="diagram";ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_title="diagram";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
     ic_workspace=state.workspace_authority;ic_origin=image;ic_unconfirmed=false });
   let window : Masc_tui_image_viewport.window = {x=0;y=0;width=1;height=1;columns=1;rows=1} in
   let inspection={image with sir_purpose=Inspect_image {identity=ref ();window}} in
@@ -577,7 +577,7 @@ let test_tools_image_keeper_owner () =
     sir_keeper=Some "keeper-a";sir_skill_reference=Some reference } in
   state.image_open <- true;
   state.image_cell_view <- Some (Types.Image_cells {
-    ic_title="diagram";ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_title="diagram";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
     ic_workspace=state.workspace_authority;ic_origin=origin;ic_unconfirmed=false });
   state.msx_open <- true;
   check bool "a hidden image cannot restore Tools selection" true
@@ -624,6 +624,43 @@ let test_tools_image_keeper_owner () =
   ignore (Types.withdraw_image_open state);
   check bool "operator input cancels the retired preview notice" true
     (Option.is_none (Types.retired_skill_image_notice state))
+
+let test_roster_view_change_retires_pending_worker () =
+  let module Work = Masc_tui_board_preview_work in
+  let state = state () and worker = Work.create () in
+  let a = keeper_row "keeper-a" and b = keeper_row "keeper-b" in
+  state.view <- Types.Keepers Keeper_detail;
+  state.workspace_identity <- Types.Workspace_identity_match;
+  state.local_keepers <- Types.Local_workspace_read;
+  state.keepers <- [a;b];
+  state.keeper_cursor <- 0;
+  let old = pending state (Types.Remote_url_image_read state.workspace_authority) in
+  state.sent_image_read <- Some old;
+  let ticket = match Work.reserve worker with Some ticket -> ticket | None -> fail "reservation" in
+  let calls = ref 0 in
+  let before_view_change () =
+    incr calls;
+    check bool "owner is withdrawn before navigation" true (state.view = old.sir_view);
+    ignore (Types.withdraw_image_open state);
+    ignore (Work.withdraw_pending worker) in
+  let replace keepers =
+    Masc_tui_loader.replace_keeper_rows ~before_view_change ~preserve_on_error:true state
+      ~keepers ~error:None in
+  replace [a;b];
+  check int "same view preserves pending work" 0 !calls;
+  check bool "same view retains the exact owner" true
+    (Option.exists (fun request -> request == old) state.sent_image_read);
+  replace [b];
+  check int "changed view withdraws once" 1 !calls;
+  let next = match Work.reserve worker with Some next -> next | None -> fail "replacement reservation" in
+  check bool "withdrawn worker cannot start" true
+    (Option.is_none (Work.run_reserved worker ticket (fun () -> ())));
+  Work.withdraw worker ticket;
+  check bool "old withdrawal cannot release the replacement" true
+    (Option.is_some (Work.run_reserved worker next (fun () -> ())));
+  state.view <- old.sir_view;
+  check bool "returning to the old view cannot revive its owner" true
+    (Option.is_none (Types.take_image_read state old))
 
 let test_image_preview_input_barrier () =
   let module Protocol = Masc_tui_async_protocol in
@@ -753,8 +790,8 @@ let test_image_result_with_full_mailbox () =
       check int "only an admitted result can draw" expected_draw !draw;
       check int "only an admitted failure can open the browser" expected_open !open_browser;
       Results.close results)
-      [Ok "png",false,1,0; Error "unavailable",false,0,1;
-       Ok "png",true,0,0; Error "unavailable",true,0,0]))
+      [Ok (Masc_tui_image_cache.Remote_png "png"),false,1,0; Error "unavailable",false,0,1;
+       Ok (Masc_tui_image_cache.Remote_png "png"),true,0,0; Error "unavailable",true,0,0]))
 
 let test_board_svg_and_original_reader () =
   let module Payload = Masc_tui_image_payload in
@@ -1153,6 +1190,7 @@ let () =
   test_case "displayed cell attachment treats malformed absence as unconfirmed" `Quick test_displayed_cell_attachment_uncertain;
   test_case "displayed chat cell names its unconfirmed source" `Quick test_displayed_chat_cell_is_captured;
   test_case "Tools image owns the selected keeper" `Quick test_tools_image_keeper_owner;
+  test_case "roster navigation retires a pending image worker" `Quick test_roster_view_change_retires_pending_worker;
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;

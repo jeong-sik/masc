@@ -521,7 +521,7 @@ type async_msg =
       caption : string list;
       page_url : string;
       image_url : string;
-      result : (string, string) result;
+      result : (Masc_tui_image_cache.remote_image, string) result;
     }
       (** A [v]-requested or /image-requested web image, downloaded and
           converted to PNG off the render loop. [request] is the exact pending
@@ -529,8 +529,8 @@ type async_msg =
           request cannot paint, notify another pane, or open its fallback.
           An explicit remote URL belongs to its workspace, independently of
           unrelated peer resource readings.
-          [result] is the PNG bytes
-          ready to draw, or why they could not be produced. [title] is what
+          [result] holds the prepared PNG or character frame, or why it could
+          not be produced. [title] is what
           the screen shows: [v] indents a display title, /image passes the URL
           itself. [image_url] is what was fetched; [page_url] is the link the
           operator chose, and the one a browser gets when drawing fails

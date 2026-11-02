@@ -8,6 +8,7 @@ type view =
   ; logins : Masc_tui_identity_model.identity_login_started list
   ; attempt_error : (Masc_tui_identity_model.identity_notice_kind * string) option
   ; app_form : Masc_tui_identity_model.identity_app_form option
+  ; callback : Masc_tui_identity_model.identity_callback option
   }
 
 (** Preserve provider numbering, notices, filtered-empty readings and login URL

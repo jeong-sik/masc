@@ -23,13 +23,17 @@ val switch_set
 
 (** Apply catalog and attempt facts under one read admission. Published
     credentials retire only with the paired current successful catalog read;
-    immutable failure/expiry facts need no catalog. Present only the selected Keeper. *)
+    immutable failure/expiry facts need no catalog. Present only the selected Keeper.
+    A successful read also holds the callback the server named. *)
 val providers_loaded
   :  Masc_tui_types.state
   -> Masc_tui_types.detail_read_request
   -> report:(string -> unit)
   -> attempts:(Masc_tui_types.identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
-  -> (Masc_tui_identity_model.identity_provider list, string) result
+  -> ( Masc_tui_identity_model.identity_provider list
+       * Masc_tui_identity_model.identity_callback option
+     , string )
+     result
   -> unit
 
 (** Retire the exact request generation before remembering its login or notice.

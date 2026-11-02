@@ -472,7 +472,7 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
 let move_identity_cursor (state : state) ~delta =
   match state.identity_view with
   | None -> ()
-  | Some (_, providers) ->
+  | Some (keeper_name, providers) ->
       let count =
         List.length
           (Masc_tui_identity_model.identity_connectable ~query:(Masc_tui_identity_input.current_query state)
@@ -498,10 +498,17 @@ let move_identity_cursor (state : state) ~delta =
                   (Masc_tui_identity_model.identity_provider_line
                      ~summary:
                        (Masc_tui_identity_model.identity_summary ~providers ~query)
+                     ~callback:
+                       (Masc_tui_identity_model.identity_callback_rows
+                          state.identity_callback)
                      ~notice:
                        (Masc_tui_identity_model.identity_notice
                           ~cols:(identity_pane_columns state)
                           state.identity_attempt_error
+                       @ Masc_tui_identity_model.identity_started_rows
+                           ~cols:(identity_pane_columns state)
+                           ~keeper_name:keeper_name
+                           state.identity_logins
                        @ Masc_tui_identity_model.identity_app_form_rows
                            state.identity_app_form
                        @ Masc_tui_identity_model.identity_filter_rows ~providers

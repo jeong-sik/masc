@@ -46,6 +46,15 @@ let redirect_uri () =
   | Ok base_url -> Ok (base_url ^ callback_path)
 ;;
 
+(* The callback a login started now would name, for a screen to show. An
+   operator who makes their own app has to register exactly this URL, and an
+   operator who moved the server wants to see what it answers at. *)
+let callback_json () =
+  match redirect_uri () with
+  | Ok url -> `Assoc [ "url", `String url ]
+  | Error problem -> `Assoc [ "problem", `String problem ]
+;;
+
 let provider_of_id provider_id =
   match Declarations.find provider_id with
   | None -> Error (Printf.sprintf "no identity provider is declared as %S" provider_id)
@@ -249,6 +258,7 @@ let attached_tools_json ~base_path ~keeper =
                 [ "provider", `String id
                 ; "provider_label", `String provider.Provider.label
                 ; "attached", `Bool false
+                ; "app_state", app_state ~base_path ~provider |> app_state_to_json
                 ; ( "also_on"
                   , `List
                       (List.map
@@ -262,6 +272,7 @@ let attached_tools_json ~base_path ~keeper =
                 ([ "provider", `String id
                  ; "provider_label", `String provider.Provider.label
                  ; "attached", `Bool true
+                 ; "app_state", app_state ~base_path ~provider |> app_state_to_json
                  ]
                  @ switch_fields provider.Provider.id
                  @ [ ( "also_on"

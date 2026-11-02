@@ -16,6 +16,12 @@ val callback_path : string
     them: which login a callback belongs to is the state it echoes, and a
     state is unguessable and redeemable once. *)
 
+val callback_json : unit -> Yojson.Safe.t
+(** The callback a login started now would name: [{url}], or [{problem}] when
+    this server does not know its own base URL. It follows
+    [MASC_HTTP_BASE_URL], or the address the server bound when that is unset,
+    so it changes when the server moves. *)
+
 val declarations_json : base_path:string -> Yojson.Safe.t
 (** Every provider declared under [config/identity/], as a screen could list
     them. A readable declaration carries a tagged [app_state] object whose
@@ -123,7 +129,8 @@ val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
     would list it: when it was found out, and the tool names. A provider this
     Keeper never attached to is listed as such rather than left out, because
     "not attached" and "attached with no tools" are different things to
-    whoever is looking. *)
+    whoever is looking. Each readable row also carries [app_state], the same
+    object {!declarations_json} gives. *)
 
 val finish :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

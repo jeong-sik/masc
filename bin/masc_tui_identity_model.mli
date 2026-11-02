@@ -1,5 +1,17 @@
 (** Identity data and pure projections, independent of mutable UI state. *)
 
+(** Whether an operator app is on file for a service. *)
+type identity_app =
+  | App_on_file
+  | App_none
+  | App_problem of string
+
+(** The callback a login started now would name. An operator who makes their
+    own app registers exactly this URL as its redirect URI. *)
+type identity_callback =
+  | Callback_url of string
+  | Callback_unknown of string (** why the server does not know it *)
+
 type identity_provider =
   | Identity_declared of
       { idp_id : string
@@ -21,6 +33,9 @@ type identity_provider =
             not show a guess for either. *)
       ; idp_switch_problem : string option
         (** Why the switch state is unknown, when it is. *)
+      ; idp_app : identity_app option
+        (** Whether an app the operator made is on file for this service.
+            [None] when the server did not say. *)
       }
   | Identity_unreadable of
       { idp_id : string
@@ -96,8 +111,19 @@ val identity_filter_rows
   -> string option
   -> string list
 
-val identity_preamble : summary:string -> notice:string list -> string list
-val identity_provider_line : summary:string -> notice:string list -> index:int -> int
+val identity_callback_rows : identity_callback option -> string list
+(** The callback line under the summary, or nothing when the server did not
+    say. Shared by the renderer and the key handler so both count it. *)
+
+val identity_started_rows :
+  cols:int -> keeper_name:string -> identity_login_started list -> string list
+(** The consent prompt and wrapped URL for each login this Keeper started and
+    has not finished. Shared for the same reason as the callback rows. *)
+
+val identity_preamble :
+  summary:string -> callback:string list -> notice:string list -> string list
+val identity_provider_line :
+  summary:string -> callback:string list -> notice:string list -> index:int -> int
 
 val identity_cursor_clamped
   :  query:string
@@ -140,3 +166,10 @@ val decode_identity_login_status : Yojson.Safe.t -> (identity_login_status, stri
    different facts, and an operator told only "disconnected" cannot tell a
    token gone everywhere from one the provider still honours. *)
 val disconnect_receipt_text : provider_id:string -> Yojson.Safe.t -> string
+
+val decode_identity_providers :
+  Yojson.Safe.t -> (identity_provider list * identity_callback option, string) result
+(** The Identity tab's reading of the attached-tools answer: the rows, and the
+    callback the server would name. A callback of any other shape and an
+    [app_state] of an unknown kind are read as unknown ([None]), never as a
+    convenient value. *)

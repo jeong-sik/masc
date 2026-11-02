@@ -2027,75 +2027,10 @@ let load_keeper_board_quarantines ~(host : string) ~(port : int)
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of
    attachments cannot disagree if they arrive together. *)
-let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : string)
-  : (Masc_tui_identity_model.identity_provider list, string) result
-  =
+let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : string) =
   match Masc_tui_http.fetch_attached_tools ~host ~port ~keeper_name with
   | Error err -> Error ("identity providers load failed: " ^ err)
-  | Ok json ->
-    let rows =
-      match json with
-      | `Assoc fields -> (
-        match List.assoc_opt "providers" fields with
-        | Some (`List rows) -> Some rows
-        | Some _ | None -> None)
-      | _ -> None
-    in
-    (match rows with
-     | None -> Error "identity providers response carries no providers list"
-     | Some rows ->
-       Ok
-         (List.filter_map
-            (fun row ->
-              let field key =
-                match row with
-                | `Assoc fields -> List.assoc_opt key fields
-                | _ -> None
-              in
-              let string_field key =
-                match field key with
-                | Some (`String value) -> Some value
-                | Some _ | None -> None
-              in
-              match string_field "provider", string_field "problem" with
-              | Some idp_id, Some idp_problem ->
-                Some (Masc_tui_identity_model.Identity_unreadable { idp_id; idp_problem })
-              | Some idp_id, None ->
-                let idp_label =
-                  Option.value ~default:idp_id (string_field "provider_label")
-                in
-                let idp_tools =
-                  match field "tools" with
-                  | Some (`List names) ->
-                    Some
-                      (List.filter_map
-                         (function `String name -> Some name | _ -> None)
-                         names)
-                  (* No tools key means the server said this one is not
-                     attached; an empty list would mean attached and
-                     offering nothing. *)
-                  | Some _ | None -> None
-                in
-                let idp_also_on =
-                  match field "also_on" with
-                  | Some (`List names) ->
-                    List.filter_map
-                      (function `String name -> Some name | _ -> None)
-                      names
-                  | Some _ | None -> []
-                in
-                let idp_enabled =
-                  match field "enabled" with
-                  | Some (`Bool value) -> Some value
-                  | Some _ | None -> None
-                in
-                let idp_switch_problem = string_field "switch_problem" in
-                Some
-                  (Masc_tui_identity_model.Identity_declared
-                     { idp_id; idp_label; idp_tools; idp_also_on
-                     ; idp_enabled; idp_switch_problem })
-              | None, _ -> None)
-            rows))
+  | Ok json -> Masc_tui_identity_model.decode_identity_providers json
 
 let load_runtime_config_view ~(host : string) ~(port : int) :
     (Masc_tui_runtime_config_view.reading, string) result =

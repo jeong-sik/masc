@@ -697,10 +697,6 @@ let test_flush_failure_keeps_the_vote_log_scheduled () =
     store.Board.dirty_posts
 ;;
 
-(* rewrite_posts drops an orphan row an aborted append left on disk. Its write
-   used to swallow the Error, so a failed rewrite left the orphan with nothing
-   scheduled to retry and a restart revived a post that never reached memory.
-   Blocking only the posts snapshot path exercises that branch on its own. *)
 (* A well-formed vote whose post is not loaded survives the restart and the
    next flush. On 2026-09-19 the posts file had been renamed away, the board
    loaded no posts, the loader skipped all 225 votes as targetless, and the
@@ -815,27 +811,6 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
     [ "vote", vote_path; "reaction", reaction_path; "sub-board", sub_board_path ]
 ;;
 
-let test_rewrite_posts_failure_stays_scheduled () =
-  let post = create_post_exn ~author:"rewrite-retry-author" ~content:"rewrite retry body" in
-  ignore post;
-  let store =
-    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
-  in
-  let posts_path = Board.persist_path () in
-  (try Sys.remove posts_path with Sys_error _ -> ());
-  Fs_compat.mkdir_p posts_path;
-  let before = Board.persist_error_count () in
-  Board.rewrite_posts store;
-  Alcotest.(check bool)
-    "the failed rewrite was counted"
-    true
-    (Board.persist_error_count () > before);
-  Alcotest.(check bool)
-    "the snapshot rewrite is still scheduled after it failed"
-    true
-    store.Board.dirty_posts
-;;
-
 let test_snapshot_waiting_after_edit_keeps_edited_post
     ?(check_reloaded = fun (_ : Board.post) -> ()) prepare_snapshot () =
   let author = "snapshot-order-author" in
@@ -940,11 +915,6 @@ let () =
             (with_eio (test_snapshot_waiting_after_edit_keeps_edited_post
                (fun store ~post_id:_ () -> Board.flush_dirty store)));
           Alcotest.test_case
-            "rewrite queued after an edit preserves it across restart"
-            `Quick
-            (with_eio (test_snapshot_waiting_after_edit_keeps_edited_post
-               (fun store ~post_id:_ () -> Board.rewrite_posts store)));
-          Alcotest.test_case
             "pin queued after an edit preserves both across restart"
             `Quick
             (with_eio test_pin_waiting_after_edit_keeps_edited_post);
@@ -966,10 +936,6 @@ let () =
             "flush: failed vote log write stays scheduled"
             `Quick
             (with_eio test_flush_failure_keeps_the_vote_log_scheduled);
-          Alcotest.test_case
-            "rewrite_posts: failed snapshot write stays scheduled"
-            `Quick
-            (with_eio test_rewrite_posts_failure_stays_scheduled);
           Alcotest.test_case
             "flush: cancellation cannot cut the write"
             `Quick

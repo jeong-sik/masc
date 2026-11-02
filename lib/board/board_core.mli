@@ -169,16 +169,11 @@ val save_posts_snapshot : store -> string -> (unit, board_error) result
     [store.comments_load_result]. *)
 val save_comments_snapshot : store -> string -> (unit, board_error) result
 
-(** Atomically rewrites {!persist_path} from
-    [store.posts].  The implementation snapshots under [store.mutex]
-    and performs disk I/O under the persist lock after releasing the
-    state lock; callers must not invoke it while already holding
-    [store.mutex]. *)
-val rewrite_posts : store -> unit
-
 (** Atomically rewrites {!comments_path} from
-    [store.comments].  Same usage pattern as
-    {!rewrite_posts}. *)
+    [store.comments]. The snapshot is captured under the state lock and written
+    outside it while retaining the persistence lock. Failure re-marks comments
+    dirty for the flusher to retry; callers must not invoke this while already
+    holding the state lock. *)
 val rewrite_comments : store -> unit
 
 (** Marks one post for append-only deferred persistence.  Call with
@@ -259,7 +254,12 @@ val update_post_with_outcome
     meta] via {!normalize_post_payload}, then writes under
     {!with_lock}.  [ttl_hours = 0] persists indefinitely;
     positive values are preserved exactly and negative values are rejected.
-    Errors on validation or persistence failure.  The
+    Errors on validation or persistence failure.
+    Final sub-board policy admission precedes append while holding this
+    store's persistence lock, shared with runtime sub-board mutations.
+    A specified hearth requires a fully readable sub-board policy source;
+    an unscoped post is independent of that source. This boundary does not
+    serialize other stores/processes or supply durable operation receipts.
     JSONL append and side-effect hooks are intentionally
     performed {b outside} the state lock to avoid blocking concurrent
     readers on filesystem writes. *)
@@ -468,8 +468,9 @@ val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
-    Returns [Validation_error] when the slug is invalid or already taken. JSONL append
-    persistence is performed outside the state lock. *)
+    Returns [Validation_error] when the slug is invalid and [Already_exists]
+    when taken. The final uniqueness check precedes append under this store's
+    persistence lock; append runs outside the state lock. *)
 val create_sub_board
   :  store
   -> slug:string
@@ -488,12 +489,15 @@ val get_sub_board : store -> sub_board_id:string -> (sub_board, board_error) Res
 val list_sub_boards : store -> sub_board list
 
 (** Removes a sub-board by ID or slug under the state lock, then persists the
-    rewritten snapshot outside the state lock. *)
+    rewritten snapshot outside the state lock while retaining this store's
+    persistence lock. Snapshot-save failures retain their logging behavior. *)
 val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.
-    Persists the rewritten snapshot outside the state lock. *)
+    Takes this store's persistence lock before changing policy under the state
+    lock, then persists its snapshot outside the state lock. Snapshot-save
+    failures retain their logging behavior. *)
 val update_sub_board
   :  store
   -> sub_board_id:string

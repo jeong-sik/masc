@@ -68,7 +68,6 @@ val ensure_masc_dir : unit -> unit
 
 val save_posts_snapshot : store -> string -> (unit, board_error) result
 val save_comments_snapshot : store -> string -> (unit, board_error) result
-val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string
 val save_reactions_jsonl_result : string -> (unit, board_error) result
@@ -93,6 +92,12 @@ val sub_board_with_post_count : (string, int) Hashtbl.t -> sub_board -> sub_boar
    bool and inventing its own refusal. *)
 val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
+(** Call while holding the state lock. A specified hearth requires a fully
+    readable sub-board source; an unscoped post needs no sub-board policy.
+    Both comment policy checks and final post admission use this guard.
+    Post creation checks again under the same store's persistence lock before
+    append, serialized with runtime sub-board policy mutations. This does not
+    change the comment append ordering or establish durable receipt authority. *)
 
 module Post_publication_failure = Board_post_publication_failure
 
@@ -152,8 +157,12 @@ val create_post_with_audience :
   unit ->
   (post_creation, Post_publication_failure.t) result
 (** Validate and freeze the post audience before mutating or persisting the
-    Board, returning that same authority with the committed post. Failures retain
-    publication evidence and expose a receipt only after the state commit.
+    Board, returning that same authority with the committed post. The final
+    policy check precedes append under the store's persistence lock; successful
+    append is followed by memory publication without a policy-refusal branch.
+    This is same-store serialization, not a cross-process or crash-durable
+    operation receipt contract. Failures retain publication evidence and expose
+    a receipt only after the state commit.
     Cancellation, [Eio.Time.Timeout], [Out_of_memory], [Stack_overflow] and
     [Sys.Break] propagate rather than becoming ordinary failures. *)
 

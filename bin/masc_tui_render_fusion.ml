@@ -339,6 +339,82 @@ let fusion_tool_agent_suffix actor agent_name =
 type fusion_json_preview =
   | Fusion_json_container of string
   | Fusion_json_scalar of string
+  | Fusion_json_original of string * bool list
+
+type fusion_json_lex_state =
+  | Json_code | Json_string | Json_escape | Json_line_comment | Json_block_comment
+
+type fusion_json_scan =
+  { has_comments : bool
+  ; leading_comment : bool
+  ; first_comment : int option
+  ; string_newlines : bool list
+  }
+
+(* Yojson accepts comments but drops them when reprinting. Track comments and
+   string boundaries together, including incomplete previews. *)
+let fusion_json_scan text =
+  let length = String.length text in
+  let index = ref 0 and state = ref Json_code in
+  let has_comments = ref false and leading_comment = ref false in
+  let first_comment = ref None in
+  let leading = ref true and string_newlines = ref [] in
+  while !index < length do
+    let byte = text.[!index] in
+    if byte = '\n' then
+      string_newlines := (!state = Json_string || !state = Json_escape) :: !string_newlines;
+    (match !state with
+     | Json_code ->
+       (match byte with
+        | '"' -> leading := false; state := Json_string
+        | '/' when !index + 1 < length && (text.[!index + 1] = '/' || text.[!index + 1] = '*') ->
+          has_comments := true;
+          if Option.is_none !first_comment then first_comment := Some !index;
+          if !leading then leading_comment := true;
+          state := (if text.[!index + 1] = '/' then Json_line_comment else Json_block_comment);
+          incr index
+        | ' ' | '\t' | '\r' | '\n' -> ()
+        | _ -> leading := false)
+     | Json_string ->
+       if byte = '\\' then state := Json_escape
+       else if byte = '"' then state := Json_code
+     | Json_escape -> state := Json_string
+     | Json_line_comment -> if byte = '\n' then state := Json_code
+     | Json_block_comment ->
+       if byte = '*' && !index + 1 < length && text.[!index + 1] = '/' then begin
+         state := Json_code;
+         incr index
+       end);
+    incr index
+  done;
+  { has_comments = !has_comments
+  ; leading_comment = !leading_comment
+  ; first_comment = !first_comment
+  ; string_newlines = List.rev !string_newlines
+  }
+
+let fusion_json_value_before_comment text scan =
+  match scan.first_comment with
+  | None -> false
+  | Some index ->
+    (try
+       ignore (Yojson.Safe.from_string (String.sub text 0 index));
+       true
+     with Yojson.Json_error _ -> false)
+
+let fusion_json_safe_original text string_newlines =
+  let safe = Masc.Tui_terminal_text.sanitize_terminal_lines text in
+  let output = Buffer.create (String.length safe) in
+  let remaining = ref string_newlines in
+  String.iter (fun byte ->
+    if byte <> '\n' then Buffer.add_char output byte
+    else match !remaining with
+      | in_string :: rest ->
+        remaining := rest;
+        if in_string then Buffer.add_string output "\\x0A"
+        else Buffer.add_char output '\n'
+      | [] -> assert false) safe;
+  Buffer.contents output
 
 let fusion_json_control_byte byte = byte < '\x20' || byte = '\x7f'
 
@@ -368,6 +444,10 @@ let fusion_tool_preview_lines ~width ~label preview =
            malformed strings that Safe rejects, and formatting those would
            silently discard comments from what was previously shown verbatim. *)
         ignore (Yojson.Safe.from_string preview.ftp_text);
+        let scan = fusion_json_scan preview.ftp_text in
+        if scan.has_comments
+        then Some (Fusion_json_original (preview.ftp_text, scan.string_newlines))
+        else
         (* Keep numeric and string literals while formatting the container:
            a float conversion can otherwise turn a large exponent into
            Infinity or round a value before the operator reads it. *)
@@ -391,13 +471,13 @@ let fusion_tool_preview_lines ~width ~label preview =
           Some (Fusion_json_scalar preview.ftp_text)
       with Yojson.Json_error _ -> None
   in
-  let direct_safe_json_rows safe =
+  let direct_safe_json_rows ?(language = "json") safe =
     let indent_cells = min 6 (max 0 (width - 1)) in
     let indent = String.make indent_cells ' ' in
     let body_width = max 1 (width - indent_cells) in
     let palette =
       { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
-    Masc_tui_code_lexer.rows_of_source ~language:(Some "json") safe
+    Masc_tui_code_lexer.rows_of_source ~language:(Some language) safe
     |> List.concat_map (fun pieces ->
          match Masc_tui_markdown.render_lexed_line ~palette ~width:body_width pieces with
          | [] -> [ "" ]
@@ -422,15 +502,23 @@ let fusion_tool_preview_lines ~width ~label preview =
   let rows =
     match complete_json with
     | Some (Fusion_json_container payload) -> fenced_json_rows payload
+    | Some (Fusion_json_original (payload, string_newlines)) ->
+      direct_safe_json_rows ~language:"js" (fusion_json_safe_original payload string_newlines)
     | Some (Fusion_json_scalar payload) ->
       direct_safe_json_rows (Keeper_chat.terminal_safe_text ~preserve_newlines:true payload)
     | None ->
       (* Keep the existing code reading for incomplete object and array
          previews. They cannot be parsed or treated as complete JSON. *)
       let trimmed = String.trim preview.ftp_text in
-      if String.starts_with ~prefix:"{" trimmed
-         || String.starts_with ~prefix:"[" trimmed
-      then fenced_json_rows preview.ftp_text
+      let container = String.starts_with ~prefix:"{" trimmed
+                      || String.starts_with ~prefix:"[" trimmed in
+      let scan = fusion_json_scan preview.ftp_text in
+      if (container && scan.has_comments)
+         || (preview.ftp_truncated
+             && (scan.leading_comment || fusion_json_value_before_comment preview.ftp_text scan)) then
+        direct_safe_json_rows ~language:"js"
+          (fusion_json_safe_original preview.ftp_text scan.string_newlines)
+      else if container then fenced_json_rows preview.ftp_text
       else fusion_markdown_block ~width ~indent:"      " preview.ftp_text
   in
   [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ] @ rows

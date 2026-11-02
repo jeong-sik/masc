@@ -389,7 +389,7 @@ let stage_collect
            After_assistant_collected
            agent.state
        in
-       (match agent.options.event_bus with
+       (match Pipeline_common.transient_event_bus agent with
         | Some bus ->
           safe_publish
             bus
@@ -409,7 +409,7 @@ let stage_collect
           when the provider did not report them (cloud providers omit timings).
           The nested [None -> ()] arms are explicit (no catch-all) so a future
           telemetry field cannot be silently dropped here. *)
-       (match agent.options.event_bus with
+       (match Pipeline_common.transient_event_bus agent with
         | None -> ()
         | Some bus ->
           (match response.telemetry with
@@ -722,6 +722,9 @@ let run_new_turn
       }
       (fun _tracer -> stage_input ?raw_trace_run ?clock ~turn agent |> tag_error "input")
   in
+  let* execution =
+    Pipeline_execution_scope.open_turn (Execution_context.agent_scope ()) ~ordinal:turn
+  in
   (* Stage 2: Parse *)
   let* prep, turn_config, turn_params =
     Tracing.with_span
@@ -735,6 +738,8 @@ let run_new_turn
       }
       (fun _tracer -> stage_parse ?raw_trace_run ?clock ~turn agent |> tag_error "parse")
   in
+  let* () = Pipeline_execution_scope.record_turn_ready execution
+    ~tool_names:prep.Agent_turn.visible_tool_names in
   (* Stage 2.5: Async input validation *)
   let async_guard = agent.options.guardrails_async in
   match
@@ -745,9 +750,6 @@ let run_new_turn
   | Guardrails_async.Fail { validator_name; reason } ->
     Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
   | Guardrails_async.Pass ->
-    let* execution =
-      Pipeline_execution_scope.open_turn (Execution_context.agent_scope ()) ~ordinal:turn
-    in
     (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
        error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
     let api_outcome =

@@ -51,7 +51,8 @@ module type S = sig
     }
 
   type node_update =
-  | Checkpoint_snapshot of Checkpoint_snapshot.t
+    | Turn_ready of string list
+    | Checkpoint_snapshot of Checkpoint_snapshot.t
     | Provider_event of Yojson.Safe.t
     | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
     | Provider_response_snapshot of Llm_provider.Types.api_response
@@ -259,6 +260,7 @@ module type S = sig
     ; run_id : Run_id.t
     ; through : cursor
     }
+
   (** Latest committed checkpoint of the selected root, excluding child runs.
       Absence is explicit; this observation grants no effect replay permission. *)
   val latest_checkpoint : t -> (checkpoint_observation option, error) result
@@ -286,17 +288,30 @@ module type S = sig
     -> limit:int
     -> unit
     -> (page, error) result
-  type tool_observation =
+  type bus_observation =
     { run_id : Run_id.t
     ; event : Event_bus.event
     ; through : cursor
     }
-  type tool_observation_page = private
-    { observations : tool_observation list
+  type bus_observation_page = private
+    { observations : bus_observation list
     ; next_cursor : cursor
     ; high_watermark : cursor
     ; has_more : bool
     }
+
+  (** Turn preparation, admitted provider telemetry, successful turn settlement, and
+      tool observations, derived only from committed source facts. Each event
+      keeps the source envelope and cursor. [run] restricts the exact audience;
+      omission includes nested runs. Empty pages still advance source cursors.
+      Accept an observation before persisting its [through] acknowledgement. *)
+  val read_bus_observations :
+    t -> ?run:Run_id.t -> after:cursor -> ?through:cursor -> limit:int -> unit ->
+    (bus_observation_page, error) result
+
+  type tool_observation = bus_observation
+  type tool_observation_page = bus_observation_page
+
   (** Committed attempt admission and result facts from the whole journal, in
       source sequence order, matching [read_page]. [run] selects one exact
       Agent run in that journal; omission includes its one top-level run and

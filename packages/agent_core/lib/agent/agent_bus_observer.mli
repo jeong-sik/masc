@@ -3,4 +3,4 @@
     occurrence at a time; an ordinary failure retains the last cursor. *)
 val create :
   publish:(Event_bus.t -> Event_bus.event -> unit) ->
-  Execution_agent_scope.t -> Execution_context.tool_observer
+  Execution_agent_scope.t -> Execution_context.bus_observer

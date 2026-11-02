@@ -659,6 +659,34 @@ let test_undrawn_source_decisions () =
   fallback "graph TD\nA[first]\nclassDef hot fill:red\nB[second]";
   fallback "stateDiagram-v2\nA: first description\nA: second description"
 
+let test_edge_label_line_collision_decisions () =
+  let source direction grouped label_first label =
+    let labelled = "A -->|" ^ label ^ "| C" and other = "B --> D" in
+    let first, second = if label_first then labelled, other else other, labelled in
+    let body = "A[a]\nB[b]\nC[c]\nD[d]\n" ^ first ^ "\n" ^ second in
+    "graph " ^ direction ^ "\n" ^ if grouped then "subgraph G[group]\n" ^ body ^ "\nend" else body
+  in
+  let collision source =
+    match Mermaid.render_with_status ~cols:100 source, Mermaid.render_with_source_labels ~cols:100 source with
+    | Error (Mermaid.Unsupported _), Error (Mermaid.Unsupported _) -> ()
+    | _ -> Alcotest.fail "an edge label crossing a line requires source fallback" in
+  let safe source =
+    match Mermaid.render_with_status ~cols:100 source, Mermaid.render_with_source_labels ~cols:100 source with
+    | Ok _, Ok _ -> ()
+    | _ -> Alcotest.fail "a label beside an edge should still render" in
+  List.iter (fun direction ->
+    List.iter (fun grouped -> List.iter (fun label_first ->
+      List.iter (fun label -> collision (source direction grouped label_first label))
+        ["abcdefgh"; "abcde한x"];
+      safe (source direction grouped label_first "abcdef")) [true; false]) [true; false]) ["TD"; "BT"];
+  List.iter (fun direction ->
+    List.iter (fun grouped -> List.iter (fun label_first ->
+      safe (source direction grouped label_first "abcdefgh")) [true; false]) [true; false]) ["LR"; "RL"];
+  List.iter (fun label_first ->
+    let labelled = "A --> C : abcdefgh" and other = "B --> D" in
+    let first, second = if label_first then labelled, other else other, labelled in
+    collision ("stateDiagram-v2\nA\nB\nC\nD\n" ^ first ^ "\n" ^ second)) [true; false]
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -678,7 +706,9 @@ let () =
     ; ( "shape"
       , [] )
     ; ( "refusals"
-      , [ Alcotest.test_case "another kind names itself" `Quick
+      , [ Alcotest.test_case "edge label line collision decisions" `Quick
+            test_edge_label_line_collision_decisions
+        ; Alcotest.test_case "another kind names itself" `Quick
             test_a_diagram_of_another_kind_names_itself
         ; Alcotest.test_case "an unreadable line names its line" `Quick
             test_a_line_this_grammar_cannot_read_names_its_line

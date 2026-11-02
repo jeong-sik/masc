@@ -12612,6 +12612,81 @@ let test_decode_runtime_params_rejects_a_row_without_a_key () =
    store could not be read, so it must decode to the explicit unavailable
    constructor — an empty list would draw a goal with no history where the
    truth is "the history could not be read". *)
+let test_goal_timeline_binds_ready_events_to_requested_goal () =
+  let response goal = `Assoc ["goal", goal; "timeline", `List []] in
+  let goal id = `Assoc ["id", `String id] in
+  List.iter (fun id ->
+    match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:id (response (goal id)) with
+    | Ok (Tui_decode.Goal_timeline_ready []) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "matching Goal timeline was not accepted")
+    ["g"; "\194\160g\194\160"];
+  let rejected = [
+    response (goal "g");
+    response (`Assoc []);
+    response (`Assoc ["id", `String " g "; "id", `String "g"]);
+    `Assoc ["goal", goal " g "; "goal", goal "g"; "timeline", `List []];
+    `Assoc ["timeline", `List []];
+  ] in
+  List.iter (fun json ->
+    match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:" g " json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "timeline without one matching Goal ID was accepted") rejected;
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" (schema_rejected_body ()) with
+   | Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Goal_source_failure _)) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "Goal source failure lost its type");
+  let link_failure = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
+    "error", `String "goal_task_links unavailable" ] in
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" link_failure with
+   | Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Goal_source_failure _)) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "Goal link failure lost its type");
+  let unavailable = `Assoc ["goal", `Null; "timeline", `Null;
+    "approval_queue_state", `Assoc ["state", `String "unavailable"; "operator_detail", `String "queue unavailable"]] in
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" unavailable with
+   | Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Approval_queue_failure _)) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "approval queue failure lost its type");
+  let event = [ "ts", `String "t"; "kind", `String "k"; "lane", `String "goal";
+    "title", `String "title"; "summary", `String "summary"; "severity", `String "ok" ] in
+  let with_timeline fields = `Assoc (("goal", goal "g") :: fields) in
+  let one_event = `List [`Assoc event] in
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g"
+      (with_timeline ["timeline", one_event]) with
+   | Ok (Tui_decode.Goal_timeline_ready [_]) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "unique timeline event was not accepted");
+  let duplicate_timelines = [
+    ["timeline", `List []; "timeline", one_event];
+    ["timeline", one_event; "timeline", `List []];
+    ["timeline", `List []; "timeline", `List []];
+    ["timeline", `Null; "timeline", `List []];
+    ["timeline", `List []; "timeline", `Null];
+  ] in
+  let duplicate_events = List.map (fun field ->
+      ["timeline", `List [`Assoc ((field, `String "other") :: event)]])
+      ["ts"; "kind"; "lane"; "title"; "summary"; "severity"] in
+  let queue = `Assoc ["state", `String "unavailable"; "operator_detail", `String "unavailable"] in
+  let duplicate_queue = [
+    ["timeline", `Null; "approval_queue_state", queue; "approval_queue_state", queue];
+    ["timeline", `Null; "approval_queue_state", `Assoc ["state", `String "unavailable";
+      "state", `String "ready"; "operator_detail", `String "unavailable"]];
+    ["timeline", `Null; "approval_queue_state", `Assoc ["state", `String "unavailable";
+      "operator_detail", `String "one"; "operator_detail", `String "two"]];
+  ] in
+  let contradictory_ready = [
+    ["timeline", `List []; "approval_queue_state", queue];
+    ["timeline", `List []; "approval_queue_state", `Assoc ["state", `String "ready"];
+      "approval_queue_state", queue];
+    ["timeline", `List []; "approval_queue_state", `Assoc ["state", `String "ready";
+      "state", `String "unavailable"]];
+    ["timeline", `List []; "approval_queue_state", `Assoc []];
+    ["timeline", `List []; "ok", `Bool false; "error", `String "source failed"];
+    ["timeline", `List []; "ok", `Bool true; "ok", `Bool false];
+    ["timeline", `List []; "error_code", `String "one"; "error_code", `String "two"];
+  ] in
+  List.iter (fun fields ->
+    match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" (with_timeline fields) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "ambiguous timeline data was accepted")
+    (duplicate_timelines @ duplicate_events @ duplicate_queue @ contradictory_ready)
+
 let test_goal_timeline_decodes_ready_events () =
   let json =
     Yojson.Safe.from_string
@@ -13899,7 +13974,9 @@ let () =
           test_verification_evidence_defective_bodies_are_named
       ] );
     ( "decode_goal_timeline",
-      [ Alcotest.test_case "carries ready events" `Quick
+      [ Alcotest.test_case "ready timeline is bound to the requested Goal" `Quick
+          test_goal_timeline_binds_ready_events_to_requested_goal
+      ; Alcotest.test_case "carries ready events" `Quick
           test_goal_timeline_decodes_ready_events
       ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
           test_goal_timeline_null_is_unavailable_with_detail

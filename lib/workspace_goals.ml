@@ -1255,11 +1255,37 @@ module For_testing = struct
   let cancel_dropped_goal_todos = cancel_dropped_goal_todos
 end
 
+(* A transition targets the ID the caller supplied. The shared string
+   validator trims input, which could otherwise redirect a stored legacy ID
+   to a different Goal before the transaction checks its identity. *)
+let validate_transition_goal_id = function
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key "goal_id") fields with
+     | [_, `String raw] ->
+       (match Goal_store.validate_goal_id raw with
+        | Ok () | Error Goal_store.Goal_id_blank -> Ok ()
+        | Error (Goal_id_padded _ as error) -> Error (Goal_store.goal_id_error_to_string error))
+     | _ :: _ :: _ -> Error "goal_id must occur exactly once"
+     (* Leave missing or non-string fields to the standard field validator. *)
+     | [] | [_] -> Ok ())
+  | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> Ok ()
+;;
+
 let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
-  match parse_goal_evidence_refs args, parse_expected_verification args with
-  | Error detail, _ | _, Error detail -> error_result_typed ~tool_name ~start_time ~code:Validation_error detail
-  | Ok evidence_refs, Ok expected_verification ->
+  match validate_transition_goal_id args, parse_goal_evidence_refs args, parse_expected_verification args with
+  | Error detail, _, _ ->
+    (* This branch performs only input validation, before any Goal effect. *)
+    let data = error_assoc
+        [ "error_code", `String (error_code_to_string Validation_error)
+        ; "message", `String detail ] in
+    Tool_result.make_err ~tool_name ~start_time ~data
+      ~class_:(failure_class_of_error_code Validation_error)
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Yojson.Safe.to_string data)
+  | Ok (), Error detail, _ | Ok (), _, Error detail ->
+    error_result_typed ~tool_name ~start_time ~code:Validation_error detail
+  | Ok (), Ok evidence_refs, Ok expected_verification ->
   match
     ( validate_string_required args "goal_id"
     , parse_optional_transition_action args "action" )

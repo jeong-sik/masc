@@ -1283,11 +1283,11 @@ let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
   let ( let* ) = Result.bind in
   let path =
     Printf.sprintf "/api/v1/dashboard/goals/detail?goal_id=%s"
-      (percent_encode_path_segment goal_id)
+      (percent_encode_query_value goal_id)
   in
   let* json = get_json ~host ~port ~path
     |> Result.map_error (fun detail -> "goal detail: " ^ detail) in
-  Masc.Tui_decode.decode_goal_detail_timeline json
+  Masc.Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id json
 
 (** Read one exact continuation page. The response demand comes from the
     caller's viewport; older pages carry their captured prefix on the CPU path. *)

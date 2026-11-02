@@ -1266,11 +1266,8 @@ let decode_goal_verification ~goal_id ~criterion json =
       else if not stale && matches then Ok (Verification_current completion)
       else Error "proof criterion does not match its current or historical projection" in
   let decode () =
-    let trimmed_id = String.trim goal_id in
-    let* () =
-      if String.equal trimmed_id "" || not (String.equal trimmed_id goal_id) then
-        Error "Goal ID is blank or would change during request validation"
-      else Ok () in
+    let* () = Goal_store.validate_goal_id goal_id
+      |> Result.map_error (fun _ -> "Goal ID is blank or would change during request validation") in
     let* fields = unique_fields "goal verification" json in
     match List.assoc_opt "state" fields with
     | Some (`String "ledger_error") ->
@@ -7712,10 +7709,21 @@ and goal_timeline_unavailability =
   | Goal_source_failure of goal_source_failure
   | Approval_queue_failure of string
 
+let unique_goal_timeline_member field json =
+  match json with
+  | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name field) fields with
+       | [] -> Ok None
+       | [ _, value ] -> Ok (Some value)
+       | _ :: _ :: _ -> Error (Printf.sprintf "goal timeline contains duplicate %s" field))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "goal timeline value is not an object"
+
 let decode_goal_timeline_event json =
   let required field =
-    match member field json with
-    | `String value -> Ok value
+    let* value = unique_goal_timeline_member field json in
+    match value with
+    | Some (`String value) -> Ok value
     | _ -> Error (Printf.sprintf "timeline event %s must be a string" field)
   in
   let* gt_ts = required "ts" in
@@ -7727,18 +7735,46 @@ let decode_goal_timeline_event json =
   Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
+  let* status = unique_goal_timeline_member "ok" json in
+  let* _ = unique_goal_timeline_member "error_code" json in
   match decode_goal_source_failure json with
   | Ok (Some failure) -> Ok (Goal_timeline_unavailable (Goal_source_failure failure))
   | Error message -> Error message
   | Ok None ->
-  match Json_util.assoc_member_opt "timeline" json with
+  let* () = match status with
+    | None | Some (`Bool true) -> Ok ()
+    | Some (`Bool false) -> Error "goal detail reports a failed request"
+    | Some _ -> Error "goal detail has an invalid request status"
+  in
+  let* timeline = unique_goal_timeline_member "timeline" json in
+  match timeline with
   | Some `Null ->
-      let state = member "approval_queue_state" json in
-      (match member "state" state, member "operator_detail" state with
-       | `String "unavailable", `String detail when String.trim detail <> "" ->
+      let* state = unique_goal_timeline_member "approval_queue_state" json in
+      let* state, detail =
+        match state with
+        | Some (`Assoc _ as state) ->
+            let* name = unique_goal_timeline_member "state" state in
+            let* detail = unique_goal_timeline_member "operator_detail" state in
+            Ok (name, detail)
+        | _ -> Ok (None, None)
+      in
+      (match state, detail with
+       | Some (`String "unavailable"), Some (`String detail) when String.trim detail <> "" ->
            Ok (Goal_timeline_unavailable (Approval_queue_failure detail))
        | _ -> Error "goal detail has a null timeline without an unavailable source state")
   | Some (`List items) ->
+      (* Older servers did not send this field. When present, do not treat an
+         unavailable or ambiguous queue as a complete timeline. *)
+      let* queue = unique_goal_timeline_member "approval_queue_state" json in
+      let* () = match queue with
+        | None -> Ok ()
+        | Some (`Assoc _ as queue) ->
+            let* state = unique_goal_timeline_member "state" queue in
+            (match state with
+             | Some (`String "ready") -> Ok ()
+             | _ -> Error "goal detail timeline conflicts with approval queue state")
+        | Some _ -> Error "goal detail approval queue state is not an object"
+      in
       let rec loop acc = function
         | [] -> Ok (Goal_timeline_ready (List.rev acc))
         | item :: rest ->
@@ -7748,6 +7784,25 @@ let decode_goal_detail_timeline json =
       loop [] items
   | None -> Error "goal detail response has no timeline"
   | Some _ -> Error "goal detail timeline is neither a list nor null"
+
+(* Unavailable source envelopes do not identify a Goal. A ready timeline must
+   name exactly the requested Goal before its events can be attached to it. *)
+let decode_goal_detail_timeline_for_goal ~goal_id json =
+  let* timeline = decode_goal_detail_timeline json in
+  match timeline with
+  | Goal_timeline_unavailable _ -> Ok timeline
+  | Goal_timeline_ready _ ->
+    let members key fields = List.filter (fun (name, _) -> String.equal name key) fields in
+    (match json with
+     | `Assoc fields ->
+       (match members "goal" fields with
+        | [_, `Assoc goal] ->
+          (match members "id" goal with
+           | [_, `String actual] when String.equal actual goal_id -> Ok timeline
+           | [] | [_] | _ :: _ :: _ -> Error "goal detail identity does not match the request")
+        | [] | [_] | _ :: _ :: _ -> Error "goal detail has no unique Goal identity")
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+       Error "goal detail is not an object")
 
 (* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
    raw event-stream lines, not a uniform projection, so every field except

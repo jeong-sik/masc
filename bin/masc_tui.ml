@@ -17348,7 +17348,7 @@ let resume_task_followups state ~mailbox ~refresh_inflight
 (* A proof read is separate from the confirmation key: recovery must never
    replay the key's second-press mutation. *)
 let launch_goal_confirmation_read state ~mailbox ~goal_id =
-  if server_authority_ready state then
+  if Result.is_ok (Goal_store.validate_goal_id goal_id) && server_authority_ready state then
     match state.server_identity with
     | None -> ()
     | Some expected_workspace ->
@@ -18794,6 +18794,8 @@ let handle_goal_confirmation_key state ~mailbox =
   else
   match state.planning_mode with
   | Planning_list -> ()
+  | Planning_detail goal_id when Result.is_error (Goal_store.validate_goal_id goal_id) ->
+      set_goal_action_error state ~goal_id "Cannot inspect confirmation for this Goal ID"
   | Planning_detail goal_id ->
       let host = server_peer_host and port = state.port in
       state.goal_action_pending <- None;
@@ -31568,6 +31570,8 @@ Use relative paths for resources already held in the package. -->
                  let reason = String.trim entry.reason in
                  if String.equal reason "" then
                    set_goal_action_error state ~goal_id:entry.goal_id "A drop needs a reason; type why, or Esc to cancel"
+                 else if Result.is_error (Goal_store.validate_goal_id entry.goal_id) then
+                   set_goal_action_error state ~goal_id:entry.goal_id "Cannot send this Goal ID; the drop reason is retained"
                  else if List.mem_assoc entry.goal_id state.goal_action_inflight then
                    set_goal_action_error state ~goal_id:entry.goal_id "A request is still in progress; the drop reason is retained"
                  else begin

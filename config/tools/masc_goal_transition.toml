@@ -20,6 +20,7 @@ defer_loading = true
 name = "goal_id"
 type = "string"
 required = true
+description = "The exact Goal ID, without leading or trailing space, tab, line feed, carriage return, or form feed."
 
 # The enum mirrors Goal_phase.Public_action.all, which deliberately excludes
 # the verifier verdict actions; test_enum_mirror_sync compares the published

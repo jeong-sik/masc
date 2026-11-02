@@ -2107,6 +2107,14 @@ let test_goal_completion_requires_an_observed_binding () =
                   grb_criterion_revision = "revision"; grb_request_id = None } in
   check Alcotest.bool "an observed proof binding authorizes the action" true
     (planning_goal_offers_action { goal with pg_retry_binding = Some binding } action);
+  List.iter (fun public_action ->
+    check Alcotest.bool "canonical Goal permits the applicable action" true
+      (planning_goal_offers_action goal public_action);
+    check Alcotest.bool "padded Goal does not permit the action" false
+      (planning_goal_offers_action { goal with pg_id = " a " } public_action))
+    [Goal_phase.Public_action.Drop; Goal_phase.Public_action.Pause];
+  check Alcotest.bool "non-trimmed Unicode identity stays eligible" true
+    (planning_goal_offers_action { goal with pg_id = "\194\160a\194\160" } Goal_phase.Public_action.Drop);
   check Alcotest.bool "a changed phase invalidates the first press" false
     (planning_goal_retains_arm { goal with pg_phase = Goal_phase.Verifying; pg_retry_binding = Some binding }
        ~action ~phase:Goal_phase.Executing ~retry_binding:(Some binding))

@@ -387,7 +387,9 @@ let planning_detail_tone (tone : Planning_detail.tone) =
    word. Only the goal phase decides here -- the linked tasks have their own
    surface and their own verdicts. *)
 let planning_next_step (goal : planning_goal) =
-  match goal.pg_phase, goal.pg_proof with
+  if not (planning_goal_has_valid_id goal) then
+    (Theme.warn (), "Goal ID is blank or has disallowed surrounding whitespace; inspect the stored ID")
+  else match goal.pg_phase, goal.pg_proof with
   | Goal_phase.Executing, Tui_decode.Proof_unreadable _ when Option.is_none goal.pg_retry_binding ->
     (Theme.warn (), "verification binding unavailable - inspect proof, server storage and runtime, then [r] refresh")
   | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
@@ -1050,7 +1052,8 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
     then text else Ansi.dim ^ text ^ Ansi.reset
   in
   let actions = List.map item Goal_phase.Public_action.all
-    @ (if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
+    @ (if not (planning_goal_has_valid_id goal) then []
+       else if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
        then ["[a] Confirm proof"] else if goal.pg_phase = Goal_phase.Completed
        then ["[a] Inspect confirmation"] else []) in
   (* These are commands, so every action stays visible while its evidence is
@@ -1058,6 +1061,10 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
   Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
     ("Actions: " ^ String.concat "   " actions)
   |> List.map (fun line -> "  " ^ line)
+  |> fun rows -> rows @ (if planning_goal_has_valid_id goal then [] else
+       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+         "Goal ID is blank or has disallowed surrounding whitespace; lifecycle actions are unavailable."
+       |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
   |> fun rows -> rows @ (match armed with
        | None -> []
        | Some action ->

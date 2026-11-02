@@ -22,6 +22,46 @@ val prompt_blocks : t -> (Prompt_block_id.t * string) list
     {!Prompt_block_id.Recalled_memory_status}, then the body, when there is
     one, as {!Prompt_block_id.Recalled_memory}. *)
 
+type delivery
+(** One runtime attempt's recall delivery, separate from the turn's judgment
+    memo. Only a body in the latest completed issuer assembly may be deferred.
+    A status-only preparation is not an offered body. This is not a claim that
+    a client session received or retained the issuer's text. *)
+
+val create_delivery : unit -> delivery
+val begin_runtime_attempt : delivery -> unit
+(** Offer the full body again to a new runtime candidate. The turn's judgment,
+    its retained evaluation and the stored facts are unchanged. *)
+
+val begin_request : delivery -> unit
+(** Retire the previous request's offered body before preparing another one.
+    In particular a post-tool request cannot reduce a first-round body that
+    it does not carry. An existing capacity deferral remains for this attempt. *)
+
+val for_request : delivery -> t -> t
+(** Apply an existing capacity deferral to a newly prepared body, using the
+    exact status that authorized the reduction. A fresh status-only result is
+    preserved. The caller still prepares normally and reads current facts. *)
+
+val observe_request :
+  delivery -> turn_ref:Ids.Turn_ref.t -> blocks:(Prompt_block_id.t * string) list -> unit
+(** Record only the final issuer assembly after its round filter. Exactly one
+    recall body and status must be present; absent or duplicate blocks offer
+    no reduction. Already-held official-client blocks may be absent from the
+    submitted resume packet: the subsequent reduction concerns the existing
+    effect-safe retry's fresh rebuilt Start, not that earlier resume wire. *)
+
+val defer_for_capacity :
+  delivery -> (Keeper_memory_delivery_reprojection.reduction, string) result
+(** Called only after the runtime admits a typed capacity refusal and an
+    effect-safe rebuild. Withhold the whole offered body, preserving judgment
+    and facts, only when the replacement status is strictly smaller than the
+    exact prior status plus body and their separator. [Reprojected] is a
+    reduction of those issuer bytes, not a cause attribution or a bound on the
+    whole encoded request. No body, an existing deferral, or no strict decrease
+    is [Unchanged]. A failed status render returns its error without changing
+    delivery. No partial-fact selection, new judgment or persistence occurs. *)
+
 val purpose :
   current_input:string -> keeper_instructions:string -> turn_ref:Ids.Turn_ref.t -> Yojson.Safe.t
 (** What the judgment is for: this turn's input, the Keeper's instructions and

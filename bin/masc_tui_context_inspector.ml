@@ -637,6 +637,19 @@ let format_bytes bytes =
   else if bytes >= 1024 then Printf.sprintf "%.1f KB" (float bytes /. 1024.)
   else Printf.sprintf "%d B" bytes
 
+(* Exact byte counts with thin separators: the context diagnostics promise
+   exact sizes, and two sizes that round to the same KB must stay distinct. *)
+let exact_bytes bytes =
+  let digits = string_of_int (max 0 bytes) in
+  let rec parts acc s =
+    if String.length s <= 3 then (if s = "" then acc else s :: acc)
+    else
+      parts
+        (String.sub s (String.length s - 3) 3 :: acc)
+        (String.sub s 0 (String.length s - 3))
+  in
+  String.concat "," (parts [] digits) ^ " B"
+
 let input_source = function
   | Turn_record.Prompt_block _ -> Turn_prompt_assembly
   | Turn_record.Tool_schemas -> Effective_tool_surface
@@ -1124,6 +1137,42 @@ let client_context_tokens ~scope ~input_tokens ~output_tokens =
   | Per_request, Some input -> Some (input + Option.value output_tokens ~default:0)
   | Per_request, None
   | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _ -> None
+;;
+
+let provider_usage_summary (usage : Turn_record.usage) =
+  let scope =
+    match usage.scope with
+    | Runtime_usage_scope.Per_request -> "last reported request in this turn"
+    | Runtime_usage_scope.Turn_total -> "client turn total"
+    | Runtime_usage_scope.Conversation_cumulative -> "conversation cumulative"
+    | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown"
+  in
+  let read =
+    match usage.cache_read_input_tokens with
+    | None -> "cache read unreported"
+    | Some n -> "cache read " ^ format_tokens n
+  in
+  let ratio =
+    match usage.scope, usage.input_tokens, usage.cache_read_input_tokens with
+    | Runtime_usage_scope.Per_request, Some input, Some read
+      when input > 0 && read >= 0 && read <= input ->
+        Printf.sprintf " (%.1f%% of input)" (float read /. float input *. 100.)
+    | ( Runtime_usage_scope.Per_request
+      | Runtime_usage_scope.Turn_total
+      | Runtime_usage_scope.Conversation_cumulative
+      | Runtime_usage_scope.Usage_scope_unavailable ), _, _ -> ""
+  in
+  let parts =
+    List.filter_map
+      Fun.id
+      [ Option.map (fun n -> "input " ^ format_tokens n) usage.input_tokens
+      ; Some (read ^ ratio)
+      ; Option.map
+          (fun n -> "cache created " ^ format_tokens n)
+          usage.cache_creation_input_tokens
+      ]
+  in
+  Printf.sprintf "Provider usage (%s) · %s" scope (String.concat " · " parts)
 ;;
 
 (* The part a pane shows. On the request tab: the opened item, or with none

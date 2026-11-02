@@ -2,6 +2,7 @@ import type { KeeperCostCoverage } from '../lib/keeper-cost-coverage'
 import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
 import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
+import type { KeeperApprovalQueueState } from './gate'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
 import type { KeeperChatDeliveryKey, KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
@@ -1478,6 +1479,7 @@ export interface Keeper {
   last_activity_source?: KeeperLiveActivitySource | null
   live_activity?: KeeperLiveActivity | null
   current_gate?: KeeperCurrentGate | null
+  approval_queue_state?: KeeperApprovalQueueState | null
   context_ratio?: number | null
   context_tokens?: number | null
   context_max?: number | null

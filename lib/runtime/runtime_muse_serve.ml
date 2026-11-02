@@ -804,12 +804,31 @@ let send_best_effort io ~what json =
    rejected turn. Other session projections are not consumed before the
    turn; a server request before the turn exists is not one MASC answers. *)
 let rec await_response ?(on_view_gap = fun _ -> ())
-    ?(on_model_usage = fun ~session_id:_ ~turn_id:_ -> ()) io ~id ~method_ =
+    ?(on_model_usage = fun ~session_id:_ ~turn_id:_ -> ())
+    ?pending_decisions io ~id ~method_ =
+  let has_pending_decision response_id =
+    match pending_decisions with
+    | None -> false
+    | Some decisions -> List.mem response_id !decisions
+  in
+  let remove_pending_decision response_id =
+    match pending_decisions with
+    | None -> ()
+    | Some decisions -> decisions := List.filter (( <> ) response_id) !decisions
+  in
   let* message = io.receive () in
   match message with
   | Msp.Response { id = Msp.Int_id response_id; result } when response_id = id -> Ok result
   | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; _ }
     when response_id = id -> Error (Rpc_error { method_; code; message })
+  | Msp.Response { id = Msp.Int_id response_id; _ }
+    when has_pending_decision response_id ->
+    remove_pending_decision response_id;
+    await_response ~on_view_gap ~on_model_usage ?pending_decisions io ~id ~method_
+  | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; _ }
+    when has_pending_decision response_id ->
+    remove_pending_decision response_id;
+    Error (Rpc_error { method_ = "approval/decide"; code; message })
   | Msp.Response_error { id = None; code; message; _ } ->
     Error (Rpc_error { method_; code; message })
   | Msp.Response { id = Msp.Int_id _ | Msp.String_id _; _ }
@@ -825,7 +844,7 @@ let rec await_response ?(on_view_gap = fun _ -> ())
      | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
      | Item_completed _ | Item_delta _
      | Unhandled_notification _ -> ());
-    await_response ~on_view_gap ~on_model_usage io ~id ~method_
+    await_response ~on_view_gap ~on_model_usage ?pending_decisions io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
       io
@@ -837,10 +856,10 @@ let rec await_response ?(on_view_gap = fun _ -> ())
     Error (Unsupported_server_request requested)
 ;;
 
-let request io ~method_ build =
+let request ?on_view_gap ?pending_decisions io ~method_ build =
   let id = io.next_id () in
   send_best_effort io ~what:method_ (build ~id);
-  await_response io ~id ~method_
+  await_response ?on_view_gap ?pending_decisions io ~id ~method_
 ;;
 
 let handshake io ~requested_capabilities ~requires_durable_session =
@@ -982,12 +1001,9 @@ let durable_turn_of_events ~turn_id ~open_items events =
           if String.equal id item.item_id
           then id, (item, completed || was_completed, truncated || event.item_truncated)
           else id, value) messages)
-      | Some (_, was_completed, _) ->
-        Ok (List.map (fun (id, value) ->
-          if String.equal id item.item_id
-          then id, (item, completed || was_completed, event.item_truncated)
-          else id, value) messages)
-      | None ->
+      | Some (_, true, _) ->
+        protocol_error "view/page" "agent item updated after completion"
+      | Some (_, false, _) | None ->
         Ok ((item.item_id, (item, completed, event.item_truncated))
             :: List.remove_assoc item.item_id messages)
     in
@@ -1000,7 +1016,10 @@ let durable_turn_of_events ~turn_id ~open_items events =
       then protocol_error "view/page" "agent item update is terminal"
       else update false item
     | Msp.Item_started { item; _ }
-      when item.kind = Msp.Agent_message && item_in_turn ~turn_id item -> update false item
+      when item.kind = Msp.Agent_message && item_in_turn ~turn_id item ->
+      if item.status <> Msp.In_progress
+      then protocol_error "view/page" "agent item start is terminal"
+      else update false item
     | Msp.Item_started _ | Msp.Item_updated _ | Msp.Item_completed _
     | Msp.Turn_started _ | Msp.Turn_completed _ | Msp.Item_delta _
     | Msp.Usage_changed _ | Msp.View_gap _ | Msp.Model_usage_reported _
@@ -1044,11 +1063,17 @@ let durable_turn_of_events ~turn_id ~open_items events =
   Ok { durable_final_text; durable_usage; durable_last_call; durable_models }
 ;;
 
-let read_durable_turn io ~session_id ~turn_id ~terminal_cursor ~open_items =
+let read_durable_turn ?on_view_gap ?pending_decisions io ~session_id ~turn_id ~terminal_cursor ~open_items =
   io.set_receive_phase Awaiting_history;
   let rec read ~cursor ~seen ~later =
-    let* result = request io ~method_:"view/page" (fun ~id ->
-      Msp.view_page_backward_request ~id ~session_id ~cursor) in
+    let* result =
+      request
+        ?on_view_gap
+        ?pending_decisions
+        io
+        ~method_:"view/page"
+        (fun ~id -> Msp.view_page_backward_request ~id ~session_id ~cursor)
+    in
     let* page = lift (Msp.parse_view_page_result result) in
     let* seen = List.fold_left (fun result (event : Msp.view_event) ->
       let* seen = result in
@@ -1296,8 +1321,18 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        let complete () =
            let* state = match terminal with
              | Msp.Terminal_completed ->
-               let* witness = read_durable_turn io ~session_id ~turn_id
-                   ~terminal_cursor:view_cursor ~open_items:state.open_items in
+               let pending_decisions = ref state.pending_decisions in
+               let* witness =
+                 read_durable_turn
+                   ~on_view_gap:(fun sid ->
+                     if gap_applies ~session_id sid then emit View_gap_observed)
+                   ~pending_decisions
+                   io
+                   ~session_id
+                   ~turn_id
+                   ~terminal_cursor:view_cursor
+                   ~open_items:state.open_items
+               in
                (match witness.durable_models, state.call_models with
                 | call :: _, previous :: _ when same_call call previous -> ()
                 | (Named model :: _), ([] | _ :: _) ->
@@ -1306,6 +1341,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                   emit (Model_call_reported {session_id; turn_id; model=None})
                 | [], ([] | _ :: _) -> ());
                Ok {state with final_text=witness.durable_final_text;
+                 pending_decisions = !pending_decisions;
                  observed_usage=Observing_usage witness.durable_usage;
                  last_call_usage=witness.durable_last_call; call_models=witness.durable_models}
              | Msp.Terminal_failed _ | Msp.Terminal_host_died _
@@ -1388,12 +1424,12 @@ let validate_session_workspace ~workspace_root (session : Msp.session) =
    model, whatever the session reports, the way it re-applies the approval
    mode. The accepted ack is the host's answer; a refused or failed selection
    stops the turn before it starts. *)
-let select_session_model io (config : config) (session : Msp.session) =
+let select_session_model ?on_view_gap io (config : config) (session : Msp.session) =
   match config.model with
   | None -> Ok session
   | Some requested ->
     let* result =
-      request io ~method_:"session/setModel" (fun ~id ->
+      request ?on_view_gap io ~method_:"session/setModel" (fun ~id ->
         Msp.session_set_model_request
           ~id
           ~command_id:(new_command_id ())
@@ -1409,7 +1445,7 @@ let validate_session_approval_mode ~requested reported =
   else Error (Session_approval_mode_mismatch {requested; reported})
 ;;
 
-let open_session io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
+let open_session ?(on_view_gap = fun ~session_id:_ _ -> ()) io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
   match session_mode with
   | Start ->
     let* result =
@@ -1437,8 +1473,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
   | Resume { session_id; expected_turns } ->
+    let on_view_gap = on_view_gap ~session_id in
     let* result =
-      request io ~method_:"session/resume" (fun ~id ->
+      request ~on_view_gap io ~method_:"session/resume" (fun ~id ->
         Msp.session_resume_request
           ~id
           ~command_id:(new_command_id ())
@@ -1470,9 +1507,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     (* The model first: the approval mode set after it is the session state
        the host confirms last, so no other session command follows its check. *)
-    let* session = select_session_model io config session in
+    let* session = select_session_model ~on_view_gap io config session in
     let* result =
-      request io ~method_:"session/setApprovalMode" (fun ~id ->
+      request ~on_view_gap io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
           ~id
           ~command_id:(new_command_id ())
@@ -1508,6 +1545,9 @@ let run_protocol
   let* init = handshake io ~requested_capabilities ~requires_durable_session:true in
   let* session, resumed =
     open_session
+      ~on_view_gap:(fun ~session_id sid ->
+        if gap_applies ~session_id sid
+        then emit_stream_event on_stream_event View_gap_observed)
       io
       config
       ~approval_mode

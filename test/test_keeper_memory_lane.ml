@@ -124,6 +124,57 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
          (List.rev !wakes))
 ;;
 
+let test_failed_official_turn_wakes_only_after_recording () =
+  let module B = Masc.Keeper_turn_boundaries in
+  let root = temp_dir "test-failed-official-wake-" in
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  let previous_env = Sys.getenv_opt env_key in
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv env_key (Option.value previous_env ~default:"");
+    Queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+    Config_dir_resolver.reset ();
+    remove_tree root) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let config = Masc.Workspace.default_config root in
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  Config_dir_resolver.reset ();
+  let keeper_name = "failed-official" in
+  let meta = make_meta keeper_name in
+  let runtime_dir = Masc.Workspace.keepers_runtime_dir config in
+  let wakes = ref [] in
+  Queue_signal.install (fun ~base_path ~keeper_name ->
+    let recorded = match B.read ~keepers_dir:runtime_dir ~keeper_id:keeper_name with
+      | Error _ -> false
+      | Ok lines -> List.exists (function
+          | _, Ok {B.event=B.Turn_ended _;_} -> true
+          | _ -> false) lines in
+    wakes := (base_path,keeper_name,recorded) :: !wakes);
+  let record_failure meta turn =
+    let trace_id = Keeper_id.Trace_id.to_string meta.Masc.Keeper_meta_contract.runtime.trace_id in
+    let session = Masc.Keeper_context_core.create_session ~session_id:trace_id
+      ~base_dir:(Masc.Keeper_fs.session_store_path config) in
+    Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+      ~task_context:Masc.Keeper_turn_task_context.No_task ~config ~meta
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:turn)
+      ~session ~tool_observations:[] ~history_at_start:B.Continued_history
+      ~restart_notice_pending:(Atomic.make false) in
+  Unix.putenv env_key "true";
+  record_failure meta 1;
+  Alcotest.(check (list (triple string string bool)))
+    "failed official turn wakes after its durable end exists"
+    [config.base_path,keeper_name,true] (List.rev !wakes);
+  Unix.putenv env_key "false";
+  record_failure meta 2;
+  Alcotest.(check int) "disabled Librarian is not woken" 1 (List.length !wakes);
+  Unix.putenv env_key "true";
+  let broken = make_meta "failed-append" in
+  Fs_compat.mkdir_p (B.path_for_keepers_dir ~keepers_dir:runtime_dir ~keeper_id:broken.name);
+  record_failure broken 1;
+  Alcotest.(check int) "failed boundary append does not claim a completed source" 1 (List.length !wakes)
+;;
+
 (* No executor switch set -> submit runs inline so no work is lost. *)
 let test_inline_when_uninitialized () =
   Lane.For_testing.reset ();
@@ -928,6 +979,8 @@ let () =
             "either checkpoint owner wakes the durable consumer"
             `Quick
             test_either_checkpoint_owner_wakes_the_durable_consumer
+        ; Alcotest.test_case "failed official boundary wakes only after durable append" `Quick
+            test_failed_official_turn_wakes_only_after_recording
         ; Alcotest.test_case
             "inline when uninitialized"
             `Quick

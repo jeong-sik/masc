@@ -15,7 +15,9 @@ val handle :
     the checked PNG is an image block of the result; it is never persisted
     for an arbitrary owner.
     Scene retention and result manifests remain the verified caller's existing
-    responsibility. [upload_paths] comes only from the host's staged-file
+    responsibility. Explicit live [mode=dialog] uses the existing Page_context
+    route, admitted only by a transport serving native dialog reads.
+    [upload_paths] comes only from the host's staged-file
     authority, never the tool body. The bundled owned-Gecko path copies them into
     a one-use worker lease before invoking the ordinary exported tool/hooks.
     Other backends must support their own scoped transfer before admission. *)

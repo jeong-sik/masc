@@ -12,6 +12,10 @@ module Message_layout = Masc_tui_message_layout
 module Render_schedule = Masc_tui_render_schedule
 module Rows = Masc_tui_rows
 
+type approval_line =
+  | Field_line of Approval_detail.line
+  | Gate_line of Approval_detail.gate_line
+
 (** Render the Approvals surface (pending confirmations). *)
 (* The ask, whole. The list row is one line through [single_line], which
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
@@ -19,17 +23,17 @@ module Rows = Masc_tui_rows
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
   let width = max 8 (framed_inner_width cols - 2) in
+  let gate_width = max 0 (framed_inner_width cols - 2) in
   (* [Approval_detail.of_fields] makes every value terminal-safe. *)
-  let lines =
-    Approval_detail.of_fields ~width
-      (match row with
+  let fields, gate_fields =
+    match row with
     | Masc_tui_approvals_model.Keeper_tool_row held ->
-      [ "keeper", held.Tui_decode.kta_keeper
+      ([ "keeper", held.Tui_decode.kta_keeper
       ; "tool", held.Tui_decode.kta_tool
       ; "call", held.Tui_decode.kta_tool_call_id
       ; "question", held.Tui_decode.kta_question
       ; "args", held.Tui_decode.kta_args
-      ]
+      ], None)
     | Masc_tui_approvals_model.Gate_row pending ->
       let phase =
         match pending.Tui_decode.gp_phase with
@@ -64,7 +68,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
            | None -> [])
         | Gate_queued | Gate_judging -> []
       in
-      [ "keeper", pending.Tui_decode.gp_keeper
+      let fields = [ "keeper", pending.Tui_decode.gp_keeper
       ; "tool", pending.Tui_decode.gp_display_tool
       ; "operation", pending.Tui_decode.gp_operation
       ; "state", phase
@@ -79,31 +83,48 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
         , Terminal_text.single_line_or ~default:"(not recorded)"
             pending.Tui_decode.gp_execution_cwd )
       ]
-      @ (match pending.Tui_decode.gp_input_rows with
-         | Tui_decode.Rows (_ :: _ as fields) ->
-           List.map
-             (fun (key, value) -> (Terminal_text.single_line key, value))
-             fields
-         | Tui_decode.Rows [] -> [ "input", "(the stored input object is empty)" ]
+      in
+      (match pending.Tui_decode.gp_input_rows with
+         | Tui_decode.Rows (_ :: _ as input_fields) ->
+           fields, Some input_fields
+         | Tui_decode.Rows [] ->
+           fields @ [ "input", "(the stored input object is empty)" ], None
          | Tui_decode.Flattened preview ->
-           [ ( "input (flattened preview, may be cut)"
+           fields @ [ ( "input (flattened preview, may be cut)"
              , Terminal_text.single_line_or
                  ~default:"(the server recorded no input preview)" preview )
-           ])
+           ], None)
     | Masc_tui_approvals_model.Operator_row a ->
-      [ "actor", a.Masc_tui_operator_projection.ap_actor
+      ([ "actor", a.Masc_tui_operator_projection.ap_actor
       ; "action", a.Masc_tui_operator_projection.ap_action_type
       ; "target", a.Masc_tui_operator_projection.ap_target_type
       ; "summary", a.Masc_tui_operator_projection.ap_summary
       ; "payload",
-        Yojson.Safe.pretty_to_string a.Masc_tui_operator_projection.ap_payload
-      ])
+        Masc_tui_operator_projection.approval_payload_document_for_terminal
+          a.Masc_tui_operator_projection.ap_payload
+      ], None)
+  in
+  let lines =
+    List.map (fun line -> Field_line line) (Approval_detail.of_fields ~width fields)
+    @ (match gate_fields with
+       | None -> []
+       | Some fields ->
+         Approval_detail.of_gate_fields ~width:gate_width fields
+         |> List.map (fun line -> Gate_line line))
+  in
+  let input_unreadable =
+    List.exists
+      (function
+        | Field_line _ -> false
+        | Gate_line line -> line.gate_origin = Approval_detail.Gate_unreadable)
+      lines
   in
   box_top buf cols;
   (* Opens on MASC and its name, like every other surface; the way out is the
      footer's to say, and saying it here too spelled the same key twice in two
      notations. *)
-  box_line buf cols (screen_title " MASC Approval");
+  box_line buf cols (screen_title
+    (if input_unreadable then "!WIDEN Approval" else " MASC Approval"));
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
   let scroll =
@@ -128,13 +149,18 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
     lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
   in
   List.iter
-    (fun (line : Approval_detail.line) ->
-      let text = line.Approval_detail.text in
-      match line.Approval_detail.label with
+    (fun line ->
+      let label, text, prefix =
+        match line with
+        | Field_line line -> line.label, line.text, ""
+        | Gate_line line -> line.gate_label, line.gate_text, Approval_detail.prefix line.gate_origin
+      in
+      let content_width = max 0 (framed_inner_width cols - 2 - String.length prefix) in
+      match label with
       | Some label ->
         (* The name is bold, what sits beside it is not: the row carries both
            now, and bolding the whole of it would weight the value too. *)
-        let drawn = fit_width text (framed_inner_width cols - 2) in
+        let drawn = fit_width text content_width in
         let name = String.length label in
         (* Split only where the whole name survived the cut. A narrow pane
            can end the row inside the name, and [fit_width]'s ellipsis is
@@ -142,11 +168,11 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
            the ellipsis and send half a character to the terminal. *)
         box_line buf cols
           (if String.starts_with ~prefix:label drawn then
-             Printf.sprintf "  %s%s%s%s" Ansi.bold label Ansi.reset
+             Printf.sprintf "  %s%s%s%s%s" prefix Ansi.bold label Ansi.reset
                (String.sub drawn name (String.length drawn - name))
-           else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
+           else Printf.sprintf "  %s%s%s%s" prefix Ansi.bold drawn Ansi.reset)
       | None ->
-        box_line buf cols (Printf.sprintf "  %s" (fit_width text (framed_inner_width cols - 2))))
+        box_line buf cols (Printf.sprintf "  %s%s" prefix (fit_width text content_width)))
     drawn;
   for _ = 1 to content_height - List.length drawn do
     box_empty buf cols

@@ -333,7 +333,8 @@ let test_a_request_that_cannot_be_built_gives_status_only () =
       Alcotest.(check (float 0.)) "one construction failure is recorded"
         (before +. 1.) (preparation_failures "request_not_built"))
       [Codec.Duplicate_candidate_id "private construction detail";
-       Codec.Choice_set_invalid "private construction detail"])
+       Codec.Choice_set_invalid "private construction detail";
+       Codec.Guidance_unavailable "private construction detail"])
 
 (* The recall must not end the turn it is meant to help: whatever raises in it
    is logged and the Keeper gets its unavailable status. *)
@@ -602,6 +603,56 @@ let test_no_clock_with_an_unreadable_status_prompt_keeps_status_only () =
         Alcotest.(check (float 0.)) "render I/O does not add another failure"
           (before +. 1.) (total_preparation_failures ()))))
 
+let assemble_recall ~post_tool_round texts =
+  Keeper_run_prompt.assemble_request_context
+    ~base_system_prompt:"fixture instructions" ~post_tool_round ~previous_assembly:None
+    ~dynamic_context_partition:None ~existing_extra_system_context:None
+    ~blocks:(Blocks.prompt_blocks texts)
+
+let test_capacity_refusal_defers_delivery_and_failover_offers_the_full_body () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    let delivery = Blocks.create_delivery () in
+    let p = probe () in
+    let prepare facts =
+      prepare ~probe:p ~facts_result:(Ok facts)
+        ~answer:(Ok (Turn.Judged carrying_the_first)) () |> some_or_fail in
+    let full = prepare facts in
+    let first_request = assemble_recall ~post_tool_round:false full in
+    Blocks.observe_request delivery ~turn_ref ~blocks:first_request.blocks;
+    Alcotest.(check bool) "provider refusal permits a smaller delivery" true
+      (Blocks.defer_for_capacity delivery = Ok Keeper_memory_delivery_reprojection.Reprojected);
+    Blocks.begin_request delivery;
+    let retry = Blocks.for_request delivery (prepare [second]) in
+    let retry_request = assemble_recall ~post_tool_round:false retry in
+    Alcotest.(check (option string)) "no selected fact is partly delivered" None retry.body;
+    Alcotest.(check bool) "actual rebuilt carrier is smaller" true
+      (String.length (Option.get retry_request.extra_system_context)
+       < String.length (Option.get first_request.extra_system_context));
+    Alcotest.(check int) "retry still reads current facts" 2 !(p.reads);
+    Alcotest.(check bool) "the same attempt cannot claim another reduction" true
+      (Blocks.defer_for_capacity delivery = Ok Keeper_memory_delivery_reprojection.Unchanged);
+    Blocks.begin_runtime_attempt delivery;
+    let failover = Blocks.for_request delivery full in
+    Alcotest.(check (option string)) "next runtime gets the full retained selection"
+      full.body failover.body)
+
+let test_only_a_body_in_the_current_final_assembly_can_be_deferred () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    let delivery = Blocks.create_delivery () in
+    let full = prepare ~probe:(probe ()) ~facts_result:(Ok facts)
+        ~answer:(Ok (Turn.Judged carrying_the_first)) () |> some_or_fail in
+    let first_request = assemble_recall ~post_tool_round:false full in
+    Blocks.observe_request delivery ~turn_ref ~blocks:first_request.blocks;
+    Blocks.begin_request delivery;
+    let post_tool = assemble_recall ~post_tool_round:true full in
+    Blocks.observe_request delivery ~turn_ref ~blocks:post_tool.blocks;
+    Alcotest.(check bool) "a post-tool request cannot reduce an earlier body" true
+      (Blocks.defer_for_capacity delivery = Ok Keeper_memory_delivery_reprojection.Unchanged);
+    let status_only = {full with Blocks.body=None} in
+    Blocks.observe_request delivery ~turn_ref ~blocks:(Blocks.prompt_blocks status_only);
+    Alcotest.(check bool) "a status-only preparation is not an offered body" true
+      (Blocks.defer_for_capacity delivery = Ok Keeper_memory_delivery_reprojection.Unchanged))
+
 let () =
   Alcotest.run "keeper_memory_recall_blocks"
     [ ( "who gets the texts"
@@ -655,5 +706,9 @@ let () =
             test_a_judged_keeper_without_a_clock_gets_status_only
         ; Alcotest.test_case "no clock and an unreadable prompt preserve status only" `Quick
             test_no_clock_with_an_unreadable_status_prompt_keeps_status_only
+        ; Alcotest.test_case "capacity refusal defers delivery and failover offers the full body" `Quick
+            test_capacity_refusal_defers_delivery_and_failover_offers_the_full_body
+        ; Alcotest.test_case "only a body in the current final assembly can be deferred" `Quick
+            test_only_a_body_in_the_current_final_assembly_can_be_deferred
         ] )
     ]

@@ -147,7 +147,7 @@
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
- (deps fixtures/librarian_statements_golden.json)
+ (deps fixtures/librarian_statements_golden.json ../config/prompts/librarian.md)
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main mtime.clock.os))
 
@@ -1103,7 +1103,9 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink
   )
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
+ masc.prompt_registry
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
   masc.auth
@@ -2122,7 +2124,8 @@
   ; digest of the directory's own (st_dev, st_ino) identity.
   masc.agent_core.digest
   masc.tool_metrics_store)
- (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json))
+ (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json
+  ../config/prompts/keeper.fleet.diagnose.md))
 
 (test
  (name test_dashboard_namespace_truth)
@@ -2162,9 +2165,14 @@
  (modules test_dashboard_goals_trust_reads)
  (libraries masc_test_deps))
 
+; Exercise the private immutable state with its production source and interface
+; without publishing it from masc.server.
+(copy_files ../lib/server/server_full_health_refresh_state.ml)
+(copy_files ../lib/server/server_full_health_refresh_state.mli)
+
 (test
  (name test_server_runtime_bootstrap)
- (modules test_server_runtime_bootstrap)
+ (modules test_server_runtime_bootstrap server_full_health_refresh_state)
  (libraries
   masc_test_deps
   masc_test_runtime
@@ -2330,6 +2338,7 @@
 (test
  (name test_keeper_board_attention_exact_flow)
  (modules test_keeper_board_attention_exact_flow)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 (test
@@ -3554,7 +3563,7 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane masc.lane_addon_call_context)
- (deps ../bin/masc_native_addon_launcher.exe))
+ (deps ../config/prompts/keeper.vision.output.md ../config/prompts/keeper.vision.request_header.md ../bin/masc_native_addon_launcher.exe))
 
 (rule
  (alias runtest-browser-native-screenshot)
@@ -3757,7 +3766,7 @@
 (test
  (name test_tui_operator_projection)
  (modules test_tui_operator_projection)
- (libraries alcotest masc_tui_operator_projection yojson))
+ (libraries alcotest masc_tui_approval_detail masc_tui_operator_projection yojson))
 
 (test
  (name test_tui_task_detail)
@@ -3904,6 +3913,16 @@
  (name test_tui_measurement)
  (modules test_tui_measurement)
  (libraries alcotest  masc.agent_core.digest masc masc_tui_types yojson))
+
+(test
+ (name test_tui_terminal_json)
+ (modules test_tui_terminal_json)
+ (libraries alcotest masc masc.string_util yojson))
+
+(test
+ (name test_tui_json_document)
+ (modules test_tui_json_document)
+ (libraries alcotest masc_tui_render_prim masc_tui_message_layout yojson))
 
 (test
  (name test_tui_music_launcher)
@@ -4127,7 +4146,7 @@
 (test
  (name test_tui_message_input)
  (modules test_tui_message_input)
- (libraries alcotest masc_tui_message_input masc_tui_message_layout))
+ (libraries alcotest masc_tui_message_input masc_tui_message_layout masc_tui_command))
 
 (test
  (name test_tui_message_layout)
@@ -4203,6 +4222,7 @@
    masc.agent_core.digest
   masc_tui_context_inspector
   masc
+  masc.runtime
   masc.agent_core.llm_provider
   masc.masc_tool_blob_store
   masc.masc_types
@@ -4753,7 +4773,7 @@
 (test
  (name test_tui_approval_detail)
  (modules test_tui_approval_detail)
- (libraries alcotest masc_tui_approval_detail))
+ (libraries alcotest masc_tui_approval_detail yojson))
 
 (test
  (name test_tui_connector_state)
@@ -5103,6 +5123,7 @@
 (test
  (name test_keeper_task_skill_turn_exact)
  (modules test_keeper_task_skill_turn_exact)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   alcotest
   masc_test_deps
@@ -5782,6 +5803,7 @@
   ../scripts/lib/masc_base_path.py
   ../scripts/lib/keeper_store_layout.py
   ../scripts/lib/recorded_tool_outcome.py
+  ../scripts/lib/tool_call_log_paths.py
   ../scripts/analyze-keeper-execute-failures.sh
   ../scripts/audit-keeper-fleet-readiness.py
   ../scripts/bench-web-tools.py
@@ -6013,13 +6035,15 @@
 (test
  (name test_browser_addon_models)
  (modules test_browser_addon_models)
- (libraries masc_test_deps masc.browser_lane))
+ (libraries masc_test_deps masc.browser_lane)
+ (deps (source_tree %{workspace_root}/config/prompts)))
 
 (test
  (name test_browser_addon_locate)
  (modules test_browser_addon_locate)
  (libraries masc_test_deps masc.browser_lane masc.lane_addon_tool_result mcp_protocol)
- (deps (source_tree ../addons/browser/automation))
+ (deps (source_tree ../addons/browser/automation)
+       (source_tree %{workspace_root}/config/prompts))
  (action (run %{test} %{dep:../addons/browser/automation/lane.toml})))
 
 (test
@@ -6414,6 +6438,7 @@
 (test
  (name test_keeper_librarian_context_review)
  (modules test_keeper_librarian_context_review)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main))
 

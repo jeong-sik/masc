@@ -1478,6 +1478,27 @@ let test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged 
     (List.mem "thinking" (List.nth types 1))
 ;;
 
+let test_prefix_binding_tracks_split_system_blocks () =
+  let unsplit = anthropic_build_config_variant
+      ~system:"고정 지침\n\nGoal observation" ~cache_system_prompt:true () in
+  let split = {unsplit with Provider_config.system_prompt_cache_prefix = Some "고정 지침"} in
+  let tools = [prefix_test_tool_schema] in
+  let carrier = message User [Text "trigger"] in
+  let assistant config = stamped_assistant ~config ~request_messages:[carrier] ~tools
+      [Thinking {content = "reasoning"; signature = Some "sig"};
+       ToolUse {id = "call-1"; name = "inspect"; input = `Assoc []}] in
+  let replays produced current =
+    let messages = [carrier; assistant produced; message Tool [tool_result "call-1"]] in
+    let body = Backend_anthropic.build_request ~config:current ~messages ~tools () in
+    List.mem "thinking" (List.nth (wire_content_types body) 1) in
+  check_bool "a new System block boundary invalidates the prior signed prefix"
+    false (replays unsplit split);
+  check_bool "the same split System retains valid signed thinking"
+    true (replays split split);
+  check_bool "changing only cache TTL preserves the signed prefix"
+    true (replays split {split with cache_extended_ttl = true})
+;;
+
 let test_prefix_binding_keeps_thinking_across_chained_rounds () =
   let preserve_always =
     { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
@@ -2979,6 +3000,10 @@ let () =
             "prefix binding keeps thinking when the cached system form is unchanged"
             `Quick
             test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged
+        ; Alcotest.test_case
+            "prefix binding tracks split System blocks"
+            `Quick
+            test_prefix_binding_tracks_split_system_blocks
         ; Alcotest.test_case
             "prefix binding keeps thinking across chained rounds"
             `Quick

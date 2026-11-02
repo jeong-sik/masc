@@ -16,4 +16,17 @@ val terminal_recovery :
   t ->
   ((Execution_event.terminal * Execution_agent_scope.recovery_evidence) option, error) result
 (** Inspect one refreshed, validated reducer snapshot without writer admission.
-    [None] means the top-level run is still running. *)
+    [None] means no root terminal has been observed; it does not prove liveness. *)
+
+type ownership_observation =
+  | Owner_awaiting
+  | Owner_lost
+  | Terminal_observed of
+      Execution_event.terminal * Execution_agent_scope.recovery_evidence
+
+val observe_ownership : t -> (ownership_observation, error) result
+(** Prefer canonical terminal evidence. If absent, observe the existing writer
+    authority and refresh the same identity-bound projection while excluding
+    new writers. Only a successful locked refresh with no terminal establishes
+    [Owner_lost]. That read cannot join a refresh started before the lock.
+    No journal bytes are recovered, appended or replayed. *)

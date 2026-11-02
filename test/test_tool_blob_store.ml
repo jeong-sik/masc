@@ -1103,9 +1103,11 @@ let write_maintenance_tool_receipts ~base_path input =
   Fun.protect ~finally:Calls.reset_for_testing (fun () ->
     Calls.init ~base_path ();
     let committed = ref 0 in
+    let execution_evidence = `Assoc ["detail", input] in
+    let output_text = Yojson.Safe.to_string (`Assoc ["status", input]) in
     List.iter (fun wire_outcome ->
       Calls.log_call ~keeper_name:"reviewer" ~tool_name:"fixture" ~input
-        ~output_text:"ok" ~duration_ms:0. ~wire_outcome
+        ~execution_evidence ~output_text ~duration_ms:0. ~wire_outcome
         ~on_committed:(fun () -> incr committed) ())
       [Tool_result.Ok;Tool_result.Error;Tool_result.Unknown];
     Alcotest.(check int) "all wire outcomes commit real producer rows" 3 !committed;
@@ -1132,13 +1134,13 @@ let test_maintenance_distinguishes_tool_payloads_from_media_owners () =
     let use = Agent_core.Types.ToolUse {id="call";name="fixture";input=payload} in
     let result = Agent_core.Types.ToolResult {tool_use_id="call";content="image result";
       outcome=Tool_succeeded;json=Some payload;
-      content_blocks=Some [Agent_core.Types.Image {media_type="image/png";source=Stored media}]} in
+      content_blocks=Some [Agent_core.Types.Image {media_type="image/png";source=Agent_core.Types.Stored media}]} in
     let assistant = Agent_core.Types.make_message ~role:Assistant [use] in
     let tool = Agent_core.Types.make_message ~role:Tool [result] in
     let official_tool = Agent_core.Types.make_message ~role:Tool
       [Agent_core.Types.ToolResult {tool_use_id="official-call";content="image result";
         outcome=Tool_succeeded;json=Some payload;
-        content_blocks=Some [Agent_core.Types.Image {media_type="image/png";source=Stored sibling_media}]}] in
+        content_blocks=Some [Agent_core.Types.Image {media_type="image/png";source=Agent_core.Types.Stored sibling_media}]}] in
     let demoted = Agent_core.Types.ToolUse {id="demoted";name="fixture";
       input=O.normalized_artifact_ref_to_json artifact} in
     ignore (save_maintenance_source base_path "keepers/reviewer/payloads.json"
@@ -1240,7 +1242,7 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
       (* Keep the arbitrary payload well formed: the only malformed reference
          in these two cases is the media-bearing sibling. *)
       result_message ~content_blocks:[Agent_core.Types.Image {media_type="image/png";
-        source=Stored stored}]
+        source=Agent_core.Types.Stored stored}]
         ~payload:(Agent_core.History.stored_source_to_json ~media_type:"image/png" stored) () in
     let corrupt_official_result fields =
       match official_result () with
@@ -1329,7 +1331,7 @@ let test_maintenance_outbox_payloads_are_tool_data () =
       ~tool_name:"fixture" ~arguments:payload ~response:payload);
     ignore (save_maintenance_source base_path "messages/outbox-media-owner.json"
       (Agent_core.History.content_block_to_json
-        (Agent_core.Types.Image {media_type="image/png";source=Stored media})));
+        (Agent_core.Types.Image {media_type="image/png";source=Agent_core.Types.Stored media})));
     let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
     Alcotest.(check int) "only the data-named bytes become candidates" 1 first.candidates_recorded;
     Alcotest.(check int) "the first scan does not delete" 0 first.deleted;

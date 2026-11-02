@@ -81,6 +81,20 @@ val keeper_observation_rejected_digest_row : string
 
 val librarian : string
 
+(** Managed admission and absorption policy fragments. *)
+val librarian_admission_policy : string
+val librarian_retirement_policy : string
+val librarian_absorb_forward : string
+val librarian_absorb_pair : string
+val librarian_absorb_observations : string
+val librarian_absorb_reverse : string
+val librarian_absorb_reverse_yes : string
+val librarian_absorb_reverse_no : string
+val librarian_absorb_mergeable : string
+val librarian_absorb_different_context : string
+val librarian_absorb_loses_knowledge : string
+val librarian_absorb_uncertain : string
+
 (** A continuity pass over a range whose Memory is already committed: the
     answer is the working state alone. *)
 val librarian_continuity : string
@@ -94,6 +108,17 @@ val librarian_working_context : string
     [working_contexts_rule] variable, so the rule has one text. *)
 val librarian_working_contexts_rule : string
 
+val keeper_memory_selection : string
+val keeper_memory_selection_candidate : string
+val keeper_memory_selection_request_context : string
+val keeper_memory_successor_selection : string
+val keeper_memory_selection_current_decision : string
+val keeper_memory_selection_comparison : string
+val keeper_memory_selection_inspect_source : string
+val keeper_memory_selection_not_needed : string
+val keeper_memory_successor_applies_to_query : string
+val keeper_memory_successor_different_scope : string
+val keeper_memory_successor_uncertain : string
 val workspace_memory_curator : string
 val workspace_memory_briefing : string
 
@@ -151,6 +176,23 @@ val lane_cli_probe_hitl_system : string
 val lane_cli_probe_hitl_user : string
 val keeper_antigravity_system_instructions_label : string
 val keeper_antigravity_current_goal_label : string
+val keeper_vision_output : string
+val keeper_vision_request_header : string
+val keeper_fleet_diagnose : string
+val keeper_antigravity_workspace_shared : string
+val keeper_antigravity_workspace_private : string
+val keeper_antigravity_additional_directories_label : string
+val keeper_context_librarian_working : string
+val keeper_context_librarian_empty_artifact : string
+val keeper_context_librarian_empty : string
+val keeper_context_librarian_unavailable : string
+val keeper_context_librarian_recall : string
+val keeper_context_librarian_preview : string
+val keeper_context_librarian_unread : string
+val keeper_muse_native_read : string
+(** Managed explanation of Muse's native read posture and attached MASC tools. *)
+val keeper_codex_native_read : string
+val keeper_official_client_resume : string
 val eval_calibration_few_shot : string
 val eval_calibration_few_shot_example : string
 
@@ -196,12 +238,24 @@ val keeper_world_transcript_intro : string
 (** Durable direct-conversation transcript block, prepended to the quoted
     recent-conversation rows in the turn context. *)
 
+(** Managed recall instructions and external criterion policy. *)
+val keeper_recall_candidate : string
+val keeper_recall_candidate_possibly_needed : string
+val keeper_recall_candidate_not_needed : string
+val keeper_recall_time : string
+val keeper_recall_time_standing : string
+val keeper_recall_time_bound : string
+val keeper_recall_turn : string
+val keeper_recall_turn_yes : string
+val keeper_recall_turn_no : string
+val keeper_recall_turn_unsure : string
+
 (** The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
     section 4.4): the status line a judged turn always carries, and the body of
     the memories the judgment carried. *)
-
 val keeper_recall_status_selected : string
 val keeper_recall_status_selected_ids : string
+val keeper_recall_status_capacity_deferred : string
 val keeper_recall_status_none_found_needed : string
 val keeper_recall_status_none_found_unsure : string
 val keeper_recall_status_none_needed : string
@@ -493,3 +547,27 @@ val candle_appraiser_weights : string
 val keeper_world_recent_work : string
 
 val keeper_world_recent_work_preview : string
+
+(* Managed judgment instructions and model-facing advice. *)
+val judge_board_policy : string
+val judge_board_system_one : string
+val librarian_preflight : string
+val librarian_context_review : string
+val skill_applicability : string
+val skill_applicability_advice : string
+val skill_applicability_unavailable : string
+val skill_applicability_projection : string
+val browser_locate : string
+
+val librarian_preflight_keep_current : string
+val librarian_preflight_needs_generation : string
+val librarian_preflight_uncertain : string
+val librarian_context_review_faithful : string
+val librarian_context_review_needs_revision : string
+val librarian_context_review_insufficient_evidence : string
+val skill_applicability_applicable : string
+val skill_applicability_not_applicable : string
+val skill_applicability_insufficient_context : string
+val judge_board_policy_relevant : string
+val judge_board_policy_not_relevant : string
+val judge_board_system_one_uncertain : string

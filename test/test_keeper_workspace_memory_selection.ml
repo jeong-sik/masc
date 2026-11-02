@@ -12,13 +12,32 @@ let response choice : Types.eval_response =
          label, if label=choice then 1. else 0.)
          ["current_decision";"comparison";"inspect_source";"not_needed"]}] }
 
+let with_prompt_override key value f =
+  let module Registry = Prompt_registry in
+  let previous = (Registry.resolve_prompt key).override_value in
+  let require = function Ok () -> () | Error detail -> Alcotest.fail detail in
+  Registry.set_override key value |> require;
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Registry.set_override key value |> require
+    | None -> Registry.clear_prompt_override key) f
+
 let test_source_can_change_how_a_memory_is_used () =
+  with_prompt_override Prompt_names.keeper_memory_selection "FROZEN_SELECTION" @@ fun () ->
   let events = ref [] in
-  let evaluate ~state ~questions:_ =
+  let evaluate ~state ~questions =
+    (match questions with
+     | [_, Types.Choice {instructions;_}] ->
+       Alcotest.(check string) "one managed policy survives both assessments"
+         "FROZEN_SELECTION" instructions
+     | _ -> Alcotest.fail "expected one selection question");
     Alcotest.(check bool) "frozen purpose survives both assessments" true
       (Yojson.Safe.Util.member "current_purpose" state = purpose);
     match Yojson.Safe.Util.member "source_detail" state with
-    | `Null -> events := !events @ ["summary"]; Ok (response "current_decision")
+    | `Null ->
+      (match Prompt_registry.set_override Prompt_names.keeper_memory_selection
+          "CHANGED_AFTER_SUMMARY" with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
+      events := !events @ ["summary"]; Ok (response "current_decision")
     | detail ->
       Alcotest.(check bool) "actual resolved source is judged" true (detail=source);
       events := !events @ ["source assessment"]; Ok (response "comparison") in
@@ -73,6 +92,17 @@ let with_adapter f =
     let adapter = Masc.Keeper_workspace_memory_selection_io.create
       ~config ~keeper_id:"fixture" ~destinations:(destination,[]) in
     f adapter destination)
+
+let test_missing_clock_does_not_start_an_assessment () = with_adapter (fun adapter _ ->
+  let module IO = Masc.Keeper_workspace_memory_selection_io in
+  (match IO.evaluate ~clock:None adapter ~state:purpose ~questions:[] with
+   | Error (Selection.Unavailable _) -> ()
+   | Error (Selection.Capacity_refused _) | Ok _ ->
+     Alcotest.fail "missing request clock must remain unavailable");
+  Alcotest.(check (list string)) "no assessment identity was admitted" []
+    (IO.request_ids adapter);
+  Alcotest.(check bool) "no assessment journal was created" false
+    (Sys.file_exists (IO.journal_path adapter)))
 
 let test_request_is_durable_before_dispatch () = with_adapter (fun adapter destination ->
   let module IO = Masc.Keeper_workspace_memory_selection_io in
@@ -183,12 +213,23 @@ let test_resolved_partial_answers_and_inspection_stay_deferred () =
       | _ -> false) results)
 
 let test_resolved_capacity_split_keeps_full_details () =
+  with_prompt_override Prompt_names.keeper_memory_selection "FROZEN_BATCH" @@ fun () ->
+  with_prompt_override Prompt_names.keeper_memory_selection_candidate
+    "SCOPE {{question_id}}" @@ fun () ->
   let rows = List.map (fun id -> {candidate with id},`Assoc ["original",`String id])
       ["left";"oversized";"right"] in
   let attempts = ref [] in
   let evaluate ~state ~questions =
     let ids = List.map fst questions in
     attempts := ids :: !attempts;
+    List.iter (fun (id, question) -> match question with
+      | Types.Choice {instructions;_} ->
+        Alcotest.(check string) "capacity partitions use captured managed scope"
+          ("FROZEN_BATCH SCOPE " ^ id) instructions
+      | _ -> Alcotest.fail "expected a selection choice") questions;
+    (match Prompt_registry.set_override Prompt_names.keeper_memory_selection_candidate
+        "CHANGED_SCOPE {{question_id}}" with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
     Alcotest.(check bool) "split keeps exact purpose" true
       (Yojson.Safe.Util.member "current_purpose" state = purpose);
     Yojson.Safe.Util.(state |> member "candidates" |> to_list) |> List.iter (fun row ->
@@ -728,8 +769,42 @@ let test_host_prompt_io_does_not_publish_an_unretained_reduction () =
       (List.hd !seen = payload))
 ;;
 
+let test_missing_guidance_defers_before_evaluation () =
+  let module Registry = Prompt_registry in
+  let directory = match Registry.get_markdown_dir () with
+    | Some directory -> directory | None -> Alcotest.fail "fixture prompt directory unavailable" in
+  let empty = Filename.temp_dir "missing-selection-policy-" "" in
+  Fun.protect
+    ~finally:(fun () -> Registry.set_markdown_dir directory; Fs_compat.remove_tree empty)
+    (fun () ->
+      Registry.set_markdown_dir empty;
+      let evaluate ~state:_ ~questions:_ = Alcotest.fail "missing policy reached evaluation" in
+      let resolve ~id:_ = Alcotest.fail "missing policy reached source resolution" in
+      match Selection.select ~evaluate ~resolve ~purpose candidate with
+      | Deferred {reason=Evaluation_failed _;_} -> ()
+      | _ -> Alcotest.fail "missing policy became a selection or omission")
+
+let test_candidate_scope_is_required_before_dispatch () =
+  with_prompt_override Prompt_names.keeper_memory_selection_candidate
+    "All candidates are relevant" @@ fun () ->
+  let evaluate ~state:_ ~questions:_ = Alcotest.fail "unscoped candidate reached evaluation" in
+  let resolve ~id:_ = Alcotest.fail "unscoped candidate reached source resolution" in
+  let candidates = [candidate; {candidate with id="second"}] in
+  List.iter (fun outcomes ->
+    Alcotest.(check int) "every original candidate remains visible" 2 (List.length outcomes);
+    Alcotest.(check bool) "missing scope defers every candidate before dispatch" true
+      (List.for_all (function Selection.Deferred {reason=Evaluation_failed _;_} -> true
+        | _ -> false) outcomes))
+    [Selection.select_many ~evaluate ~resolve ~purpose candidates;
+     Selection.select_resolved_many ~evaluate ~purpose
+       (List.map (fun candidate -> candidate,source) candidates)]
+
 let () = Alcotest.run "purpose-specific workspace memory selection"
   ["selection",[
+    Alcotest.test_case "missing managed policy defers before dispatch" `Quick
+      test_missing_guidance_defers_before_evaluation;
+    Alcotest.test_case "candidate scope is required before dispatch" `Quick
+      test_candidate_scope_is_required_before_dispatch;
     Alcotest.test_case "resolved first assessment sees full lineage" `Quick
       test_resolved_sources_are_present_before_any_omission;
     Alcotest.test_case "resolved inspection and partial answers remain unresolved" `Quick
@@ -741,6 +816,8 @@ let () = Alcotest.run "purpose-specific workspace memory selection"
     Alcotest.test_case "source failure is not irrelevance" `Quick test_source_failure_is_not_a_negative_relevance_vote;
     Alcotest.test_case "unresolved applicability stays pending" `Quick test_unresolved_source_does_not_loop;
     Alcotest.test_case "invalid judgment retains uncertainty" `Quick test_invalid_judgment_does_not_deliver_or_discard_memory;
+    Alcotest.test_case "missing clock does not start an assessment" `Quick
+      test_missing_clock_does_not_start_an_assessment;
     Alcotest.test_case "request precedes dispatch durably" `Quick test_request_is_durable_before_dispatch;
     Alcotest.test_case "failed request record prevents dispatch" `Quick test_failed_record_prevents_dispatch;
     Alcotest.test_case "failed response record prevents delivery" `Quick test_failed_response_record_prevents_delivery;

@@ -19,4 +19,7 @@ val observe : base_path:string -> original:Verifier_review_original.t ->
 (** Validate all recorded call bindings and read their exact root journals.
     Only a terminal success with a single admitted, successfully settled
     report invocation may supply a verdict. Unknown effects, ambiguous report
-    histories and missing historical locators never authorize execution. *)
+    histories and missing historical locators never authorize execution.
+    A live or contended writer without a terminal remains [Awaiting]. Confirmed
+    writer loss without a canonical terminal returns [Repair_required], using
+    the existing operator-reconciliation path and preserving the original. *)

@@ -3396,9 +3396,9 @@ let test_advanced_replays_nonzero_settled_terminal_ordinal () =
 
 let settled_terminal_media_content encoded =
   [ Llm_provider.Types.Text "persisted terminal answer"
-  ; Llm_provider.Types.Image {media_type="image/png";source=Base64 encoded}
-  ; Llm_provider.Types.Document {media_type="application/pdf";source=Base64 encoded}
-  ; Llm_provider.Types.Audio {media_type="audio/wav";source=Base64 encoded}
+  ; Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded}
+  ; Llm_provider.Types.Document {media_type="application/pdf";source=Llm_provider.Types.Base64 encoded}
+  ; Llm_provider.Types.Audio {media_type="audio/wav";source=Llm_provider.Types.Base64 encoded}
   ]
 ;;
 
@@ -3417,9 +3417,9 @@ let test_settled_terminal_replay_keeps_content_exact () =
     ; Llm_provider.Types.Text "different answer" :: List.tl content
     ; List.rev content
     ; [ Llm_provider.Types.Text "persisted terminal answer"
-      ; Llm_provider.Types.Image {media_type="image/jpeg";source=Base64 "AA=="}
-      ; Llm_provider.Types.Document {media_type="application/pdf";source=Base64 "AA=="}
-      ; Llm_provider.Types.Audio {media_type="audio/wav";source=Base64 "AA=="}
+      ; Llm_provider.Types.Image {media_type="image/jpeg";source=Llm_provider.Types.Base64 "AA=="}
+      ; Llm_provider.Types.Document {media_type="application/pdf";source=Llm_provider.Types.Base64 "AA=="}
+      ; Llm_provider.Types.Audio {media_type="audio/wav";source=Llm_provider.Types.Base64 "AA=="}
       ]
     ]
 ;;

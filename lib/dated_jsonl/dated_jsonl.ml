@@ -1521,7 +1521,7 @@ let load_count_cache ~path =
       Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
 ;;
 
-let append_rotating_unlocked t ~max_current_file_bytes json =
+let append_rotating_unlocked ~on_committed t ~max_current_file_bytes json =
   let mutex = Atomic.get t.mutex in
   Eio.Mutex.use_ro mutex (fun () ->
     let dated = Store.dated_path_now t.location in
@@ -1564,13 +1564,14 @@ let append_rotating_unlocked t ~max_current_file_bytes json =
       Skipped_rotation_exhausted { sequence_limit = max_int }
     | Some outcome ->
       Jsonl_writer.append_jsonl ~path:dated.path json;
+      on_committed ();
       run_post_append_pruning_unlocked t ~dated;
       outcome)
 
-let append_rotating t ~max_current_file_bytes json =
+let append_rotating ?(on_committed = ignore) t ~max_current_file_bytes json =
   let outcome = ref Skipped_by_append_guard in
   (Atomic.get append_guard) (fun () ->
-    outcome := append_rotating_unlocked t ~max_current_file_bytes json);
+    outcome := append_rotating_unlocked ~on_committed t ~max_current_file_bytes json);
   !outcome
 
 let read_range t ~since ~until =

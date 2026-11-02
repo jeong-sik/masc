@@ -797,6 +797,12 @@ let tool_request_archive_body_path ~scope ~date ~request_digest =
   tool_request_archive_path ~scope ~date "bodies" (request_digest ^ ".json")
 let owned_regular_file (stat : Unix.stats) =
   stat.st_kind = Unix.S_REG && stat.st_nlink = 1 && stat.st_uid = Unix.geteuid ()
+(* A rename may have happened before a directory sync failed. Both a repeated
+   move and recovery's positive archive observation must discharge that same
+   obligation. A removed live directory leaves its existing ancestor to sync. *)
+let sync_settlement_directories ~source ~target =
+  sync_parent_directory (Filename.dirname target);
+  sync_existing_parent ~sync_parent:sync_parent_directory (Filename.dirname source)
 (* Move one published file into the archive, or find it already there. Both
    directories are synced after the rename. *)
 let move_into_archive t ~source ~target =
@@ -805,13 +811,14 @@ let move_into_archive t ~source ~target =
   | stat when owned_regular_file stat ->
     durable_directory t ~sync_parent:sync_parent_directory (Filename.dirname target);
     Unix.rename source target;
-    sync_parent_directory (Filename.dirname target);
-    sync_parent_directory (Filename.dirname source);
+    sync_settlement_directories ~source ~target;
     Ok ()
   | _ -> Error ("an original request file to settle is not a regular file this process owns: " ^ source)
   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
     match Unix.lstat target with
-    | stat when owned_regular_file stat -> Ok ()
+    | stat when owned_regular_file stat ->
+      sync_settlement_directories ~source ~target;
+      Ok ()
     | _ -> Error ("a settled original request file is not a regular file this process owns: " ^ target)
     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
       Error ("an original request file is in neither its scope nor the settled archive: " ^ source)
@@ -835,8 +842,11 @@ let tool_request_settled t ~scope ~date ~request_id =
   let* () = settled_day date in
   protect (fun () ->
   let path = Filename.concat t.root (tool_request_archive_record_path ~scope ~date ~request_id) in
+  let source = Filename.concat t.root (tool_request_owner_path ~scope ~request_id) in
   match Unix.lstat path with
-  | stat when owned_regular_file stat -> Ok true
+  | stat when owned_regular_file stat ->
+    sync_settlement_directories ~source ~target:path;
+    Ok true
   | _ -> Error ("a settled original request record is not a regular file this process owns: " ^ path)
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false)
 

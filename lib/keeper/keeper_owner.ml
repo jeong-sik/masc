@@ -255,6 +255,11 @@ type retired_input_cut =
     observed:Keeper_native_call.state; call:Keeper_native_call.t;
     cut:Keeper_input_history_cut.binding }
 
+type preparation_wait_intent =
+  { preparation_operation:Operation_id.t; preparation_digest:string;
+    preparation_checkpoint:Keeper_semantic_execution.gate_checkpoint;
+    preparation_failure:Agent_core.Error.t; preparation_child:Keeper_interrupt_token.t }
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -265,6 +270,18 @@ type _ command =
       Operation_id.t -> (Chat_operation.t option, error) result command
   | Has_queued_handoff_recipient :
       Operation_id.t -> (bool, error) result command
+  | Enter_direct_preparation : {operation_id:Operation_id.t;execution_digest:string;child:Keeper_interrupt_token.t} ->
+      (unit,error) result command
+  | Direct_preparation_wait : Operation_id.t ->
+      (Chat_operation_store.preparation_wait_observation option, error) result command
+  | Wait_direct_preparation :
+      { operation_id:Operation_id.t; execution_digest:string;
+        observed:Keeper_semantic_execution.gate_checkpoint;
+        failure:Agent_core.Error.t; child:Keeper_interrupt_token.t } ->
+      (Chat_operation.t,error) result command
+  | Retry_direct_preparation :
+      { operation_id:Operation_id.t; expected_revision:int64; execution_digest:string } ->
+      (Chat_operation.t,error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Begin_direct_input_response : {operation_id:Operation_id.t;
@@ -704,6 +721,7 @@ let answer : type response. response command -> answer = function
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
   | Has_queued_handoff_recipient _ -> In_its_drain_step
+  | Enter_direct_preparation _ | Direct_preparation_wait _ | Wait_direct_preparation _ | Retry_direct_preparation _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
@@ -1088,6 +1106,9 @@ let recover_operation_availability t =
      | Error error -> Error (record_operation_error t error)
      | Ok operation_store ->
        t.operation_store <- operation_store;
+       (match Chat_operation_store.block_preparing_operations operation_store ~now:(t.now ()) with
+        | Error error -> Error (record_operation_error t error)
+        | Ok () ->
        (match read_operation_projection operation_store ~now:(t.now ()) with
         | Error error -> Error (record_operation_error t error)
         | Ok projection ->
@@ -1109,7 +1130,7 @@ let recover_operation_availability t =
              publish_operation_projection t projection;
              Log.Keeper.info ~keeper_name:t.keeper_name
                "keeper Owner operation store recovered queued=%d" projection.queued_count;
-             Ok ())))
+             Ok ()))))
 ;;
 
 (* Remove the retained files that the store's confirmed commits released.
@@ -1523,6 +1544,9 @@ let start
         keeper_name
         (Chat_operation_store.error_to_string error));
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    (* Only an exact child request carrying the positive preparation marker
+       can retry a failed wait write during that child's settlement. *)
+    let unpersisted_preparation_wait : preparation_wait_intent option ref = ref None in
     let fail_running_operation ~operation_id ~kind ~detail ~outcome_ref =
       run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
         Chat_operation_store.fail_running
@@ -1583,6 +1607,8 @@ let start
       |> Result.map fst
     in
     let finish_operation_child claimed_operation_id execution ~ended =
+      let preparation_wait = !unpersisted_preparation_wait in
+      unpersisted_preparation_wait := None;
       let policy () =
         active_native_call_policy
           ~owner_stopping:(Atomic.get t.projection).Keeper_owner_reducer.stopping
@@ -1647,6 +1673,32 @@ let start
               ~detail:native_call_unknown_effect_success_detail
               ~outcome_ref:(Some outcome_ref))
       | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
+        let preparation = match preparation_wait with
+          | None -> Ok None
+          | Some intent ->
+            (match Atomic.get t.turn_in_flight with
+             | Some {lane=Chat_operation;interrupt_token;_}
+                 when Operation_id.equal intent.preparation_operation operation_id
+                   && Keeper_interrupt_token.equal intent.preparation_child interrupt_token ->
+               (match Keeper_internal_error.guidance_preparation_failure intent.preparation_failure with
+                | Some detail ->
+                  run_operation_store ~label:"retain failed official preparation" (fun () ->
+                    Chat_operation_store.wait_direct_preparation t.operation_store ~now:(t.now ())
+                      ~operation_id ~execution_digest:intent.preparation_digest
+                      ~observed:intent.preparation_checkpoint ~detail)
+                  |> Result.map Option.some
+                | None -> Ok None)
+             | Some {lane=Chat_operation | Autonomous | Maintenance;_} | None -> Ok None) in
+        (match preparation with
+         | Error error -> Error (record_operation_error t error)
+         | Ok (Some _) ->
+           (match !(t.operation_error) with
+            | Some (Operation_availability_failure _) -> t.operation_error := None
+            | Some (Operation_integrity_failure _ | Operation_reconciliation_required _) | None -> ());
+           (match read_operation_projection t.operation_store ~now:(t.now ()) with
+            | Error error -> Error (record_operation_error t error)
+            | Ok projection -> publish_operation_projection t projection; Ok ())
+         | Ok None ->
         Result.bind (settle_native_call ~operation_id ~policy:(policy ())) (function
           | Native_call_left_for_restart_recovery ->
             (* Not an error: the runner ended without settling the native
@@ -1659,7 +1711,7 @@ let start
           | Native_call_settleable
           | Native_call_effect_unknown
           | Native_call_closed_without_disposition ->
-            fail_running_operation ~operation_id ~kind ~detail ~outcome_ref)
+            fail_running_operation ~operation_id ~kind ~detail ~outcome_ref))
     in
     let request_scheduled_handoff state shutdown_operation_id ~observed sources =
       match !(t.scheduled_consumer) with
@@ -1967,6 +2019,62 @@ let start
                 t.operation_store ~now:(t.now ()) ~operation_id)
           in
           Eio.Promise.resolve resolve response;
+          loop state
+        | Command (Enter_direct_preparation {operation_id;execution_digest;child}, resolve) ->
+          let response = match Atomic.get t.turn_in_flight,
+              (Atomic.get t.operation_projection).running_operation_id with
+            | Some {lane=Chat_operation;interrupt_token;_}, Some running
+                when Keeper_interrupt_token.equal child interrupt_token && Operation_id.equal operation_id running ->
+              run_operation_command t ~label:"admit official checkpoint dispatch" (fun () ->
+                Chat_operation_store.enter_direct_preparation t.operation_store ~now:(t.now ()) ~operation_id ~execution_digest)
+              |> Result.map fst
+            | (Some {lane=Autonomous;_} | Some {lane=Maintenance;_}), _
+            | Some {lane=Chat_operation;_}, Some _
+            | None, _ | Some _, None ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "official dispatch admission requires its exact executing child")) in
+          Eio.Promise.resolve resolve response;
+          loop state
+        | Command (Direct_preparation_wait operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct preparation wait" (fun () ->
+            Chat_operation_store.direct_preparation_wait t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state
+        | Command (Wait_direct_preparation {operation_id;execution_digest;observed;failure;child}, resolve) ->
+          let response = match Keeper_internal_error.guidance_preparation_failure failure,
+              Atomic.get t.turn_in_flight, (Atomic.get t.operation_projection).running_operation_id with
+            | Some detail, Some {lane=Chat_operation;interrupt_token;_}, Some running
+                when Keeper_interrupt_token.equal child interrupt_token
+                  && Operation_id.equal operation_id running ->
+              let response = run_operation_command t ~label:"retain direct preparation wait" (fun () ->
+                Chat_operation_store.wait_direct_preparation t.operation_store ~now:(t.now ())
+                  ~operation_id ~execution_digest ~observed ~detail)
+                |> Result.map fst in
+              (match response with
+               | Error (Store_unavailable _) ->
+                 unpersisted_preparation_wait := Some
+                   {preparation_operation=operation_id;preparation_digest=execution_digest;
+                    preparation_checkpoint=observed;preparation_failure=failure;preparation_child=child}
+               | Ok _ -> unpersisted_preparation_wait := None
+               | Error (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed) -> ());
+              response
+            | None, _, _
+            | Some _, None, _
+            | Some _, Some _, None
+            | Some _, (Some {lane=Autonomous;_} | Some {lane=Maintenance;_}), _
+            | Some _, Some {lane=Chat_operation;_}, Some _ ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "preparation wait requires its exact executing child and a pre-dispatch preparation failure")) in
+          Eio.Promise.resolve resolve response;
+          loop state
+        | Command (Retry_direct_preparation {operation_id;expected_revision;execution_digest}, resolve) ->
+          let response = reject_if_stopping state (fun () ->
+            run_operation_command t ~label:"retry retained direct preparation" (fun () ->
+              Chat_operation_store.retry_direct_preparation t.operation_store ~now:(t.now ())
+                ~operation_id ~expected_revision ~execution_digest)
+            |> Result.map fst) in
+          Eio.Promise.resolve resolve response;
+          (match response with Ok _ -> start_child_if_needed state shutdown_operation_id | Error _ -> ());
           loop state
         | Command (Direct_checkpoint operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
@@ -2983,6 +3091,19 @@ let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta (command,None))
 let create_from_input_birth t meta seed =
   request t (Apply_meta (Keeper_owner_reducer.Create meta,Some seed))
+let enter_direct_preparation t ~operation_id ~execution_digest =
+  match Keeper_turn_preview_owner.current () with
+  | Some child -> request t (Enter_direct_preparation {operation_id;execution_digest;child})
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "official dispatch admission requires an inherited executing child"))
+let direct_preparation_wait t ~operation_id = request t (Direct_preparation_wait operation_id)
+let wait_direct_preparation t ~operation_id ~execution_digest ~observed ~failure =
+  match Keeper_turn_preview_owner.current () with
+  | Some child -> request t (Wait_direct_preparation {operation_id;execution_digest;observed;failure;child})
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "preparation waiting requires an inherited executing child"))
+let retry_direct_preparation t ~operation_id ~expected_revision ~execution_digest =
+  request t (Retry_direct_preparation {operation_id;expected_revision;execution_digest})
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})

@@ -704,6 +704,12 @@ type reported_model =
   | Provider_model_not_reported
 [@@deriving show, yojson]
 
+type reported_cache_usage =
+  { cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int option
+  }
+[@@deriving show, yojson]
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -723,6 +729,11 @@ type inference_telemetry =
     (** Captured by the raw response parser before model fallback. [None]
         means no such capture exists; it never licenses a model inference
         from [api_response.model] or the configured request model. *)
+  ; reported_cache_usage : reported_cache_usage option [@default None]
+    (** Captured by the raw response parser before [api_usage] normalizes
+        absent cache token fields to [0]. [None] means no parser capture exists;
+        [Some r] distinguishes a wire that omitted cache fields ([None]) from a
+        wire that explicitly reported [0] ([Some 0]). *)
   ; reasoning_source : Reasoning_source.t option
     (** Exact replay provenance stamped by the live inference boundary. *)
   ; reasoning_prefix : Reasoning_prefix.t option
@@ -833,6 +844,15 @@ val with_reported_model : model:string -> inference_telemetry option -> inferenc
     absence before any response normalization. Repatching telemetry must
     retain this fact rather than recapture a fallback-normalized model. *)
 
+val with_reported_cache_usage
+  :  cache_creation_input_tokens:int option
+  -> cache_read_input_tokens:int option
+  -> inference_telemetry option
+  -> inference_telemetry
+(** Raw parser boundary only: preserve whether the wire reported
+    [cache_creation_input_tokens] and [cache_read_input_tokens] before
+    [api_usage] normalizes absent fields to [0]. *)
+
 type api_response =
   { id : string
   ; model : string
@@ -842,6 +862,16 @@ type api_response =
   ; telemetry : inference_telemetry option
   }
 [@@deriving show]
+
+val reported_cache_creation_input_tokens : api_response -> int option
+(** Return the wire-reported [cache_creation_input_tokens] when usage was
+    reported: [None] if usage is absent or the wire parser recorded no
+    cache-creation field, [Some n] when the wire explicitly reported [n]. *)
+
+val reported_cache_read_input_tokens : api_response -> int option
+(** Return the wire-reported [cache_read_input_tokens] when usage was
+    reported: [None] if usage is absent or the wire parser recorded no
+    cache-read field, [Some n] when the wire explicitly reported [n]. *)
 
 (** Retain admitted response occurrences and remap both replay witnesses.
     Tool admission supplies exact source indices; no structural identity guess. *)

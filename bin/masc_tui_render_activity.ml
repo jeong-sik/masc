@@ -90,11 +90,9 @@ let system_log_detail_lines (state : state) ~seq ~width =
         @ (match entry.sl_details with
            | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
            | json ->
-               let source =
-                 "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
-               in
+               let source = Yojson.Safe.pretty_to_string json in
                (Ansi.bold, "  STRUCTURED DETAILS")
-               :: (document_markdown ~width source
+               :: (document_json ~width source
                    |> List.map (fun line -> Ansi.reset, "  " ^ line)))
       in
       core_fields @ metadata_fields @ details
@@ -635,8 +633,8 @@ let render_acting_evidence (state : state) entry =
           | None -> ["  " ^ label ^ ": not carried"]
           | Some value ->
               ("  " ^ label ^ " (producer-redacted JSON)")
-              :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
-                    ("```json\n" ^ Yojson.Safe.pretty_to_string value ^ "\n```")
+              :: (document_json ~width:(max 1 (framed_inner_width cols - 3))
+                    (Yojson.Safe.pretty_to_string value)
                   |> List.map (fun line -> "  " ^ line)) in
         let preview label = function
           | None -> ["  " ^ label ^ ": not carried"]

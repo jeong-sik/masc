@@ -138,6 +138,118 @@ let separated_append_keeps_exact_bytes () =
   check string "separator and payload retain their bytes" "가/\000\255" (Input.contents draft);
   check int "cursor stays at the end" (String.length "가/\000\255") (Input.cursor draft)
 
+let move_to_start draft =
+  while Input.cursor draft > 0 do Input.move_left draft done
+
+let current_owned_view draft owner = Input.snapshot_owned_view (Input.snapshot draft) owner
+
+let expanded draft owner replacement =
+  match current_owned_view draft owner with
+  | None -> Input.contents draft
+  | Some view -> Input.replace_owned view ~replacement
+
+let owned_literal_provenance () =
+  let draft = Input.create () and marker = "[paste → source]" in
+  let owner = Input.insert_owned draft marker in
+  Input.insert draft (" tail " ^ marker);
+  move_to_start draft;
+  Input.insert draft (marker ^ "\n");
+  check string "identical user text stays literal on both sides"
+    (marker ^ "\nORIGINAL tail " ^ marker) (expanded draft owner "ORIGINAL");
+  Input.move_left draft;
+  Input.backspace draft;
+  check bool "editing outside the owned extent keeps it" true
+    (Option.is_some (current_owned_view draft owner))
+
+let retired_owned_bytes_do_not_revive () =
+  let draft = Input.create () and marker = "[original]" in
+  let owner = Input.insert_owned draft marker in
+  Input.backspace draft; Input.insert draft "]";
+  check string "same bytes after an edit are literal" marker (expanded draft owner "UNWANTED");
+  Input.clear draft; Input.insert draft marker;
+  check string "clear and retype cannot revive ownership" marker (expanded draft owner "UNWANTED");
+  let owner = Input.insert_owned draft marker in
+  Input.delete_word draft;
+  check bool "word erasure retires an overlapping span" true
+    (Option.is_none (current_owned_view draft owner));
+  Input.clear draft;
+  let owner = Input.insert_owned draft marker in
+  Input.append draft "́";
+  Input.backspace draft; Input.insert draft "]";
+  check string "grapheme erasure across owned boundary cannot revive equal bytes"
+    marker (expanded draft owner "UNWANTED")
+
+let deleted_owner_keeps_other_literal () =
+  let draft = Input.create () and marker = "[paste]" in
+  let owner = Input.insert_owned draft marker in
+  move_to_start draft; Input.insert draft (marker ^ "\n");
+  while Input.cursor draft < Input.length draft do Input.move_right draft done;
+  while Input.cursor draft > String.length marker + 1 do Input.backspace draft done;
+  check string "removing the real owner cannot expand another copy"
+    (marker ^ "\n") (expanded draft owner "UNWANTED")
+
+let owned_utf8_boundary_edits () =
+  let draft = Input.create () in
+  Input.insert draft "한\n";
+  let owner = Input.insert_owned draft "[원문]" in
+  Input.append_separated draft ~separator:"\n" "👩‍💻";
+  move_to_start draft; Input.insert draft "語 ";
+  Input.delete_word draft;
+  check string "word erasure before the span shifts its byte offset"
+    "한\nPAYLOAD\n👩‍💻" (expanded draft owner "PAYLOAD");
+  while Input.cursor draft < Input.length draft do Input.move_right draft done;
+  Input.backspace draft;
+  check string "grapheme erasure after the span keeps its ownership"
+    "한\nPAYLOAD\n" (expanded draft owner "PAYLOAD");
+  check bool "source stays valid UTF-8" true (String.is_valid_utf_8 (Input.contents draft))
+
+let owned_snapshots_and_revision () =
+  let draft = Input.create () in
+  let owner = Input.insert_owned draft "[paste]" in
+  let snapshot = Input.snapshot draft in
+  let view = Option.get (Input.snapshot_owned_view snapshot owner) in
+  Input.move_left draft;
+  check bool "cursor movement preserves preparation" true (Input.owned_is_current draft view);
+  Input.invalidate_revision draft;
+  check bool "attachment revision refuses old preparation" false (Input.owned_is_current draft view);
+  Input.clear draft;
+  check bool "current snapshot does not resurrect retired owner" true
+    (Option.is_none (Input.snapshot_owned_view (Input.snapshot draft) owner));
+  let restored = Input.create () in
+  Input.insert restored (Input.replace_owned view ~replacement:"ORIGINAL");
+  check string "explicit saved-view restoration materializes the exact source" "ORIGINAL" (Input.contents restored);
+  check bool "restored plain source does not acquire old handle" true
+    (Option.is_none (current_owned_view restored owner))
+
+let owned_parser_projection () =
+  let module Command = Masc_tui_command in
+  let draft = Input.create () and marker = "[paste]" in
+  Input.insert draft ("/steer  " ^ marker ^ "  \n");
+  let owner = Input.insert_owned draft marker in
+  Input.insert draft "\n尾";
+  let command, ranges = Command.parse_with_message_source (Input.contents draft) in
+  check bool "same parser chooses steer without interpreting original bytes" true
+    (command = Command.Steer_turn (marker ^ "\n" ^ marker ^ "\n尾"));
+  let view = Option.get (Input.project_owned (Option.get (current_owned_view draft owner)) (Option.get ranges)) in
+  check string "projection trims command spaces while preserving original payload whitespace/slash"
+    (marker ^ "\n  /help\n原文  \n尾")
+    (Input.replace_owned view ~replacement:"  /help\n原文  ");
+  check bool "projection keeps input revision authority" true (Input.owned_is_current draft view);
+  Input.insert draft "new";
+  check bool "projected preparation becomes stale after edit" false (Input.owned_is_current draft view)
+
+let owned_plain_message_is_not_reparsed () =
+  let module Command = Masc_tui_command in
+  let draft = Input.create () in
+  let owner = Input.insert_owned draft "[paste]" in
+  let command, ranges = Command.parse_with_message_source (Input.contents draft) in
+  check bool "visible input determines Say" true (command = Command.Say "[paste]");
+  let view = Option.get (Input.project_owned (Option.get (current_owned_view draft owner)) (Option.get ranges)) in
+  check string "slash in original stays message data" "/help\ntext"
+    (Input.replace_owned view ~replacement:"/help\ntext");
+  let _, other = Command.parse_with_message_source "/task title\n[paste]" in
+  check bool "another command exposes no message-data projection" true (Option.is_none other)
+
 let () = run "Chat composer cursor"
   [ "editing", [ test_case "empty Left boundary" `Quick empty_boundary;
                   test_case "Unicode insertion and erasure" `Quick unicode_editing;
@@ -147,5 +259,12 @@ let () = run "Chat composer cursor"
                   test_case "revision follows edits" `Quick revision_tracks_edits_but_not_cursor_moves;
                   test_case "grapheme boundaries can change on insertion" `Quick boundary_changes_across_insertions;
                   test_case "cursor works after appended text" `Quick cursor_after_appended_text;
-                  test_case "separated append retains exact bytes" `Quick separated_append_keeps_exact_bytes ];
+                  test_case "separated append retains exact bytes" `Quick separated_append_keeps_exact_bytes;
+                  test_case "owned extent ignores identical literals" `Quick owned_literal_provenance;
+                  test_case "edited owner never revives" `Quick retired_owned_bytes_do_not_revive;
+                  test_case "deleting owner leaves literal copies" `Quick deleted_owner_keeps_other_literal;
+                  test_case "owned UTF-8 boundary edits" `Quick owned_utf8_boundary_edits;
+                  test_case "owned snapshots and revision" `Quick owned_snapshots_and_revision;
+                  test_case "actual steer source projection" `Quick owned_parser_projection;
+                  test_case "plain spill is message data" `Quick owned_plain_message_is_not_reparsed ];
     "rendering", [] ]

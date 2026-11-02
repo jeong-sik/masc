@@ -60,9 +60,9 @@ let original_judgment (record:Owner.retained) =
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Ok commit.judgment
   | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
     Error (Rejected "Original history record has no answered host judgment")
-let restore_answer ~store ~schema request record =
+let restore_answer ~store request record =
   let* judgment=original_judgment record in
-  let* final=rejected (Exact.final_of_json ~schema judgment) in
+  let* final=io (fun () -> Request.decode_final ~store request judgment) |> rejected in
   let* ()=io (fun () -> Request.confirm_final ~store request final) |> rejected in
   match final with
   | Exact.Call_final (Exact.Answered {output;_}) ->
@@ -146,7 +146,8 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
        | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> wake ());
       Ok (Basis_superseded completed) in
-  let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~prepare ~call ~terminal in
+  let decode_final json=io (fun () -> Request.decode_final ~store request json) in
+  let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~decode_final ~prepare ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (proposal,record)) -> publish_answer record proposal
@@ -154,15 +155,15 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
   | Final (Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
     Ok (Refused (final,record))
   | Commit_pending record ->
-    let* _,proposal=restore_answer ~store ~schema request record in
+    let* _,proposal=restore_answer ~store request record in
     publish_answer record proposal
   | Settled record ->
     (match Progress.phase record.progress with
      | Progress.Finished _ ->
-       let* _=restore_answer ~store ~schema request record in
+       let* _=restore_answer ~store request record in
        Ok (Finished record)
      | Conflicted _ ->
-       let* _,proposal=restore_answer ~store ~schema request record in
+       let* _,proposal=restore_answer ~store request record in
        publish_answer record proposal
      | Rejected _ | Subdividing _ | Subdivided _ ->
        Error (Rejected "Original history request has a terminal host refusal")

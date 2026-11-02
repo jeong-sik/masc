@@ -648,6 +648,23 @@ let run_turn
   let native_binding, native_resume = match native_continuation with
     | None -> None, None
     | Some { binding; resumed } -> Some binding, resumed in
+  let on_checkpoint_prepared = match direct_resume, native_binding with
+    | Some (Checkpoint_continuation admission), Some binding ->
+      let entered = ref false in
+      Some (fun () ->
+        if !entered then Ok ()
+        else
+          let result = match Keeper_direct_checkpoint_continuation.official_client admission with
+            | Some _ ->
+              Keeper_owner_registry.enter_direct_preparation ~base_path:binding.base_path ~keeper_name:binding.keeper_name
+                ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
+              |> Result.map_error Keeper_owner_registry.command_error_to_string
+            | None -> Keeper_direct_checkpoint_continuation.consume
+                ~base_path:binding.base_path ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id admission in
+          Result.map (fun () -> entered := true) result
+          |> Result.map_error (fun detail -> Agent_core.Error.Internal detail))
+    | Some (Gate_continuation _ | Runtime_continuation _), _
+    | None, _ | Some _, None -> None in
   (* Restore the whole native context before prompt/tool setup closes over
      it. The same object must reach Core so new load receipts, repetition
      observations and injector updates are persisted together. *)
@@ -1669,6 +1686,7 @@ let run_turn
                       ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
                       ?official_client_continuation
+                      ?on_checkpoint_prepared
                       ?official_task_reference
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
@@ -2222,13 +2240,10 @@ let run_turn
                input_tokens on a cache-heavy turn and one on a genuinely large prompt
                read identically without them, and the ctx-fill denominator below is the
                conversation ceiling, so the difference is what an operator acts on. *)
-            { input_tokens = Some result.usage.input_tokens
-            ; output_tokens = Some result.usage.output_tokens
-            ; cache_creation_input_tokens =
-                Some result.usage.cache_creation_input_tokens
-            ; cache_read_input_tokens = Some result.usage.cache_read_input_tokens
-            ; scope = result.usage_scope
-            }
+            Turn_record.usage_of_reported_counts
+              ~scope:result.usage_scope
+              ~usage:result.usage
+              ~telemetry:result.inference_telemetry
           | Ok _ | Error _ ->
             { input_tokens = None
             ; output_tokens = None

@@ -4976,6 +4976,16 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
          "one pending entry read error is exposed"
          1
          (List.length read_errors);
+       let current =
+         `Assoc
+           (Masc.Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
+              ~base_path ~keeper_name:"queue-partial-read" ~now_ts:(Unix.gettimeofday ()))
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.check yojson "partial authority does not certify a current gate"
+         `Null (current |> member "current_gate");
+       Alcotest.(check string) "partial authority stays unavailable"
+         "unavailable" (current |> member "approval_queue_state" |> member "state" |> to_string);
        (match
           AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
             ~keeper_name:"queue-partial-read"
@@ -6376,6 +6386,14 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        Keeper_approval.Audit.For_testing.reset_store ();
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
+       let gate_fields () =
+         `Assoc
+           (Masc.Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
+              ~base_path ~keeper_name ~now_ts:(Unix.gettimeofday ()))
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "pending queue owns the displayed gate"
+         approval_id (gate_fields () |> member "current_gate" |> member "id" |> to_string);
        Keeper_approval.Audit.For_testing.set_append_jsonl
          (fun _path _json ->
             failwith "deterministic approval audit append failure");
@@ -6416,6 +6434,22 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          (match AQ.list_pending_entries_for_workspace ~base_path with
           | Ok entries -> List.length entries
           | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
+       let rows =
+         Keeper_approval.Audit.read_recent ~base_path ~keeper_name ~n:128 ()
+         |> function
+         | Ok rows -> rows
+         | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
+       in
+       Alcotest.(check bool) "historical pending audit remains after append failure"
+         true
+         (List.exists (fun row ->
+              (row |> member "id") = `String approval_id
+              && (row |> member "event") = `String "pending") rows);
+       let current = gate_fields () in
+       Alcotest.check yojson "historical audit cannot reopen the displayed gate"
+         `Null (current |> member "current_gate");
+       Alcotest.(check string) "confirmed empty queue is ready"
+         "ready" (current |> member "approval_queue_state" |> member "state" |> to_string);
        let durable_resolution =
          durable_resolution_opt ~base_path ~keeper_name ~approval_id
          |> require_some "approved resolution was not delivered"

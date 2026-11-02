@@ -323,6 +323,14 @@ let recommended ~needs_attention ~idle_attention =
 ;;
 
 let test_recommendations_address_the_keeper () =
+  let key = Prompt_names.keeper_fleet_diagnose in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  let set value = match Prompt_registry.set_override key value with
+    | Ok () -> () | Error detail -> Alcotest.fail detail in
+  set "MANAGED_FLEET {{keeper_name}} {{reason}}";
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> set value
+    | None -> Prompt_registry.clear_prompt_override key) @@ fun () ->
   let open Yojson.Safe.Util in
   let action_types items =
     List.map (fun item -> item |> member "action_type" |> to_string) items
@@ -341,6 +349,11 @@ let test_recommendations_address_the_keeper () =
     "an idle keeper: equal severity, so ordered by action name"
     [ "keeper_message"; "keeper_probe" ]
     (action_types idle);
+  let message = match Server_dashboard_http_composite_recommendations.fleet_fsm_message_payload
+      ~keeper_name:"worker-a" ~reason:"idle" ~snapshot:(`Assoc []) ~execution:(`Assoc []) with
+    | Ok payload -> payload | Error detail -> Alcotest.fail detail in
+  Alcotest.(check string) "managed diagnosis guidance renders the current target and reason"
+    "MANAGED_FLEET worker-a idle" (message |> member "message" |> to_string);
   List.iter
     (fun item ->
        let action_type = item |> member "action_type" |> to_string in
@@ -366,6 +379,23 @@ let test_recommendations_address_the_keeper () =
          "keeper"
          (preview |> member "target_type" |> to_string))
     (stalled @ idle)
+;;
+
+let test_missing_guidance_does_not_publish_a_message_action () =
+  let directory = match Prompt_registry.get_markdown_dir () with
+    | Some value -> value | None -> Alcotest.fail "fixture prompt directory unavailable" in
+  let empty = Filename.temp_dir "missing-fleet-guidance-" "" in
+  Fun.protect
+    ~finally:(fun () -> Prompt_registry.set_markdown_dir directory; Fs_compat.remove_tree empty)
+    (fun () ->
+      Prompt_registry.set_markdown_dir empty;
+      (match Server_dashboard_http_composite_recommendations.fleet_fsm_message_payload
+         ~keeper_name:"worker-a" ~reason:"idle" ~snapshot:(`Assoc []) ~execution:(`Assoc []) with
+       | Error _ -> () | Ok _ -> Alcotest.fail "missing guidance produced a successful message");
+      let actions = recommended ~needs_attention:true ~idle_attention:true in
+      Alcotest.(check (list string)) "available probes remain when message guidance is absent"
+        ["keeper_probe"]
+        (List.map (fun action -> Yojson.Safe.Util.(action |> member "action_type" |> to_string)) actions))
 ;;
 
 let () =
@@ -395,6 +425,8 @@ let () =
             "address the keeper by catalog action"
             `Quick
             test_recommendations_address_the_keeper
+        ; Alcotest.test_case "missing diagnostic guidance leaves no message action" `Quick
+            test_missing_guidance_does_not_publish_a_message_action
         ] )
     ]
 ;;

@@ -2,6 +2,7 @@ type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
 type request = { route : Browser_selection.preference; tab_id : int option }
 type dialog_kind = Alert | Confirm | Prompt | Beforeunload
 type dialog = { kind : dialog_kind; message : string; default_value : string option }
+type dialog_observation = Unobserved | Observed of dialog option
 let dialog_kind_to_wire = function
   | Alert -> "alert" | Confirm -> "confirm" | Prompt -> "prompt" | Beforeunload -> "beforeunload"
 let dialog_kind_of_wire = function
@@ -27,7 +28,7 @@ let ego_page_of_json = function
      | (None|Some _),(None|Some _),(None|Some _) -> Error "invalid Ego Page provenance")
   | _ -> Error "invalid or duplicate Ego Page provenance fields"
 type tab = { id : int; title : string; url : string; active : bool; window_id : int option;
-  dialog : dialog option; ego_page : ego_page option }
+  dialog : dialog_observation; ego_page : ego_page option }
 type selection = Requested of tab | Active of tab | None_active
 open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -73,7 +74,7 @@ let decode_tab json =
       | None -> Ok None
       | Some (`Int window_id) when window_id >= 0 -> Ok (Some window_id)
       | Some _ -> Error "malformed browser tab window" in
-    let* dialog = match field "dialog" json with
+    let* payload = match field "dialog" json with
       | None -> Ok None
       | Some dialog ->
         (match field "type" dialog, field "message" dialog, field "defaultValue" dialog with
@@ -83,6 +84,11 @@ let decode_tab json =
             | Some kind, Some (`String value) -> Ok (Some {kind;message;default_value=Some value})
             | None, _ | Some _, Some _ -> Error "malformed browser tab dialog")
          | _ -> Error "malformed browser tab dialog") in
+    let* dialog = match field "dialogObservation" json, payload with
+      | None, None | Some (`String "unobserved"), None -> Ok Unobserved
+      | None, Some dialog -> Ok (Observed (Some dialog))
+      | Some (`String "observed"), payload -> Ok (Observed payload)
+      | Some _, (None | Some _) -> Error "malformed browser tab dialog observation" in
     let* ego_page=match field "egoPage" json with
       | None -> Ok None
       | Some value -> Result.map Option.some (ego_page_of_json value) in
@@ -110,14 +116,15 @@ let decode_inventory = function
 let dialog_json {kind;message;default_value} =
   `Assoc (["type",`String (dialog_kind_to_wire kind);"message",`String message]
     @ match default_value with Some value -> ["defaultValue",`String value] | None -> [])
+let dialog_observation_fields = function
+  | Unobserved -> ["dialogObservation",`String "unobserved"]
+  | Observed None -> ["dialogObservation",`String "observed"]
+  | Observed (Some dialog) -> ["dialogObservation",`String "observed";"dialog",dialog_json dialog]
 let tab_json tab = `Assoc (["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
   @ (match tab.window_id with Some window_id -> ["windowId",`Int window_id] | None -> [])
   @ (match tab.ego_page with None -> [] | Some page -> ["egoPage",ego_page_to_json page])
-  @ match tab.dialog with
-    | None -> []
-    | Some {kind;message;default_value} ->
-      ["dialog",dialog_json {kind;message;default_value}])
+  @ dialog_observation_fields tab.dialog)
 let source_name route = Browser_lane.Lane_name.to_wire (Browser_lane.route_lane_name route)
 let select ~tab_id tabs = match tab_id with
   | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with

@@ -120,7 +120,7 @@ let script_text ~capture steps =
     | `Assoc fields ->
       (match List.assoc_opt "method" fields, List.assoc_opt "params" fields with
        | Some (`String method_), Some (`Assoc params)
-         when List.mem method_ ["turn/started"; "item/completed"; "item/updated"; "session/tokenUsage"] ->
+         when List.mem method_ ["turn/started"; "item/started"; "item/completed"; "item/updated"; "session/tokenUsage"] ->
          let position = `Assoc ["id", `String "fixture-record"; "sequence", `Int 1] in
          let source_range = `Assoc ["first", position; "last", position;
            "stream", `Assoc ["kind", `String "run"; "id", `String "fixture-run"]] in
@@ -1361,7 +1361,107 @@ let test_message_phase_marks_the_answer () =
     (fun result _ ->
        match result with
        | Ok turn -> check (option string) "no phase keeps the newest message" (Some "MASC_MUSE_OK") turn.text
-       | Error error -> fail (Serve.error_to_string error))
+       | Error error -> fail (Serve.error_to_string error));
+  let started ~item_id cursor =
+    Printf.sprintf
+      {|{"jsonrpc":"2.0","method":"item/started","params":{"sessionId":"s-1","viewCursor":%S,"item":{"itemId":%S,"kind":"agentMessage","turnId":"t-1","revision":1,"status":"inProgress","text":""}}}|}
+      cursor item_id
+  in
+  run_scripted
+    (handshake_and_session ~granted:[]
+     @ [ Write (started ~item_id:"m-1" "v:3")
+       ; Write (phased_message ~item_id:"m-2" ~phase:"finalAnswer" "Earlier completed")
+       ; Write (phased_message ~item_id:"m-1" ~phase:"finalAnswer" "Completed later")
+       ; Write turn_completed
+       ])
+    (fun result _ ->
+       match result with
+       | Ok turn ->
+         check (option string) "completion order selects the newest answer"
+           (Some "Completed later") turn.text
+       | Error error -> fail (Serve.error_to_string error));
+  let terminal_start =
+    {|{"jsonrpc":"2.0","method":"item/started","params":{"sessionId":"s-1","viewCursor":"v:3","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":1,"status":"completed","text":"bad"}}}|}
+  in
+  run_scripted
+    (handshake_and_session ~granted:[]
+     @ [ Write terminal_start
+       ; Write agent_completed
+       ; Write turn_completed
+       ])
+    (fun result _ ->
+       match result with
+       | Error (Serve.Protocol_error { stage = "view/page"; detail }) ->
+         check string "terminal item/started is rejected" "agent item start is terminal" detail
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "terminal item/started must be rejected");
+  let reupdated_after_complete =
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"agent-final-2","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":3,"status":"completed","text":"overwritten"}}}|}
+  in
+  run_scripted
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_completed
+       ; Write reupdated_after_complete
+       ; Write turn_completed
+       ])
+    (fun result _ ->
+       match result with
+       | Error (Serve.Protocol_error { stage = "view/page"; detail }) ->
+         check string "post-completion revision is rejected" "agent item updated after completion" detail
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "revision after completion must be rejected")
+;;
+
+let test_pending_approval_decision_response_during_view_page () =
+  let gaps = ref 0 in
+  let gap =
+    {|{"jsonrpc":"2.0","method":"view/gap","params":{"after":"v:6","next":"v:7","sessionId":"s-1"}}|}
+  in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.View_gap_observed -> incr gaps
+      | _ -> ())
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_started
+       ; Write tool_started
+       ; Write approval_request
+       ; Read (* approval ack *)
+       ; Read (* approval/decide *)
+       ; Write tool_completed
+       ; Write agent_completed
+       ; Write turn_completed
+       ; Write gap
+       ; Write decide_result
+       ])
+    (fun result _ ->
+       match result with
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok turn ->
+         check (option string) "reply survives late approval/decide response"
+           (Some "MASC_MUSE_OK") turn.text;
+         check int "approval counted" 1 turn.approvals_decided;
+         check int "view gap during history page observed" 1 !gaps);
+  let decide_error =
+    {|{"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"decision persistence failed"}}|}
+  in
+  run_scripted
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_started
+       ; Write tool_started
+       ; Write approval_request
+       ; Read (* approval ack *)
+       ; Read (* approval/decide *)
+       ; Write tool_completed
+       ; Write agent_completed
+       ; Write turn_completed
+       ; Write decide_error
+       ])
+    (fun result _ ->
+       match result with
+       | Error (Serve.Rpc_error { method_ = "approval/decide"; code = -32603; message }) ->
+         check string "late approval/decide rpc error surfaces" "decision persistence failed" message
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "failed approval/decide response must fail the turn")
 ;;
 
 let test_stream_callback_preserves_reserved_controls () =
@@ -1647,6 +1747,8 @@ let () =
     [ ( "turn"
       , [ test_case "completed message presence" `Quick test_completed_message_presence
         ; test_case "message phase marks the answer" `Quick test_message_phase_marks_the_answer
+        ; test_case "pending approval/decide response during view/page" `Quick
+            test_pending_approval_decision_response_during_view_page
         ; test_case "stream callback preserves reserved controls" `Quick
             test_stream_callback_preserves_reserved_controls
         ; test_case "history failure aggregate observer preserves reserved controls" `Quick

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { fireEvent, waitFor } from '@testing-library/preact'
+import { act } from 'preact/test-utils'
+import { fireEvent, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -141,8 +142,10 @@ import {
   resetToolCallOutputs,
 } from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
+import { hydrateServerPushEvent } from '../sse-store'
 import { chatShowAutonomous, chatShowInternal } from '../lib/chat-view-prefs'
 import type { KeeperConversationEntry } from '../types'
+import type { KeeperChatOperation } from '../api/keeper'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -868,6 +871,123 @@ describe('KeeperConversationPanel', () => {
         'edited operation input',
       )
     })
+  })
+
+  function queuedOperation(operationId: string): KeeperChatOperation {
+    return {
+      operationId, sequence: '7', createdAt: 42,
+      input: { message: operationId, wire: {
+        schema: 'masc.keeper_chat_operation.input.v1', message: operationId,
+        user_blocks: [{ type: 'text', text: operationId }],
+        turn_instructions: null, surface_context: null, attachments: [],
+      } },
+      state: { kind: 'queued' },
+    }
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(accept => { resolve = accept })
+    return { promise, resolve }
+  }
+
+  function cancelOperation(operationId: string): HTMLButtonElement {
+    const row = container.querySelector(`[data-operator-chat-operation="${operationId}"]`)
+    expect(row).not.toBeNull()
+    const button = within(row as HTMLElement).getByRole('button', { name: '취소' }) as HTMLButtonElement
+    fireEvent.click(button)
+    return button
+  }
+
+  it('keeps queue response ownership through A to B to A visits', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    const firstA = deferred<KeeperChatOperation[]>()
+    const firstB = deferred<KeeperChatOperation[]>()
+    const oldA = queuedOperation('old-A')
+    const newA = queuedOperation('new-A')
+    const operationB = queuedOperation('operation-B')
+    listQueuedKeeperChatOperations.mockImplementationOnce(() => firstA.promise)
+      .mockImplementationOnce(() => firstB.promise)
+      .mockImplementation(async (keeper: string) => [keeper === 'A' ? newA : operationB])
+    render(html`<${KeeperConversationPanel} keeperName="A" placeholder="" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]')!)
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledWith('A'))
+    render(html`<${KeeperConversationPanel} keeperName="B" placeholder="" />`, container)
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledWith('B'))
+    firstB.resolve([operationB])
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="operation-B"]')).not.toBeNull())
+    await act(async () => { firstA.resolve([oldA]) })
+    expect(container.querySelector('[data-operator-chat-operation="old-A"]')).toBeNull()
+    cancelOperation(operationB.operationId)
+    await waitFor(() => expect(cancelKeeperChatOperation).toHaveBeenCalledWith('B', operationB.operationId))
+    render(html`<${KeeperConversationPanel} keeperName="A" placeholder="" />`, container)
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="new-A"]')).not.toBeNull())
+    expect(container.querySelector('[data-operator-chat-operation="old-A"]')).toBeNull()
+  })
+
+  it('keeps the latest queue read when an earlier read finishes last', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    const older = deferred<KeeperChatOperation[]>()
+    const newest = queuedOperation('newest-operation')
+    listQueuedKeeperChatOperations.mockImplementationOnce(() => older.promise).mockResolvedValue([newest])
+    render(html`<${KeeperConversationPanel} keeperName="A" placeholder="" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]')!)
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledWith('A'))
+    hydrateServerPushEvent({ type: 'keeper_waiting_inventory_changed', keeper_name: 'A' })
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="newest-operation"]')).not.toBeNull())
+    await act(async () => { older.resolve([queuedOperation('retired-read-operation')]) })
+    expect(container.querySelector('[data-operator-chat-operation="retired-read-operation"]')).toBeNull()
+    cancelOperation(newest.operationId)
+    await waitFor(() => expect(cancelKeeperChatOperation).toHaveBeenCalledWith('A', newest.operationId))
+  })
+
+  it('keeps a new keeper action pending when a retired keeper action settles', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    const actionA = deferred<unknown>()
+    const actionB = deferred<unknown>()
+    listQueuedKeeperChatOperations.mockImplementation(async (keeper: string) => [queuedOperation(`operation-${keeper}`)])
+    cancelKeeperChatOperation.mockImplementationOnce(() => actionA.promise).mockImplementationOnce(() => actionB.promise)
+    render(html`<${KeeperConversationPanel} keeperName="A" placeholder="" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]')!)
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="operation-A"]')).not.toBeNull())
+    cancelOperation('operation-A')
+    render(html`<${KeeperConversationPanel} keeperName="B" placeholder="" />`, container)
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="operation-B"]')).not.toBeNull())
+    cancelOperation('operation-B')
+    await act(async () => {
+      actionA.resolve(undefined)
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+    })
+    await waitFor(() => {
+      const row = container.querySelector('[data-operator-chat-operation="operation-B"]')
+      expect(row).not.toBeNull()
+      expect((within(row as HTMLElement).getByRole('button', { name: '취소' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+    actionB.resolve(undefined)
+  })
+
+  it('keeps each queue operation pending until its own action settles', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    const firstAction = deferred<unknown>()
+    const secondAction = deferred<unknown>()
+    listQueuedKeeperChatOperations.mockResolvedValue([
+      queuedOperation('first-operation'), queuedOperation('second-operation'),
+    ])
+    cancelKeeperChatOperation.mockImplementationOnce(() => firstAction.promise)
+      .mockImplementationOnce(() => secondAction.promise)
+    render(html`<${KeeperConversationPanel} keeperName="A" placeholder="" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]')!)
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="second-operation"]')).not.toBeNull())
+    cancelOperation('first-operation')
+    cancelOperation('second-operation')
+    await act(async () => {
+      firstAction.resolve(undefined)
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+    })
+    const secondRow = container.querySelector('[data-operator-chat-operation="second-operation"]') as HTMLElement
+    expect((within(secondRow).getByRole('button', { name: '취소' }) as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => { secondAction.resolve(undefined) })
+    await waitFor(() => expect((within(secondRow).getByRole('button', { name: '취소' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
   it('keeps operation controls closed for a Reader session', async () => {

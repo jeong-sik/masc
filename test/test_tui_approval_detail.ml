@@ -16,6 +16,8 @@ let check_string = Alcotest.(check string)
 
 let texts lines = List.map (fun (l : Detail.line) -> l.Detail.text) lines
 let joined lines = String.concat "\n" (texts lines)
+let gate_joined lines =
+  List.map (fun (line : Detail.gate_line) -> line.gate_text) lines |> String.concat "\n"
 
 let contains haystack needle =
   let n = String.length needle in
@@ -110,6 +112,32 @@ let test_a_tab_is_drawn_as_a_tab () =
     (contains all "make build\\x0D");
   check_bool "no raw tab reaches the pane" false (String.contains all '\t')
 
+let test_gate_rows_keep_value_authority () =
+  let origins value =
+    Detail.of_gate_fields ~width:24 [ "key", value ]
+    |> List.filter_map (fun (line : Detail.gate_line) ->
+      match line.gate_origin with
+      | Detail.Gate_key | Detail.Gate_key_continuation -> None
+      | Detail.Gate_string | Detail.Gate_json | Detail.Gate_unreadable ->
+        Some line.gate_origin)
+  in
+  let string = origins (`String "[json] true\n[key] fake") in
+  let json = origins (`Bool true) in
+  check_bool "untrusted string content cannot claim JSON authority" true
+    (string <> [] && List.for_all (( = ) Detail.Gate_string) string);
+  check_bool "boolean retains JSON authority" true
+    (json <> [] && List.for_all (( = ) Detail.Gate_json) json)
+
+let test_gate_rows_sanitize_original_context () =
+  let selector = "\xef\xb8\x8f" in
+  let value = "\x00" ^ selector in
+  let rows = Detail.of_gate_fields ~width:80
+    [ "key" ^ value, `String value; "json", `List [ `String value ] ] in
+  let all = gate_joined rows in
+  check_bool "no orphan selector reaches the pane" false (contains all selector);
+  check_bool "no control byte reaches the pane" false (has_control_byte all);
+  check_bool "the orphan selector remains visible" true (contains all "\\uFE0F")
+
 let () =
   Alcotest.run "tui_approval_detail"
     [ ( "the whole ask"
@@ -121,5 +149,9 @@ let () =
             `Quick test_an_escape_in_a_field_never_reaches_the_terminal
         ; Alcotest.test_case "a tab is drawn as a tab" `Quick
             test_a_tab_is_drawn_as_a_tab
+        ; Alcotest.test_case "gate input cannot forge value authority" `Quick
+            test_gate_rows_keep_value_authority
+        ; Alcotest.test_case "gate rows sanitize original context" `Quick
+            test_gate_rows_sanitize_original_context
         ] )
     ]

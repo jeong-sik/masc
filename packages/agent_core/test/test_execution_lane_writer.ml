@@ -1527,6 +1527,10 @@ let test_each_external_wake_authorizes_one_reconciliation () =
           true
           (Writer.wake_reconciliation writer ~source:Writer.Operator_requested);
         let waiting = await_reconciliation_wait writer ~outcome_count:3 in
+        (match Store.with_writer_absent ~dir (fun () -> ()) with
+         | Ok Store.Writer_active -> ()
+         | Ok (Writer_absent ()) -> fail "live reconciliation wait released actor ownership"
+         | Error error -> fail (Store.error_to_string error));
         check int "one external wake causes one retry" 1 waiting.reconciliation_wakes;
         check
           bool

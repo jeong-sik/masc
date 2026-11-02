@@ -61,5 +61,6 @@ val retract_sources : keepers_dir:string -> keeper_id:string -> expected_version
     references are preserved; a pocket that loses some sources becomes
     [Needs_reconsideration] with empty [next_steps], and one that loses all of
     them is removed. *)
-val render : input -> string option
-(** Advice requires matching source and execution-progress evidence. *)
+val render : input -> (string option, string) result
+(** Advice requires matching source and execution-progress evidence. Missing
+    managed guidance is an explicit [Error]; no previous pockets is [Ok None]. *)

@@ -133,13 +133,24 @@ BrowserInteract {"lane":"automation","action":"fill","tabId":<id>,"selector":<�
 BrowserInteract {"lane":"automation","action":"press_key","tabId":<id>,"expectedUrl":<읽은 URL>,"key":"Enter"}
 BrowserRead {"lane":"automation","tabId":<id>}
 BrowserRead {"lane":"automation","tabId":<id>,"mode":"screenshot"}
-keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 화면 배치를 확인해줘"}
+keeper_image_read {"artifact":<반환된 artifact>}
 ```
 
 스크린샷은 명시한 탭의 viewport PNG를 Keeper의 이미지 저장소에 저장한다.
-반환된 artifact를 Vision reader가 읽으며, BrowserRead의 텍스트 응답에 이미지
-바이트를 넣지는 않는다. 스크린샷 저장에는 in-process Keeper 실행 문맥이 필요하다.
+반환된 Keeper-local 이미지 artifact 핸들을 그대로 `keeper_image_read`로 읽는다.
+성공하면 별도 모델 호출 없이 현재 모델에 이미지 블록을 전달한다. BrowserRead의
+텍스트 응답 자체에는 이미지 바이트를 넣지 않는다. 메시지에 이미지 블록이 이미
+첨부됐으면 그 입력을 직접 읽는다.
+스크린샷 저장에는 in-process Keeper 실행 문맥이 필요하다.
 일반 도구 호출자의 표시 이름을 Keeper 소유권으로 간주하지 않는다.
+
+현재 런타임 capability와 실제 제공 도구 목록에서 이미지 입력 미지원으로
+`keeper_image_read`가 제외됐음이 확인되거나, native image admission이 명시적으로
+거절했거나, 다른 모델의 텍스트 해석이 필요하면 `keeper_analyze_image`에 artifact와
+query를 전달한다. 정상 제외는 deferred/discovery 목록에도 적용되므로 거절된 호출을
+먼저 만들 필요는 없다. 단순 스키마 미로드나 도구 검색 실패만으로 미지원 제외를
+추측하지 않는다. 모델·provider 이름, 과거 스킬 안내, 파일·아티팩트 조회 실패나
+계정 한도 오류도 이미지 미지원의 근거가 아니다.
 
 `live`는 `BrowserTabs`에서 받은 `clientId`와 `tabId`를 한 쌍으로 유지한다.
 Firefox와 Zen이 동시에 연결된 경우 읽기·캡처·조작마다 해당 `clientId`를
@@ -148,7 +159,7 @@ Firefox와 Zen이 동시에 연결된 경우 읽기·캡처·조작마다 해당
 ## 화면과 상호작용
 
 선택한 탭의 화면을 보려면 `BrowserRead`에 `mode=screenshot`를 지정한다.
-Keeper는 반환된 `artifact`를 `keeper_analyze_image`에 전달한다. TUI에서는
+Keeper는 반환된 `artifact`를 먼저 `keeper_image_read`에 전달한다. TUI에서는
 `Ctrl-O`로 같은 탭의 PNG를 미리 본다. 캡처 범위는 현재 viewport다.
 
 ```json

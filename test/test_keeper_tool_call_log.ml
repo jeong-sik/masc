@@ -2715,6 +2715,56 @@ let execution_row ~keeper ~execution_id ~tool ~ts =
          ; "execution_id", `String execution_id; "tool", `String tool ]
 ;;
 
+let test_file_change_tally_does_not_recount_rotated_rows () =
+  with_tmp_log (fun () ->
+    let module Change = Keeper_tool_call_file_change in
+    let store = log_store () in
+    let row tool = `Assoc
+      ["keeper", `String "alice"; "tool", `String tool
+      ; "ts", `Float (Unix.gettimeofday ())] in
+    let append tool = ignore (Dated_jsonl.append_rotating store
+      ~max_current_file_bytes:1 (row tool) : Dated_jsonl.append_outcome) in
+    append "first";
+    let count () = Change.rows_counted
+      (Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 ()) in
+    Alcotest.(check int) "first row counted once" 1 (count ());
+    append "second";
+    Alcotest.(check int) "rotation retains both rows once" 2 (count ());
+    Alcotest.(check int) "unchanged read does not replay a segment" 2 (count ()))
+;;
+
+let test_index_includes_a_segment_rotated_during_enumeration () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let row tool = execution_row ~keeper:"alice" ~execution_id:"same-execution"
+      ~tool ~ts:(Unix.gettimeofday ()) in
+    Dated_jsonl.append store (row "before-rotation");
+    let current = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "current ledger path missing" in
+    let sentinel = Filename.remove_extension current ^ ".001.jsonl" in
+    Fs_compat.append_jsonl sentinel
+      (execution_row ~keeper:"bob" ~execution_id:"sentinel" ~tool:"sentinel"
+        ~ts:(Unix.gettimeofday ()));
+    let rotated = ref false in
+    let before_scan ~path =
+      if String.equal path sentinel && not !rotated then begin
+        rotated := true;
+        (* The current path was enumerated, but has not been inspected yet. *)
+        let segment = Filename.remove_extension current ^ ".002.jsonl" in
+        Fs_compat.invalidate_cached_writer current;
+        Sys.rename current segment;
+        Fs_compat.append_jsonl current (row "after-rotation")
+      end in
+    let rows = match Keeper_tool_call_index.For_testing.recent_rows
+        ~before_scan ~store ~keeper_name:"alice" ~n:50 () with
+      | Ok rows -> rows | Error detail -> Alcotest.fail detail in
+    Alcotest.(check (list string)) "the successful snapshot includes both files"
+      ["after-rotation"; "before-rotation"]
+      (List.sort String.compare (tool_names rows));
+    Alcotest.(check int) "rotation cannot hide duplicate execution evidence" 2
+      (List.length (execution_rows store ~keeper_name:"alice" ["same-execution"])))
+;;
+
 let test_execution_lookup_covers_complete_ledger () =
   with_tmp_log (fun () ->
     let store = log_store () in
@@ -3281,6 +3331,8 @@ let () =
     ; ( "file_change_tally",
         [ eio_test "matches a whole read and sees appends"
             test_file_change_tally_matches_a_whole_read
+        ; eio_test "carried tally does not recount rotated rows"
+            test_file_change_tally_does_not_recount_rotated_rows
         ; Alcotest.test_case "a carried entry answers only while nothing aged out"
             `Quick test_carried_entry_answers_only_while_nothing_aged_out
         ; eio_test "drops rows that aged out of the window"
@@ -3426,6 +3478,8 @@ let () =
             test_rows_after_keeps_only_the_projection
         ; eio_test "execution lookup covers history, keeper isolation and duplicate identities"
             test_execution_lookup_covers_complete_ledger
+        ; eio_test "index includes a segment rotated during enumeration"
+            test_index_includes_a_segment_rotated_during_enumeration
         ; eio_test "execution lookup preserves unordered duplicate evidence ordering"
             test_execution_lookup_orders_only_matches
         ; eio_test "execution lookup uses both composite index keys"

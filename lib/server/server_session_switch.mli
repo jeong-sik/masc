@@ -7,7 +7,10 @@
     nothing left to end it once the session is over. Returning from the switch
     would wait for that lane forever; failing it cancels the lane instead.
 
-    [run body] runs [body sw] and then ends the switch by failing it. An
-    exception [body] raises propagates, and the switch fails the same way. *)
+    [run body] runs [body ~runtime_sw sw] and then ends the session switch
+    [sw] by failing it. An exception [body] raises propagates, and the switch
+    fails the same way. When the session body returns or raises, [sw] and its
+    release handlers settle before [runtime_sw] stops its execution codec
+    workers. Cancellation of an ancestor scope still cancels both switches. *)
 
-val run : (Eio.Switch.t -> unit) -> unit
+val run : (runtime_sw:Eio.Switch.t -> Eio.Switch.t -> unit) -> unit

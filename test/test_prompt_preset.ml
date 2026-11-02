@@ -1426,6 +1426,18 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
       | _ -> fail "report part must be an object" in
     let runtime = Yojson.Safe.Util.member "runtime" wire in
     let commit_json = Yojson.Safe.Util.member "commit" runtime in
+    (* The receipt is private; add the tolerated legacy key on the wire it
+       round-trips through, exactly as an older committed file would carry it. *)
+    let ignored_runtime = replace "commit"
+      (replace "ignored_legacy_keys" (`List [ `String "max-prompt-bytes" ])
+         (Runtime.config_commit_receipt_to_yojson receipt)) runtime in
+    (match (or_fail (Masc.Tui_decode.decode_preset_restore
+      (payload (replace "runtime" ignored_runtime wire)))).prr_runtime with
+     | Masc.Tui_decode.Preset_runtime_committed commit ->
+       check string "editor diagnostics do not erase the original commit"
+         decoded_commit.prc_source_revision commit.prc_source_revision
+     | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
+       fail "editor diagnostics cannot turn an observed commit into a failed write");
     List.iter (fun (application, expected_registry) ->
       let runtime = replace "exact_output_registry"
         (Runtime.exact_output_registry_application_to_yojson application) runtime in
@@ -1471,6 +1483,15 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
       ; replace "commit" (replace "order" (`String "0") commit_json) runtime
       ; replace "commit" (replace "durability" (`String "unknown") commit_json) runtime
       ; replace "commit" (replace "warnings" `Null commit_json) runtime
+      ; replace "commit" (replace "ignored_legacy_keys" `Null commit_json) runtime
+      ; replace "commit" (replace "ignored_legacy_keys" (`List [`Int 7]) commit_json) runtime
+      ; replace "commit" (match commit_json with
+          | `Assoc fields -> `Assoc (List.remove_assoc "ignored_legacy_keys" fields)
+          | _ -> fail "commit must be an object") runtime
+      ; replace "commit" (match commit_json with
+          | `Assoc fields -> `Assoc (("ignored_legacy_keys", `List []) :: fields)
+          | _ -> fail "commit must be an object") runtime
+      ; replace "commit" (replace "future" (`Bool true) commit_json) runtime
       ; replace "commit" (replace "durability" (`String "unconfirmed")
           (replace "durability_detail" `Null commit_json)) runtime
       ; replace "exact_output_registry" (`Assoc ["status", `String "future";

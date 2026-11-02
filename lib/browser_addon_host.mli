@@ -49,13 +49,17 @@ val goal_space : t -> goal_id:string -> (Browser_goal_space.t option, Browser_go
 val bind_goal_space : t -> goal_id:string -> client_id:Browser_lane.client_id ->
   (Browser_goal_space.commit, Browser_goal_space.error) result
 (** Bind only the Space metadata of an observed Ego connection on this exact
-    installation. No browser command, claim, takeover or Page read is issued. *)
+    installation, with one current publishing service. A configured declaration
+    retains its typed installation identity across worker reattachment; a manual
+    installation retains its instance. No browser command, claim, takeover or
+    Page read is issued. *)
 val issue : ?goal_space:Browser_goal_space.t -> ?upload_paths:string list -> ?required_actions:Browser_capabilities.operation list ->
   t -> preference:Browser_selection.preference -> Browser_lane.verb ->
   (receipt, Tool_result.result) result
 (** [goal_space] applies only to initial automatic discovery/open. Its original
     installation and numeric Space ID must resolve in the dispatch snapshot;
-    a missing connection never falls back. It cannot redirect an explicit route
+    missing or duplicate installation publishers never fall back. Its current
+    instance and export owner still authorize dispatch. It cannot redirect an explicit route
     or a bound Page command.
 
     Choose the browser from the services' snapshots, invoke the advertised

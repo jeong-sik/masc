@@ -1,4 +1,5 @@
 module Live = Browser_live_peer
+module Raw_type = Browser_ego_raw_type
 open Result.Syntax
 let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 let obj fields = `Assoc fields
@@ -300,7 +301,7 @@ let retirement_settlement t = match t.finish_state with
    would leave the dialog's answer to the browser. Reads, moves and input
    are refused before any effect; closing the tab and answering the dialog
    are not. ego's page.info() names the open dialog. *)
-let dialog_blocked = "is blocked on a JavaScript dialog; list the tabs to read it, and answer it with accept_dialog or dismiss_dialog before another step"
+let dialog_blocked = "is blocked on a JavaScript dialog; read mode=dialog on this tab if metadata is needed (it can be unavailable after SDK-session replacement), and answer with accept_dialog or dismiss_dialog before another step"
 let open_dialog page = "(await " ^ page ^ ".info()).dialog ?? null"
 
 (* The dialog ego's page.info() names: CDP's javascriptDialogOpening, with
@@ -316,23 +317,19 @@ let ego_dialog json : (Browser_surface.dialog, string) result =
      | None, (None | Some _) -> Error (Printf.sprintf "ego reported a JavaScript dialog of unknown type %S" kind))
   | _ -> Error "ego reported a JavaScript dialog without its type or message"
 
-(* A listing is the space's tabs now: a number whose page is no longer
-   listed is dropped, so a read of it is refused before any run. Each page
-   the space manages says whether a JavaScript dialog blocks it, as a BiDi
-   row does; a page whose dialog state could not be read is listed among
-   the unavailable tabs with why, as BiDi lists a tab it could not read. *)
-type listed_tab = Listed of { page : page; title : string; url : string; active : bool;
-    dialog : Browser_surface.dialog option; provenance : Browser_surface.ego_page }
-  | Unread of { page : page; url : string; reason : string; provenance : Browser_surface.ego_page }
+(* Native inventory is independent of renderer-backed Page.info. A modal
+   retained across SDK-session replacement must not hide its Page identity. *)
+let tab_inventory_script = {js|async function(task) {
+  return (await task.tabs()).map(tab => ({
+    label: tab.label ?? null, targetId: tab.targetId, openedBy: tab.openedBy,
+    title: tab.title, url: tab.url, active: tab.active
+  }));
+}|js}
+type listed_tab = { page : page; title : string; url : string; active : bool;
+  provenance : Browser_surface.ego_page }
 let tab_rows t =
-  let* listed = ask t ~step:"tabs.list" ~args:`Null (String.concat "\n" [
-      "  const rows = [];";
-      "  for (const tab of await task.tabs()) {";
-      "    const row = {label: tab.label ?? null, targetId: tab.targetId, openedBy: tab.openedBy, title: tab.title, url: tab.url, active: tab.active, dialog: null, dialogUnread: null};";
-      "    if (tab.label) { try { row.dialog = " ^ open_dialog "task.page(tab.label)" ^ "; } catch (error) { row.dialogUnread = String(error && error.message || error); } }";
-      "    rows.push(row);";
-      "  }";
-      "  emit({ok: true, value: rows});" ]) in
+  let* listed = ask t ~step:"tabs.list" ~args:`Null
+      ("  emit({ok: true, value: await (" ^ tab_inventory_script ^ ")(task)});") in
   let row json =
     let* ()=match json with
       | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
@@ -344,14 +341,7 @@ let tab_rows t =
     let page=match provenance.label with Some label -> Managed label | None -> Unmanaged provenance.target_id in
     match field "title" json, field "url" json, field "active" json with
     | Some (`String title), Some (`String url), Some (`Bool active) ->
-      (match field "dialog" json, field "dialogUnread" json with
-       | Some `Null, Some `Null -> Ok (Listed {page; title; url; active; dialog = None;provenance})
-       | Some (`Assoc _ as dialog), Some `Null ->
-         (match ego_dialog dialog with
-          | Ok dialog -> Ok (Listed {page; title; url; active; dialog = Some dialog;provenance})
-          | Error reason -> Ok (Unread {page; url; reason;provenance}))
-       | Some `Null, Some (`String reason) -> Ok (Unread {page; url; provenance;reason = "ego did not read whether a dialog blocks this page: " ^ reason})
-       | _ -> Error "ego listed a tab without its dialog state")
+        Ok {page;title;url;active;provenance}
     | _ -> Error "ego listed a tab without its title, URL or active state" in
   let* rows = match listed with
     | `List rows ->
@@ -360,21 +350,12 @@ let tab_rows t =
         | json :: rest -> let* row = row json in collect (row :: acc) rest in
       collect [] rows
     | _ -> Error "ego answered a tab list that is not a list" in
-  let page_of = function Listed {page; _} | Unread {page; _} -> page in
-  let numbered = List.map (fun row -> remember t (page_of row), row) rows in
-  t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> page_of row = page) rows) t.pages;
-  let tabs, unavailable = List.fold_left (fun (tabs, unavailable) (index, (id, row)) -> match row with
-    | Listed {title; url; active; dialog; provenance; _} ->
-      obj (["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active;
-        "egoPage",Browser_surface.ego_page_to_json provenance]
-        @ match dialog with Some dialog -> ["dialog",Browser_surface.dialog_json dialog] | None -> []) :: tabs, unavailable
-    | Unread {url; reason; provenance; _} ->
-      tabs, obj ["id",`Int id;"index",`Int index;"error",str reason;"url",str url;
-        "egoPage",Browser_surface.ego_page_to_json provenance] :: unavailable)
-    ([], []) (List.mapi (fun index row -> index, row) numbered) in
-  Ok (match unavailable with
-    | [] -> `List (List.rev tabs)
-    | _ :: _ -> obj ["tabs",`List (List.rev tabs);"complete",`Bool false;"unavailableTabs",`List (List.rev unavailable)])
+  let numbered = List.map (fun row -> remember t row.page, row) rows in
+  t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> row.page=page) rows) t.pages;
+  Ok (`List (List.mapi (fun index (id,row) ->
+    obj (["id",`Int id;"index",`Int index;"url",str row.url;"title",str row.title;"active",`Bool row.active;
+      "egoPage",Browser_surface.ego_page_to_json row.provenance]
+      @ Browser_surface.dialog_observation_fields Unobserved)) numbered))
 
 let unmanaged_refused = "is unmanaged in the ego task space; this connection reads only the pages the space manages"
 
@@ -642,7 +623,6 @@ let watch_managed_page = "    watchDownloads(task.page(args.label), args.label);
 let find_managed_tab = "  const tab = (await task.tabs()).find(item => item.label === args.label);"
 let managed_refusals = [
   "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});" ]
-let managed_page = String.concat "\n" (download_watch :: find_managed_tab :: managed_refusals @ ["  else {"; watch_managed_page])
 (* The installed SDK guide treats unknown-origin Pages as user-owned when
    deciding whether to close. Explicit adoption grants Page operations but
    does not change that disposition; release returns the tab without closing. *)
@@ -901,43 +881,82 @@ let close_tab t id =
     t.pages <- List.filter (fun (_, known) -> known <> id) t.pages;
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
 
-(* A dialog is answered on a native managed Page in this Ego Space.
-   The dialog is read before it is
-   answered, since the answer closes it, and the receipt says which one was
-   answered; ego answers false when none is open, and nothing happened. A
-   dialog ego reported in a shape this connection cannot read is left out
-   of the receipt, as BiDi leaves out one it did not track. Prompt text
-   reaches ego as given, as BiDi passes userText. *)
-let no_dialog_refused = "no dialog is open in this tab"
+(* Both explicit dialog reads and answers bind the same canonical Page from
+   fresh native inventory. Neither resolves it through renderer-backed info. *)
+let dialog_page_script = {js|async function(task, args) {
+  const rows = await task.tabs();
+  if (!Array.isArray(rows)) return {error: "native tab inventory is not an array"};
+  const matches = rows.filter(row => row && row.label === args.label);
+  if (matches.length !== 1) return {error: "managed Page is absent or ambiguous in native inventory"};
+  const row = matches[0], page = row.page;
+  if (task.spaceId !== args.spaceId || typeof row.targetId !== "string" || row.targetId.trim() === ""
+      || (row.openedBy !== "agent" && row.openedBy !== "unknown")
+      || !page || page.spaceId !== args.spaceId || page.label !== args.label
+      || page.targetId !== row.targetId || page.openedBy !== row.openedBy)
+    return {error: "native dialog Page identity or origin changed"};
+  return {page};
+}|js}
+let dialog_read_script = {js|async function(task, args, resolve) {
+  const resolved = await resolve(task, args);
+  if (resolved.error) return {ok: false, before: true, error: resolved.error};
+  const info = await resolved.page.info();
+  if (info === null || typeof info !== "object" || Array.isArray(info))
+    return {ok: false, before: true, error: "native Page.info returned invalid state"};
+  if (Object.hasOwn(info, "dialog")) {
+    if (info.dialog === null || typeof info.dialog !== "object" || Array.isArray(info.dialog))
+      return {ok: false, before: true, error: "native Page.info returned invalid dialog state"};
+    return {ok: true, value: {dialog: info.dialog}};
+  }
+  if (typeof info.url !== "string" || typeof info.title !== "string"
+      || !["w", "h", "sx", "sy", "pw", "ph"].every(key => typeof info[key] === "number" && Number.isFinite(info[key])))
+    return {ok: false, before: true, error: "native Page.info omitted its dialog and document observation"};
+  return {ok: true, value: {dialog: null}};
+}|js}
+let dialog_answer_script = {js|async function(task, args, resolve, watchDownloads) {
+  const resolved = await resolve(task, args);
+  if (resolved.error) return {ok: false, before: true, error: resolved.error};
+  const page = resolved.page;
+  watchDownloads(page, args.label);
+  const answered = !args.accept ? await page.dismissDialog()
+    : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);
+  if (answered === false) return {ok: false, before: true, error: "no dialog is open in this tab"};
+  if (answered === true) return {ok: true, value: {answered: true}};
+  return {ok: false, error: "native dialog answer did not return a boolean"};
+}|js}
+let dialog_args t id label = ["spaceId",`Int t.space.id;"label",str label;"tabId",`Int id]
+let dialog_read t args =
+  let* id=match field "tabId" args with Some (`Int id) -> Ok id | _ -> Error "an observed tabId is required" in
+  let* frame_path=Browser_lane.Action.parse_frame_path args in
+  let* ()=match field "mode" args,frame_path with
+    | Some (`String "dialog"),[] -> Ok ()
+    | (None|Some _),([]|_::_) -> Error "an ego contextual read serves mode dialog without framePath only" in
+  let* label=label_of t id |> Result.map_error (function
+    | Live.Before_effect detail|Outcome_unknown detail -> detail
+    | Partial_failure {message;_}|Observed_failure {message;_} -> message) in
+  let* value=ask t ~step:"page.context" ~args:(obj (dialog_args t id label))
+      ("  emit(await (" ^ dialog_read_script ^ ")(task, args, " ^ dialog_page_script ^ ")); ") in
+  let* observation=match field "dialog" value with
+    | Some `Null -> Ok (Browser_surface.Observed None)
+    | Some dialog -> ego_dialog dialog |> Result.map (fun dialog -> Browser_surface.Observed (Some dialog))
+    | None -> Error "native dialog read omitted its observation" in
+  Ok (obj (("tabId",`Int id)::Browser_surface.dialog_observation_fields observation))
 let answer_dialog t id ~accept text =
   let* label = label_of t id in
   let action, interaction = if accept then "accept_dialog", Browser_lane.Action.Accept_dialog text
     else "dismiss_dialog", Browser_lane.Action.Dismiss_dialog in
   match run_step t ~window_s:(tab_window id interaction) ~step:"page.dialog"
-          ~args:(obj ["label",str label;"tabId",`Int id;"accept",`Bool accept;
-            "text",(match text with Some text -> str text | None -> `Null)]) (String.concat "\n" [
-      managed_page;
-      "    const page = task.page(args.label);";
-      "    const open = " ^ open_dialog "page" ^ ";";
-      "    if (open === null) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
-      "    else {";
-      "      const answered = !args.accept ? await page.dismissDialog() : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);";
-      "      if (answered === false) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
-      "      else if (answered === true) emit({ok: true, value: {answered: true, dialog: open}});";
-      "      else emit({ok: false, error: \"native dialog answer did not return a boolean\"});";
-      "    }";
-      "  }" ]) with
+          ~args:(obj (dialog_args t id label @ ["accept",`Bool accept;
+            "text",(match text with Some text -> str text | None -> `Null)])) (String.concat "\n" [
+      download_watch;
+      "  emit(await (" ^ dialog_answer_script ^ ")(task, args, " ^ dialog_page_script ^ ", watchDownloads));" ]) with
   | Error failure ->
     Error (effect_failure ~unknown:(Printf.sprintf "the dialog of tab %d may have been answered: list this connection's tabs" id) failure)
   | Ok value ->
     if field "answered" value <> Some (`Bool true) then
       Error (Live.Outcome_unknown (Printf.sprintf
         "the dialog of tab %d may have been answered: native boolean receipt is missing or invalid; list this connection's tabs" id))
-    else
-      let dialog = match field "dialog" value with
-        | Some dialog -> (match ego_dialog dialog with Ok dialog -> ["dialog",Browser_surface.dialog_json dialog] | Error _ -> [])
-        | None -> [] in
-      Ok (obj (["tabId",`Int id;"action",str action;"answered",`Bool true] @ dialog))
+    else Ok (obj (["tabId",`Int id;"action",str action;"answered",`Bool true]
+      @ Browser_surface.dialog_observation_fields Unobserved))
 
 (* ego shows a mouse step's [label] beside its own cursor highlight. It says
    who acts and what, from the same pieces as the BiDi connection's overlay
@@ -1341,7 +1360,9 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
       let declared = match operation with
         | Target_click | Target_double_click | Target_drag _ ->
           (match answer with
-           | Browser_ego_release.Unreleased Browser_ego_release.Undeclared_answer ->
+           | Browser_ego_release.Native_window_tail _
+           | Browser_ego_release.Unreleased (Browser_ego_release.Undeclared_answer
+               | Native_window_unconfirmed _ | Conflicting_evidence) ->
              Error "ego answered the input with a receipt the SDK does not declare"
            | Browser_ego_release.Receipt_without_dialog
            | Browser_ego_release.Unreleased (Browser_ego_release.Receipt_with_dialog | Void_answer | Never_returned) -> Ok ())
@@ -1389,6 +1410,101 @@ let activate_tab t ~id ~label ~expected_url =
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value -> Browser_ego_activation.receipt ~space_id:t.space.id ~tab_id:id ~label ~expected_url value
       |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
+
+let managed_source t ~tab_id ~label =
+  let* rows=tab_rows t in
+  let* tab=Browser_surface.inventory_tab ~tab_id rows in
+  match tab.ego_page with
+  | Some {label=Some observed;target_id;opened_by} when observed=label ->
+    Ok {Browser_ego_workflow.space_id=t.space.id;label;target_id;opened_by}
+  | None|Some _ -> Error "source is not the exact managed Page in the native inventory"
+
+let window_page (identity:Browser_ego_workflow.page_identity) =
+  {Browser_ego_native_window.space_id=identity.space_id;
+    native={Browser_surface.label=Some identity.label;target_id=identity.target_id;opened_by=identity.opened_by}}
+
+let source_page_json (identity:Browser_ego_workflow.page_identity) =
+  obj (("spaceId",`Int identity.space_id)::Browser_surface.ego_page_fields
+    {label=Some identity.label;target_id=identity.target_id;opened_by=identity.opened_by})
+
+let native_type_guard_script = {js|async function nativeTypeGuard(page, args) {
+  const checked = await page.evaluate(pageCall(args.guard, args.input));
+  const refuse = () => { throw new Error('native input guard refused'); };
+  if (!checked || typeof checked !== 'object' || Array.isArray(checked)
+      || Object.keys(checked).length !== 1 || !Object.hasOwn(checked,'answer')
+      || typeof checked.answer !== 'string') refuse();
+  let observed;
+  try { observed = JSON.parse(checked.answer); } catch (_) { refuse(); }
+  const expected = JSON.parse(args.input);
+  const members = ['url','title','scrollX','scrollY'];
+  if (!observed || typeof observed !== 'object' || Array.isArray(observed)
+      || Object.keys(observed).length !== members.length
+      || !Object.keys(observed).every(key => members.includes(key))
+      || observed.url !== expected.expectedUrl || typeof observed.title !== 'string'
+      || !Number.isFinite(observed.scrollX) || !Number.isFinite(observed.scrollY)) refuse();
+}|js}
+
+let native_type t ~id ~label ~expected_url ~document_id ~text =
+  let before result=Result.map_error (fun message->Live.Before_effect message) result in
+  let* source=before (managed_source t ~tab_id:id ~label) in
+  let current=window_page source in
+  let* pending=before (Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_type_text") in
+  let* context=match Raw_type.prepare ~command_id:pending.command_id ~generation:pending.generation ~source:current ~indices:[0] with
+    | Ok context->Ok context
+    | Error _ -> let* ()=before (Input.not_started t.input ~generation:pending.generation) in
+      Error (Live.Before_effect "native typing context could not be prepared") in
+  let input=Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url
+    (Browser_lane.Type_text {document_id;text}) in
+  let arguments=obj ["label",str label;"text",str text;"nativeInputWindows",Raw_type.arguments context;
+    "expectedSourcePage",source_page_json source;
+    "guard",str (page_function Browser_interaction.keyboard_guard_script);
+    "input",str (Yojson.Safe.to_string input)] in
+  let response=run_native_step t ~step:"page.native_type" ~args:arguments (String.concat "\n" [
+    Browser_ego_workflow.native_error_script;Raw_type.script;page_call;native_type_guard_script;unblocked_managed_page;
+    "    const guard = page => nativeTypeGuard(page, args);";
+    "    const outcome = await nativeTypeWindow(task, task.page(args.label), args.nativeInputWindows, 0, args.text, undefined, args.expectedSourcePage, args.expectedSourcePage, guard);";
+    "    const nativeError = nativeErrorObservation(outcome.error);";
+    "    emit({ok:true,value:{capture:outcome.capture,...(nativeError === undefined ? {} : {nativeError})}});";"  }"]) in
+  let unknown=Live.Outcome_unknown "native typing result is unconfirmed; inspect the same Page and never replay the input" in
+  match response with
+  | Error (Refused _|Unanswered (Unstarted _)) ->
+    let* ()=before (Input.not_started t.input ~generation:pending.generation) in
+    Error (Live.Before_effect "native typing was refused before its producer ran")
+  | Error (Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Error unknown
+  | Ok value ->
+    let* fields=match value with
+      | `Assoc fields when List.for_all (fun (key,_)->List.mem key ["capture";"nativeError"]) fields
+          && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
+      | `Assoc _|`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> Error unknown in
+    let* capture=match List.assoc_opt "capture" fields with Some capture->Ok capture|None->Error unknown in
+    let* outcome=Raw_type.decode context ~index:0 ~current capture |> Result.map_error (fun _->unknown) in
+    let* diagnostic=match List.assoc_opt "nativeError" fields with
+      | None->Ok []
+      | Some error->(match Browser_ego_workflow.validate_native_error error,outcome with
+        | Ok value,_->Ok ["nativeError",value]
+        (* An unreadable cleanup diagnostic cannot erase an independently
+           verified interval. The caller still reports cleanup as partial. *)
+        | Error _,Raw_type.Completed {cleanup=(Not_attempted|Unconfirmed);_}->Ok []
+        | Error _,(Raw_type.Completed {cleanup=Returned;_}|Not_entered _|Entered_unconfirmed _)->Error unknown) in
+    let failure failed = Error (Live.Observed_failure {disposition=Live.Uncertain;
+      message="native typing window is unconfirmed; inspect the same Page and never replay the input";
+      receipt=obj (["tabId",`Int id;"action",str "type_text";"effectStarted",`Bool true;
+        "nativeInputFailure",Raw_type.public_failure failed] @ diagnostic)}) in
+    match outcome with
+    | Raw_type.Not_entered failed ->
+      let* ()=before (Input.not_started t.input ~generation:pending.generation) in failure failed
+    | Raw_type.Entered_unconfirmed failed -> failure failed
+    | Raw_type.Completed {expected;completion;cleanup} ->
+      let* answer=Browser_ego_release.answer_of_window ~expected completion |> Result.map_error (fun _->unknown) in
+      let* ()=match Browser_ego_release.judge [0,answer] with
+        | Browser_ego_release.Unconfirmed _ -> Error unknown
+        | Settled settled -> settle_input t (Some pending) settled |> Result.map_error (fun _->unknown) in
+      let receipt=obj (["tabId",`Int id;"action",str "type_text";"receipt",`Null;
+        "nativeCompletion",Browser_ego_native_window.public_summary completion] @ diagnostic) in
+      match cleanup with
+      | Raw_type.Returned -> Ok receipt
+      | Not_attempted|Unconfirmed -> Error (Live.Partial_failure {tab_id=id;receipt;
+          message="native typing completed but native instrumentation cleanup is unconfirmed; never replay the input"})
 
 let interact ?actor t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
@@ -1472,7 +1588,7 @@ let interact ?actor t args =
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
   | Browser_lane.Scroll_at {point; viewport; x; y} -> pointer viewport point (Wheel {x; y})
   | Browser_lane.Drag _ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void
-  | Browser_lane.Type_text _ -> unavailable_input Browser_lane.Native_input.Keyboard_type_void
+  | Browser_lane.Type_text {document_id;text} -> native_type t ~id ~label ~expected_url ~document_id ~text
   | Browser_lane.Press_key {key; _} ->
     (match key.key with
      | Browser_lane.Keyboard.Character scalar when Uchar.to_int scalar > last_pressable_character ->
@@ -1667,14 +1783,6 @@ let act ?actor t args =
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
     Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, stop_loading, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, finish_space, wait_for_control, adopt_tab and release_tab only")
 
-let workflow_source t ~tab_id ~label =
-  let* rows=tab_rows t in
-  let* tab=Browser_surface.inventory_tab ~tab_id rows in
-  match tab.ego_page with
-  | Some {label=Some observed;target_id;opened_by} when observed=label ->
-    Ok {Browser_ego_workflow.space_id=t.space.id;label;target_id;opened_by}
-  | None|Some _ -> Error "workflow source is not the exact managed Page in the native inventory"
-
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* request = pre (Browser_lane.Native_workflow.of_json args) in
@@ -1685,6 +1793,13 @@ let workflow ?actor t args =
   let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.holds_input step.action) request.steps in
+  let raw_indices=List.filter_map (fun (index,(step:Browser_lane.Native_workflow.step)) ->
+    match step.action with Browser_lane.Native_workflow.Keyboard_type _ -> Some index
+    | Click _|Click_and_wait_for_popup _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+    | Fill _|Press _|Focus _|Reload|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+    | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+    | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> None)
+      (List.mapi (fun index step->index,step) request.steps) in
   let scope=if List.exists (fun (step:Browser_lane.Native_workflow.step) -> match step.action with
       | Click_and_wait_for_popup _ -> true
       | Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
@@ -1692,23 +1807,35 @@ let workflow ?actor t args =
       | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
       | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false) request.steps
     then Input.Space_scope else Input.Page_scope in
-  let* source=match scope with
-    | Input.Page_scope -> Ok None
-    | Input.Space_scope -> pre (workflow_source t ~tab_id:request.tab_id ~label) |> Result.map Option.some in
+  let* source=match scope,raw_indices with
+    | Input.Page_scope,[] -> Ok None
+    | Input.Space_scope,_ | Input.Page_scope,(_::_) ->
+      pre (managed_source t ~tab_id:request.tab_id ~label) |> Result.map Option.some in
+  let* pending=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
+    |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
+  let* windows=match raw_indices,source,pending with
+    | [],_,_ -> Ok None
+    | (_::_),Some source,Some pending ->
+      (match Raw_type.prepare ~command_id:pending.command_id ~generation:pending.generation
+          ~source:(window_page source) ~indices:raw_indices with
+       | Ok context -> Ok (Some context)
+       | Error _ ->
+         let* ()=pre (Input.not_started t.input ~generation:pending.generation) in
+         Error (Live.Before_effect "native workflow typing context could not be prepared"))
+    | (_::_),_,pending ->
+      let* ()=match pending with None->Ok ()|Some pending->pre (Input.not_started t.input ~generation:pending.generation) in
+      Error (Live.Before_effect "native workflow typing requires its exact input intent and source Page") in
   let arguments = match Browser_lane.Native_workflow.to_json request with
     | `Assoc fields ->
       let expected=match source with
         | None -> []
-        | Some identity -> ["expectedSourcePage",obj (("spaceId",`Int identity.space_id)::
-            Browser_surface.ego_page_fields {label=Some identity.label;
-              target_id=identity.target_id;opened_by=identity.opened_by})] in
-      obj (expected @ ["inputReceiptContract",Browser_ego_release.receipt_contract;
+        | Some identity -> ["expectedSourcePage",source_page_json identity] in
+      let native=match windows with None->[]|Some context->["nativeInputWindows",Raw_type.arguments context] in
+      obj (native @ expected @ ["inputReceiptContract",Browser_ego_release.receipt_contract;
         "label",str label;"cursor",str (cursor_label ~actor ~verb:"workflow")] @ fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
-  let* pending=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
-    |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
-      (String.concat "\n" [Browser_ego_workflow.script;unblocked_managed_page;
+      (String.concat "\n" [Browser_ego_workflow.native_error_script;Raw_type.script;Browser_ego_workflow.script;unblocked_managed_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args, task, watchDownloads);";
         "    emit({ok: true, value: outcome});";"  }"]) in
   match result with
@@ -1717,10 +1844,14 @@ let workflow ?actor t args =
      | Some pending,(Refused _|Unanswered (Unstarted _)) -> Input.not_started t.input ~generation:pending.generation
          |> Result.map_error (fun detail -> Live.Before_effect detail)
      | None,_ | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Ok () in
-    Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error)
+    (match windows,error with
+     | Some _,(Refused _|Unanswered (Unstarted _)) -> Error (Live.Before_effect "native workflow was refused before its producer ran")
+     | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) ->
+       Error (Live.Outcome_unknown "native workflow result is unknown; read the same tab before another step; never replay the workflow")
+     | None,_ -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error))
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
-    let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
+    let* outcome=Browser_ego_workflow.decode ~windows request value |> Result.map_error unknown in
     let pages=match outcome with Browser_ego_workflow.Completed {pages;_}|Stopped {pages;_} -> pages in
     let* ()=match pages with
       | None -> Ok ()
@@ -1773,7 +1904,7 @@ let dispatch_raw ?actor t ~verb args =
   | Page_scene -> pre (scene t args)
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
-  | Page_context -> Error (Live.Before_effect "framePath reads are not supported on an ego connection")
+  | Page_context -> pre (dialog_read t args)
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
   | Page_act -> act ?actor t args

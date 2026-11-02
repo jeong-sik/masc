@@ -34,10 +34,10 @@ val evaluate : clock:[> float Eio.Time.clock_ty] Eio.Resource.t option -> t ->
     judgment. Cancellation records a terminal attempt when possible and propagates.
     Records contain private source data and sanitized destination identities.
 
-    [clock] has no default, so a caller has to decide. The client puts a time
-    limit on a request only with a clock; with [None] the request is sent
-    without any limit and a destination that accepts the connection and never
-    answers is waited on for good. *)
+    [clock] has no default. [None] returns [Unavailable] before starting an
+    assessment: no request is sent or recorded and no request ID is added.
+    [Some clock] gives the client its clock so its existing per-request time
+    limit applies; this adapter adds no time limit of its own. *)
 
 module For_testing : sig
   val evaluate_with :

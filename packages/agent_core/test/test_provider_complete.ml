@@ -1998,6 +1998,47 @@ let test_cache_system_prompt () =
     (cc |> member "type" |> to_string)
 ;;
 
+let test_cache_stable_system_prefix_before_changing_observations () =
+  let prefix = "고정 Keeper 지침\n" in
+  let config = PC.make ~kind:Anthropic ~model_id:"claude-sonnet-5"
+      ~base_url:"" ~system_prompt_cache_prefix:prefix
+      ~cache_system_prompt:true ~cache_extended_ttl:true () in
+  let tool = `Assoc ["name", `String "inspect"; "description", `String "inspect"] in
+  let request suffix =
+    let config = {config with system_prompt = Some (prefix ^ suffix)} in
+    BA.build_request ~config ~messages:[user_msg "Continue."] ~tools:[tool] ()
+    |> Yojson.Safe.from_string in
+  let first = request "\nGoal observation; scheduled turn 1" in
+  let next = request "\nGoal observation; scheduled turn 2" in
+  let open Yojson.Safe.Util in
+  let first_system = first |> member "system" |> to_list in
+  let next_system = next |> member "system" |> to_list in
+  Alcotest.(check (list string)) "all observations retain exact System text"
+    [prefix; "\nGoal observation; scheduled turn 2"]
+    (List.map (fun block -> block |> member "text" |> to_string) next_system);
+  Alcotest.(check bool) "the stable cache block survives the changed turn" true
+    (List.hd first_system = List.hd next_system);
+  List.iter (fun block ->
+    Alcotest.(check string) "each System boundary keeps the configured TTL" "1h"
+      (block |> member "cache_control" |> member "ttl" |> to_string)) next_system;
+  let explicit = List.filter (fun block -> member "cache_control" block <> `Null)
+      (next_system @ (next |> member "tools" |> to_list)) |> List.length in
+  let automatic = if member "cache_control" next = `Null then 0 else 1 in
+  Alcotest.(check bool) "System/tools/automatic cache fits the API's four slots" true
+    (explicit + automatic <= 4);
+  (* A hook can replace the whole System. The hint must never discard or
+     misattribute that override, including an empty or overlong prefix. *)
+  List.iter (fun hint ->
+    let config = {config with system_prompt = Some "Replacement System";
+        system_prompt_cache_prefix = Some hint} in
+    let blocks = BA.build_request ~config ~messages:[user_msg "hi"] ()
+        |> Yojson.Safe.from_string |> member "system" |> to_list in
+    Alcotest.(check (list string)) "an incompatible hint preserves the whole override"
+      ["Replacement System"]
+      (List.map (fun block -> block |> member "text" |> to_string) blocks))
+    [""; prefix; "Replacement System"; "Replacement System with an extra suffix"]
+;;
+
 let test_cache_short_prompt_preserves_opt_in () =
   let config =
     PC.make
@@ -2030,6 +2071,7 @@ let test_cache_no_system_no_cache () =
       ~base_url:""
       ~max_tokens:128
       ~system_prompt:"Hello."
+      ~system_prompt_cache_prefix:"Hello"
       ~cache_system_prompt:false
       ()
   in
@@ -2060,6 +2102,7 @@ let test_cache_opt_in_emits_top_level_automatic_breakpoint () =
       ~base_url:""
       ~max_tokens:128
       ~system_prompt:"Hello."
+      ~system_prompt_cache_prefix:"Hello"
       ~cache_system_prompt:true
       ()
   in
@@ -2121,6 +2164,7 @@ let test_cache_top_level_not_emitted_for_kimi () =
       ~base_url:""
       ~max_tokens:128
       ~system_prompt:"Hello."
+      ~system_prompt_cache_prefix:"Hello"
       ~cache_system_prompt:true
       ()
   in
@@ -2132,6 +2176,8 @@ let test_cache_top_level_not_emitted_for_kimi () =
     true
     (json |> member "cache_control" = `Null);
   let system_block = json |> member "system" |> to_list |> List.hd in
+  Alcotest.(check int) "Kimi retains one System block" 1
+    (json |> member "system" |> to_list |> List.length);
   Alcotest.(check string)
     "block-level system breakpoint unchanged"
     "ephemeral"
@@ -2383,6 +2429,8 @@ let () =
         ] )
     ; ( "prompt_caching"
       , [ test_case "system block with cache_control" `Quick test_cache_system_prompt
+        ; test_case "stable System prefix before changing observations" `Quick
+            test_cache_stable_system_prefix_before_changing_observations
         ; test_case "no cache when disabled" `Quick test_cache_no_system_no_cache
         ; test_case
             "opt-in emits top-level automatic breakpoint"

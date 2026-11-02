@@ -816,11 +816,16 @@ let test_result_usage_is_carried () =
          (* turn_usage keeps the CLI's exclusive wire counts as-is; the
             inclusive normalization happens in the keeper's api_usage
             mapping. The frame's cache_read 42 must survive the parse and
-            its absent cache_creation reads as 0. *)
+            its absent cache_creation reads as 0 for accounting while
+            reported_cache_* preserves wire presence. *)
          check int "input tokens" 123456 usage.input_tokens;
          check int "output tokens" 789 usage.output_tokens;
          check int "cache read carried" 42 usage.cache_read_input_tokens;
-         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens))
+         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens;
+         check (option int) "reported cache read carried" (Some 42)
+           usage.reported_cache_read_input_tokens;
+         check (option int) "absent reported cache creation stays None" None
+           usage.reported_cache_creation_input_tokens))
 ;;
 
 let test_latest_request_input_and_result_total_both_travel () =
@@ -840,7 +845,11 @@ let test_latest_request_input_and_result_total_both_travel () =
              input.input_tokens;
            check int "latest cache read" 5 input.cache_read_input_tokens;
            check int "latest absent cache creation" 0
-             input.cache_creation_input_tokens
+             input.cache_creation_input_tokens;
+           check (option int) "latest reported cache read" (Some 5)
+             input.reported_cache_read_input_tokens;
+           check (option int) "latest absent reported cache creation stays None" None
+             input.reported_cache_creation_input_tokens
          | None -> fail "a later uncounted assistant erased the latest request");
         (match turn.usage.turn_total with
          | Some total ->

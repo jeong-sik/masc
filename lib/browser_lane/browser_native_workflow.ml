@@ -369,7 +369,7 @@ let input_contract = function
   | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> Input_contract.No_hold
 let holds_input action = match input_contract action with
   | Input_contract.No_hold -> false
-  | Input_contract.Observed_receipt | Input_contract.Unattestable_raw_hold _ -> true
+  | Input_contract.Observed_receipt | Input_contract.Observed_native_window | Input_contract.Unattestable_raw_hold _ -> true
 let method_name = function
   | Click_and_wait_for_popup _ -> "clickAndWaitForPopup"
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"

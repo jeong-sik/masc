@@ -48,23 +48,3 @@ let message_line spill =
     "[The operator pasted %s. It is in your working directory as %s -- read \
      that file for the text.]"
     (described spill) spill.file_name
-
-let placeholder_index spill text =
-  String_util.find_substring text (draft_line spill)
-
-let contains_placeholder spill text =
-  Option.is_some (placeholder_index spill text)
-
-let substituted spill ~replacement text =
-  let placeholder = draft_line spill in
-  let placeholder_length = String.length placeholder in
-  let text_length = String.length text in
-  match String_util.find_substring text placeholder with
-  | None -> None
-  | Some at ->
-      Some
-        (String.sub text 0 at
-        ^ replacement
-        ^ String.sub text
-            (at + placeholder_length)
-            (text_length - at - placeholder_length))

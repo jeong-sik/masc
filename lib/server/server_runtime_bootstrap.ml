@@ -699,6 +699,7 @@ let owner_initialization_error_to_string = function
 
 let initialize_owner_state_blocking
       ~sw
+      ~runtime_sw
       ~env
       ~base_path
       ?input_base_path
@@ -1128,7 +1129,7 @@ let initialize_owner_state_blocking
   in
   install_domain_pool_references ~read:read_pool domain_pool;
   Systhread_host.start ();
-  (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
+  (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
       ~domain_count:budget.Domain_budget.execution_codec with
    | Ok () -> ()
    | Error error ->
@@ -1619,7 +1620,7 @@ let activate_owner_state
   }
 ;;
 
-let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
+let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
     ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
@@ -1735,7 +1736,7 @@ let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_st
     try
       Server_startup_state.mark_blocking ();
       let initialized_owner =
-        initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
+        initialize_owner_state_blocking ~sw ~runtime_sw ~env ~base_path ?input_base_path
           ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let activated_owner =

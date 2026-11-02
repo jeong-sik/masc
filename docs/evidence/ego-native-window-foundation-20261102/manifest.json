@@ -1,0 +1,17 @@
+{
+  "public_safe_projection": true,
+  "files": {
+    "README.md": {
+      "bytes": 3436,
+      "sha256": "133a41189a3c45c26824c67585a04865150bad64fc9dfdb02772d3f14c61357c"
+    },
+    "actual-one-key.png": {
+      "bytes": 35160,
+      "sha256": "169d5024253954ed315e0aaf1c7d1ab3f2ed05bc9fab302fb6a59e427e304172"
+    },
+    "normal-key-projection.json": {
+      "bytes": 13448,
+      "sha256": "8fc7d7212bd70c9c52466736be5d0e3eebaa2e1026ccc66f5e0a0d857d1f27b7"
+    }
+  }
+}

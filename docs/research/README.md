@@ -9,9 +9,16 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 
 | Date | Record |
 | --- | --- |
+| — | [Extreme TUI/server performance: measured baseline and next decisions](extreme-performance-20261030.md) |
+| 2026-11-01 | [Keeper System Prompt 크기와 prefix cache](2026-11-01-keeper-prompt-cache.md) |
+| 2026-10-29 | [Queue layout comparison: candidate and observation protocol](2026-10-29-tui-queue-layout-comparison.md) |
+| 2026-10-29 | [TUI: information priority needs a matching input owner](2026-10-29-tui-panel-input-observation.md) |
+| 2026-10-28 | [TUI surface inventory and compact viewport audit](2026-10-28-tui-surface-inventory.md) |
+| 2026-10-28 | [TUI information, keyboard ownership and layers](2026-10-28-tui-information-layers.md) |
 | 2026-10-28 | [Keeper workbench: baseline and design options](2026-10-28-keeper-workbench.md) |
 | 2026-10-28 | [Keeper 기억 recall: 2026-10 추가 조사 (r2)](2026-10-28-keeper-recall-prior-art-r2.md) |
 | 2026-10-28 | [Keeper 기억 recall: 기성 제품과 논문 대조, 우리 구현의 빠진 곳 (r1)](2026-10-28-keeper-recall-prior-art-r1.md) |
+| 2026-10-27 | [MCP 2026-07-28 parity: source audit and remaining work](2026-10-27-mcp-2026-07-28-parity.md) |
 | 2026-10-26 | [Librarian 완료 기록 검증 비용 — 실측, 외부 설계 대조, 선택지 (r1)](2026-10-26-librarian-history-validation-cost-r1.md) |
 | 2026-10-26 | [Keeper volume lifecycle and reclamation](2026-10-26-keeper-volume-lifecycle.md) |
 | 2026-09-18 | [TypeSafe Jev(System One) 분석과 masc 판단 레인 적용 가능성 (r1)](2026-09-18-typesafe-jev-masc-applicability-r1.md) |

@@ -45,8 +45,14 @@ existing directory fails with `EEXIST`; a missing parent fails with `ENOENT`.
 Missing `--base-path` prints an explicit refusal. Choose a new output directory
 instead of deleting evidence. Forced process termination can leave no final
 report; an empty directory or absent report is not a successful observation.
-Report-write errors are failures, and may replace the original server error in
-this initial command's finalizer. Keep stderr alongside the report.
+Report-write errors are failures. If the server and report both fail, ordinary
+errors retain both causes and backtraces through Eio's combined exception. A
+primary cancellation, reserved exception or scheduler EINTR keeps its original
+exception and backtrace; the report failure is written to stderr. Otherwise a
+reserved report exception propagates, with the server failure and backtrace on
+stderr. Primary control exceptions take precedence when both sides raise one.
+Report-only errors retain the existing finalizer failure path, so report I/O
+EINTR is not classified as scheduler EINTR. Keep stderr alongside the report.
 
 The report's `coverage`, `failures` and `active_spans` describe whether all
 diagnostic bookkeeping completed. Timing and allocation data can be unavailable

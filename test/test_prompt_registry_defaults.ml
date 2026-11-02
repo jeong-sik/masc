@@ -594,6 +594,77 @@ let () =
         ] );
       ( "rendering",
         [
+          test_case "unreadable source returns an error without discarding override" `Quick
+            (fun () ->
+              if Unix.geteuid () = 0 then Alcotest.skip ();
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              let key = "test.plain" in
+              let path = Filename.concat prompts_dir (key ^ ".md") in
+              let replacement = path ^ ".replacement" in
+              (match Prompt_registry.set_override key "operator override" with
+               | Ok () -> () | Error detail -> fail detail);
+              (* A new inode makes the cache read the replacement. A chmod of
+                 the cached inode alone need not invalidate its version. *)
+              write_file replacement (markdown_fixture key "replacement body");
+              Unix.chmod replacement 0o000;
+              Unix.rename replacement path;
+              Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) @@ fun () ->
+              let check_read_error = function
+                | Error detail ->
+                  check bool "reports resolution error for the prompt" true
+                    (String.starts_with ~prefix:"Prompt 'test.plain' could not be resolved:" detail)
+                | Ok _ -> fail "an unreadable prompt was rendered" in
+              check_read_error (Prompt_registry.render_prompt_template key []);
+              Unix.chmod path 0o600;
+              (match Prompt_registry.render_prompt_template key [] with
+               | Ok value -> check string "override survives failed read" "operator override" value
+               | Error detail -> fail detail);
+              Prompt_registry.clear_prompt_override key;
+              (match Prompt_registry.render_prompt_template key [] with
+               | Ok value -> check string "override yields to new file" "replacement body" value
+               | Error detail -> fail detail);
+              write_file replacement (markdown_fixture key "second body");
+              Unix.chmod replacement 0o000;
+              Unix.rename replacement path;
+              check_read_error (Prompt_registry.resolve_and_render_prompt_template key []);
+              Unix.chmod path 0o600;
+              (match Prompt_registry.render_prompt_template key [] with
+               | Ok value -> check string "failed read was not cached" "second body" value
+               | Error detail -> fail detail));
+          test_case "missing source keeps its existing error" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              let key = "test.plain" in
+              (match Prompt_registry.set_override key "saved override" with
+               | Ok () -> () | Error detail -> fail detail);
+              Sys.remove (Filename.concat prompts_dir (key ^ ".md"));
+              (match Prompt_registry.render_prompt_template key [] with
+               | Ok value -> check string "existing override still wins" "saved override" value
+               | Error detail -> fail detail);
+              Prompt_registry.clear_prompt_override key;
+              match Prompt_registry.render_prompt_template key [] with
+              | Error detail -> check string "missing error" "Prompt 'test.plain' is missing" detail
+              | Ok _ -> fail "a missing prompt was rendered");
+          test_case "unsearchable directory keeps existing absence behavior" `Quick
+            (fun () ->
+              if Unix.geteuid () = 0 then Alcotest.skip ();
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              let key = "test.plain" in
+              let path = Filename.concat prompts_dir (key ^ ".md") in
+              (match Prompt_registry.set_override key "saved override" with
+               | Ok () -> () | Error detail -> fail detail);
+              Unix.chmod prompts_dir 0o000;
+              Fun.protect ~finally:(fun () -> Unix.chmod prompts_dir 0o755) @@ fun () ->
+              check bool "source appears absent without directory search" false
+                (Sys.file_exists path);
+              (match Prompt_registry.render_prompt_template key [] with
+               | Ok value -> check string "existing override still wins" "saved override" value
+               | Error detail -> fail detail);
+              Prompt_registry.clear_prompt_override key;
+              match Prompt_registry.render_prompt_template key [] with
+              | Error detail -> check string "indistinguishable from missing"
+                  "Prompt 'test.plain' is missing" detail
+              | Ok _ -> fail "an inaccessible source was rendered");
           test_case "render_prompt_template uses markdown template" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->

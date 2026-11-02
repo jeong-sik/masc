@@ -1147,6 +1147,9 @@ type lane_run_prepared_field =
   ; full_bytes : int
   }
 
+let json_preview_lines ~width text =
+  document_json ~width text |> List.map (fun line -> Ansi.reset, line)
+
 let lane_run_payload_lines ~width json =
   let fence = fenced_document_text ~language:"json" in
   let prepare_document value =
@@ -1163,8 +1166,8 @@ let lane_run_payload_lines ~width json =
   (* Field allocation reserves the minimum above; non-object payloads receive
      the full preview budget. Both callers therefore leave a non-negative room. *)
   let render_document ~budget prepared =
-    let document, notices =
-      if String.length prepared.document <= budget then prepared.document, []
+    let text, notices =
+      if String.length prepared.document <= budget then prepared.full_text, []
       else
         let wrapper_bytes = String.length prepared.document - String.length prepared.full_text in
         let room = budget - wrapper_bytes - String.length prepared.notice - 1 in
@@ -1173,13 +1176,9 @@ let lane_run_payload_lines ~width json =
           | Some newline -> newline
           | None -> String_util.utf8_char_boundary prepared.full_text room
         in
-        fence (String.sub prepared.full_text 0 cut), [ Theme.warn (), prepared.notice ]
+        String.sub prepared.full_text 0 cut, [ Theme.warn (), prepared.notice ]
     in
-    let lines =
-      document_markdown ~width document
-      |> List.map (fun line -> Ansi.reset, line)
-    in
-    lines @ notices
+    json_preview_lines ~width text @ notices
   in
   match json with
   | `Assoc (_ :: _ as fields) ->
@@ -1187,8 +1186,10 @@ let lane_run_payload_lines ~width json =
     let fields =
       List.mapi
         (fun index (name, value) ->
-          let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
-          let heading_bytes = String.length heading + 1 in
+          let heading_source = Yojson.Safe.to_string (`String name) in
+          (* The preview budget counts source bytes, before visible escapes. *)
+          let heading_bytes = String.length heading_source + 1 in
+          let heading = Masc.Tui_terminal_json.sanitize_canonical_preview heading_source in
           let prepared = prepare_document value in
           { index; heading; heading_bytes; prepared
           ; minimum_bytes = heading_bytes + minimum_document_bytes prepared
@@ -1641,7 +1642,7 @@ let measurement_text_lines ~width lines =
         |> List.map (fun line -> style, line)))
     lines
 
-let measurement_input_lines ~width ~sha256 (measurement : Measurement.t) =
+let measurement_input_lines ~width ~sha256 (measurement : Measurement.snapshot) =
   let report = measurement.report in
   let module R = Continuity_report in
   let metadata =
@@ -1661,19 +1662,31 @@ let measurement_input_lines ~width ~sha256 (measurement : Measurement.t) =
   @ lane_run_payload_lines ~width
       (`List (List.map (fun (sample : R.sample) -> R.case_to_yojson sample.case) report.samples))
 
+type measurement_output_part =
+  | Measurement_text of (string * string)
+  | Measurement_json of string
+
 (* Apply the same byte ceiling as exact lane payloads before wrapping. The
    report and its full score distribution remain intact; only text is a preview. *)
-let measurement_output_preview ~width ~output_path lines =
+let measurement_output_preview ~width ~output_path parts =
+  let text = function
+    | Measurement_text (_, value) | Measurement_json value -> value in
+  let with_text part value = match part with
+    | Measurement_text (style, _) -> Measurement_text (style, value)
+    | Measurement_json _ -> Measurement_json value in
   let rec take remaining reversed = function
     | [] -> List.rev reversed, false
-    | (style, text) :: rest ->
-      let bytes = String.length text + 1 in
-      if bytes <= remaining then take (remaining - bytes) ((style, text) :: reversed) rest
+    | part :: rest ->
+      let value = text part in
+      let bytes = String.length value + 1 in
+      if bytes <= remaining then take (remaining - bytes) (part :: reversed) rest
       else
-        let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) text in
-        List.rev ((style, prefix) :: reversed), true
+        let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) value in
+        (* The final part needs no following separator. *)
+        List.rev (with_text part prefix :: reversed),
+        String.length prefix < String.length value || not (List.is_empty rest)
   in
-  let preview, truncated = take lane_run_preview_source_max_bytes [] lines in
+  let preview, truncated = take lane_run_preview_source_max_bytes [] parts in
   let notice =
     if truncated then
       [ Theme.warn (), Printf.sprintf
@@ -1681,7 +1694,12 @@ let measurement_output_preview ~width ~output_path lines =
           lane_run_preview_source_max_bytes output_path ]
     else []
   in
-  measurement_text_lines ~width (notice @ preview)
+  let render = function
+    | Measurement_text line -> measurement_text_lines ~width [line]
+    | Measurement_json "" -> []
+    | Measurement_json value -> json_preview_lines ~width value
+  in
+  measurement_text_lines ~width notice @ List.concat_map render preview
 
 let measurement_output_lines ~width (report : Continuity_report.t) =
   let module R = Continuity_report in
@@ -1751,26 +1769,119 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
       [ Ansi.dim, ""; style, sample.case.id ^ "  ·  " ^ status ]
       @ List.map (fun line -> Ansi.reset, line) lines) report.samples
   in
-  measurement_output_preview ~width ~output_path:report.output_path (probabilities @ samples)
+  measurement_output_preview ~width ~output_path:report.output_path
+    (List.map (fun line -> Measurement_text line) (probabilities @ samples))
+
+module Temporal = Masc.Tui_decode_temporal_continuity
+
+let temporal_summary_lines (report : Temporal.t) =
+  let provenance = match report.provenance with
+    | Temporal.Live_keeper -> "LIVE KEEPER CAPTURE"
+    | Temporal.Assessment -> "ASSESSMENT OF CAPTURED EVIDENCE" in
+  let status = match report.status with
+    | Temporal.Recording -> "RECORDING" | Temporal.Recorded -> "RECORDED"
+    | Temporal.Incomplete -> "INCOMPLETE" in
+  [ Ansi.reset, "  KEEPER CONTINUITY  " ^ Terminal_text.single_line report.keeper
+  ; Ansi.dim, "  " ^ provenance ^ "  ·  " ^ status
+  ; Ansi.dim, "  " ^ Terminal_text.single_line report.started_at
+      ^ "  ·  " ^ string_of_int (List.length report.timeline) ^ " STEPS · NO VERDICT"
+  ]
+
+let temporal_input_lines ~width ~sha256 (report : Temporal.t) =
+  let optional label = function None -> [label ^ "unavailable"] | Some value -> [label ^ value] in
+  let metadata =
+    [ "AUTHORITATIVE REPORT  " ^ report.report_path
+    ; "REPORT SHA256  " ^ report.report_sha256
+    ; "VIEW BLOB SHA256  " ^ sha256
+    ; "HARNESS SHA256  " ^ report.harness_source_sha256 ]
+    @ optional "SOURCE CAPTURE SHA256  " report.source_capture_sha256
+    @ optional "BINARY COMMIT  " report.binary_commit
+    @ optional "EXECUTABLE SHA256  " report.executable_sha256
+    @ (match report.memory_readiness with
+       | None | Some Temporal.Memory_unavailable -> ["MEMORY READINESS  UNAVAILABLE"]
+       | Some (Temporal.Memory_operations operations) ->
+         ["MEMORY READINESS  " ^ String.concat "  ·  "
+            (List.map (fun (tool, state) -> tool ^ " " ^ state) operations)])
+    @ [ "Durable originals are retained. Omission describes prepared organic ranges."
+      ; "Provider receipt and Librarian-only causal attribution remain unestablished."
+      ; "Probabilities are separate observations with no pass threshold." ] in
+  measurement_text_lines ~width (List.map (fun text -> Ansi.dim, text) metadata)
+
+let temporal_output_lines ~width (report : Temporal.t) =
+  let module T = Temporal in
+  let natural = function None -> "unknown" | Some value -> string_of_int value in
+  let detail (value : T.omission_detail) =
+    ("TARGET EXCLUSIVE END  " ^ string_of_int value.target_end_atom)
+    :: List.concat_map (fun (request : T.request_range) ->
+      [ "REQUEST  " ^ request.capture_id ^ "  ·  W END " ^ natural request.summary_end_atom
+        ^ "  ·  ORGANIC FIRST " ^ string_of_int request.first_atom
+      ; "BODY SHA256  " ^ request.body_sha256 ]) value.requests in
+  let steps = List.concat_map (fun (step : T.step) ->
+    let kind = match step.kind with T.Message -> "MESSAGE" | T.Restart -> "LANE RESTART" | T.Await_summary -> "WAIT FOR W" in
+    let status = match step.status with
+      | T.Started -> "STARTED" | T.Collecting -> "COLLECTING" | T.Captured -> "CAPTURED"
+      | T.Restart_observed -> "RESTART OBSERVED" | T.Summary_ready_observed -> "W READY · READINESS ONLY" in
+    let identity = [step.id ^ "  ·  " ^ kind ^ "  ·  " ^ status]
+      @ (match step.turn_ref with None -> [] | Some value -> ["TURN  " ^ value])
+      @ (match step.operation_state with None -> [] | Some value -> ["OPERATION  " ^ value])
+      @ (match step.kind with
+         | T.Message -> ["W MESSAGES IN LAST REQUEST  " ^ natural step.working_state_messages]
+         | T.Restart | T.Await_summary -> [])
+      @ (match step.target_end_atom with None -> [] | Some value -> ["WAIT TARGET END  " ^ string_of_int value]) in
+    let readiness = match step.readiness with
+      | None -> []
+      | Some T.Readiness_not_available -> ["SUMMARY READINESS  NOT AVAILABLE"]
+      | Some (T.Covered { end_atom; last_atom_digest = _ }) ->
+        ["SUMMARY READINESS  COVERED · W END " ^ string_of_int end_atom] in
+    let omitted = match step.omission with
+      | T.Not_requested -> []
+      | T.Omission_unavailable reason -> ["PREFIX OMISSION  UNAVAILABLE"; reason]
+      | T.Not_observed (reason, value) -> ["PREFIX OMISSION  NOT OBSERVED"; reason] @ detail value
+      | T.Observed value -> ["PREFIX OMISSION  OBSERVED · ALL ATTRIBUTED PREPARED REQUESTS"] @ detail value in
+    let judgments = List.map (fun (value : T.judgment) ->
+      let scope = match value.scope with T.Reply -> "reply" | T.Working_state -> "W" | T.Tool_calls -> "tool calls" in
+      let observation = match value.result with
+        | T.Unavailable -> "unavailable" | T.Pending -> "pending"
+        | T.Measured { probability; model } ->
+          "p=" ^ Yojson.Safe.to_string (`Float probability) ^ "  ·  " ^ model in
+      value.criterion_id ^ " (" ^ scope ^ ")  " ^ observation) step.judgments in
+    let working_state = match step.working_state with
+      | None | Some [] -> []
+      | Some messages ->
+        [ Measurement_text (Ansi.reset, "W IN LAST PREPARED REQUEST")
+        ; Measurement_json (Yojson.Safe.pretty_to_string (`List messages)) ] in
+    [Measurement_text (Ansi.dim, "")]
+    @ List.map (fun value -> Measurement_text (Ansi.reset, value)) (identity @ readiness @ omitted)
+    @ working_state
+    @ List.map (fun value -> Measurement_text (Ansi.reset, value))
+        ((if step.reply = [] then [] else "ORIGINAL REPLY" :: step.reply) @ judgments)) report.timeline in
+  let errors = match report.error with
+    | None -> [] | Some value -> [Measurement_text (Theme.warn (), value)] in
+  measurement_output_preview ~width ~output_path:report.report_path (errors @ steps)
 
 let inspection_summary_lines ~cols = function
   | Inspection_lane detail -> lane_run_summary_lines ~cols detail
-  | Inspection_measurement (_, measurement) -> measurement_summary_lines measurement.report
+  | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_summary_lines measurement.report
+  | Inspection_measurement (_, Measurement.Temporal report) -> temporal_summary_lines report
 
 let inspection_panel_titles = function
   | Inspection_lane detail -> lane_run_panel_titles detail
-  | Inspection_measurement (_, measurement) ->
+  | Inspection_measurement (_, Measurement.Snapshot measurement) ->
     (match measurement.report.provenance with
      | Continuity_report.Synthetic -> "INPUT · SYNTHETIC CASES"),
     "OBSERVATIONS · NO VERDICT"
+  | Inspection_measurement (_, Measurement.Temporal _) ->
+    "SOURCE · PREPARED REQUEST EVIDENCE", "TIMELINE · NO VERDICT"
 
 let inspection_input_lines ~width = function
   | Inspection_lane detail -> lane_run_input_lines ~width detail
-  | Inspection_measurement (sha256, report) -> measurement_input_lines ~width ~sha256 report
+  | Inspection_measurement (sha256, Measurement.Snapshot report) -> measurement_input_lines ~width ~sha256 report
+  | Inspection_measurement (sha256, Measurement.Temporal report) -> temporal_input_lines ~width ~sha256 report
 
 let inspection_output_lines ~details ~width = function
   | Inspection_lane detail -> lane_run_output_lines ~details ~width detail
-  | Inspection_measurement (_, measurement) -> measurement_output_lines ~width measurement.report
+  | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_output_lines ~width measurement.report
+  | Inspection_measurement (_, Measurement.Temporal report) -> temporal_output_lines ~width report
 
 let lane_run_stacked_lines ~details ~width detail =
   let input_title, output_title = inspection_panel_titles detail in

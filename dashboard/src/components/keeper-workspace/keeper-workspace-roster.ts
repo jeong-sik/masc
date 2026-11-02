@@ -26,6 +26,7 @@ import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
+import { approvalQueueProblem } from '../../lib/gate-observation-state'
 import { compareByRecency, sortByRecency } from '../../lib/keeper-recency'
 import {
   deriveKeeperRuntimeProjection,
@@ -40,7 +41,6 @@ import {
   StatusDot,
   keeperBucket,
   keeperFleetTone,
-  keeperStatusTone,
   keeperPhaseLabel,
   type KeeperBucket,
 } from './keeper-workspace-shared'
@@ -302,7 +302,9 @@ function RosterRow({
   const handleTitle = basepath || scope || ''
   const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
   const activityText = rosterActivityText(activity)
-  const phaseLabel = keeper.declaration_only ? '아직 시작하지 않음' : keeperPhaseLabel(keeper)
+  const queueProblem = approvalQueueProblem(keeper.approval_queue_state)
+  const phaseLabel = queueProblem?.title
+    ?? (keeper.declaration_only ? '아직 시작하지 않음' : keeperPhaseLabel(keeper))
   const preparation = (keeper.preparation_requirements ?? []).map(requirement => ({
     runtime_check_required: '모델 연결 확인 필요',
     sandbox_check_required: '샌드박스 확인 필요',
@@ -333,7 +335,7 @@ function RosterRow({
       <div class="kw-kp-meta">
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
-          <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${beat} />${phaseLabel}</span>
+          <span class="kw-kp-state" title=${queueProblem?.operator_detail}><${StatusDot} tone=${tone} pulse=${beat} />${phaseLabel}</span>
           <!-- The design's kp-sandbox worktree glyph was gated on a 'local'
                profile. The runtime's set is docker / microvm / remote_ssh
                (keeper_sandbox_config.ml), so it never rendered for any row. -->
@@ -374,17 +376,19 @@ function MiniRosterRow({
   onSelect: (name: string) => void
   onMenu: (keeper: Keeper, event: MouseEvent) => void
 }) {
-  const tone = keeperStatusTone(keeper)
+  const tone = keeperFleetTone(keeper)
   const lifecycle = keeper.phase || keeper.lifecycle_phase
   const beat = phasePulse(lifecycle)
-  const label = `${keeper.name} · ${keeperPhaseLabel(keeper)}`
+  const queueProblem = approvalQueueProblem(keeper.approval_queue_state)
+  const label = `${keeper.name} · ${queueProblem?.title ?? keeperPhaseLabel(keeper)}`
+  const title = queueProblem ? `${label} · ${queueProblem.operator_detail}` : label
   return html`
     <button
       type="button"
       class="kw-kp-mini kp-row mini v2-monitoring-action"
       aria-current=${active ? 'true' : 'false'}
       aria-label=${label}
-      title=${label}
+      title=${title}
       onClick=${() => onSelect(keeper.name)}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
     >

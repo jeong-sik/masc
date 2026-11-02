@@ -433,7 +433,7 @@ let test_old_store_format_is_explicitly_rejected () =
       match Journal.open_durable_writer ~sw ~codec ~dir with
       | Error
           (Journal.Persistence_failure
-             (Store.Unsupported_store_version { expected = 2; actual = 1 })) -> ()
+             (Store.Unsupported_store_version { expected = 3; actual = 1 })) -> ()
       | Error error ->
         fail ("unexpected journal failure: " ^ Journal.error_to_string error)
       | Ok _ -> fail "old recursive execution store was reopened");
@@ -1855,6 +1855,8 @@ let test_released_codec_fails_before_store_mutation () =
 ;;
 
 let test_batch_validation_enforces_header_capacity_and_completion_bounds () =
+  Eio_main.run
+  @@ fun _env ->
   let module Validation = Internal.Execution_batch_validation in
   let correlation_id = fresh Event.Correlation_id.fresh in
   let events = make_four_events correlation_id in
@@ -1942,6 +1944,55 @@ let test_batch_validation_enforces_header_capacity_and_completion_bounds () =
   | Error { detail; _ } -> fail detail
 ;;
 
+let test_actor_lease_survives_store_epochs () =
+  Eio_main.run (fun env -> with_temp_dir env (fun codec dir ->
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+    Eio.Switch.run (fun owner_sw ->
+      let lease = require_store (Store.acquire_writer_lease ~sw:owner_sw ~dir) in
+      Eio.Switch.run (fun sw ->
+        let store, _ = require_store (Store.create_with_lease ~sw ~codec ~dir ~lease ()) in
+        let writer = attach_store store in
+        ignore (require_store (Store.append_batch writer ~expected_next_seq:1
+          (make_four_events (Store.correlation_id store)))));
+      (match require_store (Store.with_writer_absent ~dir (fun () -> fail "live lease was absent")) with
+       | Store.Writer_active -> ()
+       | Writer_absent _ -> fail "epoch cleanup released actor authority");
+      Eio.Switch.run (fun sw ->
+        let reopened = require_store (Store.open_existing_with_lease ~sw ~codec ~dir ~lease) in
+        check int "same actor reopens its canonical epoch" 4
+          (require_store (Store.last_seq reopened.store))));
+    let original = directory_snapshot dir in
+    (match require_store (Store.with_writer_absent ~dir (fun () ->
+       require_store (Store.read_only_snapshot ~codec ~dir ()))) with
+     | Store.Writer_absent snapshot -> check int "released actor retains its committed prefix" 4 snapshot.last_seq
+     | Writer_active -> fail "released actor kept its writer claim");
+    check bool "observation never mutates the retained journal" true
+      (original = directory_snapshot dir)))
+;;
+
+let test_epoch_only_format_cannot_establish_owner_loss () =
+  Eio_main.run (fun env -> with_temp_dir env (fun codec dir ->
+    Eio.Switch.run (fun sw ->
+      let store = create_store ~codec ~sw ~dir in
+      ignore (require_store (Store.append_batch (attach_store store) ~expected_next_seq:1
+        (make_four_events (Store.correlation_id store)))));
+    let authority = Eio.Path.(dir / "events.v1.commit") in
+    Eio.Path.save ~create:(`Or_truncate 0o600) authority
+      (authority_with_format_version ~version:2 (Eio.Path.load authority));
+    let original = directory_snapshot dir in
+    (match Store.read_only_snapshot ~codec ~dir () with
+     | Error (Store.Unsupported_store_version {expected=3;actual=2}) -> ()
+     | Error error -> fail (Store.error_to_string error)
+     | Ok _ -> fail "old epoch-only terminal was admitted as actor-lifetime evidence");
+    Eio.Switch.run (fun sw ->
+      match Store.open_existing ~sw ~codec ~dir with
+      | Error (Store.Unsupported_store_version {expected=3;actual=2}) -> ()
+      | Error error -> fail (Store.error_to_string error)
+      | Ok _ -> fail "old writer protocol was automatically reopened");
+    check bool "strict refusal preserves old terminal and authority bytes" true
+      (original = directory_snapshot dir)))
+;;
+
 let () =
   run
     "Execution event store"
@@ -1954,6 +2005,14 @@ let () =
             "idempotent retry requires exact canonical bytes"
             `Quick
             test_idempotent_retry_requires_exact_canonical_bytes
+        ; test_case
+            "actor lease survives store epochs"
+            `Quick
+            test_actor_lease_survives_store_epochs
+        ; test_case
+            "epoch-only store cannot establish owner loss"
+            `Quick
+            test_epoch_only_format_cannot_establish_owner_loss
         ; test_case
             "old store format is explicitly rejected"
             `Quick

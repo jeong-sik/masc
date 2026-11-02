@@ -2471,24 +2471,24 @@ let test_fusion_creation_emits_the_recorded_audience () =
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   (match
      Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
-       ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+       ~author:"other-keeper" ~content:"fusion result headline @first-reader"
        ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
        ~origin:{ origin with fusion_producer = Some "other-keeper" } ()
    with
-   | Error (Board.Post_publication_failure.Board_error (Board.Already_exists _)) -> ()
+   | Error failure when
+       (match Board.Post_publication_failure.cause failure with
+        | Board.Post_publication_failure.Board_error (Board.Already_exists _) -> true
+        | Board.Post_publication_failure.Board_error _
+        | Board.Post_publication_failure.Raised _ -> false) -> ()
    | Ok _ -> Alcotest.fail "mismatched fusion_producer was treated as an exact replay"
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   List.iter
     (fun fusion_producer ->
-      match
-        Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+      expect_validation_error "invalid Fusion producer origin"
+        (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
           ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
           ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
-          ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer } ()
-      with
-      | Error (Board.Post_publication_failure.Board_error (Board.Validation_error _)) -> ()
-      | Ok _ -> Alcotest.fail "invalid Fusion producer origin was accepted"
-      | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error))
+          ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer } ()))
     [ None; Some "   "; Some "bad/producer" ];
   Alcotest.(check int) "an exact replay emits nothing" 1 (List.length !seen)
 

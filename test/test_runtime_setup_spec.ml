@@ -319,6 +319,23 @@ base = "anthropic"
       [`Assoc ["id",`String "provider-base";"supports_image_input",`Bool false]] in
     Alcotest.(check (option bool)) "endpoint false overrides catalog true"
       (Some false) (image disabled "provider-base");
+    List.iter (fun invalid_discovery ->
+      Alcotest.(check bool) "discovery connection_of_json rejects mismatched provider_kind" true
+        (Result.is_error (Discovery.connection_of_json invalid_discovery)))
+      [ `Assoc ["choice", `String "openai_compatible"; "endpoint", `String "https://fixture.invalid/v1";
+                "provider_kind", `String "anthropic"]
+      ; `Assoc ["choice", `String "ollama"; "endpoint", `String "https://fixture.invalid/v1";
+                "provider_kind", `String "openai_compat"]
+      ; `Assoc ["choice", `String "messages"; "endpoint", `String "https://fixture.invalid/v1"]
+      ];
+    List.iter (fun valid_discovery ->
+      Alcotest.(check bool) "discovery connection_of_json accepts valid dialect or named catalog default" true
+        (Result.is_ok (Discovery.connection_of_json valid_discovery)))
+      [ `Assoc ["choice", `String "openai_compatible"; "endpoint", `String "https://fixture.invalid/v1";
+                "provider_kind", `String "glm"]
+      ; `Assoc ["choice", `String "messages"; "endpoint", `String "https://fixture.invalid/v1";
+                "provider_id", `String "claude"]
+      ];
     let fields = ["choice",`String "codex";"model",`String "omitted";
       "max_context",`Int 8192;"tools",`Bool true;"streaming",`Bool true]
       @ (match image models "omitted" with None -> [] | Some value -> ["supports_image_input",`Bool value]) in
@@ -614,6 +631,37 @@ let test_named_catalog_selection_revalidates_existing_provider () =
     | Ok config -> config | Error _ -> Alcotest.fail "appended named model duplicates or changes its provider" in
   Alcotest.(check int) "one configured account remains one provider" 1 (List.length config.providers);
   Alcotest.(check int) "the selected new model is appended" 2 (List.length config.models);
+  let unbound_claim = parse_setup (named_catalog_spec ~declared:false ~model_key:"third-model" ~image:true ()) in
+  let rebound = Runtime_setup_spec.resolve_provider unbound_claim [provider] |> Result.get_ok in
+  let default_rendered = Runtime_setup_spec.render rebound in
+  let parsed_rebound = Otoml.Parser.from_string_result default_rendered.runtime_toml |> Result.get_ok in
+  Alcotest.(check bool) "binding a new named selection to an existing provider omits duplicate provider TOML by default" true
+    (Otoml.find_opt parsed_rebound Otoml.get_table ["providers"] = None);
+  let seed_like = Runtime_toml.parse_string {|
+[runtime]
+default = "glm-coding.glm-coding-glm-5-3-flash"
+[providers.glm-coding]
+display-name = "Selected coding account"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+[providers.glm-coding.credentials]
+type = "env"
+key = "SETUP_NAMED_TEST_KEY"
+[models.glm-coding-glm-5-3-flash]
+api-name = "glm-5.3-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+[models.glm-coding-glm-5-3-flash.capabilities]
+supports-image-input = true
+[glm-coding.glm-coding-glm-5-3-flash]
+wizard-default = true
+|} |> Result.get_ok in
+  Alcotest.(check bool) "named selection matches seed/installer binding whose window is catalog-owned" true
+    (Runtime_setup_spec.matches_existing_selection
+       (parse_setup (named_catalog_spec ~image:true ()))
+       seed_like);
   Alcotest.(check bool) "an existing-provider claim cannot create an absent account" true
     (Result.is_error (Runtime_setup_spec.resolve_provider spec []));
   Alcotest.(check bool) "disabled accounts stay disabled" true

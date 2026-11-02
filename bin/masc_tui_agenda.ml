@@ -30,10 +30,8 @@ type awaiting =
   ; timeout_sec : float
   }
 
-(* A task whose only exit belongs to the operator, as
-   [Operator_task_attention] projected it. Flattened to text here: the panel
-   draws rows, and three surfaces describing the same row three ways is what
-   the projection exists to prevent, so the sentence is made once over there. *)
+(* A Task with an unavailable Keeper route. This does not establish that its
+   owner has stopped or that a question was asked. *)
 type stalled =
   { task_id : string
   ; what : string
@@ -67,7 +65,7 @@ type t =
   ; blocked : awaiting reading
   ; asking : open_question reading  (** in the order the server sent them *)
   ; confirming : goal_to_confirm reading
-  ; stuck : stalled reading  (** longest wait first *)
+  ; stuck : stalled reading  (** oldest claim/start first *)
   }
 
 let rows_of = function
@@ -100,16 +98,15 @@ let project ~scheduled ~awaiting ~asking ~confirming ~stalled =
 
 let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
 
-(* A keeper holding a tool call, a question a keeper asked, a Goal waiting for
-   confirmation and a task only the operator can move all wait on the operator,
-   and each asks for a different thing. The badge names them one by one
+(* A held call, a question, and a Goal awaiting confirmation need an operator
+   response. An unavailable Task route is an observation, not a request.
+   The badge names requests one by one
    ([waiting_label]); this total is what it falls back to when there is no room
    to name them. *)
 let waiting t =
   List.length (rows_of t.blocked)
   + List.length (rows_of t.asking)
   + List.length (rows_of t.confirming)
-  + List.length (rows_of t.stuck)
 
 (* Only a wake takes the row above the composer: what waits on the operator is
    on the surface strip at the top of every frame. One predicate, two readers:
@@ -153,16 +150,11 @@ let clock_half ~now ~localtime ~cells row =
   if room <= 0 then "" else head ^ Masc_tui_message_layout.fit_middle room said
 ;;
 
-(* One phrase per kind, questions first. The words follow the Dashboard's rows
-   and the [;] panel: a keeper's held call is a "Held call" there, and the
-   panel has the "Confirm a goal" and "Stuck on you" sections. Gate requests and
-   operator confirmations are not in the agenda, so "approval" would claim more
-   than the number counts. *)
+(* One phrase per request kind, questions first. *)
 let waiting_phrases ~ko t =
   [ List.length (rows_of t.asking), "질문", "question", "questions"
   ; List.length (rows_of t.blocked), "보류된 호출", "held call", "held calls"
   ; List.length (rows_of t.confirming), "완료 확인 목표", "goal to confirm", "goals to confirm"
-  ; List.length (rows_of t.stuck), "막힌 작업", "stuck task", "stuck tasks"
   ]
   |> List.filter_map (fun (count, korean, one, many) ->
     if count <= 0 then None
@@ -344,11 +336,6 @@ let overlay ~now ~localtime ~cols t =
     match t.blocked with
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
-    (* Named after what this section holds, the way the stuck section is. The
-       note used to read "nobody is waiting on you" while the strip's badge
-       said "Awaiting you" over a number that counts this list AND the stuck
-       one: with no held call and sixteen stuck tasks the panel answered the
-       badge with "nobody is waiting on you" two rows under it. *)
     | Read [] -> [ quiet "no keeper is holding a call" ]
     | Read rows ->
       List.map
@@ -393,15 +380,17 @@ let overlay ~now ~localtime ~cols t =
     match t.stuck with
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no task is stuck on you" ]
+    | Read [] -> [ quiet "no task owner route needs inspection" ]
     (* Every row, oldest first. The panel scrolls, and a row the cursor
        cannot reach is work the operator cannot open. *)
     | Read rows ->
       List.map
         (fun (row : stalled) ->
-           { tone = Question
+           { tone = Quiet
            ; goes_to = Stuck_task row.task_id
-           ; text = two_column ~cols row.what (waited ~now row.since_iso)
+           ; text = two_column ~cols
+               (Masc.Tui_terminal_text.preview_line row.what)
+               ("since " ^ row.since_iso)
            })
         rows
   in
@@ -428,16 +417,14 @@ let overlay ~now ~localtime ~cols t =
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
   (heading "Coming up" :: wakes)
-  (* "Awaiting you" is the badge's word for the four lists below together.
-     Each heading names its own rows, so the badge's number reads as the
-     sections under it rather than as any one of them. *)
+  (* The task route section remains inspectable but is not a request. *)
   @ [ blank; heading "Holding a call" ]
   @ questions
   @ [ blank; heading "Answer a question" ]
   @ asked
   @ [ blank; heading "Confirm a goal" ]
   @ goals
-  @ [ blank; heading "Stuck on you" ]
+  @ [ blank; heading "Task owner routes" ]
   @ stuck
 ;;
 

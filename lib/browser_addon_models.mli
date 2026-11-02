@@ -3,7 +3,19 @@
 type configuration = {
   store_root : string;
   outputs : Lane_addon_types.exact_output list;
+  locate_system : (string, string) result option;
+    (** [None] when locate is not selected; otherwise the host-rendered
+        instructions or their original unavailable reason. *)
 }
+val locate_output_name : string
+val prepare_configuration :
+  store_root:string -> outputs:Lane_addon_types.exact_output list -> configuration
+(** Host-only preparation. Captures the managed locator prompt, including its
+    current override or explicit render failure, before the worker is launched.
+    No prompt is read when that output is not selected. *)
+val load_configuration : directory:string -> (configuration, string) result
+(** The worker's owned models.json reader. Decodes the host snapshot without
+    reading a prompt registry, environment configuration or provider secrets. *)
 val configuration_to_json : configuration -> Yojson.Safe.t
 val configuration_of_json : Yojson.Safe.t -> (configuration, string) result
 type t
@@ -17,6 +29,9 @@ val incarnation : t -> string
 val output : t -> name:string -> Lane_addon_types.exact_output option
 (** Effective selected baseline and request-schema grant while serving; no
     provider or filesystem access. Both are pinned to this incarnation. *)
+val locate_system : t -> (string, string) result
+(** The locator guidance captured for this worker, or the original render
+    failure. This never substitutes instructions. *)
 val request : t -> Lane_addon_exact.request -> (outcome, error) result
 (** Publishes one request and waits. Completion/cancellation withdraws only
     this waiter and signals a new availability revision. No input is replayed. *)

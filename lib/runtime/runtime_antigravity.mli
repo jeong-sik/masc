@@ -268,6 +268,11 @@ val run_turn :
     XDG directory overrides before spawning the official client. *)
 
 module For_testing : sig
+  val with_child_fd_sampler :
+    (unit -> Runtime_cli_spawn_gate.child_fds) -> (unit -> 'a) -> 'a
+  (** Fiber-scoped samples for deterministic safety-abort tests. The normal
+      ceiling, live-child check, timeout and process cleanup still run. *)
+
   val tool_step_timeout_s : config -> float option
   (** Phase mapping for tool steps: pins that the phase carries the
       [tool_step_idle_timeout_s] backstop instead of no bound. *)

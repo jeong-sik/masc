@@ -125,7 +125,8 @@ let independent_ego_spaces_route_exact_clients () =
       let bound=match Browser_addon_host.bind_goal_space host ~goal_id:goal ~client_id:second.client_id with
         | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
       let second_instance=(List.nth attached 1).F.instance_id in
-      check string "Goal pin records the actual second publisher" second_instance bound.addon_instance_id;
+      check bool "Goal pin records the actual manual publisher" true
+        (bound.installation=Lane_addon_tool_request_owner.Manual second_instance);
       reaches_instance "a bound initial browse dispatches on that exact Space" attached (List.nth attached 1)
         (live second) B.Tabs_list
         (fun () -> Browser_addon_host.issue ~goal_space:bound host ~preference:Browser_selection.Automatic B.Tabs_list);

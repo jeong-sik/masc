@@ -350,31 +350,9 @@ let queued_count_for_testing () =
 
 let iso_date_of_unix ts = Jsonl_writer.day_key ~ts
 
-(* A trailing-window file-change answer, kept between calls.
-
-   The store is append-only per day file, so what a window gains between two
-   calls is the bytes appended plus files that did not exist yet. Measured
-   2026-09-06 on this workspace: a 24h window is 242MB and the busy hour
-   appends about 15MB, so a caller ten seconds apart needs 0.04MB of it. The
-   endpoint that reads this answered 1.8-8.8s per call and was the top
-   allocator in the profile at 2.62GB of major-direct allocation.
-
-   Held per (keeper, window) because that is what a caller asks for, and the
-   tally is small: the same measurement put every file change in a 24h window
-   across fifteen keepers at 3.4MB, the largest keeper at 0.8MB.
-
-   [Keeper_tool_call_file_change.tally] carries no timestamp on its unreadable
-   rows, so a folded tally cannot drop what aged out of the window. A carried
-   entry is therefore reusable only while nothing it counted has left the
-   window, and it records the oldest row it folded to say when that stops
-   holding.
-
-   Keying on the day range instead was wrong, which is why this note is long.
-   [iso_date_of_unix] is a calendar day, so a one-hour window's [since] does
-   not move until midnight: an entry folded at 09:00 was still "valid" at
-   17:00 and answered with eight hours of rows. At [window_hours = 24] it
-   looked right, because there the day boundary moves about as often as the
-   window. Caught in review on #33563. *)
+(* A trailing-window tally and its exact file identities. Ordinary appends
+   extend it; replacement, rotation or retention invalidates the cursor and
+   rebuilds the answer. A moving window prunes timestamps before extension. *)
 type file_change_cache_entry =
   { fcc_since_ts : float
         (** The window floor this entry was folded against. *)
@@ -382,7 +360,7 @@ type file_change_cache_entry =
         (** The oldest row the tally counted, or [None] if it counted none.
             While this is still inside the window, nothing the entry holds has
             aged out and nothing needs dropping. *)
-  ; fcc_cursors : (string * int) list
+  ; fcc_cursor : Dated_jsonl.append_cursor
   ; fcc_tally : Keeper_tool_call_file_change.tally
   }
 
@@ -392,8 +370,7 @@ let file_change_cache : (string * float, file_change_cache_entry) Hashtbl.t =
 
 (* Guards [file_change_cache] and makes the incremental fold a single flight, so
    two callers do not read the same appended bytes twice. The fold holds it
-   across calls that suspend the calling fiber: [Fs_compat.fold_appended_lines]
-   stats each day file through Eio, which runs the stat on a worker thread. The
+   across calls that may suspend the calling fiber. The
    fibers of one domain share one thread, and a [Stdlib.Mutex] raises
    [Sys_error "Mutex.lock: Resource deadlock avoided"] when the thread that
    holds it locks it again, so the next caller of the domain raised instead of
@@ -571,12 +548,26 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
 (* [committed] turns true once the row is in the ledger file. A failure after
    that point (retention pruning, the revision advance) leaves the row durable,
    so a caller that retries must read it and not append the row again. *)
+(* Only the current segment changes on ordinary appends. Bound that mutable
+   prefix so the index's content proof does not grow with a busy day's ledger.
+   Completed segments remain authoritative and use the same dated readers;
+   this byte boundary rotates storage without dropping or refusing records. *)
+let max_current_segment_bytes = 16 * 1024 * 1024
+
+exception Rotation_sequence_exhausted of int
+
 let append_to_store_result ~committed (entry : append_entry) =
   try
-    Dated_jsonl.append_notifying_commit entry.store entry.json
+    let outcome = Dated_jsonl.append_rotating
       ~on_committed:(fun () ->
         committed := true;
-        advance_committed_revision ~keeper_name:entry.keeper_name);
+        advance_committed_revision ~keeper_name:entry.keeper_name)
+      entry.store ~max_current_file_bytes:max_current_segment_bytes entry.json in
+    (match outcome with
+     | Dated_jsonl.Appended_to_current | Dated_jsonl.Appended_after_rotation _ -> ()
+     | Dated_jsonl.Skipped_by_append_guard -> raise Dated_jsonl.Append_guard_skipped
+     | Dated_jsonl.Skipped_rotation_exhausted { sequence_limit } ->
+       raise (Rotation_sequence_exhausted sequence_limit));
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1376,62 +1367,7 @@ let ts_of_entry (json : Yojson.Safe.t) : float option =
   | _ -> None
 ;;
 
-let fast_line_ts_opt (line : string) : float option =
-  let len = String.length line in
-  if len < 8 then None
-  else
-    let max_search = min (len - 5) 64 in
-    let rec find_key i =
-      if i > max_search then None
-      else if line.[i] = '"' && line.[i + 1] = 't' && line.[i + 2] = 's' && line.[i + 3] = '"' then
-        let colon = i + 4 in
-        let rec skip_ws j =
-          if j < len && (line.[j] = ' ' || line.[j] = '\t' || line.[j] = ':') then skip_ws (j + 1)
-          else j
-        in
-        let num_start = skip_ws colon in
-        let rec find_num_end j =
-          if j < len && (
-            (line.[j] >= '0' && line.[j] <= '9')
-            || line.[j] = '.' || line.[j] = '-' || line.[j] = '+'
-            || line.[j] = 'e' || line.[j] = 'E')
-          then find_num_end (j + 1)
-          else j
-        in
-        let num_end = find_num_end num_start in
-        if num_end > num_start then
-          float_of_string_opt (String.sub line num_start (num_end - num_start))
-        else None
-      else find_key (i + 1)
-    in
-    find_key 0
-;;
-
-let fast_line_contains_substring ~needle haystack =
-  let n_len = String.length needle in
-  let h_len = String.length haystack in
-  if n_len = 0 then true
-  else if n_len > h_len then false
-  else
-    let rec check i j =
-      if j = n_len then true
-      else if String.unsafe_get haystack (i + j) = String.unsafe_get needle j then check i (j + 1)
-      else false
-    in
-    let max_i = h_len - n_len in
-    let rec loop i =
-      if i > max_i then false
-      else if check i 0 then true
-      else loop (i + 1)
-    in
-    loop 0
-;;
-
-let fast_line_might_match_keeper ?keeper_needle (line : string) : bool =
-  match keeper_needle with
-  | None -> true
-  | Some needle -> fast_line_contains_substring ~needle line
-;;
+exception File_change_read_failed of Dated_jsonl.read_error
 
 let file_change_tally ?keeper_name ~(window_hours : float) () =
   if window_hours <= 0.0
@@ -1445,7 +1381,6 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
       let since = iso_date_of_unix since_ts in
       let until = iso_date_of_unix now in
       let key = Option.value keeper_name ~default:"", window_hours in
-      let keeper_needle = Option.map (fun name -> "\"" ^ name ^ "\"") keeper_name in
       Cross_context_mutex.with_lock file_change_cache_lock (fun () ->
         let carried =
           match Hashtbl.find_opt file_change_cache key with
@@ -1455,52 +1390,45 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
               | Some oldest when oldest >= since_ts -> entry.fcc_tally
               | _ -> Keeper_tool_call_file_change.prune_before ~since_ts entry.fcc_tally
             in
-            Some (entry.fcc_cursors, tally)
+            Some (entry.fcc_cursor, tally)
           | Some _ | None -> None
         in
-        let cursors, tally =
+        let cursor, tally =
           match carried with
-          | Some (cursors, pruned_tally) -> cursors, pruned_tally
-          | None -> [], Keeper_tool_call_file_change.empty_tally
+          | Some (cursor, pruned_tally) -> Some cursor, pruned_tally
+          | None -> None, Keeper_tool_call_file_change.empty_tally
         in
-        let tally, cursors =
-          Dated_jsonl.fold_range_appended_raw
-            store
-            ~since
-            ~until
-            ~cursors
-            ~init:tally
-            ~f:(fun tally line ->
-              match fast_line_ts_opt line with
-              | Some ts when ts < since_ts -> tally
-              | _ ->
-                if not (fast_line_might_match_keeper ?keeper_needle line) then tally
-                else
-                  (match Yojson.Safe.from_string line with
-                   | json ->
-                     let row_ts = ts_of_entry json in
-                     let in_window =
-                       match row_ts with
-                       | Some ts -> ts >= since_ts
-                       | None -> false
-                     in
-                     let keeper_ok =
-                       match keeper_name with
-                       | None -> true
-                       | Some name -> keeper_matches name json
-                     in
-                     if in_window && keeper_ok
-                     then Keeper_tool_call_file_change.fold_row tally json
-                     else tally
-                   | exception Yojson.Json_error _ -> tally))
+        let fold tally json =
+          let in_window = match ts_of_entry json with
+            | Some ts -> ts >= since_ts
+            | None -> false in
+          let keeper_ok = match keeper_name with
+            | None -> true
+            | Some name -> keeper_matches name json in
+          if in_window && keeper_ok
+          then Keeper_tool_call_file_change.fold_row tally json
+          else tally
         in
+        let rec read ~cursor ~init =
+          match Dated_jsonl.fold_range_appended_result store ~since ~until
+              ~cursor ~init ~f:fold with
+          | Ok (Dated_jsonl.Appended (tally, cursor)) -> tally, cursor
+          | Ok Dated_jsonl.Cursor_invalidated ->
+            (* Rotation moved the old current rows into a completed segment.
+               Discard the carried tally before reading those rows again. *)
+            read ~cursor:None ~init:Keeper_tool_call_file_change.empty_tally
+          | Error error ->
+            Hashtbl.remove file_change_cache key;
+            raise (File_change_read_failed error)
+        in
+        let tally, cursor = read ~cursor ~init:tally in
         let oldest = Keeper_tool_call_file_change.oldest_row_ts tally in
         Hashtbl.replace
           file_change_cache
           key
           { fcc_since_ts = since_ts
           ; fcc_oldest_row_ts = oldest
-          ; fcc_cursors = cursors
+          ; fcc_cursor = cursor
           ; fcc_tally = tally
           };
         Keeper_tool_call_file_change.seal_tally tally))

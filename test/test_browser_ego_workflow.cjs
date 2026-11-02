@@ -6,7 +6,8 @@ const os=require('node:os');
 const vm=require('node:vm');
 const test=require('node:test');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let script = {js|')[1].split('|js}')[0];
-const run=vm.runInNewContext('('+source+')');
+const nativeErrorSource=fs.readFileSync(path.join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let native_error_script = {js|')[1].split('|js}')[0];
+const run=vm.runInNewContext(nativeErrorSource+'\n('+source+')');
 const initial='https://fixture.test/start',destination='https://fixture.test/done';
 function fixture({fail,dialog,snapshot='native result'}={}) {
  const calls=[];let url=initial,value='';
@@ -36,7 +37,7 @@ function cancelFixture({state='pending',source:provenance='native_download',rowL
  const row={id:downloadId,label:rowLabel,source:provenance,state,path:null,reason:null};
  const context={mascDownloads:{rows:[row],handles:new Map([[downloadId,{label:handleLabel,
   download:{async cancel(){cancellations++;if(cancel)await cancel(row);}}}]])}};
- const invoke=vm.runInNewContext('('+source+')',context);
+ const invoke=vm.runInNewContext(nativeErrorSource+'\n('+source+')',context);
  return {...f,row,context,cancellations:()=>cancellations,
   invoke:steps=>invoke(f.page,{...request(steps),label:'p1'})};
 }
@@ -162,8 +163,38 @@ test('native stopped-execution diagnostics do not settle held input',async()=>{
  assert.equal(result.completed.length,0);assert.equal(result.failure.nativeError.executionStopped,true);
  assert.deepEqual(f.calls,['url']);
 });
-test('ordinary error messages never manufacture native timeout diagnostics',async()=>{
- for(const message of ['EGO_PAGE_EVALUATION_TIMED_OUT executionStopped=true','EGO_NAVIGATION_TIMEOUT committed=true']){
+test('native dialog errors preserve their exact SDK observation and stop without follow-up',async()=>{
+ for(const stage of ['initialUrl','evaluate','click']){
+  for(const type of ['alert','confirm','prompt','beforeunload']){
+   const f=fixture();let entries=0;
+   const native={code:'EGO_PAGE_DIALOG_OPENED',method:'Runtime.evaluate',sessionId:'session-1',
+    dialog:{type,message:'page-owned content',defaultPrompt:'',url:initial,frameId:'frame-1',hasBrowserHandler:false}};
+   const fail=async()=>{entries++;throw Object.assign(Error('native dialog interruption'),native);};
+   if(stage==='initialUrl')f.page.url=fail;
+   else f.page[stage]=fail;
+   const method=stage==='click'?'click':'evaluate';
+   const result=await run(f.page,request([{method,selector:'#first',source:'window.operation()'},
+    {method:'fill',selector:'#never',text:'must not run'}]));
+   assert.deepEqual(JSON.parse(JSON.stringify(result.failure.nativeError)),native);
+   assert.equal(entries,1);assert.equal(result.failure.method,stage);
+   assert.equal(result.effectStarted,stage!=='initialUrl');assert.equal(result.completedEffect,false);
+   assert.equal(result.inputReleased,stage!=='click');assert.equal(result.completed.length,0);
+   assert.deepEqual(f.calls,stage==='initialUrl'?[]:['url']);
+  }
+ }
+});
+test('a returned application object cannot manufacture a native dialog failure',async()=>{
+ const f=fixture();
+ const data={code:'EGO_PAGE_DIALOG_OPENED',method:'Runtime.evaluate',sessionId:'page-text',
+  dialog:{type:'alert',message:'application data'}};
+ f.page.evaluate=async()=>data;
+ const result=await run(f.page,request([{method:'evaluate',source:'window.data'}]));
+ assert.equal(result.failure,null);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.completed[0].receipt)),data);
+});
+test('ordinary error messages never manufacture native diagnostics',async()=>{
+ for(const message of ['EGO_PAGE_EVALUATION_TIMED_OUT executionStopped=true','EGO_NAVIGATION_TIMEOUT committed=true',
+  'PageDialogOpenedError EGO_PAGE_DIALOG_OPENED alert']){
  const f=fixture();
  f.page.evaluate=async()=>{throw Error(message);};
  const result=await run(f.page,request([{method:'evaluate',source:'window.slow()'}]));
@@ -292,7 +323,7 @@ test('lost pointer input never treats SDK cleanup void as a release acknowledgem
  }
 });
 test('lost key input preserves unconfirmed release without guessing which keys to send',async()=>{
- for (const method of ['press','keyboard.press','keyboard.type','keyboard.paste']) {
+ for (const method of ['press','keyboard.press','keyboard.paste']) {
   const f=fixture();let entries=0,releases=0,later=0;
   const input=async()=>{entries++;throw Error('lost key input response');};
   f.page.keyboard={press:input,type:input,paste:input,up:async()=>{releases++;}};
@@ -307,7 +338,7 @@ test('lost key input preserves unconfirmed release without guessing which keys t
  }
 });
 test('receipt-less holding input keeps release uncertain on dialog or failed observation',async()=>{
- for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
+ for (const method of ['keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
   for (const observationFails of [false,true]) {
    const f=fixture();const input=async()=>{};
    f.page.keyboard={type:input,press:input,paste:input};f.page.mouse={click:input};
@@ -321,7 +352,7 @@ test('receipt-less holding input keeps release uncertain on dialog or failed obs
  }
 });
 test('void holding input never infers release from a clear or rapidly closed dialog',async()=>{
- for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
+ for (const method of ['keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
   for (const dialogWasClosed of [false,true]) {
    const f=fixture();let entered=0,later=0,held=false,dialog=null;
    const input=async()=>{entered++;held=true;if(dialogWasClosed){dialog={type:'alert'};dialog=null;}};
@@ -344,16 +375,16 @@ test('void holding input never infers release from a clear or rapidly closed dia
 });
 test('a void holding step retains the earlier completed prefix without replay',async()=>{
  const f=fixture();let typed=0,later=0;
- f.page.keyboard={async type(){typed++;}};f.page.click=async()=>{later++;return {};};
+ f.page.keyboard={async paste(){typed++;}};f.page.click=async()=>{later++;return {};};
  const result=await run(f.page,request([
   {method:'fill',selector:'#editor',text:'prefix'},
-  {method:'keyboard.type',text:'may be partial'},
+  {method:'keyboard.paste',text:'may be partial'},
   {method:'click',selector:'#submit'},
  ]));
  assert.equal(typed,1);assert.equal(later,0);
  assert.equal(result.completed.length,1);assert.equal(result.completed[0].method,'fill');
  assert.equal(result.completedEffect,true);assert.equal(result.inputReleased,false);
- assert.equal(result.failure.index,1);assert.equal(result.failure.method,'keyboard.type');
+ assert.equal(result.failure.index,1);assert.equal(result.failure.method,'keyboard.paste');
 });
 test('a missing press selector stops before input while a later press failure stays uncertain',async()=>{
  for(const missing of [false,true]) {
@@ -416,7 +447,7 @@ test('native fetch forwards browser options and returns HTTP errors as data',asy
 function savedFetchFixture() {
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'masc-fetch-test-'));
  const context=vm.createContext({crypto});
- const execute=vm.runInContext('('+source+')',context);
+ const execute=vm.runInContext(nativeErrorSource+'\n('+source+')',context);
  const f=fixture();
  return {...f,directory,context,
   run:steps=>execute(f.page,{...request(steps),downloads:directory,label:'p1'}),
@@ -611,24 +642,16 @@ test('native rich input keeps focus, clipboard content and keyboard signatures',
   async press(key,options){assert.equal(arguments.length,2);assert.equal(options.delay,5);assert.equal(key,'ControlOrMeta+A');return {};},
  };
  f.page.reload=async(options)=>{assert.equal(options.timeout,7000);return {};};
- const typed=await run(f.page,request([
-  {method:'focus',selector:'#editor',options:{timeout:0}},
-  {method:'keyboard.type',text:'hello ',options:{delay:4}},
-  {method:'keyboard.insertText',text:'must not run'},
- ]));
- assert.equal(typed.failure.method,'keyboard.type');assert.equal(typed.inputReleased,false);
- assert.equal(typed.completed.length,1);assert.equal(value,'hello ');
- // A distinct later invocation models only signature forwarding after an
- // external input reset; it does not exercise or authorize that reset.
  const result=await run(f.page,request([
+  {method:'focus',selector:'#editor',options:{timeout:0}},
   {method:'keyboard.insertText',text:'한글 😀'},
   {method:'keyboard.paste',text:'Name\tStatus',html:'<table><tr><td>Name</td><td>Status</td></tr></table>'},
   {method:'keyboard.press',key:'ControlOrMeta+A',options:{delay:5}},
   {method:'reload',options:{timeout:7000}},
  ]));
- assert.equal(result.failure,null);assert.equal(value,'hello 한글 😀Name\tStatus');
+ assert.equal(result.failure,null);assert.equal(value,'한글 😀Name\tStatus');
  assert.equal(html,'<table><tr><td>Name</td><td>Status</td></tr></table>');
- assert.equal(result.completed.length,4);assert.equal(result.completedEffect,true);
+ assert.equal(result.completed.length,5);assert.equal(result.completedEffect,true);
 });
 test('plain paste preserves empty strings and failed keyboard input is never replayed',async()=>{
  const f=fixture();let pasted;

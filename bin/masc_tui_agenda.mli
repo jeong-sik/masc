@@ -66,10 +66,10 @@ type stalled =
         (** The one line {!Operator_task_attention.summary} wrote. The sentence
             is made there rather than here so the three surfaces that draw this
             row cannot describe it three ways. *)
-  ; since_iso : string  (** when it started waiting on the operator *)
+  ; since_iso : string  (** when the task was claimed or started *)
   }
-(** A task whose only exit belongs to the operator: work held by an agent with
-    no Keeper queue, or a Keeper record that does not decode. *)
+(** A task with no Keeper route, or a Keeper record that does not decode.
+    Neither observation proves its owner stopped or asked a question. *)
 
 type goal_to_confirm =
   { goal_id : string  (** the Goal the row is about, so a key can open it *)
@@ -114,9 +114,8 @@ val project :
   confirming:goal_to_confirm reading ->
   stalled:stalled reading ->
   t
-(** Keeps the earliest {!Coming} row and counts the rest. Rows that are
-    settled or unrecognised are not on the strip. [stalled] arrives in the
-    order the projection sorted it, longest wait first. *)
+(** Keeps the earliest {!Coming} row. Rows that are settled or unrecognised
+    are not on the strip. [stalled] arrives oldest claim/start first. *)
 
 val rows_taken : t -> int
 (** [1] while a wake is coming, [0] otherwise. The surface gets the row back
@@ -124,14 +123,14 @@ val rows_taken : t -> int
     on the surface strip, which every frame has. *)
 
 val waiting : t -> int
-(** Held calls, open questions, Goals to confirm and stuck tasks together. An
-    open ask counts once however many questions it holds. A list that was not
-    read adds nothing. *)
+(** Held calls, open questions and Goals to confirm. A Task route observation
+    is not a request. An open ask counts once however many questions it holds.
+    A list that was not read adds nothing. *)
 
 val waiting_label : ?ko:bool -> cells:int -> t -> string
 (** The badge for the surface strip, as plain text; styling belongs to the
     renderer. It names what waits, by kind and in that order of attention --
-    questions, held calls, Goals to confirm, stuck tasks -- led by the [;] key
+    questions, held calls, Goals to confirm -- led by the [;] key
     that opens the panel, and is [""] when nothing waits.
 
     The longest of three spellings that fits [cells] is returned: the

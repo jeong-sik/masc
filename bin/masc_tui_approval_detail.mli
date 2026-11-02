@@ -29,4 +29,23 @@ val of_fields : width:int -> (string * string) list -> line list
     value's newlines stay line breaks, and every other control character is
     drawn as its visible escape ([\x1B], [\x09]), so no field can carry an
     escape sequence to the terminal and none is hidden as a space. [line] is
-    private, so this is the only way a row of the pane is made. *)
+    private, so only this module can make a row. *)
+
+type gate_origin =
+  | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
+
+type gate_line = private
+  { gate_label : string option
+  ; gate_text : string
+  ; gate_origin : gate_origin
+  }
+
+val prefix : gate_origin -> string
+(** A renderer-owned marker. It is never taken from a field key or value. *)
+
+val of_gate_fields : width:int -> (string * Yojson.Safe.t) list -> gate_line list
+(** Keep object field order and distinguish string from other JSON values on
+    every row. Each field's text is made terminal-safe before markers are
+    attached. If a field cannot fit at this width, the input is replaced by
+    an unreadable status. This is a display projection of the decoded value,
+    not the original wire bytes. *)

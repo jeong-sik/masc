@@ -322,3 +322,13 @@ val classify_masc_internal_error_of_string :
 
 val classify_masc_internal_error :
   Agent_core.Error.t -> masc_internal_error option
+
+(** A positive result from managed guidance preparation, before invoking any
+    client transport. This process-local marker is never reconstructed from
+    text, a generic Config error, or missing transmission observations. *)
+val guidance_preparation_unavailable : field:string -> string -> Agent_core.Error.t
+val guidance_preparation_failure : Agent_core.Error.t -> string option
+
+(** A preceding entered/unknown attempt removes preparation retry authority,
+    retaining its original diagnostic cause. *)
+val without_guidance_preparation_authority : Agent_core.Error.t -> Agent_core.Error.t

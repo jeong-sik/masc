@@ -148,7 +148,10 @@ let approval_decision_wire = function
   | Deny -> "deny"
 
 let approval_payload_for_terminal payload =
-  Masc.Tui_terminal_text.sanitize_terminal_text (Yojson.Safe.to_string payload)
+  Yojson.Safe.to_string payload |> Masc.Tui_terminal_json.sanitize_canonical_preview
+
+let approval_payload_document_for_terminal payload =
+  Yojson.Safe.pretty_to_string payload |> Masc.Tui_terminal_json.sanitize_canonical_preview
 
 let approval_gate_transition ~inflight ~pending ~token ~decision =
   if inflight then Gate_blocked_inflight

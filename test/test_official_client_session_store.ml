@@ -1597,7 +1597,8 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
   reject (Some {latest with tool_surface_sha256=String.make 64 'b'});
   reject (Some {latest with runtime_id="codex.other"});
   check bool "resume instruction contains no original input replay" false
-    (String_util.contains_substring (Cooperative.official_resume_message ~operation_id)
+    (String_util.contains_substring (match Cooperative.official_resume_message ~operation_id with
+       | Ok message -> message | Error detail -> fail detail)
        "original request with completed effects")
 ;;
 

@@ -51,7 +51,8 @@
 (test
  (name test_browser_addon_socket)
  (modules test_browser_addon_socket)
- (libraries masc masc.native_addon_lease masc.browser_configuration masc.fs_compat alcotest masc.agent_core.digest yojson uuidm unix))
+ (libraries masc masc.native_addon_lease masc.browser_configuration masc.fs_compat alcotest masc.agent_core.digest yojson uuidm unix)
+ (deps (source_tree %{workspace_root}/config/prompts)))
 
 (test
  (name test_browser_addon_client)

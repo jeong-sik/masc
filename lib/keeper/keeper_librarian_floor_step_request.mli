@@ -19,6 +19,7 @@ type link = {request_id:string;request_digest:string}
 (** An original named by the ID and digest of its record. *)
 
 val scope : Keeper_librarian_durable_request.owner -> string
+val is_scope : string -> bool
 (** The store scope of this owner's steps. It differs from the owner's history
     scope. *)
 val fresh_request_id : Keeper_librarian_durable_request.owner -> string
@@ -46,6 +47,12 @@ val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_re
     resolutions and its own input, and check that the prompt is the one the
     host was sent. The record must be this owner's step scope with the host
     binding the request names. *)
+val validate_ancestry_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  t -> (unit, string) result
+(** Read-only previous-step links: each digest, physical owner,
+    transaction and consecutive position must agree, down to the first step.
+    Uses captured payloads only, with no source observation or chain execution. *)
 val matches_question : Keeper_librarian_message_floor.Machine.question -> t -> (unit, string) result
 (** The step is the question the floor asks now: the same position and sources,
     the same carried working state and unread messages, and the same input. *)
@@ -77,6 +84,10 @@ val position : t -> int
 val sources : t -> Keeper_librarian_unread.source list
 val step : t -> Keeper_librarian_runtime.durable_step_preparation
 val request : t -> (Lane_addon_exact.request, string) result
+val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t ->
+  (Lane_addon_exact.final, string) result
+(** Reobserve the original owner and decode with its original host evidence.
+    This neither validates the proposal nor grants a Memory write. *)
 val confirm_owner : t -> (unit, string) result
 val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
   (unit, string) result

@@ -66,7 +66,7 @@ selection; MASC preserves the requested selection forms.
 | `focus`, `selectOption`, `waitForURL`, `waitForSelector` | timeout |
 | `goto` | referer, timeout, waitUntil |
 | `reload` | timeout, waitUntil |
-| `keyboard.press` | delay |
+| `keyboard.type`, `keyboard.press` | delay |
 | `waitForLoadState` | timeout, idleMs |
 | `waitForFunction` | timeout, polling |
 | `fetch` | timeout, method, headers, body, cache, credentials, integrity, keepalive, mode, redirect, referrer, referrerPolicy |
@@ -124,8 +124,8 @@ input on that connection. The result reports `inputReleased` independently of co
 effects; a guard does not make the failed action successful.
 Manual held-button and held-key workflows are not exposed. The rule below applies
 to native selector and snapshot-target `click` and `dblclick`, drags, and
-input-holding workflow steps. Other standalone pointer and keyboard verbs do not
-acquire this input ownership.
+input-holding workflow steps. Ordinary Ego `type_text` also acquires this input
+ownership through the native typing path below.
 
 `keyboard.type`, `keyboard.press` and `keyboard.paste` have no selector preflight.
 An exception after entering their SDK method cannot be classified as definitely
@@ -146,17 +146,63 @@ so none provides a release receipt. `keyboard.insertText` only invokes native
 `Input.insertText`, with no key-down/up, and is classified `No_hold`; it does not
 attest release or application success. Manual `down`/`up` are not exposed.
 
-The shared typed native input contract therefore refuses `keyboard.type` and
-ordinary Ego `type_text` before input. A workflow containing `keyboard.type` is
-refused as a whole before its first step, including any earlier fill, click or
-navigation. Native data decoding still recognizes that method for retained
-receipts; decoding is not execution admission. For new work explicitly select
-native `fill` to replace an observed input, textarea or contenteditable editor,
-`keyboard.insertText` to insert literal text at the observed focus, or
-`keyboard.paste` for text/HTML. MASC never silently substitutes a method.
-Coordinate, waypoint and scene-node drags are also refused before input; native
-selector-to-selector `drag_to` without `via` and with `durationMs=0`, and workflow
-`dragAndDrop`, keep their observed receipt boundary.
+Ego `type_text` and workflow `keyboard.type` use the same fixed native typing
+producer, invoking `page.keyboard.type()` once. Ordinary `type_text` checks the
+observed document, URL and enabled editable focus before typing. A workflow
+types at its current Page's focus; use an observed editor's `focus` step when
+needed. Choose native `fill` to replace an observed input, textarea or
+contenteditable editor, `keyboard.insertText` for literal insertion without
+key-down/up, or `keyboard.paste` for text/HTML. MASC never substitutes a method.
+Coordinate, waypoint and scene-node raw drags remain refused before input;
+native selector-to-selector `drag_to` without `via` and with `durationMs=0`, and
+workflow `dragAndDrop`, keep their observed receipt boundary.
+
+Before native holding input, MASC persists the actual command's `Pending`
+intent. For raw typing it also fixes the original source Page and the current
+Page's canonical Space, permanent label, target and origin. The fixed producer
+observes a fresh native isolated context and places authenticated start/end
+binding markers around the awaited typing call. It preserves the actual void
+return and checks the native event interval between those bounds for dialog,
+document, context or session changes. A void return by itself still proves
+nothing. The local check must succeed before any later workflow step runs;
+the Host independently validates the returned capture and its original
+command, generation, step and Page bindings before accepting that progress.
+These internal bindings cannot be supplied through public tool arguments or
+application evaluation results. See the [producer interface](../../lib/browser_ego_raw_type.mli)
+and [native-window classifier](../../lib/browser_ego_native_window.mli).
+
+A verified ordinary typing result has `receipt: null` and a separate
+`nativeCompletion`; the completed raw workflow row uses the same pair. This
+summary identifies a Host-verified SDK tail, not a fabricated SDK receipt,
+physical key release, input freshness or application acceptance. Observe the
+same document's values, pixels or independent application result for the task's
+outcome. Native event arrays, CDP setup/replies and invocation nonces stay
+private: they can contain cookies or authorization headers. Success, partial
+failure and transport errors expose only the fixed safe completion/failure
+summary and strictly validated native error fields, never those raw captures.
+
+Typing consumes this SDK process's Page event buffer for its pre-window and
+interval checks. A later workflow `events` step sees only the remaining buffer,
+not a complete history of the typing invocation. This observation is not
+persistent event history across SDK process replacement.
+
+An entered raw call without a verified interval stops the workflow before
+later steps and retains uncertain input. A validated `Not_entered` result
+concerns only that raw step: observation setup may already have run, so it is
+not a claim of no effects.
+Ordinary typing can restore its prior readiness; a workflow must still judge
+every earlier entered holding step. A swallowed dialog/void result does not
+acquire an invented SDK error code. An actual thrown SDK error is retained
+only through the existing strict native-error projection.
+
+Removing the native binding is later, nonholding cleanup. A separately valid
+typing interval can settle its input even if this cleanup fails; the result
+remains a partial cleanup failure and the workflow stops before following
+steps. A malformed optional cleanup diagnostic is omitted only when the Host
+has validated that exact cleanup-only failure after the final verified raw
+tail, with no later pending action or Page transition. A lost or malformed
+overall reply, ambiguous progress, or an unconfirmed later holding step still
+leaves input pending. Never replay typing because cleanup or its reply failed.
 
 A pre-effect refusal preserves previous input readiness; it does not reset an
 existing uncertain command. Already dispatched receipt-less holding input from
@@ -169,59 +215,70 @@ permits a new distinct command after the operator has checked/reset that Space;
 it does not prove SDK cleanup. Retention cannot recover an older worker's
 uncertainty that was never recorded: installing/restarting is not an input reset.
 A missing record means no retained MASC intent, not proven native freshness.
-Automatic, fully settled `keyboard.type` workflows
-require an SDK contract that distinguishes the original input's completion from
-interruption. Observed action receipts still report immediate popup/dialog data,
-and do not verify application success. See the
+The separate native window does not change the SDK's void contract or repair
+historical receipt-less failures. The retained
+[normal one-key experiment](../evidence/ego-native-window-foundation-20261102/README.md)
+establishes a native experimental tail only. Current producer/Host checks use
+owned SDK stand-ins; installed MASC raw typing, interrupted-input recovery and
+full native parity remain unverified. Observed action receipts still report
+immediate popup/dialog data and do not verify application success. See the
 [SDK input boundary](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674),
 [pointer implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-actions.ts#L1183)
 and [keyboard implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-keyboard.ts#L115).
 
-The host does not take the script's `inputReleased` on trust. `decode` reads what
-the SDK declared for each holding step and builds the release state from that
-(`Browser_ego_release`):
+The Host does not take the script's `inputReleased` on trust. `decode` builds
+each holding step's typed evidence through
+[`Browser_ego_release`](../../lib/browser_ego_release.mli):
 
 - an object receipt that has only the members `popups` and `dialog`, each at most
-  once, and no `dialog`, is `Receipt_without_dialog`, the only answer that releases
-  a step.
+  once, and no `dialog`, is `Receipt_without_dialog` for a receipt-backed step.
   Its `popups` is a list of `{label, targetId}` objects whose two members are
   strings that are not empty. Only `Browser_ego_release.answer_of_json` builds it;
+- a raw typing window independently verified for its expected invocation is
+  `Native_window_tail`. It keeps its private completion provenance separate
+  from the SDK receipt path; JSON or a void flag cannot construct it;
 - an object receipt whose `dialog` is an object is `Receipt_with_dialog`;
 - `null` is `Void_answer`, which declares nothing;
 - any other value is `Undeclared_answer`: a non-object, a member the SDK does not
   declare or that repeats a member, a `popups` that is not a list of such objects,
   a popup with another or a repeated member, or a `dialog` that is not an object;
-- a step that was entered and gave no answer is `Never_returned`.
+- a step that was entered and gave no answer is `Never_returned`;
+- an unconfirmed native window or conflicting evidence also releases nothing.
 
-The last four are the answers that release nothing (`Unreleased`). They are public
-and anyone may build them, so the type that names the first unreleased step cannot
-hold the one answer that releases.
+Unreleased reasons are public and supply no completion authority. Only the
+receipt decoder and the verified-window boundary build successful answers.
 
-The script turns a void or non-object answer of a holding step into a failure
-before it records the step. Retained older `keyboard.type` failures therefore
-decode as `Never_returned`; current admission refuses them before execution.
-A `null` or non-object receipt (`Void_answer`, or `Undeclared_answer` for a
-non-object) therefore only comes from a reply the script did not produce. An object
-receipt with a member the SDK does not declare is recorded as it is and decodes as
-`Undeclared_answer`.
+For receipt-backed holding steps, the script stops on a void or non-object
+answer rather than recording a successful step. An object receipt with an
+undeclared member also cannot settle input. Raw typing is accepted only with
+its separately validated native window; `receipt: null` without that evidence
+is not a clean answer. Historical `keyboard.type` failures and bare void replies
+remain their original evidence and cannot be promoted into a native completion.
 
 A reply that claims release is accepted when every holding step that was entered
-is released. It carries their indices as `Released_by_receipts`, or `No_hold` when
-no holding step was entered, as when a `fill` fails before a `click`. Otherwise
-the reply is an unknown outcome that names the first step that is not released.
+has valid evidence. The one `judge` carries receipt-only indices as
+`Released_by_receipts`, or retains mixed/native provenance in
+`Completed_by_evidence`. Identical window duplicates count once; contradictory
+private invocations or a receipt/window conflict at the same step refuse.
+`No_hold` applies only when no holding step was entered, as when a `fill` fails
+before a `click`. Otherwise the reply names the first unconfirmed step.
 A failed reply that reports a held input is `Stopped` with that step, or with
 `Held_by_script_report` when every answer is clean. A successful reply cannot
 report a held input.
 
-The peer settles its input from `Released`, and restores the readiness it had for
-`No_hold`. `Browser_ego_input.command_settled` takes the `proof`, which only
-`Browser_ego_release.judge` builds from answers read by `answer_of_json`, so a flag
-cannot settle an input. The types do not show that the JSON handed to
-`answer_of_json` is the SDK's answer for this pending input. A selector
-`drag_to` settles from the one receipt of its `dragAndDrop` call by the same rule:
-an object receipt goes through `answer_of_json` and `judge`, and only a reply read
-whole settles. A failure the script caught, and a receipt that is missing, `null` or
-not an object, end as an unknown outcome and settle nothing.
+The peer settles its input from `Released`, and restores its previous readiness,
+including operator provenance, for whole-command `No_hold`.
+[`Browser_ego_input.command_settled`](../../lib/browser_ego_input.mli) accepts
+only the judge's proof. Native-window bindings must additionally match the
+actual pending command/generation, source Page label and retained numeric
+Space; Page-scoped input requires the same source/current Page. The existing
+full-record CAS and active writer checks prevent stale or replaced workers
+from settling another command. Volatile, unbound state cannot settle a native
+window. Receipt-backed answers retain their call-site responsibility: the
+types alone cannot establish that JSON is the actual SDK answer. A selector
+`drag_to` still settles from the one declared `dragAndDrop` receipt through
+`answer_of_json` and `judge`; a missing, `null` or non-object receipt establishes
+no completion.
 
 The receipt's `dialog` is declared by the SDK: it is set from the dialog-opened
 error that unwound the driver
@@ -232,13 +289,13 @@ such as `keyboard.type`, and `mouse.down`, `mouse.move` and `mouse.up`, swallow
 that error into void
 ([raw action](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674-L2687),
 [mouse](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L512-L568)),
-so void is never release proof. Current admission refuses those raw holding
-methods before input; the operator's input reset still applies to already
-uncertain input from an older session.
-`Page.info()` and the Page's event buffer are samples of the page, not answers of
-the SDK, and `decode` does not use them as release evidence. The SDK documents no
-release acknowledgement, and a receipt does not prove that every key or button
-came up.
+so void is never release proof. Raw pointer drags remain refused before input;
+raw typing uses only the separate bounded native-window path above. The
+operator's input reset still applies to already uncertain input.
+`Page.info()` and unbounded event samples cannot establish that interval or
+complete an interrupted call. The SDK documents no release acknowledgement,
+and neither a receipt nor a verified typing tail proves that every key or
+button came up.
 
 This rests on the SDK implementation at the pinned commit, not on a documented
 guarantee. The receipt's `dialog` is `pendingDialog(sessionId) || actionError.dialog`.
@@ -480,9 +537,12 @@ invented. SDK round disposal still owns interruption of an unfinished wait.
 Input uncertainty remains connection-wide. Because a lost reply can follow
 input on a different Page, the private reset view marks popup workflows as
 Space-scoped and retains the original source identity; it does not guess which
-Page holds input. Native receipt requirements, keyboard.type's void ambiguity
-and explicit operator reset authority remain unchanged. A shared receipt-field
-contract is used by the host parser and the SDK-side continuation check. Any
+Page holds input. A raw typing window after a selected popup binds both the
+original source and that step's current canonical Page. The Host reconstructs
+the current Page from validated selected transitions; arbitrary Page identities
+do not authorize continuation. SDK void ambiguity and operator reset authority
+remain unchanged. Receipt-backed input uses the shared receipt-field contract
+in the Host parser and SDK-side continuation check. Any
 undeclared action receipt, including an unknown field or `dialog: null`, stops
 before later input; a declared optional popup list without a dialog stays valid.
 The contract data itself supplies no input-release authority. This one popup flow is

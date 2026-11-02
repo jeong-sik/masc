@@ -1846,7 +1846,8 @@ let workflow ?actor t args =
      | None,_ | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Ok () in
     (match windows,error with
      | Some _,(Refused _|Unanswered (Unstarted _)) -> Error (Live.Before_effect "native workflow was refused before its producer ran")
-     | Some _,_ -> Error (Live.Outcome_unknown "native workflow result is unknown; read the same tab before another step; never replay the workflow")
+     | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) ->
+       Error (Live.Outcome_unknown "native workflow result is unknown; read the same tab before another step; never replay the workflow")
      | None,_ -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error))
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in

@@ -28,7 +28,8 @@ val serve :
     behind or stops accepting frames, and the end of the response. Returns once the stream runs in [sw].
     Authorization is the caller's: {!add_routes} puts this behind it, with the
     server's hub and limits. Exposed so tests and the bench drive the code the
-    server runs, over a real socket. *)
+    server runs, over a real socket. Headers admitted in the request fiber are
+    forwarded on the stream response; they attest only that admission. *)
 
 val add_routes :
   sw:Eio.Switch.t ->

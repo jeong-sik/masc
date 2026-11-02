@@ -3593,10 +3593,12 @@ type observer_replay_status =
   | Observer_replay_unobserved
   | Observer_replay_scoped of Sse_wire.observer_handshake
   | Observer_replay_unavailable of string
+  | Observer_replay_rejected of string
 
 let observer_replay_description = function
   | Observer_replay_unobserved -> "Replay: not negotiated"
   | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
@@ -3609,6 +3611,8 @@ let observer_replay_description = function
       "Replay reset: server instance changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
       "Replay reset: previous cursor had no instance; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->
+      "Replay reset: cursor ahead of server; disconnected history not recovered"
 
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at

@@ -29,6 +29,7 @@ type trouble =
 
 type failure =
   | Refused of { status : int; detail : string }
+  | Invalid_response of string
   | Schema_mismatch of { expected : int; received : int }
   | Frame_rejected of string  (** A frame this build cannot read. *)
 
@@ -69,6 +70,9 @@ val feed : t -> string -> step
 
 val refused : t -> status:int -> detail:string -> unit
 (** The server answered with an HTTP refusal instead of the stream. *)
+
+val invalid_response : t -> string -> unit
+(** An HTTP success did not identify a valid event stream. *)
 
 val lost : t -> now:float -> unit
 (** The connection ended, whatever the reason. The first loss after a state

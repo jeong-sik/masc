@@ -4,8 +4,6 @@ type decision = Board_initialization_inspect.decision =
   | Bootstrap_required | Adoption_required | Ready_observed | Refused
 type completion = Board_initialization_protocol.completion = Completed | Not_completed
 
-let live_guard_enforced = Board_posts_source.live_guard_enforced
-
 let inspect ~base_path = Board_initialization_inspect.read ~base_path ()
 let decision = Board_initialization_inspect.decision
 let intent_sha256 = Board_initialization_inspect.intent_sha256

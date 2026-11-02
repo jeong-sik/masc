@@ -14,12 +14,8 @@ let kind_of_payload = function
   | Posts_payload _ -> Posts | Comments_payload _ -> Comments
   | Votes_payload _ -> Votes | Reactions_payload _ -> Reactions
 
-type write_outcome =
-  | Attempted of (unit, Board_types.board_error) result
-  | Pending
-
 type outcome = {
-  writes : (kind * write_outcome) list;
+  writes : (kind * (unit, Board_types.board_error) result) list;
   settlement : Board_posts_source.reserved_settlement option;
 }
 
@@ -51,20 +47,20 @@ let capture selection ~posts ~comments ~votes ~reactions =
   |> List.rev
 
 let persist batch ~write =
-  let rec loop reversed = function
-    | [] -> { writes = List.rev reversed; settlement = None }
-    | content :: remaining ->
-      let attempted = try Ok (write content) with
-        | Board_posts_source.Reserved_settlement deferred -> Error deferred in
-      let kind = kind_of_payload content in
-      match attempted with
-      | Ok result -> loop ((kind, Attempted result) :: reversed) remaining
-      | Error deferred ->
-        let pending = List.map (fun content -> kind_of_payload content, Pending) remaining in
-        { writes = List.rev_append reversed ((kind, Attempted deferred.result) :: pending);
-          settlement = Some deferred }
-  in
-  loop [] batch
+  let reversed, settlement = List.fold_left
+    (fun (reversed, settlement) content ->
+       let result, settlement =
+         try write content, settlement with
+         | Board_posts_source.Reserved_settlement deferred ->
+           (* This carrier follows a known primary success or nonwrite. The
+              posts writer publishes success before finishing its diagnostic;
+              nonwrites carry their typed error for normal retry marking. *)
+           let settlement = match settlement with
+             | Some _ -> settlement | None -> Some deferred in
+           deferred.result, settlement in
+       (kind_of_payload content, result) :: reversed, settlement)
+    ([], None) batch in
+  { writes = List.rev reversed; settlement }
 
 let finish_settlement outcome = match outcome.settlement with
   | None -> ()
@@ -79,8 +75,8 @@ let retries outcome =
     List.fold_left
       (fun (posts, comments) (kind, result) ->
          match result with
-         | Attempted (Ok ()) -> posts, comments
-         | Attempted (Error _) | Pending ->
+         | Ok () -> posts, comments
+         | Error _ ->
            (match retry_for_kind kind with
             | Retry_posts -> true, comments
             | Retry_comments -> posts, true))
@@ -96,6 +92,6 @@ let retries outcome =
 let errors outcome =
   List.filter_map
     (function
-      | _, Attempted (Ok ()) | _, Pending -> None
-      | _, Attempted (Error error) -> Some error)
+      | _, Ok () -> None
+      | _, Error error -> Some error)
     outcome.writes

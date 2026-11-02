@@ -51,11 +51,13 @@ val flush_interval_sec : float
     prepare the root before construction, then explicitly load sources. *)
 val create_store : base_path:string -> unit -> store
 
-val create_store_with_source_io_for_testing :
-  base_path:string -> io:posts_source_io -> unit -> store
-(** Same production store with immutable per-file guard/posts transaction IO.
-    None slots use production IO; the constructor creates/adopts nothing and
-    leaves posts unobserved until explicit load. *)
+val create_store_with_posts_io_for_testing :
+  base_path:string ->
+  io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
+(** The same production store and posts writer with an immutable, store-local
+    Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
+    initialization and the actual post-rename rewrite-parent sync; [close_fd]
+    covers descriptor settlement. Posts remain unobserved until explicit load. *)
 
 (** {1 Locking + cache invalidation} *)
 
@@ -409,9 +411,9 @@ val current_post_cursor : store -> float * string option
     lock used by post creation, so a concurrently admitted first post is
     strictly newer than the returned cursor. *)
 
-(** Traverse the Recent index in [created_at DESC, post_id ASC] order until
-    [limit] matches are collected or the index is exhausted. A nonpositive
-    limit returns no posts. *)
+(** Full-scan search over every post (no cap on the scan,
+    only on the result size).  Returns matches sorted by
+    [created_at desc]. *)
 val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 (** {1 Comment operations} *)

@@ -435,7 +435,7 @@ let record_board_attention_candidate
     Log.Keeper.warn
       "board attention candidate record failed: keeper=%s post=%s error=%s"
       meta.name
-      signal.post_id
+      addressed.signal.post_id
       err
 ;;
 

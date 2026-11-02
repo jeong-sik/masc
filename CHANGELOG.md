@@ -17,6 +17,14 @@
   default. A child startup failure now fails these cases instead of skipping
   them (#27898).
 
+## [0.67.0] - 2026-11-02
+
+### Known issues
+
+- `test_server_runtime_bootstrap` (12 cases) and `test_workspace_coverage` (1 case) fail on this tree; recorded in #47336. The OCaml suites are not a release gate (#47439).
+- The v0.66.0 tag is not a main first-parent ancestor, so the missing-fragment report for this release was skipped.
+
+
 ### Upgrade notes
 
 - `MASC_KEEPER_MICROVM_MEMORY` and `MASC_KEEPER_MICROVM_CPUS` are no longer read. Set the workspace guest size with `microvm_memory` and `microvm_cpus` in the `[sandbox]` table of `runtime.toml`, which the server reads when it starts (#46805).
@@ -719,14 +727,6 @@
 - Retain Skills authoring, history and statistics evidence with source identities, and compare Dashboard nested observation against unchanged native public prepare/run results (#47205).
 - Run private JSONL FIFO probes in fresh executable processes after OCaml 5 domains start, preserving actual refusal, file preservation and bounded child cleanup checks. (#47248)
 - Check Ego capability contracts instead of guidance wording, preserving explicit Page conditions and close-tab invocation coverage (#47295).
-
-## [0.67.0] - 2026-11-02
-
-### Changed
-- TBD
-
-### Deprecated
-- TBD
 
 ## [0.66.0] - 2026-10-29
 

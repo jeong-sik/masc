@@ -158,14 +158,17 @@ let with_profile ~(meta : keeper_meta) fields =
      :: fields)
 ;;
 
-(* What an unreachable report says next is the profile's, never the detail
-   string's. An OpenSSH endpoint is named by a declaration, so a missing one
-   is the operator's. A microVM endpoint is the keeper's own guest: this read
-   cannot start it, and the keeper's next Execute starts or prepares it
-   ({!Keeper_sandbox_remote_lane.guest_endpoint}). *)
+(* What an unreachable report says next is chosen by these variants, never by
+   the detail string. An OpenSSH endpoint is named by declarations, so a
+   missing one is the operator's. A microVM guest that the runtime observes
+   as not running is started by a turn's next Execute
+   ({!Keeper_sandbox_remote_lane.guest_endpoint}); this read cannot start it.
+   Any other microVM attach failure is not one that starting the guest
+   repairs. *)
 type unreachable_endpoint =
   | Declared_endpoint
-  | Keeper_guest
+  | Guest_not_running
+  | Guest_unattached
 
 let unreachable_fields = function
   | Declared_endpoint ->
@@ -174,21 +177,29 @@ let unreachable_fields = function
           "The lane endpoint cannot be named from its declarations. Correcting \
            the keeper's runtime or endpoint declaration is the operator's." )
     ]
-  | Keeper_guest ->
+  | Guest_not_running ->
     [ "operator_action", `Null
     ; ( "note"
       , `String
-          "This status read cannot start your guest. Your next Execute starts or \
-           prepares it and reports a start failure as its own result." )
+          "The guest is not running. This status read cannot start it; the \
+           keeper's next Execute tries to start it and returns any start failure \
+           as its own result." )
+    ]
+  | Guest_unattached ->
+    [ ( "operator_action"
+      , `String
+          "The guest is running or its state could not be read, and the lane \
+           could not attach to it; unreachable names what failed. Repairing it \
+           is the operator's." )
     ]
 ;;
 
-let with_remote_report ~(meta : keeper_meta) ~unreachable = function
+let with_remote_report ~(meta : keeper_meta) = function
   | Ok report ->
     (match json_of_report report with
      | `Assoc fields -> with_profile ~meta fields
      | other -> other)
-  | Error detail ->
+  | Error (detail, unreachable) ->
     with_profile ~meta
       ([ "lane", `Null
        ; "endpoint", `Null
@@ -197,6 +208,14 @@ let with_remote_report ~(meta : keeper_meta) ~unreachable = function
        ; "unreachable", `String detail
        ]
        @ unreachable_fields unreachable)
+;;
+
+(* The attach failure is a string, so whether starting the guest is the
+   repair is asked of the runtime's own observation instead. *)
+let microvm_unreachable ~config ~meta =
+  match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+  | Some _ -> Guest_not_running
+  | None -> Guest_unattached
 ;;
 
 let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.Safe.t =
@@ -222,9 +241,11 @@ let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.S
       |> Keeper_sandbox_remote.report_openssh
            ~scope:(Keeper_sandbox_remote.Keeper_dispatch meta.name)
            ~base_path:config.base_path)
-    |> with_remote_report ~meta ~unreachable:Declared_endpoint
+    |> Result.map_error (fun detail -> detail, Declared_endpoint)
+    |> with_remote_report ~meta
   | Keeper_types_profile_sandbox.Micro_vm ->
     Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
     |> Result.map Keeper_sandbox_remote.report
-    |> with_remote_report ~meta ~unreachable:Keeper_guest
+    |> Result.map_error (fun detail -> detail, microvm_unreachable ~config ~meta)
+    |> with_remote_report ~meta
 ;;

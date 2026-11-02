@@ -689,10 +689,11 @@ let test_guest_target_refuses_guest_local_before_runtime_acquisition () =
   check bool "the isolated runtime CLI was not invoked" false (Sys.file_exists cli_log)
 ;;
 
-(* A microVM keeper's lane status is read without starting anything, so an
-   unprepared guest is unreachable there while the keeper's next Execute would
-   start it. The status must not send that keeper to the operator for a
-   declaration that is not missing; an undeclared OpenSSH endpoint still is. *)
+(* A lane status read starts nothing. When the runtime observes the microVM
+   guest as not running, the keeper's next Execute is what starts it, so the
+   status names no operator action. When the guest cannot be observed (or is
+   running and still unattached), starting it is not the repair and the
+   operator action stays, as it does for an undeclared OpenSSH endpoint. *)
 let test_unattached_lanes_name_who_acts_by_profile () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -703,30 +704,48 @@ let test_unattached_lanes_name_who_acts_by_profile () =
     | Ok meta -> meta
   in
   let field name json = Yojson.Safe.Util.member name json in
+  let is_string = function `String _ -> true | _ -> false in
   let guest_name = "unprepared-guest" in
   Masc_test_deps.declare_fixture_keeper ~base_path
     ~sandbox_profile:(Some Keeper_types_profile_sandbox.Micro_vm) ~sandbox_image:"base" guest_name;
+  let guest_meta =
+    { (fixture_meta guest_name) with
+      sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+    ; microvm_backend = Some Keeper_microvm_backend.Apple_container
+    ; sandbox_image = Some "base" }
+  in
   let cli_log = Filename.concat base_path "container-called" in
   let cli = Filename.concat base_path "container" in
-  save cli (Printf.sprintf "#!/bin/sh\nprintf called >> %s\nexit 1\n" (Filename.quote cli_log));
-  Unix.chmod cli 0o755;
-  let guest_status =
+  (* Every subcommand but the guest listing fails, so no guest can be
+     inspected, created, started or run; [listing_exit] decides whether the
+     runtime can see that the guest is absent. *)
+  let status ~listing_exit =
+    save cli
+      (Printf.sprintf
+         "#!/bin/sh\nprintf '%%s\\n' \"$1\" >> %s\nif [ \"$1\" = list ]; then printf '[]'; exit %d; fi\nexit 1\n"
+         (Filename.quote cli_log) listing_exit);
+    Unix.chmod cli 0o755;
     with_env "PATH" base_path @@ fun () ->
-    Keeper_tool_lane_status.handle ~config ~args:(`Assoc [])
-      ~meta:
-        { (fixture_meta guest_name) with
-          sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
-        ; microvm_backend = Some Keeper_microvm_backend.Apple_container
-        ; sandbox_image = Some "base" }
+    Keeper_tool_lane_status.handle ~config ~args:(`Assoc []) ~meta:guest_meta
   in
-  (match field "unreachable" guest_status with
-   | `String _ -> ()
-   | other -> failf "an unprepared guest was reported as %s" (Yojson.Safe.to_string other));
-  check bool "an unprepared guest asks nothing of the operator" true
-    (field "operator_action" guest_status = `Null);
-  (match field "note" guest_status with
-   | `String _ -> ()
-   | other -> failf "the guest note was %s" (Yojson.Safe.to_string other));
+  let absent = status ~listing_exit:0 in
+  check bool "an absent guest is unreachable" true (is_string (field "unreachable" absent));
+  check bool "an absent guest asks nothing of the operator" true
+    (field "operator_action" absent = `Null);
+  check bool "an absent guest is described by a note" true (is_string (field "note" absent));
+  let unobserved = status ~listing_exit:1 in
+  check bool "an unobserved guest is unreachable" true
+    (is_string (field "unreachable" unobserved));
+  check bool "an unobserved guest keeps the operator action" true
+    (is_string (field "operator_action" unobserved));
+  check bool "an unobserved guest gets no start note" true (field "note" unobserved = `Null);
+  let called =
+    if Sys.file_exists cli_log
+    then String.split_on_char '\n' (read_file cli_log) |> List.filter (fun line -> line <> "")
+    else [] in
+  check bool "the runtime was asked about the guest" true (List.mem "list" called);
+  check bool "a status read only inspects and lists guests" true
+    (List.for_all (fun subcommand -> subcommand = "inspect" || subcommand = "list") called);
   let ssh_name = "undeclared-endpoint" in
   Masc_test_deps.declare_fixture_keeper ~base_path
     ~sandbox_profile:(Some Keeper_types_profile_sandbox.Remote_ssh) ssh_name;
@@ -736,11 +755,10 @@ let test_unattached_lanes_name_who_acts_by_profile () =
         { (fixture_meta ssh_name) with
           sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
   in
-  (match field "unreachable" ssh_status, field "operator_action" ssh_status with
-   | `String _, `String _ -> ()
-   | unreachable, action ->
-     failf "an undeclared endpoint reported unreachable=%s operator_action=%s"
-       (Yojson.Safe.to_string unreachable) (Yojson.Safe.to_string action))
+  check bool "an undeclared endpoint is unreachable" true
+    (is_string (field "unreachable" ssh_status));
+  check bool "an undeclared endpoint keeps the operator action" true
+    (is_string (field "operator_action" ssh_status))
 ;;
 
 (* Whether there is a box is the shim's answer, read from its probe: a shim

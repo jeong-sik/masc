@@ -27,7 +27,8 @@ val handle :
 (** The tool. A docker keeper hears that it has no remote lane. A remote_ssh
     keeper whose endpoint cannot be named from its declarations hears that as
     [unreachable] with the operator action. A microvm keeper whose guest
-    cannot be attached hears [unreachable] with a [note] that its next Execute
-    starts or prepares the guest, and no operator action. Otherwise
+    cannot be attached hears [unreachable]: when the runtime observes the
+    guest as not running, with a [note] that the next Execute tries to start
+    it and no operator action; otherwise with an operator action. Otherwise
     {!json_of_report} of the endpoint's report, with the keeper's [profile]
     added. *)

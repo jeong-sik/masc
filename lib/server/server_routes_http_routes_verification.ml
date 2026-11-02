@@ -139,7 +139,7 @@ let confirmation_error_to_string = function
 let confirmation_error_of_write_error (error : Goal_store.write_error) =
   match error with
   | Goal_store.Store_unavailable unavailable -> Goal_store_unavailable unavailable
-  | Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error ->
+  | Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error ->
     Confirmation_rejected (Goal_store.write_error_to_string error)
 ;;
 

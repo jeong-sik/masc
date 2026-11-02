@@ -533,7 +533,7 @@ let test_drop_refuses_duplicate_linked_goal ~claimed () = with_workspace @@ fun 
      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "shared Task was changed")
   end
 
-let test_drop_does_not_cancel_from_duplicate_target_goal ~claimed () = with_workspace @@ fun config _ ->
+let test_drop_refuses_duplicate_target_goal ~claimed ~dropped_first () = with_workspace @@ fun config _ ->
   ignore (Masc.Workspace.init config ~agent_name:None);
   let goal = create config in
   let id = add_task ~goal_id:goal.id config "candidate" in
@@ -541,23 +541,30 @@ let test_drop_does_not_cancel_from_duplicate_target_goal ~claimed () = with_work
     Masc.Workspace.transition_task_r config ~agent_name:"operator" ~task_id:id ~action:Masc_domain.Claim ()
     |> ok_or_fail;
   let current = state config in
-  (match Goal_store.write_state_result config { current with goals = current.goals @ [goal] } with
+  let duplicate = { goal with title = "Different duplicate"; phase = GP.Dropped;
+                              criterion_revision = "different-criterion" } in
+  let rows = if dropped_first then [duplicate; goal] else [goal; duplicate] in
+  (match Goal_store.write_state_result config { current with goals = rows } with
    | Ok () -> () | Error detail -> fail detail);
-  let json = transition config goal.id "drop" |> success in
-  check (list string) "Task work reports ambiguous target Goal" [id] (failed_task_ids json);
-  (match failed_task_errors json with
-   | [error] -> check bool "target Goal ambiguity is named" true (contains ~sub:"target Goal ID was ambiguous" error)
-   | [] | _ :: _ :: _ -> fail "expected one Task error");
-  let held = drop_field json "held" |> List.map (fun row -> Yojson.Safe.Util.(
-    to_string (member "task_id" row) ^ "/" ^ to_string (member "holder" row))) in
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+  let abandoned = ref 0 in
+  let hook = Atomic.exchange Workspace_hooks.goal_verification_abandoned_fn
+      (fun _ ~goal_id:_ -> incr abandoned) in
+  let result = Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_abandoned_fn hook)
+      (fun () -> transition config goal.id "drop") in
+  refused result;
+  check bool "ambiguous target is named" true (contains ~sub:"goal ID has multiple rows" (Tool_result.message result));
+  check string "ambiguous Goal primary unchanged" (fst before) (Fs_compat.load_file primary);
+  check string "ambiguous Goal mirror unchanged" (snd before) (Fs_compat.load_file mirror);
+  check int "ambiguous Goal does not abandon verification" 0 !abandoned;
   if claimed then begin
-    check (list string) "ambiguous target retains holder observation" [id ^ "/operator"] held;
     (match task_status config id with
      | Masc_domain.Claimed { assignee; _ } -> check string "holder preserved" "operator" assignee
      | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "ambiguous target changed the held Task")
   end else begin
-    check (list string) "Todo candidate has no holder" [] held;
     (match task_status config id with
      | Masc_domain.Todo -> ()
      | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
@@ -640,8 +647,8 @@ let () = run "Goal suspension" ["drop", [
   test_case "drop refuses duplicate Todo and Claimed rows" `Quick (fun () -> test_drop_refuses_duplicate_task_rows ~claimed:true ());
   test_case "drop refuses Todo linked to duplicate Goal rows" `Quick (fun () -> test_drop_refuses_duplicate_linked_goal ~claimed:false ());
   test_case "drop reports holder linked to duplicate Goal rows" `Quick (fun () -> test_drop_refuses_duplicate_linked_goal ~claimed:true ());
-  test_case "drop does not cancel Todo from duplicate target Goal rows" `Quick (fun () -> test_drop_does_not_cancel_from_duplicate_target_goal ~claimed:false ());
-  test_case "drop reports holder from duplicate target Goal rows" `Quick (fun () -> test_drop_does_not_cancel_from_duplicate_target_goal ~claimed:true ());
+  test_case "drop refuses duplicate target before cancelling Todo" `Quick (fun () -> test_drop_refuses_duplicate_target_goal ~claimed:false ~dropped_first:false ());
+  test_case "repeated drop refuses duplicate target and preserves holder" `Quick (fun () -> test_drop_refuses_duplicate_target_goal ~claimed:true ~dropped_first:true ());
   test_case "drop refuses backlog recovery as authority" `Quick (fun () -> test_drop_rejects_recovery_candidate ~links:false ());
   test_case "drop refuses link recovery as authority" `Quick (fun () -> test_drop_rejects_recovery_candidate ~links:true ());
   test_case "drop without a reason is refused and changes nothing" `Quick test_drop_without_reason_is_refused;

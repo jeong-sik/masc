@@ -665,5 +665,5 @@ let bind_review config ~goal_id =
   | Ok (_, Error error) -> Error error
   | Error (Goal_store.Goal_not_found _ as error) ->
     Error (No_current_review (Goal_store.write_error_to_string error))
-  | Error (Goal_store.Store_unavailable _ | Rejected _ | Persist_failed _ as error) ->
+  | Error (Goal_store.Store_unavailable _ | Goal_identity_ambiguous _ | Rejected _ | Persist_failed _ as error) ->
     Error (Binding_unavailable (Goal_store.write_error_to_string error))

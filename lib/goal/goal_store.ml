@@ -367,14 +367,24 @@ type goal_reference_error =
 type write_error =
   | Store_unavailable of unavailable
   | Goal_not_found of string
+  | Goal_identity_ambiguous of string
   | Rejected of string
   | Persist_failed of string
 
 let write_error_to_string = function
   | Store_unavailable u -> unavailable_to_string u
   | Goal_not_found goal_id -> "goal not found: " ^ goal_id
+  | Goal_identity_ambiguous goal_id -> "goal ID has multiple rows: " ^ goal_id
   | Rejected detail -> detail
   | Persist_failed detail -> "goal persistence failed: " ^ detail
+
+(* The caller must hold the Goal lock. Decode still follows the document's
+   existing rules; this checks row identity, not duplicate JSON fields. *)
+let unique_goal_in goals goal_id =
+  match List.filter (fun (goal : goal) -> String.equal goal.id goal_id) goals with
+  | [] -> Ok None
+  | [goal] -> Ok (Some goal)
+  | _ :: _ :: _ -> Error (Goal_identity_ambiguous goal_id)
 
 (* Goal membership and the dependent commit share the Goal lock. Callbacks
    may acquire backlog then link locks, never re-enter the Goal store. *)
@@ -425,9 +435,10 @@ let transact_goal ?effects config ~goal_id f =
         | Unavailable u -> Error (Store_unavailable u)
         | Uninitialized -> Error (Goal_not_found goal_id)
         | Available state ->
-          (match find_goal_in state.goals goal_id with
-           | None -> Error (Goal_not_found goal_id)
-           | Some goal -> Ok (goal, state))
+          (match unique_goal_in state.goals goal_id with
+           | Error error -> Error error
+           | Ok None -> Error (Goal_not_found goal_id)
+           | Ok (Some goal) -> Ok (goal, state))
       in
       let* current, state = loaded in
       match f current with
@@ -471,22 +482,26 @@ let update_goal_if_phase config ~goal_id ~expected_phase f
       | Unavailable u -> Error (Store_unavailable u)
       | Uninitialized -> Error (Goal_not_found goal_id)
       | Available state ->
-        (match find_goal_in state.goals goal_id with
-         | None -> Error (Goal_not_found goal_id)
-         | Some goal when goal.phase <> expected_phase ->
+        (match unique_goal_in state.goals goal_id with
+         | Error error -> Error error
+         | Ok None -> Error (Goal_not_found goal_id)
+         | Ok (Some goal) when goal.phase <> expected_phase ->
            Ok (Goal_phase_mismatch goal.phase)
-         | Some goal ->
+         | Ok (Some goal) ->
            let now = Masc_domain.now_iso () in
            let updated_goal = f { goal with updated_at = now } in
-           let next_state =
-             { state with version = state.version + 1
-             ; updated_at = now
-             ; goals = replace_goal state.goals updated_goal
-             }
-           in
-           (match write_state_result config next_state with
-            | Ok () -> Ok (Goal_updated updated_goal)
-            | Error detail -> Error (Persist_failed detail))))
+           if not (String.equal updated_goal.id goal.id) then
+             Error (Rejected "goal phase update cannot replace goal identity")
+           else
+             let next_state =
+               { state with version = state.version + 1
+               ; updated_at = now
+               ; goals = replace_goal state.goals updated_goal
+               }
+             in
+             (match write_state_result config next_state with
+              | Ok () -> Ok (Goal_updated updated_goal)
+              | Error detail -> Error (Persist_failed detail))))
 
 let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) result =
   Workspace_utils.with_file_lock config (goals_path config)
@@ -803,8 +818,9 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
     | None ->
         commit_state config (fun state ->
           let now = Masc_domain.now_iso () in
+          let* existing_goal = unique_goal_in state.goals resolved_id in
           let* goal, action =
-            match find_goal_in state.goals resolved_id with
+            match existing_goal with
             | Some existing ->
                 let updated, criterion_changed =
                   goal_with_fields ~now ?title ?metric ?target_value ?due_date

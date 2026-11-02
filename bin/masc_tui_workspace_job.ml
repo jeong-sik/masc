@@ -44,6 +44,12 @@ let fork ?(observation = false) ?(key = ref ()) ?(on_withdrawn = fun () -> ()) ?
     Printexc.raise_with_backtrace exn backtrace
 
 
+let cancel (state : Masc_tui_types.state) ~key =
+  match List.find_opt (fun (token, _) -> token == key)
+      state.workspace_cancellations with
+  | None -> ()
+  | Some (_, cancel) -> cancel ()
+
 let cancel_observation (state : Masc_tui_types.state) ~key =
   match List.find_opt (fun (token, _) -> token == key)
       state.workspace_observation_cancellations with

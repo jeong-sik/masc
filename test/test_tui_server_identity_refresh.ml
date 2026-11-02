@@ -2152,6 +2152,33 @@ let test_observer_retry_retires_with_workspace_read_authority () =
   Alcotest.(check bool) "retired workspace cannot admit the retry" false
     (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry)
 
+let test_observer_recovery_belongs_to_unconfirmed_workspace () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-recovery" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "unavailable";
+  let authority = state.workspace_authority in
+  let owner = ref () in
+  state.observer_recovery_owner <- Some owner;
+  Alcotest.(check bool) "unconfirmed workspace owns recovery" true
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "read suspension retains recovery owner" true
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  state.observer_recovery_owner <- Some (ref ());
+  Alcotest.(check bool) "successor owner rejects stale recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  state.observer_recovery_owner <- Some owner;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "successor workspace rejects stale recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  state.workspace_authority <- authority;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "confirmed workspace no longer owns recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner)
+
 let test_archive_cache_does_not_cross_equal_stat_files () =
   let first = Filename.temp_file "tui-archive-source-a-" ".json" in
   let second = Filename.temp_file "tui-archive-source-b-" ".json" in
@@ -6556,6 +6583,8 @@ let () =
             test_concurrent_created_keepers_retain_individual_refresh_coverage
         ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
             test_observer_retry_retires_with_workspace_read_authority
+        ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick
+            test_observer_recovery_belongs_to_unconfirmed_workspace
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
         ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick

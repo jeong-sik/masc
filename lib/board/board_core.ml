@@ -636,7 +636,7 @@ let set_reaction_unlocked store key = function
   | Some reaction -> Hashtbl.replace store.reactions key reaction
 ;;
 
-let same_reaction_state left right =
+let same_reaction_state (left : reaction option) (right : reaction option) =
   match left, right with
   | None, None -> true
   | Some left, Some right ->

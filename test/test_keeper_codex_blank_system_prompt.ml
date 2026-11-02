@@ -425,7 +425,7 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
         let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
           "name",`String "codex-blank-prompt";"trace_id",`String "codex-blank-prompt";
           "activation_mode",`String "manual"]) |> Result.get_ok in
-        let owner = Owner.start ~sw ~keeper_name:meta.name ~initial_meta:(Some meta)
+        let owner = Owner.start ~base_path ~sw ~keeper_name:meta.name ~initial_meta:(Some meta)
             ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
             ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
             ~session_root:(Filename.concat base_path "traces") ~now:(fun () -> 42.)

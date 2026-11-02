@@ -233,6 +233,7 @@ type t
 
 val start
   :  sw:Eio.Switch.t
+  -> base_path:string
   -> store:store
   -> operation_store_path:string
   -> session_root:string
@@ -242,7 +243,8 @@ val start
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
-(** [session_root] is the workspace's session root
+(** [base_path] identifies the workspace for waiting-inventory events.
+    [session_root] is the workspace's session root
     ({!Keeper_fs.session_store_path}). After each store commit the Owner
     removes, under it, the retained checkpoints that commit released
     ({!Keeper_chat_operation_store.take_released_checkpoints}).

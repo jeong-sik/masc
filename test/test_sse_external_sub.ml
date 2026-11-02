@@ -78,15 +78,42 @@ let test_broadcast_notifies_external () =
 let test_waiting_inventory_changed_wire_contract () =
   setup ();
   Eio_main.run (fun _env ->
+    let base_path = "/tmp/test-waiting-inventory-sse-a" in
+    let matching = Masc.Sse.runtime_authority_exn ~base_path in
+    let other = Masc.Sse.runtime_authority_exn ~base_path:"/tmp/test-waiting-inventory-sse-b" in
+    let other_events = ref 0 and unscoped_events = ref 0 in
     Masc.Sse.subscribe_external
+      ~runtime_authority:matching
       ~id:"test-waiting-inventory-changed"
       ~callback:(fun (ev : Masc.Sse.external_event) ->
         received_events := ev.Masc.Sse.ext_frame :: !received_events)
       ();
+    Masc.Sse.subscribe_external ~runtime_authority:other
+      ~id:"test-waiting-inventory-other"
+      ~callback:(fun _ -> incr other_events) ();
+    Masc.Sse.subscribe_external ~id:"test-waiting-inventory-unscoped"
+      ~callback:(fun _ -> incr unscoped_events) ();
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Sse.unsubscribe_external "test-waiting-inventory-changed";
+        Masc.Sse.unsubscribe_external "test-waiting-inventory-other";
+        Masc.Sse.unsubscribe_external "test-waiting-inventory-unscoped")
+      (fun () ->
+    let before = Masc.Sse.current_id () in
     Masc.Keeper_waiting_inventory_broadcast.changed
+      ~base_path
       ~keeper_name:"gamma"
       ~source:Event_queue;
     Alcotest.(check int) "received invalidation" 1 (List.length !received_events);
+    Alcotest.(check int) "another workspace receives no invalidation" 0 !other_events;
+    Alcotest.(check int) "unscoped subscriber receives no invalidation" 0 !unscoped_events;
+    let replay authority =
+      (Masc.Sse.replay_after_for_session ~runtime_authority:authority
+         ~session_id:"waiting-inventory-observer" ~kind:Observer before).deliveries in
+    Alcotest.(check int) "matching workspace can replay the invalidation" 1
+      (List.length (replay matching));
+    Alcotest.(check int) "another workspace cannot replay the invalidation" 0
+      (List.length (replay other));
     let frame = List.hd !received_events in
     let payload =
       match Masc.Sse.data_payload_of_frame frame with
@@ -110,8 +137,7 @@ let test_waiting_inventory_changed_wire_contract () =
     Alcotest.(check bool)
       "revision ID is absent"
       true
-      (payload |> member "revision" = `Null);
-    Masc.Sse.unsubscribe_external "test-waiting-inventory-changed")
+      (payload |> member "revision" = `Null)))
 
 let test_broadcast_skips_after_unsubscribe () =
   setup ();

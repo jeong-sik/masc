@@ -389,7 +389,7 @@ let failed_owner_to_saved_preparation () =
           detail="original preparation refusal"; outcome_ref=None} in
     let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
         "trace_id",`String "owner-meta-trace";"activation_mode",`String "manual"]) |> ok in
-    let owner = Keeper_owner.start ~sw
+    let owner = Keeper_owner.start ~base_path:config.Workspace.base_path ~sw
         ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
         ~operation_store_path:(Filename.concat config.Workspace.base_path "failure-owner.sqlite3") ~session_root:(Filename.concat (Filename.dirname (Filename.concat config.Workspace.base_path "failure-owner.sqlite3")) "traces")
         ~now:(fun () -> 10.) ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)

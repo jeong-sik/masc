@@ -352,6 +352,7 @@ def run(args):
         receipt['binary_commit'] = commit
         if commit != args.expected_commit:
             raise smoke.SmokeError('installed binary commit does not match --expected-commit')
+        smoke.require_checkpoint_inspector(fixture)
         remote = str(PurePosixPath(args.remote_root) / args.keeper)
         preserved = preserved_file_manifest(getattr(args, 'preserved_file_sha256', []))
         before = json.loads(ssh(args, ['python3', '-c', initial_workspace_inspection(),

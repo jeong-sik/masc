@@ -230,6 +230,15 @@ def file_sha256(path):
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
+def require_checkpoint_inspector(fixture):
+    """Refuse an incompatible pinned binary before running the Keeper workflow."""
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed before capability check')
+    command([fixture.checkpoint_binary, 'inspect-checkpoint', '--help'], fixture.checkpoint_env)
+    if file_sha256(fixture.checkpoint_binary) != fixture.checkpoint_binary_sha256:
+        raise SmokeError('checkpoint inspector binary changed during capability check')
+
+
 def checkpoint_evidence_span(messages, fixture):
     """Return the ordered call-to-final span in one decoded checkpoint."""
     if not isinstance(messages, list):
@@ -500,6 +509,7 @@ def run(args):
                 env['DOCKER_HOST'] = docker_host
             env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true')
             fixture.checkpoint_env = env
+            require_checkpoint_inspector(fixture)
             command([binary, 'init', '--base-path', str(base)], env)
             # A Keeper names a catalog image; this host's catalog makes the
             # image under test the build `base` starts from.

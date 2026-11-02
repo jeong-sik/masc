@@ -101,6 +101,13 @@ class CheckpointProofTest(unittest.TestCase):
         with self.assertRaisesRegex(smoke.SmokeError, 'changed before'):
             self.read()
 
+    def test_unsupported_inspector_is_rejected_before_use(self):
+        rejected = subprocess.CompletedProcess([], 124, '', 'unknown command')
+        with mock.patch.object(smoke.subprocess, 'run', return_value=rejected) as invoke:
+            with self.assertRaises(smoke.SmokeError):
+                smoke.require_checkpoint_inspector(self.fixture)
+        self.assertEqual(invoke.call_args.args[0][1:], ['inspect-checkpoint', '--help'])
+
     def test_ssh_restart_uses_the_new_call_and_final(self):
         self.fixture.call_id = 'ssh-restart-call'
         self.fixture.final = 'restart-final'

@@ -11,7 +11,8 @@ type 'a launch =
   (unit -> ('a, string) result) -> unit
 
 let start_board_post_refresh state ~host ~port ~post_id ~launch =
-  if server_authority_ready state then begin
+  match state.server_identity with
+  | Some expected when server_authority_ready state -> begin
   if state.board_history_post_id <> Some post_id then
     state.board_history_post_id <- None;
   match Board_detail.start state.board_detail ~post_id with
@@ -21,9 +22,13 @@ let start_board_post_refresh state ~host ~port ~post_id ~launch =
     let full_history = state.board_history_post_id = Some post_id in
     launch
       ~deliver:(fun result -> Board_post_refresh_done (request, result))
-      (fun () -> Masc_tui_loader.load_board_post ~full_history ~host ~port ~post_id ())
+      (fun () ->
+        Masc_tui_workspace_read.with_binding ~host ~port ~expected
+          ~proof:Request_precondition (fun () ->
+            Masc_tui_loader.load_board_post ~full_history ~host ~port ~post_id ()))
 
   end
+  | None | Some _ -> ()
 
 type 'authority post_phase =
   | Before_post

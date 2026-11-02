@@ -1238,7 +1238,7 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
          | Observed result -> payout result)
       @ (match ledger with
          | Observed (Owed _ | Held _ | Paid _ | Unattributed _ | Payout_failed _) -> coverage
-         | Missing | Unavailable _ | Observed _ -> [])
+         | Missing | Unavailable _ | Observed (No_recorded_obligation | Inconsistent) -> [])
       @ field ~tone:Planning_detail.Quiet "Model execution" "not observed from the payout ledger" in
     let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
     let rows =

@@ -8881,6 +8881,21 @@ type image_inspection = {
   ii_frame : image_inspection_frame;
 }
 
+(* The text image lives outside the frame presenter. Keep its rendered rows
+   while it owns the screen so they can be redrawn after a terminal resize. *)
+type image_cell_frame = {
+  ic_title : string;
+  ic_lines : string list;
+  ic_columns : int;
+  ic_terminal_size : int * int;
+  ic_workspace : workspace_authority;
+  ic_origin : sent_image_read;
+}
+
+type image_cell_view =
+  | Image_cells of image_cell_frame
+  | Image_cells_withdrawn of (int * int) option
+
 type lane_nested_read =
   | Lane_subscriptions_read
   | Lane_declaration_read of { path : string; edit : bool }
@@ -9323,11 +9338,10 @@ type state = {
      leave the rest. While this is set the loop draws no frames at all, and
      the next key takes the picture away and repaints everything. A refusal
      has nothing to draw, so it never sets this: refusals go to the pane as
-     text, like every other thing that did not happen. A plain flag, not a
-     record of what was drawn -- the title line above the picture is drawn by
-     [draw_image] from its own parameter, and nothing reads the rest. *)
+     text, like every other thing that did not happen. *)
   mutable image_open: bool;
   mutable image_inspection : image_inspection option;
+  mutable image_cell_view : image_cell_view option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;
@@ -17725,6 +17739,55 @@ let image_reading_is_current (state : state) (pending : sent_image_read) =
     reading == state.workspace_read_authority && server_authority_ready state
     && pending.sir_view = Board && board_preview_subject_is_current state subject
 
+(* A displayed observation outlives the request epoch that admitted it. A
+   failed revalidation or an in-flight reread does not prove that its source
+   changed. A completed equal resource reread can replace the retained source
+   reference, avoiding repeated comparisons of its bytes on every loop. *)
+let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image_read) =
+  let same_skill = match origin.sir_skill_reference, state.tools_inventory with
+    | None, (Some _ | None) -> true
+    | Some expected, Some {Masc.Tui_decode_tools.ts_effective=
+        Some (Masc.Tui_decode_tools.Effective_surface_available _);_} ->
+        Option.exists (fun profile -> Skill_reference.equal expected profile.esp_reference)
+          (selected_tools_skill_profile state)
+    | Some _, (None | Some {ts_effective=(None | Some
+        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+  if workspace <> state.workspace_authority || origin.sir_view <> state.view
+     || not (image_keeper_is_current state ~view:origin.sir_view ~keeper_name:origin.sir_keeper)
+     || not same_skill then None
+  else match origin.sir_owner with
+    | Local_file_image_read authority | Remote_url_image_read authority ->
+        if authority = state.workspace_authority then Some origin else None
+    | Draft_image_read (authority, attachment) ->
+        if authority = state.workspace_authority
+           && List.exists (fun current -> current == attachment) state.msg_attachments
+        then Some origin else None
+    | Peer_image_read _ when origin.sir_view = Resources ->
+        (match origin.sir_resource, state.resource_content,
+               state.resource_pending_key, state.resource_content_error with
+         | Some (old_key, old_parts), Some (new_key, new_parts), pending, error ->
+             let equal = Masc_tui_resource_catalog.equal_key old_key in
+             if not (equal new_key)
+                || Option.exists (fun key -> not (equal key)) pending
+                || Option.exists (fun (key, _) -> not (equal key)) error then None
+             else if Option.is_some pending || Option.is_some error || old_parts == new_parts then Some origin
+             else if old_parts = new_parts then Some {origin with sir_resource=state.resource_content}
+             else None
+         | (Some _ | None), None, (Some _ | None), (Some _ | None)
+         | None, Some _, (Some _ | None), (Some _ | None) -> None)
+    | Peer_image_read _ -> Some origin
+    | Board_image_read (_, subject, _) ->
+        let post_id = match subject with
+          | Board_diagram (Board_post_diagram {post_id;_}
+                          | Board_comment_diagram {post_id;_})
+          | Board_attachment_image {post_id;_} -> post_id in
+        (match state.board_mode with
+         | Board_read current when String.equal current post_id ->
+             (match Masc_tui_board_detail.view_for state.board_detail ~post_id with
+              | Ready _ -> if board_preview_subject_is_current state subject then Some origin else None
+              | Absent | Loading | Failed _ -> Some origin)
+         | Board_read _ | Board_list | Board_compose -> None)
+
 (* A completion belongs to the exact read that launched it, even if a later
    read happens to have the same name, surface and generation. *)
 let take_image_read (state : state) (request : sent_image_read) =
@@ -18383,6 +18446,7 @@ let create_state
   help_scroll = 0;
   image_open = false;
   image_inspection = None;
+  image_cell_view = None;
   browser_viewport = None;
   image_request_generation = 0;
   image_catalog = None;

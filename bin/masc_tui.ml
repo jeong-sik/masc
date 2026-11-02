@@ -11143,7 +11143,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
   observe_msx_carts state ~mailbox;
@@ -11165,7 +11166,8 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Msx;
   state.msx_open <- true;
@@ -11191,7 +11193,8 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false;
-    state.image_inspection <- None
+    state.image_inspection <- None;
+    state.image_cell_view <- None
   end;
   state.machine_source <- Masc.Machine_lane.Dos;
   state.msx_open <- true;
@@ -11430,6 +11433,7 @@ let draw_inspected_image ?(fresh=true) state inspected =
       ^ "\027[2;1H" ^ image
       ^ Printf.sprintf "\027[%d;1H\027[2K%s" rows
           (Message_layout.fit_width footer (max 1 (columns-1))));
+    state.image_cell_view <- None;
     state.image_inspection <- Some {inspected with ii_frame=frame};
     state.image_open <- true
   | (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
@@ -11519,6 +11523,7 @@ let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = 
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width footer (max 1 (columns - 1))));
+      state.image_cell_view <- None;
       state.image_open <- true)
   end
 
@@ -11528,37 +11533,78 @@ let character_images_available () =
      | Masc_tui_terminal_palette.True_color | Ansi256 -> true
      | Ansi16 | Unknown -> false
 
-let draw_prepared_image ?scene ?origin state ~refuse ~title = function
-  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ?origin ~refuse ~title png
+(* Use the actual size even when another asynchronous completion has already
+   refreshed the shared cache. Its normalized width can exceed a tiny tty. *)
+let cell_image_terminal_size () =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some (rows, columns) when rows > 0 && columns > 0 -> Some (rows, columns)
+  | Some _ | None -> None
+
+let cell_image_fits (view : image_cell_frame) (rows, columns) =
+  view.ic_columns <= columns - 2 && List.length view.ic_lines <= rows - 3
+
+let cell_image_notice ~columns ~short ~long =
+  let notice = if columns <= 4 then "!" else if columns <= 9 then "key"
+    else if columns <= 20 then short else long in
+  "\x1b[1;1H" ^ Message_layout.fit_width notice (columns - 1)
+
+let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_frame) =
+  let contents =
+    if cell_image_fits view (rows, columns) then
+      let body = List.mapi (fun index line ->
+        Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) view.ic_lines
+        |> String.concat "" in
+      "\x1b[1;1H" ^ Message_layout.fit_width view.ic_title (columns - 1) ^ body
+      ^ Printf.sprintf "\x1b[%d;1H%s" rows
+          (Message_layout.fit_width "  colour-cell preview · any key: back" (columns - 1))
+    else cell_image_notice ~columns ~short:"key:close"
+      ~long:"Window too small · resize larger or press any key to close"
+  in
+  let retire_pixels = match !active_graphics_protocol, state.image_open, state.image_cell_view with
+    | Masc_tui_graphics.Kitty_protocol, true, None -> Masc_tui_graphics.delete_all
+    | (Kitty_protocol | ITerm2_protocol | Unsupported_protocol), (true | false), (Some _ | None) -> "" in
+  Masc_tui_msx.invalidate ();
+  write_to_terminal (Ansi.clear ^ retire_pixels ^ contents);
+  state.browser_viewport <- None;
+  state.image_inspection <- None;
+  browser_image_region := None;
+  browser_pointer_press := None;
+  state.image_cell_view <- Some (Image_cells {view with ic_terminal_size=(rows, columns)});
+  state.image_open <- true
+
+let draw_withdrawn_cell_image state ~terminal_size:(_, columns as terminal_size) =
+  let notice = cell_image_notice ~columns ~short:"key:close"
+    ~long:"Image preview no longer available · press any key to close" in
+  write_to_terminal (Ansi.clear ^ notice);
+  state.image_cell_view <- Some (Image_cells_withdrawn (Some terminal_size))
+
+let draw_prepared_image ?scene ~origin state ~refuse ~title = function
+  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ~origin ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
     withdraw_resource_diagram_pending state;
-    let rows, columns = Masc_tui_ansi.get_terminal_size () in
     if state.msx_open then
       refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
     else if not (character_images_available ()) then
       refuse "this terminal has no colour image presentation"
-    else if image_columns > columns - 2 || pixel_rows / 2 > rows - 3 then
-      refuse "terminal size changed; reopen the image preview"
-    else
+    else match cell_image_terminal_size () with
+    | None -> refuse "terminal size is unavailable; reopen the image preview"
+    | Some (rows, columns) when image_columns > columns - 2 || pixel_rows / 2 > rows - 3 ->
+        refuse "terminal size changed; reopen the image preview"
+    | Some _ ->
       let lines = Masc_tui_image_mosaic.render_rgba
         ~project:Masc_tui_terminal_palette.best_color
         ~cols:image_columns ~rows:pixel_rows bytes in
       match lines with
       | [] -> refuse "image preview has no character frame"
       | _ :: _ ->
-        state.browser_viewport <- None;
-        browser_image_region := None;
-        browser_pointer_press := None;
         let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
-        let body = List.mapi (fun index line ->
-          Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) lines
-          |> String.concat "" in
-        Masc_tui_msx.invalidate ();
-        write_to_terminal (Ansi.clear ^ "\x1b[1;1H"
-          ^ Message_layout.fit_width title (max 1 (columns - 1)) ^ body
-          ^ Printf.sprintf "\x1b[%d;1H%s" rows
-              (Message_layout.fit_width "  colour-cell preview · any key: back" (max 1 (columns - 1))));
-        state.image_open <- true
+        match cell_image_terminal_size () with
+        | None -> refuse "terminal size is unavailable; reopen the image preview"
+        | Some (rows, columns) ->
+            draw_cell_image state ~terminal_size:(rows, columns)
+              {ic_title=title;ic_lines=lines;ic_columns=image_columns;
+               ic_terminal_size=(rows, columns);ic_workspace=state.workspace_authority;
+               ic_origin=origin}
 
 let download_remote_image ?(force_fetch = false) url =
   Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
@@ -12385,6 +12431,7 @@ let close_image state =
   browser_image_region := None;
   state.browser_viewport <- None;
   state.image_inspection <- None;
+  state.image_cell_view <- None;
   match state.image_open with
   | false -> ()
   | true ->
@@ -27352,8 +27399,10 @@ Use relative paths for resources already held in the package. -->
     let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
     reconcile_keeper_message_focus state ~cols
   in
+  let cell_image_redraw_pending = ref false in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then begin
+      cell_image_redraw_pending := true;
       withdraw_resource_diagram_pending state;
       state.resource_copy_pending <- None;
       state.resource_copy_ready <- None;
@@ -27643,6 +27692,7 @@ Use relative paths for resources already held in the package. -->
       (* Console writes damage whichever surface owns the terminal, including
          the spectator whose output bypasses the ordinary frame presenter. *)
       if Terminal_write_repair.consume_damage () then begin
+        cell_image_redraw_pending := true;
         Masc_tui_msx.invalidate ();
         Frame_presenter.invalidate frame_presenter;
         Render_schedule.request render_schedule Render_schedule.Force;
@@ -27706,7 +27756,7 @@ Use relative paths for resources already held in the package. -->
       (* One direct ioctl snapshot owns both this interaction's bounds and its
          eventual frame. This also observes resizes from terminals that omit
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
-      (match refresh_terminal_size () with
+      let resized = match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            withdraw_resource_diagram_pending state;
            ignore (Atomic.fetch_and_add resize_generation 1);
@@ -27730,8 +27780,38 @@ Use relative paths for resources already held in the package. -->
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ());
            if state.image_open && not state.msx_open then
-             Option.iter (draw_inspected_image state) state.image_inspection
-       | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+             Option.iter (draw_inspected_image state) state.image_inspection;
+           true
+       | Render_schedule.Terminal_size_cache.Unchanged _ -> false in
+      (match state.image_cell_view with
+       | Some (Image_cells view) when state.image_open && not state.msx_open ->
+           (match image_cell_origin_for_redraw state ~workspace:view.ic_workspace view.ic_origin with
+           | None ->
+             (match cell_image_terminal_size () with
+              | Some terminal_size ->
+                  draw_withdrawn_cell_image state ~terminal_size;
+                  cell_image_redraw_pending := false
+              | None ->
+                  write_to_terminal Ansi.clear;
+                  state.image_cell_view <- Some (Image_cells_withdrawn None);
+                  cell_image_redraw_pending := true)
+           | Some origin ->
+             let view = if origin == view.ic_origin then view else {view with ic_origin=origin} in
+             state.image_cell_view <- Some (Image_cells view);
+             (match cell_image_terminal_size () with
+              | Some terminal_size ->
+                  if !cell_image_redraw_pending || resized || terminal_size <> view.ic_terminal_size then
+                    draw_cell_image state ~terminal_size view;
+                  cell_image_redraw_pending := false
+              | None -> ()))
+       | Some (Image_cells_withdrawn last_size) when state.image_open && not state.msx_open ->
+           (match cell_image_terminal_size () with
+            | Some terminal_size ->
+                if !cell_image_redraw_pending || resized || last_size <> Some terminal_size then
+                  draw_withdrawn_cell_image state ~terminal_size;
+                cell_image_redraw_pending := false
+            | None -> ())
+       | Some (Image_cells _ | Image_cells_withdrawn _) | None -> cell_image_redraw_pending := false);
       (* Decide from the hold captured before reading: the final event is
          rejected even when reading it emptied the last input buffer. *)
       let rejected, rejected_paste, was_reported, paste_was_reported =

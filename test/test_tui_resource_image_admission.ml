@@ -121,13 +121,20 @@ let test_skill_image_owner () =
   state.tools_inventory <- Some (inventory [original]);
   check bool "exact skill revision owns the open" true (Types.image_reading_is_current state image);
   check bool "inspection retains that owner" true (Types.image_reading_is_current state inspection);
+  let displayed () = Option.is_some
+    (Types.image_cell_origin_for_redraw state ~workspace:state.workspace_authority image) in
+  check bool "displayed skill image retains its source" true (displayed ());
   state.tools_inventory <- Some (inventory [reference "diagram" 'b']);
   check bool "a replacement revision retires the open" false (Types.image_reading_is_current state image);
   check bool "a replacement revision retires inspection" false (Types.image_reading_is_current state inspection);
+  check bool "replacement revision retires the displayed image" false (displayed ());
   state.tools_inventory <- Some (inventory [reference "other" 'a']);
   check bool "a different skill retires the open" false (Types.image_reading_is_current state image);
   state.tools_inventory <- None;
   check bool "a missing skill retires the open" false (Types.image_reading_is_current state image);
+  check bool "an unavailable skill inventory retains the displayed image" true (displayed ());
+  state.tools_inventory <- Some (inventory []);
+  check bool "a confirmed empty inventory retires the displayed image" false (displayed ());
   let local=pending state (Types.Local_file_image_read state.workspace_authority) in
   let draft=attachment () in
   state.msg_attachments <- [draft];
@@ -389,6 +396,72 @@ let test_board_attachment_ownership () =
   state.view <- Types.Board;
   Types.suspend_workspace_readings state;
   check bool "withdrawn workspace reading retires preview" false (current ())
+
+let test_displayed_cell_resource_owner () =
+  let state = state () and original = parts () in
+  state.view <- Types.Resources;
+  state.resource_content <- Some (uri, original);
+  let workspace = state.workspace_authority in
+  let origin = { (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_resource = state.resource_content } in
+  let retained origin = Types.image_cell_origin_for_redraw state ~workspace origin in
+  check bool "displayed resource is retained" true (Option.is_some (retained origin));
+  Types.suspend_workspace_readings state;
+  state.workspace_identity <- Types.Workspace_identity_match_unconfirmed "temporarily unread";
+  state.resource_pending_key <- Some uri;
+  check bool "unconfirmed workspace and pending reread retain the displayed observation" true
+    (Option.is_some (retained origin));
+  state.resource_pending_key <- None;
+  state.resource_content_error <- Some (uri, "temporary failure");
+  check bool "failed same-source reread retains the displayed observation" true
+    (Option.is_some (retained origin));
+  state.resource_content_error <- None;
+  let equal_parts = parts () in
+  state.resource_content <- Some (uri, equal_parts);
+  let rebound = match retained origin with Some origin -> origin | None -> fail "equal reread retired image" in
+  check bool "equal reread rebinds to the new snapshot" true
+    (match rebound.sir_resource with Some (_, current) -> current == equal_parts | None -> false);
+  state.resource_pending_key <- Some (Catalog.Mcp_uri "masc://other");
+  check bool "a different selection retires the displayed image" true (Option.is_none (retained rebound));
+  state.resource_pending_key <- None;
+  let changed = [{Mcp.rc_uri=Some "masc://drawing";rc_mime_type=Some "image/svg+xml";
+    rc_kind=Mcp.Resource_text "changed"}] in
+  state.resource_content <- Some (uri, changed);
+  check bool "confirmed different bytes retire the displayed image" true (Option.is_none (retained rebound));
+  state.resource_content <- Some (uri, equal_parts);
+  let owner = Updates.begin_listing state in
+  Updates.listed state ~owner (Ok {Catalog.entries=[];notes=[];reports_complete=true});
+  check bool "inventory reconciliation withdraws the displayed resource" true (Option.is_none (retained rebound));
+  state.resource_content <- Some (uri, equal_parts);
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "another workspace retires even equal bytes" true (Option.is_none (retained rebound))
+
+let test_displayed_cell_board_owner () =
+  let post = board_post "post-a" and comment = board_comment "comment-a" "original" in
+  let state = board_state post [comment] in
+  state.board_comments_focused <- true;
+  state.board_comment_cursor <- Some comment.bc_id;
+  let subject = Types.Board_diagram (Board_comment_diagram
+    {post_id=post.bp_id;comment_id=comment.bc_id;body=comment.bc_content}) in
+  let origin = pending state (Types.Board_image_read (state.workspace_read_authority,subject,ref ())) in
+  let workspace = state.workspace_authority in
+  let retained () = Option.is_some (Types.image_cell_origin_for_redraw state ~workspace origin) in
+  check bool "displayed Board comment retained" true (retained ());
+  let module Detail = Masc_tui_board_detail in
+  let loading, request = match Detail.start state.board_detail ~post_id:post.bp_id with
+    | Started (loading, request) -> loading, request
+    | Already_loading -> fail "unexpected Board refresh" in
+  state.board_detail <- loading;
+  check bool "refresh in flight retains Board image" true (retained ());
+  state.board_detail <- Detail.complete loading request (Error "temporary failure");
+  check bool "failed refresh retains Board image" true (retained ());
+  Types.suspend_workspace_readings state;
+  state.workspace_identity <- Types.Workspace_identity_match_unconfirmed "temporarily unread";
+  check bool "unconfirmed workspace retains Board image" true (retained ());
+  board_detail state post [comment];
+  check bool "same source reconfirmed" true (retained ());
+  board_detail state post [{comment with bc_content="replacement"}];
+  check bool "confirmed changed comment retires Board image" false (retained ())
 
 let test_image_preview_input_barrier () =
   let module Protocol = Masc_tui_async_protocol in
@@ -913,6 +986,8 @@ let () =
   test_case "image results bypass a full shared mailbox" `Quick test_image_result_with_full_mailbox;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
   test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
+  test_case "displayed cell resource survives failed rereads" `Quick test_displayed_cell_resource_owner;
+  test_case "displayed cell Board source survives failed rereads" `Quick test_displayed_cell_board_owner;
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;

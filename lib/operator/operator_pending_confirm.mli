@@ -43,6 +43,11 @@ type target =
 val register_target_gate :
   (Workspace.config -> target -> (unit, string) result) -> unit
 
+val install_change_observer : (base_path:string -> unit) -> unit
+(** Install a short, non-yielding callback for an attempted pending-confirm
+    publication. Calls made through the store lock notify after releasing it;
+    rejected validation and reads without expiry cleanup do not notify. *)
+
 val pending_confirm_to_yojson : pending_confirm -> Yojson.Safe.t
 val pending_confirm_of_yojson : Yojson.Safe.t -> (pending_confirm, string) result
 val raw_pending_confirms : Workspace.config -> pending_confirm list

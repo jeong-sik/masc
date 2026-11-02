@@ -143,7 +143,7 @@ def main() -> int:
     parser.add_argument("--head", required=True)
     args = parser.parse_args()
     root = Path(
-        os.environ.get("GUARD_REPO_ROOT", str(Path(__file__).resolve().parents[2]))
+        os.environ.get("MASC_REVIEW_REPO_ROOT", str(Path(__file__).resolve().parents[2]))
     )
     try:
         print(diff_identity(args.repo, args.base, args.head, root))

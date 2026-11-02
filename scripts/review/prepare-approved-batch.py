@@ -28,7 +28,7 @@ class Reason(Enum):
 
 
 class SourceUnavailable(Exception):
-    # run 39404586810: the pinned reason alone hid the guard failure beneath
+    # run 39404586810: the pinned reason alone hid the review read failure beneath
     # it, so the dispatch series was corrected blind. `cause` carries the
     # underlying diagnostic without changing the pinned vocabulary.
     def __init__(self, reason: str, *, cause: str | None = None):

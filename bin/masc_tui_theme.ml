@@ -61,8 +61,8 @@ let blend_component ~toward ~ratio component =
 
 (* Secondary information is still normal-size text. WCAG 2.2 SC 1.4.3
    uses 4.5:1; the 3:1 exception is for large text, not secondary text.
-   Blend only as far as this floor allows, then check the emitted colour
-   again because a 256-colour projection can lower contrast. *)
+   Blend only as far as this floor allows, then check the projection estimate
+   because quantization can lower contrast. Indexed RGB is not observed. *)
 let recede_max_ratio = 0.4
 let recede_contrast_floor = 4.5
 
@@ -86,7 +86,7 @@ let recede_for ~colors_enabled ~default_foreground ~project palette =
         | None -> default_foreground
         | Some projected ->
           if Color.contrast_ratio
-               (Terminal_palette.projected_rgb projected) background
+               (Terminal_palette.estimated_rgb projected) background
              >= recede_contrast_floor
           then projected_foreground ~colors_enabled (Some projected)
           else default_foreground
@@ -285,7 +285,7 @@ let status_ansi_color = function
   | Muted -> Bright_black
 
 
-(* A semantic colour, made readable where the terminal's own palette is not.
+(* A semantic colour, adjusted toward readability against the palette.
 
    The colours were picked against a dark terminal and are drawn out of the
    reader's palette, so what they come out as is the reader's theme's call.
@@ -293,11 +293,11 @@ let status_ansi_color = function
    1.44:1 on default-light, bright black at 1.69:1 on Nord. Neither is a
    dimmer shade of a warning -- they are a warning nobody sees.
 
-   Where the terminal answered OSC 4 and the entry it named does clear the
-   floor, the plain SGR code goes out and the theme keeps its choice. Where it
-   does not, the same colour is lifted in lightness alone until it does, so a
-   red stays a red. Where the terminal said nothing, the plain code goes out,
-   which is what this drew before. *)
+   An entry above the floor keeps its plain SGR code. Otherwise the colour is
+   lifted toward the floor before projection. An indexed projection is only
+   estimated from xterm defaults; a selected theme may also be unapplied by
+   the terminal. The fallback policies keep the requested ANSI code for
+   colour-only distinctions or use the foreground for self-describing text. *)
 (* Whether the lift runs at all. Held beside the palette rather than threaded
    through every drawing call, for the same reason the palette is: the answer
    is one reader's setting and every row wants it. *)
@@ -320,6 +320,14 @@ let ansi_readable_with_fallback ~fallback ~colors_enabled ~project palette color
     | Keep_ansi -> true
     | Default_foreground ->
       Color.contrast_ratio color background >= status_contrast_floor
+  in
+  let acceptable_projection projected background =
+    match fallback with
+    | Keep_ansi -> true
+    | Default_foreground ->
+      (match Terminal_palette.direct_rgb projected with
+       | Some color -> acceptable color background
+       | None -> false)
   in
   (* Off means the scheme's own colour goes out untouched -- what every other
      terminal UI does, and what a reader on a high-contrast scheme asked for
@@ -344,7 +352,7 @@ let ansi_readable_with_fallback ~fallback ~colors_enabled ~project palette color
           (match project lifted with
            | None -> fallback_code ()
            | Some projected ->
-             if acceptable (Terminal_palette.projected_rgb projected) background
+             if acceptable_projection projected background
              then projected_foreground ~colors_enabled (Some projected)
              else fallback_code ()))
 ;;
@@ -358,9 +366,10 @@ let status_readable_for ~colors_enabled ~project palette state =
   ansi_readable_for ~colors_enabled ~project palette (status_ansi_color state)
 ;;
 
-(* For labels whose words already identify the state, keep them readable even
-   when an ANSI entry is unknown or its projected colour misses the floor.
-   Colour-only distinctions continue to use [status_readable_for]. *)
+(* For labels whose words already identify the state, use the terminal's own
+   foreground when the colour is unknown or cannot be verified. That
+   foreground can itself be low-contrast. Colour-only distinctions continue to
+   use [status_readable_for]. *)
 let status_text_readable_for ~colors_enabled ~project palette state =
   ansi_readable_with_fallback ~fallback:Default_foreground ~colors_enabled
     ~project palette (status_ansi_color state)
@@ -447,9 +456,8 @@ module Syntax = struct
   let diff_added_bg = Sgr.bg_added
   let diff_removed_bg = Sgr.bg_removed
 
-  (* Both fixed diff backgrounds are dark xterm cube entries. Their row text
-     therefore uses the light end of the same fixed palette instead of the
-     terminal's default foreground, which may be black on a light theme. *)
+  (* These indices use dark backgrounds and a light foreground in the default
+     xterm palette. The terminal can redefine them; see issue #47482. *)
   let diff_row_foreground = style "\027[38;5;255m"
 
   (* The same two answers in the foreground, for compact readings that do not

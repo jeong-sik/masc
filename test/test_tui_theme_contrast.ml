@@ -520,9 +520,7 @@ let test_lift_on_still_replaces_a_failing_entry () =
       check bool "some entry is lifted when the lift is on" true replaced)
 ;;
 
-(* What the theme screen reads to label its last column. The count beside a
-   scheme means "lifted" under one setting and "left under the floor" under
-   the other, so the screen has to be able to ask. *)
+(* The active setting is read when deciding whether cached colours are stale. *)
 let test_the_setting_reads_back () =
   with_lift false (fun () ->
       check bool "off reads back as off" false (Masc_tui_theme.lift_is_enabled ()));
@@ -585,6 +583,23 @@ let test_status_text_cache_follows_lift_setting () =
               check string "lift off takes effect without a palette change"
                 (Masc_tui_theme.For_testing.ansi_color_code Masc_tui_theme.Bright_cyan)
                 (Masc_tui_ansi.Theme.text_status Masc_tui_theme.Info))))
+;;
+
+(* The default xterm colour for the selected index would pass the floor, but
+   an indexed SGR does not reveal the terminal's actual, configurable slot. *)
+let test_status_text_does_not_verify_an_unreported_index () =
+  let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+  let slots = Array.make Palette.ansi_slot_count None in
+  slots.(Masc_tui_theme.For_testing.ansi_color_index Masc_tui_theme.Bright_cyan) <-
+    Some (rgb 0 70 70);
+  let palette = Palette.of_responses ~foreground:(Some (rgb 255 255 255))
+      ~background:(Some (rgb 0 0 0)) ~ansi:slots in
+  with_lift true (fun () ->
+      check string "unreported index uses the terminal foreground"
+        "\027[39m"
+        (Masc_tui_theme.For_testing.status_text_readable ~colors_enabled:true
+           ~project:(Palette.For_testing.best_color_for_level ~level:Palette.Ansi256)
+           palette Masc_tui_theme.Info))
 ;;
 
 let test_picker_orders_native_first_then_by_cost_and_name () =
@@ -784,6 +799,8 @@ let () =
             test_status_text_uses_foreground_when_colour_is_unverified
         ; Alcotest.test_case "status text cache follows the lift setting" `Quick
             test_status_text_cache_follows_lift_setting
+        ; Alcotest.test_case "indexed status text uses the terminal foreground"
+            `Quick test_status_text_does_not_verify_an_unreported_index
         ; Alcotest.test_case "picker orders native first, then cost and name"
             `Quick test_picker_orders_native_first_then_by_cost_and_name
         ] )

@@ -1,0 +1,7 @@
+Transcribed from the capture and orchestrator tool output on 2026-11-02 KST; this is not an independently collected process log.
+
+Baseline TUI PID 55248: exit 0.
+Candidate 80-column TUI PID 60056: exit 0.
+Candidate 140-column TUI PID 66903: exit 0.
+Fixture proxy PID 47636: exit -15 (SIGTERM).
+Fixture server PID 45357: exit 0.

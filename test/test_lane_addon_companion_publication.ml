@@ -155,7 +155,7 @@ let host_owner_loss _env fs config origin =
     (Keeper_continuation_channel.same_route origin.source.channel change.ao_channel);
   let observed=Keeper_world_observation.pending_board_event_of_addon_operation_change
     ~base_path:config.base_path ~keeper_name:keeper ~arrived_at:0. change |> pub_ok in
-  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=""} in
+  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=Some ""} in
   check bool "resumed input carries the complete host event" true
     (Yojson.Safe.from_string (List.assoc "publication" fields)=P.event_json event);
   let file=path origin in
@@ -200,10 +200,10 @@ let durable_queue_and_consumption _env fs config origin =
     (Q.stimulus_of_yojson (Q.stimulus_to_yojson selection.source)=Ok selection.source);
   let observed=Keeper_world_observation.pending_board_event_of_addon_operation_change
     ~base_path:config.base_path ~keeper_name:keeper ~arrived_at:selection.source.arrived_at change |> pub_ok in
-  let preview=Yojson.Safe.from_string observed.preview in
+  let preview=Yojson.Safe.from_string (Option.get observed.preview) in
   check bool "observation contains only committed public event" true
     (Yojson.Safe.Util.member "publication" preview=P.event_json event);
-  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=""} in
+  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=Some ""} in
   check string "prompt metadata preserves original publication" publication_id (List.assoc "publication_id" fields);
   check bool "full public state survives ordinary preview shortening" true
     (Yojson.Safe.from_string (List.assoc "publication" fields)=P.event_json event);
@@ -219,7 +219,7 @@ let durable_queue_and_consumption _env fs config origin =
   ignore (Keeper_reaction_ledger.summary_for_keeper ~base_path:config.base_path ~keeper_name:keeper
     ~limit:(List.length (pending config)));
   check bool "raw original input was never copied into public observation" true
-    (not (List.mem "PRIVATE_INPUT_MARKER" (String.split_on_char '"' observed.preview)));
+    (not (List.mem "PRIVATE_INPUT_MARKER" (String.split_on_char '"' (Option.get observed.preview))));
   let bytes=read (path origin) in
   deliver fs config origin event |> delivery_ok;
   check int "lost producer ACK does not duplicate pending source" 1 (List.length (pending config));

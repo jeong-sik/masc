@@ -294,16 +294,16 @@ let test_fusion_completion_is_actionable () =
       fc
   in
   check string "post_id is canonical Fusion identity" "fusion-run:fus-1" ev.post_id;
-  check bool "preview carries the resolved answer" true (contains ~needle:"ANSWER-TOKEN-xyz" ev.preview);
+  check bool "preview carries the resolved answer" true (contains ~needle:"ANSWER-TOKEN-xyz" (Option.get ev.preview));
   check bool "preview provides canonical full-result lookup" true
-    (contains ~needle:"masc_fusion_status({\"run_id\":\"fus-1\"})" ev.preview);
+    (contains ~needle:"masc_fusion_status({\"run_id\":\"fus-1\"})" (Option.get ev.preview));
   check bool "preview separates Keeper choice from judge advice" true
-    (contains ~needle:"masc_fusion_decision" ev.preview);
+    (contains ~needle:"masc_fusion_decision" (Option.get ev.preview));
   let long_answer = String.make 1000 'x' in
   let long_event = Keeper_world_observation.pending_board_event_of_fusion_completion
       ~meta ~arrived_at:1000.0 (fusion_payload ~resolved_answer:long_answer ()) in
   check bool "lookup survives answer preview truncation" true
-    (contains ~needle:"masc_fusion_status({\"run_id\":\"fus-1\"})" long_event.preview);
+    (contains ~needle:"masc_fusion_status({\"run_id\":\"fus-1\"})" (Option.get long_event.preview));
   check string "author remains context" meta.name ev.author;
   check bool "post kind remains context" true
     (ev.post_kind = Board.System_post);
@@ -314,7 +314,7 @@ let test_fusion_completion_is_actionable () =
       (fusion_stimulus ~resolved_answer:"ANSWER-TOKEN-xyz" ())
   with
   | Ok (Some (ev : Keeper_world_observation.pending_board_event)) ->
-    check bool "stimulus path preview carries the answer" true (contains ~needle:"ANSWER-TOKEN-xyz" ev.preview)
+    check bool "stimulus path preview carries the answer" true (contains ~needle:"ANSWER-TOKEN-xyz" (Option.get ev.preview))
   | Ok None -> fail "Fusion_completed stimulus must produce Some pending_board_event, not None"
   | Error unavailable ->
     fail
@@ -344,9 +344,9 @@ let test_fusion_cancellation_is_typed_and_actionable () =
   match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ()) ~meta stimulus with
   | Ok (Some event) ->
     check bool "cancellation is explicit in title" true
-      (contains ~needle:"cancelled" event.title);
+      (contains ~needle:"cancelled" (Option.get event.title));
     check bool "cancellation is actionable" true
-      (contains ~needle:"structurally cancelled" event.preview)
+      (contains ~needle:"structurally cancelled" (Option.get event.preview))
   | Ok None -> fail "Fusion_cancelled terminal must remain actionable"
   | Error unavailable ->
     fail
@@ -395,7 +395,7 @@ let test_scheduled_wake_is_actionable () =
   in
   check string "post_id preserves occurrence" "schedule-occurrence:actionable" ev.post_id;
   check bool "preview carries schedule message" true
-    (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview);
+    (contains ~needle:"SCHEDULE-ANSWER-TOKEN" (Option.get ev.preview));
   check string "schedule actor remains context" "scheduled_automation" ev.author;
   check bool "post kind remains context" true
     (ev.post_kind = Board.System_post);
@@ -406,7 +406,7 @@ let test_scheduled_wake_is_actionable () =
   with
   | Ok (Some (ev : Keeper_world_observation.pending_board_event)) ->
     check bool "stimulus path preview carries the schedule message" true
-      (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview)
+      (contains ~needle:"SCHEDULE-ANSWER-TOKEN" (Option.get ev.preview))
   | Ok None -> fail "Schedule_due stimulus must produce Some pending_board_event, not None"
   | Error unavailable ->
     fail

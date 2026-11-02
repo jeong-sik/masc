@@ -130,11 +130,11 @@ let test_the_row_says_what_the_human_picked () =
       ~responder ~answered_at:200.
   in
   check bool "the label, not the id" true
-    (contains row.Keeper_world_observation.preview "roll back");
+    (contains (Option.get row.Keeper_world_observation.preview) "roll back");
   check bool "the id is not what the Keeper reads" false
-    (contains row.Keeper_world_observation.preview "c2");
+    (contains (Option.get row.Keeper_world_observation.preview) "c2");
   check bool "which question" true
-    (contains row.Keeper_world_observation.preview "deploy");
+    (contains (Option.get row.Keeper_world_observation.preview) "deploy");
   check string "who answered" "Vincent" row.Keeper_world_observation.author;
   check string "identity points back at the ask" "keeper-ask:ask-1"
     row.Keeper_world_observation.post_id
@@ -161,14 +161,14 @@ let test_written_and_skipped_answers_are_readable () =
       ~responder ~answered_at:200.
   in
   check bool "the words the human wrote" true
-    (contains written.Keeper_world_observation.preview "ship it on Friday");
+    (contains (Option.get written.Keeper_world_observation.preview) "ship it on Friday");
   let skipped =
     Keeper_world_observation.pending_board_event_of_ask_answer ~meta ~ask
       ~answers:(answers_for ask [ "q1", Keeper_ask.Skipped ])
       ~responder ~answered_at:200.
   in
   check bool "a declined question still says so" true
-    (contains skipped.Keeper_world_observation.preview "skipped")
+    (contains (Option.get skipped.Keeper_world_observation.preview) "skipped")
 ;;
 
 let test_complete_multi_question_answers_reach_the_prompt () =
@@ -535,7 +535,7 @@ let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state (
   check string "declined is not an empty written answer" "skipped"
     (List.nth answers 2 |> member "response" |> member "kind" |> to_string);
   check bool "display changes do not remint answer identity" true
-    (Keeper_world_observation.same_board_event_identity row {row with title="changed display";preview="changed preview"});
+    (Keeper_world_observation.same_board_event_identity row {row with title=Some "changed display";preview=Some "changed preview"});
   let unlinked = persist_answer ~base_path ~keeper_name ~ask_id:"canonical-unlinked" () |> fun ask -> read_input ask.ask_id in
   let unlinked = Keeper_unified_prompt.For_testing.board_event_fields unlinked
       |> List.assoc "ask_origin" |> Yojson.Safe.from_string in

@@ -285,8 +285,8 @@ let the_turn_can_read_the_result () =
            string
            "the row states what finished, how, and under which id"
            (composition_tool ^ " failed " ^ request_id)
-           event.WO.title;
-         let projected = Yojson.Safe.from_string event.WO.preview in
+           (Option.get event.WO.title);
+         let projected = Yojson.Safe.from_string (Option.get event.WO.preview) in
          check string "the original failure detail is available"
            "node search: timed out"
            Yojson.Safe.Util.(projected |> member "terminal_detail" |> to_string);

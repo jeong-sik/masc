@@ -201,12 +201,12 @@ let the_turn_can_read_the_answer () =
          check string "the row is attributed to the Keeper that answered" delegate
            event.WO.author;
          check string "the row states who answered and how" (delegate ^ " replied")
-           event.WO.title;
+           (Option.get event.WO.title);
          check
            bool
            "the reply text is what the turn reads"
            true
-           (String.equal event.WO.preview "the answer"))
+           (String.equal (Option.get event.WO.preview) "the answer"))
     | _ -> fail "the asker's queue holds no answer")
 ;;
 
@@ -257,18 +257,18 @@ let a_cut_reply_names_the_read_path () =
       match
         List.sort
           (fun left right ->
-             compare (String.length left.WO.preview) (String.length right.WO.preview))
+             compare (String.length (Option.get left.WO.preview)) (String.length (Option.get right.WO.preview)))
           rows
       with
       | [ short_row; long_row ] -> (short_row, long_row)
       | _ -> fail "two delegations must project two rows"
     in
     check string "a reply within the ceiling stays the whole text" "the answer"
-      short_row.WO.preview;
+      (Option.get short_row.WO.preview);
     let first_line =
-      match String.index_opt long_row.WO.preview '\n' with
-      | None -> long_row.WO.preview
-      | Some i -> String.sub long_row.WO.preview 0 i
+      match String.index_opt (Option.get long_row.WO.preview) '\n' with
+      | None -> (Option.get long_row.WO.preview)
+      | Some i -> String.sub (Option.get long_row.WO.preview) 0 i
     in
     check
       string
@@ -284,8 +284,8 @@ let a_cut_reply_names_the_read_path () =
       go 0
     in
     let note =
-      String.sub long_row.WO.preview (String.length first_line + 1)
-        (String.length long_row.WO.preview - String.length first_line - 1)
+      String.sub (Option.get long_row.WO.preview) (String.length first_line + 1)
+        (String.length (Option.get long_row.WO.preview) - String.length first_line - 1)
     in
     check
       bool
@@ -431,9 +431,9 @@ let a_padded_short_reply_is_not_cut () =
                | Ok (Some event) -> event)
       with
       | [ row ] ->
-        check string "the preview equals the trimmed answer" "OK" row.WO.preview;
+        check string "the preview equals the trimmed answer" "OK" (Option.get row.WO.preview);
         check bool "no status read note on an uncut answer" true
-          (not (String.contains row.WO.preview '\n'))
+          (not (String.contains (Option.get row.WO.preview) '\n'))
       | _ -> fail "one delegation must project one row")
 ;;
 

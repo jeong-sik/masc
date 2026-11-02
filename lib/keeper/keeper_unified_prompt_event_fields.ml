@@ -107,6 +107,11 @@ let answered_ask_fields ~answer_source_id (input : Keeper_world_observation.answ
 ;;
 
 let board_event_note_fields = function
+  | Keeper_world_observation.Board_comment_added { comment_id; parent_id } ->
+    [ "comment_id", Board.Comment_id.to_string comment_id ]
+    @ (match parent_id with
+       | None -> []
+       | Some id -> [ "parent_comment_id", Board.Comment_id.to_string id ])
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_fields reaction
   | Keeper_world_observation.Board_vote_cast vote -> board_vote_fields vote
@@ -128,7 +133,6 @@ let board_event_note_fields = function
        | Some user_name -> [ "external_user_name", user_name ])
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-  | Keeper_world_observation.Board_comment_added _
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
@@ -179,9 +183,11 @@ let board_event_fields
     [ "event", event_label
     ; "post_id", event.post_id
     ; "post_kind", Board.post_kind_to_string event.post_kind
-    ; "title", Keeper_types_profile.short_preview ~max_len:80 event.title
-    ; "author", event.author
     ]
+    @ (match event.title with
+       | None -> []
+       | Some title -> [ "title", Keeper_types_profile.short_preview ~max_len:80 title ])
+    @ [ "author", event.author ]
   in
   let fields =
     match event.hearth with
@@ -235,7 +241,9 @@ let board_event_fields
           fields @ [ "latest_external_author", author; "latest_external_preview", preview ]
       | Some author, None -> fields @ [ "latest_external_author", author ]
       | None, _ -> fields in
-    fields @ [ "preview", event.preview ]
+    match event.preview with
+    | None -> fields
+    | Some preview -> fields @ [ "preview", preview ]
 ;;
 
 let format_board_event_text

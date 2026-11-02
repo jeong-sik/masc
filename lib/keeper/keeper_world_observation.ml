@@ -60,8 +60,8 @@ type pending_board_event =
   { event_kind : pending_board_event_kind
   ; post_id : string
   ; author : string
-  ; title : string
-  ; preview : string
+  ; title : string option
+  ; preview : string option
   ; hearth : string option
   ; post_kind : Board.post_kind
   ; updated_at : float
@@ -615,7 +615,7 @@ let pending_board_event_kind_of_observation
 
 let pending_board_event_of_board_observation
       ~(meta : keeper_meta)
-      ~arrived_at:(_ : float)
+      ~(arrived_at : float)
       ~allow_legacy_unknown
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
@@ -667,15 +667,17 @@ let pending_board_event_of_board_observation
         let post : Board.post = post_snapshot in
         match observation.kind with
         | Board_signal.Observed_post_created ->
-          ( observation.title, short_preview ~max_len:80 observation.content
+          ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
           , observation.hearth, post.post_kind, post.created_at )
         | Board_signal.Observed_post_updated { content_updated_at } ->
-          ( observation.title, short_preview ~max_len:80 observation.content
+          ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
           , observation.hearth, post.post_kind, content_updated_at )
         | Board_signal.Observed_comment_added _
         | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
-          ( post.title, short_preview ~max_len:80 post.body
-          , post.hearth, post.post_kind, post.updated_at )
+          (* The event audience belongs to the comment or action, not to the
+             parent post. Its current content has no recipient binding here. *)
+          ( None, None, None, post.post_kind
+          , Option.value observation.updated_at ~default:arrived_at )
       in
       let event_kind = pending_board_event_kind_of_observation observation in
       let latest_external_author, latest_external_preview =
@@ -765,10 +767,10 @@ let pending_board_event_of_fusion_completion
   { event_kind = Fusion_completed
   ; post_id
   ; author = meta.name
-  ; title
+  ; title = Some title
   ; preview =
-      (let body = short_preview ~max_len:fusion_result_preview_max_len message in
-       if String.equal lookup "" then body else body ^ "\n" ^ lookup)
+      Some (let body = short_preview ~max_len:fusion_result_preview_max_len message in
+            if String.equal lookup "" then body else body ^ "\n" ^ lookup)
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -815,8 +817,8 @@ let pending_board_event_of_composition_completion
     (* Joined rather than formatted: the ratchet counts a format literal as a
        model-facing prose slot, and the three fields already say everything
        the row states. *)
-  ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
-  ; preview
+  ; title = Some (String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ])
+  ; preview = Some preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -840,8 +842,8 @@ let pending_board_event_of_addon_operation_change ~base_path ~keeper_name ~arriv
     "tool",`String record.origin.destination.tool;"publication",P.event_json record.event] in
   Ok {event_kind=Addon_operation_changed {source=change;publication=record.event};
     post_id=Keeper_event_queue.addon_operation_change_post_id change;author=keeper_name;
-    title="Add-on " ^ record.origin.destination.tool ^ " state";
-    preview=Yojson.Safe.to_string preview;hearth=None;post_kind=Board.System_post;
+    title=Some ("Add-on " ^ record.origin.destination.tool ^ " state");
+    preview=Some (Yojson.Safe.to_string preview);hearth=None;post_kind=Board.System_post;
     updated_at=arrived_at;explicit_mention=false;matched_targets=[];replies_after_own_comment=None;
     latest_external_author=None;latest_external_preview=None}
 ;;
@@ -852,8 +854,8 @@ let pending_board_event_of_owned_job_completion ~base_path ~keeper_name ~arrived
     { event_kind = Owned_job_completed completion
     ; post_id = Keeper_event_queue.owned_job_completion_post_id completion
     ; author = keeper_name
-    ; title = "job " ^ Keeper_owned_job_identity.Job_id.to_string completion.Keeper_event_queue.oj_job_id
-    ; preview = Yojson.Safe.to_string (Keeper_owned_job_completion_result.to_json result)
+    ; title = Some ("job " ^ Keeper_owned_job_identity.Job_id.to_string completion.Keeper_event_queue.oj_job_id)
+    ; preview = Some (Yojson.Safe.to_string (Keeper_owned_job_completion_result.to_json result))
     ; hearth = None
     ; post_kind = Board.System_post
     ; updated_at = arrived_at
@@ -918,8 +920,8 @@ let pending_board_event_of_delegate_completion
   { event_kind = Delegate_completed dc.dc_terminal
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
-  ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
-  ; preview
+  ; title = Some (Printf.sprintf "%s %s" dc.dc_keeper outcome)
+  ; preview = Some preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -956,8 +958,8 @@ let pending_board_event_of_scheduled_wake
   { event_kind = Schedule_due sw
   ; post_id
   ; author = scheduled_automation_actor
-  ; title
-  ; preview = sw.message
+  ; title = Some title
+  ; preview = Some sw.message
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1000,14 +1002,14 @@ let pending_board_event_of_external_attention
   ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_external_attention_title
         [ "surface", surface_label
         ; "urgency", urgency_label
         ; "conversation_id", item.conversation.conversation_id
         ]
-        ~fallback:item.conversation.conversation_id
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len item.content_preview
+        ~fallback:item.conversation.conversation_id)
+  ; preview = Some (short_preview ~max_len:fusion_result_preview_max_len item.content_preview)
   ; hearth = None
   ; post_kind = Board.Human_post
   ; updated_at = item.received_at
@@ -1087,15 +1089,15 @@ let pending_board_event_of_ask_answer
   ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
   ; author = who
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_ask_title
         [ "ask_id", ask.Keeper_ask.ask_id
         ; "surface", Surface_ref.lane_label responder.Keeper_ask.surface
         ]
-        ~fallback:ask.Keeper_ask.ask_id
+        ~fallback:ask.Keeper_ask.ask_id)
   (* A display preview only. The model consumes the typed original questions
      and answers, not this joined display text or its short excerpt. *)
-  ; preview = body
+  ; preview = Some body
   ; hearth = None
     (* Not a Board post: masc wrote this row, nobody posted it. Marked
        [Human_post] the Keeper read it as a post it could fetch and spent a
@@ -1121,12 +1123,12 @@ let pending_board_event_of_completion_authority_rejection
   ; post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
   ; author = Masc_domain.completion_authority_actor rejection.car_authority
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_completion_authority_title
         [ "task_id", rejection.car_task_id ]
-        ~fallback:rejection.car_task_id
+        ~fallback:rejection.car_task_id)
   ; preview =
-      short_preview
+      Some (short_preview
         ~max_len:fusion_result_preview_max_len
         (event_row_text
            Prompt_names.keeper_world_event_rows_completion_authority_preview
@@ -1136,7 +1138,7 @@ let pending_board_event_of_completion_authority_rejection
              , Masc_domain.completion_authority_kind rejection.car_authority )
            ; "reason", rejection.car_reason
            ]
-           ~fallback:(rejection.car_task_id ^ " " ^ rejection.car_verification_id))
+           ~fallback:(rejection.car_task_id ^ " " ^ rejection.car_verification_id)))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1171,12 +1173,12 @@ let pending_board_event_of_task_cancellation
   ; post_id = Keeper_event_queue.task_cancellation_post_id cancellation
   ; author = cancellation.tc_cancelled_by
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_task_cancelled_title
         [ "task_id", cancellation.tc_task_id ]
-        ~fallback:cancellation.tc_task_id
+        ~fallback:cancellation.tc_task_id)
   ; preview =
-      short_preview
+      Some (short_preview
         ~max_len:fusion_result_preview_max_len
         (event_row_text
            Prompt_names.keeper_world_event_rows_task_cancelled_preview
@@ -1184,7 +1186,7 @@ let pending_board_event_of_task_cancellation
            ; "cancelled_by", cancellation.tc_cancelled_by
            ; "reason", reason_text
            ]
-           ~fallback:(cancellation.tc_task_id ^ " " ^ cancellation.tc_cancelled_by))
+           ~fallback:(cancellation.tc_task_id ^ " " ^ cancellation.tc_cancelled_by)))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1209,12 +1211,12 @@ let pending_board_event_of_task_outcome
   ; post_id = Keeper_event_queue.task_outcome_post_id outcome
   ; author = Masc_domain.completion_authority_actor outcome.to_authority
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_task_outcome_title
         [ "task_id", outcome.to_task_id ]
-        ~fallback:outcome.to_task_id
+        ~fallback:outcome.to_task_id)
   ; preview =
-      short_preview
+      Some (short_preview
         ~max_len:fusion_result_preview_max_len
         (event_row_text
            Prompt_names.keeper_world_event_rows_task_outcome_preview
@@ -1224,7 +1226,7 @@ let pending_board_event_of_task_outcome
              , Masc_domain.completion_authority_kind outcome.to_authority )
            ]
            ~fallback:
-             (outcome.to_task_id ^ " " ^ outcome.to_verification_id))
+             (outcome.to_task_id ^ " " ^ outcome.to_verification_id)))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

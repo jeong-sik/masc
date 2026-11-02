@@ -3188,7 +3188,7 @@ let test_completion_delivery_failure_and_restart () =
      check_json "model observation has the typed original source" (Store.source_to_json original.source)
        (Keeper_owned_job_identity.source_to_json carried.oj_source)
    | _ -> fail "model observation lost typed completion identity");
-  let preview = Yojson.Safe.from_string event.preview in
+  let preview = Yojson.Safe.from_string (Option.get event.preview) in
   check bool "admitted result is available" true (preview |> member "result_available" |> to_bool);
   check int "nonzero exit remains exact observed result" 7 (preview |> member "result" |> member "exit_code" |> to_int);
   let outputs = preview |> member "result" |> member "artifacts" |> to_list in

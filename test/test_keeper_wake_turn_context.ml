@@ -1514,8 +1514,8 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
       {event_kind=WO.Ask_answered_row {answered_by=Masc.Keeper_input_speaker.Owner;
         answer_source_id=Some "keeper-ask:original-common-owner";
         input={original_ask; answers; answered_at=1.}};
-       post_id="keeper-ask:original-common-owner";author="operator";title="original answer";
-       preview="ORIGINAL_ASK_REPLY\nkeep the original work";hearth=None;post_kind=Masc.Board.System_post;
+       post_id="keeper-ask:original-common-owner";author="operator";title=Some "original answer";
+       preview=Some "ORIGINAL_ASK_REPLY\nkeep the original work";hearth=None;post_kind=Masc.Board.System_post;
        updated_at=1.;explicit_mention=false;matched_targets=[];replies_after_own_comment=None;
        latest_external_author=None;latest_external_preview=None} in
     let observation = {base_observation with pending_board_events=[answer];
@@ -1684,7 +1684,7 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
     let wake = Keeper_event_queue.scheduled_wake selection.Keeper_event_queue_state.source |> Option.get in
     { base_observation with pending_board_events =
       [{ WO.event_kind = Schedule_due wake; post_id = selection.source.post_id;
-         author = "fixture"; title = "display title"; preview = "display preview";
+         author = "fixture"; title = Some "display title"; preview = Some "display preview";
          hearth = None; post_kind = Masc.Board.System_post; updated_at = 1.;
          explicit_mention = false; matched_targets = []; replies_after_own_comment = None;
          latest_external_author = None; latest_external_preview = None }] } in

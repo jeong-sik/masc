@@ -108,8 +108,11 @@ type pending_board_event = {
   event_kind : pending_board_event_kind;
   post_id : string;
   author : string;
-  title : string;
-  preview : string;
+  title : string option;
+  preview : string option;
+  (** [None] means that parent post content was not bound to the recipient of
+      this comment, reaction, or vote. The event's own details remain available
+      in [event_kind] and, for a comment, [latest_external_preview]. *)
   hearth : string option;
   post_kind : Board_types.post_kind;
   updated_at : float;

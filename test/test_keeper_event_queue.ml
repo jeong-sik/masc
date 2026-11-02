@@ -827,7 +827,7 @@ let () =
       decoded = rejection
     | _ -> false);
   assert (String.equal rejection_event.post_id rejection_stimulus.post_id);
-  assert (String_util.string_contains_substring ~needle:rejection.car_reason rejection_event.preview);
+  assert (String_util.string_contains_substring ~needle:rejection.car_reason (Option.get rejection_event.preview));
   assert (
     not (Masc.Keeper_world_observation.is_board_activity_event rejection_event));
   assert (
@@ -911,7 +911,7 @@ let () =
   assert (
     String_util.string_contains_substring
       ~needle:"approved"
-      outcome_event.title);
+      (Option.get outcome_event.title));
   assert (
     not (Masc.Keeper_world_observation.is_board_activity_event outcome_event));
   assert (

@@ -252,7 +252,7 @@ let test_replayed_comment_discovery_respects_parent_visibility () =
                  ~content:"@thread-owner discussion" ~visibility
                  ~post_kind:Board.Human_post () with
          | Ok post -> post
-         | Error error -> fail (Board.show_board_error error) in
+         | Error error -> fail (Board.Post_publication_failure.to_string error) in
        let post_id = Board.Post_id.to_string post.id in
        let comment =
          match Board_dispatch.add_comment ~post_id ~author:"comment-author"
@@ -409,12 +409,63 @@ let test_queued_creation_keeps_content_and_audience_after_edit () =
     | _ -> fail "expected one queued creation for alice" in
   check bool "projection remains a typed creation" true
     (event.Keeper_world_observation.event_kind = Keeper_world_observation.Board_post_created);
-  check string "creation keeps its original title" post.title event.title;
-  check string "creation keeps its original body" original_body event.preview;
+  check string "creation keeps its original title" post.title (Option.get event.title);
+  check string "creation keeps its original body" original_body (Option.get event.preview);
   check (float 0.) "creation keeps its original time" post.created_at event.updated_at;
   check bool "creation still explicitly mentions alice" true event.explicit_mention;
   check (list string) "creation keeps alice as the only matched target" [ "alice" ]
     event.matched_targets
+;;
+
+let test_thread_activity_does_not_project_unbound_parent_content () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let alice = keeper_meta config "alice" in
+  register config alice;
+  let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"@bob private original"
+    ~title:"Private parent" ~body:"@bob private original" ~visibility:Board.Direct
+    ~hearth:"private-hearth" ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let own_comment = get (Board_dispatch.add_comment ~post_id ~author:"alice" ~content:"Earlier comment" ()) in
+  let own_comment_id = Board.Comment_id.to_string own_comment.id in
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let reply = get (Board_dispatch.add_comment ~post_id ~author:"peer" ~parent_id:own_comment_id
+    ~content:"@alice a reply" ()) in
+  ignore (get (Board_dispatch.vote_comment ~voter:"voter" ~comment_id:own_comment_id ~direction:Board.Up));
+  ignore (get (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+    ~target_id:own_comment_id ~user_id:"reactor" ~emoji:"👍"));
+  ignore (get (Board_dispatch.update_post ~post_id ~editor:"editor"
+    ~title:"Private revision" ~body:"@carol private revision" ~content:"@carol private revision" ()));
+  let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path alice.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "comment, vote and reaction remain queued for alice" 3 (Keeper_event_queue.length queue);
+  let events = Keeper_event_queue.to_list queue |> List.map (fun stimulus ->
+    match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path ~meta:alice stimulus with
+    | Ok (Some event) -> event
+    | Ok None -> fail "queued thread activity disappeared from projection"
+    | Error unavailable -> fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable)) in
+  let rows = events |> List.map (fun event ->
+    check (option string) "unbound parent title is absent" None event.Keeper_world_observation.title;
+    check (option string) "unbound parent body is absent" None event.preview;
+    check (option string) "unbound parent hearth is absent" None event.hearth;
+    let fields = Keeper_unified_prompt.For_testing.board_event_fields event in
+    check bool "the prompt omits unbound parent content" false
+      (List.mem_assoc "title" fields || List.mem_assoc "preview" fields || List.mem_assoc "hearth" fields);
+    fields) in
+  let row key = match List.find_opt (List.mem_assoc key) rows with
+    | Some fields -> fields | None -> fail ("missing event field " ^ key) in
+  let comment = row "comment_id" in
+  check string "the reply identity remains available" (Board.Comment_id.to_string reply.id)
+    (List.assoc "comment_id" comment);
+  check string "the parent comment identity remains available" own_comment_id
+    (List.assoc "parent_comment_id" comment);
+  check string "the addressed comment preview remains available" "@alice a reply"
+    (List.assoc "latest_external_preview" comment);
+  let vote = row "vote" in
+  check string "the vote keeps its target" ("comment:" ^ own_comment_id) (List.assoc "target" vote);
+  let reaction = row "reaction" in
+  check string "the reaction keeps its target" ("comment:" ^ own_comment_id) (List.assoc "target" reaction)
 ;;
 
 let test_queued_edits_keep_their_captured_content () =
@@ -440,9 +491,9 @@ let test_queued_edits_keep_their_captured_content () =
     | Ok None -> fail "queued edit disappeared from projection"
     | Error _ -> fail "queued edit could not read its Board source") in
   check (list string) "queued titles keep A then B rather than rereading latest B"
-    [first.title; second.title] (List.map (fun event -> event.Keeper_world_observation.title) events);
+    [first.title; second.title] (List.map (fun event -> (Option.get event.Keeper_world_observation.title)) events);
   check (list string) "queued bodies keep A then B rather than rereading latest B"
-    [first.body; second.body] (List.map (fun event -> event.Keeper_world_observation.preview) events);
+    [first.body; second.body] (List.map (fun event -> (Option.get event.Keeper_world_observation.preview)) events);
   check (list (float 0.)) "each projection carries its own persisted content time"
     [first.content_updated_at; second.content_updated_at]
     (List.map (fun event -> event.Keeper_world_observation.updated_at) events);
@@ -458,7 +509,7 @@ let test_queued_edits_keep_their_recorded_audience () =
   in
   register config meta;
   let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
     ~title:"Original title" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
   let edit title body = get (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
@@ -504,7 +555,7 @@ let test_queued_edit_keeps_audience_across_late_alias () =
   let late_meta = keeper_meta config "latealias" in
   register config late_meta;
   let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
     ~title:"Original title" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
   let post_id = Board.Post_id.to_string post.id in
@@ -544,7 +595,7 @@ let test_existing_durable_comment_candidates_respect_parent_visibility () =
        register config meta;
        let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
        let post =
-         get
+         get_created
            (Board_dispatch.create_post
               ~author:"thread-author"
               ~title:"thread"
@@ -667,6 +718,8 @@ let () =
             test_existing_durable_comment_candidates_respect_parent_visibility
         ; test_case "queued creation keeps content and audience after an edit" `Quick
             test_queued_creation_keeps_content_and_audience_after_edit
+        ; test_case "thread activity excludes unbound parent content" `Quick
+            test_thread_activity_does_not_project_unbound_parent_content
         ; test_case "queued edits preserve captured content before consumption" `Quick
             test_queued_edits_keep_their_captured_content
         ; test_case "queued edits keep their recorded audience" `Quick

@@ -1388,8 +1388,10 @@ let test_comment_discovery_respects_parent_visibility () =
             let get = function
               | Ok value -> value
               | Error error -> fail (Board.show_board_error error) in
-            let post = get (Board_dispatch.create_post ~author:poster.name
-              ~content ~title:"thread" ~post_kind:Board.Human_post ~visibility ()) in
+            let post = match Board_dispatch.create_post ~author:poster.name
+              ~content ~title:"thread" ~post_kind:Board.Human_post ~visibility () with
+              | Ok post -> post
+              | Error error -> fail (Board.Post_publication_failure.to_string error) in
             let post_id = Board.Post_id.to_string post.id in
             let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
               ~content:"keeper was here" ()) in
@@ -1437,9 +1439,11 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
             let get = function
               | Ok value -> value
               | Error error -> fail (Board.show_board_error error) in
-            let post = get (Board_dispatch.create_post ~author:poster.name
+            let post = match Board_dispatch.create_post ~author:poster.name
               ~content:"@threadlane thread topic" ~title:"thread"
-              ~post_kind:Board.Human_post ~visibility ()) in
+              ~post_kind:Board.Human_post ~visibility () with
+              | Ok post -> post
+              | Error error -> fail (Board.Post_publication_failure.to_string error) in
             let post_id = Board.Post_id.to_string post.id in
             let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
               ~content:"keeper was here" ()) in

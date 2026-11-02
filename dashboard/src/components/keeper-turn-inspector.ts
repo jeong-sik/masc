@@ -1,4 +1,5 @@
 import { RequestObservationFacts } from './common/request-observation-facts'
+import { KeeperTurnFlow } from './keeper-turn-flow'
 import { isDismissEscape } from '../lib/keyboard'
 // Keeper Turn Inspector (RFC-0233 PR-4) — one row per keeper turn from
 // GET /api/v1/keepers/:name/turn-records, with the server-computed
@@ -912,6 +913,7 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
 
 const TABS: [string, string][] = [
   ['timeline', '타임라인'],
+  ['flow', '입력과 실행'],
   ['messages', '메시지'],
   ['context', '컨텍스트'],
   ['meta', '메타'],
@@ -1088,6 +1090,10 @@ function TurnDetailDrawer({
 
         <div class="ti-body">
           ${tab === 'timeline' && html`<${TimelineTab} t=${t} />`}
+          ${tab === 'flow' && html`<${KeeperTurnFlow}
+            record=${row.record} toolEntries=${toolEntries} toolCallError=${toolCallError}
+            onMessages=${() => setTab('messages')} onContext=${() => setTab('context')}
+          />`}
           ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} input=${providerInput} />`}
           ${tab === 'context' && html`<${ContextTab} keeperName=${keeperName} input=${providerInput} />`}
           ${tab === 'meta' && html`<${MetaTab} record=${row.record} t=${t} source=${source} />`}

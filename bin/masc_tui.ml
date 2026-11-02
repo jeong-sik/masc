@@ -21435,6 +21435,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          shows the whole history anyway, and the loader is generation-
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
+      let open_chat_memory_grew = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21504,6 +21505,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                       next on screen at its newest row. *)
                    open_chat_gained_turn := true
                | Some _ | None -> ());
+              (match Masc_tui_observer.memory_journal_appended_keeper event with
+               | Some keeper when state.msg_target_keeper_name = Some keeper ->
+                   open_chat_memory_grew := true
+               | Some _ | None -> ());
               (match event with
                | Masc_tui_observer.Keeper_chat_stream_frame { keeper; operation_id; seq; at; _ } ->
                    observe_journal keeper (Keeper_chat_log.Operation operation_id) seq at
@@ -21516,6 +21521,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
+               | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed
@@ -21572,6 +21578,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
+               | Masc_tui_observer.Keeper_memory_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Internal_agent_runs_changed
@@ -21679,7 +21686,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          it can (RFC-0480 §3.1). *)
       (* A loss in this batch already owes the chat an audited read that
          starts after these turns were appended. *)
-      (if !open_chat_gained_turn && not !observer_source_loss_seen then
+      (if (!open_chat_gained_turn || !open_chat_memory_grew)
+          && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
          | Some keeper_name ->
              update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
@@ -21691,7 +21699,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 into one queued follow-up, so a burst of turns collapses. *)
              (* The calls slot is shared with the Keeper_calls surface, so only
                 the chat on screen reads it. *)
-             if state.view = Keepers Keeper_message
+             if !open_chat_gained_turn
+                && state.view = Keepers Keeper_message
                 && state.msg_tool_visibility <> Tools_compact then
                launch_keeper_calls_load ~force:true state ~mailbox keeper_name
          | None -> ());

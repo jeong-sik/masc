@@ -73,6 +73,9 @@ let visible filter (event : Observer.event) =
          heartbeat: shown under [Everything], never counted as an action. *)
       | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
       | Observer.Keeper_waiting_inventory_changed _
+      (* A memory journal row follows a memory write whose tool call is
+         already its own action row. *)
+      | Observer.Keeper_memory_journal_appended _
       (* A provider-call observation is identity the fold reads, not
          something a keeper did. *)
       | Observer.Keeper_turn_observation _
@@ -114,6 +117,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_memory_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
@@ -406,6 +410,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_turn_observation o -> o.Observer.to_keeper
   | Observer.Keeper_composite_changed { keeper; _ }
   | Observer.Keeper_chat_appended { keeper; _ }
+  | Observer.Keeper_memory_journal_appended { keeper; _ }
   | Observer.Keeper_chat_stream_frame { keeper; _ }
   | Observer.Keeper_turn_stream_frame { keeper; _ }
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
@@ -439,6 +444,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Keeper_composite_changed _ -> "composite"
   | Observer.Keeper_turn_observation _ -> "call"
   | Observer.Keeper_chat_appended _ -> "chat"
+  | Observer.Keeper_memory_journal_appended _ -> "memory"
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ -> "chat stream"
   | Observer.Keeper_waiting_inventory_changed _ -> "waiting queue"
   | Observer.Fusion_run_status _ -> "fusion"
@@ -532,7 +538,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label
       ; detail = Option.value ~default:"" frame
       }
-  | Observer.Keeper_turn_stream_frame { keeper; _ } ->
+  | Observer.Keeper_turn_stream_frame { keeper; _ }
+  | Observer.Keeper_memory_journal_appended { keeper; _ } ->
       { at; keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ } ->
       { at
@@ -755,7 +762,8 @@ let member_of_event (event : Observer.event) =
      ([fold_chunks]); not a member itself. *)
   | Observer.Keeper_turn_observation _
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
-  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _
+  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
   | Observer.Lane_resource _ | Observer.Other _ ->
@@ -928,6 +936,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_memory_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
@@ -1071,7 +1080,8 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
-  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _
+  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
   | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Snapshot _
   | Observer.Other _ ->
@@ -1250,6 +1260,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+          | Observer.Keeper_memory_journal_appended _
           | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
           | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
@@ -1329,7 +1340,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

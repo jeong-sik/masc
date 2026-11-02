@@ -1182,6 +1182,7 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                 let failure_detail = ref None in
                 let usage_reports = ref [] in
                 let attempt = Keeper_antigravity_runtime.run
+                    ~configured_reasoning_effort:None ~turn_timeout_s:None
                     ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-incomplete" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)

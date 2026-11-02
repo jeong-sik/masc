@@ -170,7 +170,7 @@ let update_rate_map map key ok =
 
 let render_rate_map ~field map =
   String_map.fold
-    (fun name { calls; successes } acc ->
+    (fun name ({ calls; successes } : rate_entry) acc ->
       let pct =
         if calls > 0
         then Float.of_int successes /. Float.of_int calls *. 100.0
@@ -448,7 +448,7 @@ let summarize ~sampling records : Yojson.Safe.t =
   in
   let hourly =
     String_map.fold
-      (fun hour { calls; successes } out ->
+      (fun hour ({ calls; successes } : rate_entry) out ->
         let pct =
           if calls > 0
           then Float.of_int successes /. Float.of_int calls *. 100.0

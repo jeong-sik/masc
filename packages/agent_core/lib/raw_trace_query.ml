@@ -350,7 +350,7 @@ let validate_run run_ref =
     ; Printf.sprintf "final_text=%s" (Option.value summary.final_text ~default:"")
     ; Printf.sprintf "stop_reason=%s" (Option.value summary.stop_reason ~default:"")
     ; Printf.sprintf "error=%s" (Option.value summary.error ~default:"")
-    ; Printf.sprintf "paired_tool_result_count=%d" !paired_tool_result_count
+    ; Printf.sprintf "paired_tool_result_count=%d" paired_tool_result_count
     ]
   in
   Ok
@@ -358,7 +358,7 @@ let validate_run run_ref =
     ; ok
     ; checks
     ; evidence
-    ; paired_tool_result_count = !paired_tool_result_count
+    ; paired_tool_result_count
     ; final_text = summary.final_text
     ; tool_names = summary.tool_names
     ; stop_reason = summary.stop_reason

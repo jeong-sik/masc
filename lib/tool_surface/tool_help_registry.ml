@@ -144,7 +144,7 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
    only means "no authored help", never a silent half-entry. *)
 module String_map = Map.Make (String)
 
-let toml_help_table : string String_map.t Lazy.t =
+let toml_help_table : Tool_definition_toml.help String_map.t Lazy.t =
   lazy
     (List.fold_left
        (fun table rel ->

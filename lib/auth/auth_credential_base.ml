@@ -862,9 +862,15 @@ let compare_agent_role (a : agent_role) (b : agent_role) =
 ;;
 
 let compare_agent_credential (a : agent_credential) (b : agent_credential) =
-  let c = Option.compare Ids.Credential_id.compare a.id b.id in
+  let c = Option.compare
+      (fun left right -> String.compare
+          (Ids.Credential_id.to_string left) (Ids.Credential_id.to_string right))
+      a.id b.id in
   if c <> 0 then c else
-  let c = Option.compare Ids.Agent_id.compare a.agent_id b.agent_id in
+  let c = Option.compare
+      (fun left right -> String.compare
+          (Ids.Agent_id.to_string left) (Ids.Agent_id.to_string right))
+      a.agent_id b.agent_id in
   if c <> 0 then c else
   let c = String.compare a.agent_name b.agent_name in
   if c <> 0 then c else

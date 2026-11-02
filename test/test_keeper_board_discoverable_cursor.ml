@@ -745,7 +745,11 @@ let test_unavailable_posts_retain_a_judged_comment () =
   Unix.rename posts held;
   Fun.protect ~finally:(fun () -> if Sys.file_exists held then Unix.rename held posts)
   @@ fun () ->
-  restart ();
+  (* The running store observed the posts file, so its disappearance is
+     refused. A store that starts without a posts file reads an empty Board. *)
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts (Board.global ()) with
+   | Error _ -> ()
+   | Ok _ -> fail "a posts source that disappeared during the run was admitted");
   (match Board_dispatch.read_post_for_evidence ~post_id with
    | Error (Board.Read_source_unavailable _) -> ()
    | Error error -> fail (Board.show_board_read_error error)

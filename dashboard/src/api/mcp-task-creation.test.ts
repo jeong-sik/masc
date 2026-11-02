@@ -123,6 +123,8 @@ it('keeps the ordinary scoped result when the Task credential stays current', as
 })
 
 it.each([
+  ['missing JSON-RPC version', (id: string) => responseBody(id).replace('"jsonrpc":"2.0",', '')],
+  ['wrong JSON-RPC version', (id: string) => responseBody(id).replace('"jsonrpc":"2.0"', '"jsonrpc":"1.0"')],
   ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
   ['duplicate error flag', (id: string) => responseBody(id).replace('"result":{', '"result":{"isError":true,"isError":false,')],
   ['non-text content', (id: string) => JSON.stringify({ id, result: { content: [{ type: 'image', text: successText() }] } })],
@@ -157,6 +159,8 @@ it('reads a scoped Task receipt without replaying it', async () => {
 })
 
 it.each([
+  ['missing JSON-RPC version', (id: string) => responseBody(id).replace('"jsonrpc":"2.0",', '')],
+  ['wrong JSON-RPC version', (id: string) => responseBody(id).replace('"jsonrpc":"2.0"', '"jsonrpc":"1.0"')],
   ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
   ['duplicate error flag', (id: string) => responseBody(id).replace('"result":{', '"result":{"isError":true,"isError":false,')],
   ['non-text content', (id: string) => JSON.stringify({ id, result: { content: [{ type: 'image', text: successText() }] } })],
@@ -173,6 +177,8 @@ it.each([
 })
 
 it.each([
+  ['missing JSON-RPC version', (id: string) => responseBody(id).replace('"jsonrpc":"2.0",', '')],
+  ['wrong JSON-RPC version', (id: string) => responseBody(id).replace('"jsonrpc":"2.0"', '"jsonrpc":"1.0"')],
   ['wrong RPC id', (id: string): string => responseBody(`${id}-other`)],
   ['duplicate RPC id', (id: string) => responseBody(id).replace(`"id":"${id}"`, `"id":"other","id":"${id}"`)],
   ['wrong creation id', (id: string) => responseBody(id, successText({ creation_request_id: 'other' }))],

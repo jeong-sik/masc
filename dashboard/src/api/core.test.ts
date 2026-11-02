@@ -14,6 +14,7 @@ import {
   extractApiError,
   get,
   getPublic,
+  getWithResponse,
   getStoredToken,
   getStoredTokenMeta,
   isLoopbackHostname,
@@ -55,6 +56,28 @@ describe('browser loopback authority', () => {
     ['http://[2001:db8::1]/', false],
   ] as const)('classifies %s', (url, local) => {
     expect(isLoopbackHostname(new URL(url).hostname)).toBe(local)
+  })
+})
+
+describe('scoped JSON response evidence', () => {
+  it('rejects duplicate members when the caller requests an unambiguous response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"tasks":[{"id":"other","id":"task-1"}]}', { status: 200 })))
+    await expect(getWithResponse('/api/v1/dashboard/goals?scope=fixture', {
+      consumeWithinTimeout: true,
+      rejectDuplicateJsonMembers: true,
+    })).rejects.toMatchObject({ detail: 'invalid JSON response' })
+  })
+
+  it('accepts a unique JSON response while preserving its headers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"tasks":[{"id":"task-1"}]}', {
+      status: 200, headers: { 'x-masc-goal-tree-read': 'direct-v1' },
+    })))
+    const result = await getWithResponse('/api/v1/dashboard/goals?scope=fixture', {
+      consumeWithinTimeout: true,
+      rejectDuplicateJsonMembers: true,
+    })
+    expect(result.data).toEqual({ tasks: [{ id: 'task-1' }] })
+    expect(result.headers.get('x-masc-goal-tree-read')).toBe('direct-v1')
   })
 })
 

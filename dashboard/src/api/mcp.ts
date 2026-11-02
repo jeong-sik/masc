@@ -386,7 +386,9 @@ function parseMcpHttpResponse(raw: string, expectedId?: string, unique = false):
     const hasResult = Object.hasOwn(message, 'result')
     const hasError = Object.hasOwn(message, 'error')
     if (!hasResult && !hasError && typeof message.method === 'string') continue
-    if (hasResult === hasError || response !== null) throw new Error('Invalid MCP response')
+    if (hasResult === hasError || response !== null || (unique && message.jsonrpc !== '2.0')) {
+      throw new Error('Invalid MCP response')
+    }
     if (expectedId !== undefined && message.id !== expectedId) {
       throw new Error('MCP response does not match the request')
     }

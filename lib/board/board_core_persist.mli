@@ -39,11 +39,14 @@ val create_store : base_path:string -> unit -> store
     directory or payload is created; a failed capture grants no write authority.
     Prepare the root before construction, then explicitly load sources. *)
 
-val create_store_with_source_io_for_testing :
-  base_path:string -> io:posts_source_io -> unit -> store
-(** Same production store with immutable, distinct guard/posts transaction IO.
-    Each None slot uses production IO. Faults must be armed after explicit
-    initialization; the constructor itself creates and admits nothing. *)
+val create_store_with_posts_io_for_testing :
+  base_path:string ->
+  io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
+(** The same production store and posts writer with an immutable, store-local
+    Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
+    initialization and the actual post-rename rewrite-parent sync; [close_fd]
+    covers descriptor settlement. Posts remain unobserved until explicit load. *)
+
 
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
@@ -77,10 +80,9 @@ val reactions_path : store -> string
 val sub_boards_path : store -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : where:string -> store -> (unit, board_error) result
-(** Real initialized-guard precondition inside a persistence-protected writer.
-    This does not load posts, clear a posts refusal or bootstrap missing data.
-    [where] retains the requested operation in its one error/log diagnostic.
-    Reserved precondition failures use the existing deferred settlement carrier. *)
+(** Checked directory preparation inside a persistence-protected writer.
+    [where] retains the requested operation in its error/log diagnostic.
+    A reserved precondition failure uses the existing deferred settlement carrier. *)
 
 type posts_snapshot
 (** Frozen candidate rows and their exact expected source observation. *)
@@ -97,19 +99,14 @@ val posts_source_failure_to_board_error : posts_source_failure -> board_error
 val finish_posts_write : posts_write_outcome -> (unit, board_error) result
 (** Caller holds persistence. Observe settlement diagnostics only after known
     successful memory publication, or a proven nonwrite after rollback/refusal.
-    Known-primary reserved cleanup exceptions leave enclosing Board mutexes normally and are
-    reraised after unlocking with their original backtrace. Before propagation,
-    a successful write counts each observed diagnostic; a nonwrite or unknown
-    outcome counts its one failure, without invoking logging after a reserved
-    cause. *)
+    Reserved cleanup exceptions leave enclosing Board mutexes normally and are
+    reraised after unlocking with their original backtrace. *)
 val publish_posts_read : store -> posts_source_read -> unit
 (** Loader publication under persistence then state locks. *)
 val read_posts_source : store -> posts_source_read
 (** Caller holds persistence; general reads never recover tails or settle an
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
 val finish_posts_read : posts_source_read -> unit
-(** Count each observed read diagnostic before reserved propagation, without
-    logging or further IO after an observed reserved cause. *)
 type posts_inspection_framing =
   | Complete_rows
   | Torn_tail of { rows_end : int; end_offset : int }
@@ -211,14 +208,8 @@ val create_post_once_by_fusion_run_id :
   (create_post_once_result, Post_publication_failure.t) result
 (** Serialize exact-origin create attempts with a fiber-aware store mutex.
     An exact normalized payload replay for the same typed Fusion run returns
-    the matching observed post instead of appending another row. This positive
-    recognition can use best-effort display rows after guard refusal. Matching
-    the row neither directly accesses source files nor publishes a new row, and
-    grants no posts write authority, operation receipt or durability guarantee.
-    The call still runs ordinary maintenance scheduling before lookup; a
-    separate flusher may process the queued sweep or flush work.
-    A conflicting replay returns [Already_exists]; a new run still requires
-    ordinary source admission before creation. *)
+    the committed post instead of appending another row. A conflicting replay
+    returns [Already_exists]. The regular create path remains unchanged. *)
 
 val create_post_with_audience :
   store ->

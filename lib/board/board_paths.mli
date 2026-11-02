@@ -43,3 +43,8 @@ val comments_path : Board_types.store -> string
 val reactions_path : Board_types.store -> string
 val sub_boards_path : Board_types.store -> string
 val ensure_dir : string -> unit
+val ensure_masc_dir :
+  Board_types.store -> (unit, Board_workspace_binding.rejection) result
+(** Check before directory creation and retain an actual Present observation
+    afterward, before payload I/O. A later refusal can follow directory creation;
+    it is not a claim that all filesystem effects were absent. *)

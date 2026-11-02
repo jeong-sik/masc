@@ -85,6 +85,125 @@ let test_trending_tiebreaks_on_created_at_desc () =
     "p-newer"
     (Board.Post_id.to_string (List.hd sorted).id)
 
+let test_hot_post_set_matches_hot_compare () =
+  let now = 1_000_000.0 in
+  let p_high =
+    make_post ~id:"p-high" ~created_at:(now -. 100.0) ~votes_up:10 ~votes_down:2
+      ~reply_count:0 ()
+  in
+  let p_tie_newer =
+    make_post ~id:"p-tie-b" ~created_at:(now -. 10.0) ~votes_up:5 ~votes_down:0
+      ~reply_count:0 ()
+  in
+  let p_tie_older_a =
+    make_post ~id:"p-tie-a" ~created_at:(now -. 50.0) ~votes_up:5 ~votes_down:0
+      ~reply_count:10 ()
+  in
+  let p_tie_older_b =
+    make_post ~id:"p-tie-c" ~created_at:(now -. 50.0) ~votes_up:5 ~votes_down:0
+      ~reply_count:1 ()
+  in
+  let posts = [ p_tie_older_b; p_high; p_tie_older_a; p_tie_newer ] in
+  let sorted_ids =
+    List.sort Board_sort.hot_compare posts
+    |> List.map (fun (p : Board.post) -> Board.Post_id.to_string p.id)
+  in
+  let index_ids =
+    List.fold_left
+      (fun acc (p : Board.post) ->
+        Board.Hot_post_set.add (Board.hot_post_key_of_post p) acc)
+      Board.Hot_post_set.empty
+      posts
+    |> Board.Hot_post_set.to_seq
+    |> List.of_seq
+    |> List.map (fun (k : Board.hot_post_key) -> k.post_id)
+  in
+  Alcotest.(check (list string))
+    "Hot_post_set order matches hot_compare total order"
+    [ "p-high"; "p-tie-b"; "p-tie-a"; "p-tie-c" ]
+    sorted_ids;
+  Alcotest.(check (list string))
+    "Hot_post_set sequence equals sorted_ids"
+    sorted_ids
+    index_ids;
+  let recent_ids =
+    List.fold_left
+      (fun acc (p : Board.post) ->
+        Board.Recent_post_set.add (Board.recent_post_key_of_post p) acc)
+      Board.Recent_post_set.empty
+      posts
+    |> Board.Recent_post_set.to_seq
+    |> List.of_seq
+    |> List.map (fun (k : Board.recent_post_key) -> k.recent_post_id)
+  in
+  Alcotest.(check (list string))
+    "Recent_post_set orders created_at desc then post_id asc"
+    [ "p-tie-b"; "p-tie-a"; "p-tie-c"; "p-high" ]
+    recent_ids
+
+let test_indexed_reads_lifecycle_across_votes_deletions_and_reloads () =
+  Eio_main.run @@ fun _env ->
+  let store = Board.create_store () in
+  let now = 1_000_000.0 in
+  let p1 =
+    make_post ~id:"p-1" ~created_at:(now -. 30.0) ~votes_up:1 ~votes_down:0
+      ~reply_count:0 ()
+  in
+  let p2 =
+    make_post ~id:"p-2" ~created_at:(now -. 20.0) ~votes_up:2 ~votes_down:0
+      ~reply_count:0 ()
+  in
+  let p3 =
+    make_post ~id:"p-3" ~created_at:(now -. 10.0) ~votes_up:0 ~votes_down:0
+      ~reply_count:0 ()
+  in
+  Board.put_post store p1;
+  Board.put_post store p2;
+  Board.put_post store p3;
+  let hot_ids ?limit () =
+    Board.list_posts store ?limit ()
+    |> List.map (fun (p : Board.post) -> Board.Post_id.to_string p.id)
+  in
+  let recent_ids ~limit =
+    Board.search_posts store ~predicate:(fun _ -> true) ~limit
+    |> List.map (fun (p : Board.post) -> Board.Post_id.to_string p.id)
+  in
+  Alcotest.(check (list string))
+    "initial hot order is p-2 (net +2), p-1 (net +1), p-3 (net 0)"
+    [ "p-2"; "p-1"; "p-3" ]
+    (hot_ids ());
+  Alcotest.(check (list string))
+    "initial limited hot order returns top 2"
+    [ "p-2"; "p-1" ]
+    (hot_ids ~limit:2 ());
+  Alcotest.(check (list string))
+    "initial recent search order is newest first"
+    [ "p-3"; "p-2"; "p-1" ]
+    (recent_ids ~limit:10);
+  (* Vote flip: p-3 jumps to net +5, p-2 drops to net -1 without leaving stale keys *)
+  Board.put_post store { p3 with votes_up = 5; votes_down = 0 };
+  Board.put_post store { p2 with votes_up = 0; votes_down = 1 };
+  Alcotest.(check (list string))
+    "hot order after vote flip has no duplicates and ranks p-3, p-1, p-2"
+    [ "p-3"; "p-1"; "p-2" ]
+    (hot_ids ());
+  (* Delete p-1 and rebuild index across reload *)
+  Hashtbl.remove store.Board.posts "p-1";
+  Board.unindex_hot_post store p1;
+  Alcotest.(check (list string))
+    "hot order after deletion omits p-1"
+    [ "p-3"; "p-2" ]
+    (hot_ids ());
+  Board.rebuild_hot_post_index store;
+  Alcotest.(check (list string))
+    "hot order after rebuild matches expected table state"
+    [ "p-3"; "p-2" ]
+    (hot_ids ());
+  Alcotest.(check (list string))
+    "recent order after rebuild matches expected table state"
+    [ "p-3"; "p-2" ]
+    (recent_ids ~limit:10)
+
 let () =
   Alcotest.run "Board_sort"
     [ ( "trending"
@@ -92,5 +211,9 @@ let () =
             test_trending_ranks_net_vote_not_reply_count
         ; Alcotest.test_case "tiebreaks on created_at desc" `Quick
             test_trending_tiebreaks_on_created_at_desc
+        ; Alcotest.test_case "Hot_post_set matches hot_compare total order" `Quick
+            test_hot_post_set_matches_hot_compare
+        ; Alcotest.test_case "indexed reads across votes, deletions, and reloads" `Quick
+            test_indexed_reads_lifecycle_across_votes_deletions_and_reloads
         ] )
     ]

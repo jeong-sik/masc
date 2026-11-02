@@ -48,7 +48,8 @@ let create_store () =
   ; persist_mutex = Eio.Mutex.create ()
   ; origin_create_mutex = Eio.Mutex.create ()
   ; karma_cache = None
-  ; sorted_posts_cache = None
+  ; hot_post_index = Hot_post_set.empty
+  ; recent_post_index = Recent_post_set.empty
   ; comments_by_post = Hashtbl.create 1024
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
@@ -97,12 +98,77 @@ let unindex_post_origin store (post : post) =
   match post.origin with
   | None -> ()
   | Some (o : post_origin) ->
+    let pid = Post_id.to_string post.id in
     (match o.turn_ref with
-     | Some tr -> Hashtbl.remove store.posts_by_turn_ref (Ids.Turn_ref.to_string tr)
+     | Some tr ->
+       let key = Ids.Turn_ref.to_string tr in
+       (match Hashtbl.find_opt store.posts_by_turn_ref key with
+        | Some indexed_pid when String.equal indexed_pid pid ->
+          Hashtbl.remove store.posts_by_turn_ref key
+        | Some _ | None -> ())
      | None -> ());
     (match o.fusion_run_id with
-     | Some run_id -> Hashtbl.remove store.posts_by_run_id run_id
+     | Some run_id ->
+       (match Hashtbl.find_opt store.posts_by_run_id run_id with
+        | Some indexed_pid when String.equal indexed_pid pid ->
+          Hashtbl.remove store.posts_by_run_id run_id
+        | Some _ | None -> ())
      | None -> ())
+;;
+
+let index_hot_post store (post : post) =
+  store.hot_post_index <-
+    Hot_post_set.add (hot_post_key_of_post post) store.hot_post_index;
+  store.recent_post_index <-
+    Recent_post_set.add (recent_post_key_of_post post) store.recent_post_index
+;;
+
+let unindex_hot_post store (post : post) =
+  store.hot_post_index <-
+    Hot_post_set.remove (hot_post_key_of_post post) store.hot_post_index;
+  store.recent_post_index <-
+    Recent_post_set.remove (recent_post_key_of_post post) store.recent_post_index
+;;
+
+let reindex_hot_post store ~(previous : post) ~(updated : post) =
+  let prev_key = hot_post_key_of_post previous in
+  let next_key = hot_post_key_of_post updated in
+  if compare_hot_post_key prev_key next_key <> 0
+  then
+    store.hot_post_index <-
+      store.hot_post_index
+      |> Hot_post_set.remove prev_key
+      |> Hot_post_set.add next_key;
+  let prev_recent = recent_post_key_of_post previous in
+  let next_recent = recent_post_key_of_post updated in
+  if compare_recent_post_key prev_recent next_recent <> 0
+  then
+    store.recent_post_index <-
+      store.recent_post_index
+      |> Recent_post_set.remove prev_recent
+      |> Recent_post_set.add next_recent
+;;
+
+let put_post store (post : post) =
+  let key = Post_id.to_string post.id in
+  let previous = Hashtbl.find_opt store.posts key in
+  Hashtbl.replace store.posts key post;
+  match previous with
+  | None -> index_hot_post store post
+  | Some previous -> reindex_hot_post store ~previous ~updated:post
+;;
+
+let rebuild_hot_post_index store =
+  let hot_index, recent_index =
+    Hashtbl.fold
+      (fun _ (post : post) (hot_acc, recent_acc) ->
+         ( Hot_post_set.add (hot_post_key_of_post post) hot_acc
+         , Recent_post_set.add (recent_post_key_of_post post) recent_acc ))
+      store.posts
+      (Hot_post_set.empty, Recent_post_set.empty)
+  in
+  store.hot_post_index <- hot_index;
+  store.recent_post_index <- recent_index
 ;;
 
 (** Remove [value] from the string list stored at [key] in [tbl]. Removes the key entirely when the list becomes empty. *)
@@ -117,8 +183,7 @@ let remove_from_list_index tbl key value =
 
 (** Invalidate caches that depend on post data *)
 let invalidate_post_caches store =
-  store.karma_cache <- None;
-  store.sorted_posts_cache <- None
+  store.karma_cache <- None
 ;;
 
 (** Invalidate caches that depend on comment data *)
@@ -250,7 +315,9 @@ let sweep store =
            Stdlib.decr removed_posts
          else (
            (match Hashtbl.find_opt store.posts id with
-            | Some p -> unindex_post_origin store p
+            | Some p ->
+              unindex_post_origin store p;
+              unindex_hot_post store p
             | None -> ());
            Hashtbl.remove store.posts id;
            Hashtbl.remove store.comments_by_post id;
@@ -809,6 +876,7 @@ let create_post_with_audience
                | Ok () ->
                  Hashtbl.add store.posts (Post_id.to_string post.id) post;
                  index_post_origin store post;
+                 index_hot_post store post;
                  Stdlib.incr store.post_count;
                  invalidate_post_caches store;
                  phase := Post_committed creation;

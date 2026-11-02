@@ -735,6 +735,58 @@ end
 
 type vote_direction = Up | Down
 
+(** {1 Incremental Hot-Post Index} *)
+
+type hot_post_key =
+  { net_vote : int
+  ; created_at : float
+  ; post_id : string
+  }
+
+let hot_post_key_of_post (p : post) : hot_post_key =
+  { net_vote = p.votes_up - p.votes_down
+  ; created_at = p.created_at
+  ; post_id = Post_id.to_string p.id
+  }
+;;
+
+let compare_hot_post_key (a : hot_post_key) (b : hot_post_key) : int =
+  let cmp = Int.compare b.net_vote a.net_vote in
+  if cmp <> 0
+  then cmp
+  else (
+    let cmp = Float.compare b.created_at a.created_at in
+    if cmp <> 0 then cmp else String.compare a.post_id b.post_id)
+;;
+
+module Hot_post_set = Set.Make (struct
+    type t = hot_post_key
+
+    let compare = compare_hot_post_key
+  end)
+
+type recent_post_key =
+  { recent_created_at : float
+  ; recent_post_id : string
+  }
+
+let recent_post_key_of_post (p : post) : recent_post_key =
+  { recent_created_at = p.created_at
+  ; recent_post_id = Post_id.to_string p.id
+  }
+;;
+
+let compare_recent_post_key (a : recent_post_key) (b : recent_post_key) : int =
+  let cmp = Float.compare b.recent_created_at a.recent_created_at in
+  if cmp <> 0 then cmp else String.compare a.recent_post_id b.recent_post_id
+;;
+
+module Recent_post_set = Set.Make (struct
+    type t = recent_post_key
+
+    let compare = compare_recent_post_key
+  end)
+
 (** {1 In-Memory Store} *)
 
 type flusher_msg =
@@ -765,7 +817,8 @@ type store = {
   origin_create_mutex: Eio.Mutex.t;
   (* Phase 2 caches *)
   mutable karma_cache: (string * int) list option;       (** None = stale *)
-  mutable sorted_posts_cache: post list option;           (** None = stale *)
+  mutable hot_post_index: Hot_post_set.t;                 (** Incremental immutable Hot index *)
+  mutable recent_post_index: Recent_post_set.t;           (** Incremental immutable Recent index *)
   comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)

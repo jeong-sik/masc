@@ -226,6 +226,10 @@ type board_attachment_action_result =
   | Board_image_open_finished of unit ref * string
   | Board_image_open_retry of {attempt : unit ref; prepared : Masc_tui_attachment_action.prepared; opener : string}
 
+type image_preparation =
+  | Image_worker_busy
+  | Image_prepared of (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -516,7 +520,7 @@ type async_msg =
   | Sent_image_ready of {
       request : sent_image_read;
       skill_reference : Skill_reference.t option;
-      result : (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result;
+      result : image_preparation;
     }
   | Image_render_ready of {
       request : sent_image_read;

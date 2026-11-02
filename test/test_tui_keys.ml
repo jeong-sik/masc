@@ -2094,7 +2094,8 @@ let test_goal_action_receipts_follow_the_goal_and_latest_ticket () =
   state.goal_action_inflight <- [];
   check Alcotest.bool "an earlier workspace retains its request outcome" true
     (match state.goal_action_receipts with
-     | [("a", "a2", "/old", None, Error "outcome unknown")] -> true
+     | [{gar_goal_id="a"; gar_ticket="a2"; gar_workspace="/old";
+         gar_authority=None; gar_result=Error "outcome unknown"}] -> true
      | _ -> false)
 
 let test_goal_completion_requires_an_observed_binding () =

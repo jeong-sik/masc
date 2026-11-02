@@ -11,6 +11,7 @@ export interface GoalConfirmationEvidence {
   proof: Proven
   workspace: ArtifactWorkspace
   inspectionOperatorId: string
+  runtimeInstanceId: string
   authorityKind: 'system_llm_agent' | 'human_operator'
 }
 export interface GoalConfirmationBinding {
@@ -20,12 +21,13 @@ export interface GoalConfirmationBinding {
   verification_run_id: string
   expected_workspace: { base_path: string; masc_root: string }
   expected_operator_id: string
+  expected_runtime_instance_id: string
   criterion: GoalProofCriterion
   observedProof: Proven
   observedAuthorityKind: 'system_llm_agent' | 'human_operator'
 }
 
-export function decodeConfirmation(raw: unknown, goalId: string, workspace: ArtifactWorkspace): GoalConfirmationEvidence {
+export function decodeConfirmation(raw: unknown, goalId: string, workspace: ArtifactWorkspace, runtimeInstanceId: string): GoalConfirmationEvidence {
   if (!isRecord(raw) || typeof raw.inspection_operator_id !== 'string' || raw.inspection_operator_id.trim() === '')
     throw new Error('증거를 조회한 운영자를 확인할 수 없습니다')
   if (!isRecord(raw) || !isRecord(raw.goal) || raw.goal.id !== goalId || typeof raw.goal.phase !== 'string')
@@ -44,7 +46,7 @@ export function decodeConfirmation(raw: unknown, goalId: string, workspace: Arti
   if (raw.goal.criterion_revision !== criterion.revision || raw.goal.title !== criterion.title
     || raw.goal.metric !== criterion.metric || raw.goal.target_value !== criterion.target_value)
     throw new Error('목표 기준과 verifier 증명의 내용이 다릅니다')
-  return { goalId, phase: raw.goal.phase, proof: decoded.completion, workspace, inspectionOperatorId: raw.inspection_operator_id,
+  return { goalId, phase: raw.goal.phase, proof: decoded.completion, workspace, inspectionOperatorId: raw.inspection_operator_id, runtimeInstanceId,
     authorityKind: authority.kind }
 }
 
@@ -52,6 +54,7 @@ export function confirmationBinding(evidence: GoalConfirmationEvidence): GoalCon
   return { goal_id: evidence.goalId, criterion_revision: evidence.proof.criterion.revision,
     request_id: evidence.proof.requestId, verification_run_id: evidence.proof.runId,
     expected_workspace: artifactWorkspaceBody(evidence.workspace), expected_operator_id: evidence.inspectionOperatorId,
+    expected_runtime_instance_id: evidence.runtimeInstanceId,
     criterion: evidence.proof.criterion, observedProof: evidence.proof, observedAuthorityKind: evidence.authorityKind }
 }
 export function sameConfirmationBinding(evidence: GoalConfirmationEvidence, binding: GoalConfirmationBinding): boolean {
@@ -61,6 +64,7 @@ export function sameConfirmationBinding(evidence: GoalConfirmationEvidence, bind
     && current.expected_workspace.base_path === binding.expected_workspace.base_path
     && current.expected_workspace.masc_root === binding.expected_workspace.masc_root
     && current.expected_operator_id === binding.expected_operator_id
+    && current.expected_runtime_instance_id === binding.expected_runtime_instance_id
     && current.criterion.revision === binding.criterion.revision && current.criterion.title === binding.criterion.title
     && current.criterion.metric === binding.criterion.metric && current.criterion.target_value === binding.criterion.target_value
     && current.observedProof.evidence === binding.observedProof.evidence
@@ -68,15 +72,37 @@ export function sameConfirmationBinding(evidence: GoalConfirmationEvidence, bind
     && current.observedProof.recordedAt === binding.observedProof.recordedAt
     && current.observedAuthorityKind === binding.observedAuthorityKind
 }
-export async function readGoalConfirmation(goalId: string, workspace: ArtifactWorkspace): Promise<GoalConfirmationEvidence> {
+export async function readGoalConfirmation(goalId: string, workspace: ArtifactWorkspace, executionEpoch: string,
+  onAuthorityRefused?: (status?: number) => void): Promise<GoalConfirmationEvidence> {
   const query = artifactWorkspaceQuery(workspace)
   query.set('goal_id', goalId)
-  const result = await getWithResponse<unknown>(`/api/v1/goals/confirmation?${query}`, { consumeWithinTimeout: true })
-  requireArtifactWorkspaceRead(result.headers)
-  return decodeConfirmation(result.data, goalId, workspace)
+  const instanceFrom = (headers: Headers) => {
+    requireArtifactWorkspaceRead(headers)
+    if (headers.get('x-masc-execution-publication-epoch') !== executionEpoch)
+      throw new Error('서버 실행 세대가 변경되어 증거를 다시 조회해야 합니다')
+    const instance = headers.get('x-masc-runtime-instance-id')
+    if (!instance || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(instance))
+      throw new Error('증거를 제공한 서버 인스턴스를 확인할 수 없습니다')
+    return instance
+  }
+  const result = await getWithResponse<unknown>(`/api/v1/goals/confirmation?${query}`, {
+    consumeWithinTimeout: true,
+    preserveErrorBodyFailure: true,
+    reportCredentialRefusal: false,
+    beforeResponseBody: response => {
+      if (!response.ok) { onAuthorityRefused?.(response.status); return }
+      try { instanceFrom(response.headers) } catch (error) { onAuthorityRefused?.(); throw error }
+    },
+  })
+  let instance: string
+  try { instance = instanceFrom(result.headers) } catch (error) { onAuthorityRefused?.(); throw error }
+  return decodeConfirmation(result.data, goalId, workspace, instance)
 }
-export async function submitGoalConfirmation(binding: GoalConfirmationBinding): Promise<GoalConfirmationEvidence> {
+export async function submitGoalConfirmation(binding: GoalConfirmationBinding, onAuthorityRefused?: (status?: number) => void): Promise<GoalConfirmationEvidence> {
   const workspace = { basePath: binding.expected_workspace.base_path, mascRoot: binding.expected_workspace.masc_root }
   const { criterion: _criterion, observedProof: _observedProof, observedAuthorityKind: _observedAuthorityKind, ...request } = binding
-  return decodeConfirmation(await post<unknown>('/api/v1/goals/confirmation', request, undefined, undefined, undefined, true), binding.goal_id, workspace)
+  return decodeConfirmation(await post<unknown>('/api/v1/goals/confirmation', request, undefined, undefined, undefined, true,
+    { reportCredentialRefusal: false, preserveErrorBodyFailure: true,
+      beforeResponseBody: response => { if (!response.ok) onAuthorityRefused?.(response.status) } }),
+    binding.goal_id, workspace, binding.expected_runtime_instance_id)
 }

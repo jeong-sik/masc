@@ -63,11 +63,27 @@ type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
+  recorded_confirmation : Goal_verification.confirmation option;
   submitted : submitted_original list;
   workspace : confirmation_workspace;
   inspection_operator_id : string;
+  runtime_instance_id : string;
   credential_headers : (string * string) list;
   credential_owner : unit ref;
+}
+
+type receipt_authority = {
+  ra_workspace : confirmation_workspace;
+  ra_operator_id : string;
+  ra_runtime_instance_id : string;
+  ra_credential_owner : unit ref;
+}
+
+let confirmation_receipt_authority (confirmation : confirmation) = {
+  ra_workspace = confirmation.workspace;
+  ra_operator_id = confirmation.inspection_operator_id;
+  ra_runtime_instance_id = confirmation.runtime_instance_id;
+  ra_credential_owner = confirmation.credential_owner;
 }
 
 (* Every field of a metadata item that is present is also well-formed: a
@@ -128,11 +144,27 @@ let decode_submitted_original (item : Yojson.Safe.t) : (submitted_original, stri
       Ok (Original_unreadable { reference; reason })
   | other -> Ok (Original_unknown other)
 
+type confirmation_read_error =
+  | Read_failed of unit ref option * string
+  | Read_http_error of unit ref * int
+  | Server_changed of unit ref
+
+type confirmation_read = (string, confirmation, confirmation_read_error) Masc_tui_fetched.source
+
 type confirmation_state =
-  | Inspecting of (string, confirmation) Masc_tui_fetched.t
+  | Inspecting of confirmation_read
   (* Keep the read generation while the write is in flight. Navigation can
      cancel inspection, but cannot cancel a confirmation already sent. *)
-  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+  | Submitting of string * confirmation_read
+
+let confirmation_read_error_message ~credential_is_current = function
+  | Read_failed (Some owner, _) when credential_is_current owner -> "Goal confirmation read failed; check the connection and permissions"
+  | Read_failed (Some _, _) -> "Goal confirmation credential changed; read the proof again"
+  | Read_failed (None, _) -> "Goal confirmation read unavailable; read the proof again"
+  | Read_http_error (owner, status) when credential_is_current owner -> Printf.sprintf "Goal confirmation read failed (HTTP %d)" status
+  | Read_http_error _ -> "Goal confirmation credential changed; read the proof again"
+  | Server_changed owner when credential_is_current owner -> "Goal confirmation server changed; rechecking server identity"
+  | Server_changed _ -> "Goal confirmation credential changed; read the proof again"
 
 let suspend_confirmation_read read =
   let read = match Masc_tui_fetched.current_key read with
@@ -141,9 +173,14 @@ let suspend_confirmation_read read =
         (match Masc_tui_fetched.start ~equal:String.equal read ~key with
          | Already_loading -> read
          | Started (reading, _) -> reading) in
-  Masc_tui_fetched.suspend read
+  Masc_tui_fetched.suspend_with ~reason:(Read_failed (None, "Reading suspended; waiting for workspace identity.")) read
 
-let decode_confirmation ~goal_id ~workspace ~credential_headers ~credential_owner json =
+let confirmation_view_for read ~goal_id =
+  if Masc_tui_fetched.in_flight read && Masc_tui_fetched.current_key read = Some goal_id
+  then Masc_tui_fetched.Loading
+  else Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id
+
+let decode_confirmation ~goal_id ~workspace ~runtime_instance_id ~credential_headers ~credential_owner json =
   let open Result.Syntax in
   let field name = function
     | `Assoc fields ->
@@ -167,15 +204,15 @@ let decode_confirmation ~goal_id ~workspace ~credential_headers ~credential_owne
   let* phase = Goal_phase.of_fields goal in
   let* completion = field "completion" verification in
   let* completion = Goal_verification.completion_state_of_yojson completion in
-  let* verdict =
+  let* verdict, recorded_confirmation =
     match phase, completion with
-    | Goal_phase.Awaiting_confirmation, Goal_verification.Proof_proven verdict
+    | Goal_phase.Awaiting_confirmation, Goal_verification.Proof_proven verdict -> Ok (verdict, None)
     (* The server records a confirmation before it runs the caller's step and
        saves the phase. When that step refuses, or the phase cannot be saved,
        the goal stays here with the confirmation recorded, and confirming again
        is how the operator finishes it. *)
-    | Goal_phase.Awaiting_confirmation, Goal_verification.Human_confirmed (verdict, _)
-    | Goal_phase.Completed, Goal_verification.Human_confirmed (verdict, _) -> Ok verdict
+    | Goal_phase.Awaiting_confirmation, Goal_verification.Human_confirmed (verdict, recorded)
+    | Goal_phase.Completed, Goal_verification.Human_confirmed (verdict, recorded) -> Ok (verdict, Some recorded)
     | (Goal_phase.Awaiting_confirmation, (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | Goal_verification.Proof_refuted _)))
     | (Goal_phase.Completed, (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _))))
     | ((Goal_phase.Executing | (Goal_phase.Verifying | (Goal_phase.Dropped | (Goal_phase.Paused _ | Goal_phase.Blocked _)))), _) -> Error "goal confirmation: no current proven completion to confirm"
@@ -208,10 +245,10 @@ let decode_confirmation ~goal_id ~workspace ~credential_headers ~credential_owne
     in
     let ( let* ) = Result.bind in
     let* submitted = submitted in
-    Ok { goal_id; phase; verdict; submitted; workspace; inspection_operator_id; credential_headers; credential_owner }
+    Ok { goal_id; phase; verdict; recorded_confirmation; submitted; workspace; inspection_operator_id; runtime_instance_id; credential_headers; credential_owner }
   else Error "goal confirmation: criterion mismatch"
 
-let confirmation_body { goal_id; verdict; workspace; inspection_operator_id; _ } =
+let confirmation_body { goal_id; verdict; workspace; inspection_operator_id; runtime_instance_id; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
   `Assoc
     [ "goal_id", `String goal_id
@@ -219,6 +256,7 @@ let confirmation_body { goal_id; verdict; workspace; inspection_operator_id; _ }
     ; "request_id", `String verdict.request_id
     ; "verification_run_id", `String verdict.verification_run_id
     ; "expected_operator_id", `String inspection_operator_id
+    ; "expected_runtime_instance_id", `String runtime_instance_id
     ; "expected_workspace", `Assoc ["base_path", `String workspace.base_path; "masc_root", `String workspace.masc_root]
     ]
 
@@ -226,9 +264,33 @@ let same_confirmation_binding left right =
   String.equal left.goal_id right.goal_id
   && left.workspace = right.workspace
   && String.equal left.inspection_operator_id right.inspection_operator_id
+  && String.equal left.runtime_instance_id right.runtime_instance_id
   && left.credential_headers = right.credential_headers
   && left.credential_owner == right.credential_owner
   && left.verdict = right.verdict
+
+let same_recorded_confirmation left right =
+  match left.recorded_confirmation, right.recorded_confirmation with
+  | Some first, Some second -> first = second
+  | None, _ | _, None -> false
+
+let receipt_authority_current ~credential_current ~current_instance ~current_confirmation ~(receipt : receipt_authority) =
+  credential_current && current_instance = Some receipt.ra_runtime_instance_id
+  && match current_confirmation with
+  | None -> false
+  | Some (confirmation : confirmation) ->
+      confirmation.workspace = receipt.ra_workspace
+      && String.equal confirmation.inspection_operator_id receipt.ra_operator_id
+      && String.equal confirmation.runtime_instance_id receipt.ra_runtime_instance_id
+      && confirmation.credential_owner == receipt.ra_credential_owner
+
+let receipt_outcome_text ~ko ~current result =
+  let text korean english = if ko then korean else english in
+  match current, result with
+  | false, Error _ -> text "결과 미확인 · 원래 서버와 작업 공간의 운영자를 다시 확인" "Outcome unconfirmed; reinspect the original server, workspace and operator"
+  | false, Ok _ -> text "응답 보존됨 · 원래 서버와 작업 공간의 운영자를 다시 확인" "Response retained; reinspect the original server, workspace and operator"
+  | true, Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
+  | true, Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error
 
 (* The confirmation block is one decision the operator reads in layers: what
    to do, what the goal promised, which proof binding is on the table, and
@@ -274,7 +336,7 @@ let submitted_original_text (original : submitted_original) =
       ^ " · " ^ reason
   | Original_unknown kind -> "unknown kind " ^ kind
 
-let confirmation_lines ~width ~ko { goal_id; verdict; submitted; _ } =
+let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmation; submitted; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
   let line_of tone text = { tone; text } in
   let sanitize text =
@@ -301,13 +363,22 @@ let confirmation_lines ~width ~ko { goal_id; verdict; submitted; _ } =
     |> List.map (fun text -> line_of tone (String.make indent ' ' ^ text))
   in
   let header =
-    line_of Note (if ko then "[ 판정 확인 ]" else "[ Confirm the proof ]")
+    line_of Note (match phase with
+      | Goal_phase.Completed -> if ko then "[ 확인 완료 ]" else "[ Confirmation recorded ]"
+      | _ -> if ko then "[ 판정 확인 ]" else "[ Confirm the proof ]")
   in
   let instruction =
     paragraph ~indent:0 Waiting
-      (if ko
-       then "이 증명을 확인합니다 — 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
-       else "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels")
+      (match phase with
+       | Goal_phase.Completed -> if ko then "저장된 확인을 조회했습니다. 추가 요청은 보내지 않습니다."
+         else "Recorded confirmation inspected. No additional request will be sent."
+       | _ -> match recorded_confirmation with
+         | Some _ -> if ko
+           then "저장된 확인과 증거를 끝까지 읽고 [a]를 눌러 완료 처리를 재개합니다. Esc는 취소합니다."
+           else "Read the recorded confirmation and evidence, then [a] to resume completion; Esc cancels."
+         | None -> if ko
+           then "이 증명을 확인합니다 — 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
+           else "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels")
   in
   let promise =
     labelled ~tone:Plain "Title" criterion.title
@@ -321,6 +392,14 @@ let confirmation_lines ~width ~ko { goal_id; verdict; submitted; _ } =
          goal_id criterion.revision verdict.request_id
          verdict.verification_run_id)
   in
+  let recorded = match recorded_confirmation with
+    | None -> []
+    | Some (recorded : Goal_verification.confirmation) ->
+        labelled ~tone:Note "Confirmed" (recorded.operator_id ^ " · " ^ recorded.confirmed_at)
+        @ (if phase = Goal_phase.Completed then [] else
+          paragraph ~indent:0 Waiting (if ko
+            then "운영자 확인은 저장되었습니다. 목표 완료와 후속 처리는 아직 확인되지 않았습니다."
+            else "Operator confirmation is recorded; Goal completion and follow-up are not yet verified.")) in
   let evidence =
     line_of Plain "Evidence:" :: paragraph ~indent:2 Plain verdict.evidence
   in
@@ -341,7 +420,7 @@ let confirmation_lines ~width ~ko { goal_id; verdict; submitted; _ } =
   in
   let blank = [ line_of Quiet "" ] in
   header
-  :: (instruction @ blank @ promise @ blank @ binding @ blank @ evidence
+  :: (instruction @ (if recorded = [] then [] else blank @ recorded) @ blank @ promise @ blank @ binding @ blank @ evidence
       @ (match submitted with [] -> [] | _ -> blank @ submitted))
 
 (* A verdict is a headline and, when the judge left one, the measurement it

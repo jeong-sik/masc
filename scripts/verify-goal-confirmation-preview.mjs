@@ -15,6 +15,10 @@ assert.ok(healthResponse.ok, 'backend health is required to bind fixture reads')
 const health = await healthResponse.json()
 const expectedWorkspace = { base_path: health.paths.effective_base_path, masc_root: health.paths.effective_masc_root }
 assert.ok(expectedWorkspace.base_path && expectedWorkspace.masc_root)
+// This is an intercepted UI fixture. Its execution authority and confirmation
+// response use one synthetic pair rather than combining two live observations.
+const fixtureInstance = '018f83d7-93a4-7f5d-9a72-123456789abc'
+const fixtureEpoch = '018f83d7-93a4-4f5d-9a72-abcdef123456'
 const artifactRoot = resolve(preview), output = resolve(destination)
 const buildReceipt = JSON.parse(await readFile(resolve(artifactRoot, 'dashboard-build-receipt.json'), 'utf8'))
 assert.equal(buildReceipt.source_commit, head)
@@ -70,12 +74,22 @@ try {
   await page.routeWebSocket('**/*', socket => socket.close())
   await page.route('**/*', async route => {
     const req = route.request(), url = new URL(req.url())
+    if (url.origin === new URL(backend).origin && url.pathname === '/api/v1/dashboard/execution' && req.method() === 'GET') {
+      const requestHeaders = { ...req.headers() }
+      delete requestHeaders['if-none-match']
+      delete requestHeaders['if-modified-since']
+      const response = await route.fetch({ headers: requestHeaders })
+      if (response.status() !== 200) return route.fulfill({ response })
+      const execution = await response.json()
+      return route.fulfill({ json: { ...execution, execution_publication_epoch: fixtureEpoch },
+        headers: { 'cache-control': 'no-store' } })
+    }
     if (url.origin === new URL(backend).origin && url.pathname === '/api/v1/goals/confirmation') {
       if (req.method() === 'POST') {
         const binding = req.postDataJSON(); posts.push(binding)
         assert.deepEqual(binding, { goal_id: 'fixture-goal', criterion_revision: criterion.revision,
           request_id: verdict.request_id, verification_run_id: verdict.verification_run_id, expected_workspace: expectedWorkspace,
-          expected_operator_id: 'synthetic-operator' })
+          expected_operator_id: 'synthetic-operator', expected_runtime_instance_id: fixtureInstance })
         completed = true
         return route.fulfill({ json: payload() })
       }
@@ -84,7 +98,14 @@ try {
       assert.equal(url.searchParams.get('expected_masc_root'), expectedWorkspace.masc_root)
       if (mode === 'denied') return route.fulfill({ status: 403, json: { error: 'synthetic operator permission denied' } })
       if (mode === 'readback-failed' && completed) return route.fulfill({ status: 503, json: { error: 'synthetic readback unavailable' } })
-      return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1' }, json: payload() })
+      return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1',
+        'x-masc-runtime-instance-id': fixtureInstance, 'x-masc-execution-publication-epoch': fixtureEpoch }, json: payload() })
+    }
+    if (url.origin === new URL(backend).origin && url.pathname === '/api/v1/dashboard/goals/candle' && req.method() === 'GET') {
+      return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1',
+        'x-masc-runtime-instance-id': fixtureInstance, 'x-masc-execution-publication-epoch': fixtureEpoch },
+        json: { schema: 'masc.goal-candle-observation.v1', goal_id: 'fixture-goal', config: { state: 'off' },
+          ledger: { state: 'missing' }, execution: { state: 'not_observed', reason: 'no_complete_goal_request_index' } } })
     }
     if (!['GET', 'HEAD'].includes(req.method())) { blocked.push({ method: req.method(), path: url.pathname }); return route.abort() }
     if (url.pathname === '/api/v1/dashboard/goals') return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1' }, json: {

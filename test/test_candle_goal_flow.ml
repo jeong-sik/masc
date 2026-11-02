@@ -223,6 +223,7 @@ let confirm config goal_id =
         ; "request_id", `String verdict.Goal_verification.request_id
         ; "verification_run_id", `String verdict.Goal_verification.verification_run_id
         ; "expected_operator_id", `String "operator-a"
+        ; "expected_runtime_instance_id", `String Build_identity.runtime_instance_id
         ; "expected_workspace", `Assoc
             [ "base_path", `String (Unix.realpath config.base_path)
             ; "masc_root", `String (Unix.realpath (Workspace.masc_dir config)) ]

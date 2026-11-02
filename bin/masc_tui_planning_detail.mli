@@ -42,23 +42,48 @@ type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
+  recorded_confirmation : Goal_verification.confirmation option;
   submitted : submitted_original list;
   workspace : confirmation_workspace;
   inspection_operator_id : string;
+  runtime_instance_id : string;
   credential_headers : (string * string) list;
   credential_owner : unit ref;
 }
 
+type receipt_authority = {
+  ra_workspace : confirmation_workspace;
+  ra_operator_id : string;
+  ra_runtime_instance_id : string;
+  ra_credential_owner : unit ref;
+}
+
+val confirmation_receipt_authority : confirmation -> receipt_authority
+
+type confirmation_read_error =
+  | Read_failed of unit ref option * string
+  | Read_http_error of unit ref * int
+  | Server_changed of unit ref
+
+type confirmation_read = (string, confirmation, confirmation_read_error) Masc_tui_fetched.source
+
 type confirmation_state =
-  | Inspecting of (string, confirmation) Masc_tui_fetched.t
-  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+  | Inspecting of confirmation_read
+  | Submitting of string * confirmation_read
 
-val suspend_confirmation_read : (string, confirmation) Masc_tui_fetched.t -> (string, confirmation) Masc_tui_fetched.t
+val confirmation_read_error_message : credential_is_current:(unit ref -> bool) -> confirmation_read_error -> string
+
+val suspend_confirmation_read : confirmation_read -> confirmation_read
 (** Withdraw a proof's authority while retaining its key for a later reread. *)
+val confirmation_view_for : confirmation_read -> goal_id:string -> (confirmation, confirmation_read_error) Masc_tui_fetched.observation
+(** A revalidation hides the previous proof as soon as its read starts. *)
 
-val decode_confirmation : goal_id:string -> workspace:confirmation_workspace -> credential_headers:(string * string) list -> credential_owner:unit ref -> Yojson.Safe.t -> (confirmation, string) result
+val decode_confirmation : goal_id:string -> workspace:confirmation_workspace -> runtime_instance_id:string -> credential_headers:(string * string) list -> credential_owner:unit ref -> Yojson.Safe.t -> (confirmation, string) result
 val confirmation_body : confirmation -> Yojson.Safe.t
 val same_confirmation_binding : confirmation -> confirmation -> bool
+val same_recorded_confirmation : confirmation -> confirmation -> bool
+val receipt_authority_current : credential_current:bool -> current_instance:string option -> current_confirmation:confirmation option -> receipt:receipt_authority -> bool
+val receipt_outcome_text : ko:bool -> current:bool -> (string, string) result -> string
 val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
 (** The exact proof displayed before the operator confirms, in layers: the
     instruction, the goal's promise, the binding fine print, then the

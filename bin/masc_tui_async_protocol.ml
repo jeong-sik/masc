@@ -628,9 +628,9 @@ type async_msg =
     }
   | Board_vote_done of board_vote_target * (string, string) result
   | Goal_transition_done of string * string * string * (string, string) result
-  | Goal_confirmation_submitted of string * string * string * unit ref * (string, string) result
+  | Goal_confirmation_submitted of string * string * string * Masc_tui_planning_detail.receipt_authority * (string, string) result
   | Goal_confirmation_loaded of
-      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, string) result
+      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, Masc_tui_planning_detail.confirmation_read_error) result
   | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did

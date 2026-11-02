@@ -303,6 +303,10 @@ let test_goal_confirmation_h1_h2 () =
         (header "access-control-allow-origin" reply);
       check (option string) "credential-bound evidence is not stored" (Some "private, no-store")
         (header "cache-control" reply);
+      check (option string) "proof has server instance" (Some Masc.Build_identity.runtime_instance_id)
+        (header "x-masc-runtime-instance-id" reply);
+      check bool "proof has execution epoch" true
+        (Option.is_some (header "x-masc-execution-publication-epoch" reply));
       check string "proof is attributed to authenticated operator" "admin"
         (field_string "inspection_operator_id" (json reply))) [h1; h2];
     let conditional_h1, conditional_h2 = both gateway ~token:admin ~headers:["if-none-match", "*"] path in
@@ -323,10 +327,12 @@ let test_goal_confirmation_h1_h2 () =
     List.iter (fun reply ->
       check (option string) "foreign origin cannot read refusal" None
         (header "access-control-allow-origin" reply)) [rejected_h1; rejected_h2];
-    let payload ?(operator = "admin") ?(workspace_root = root) ?(run = "transport-test-run") () =
+    let payload ?(operator = "admin") ?(workspace_root = root) ?(run = "transport-test-run")
+        ?(instance = Masc.Build_identity.runtime_instance_id) () =
       body ["goal_id", `String goal.id; "criterion_revision", `String goal.criterion_revision;
         "request_id", `String request_id; "verification_run_id", `String run;
         "expected_operator_id", `String operator;
+        "expected_runtime_instance_id", `String instance;
         "expected_workspace", `Assoc ["base_path", `String base_path; "masc_root", `String workspace_root]] in
     List.iter (fun (label, invalid) ->
       let h1, h2 = both gateway ~token:admin ~meth:`POST ~body:invalid endpoint in
@@ -334,6 +340,7 @@ let test_goal_confirmation_h1_h2 () =
       check_json (label ^ " same refusal") (json h1) (json h2))
       ["different operator", payload ~operator:"someone-else" ();
        "different workspace", payload ~workspace_root:(root ^ "-other") ();
+       "different server instance", payload ~instance:"another-instance" ();
        "stale verification run", payload ~run:"another-run" ()];
     let still_pending = request H2 gateway ~token:admin path in
     check string "refusals did not confirm" "awaiting_confirmation"

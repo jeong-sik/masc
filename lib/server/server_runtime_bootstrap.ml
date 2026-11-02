@@ -1140,6 +1140,7 @@ let initialize_owner_state_blocking
     Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool domain_mgr
   in
   install_domain_pool_references ~read:read_pool domain_pool;
+  Server_pending_confirm_expiry.start ~sw ~clock ~state;
   Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
       ~domain_count:budget.Domain_budget.execution_codec with

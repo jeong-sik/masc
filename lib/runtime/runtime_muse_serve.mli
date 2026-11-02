@@ -92,8 +92,10 @@ type image_input =
   }
 
 (** How [muse serve] ended, read from its documented exit codes. [None] in
-    {!error.Process_exited} means the process was not reaped within the
-    grace period after its stdout closed. *)
+    {!error.Process_exited} means no process exit status is available: either
+    the process was not reaped within the grace period after its stdout
+    closed, or the host synthesized {!Runtime_muse_msp.Terminal_host_died}
+    without an exit status. *)
 type exit_status =
   | Exit_clean  (** 0 *)
   | Exit_unhandled  (** 1 *)

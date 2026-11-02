@@ -1,8 +1,8 @@
 (* The decisions an owed read makes about when a surface reads again.
 
-   The case worth a test is the one a refresh tick used to hide: a change
-   announced while a read is in flight. That read may have been answered
-   from a state before the change, so one more read is owed after it. *)
+   The case worth a test is a change announced while a read is in flight.
+   That read may have been answered from a state before the change, so one
+   more read is owed after it. *)
 
 open Alcotest
 module O = Masc_tui_owed_read
@@ -45,9 +45,13 @@ let test_the_wait_stops_growing () =
   check bool "capped wait has passed" true (O.due ~now:max_retry_s t);
   check bool "capped wait has not passed" false (O.due ~now:(max_retry_s -. 0.1) t)
 
-let test_a_change_does_not_cut_a_failure_wait_short () =
+let test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff () =
   let t = failed ~now:0.0 (O.started (O.changed O.settled)) in
-  check bool "a change keeps the wait" false (O.due ~now:1.0 (O.changed t))
+  let t = O.changed t in
+  check bool "the change is read now" true (O.due ~now:1.0 t);
+  let t = failed ~now:1.0 (O.started t) in
+  check bool "the next failure waits the doubled time" false (O.due ~now:4.9 t);
+  check bool "after the doubled time" true (O.due ~now:5.0 t)
 
 (* An answer arriving when no read is in flight belongs to a read that did
    not carry the owed change (an audit still owed, for one), so it settles
@@ -72,8 +76,8 @@ let () =
         ; test_case "a failed read retries with backoff" `Quick
             test_a_failed_read_retries_with_backoff
         ; test_case "the wait stops growing" `Quick test_the_wait_stops_growing
-        ; test_case "a change does not cut a failure wait short" `Quick
-            test_a_change_does_not_cut_a_failure_wait_short
+        ; test_case "a change during a failure wait is read now and keeps the backoff" `Quick
+            test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff
         ; test_case "an answer without a read in flight keeps what is owed" `Quick
             test_an_answer_without_a_read_in_flight_keeps_what_is_owed
         ; test_case "a replacing read covers the changes before it" `Quick

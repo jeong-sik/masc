@@ -4,9 +4,8 @@
     The observer feed says that something changed; the surface reads it from
     the server. A change can arrive while a read of the same surface is in
     flight, while the surface cannot read (the chat is scrolled into older
-    rows), or the read can fail. Each of those used to be caught up by the
-    next refresh tick. This value remembers it instead, so a read is owed
-    exactly until one read that began after the change succeeds.
+    rows), or the read can fail. This value records each of those, so a read
+    is owed exactly until one read that began after the change succeeds.
 
     Nothing here performs I/O or reads a clock. The caller passes [now] and
     asks {!due} whether to start a read. *)
@@ -26,7 +25,9 @@ val settled : t
 
 val changed : t -> t
 (** The server announced a change of this surface. A change while waiting
-    out a failure does not shorten the wait: the retry reads the newest. *)
+    out a failure is read now: the failure may belong to another part of the
+    reading, and the change is new. The failures in a row are kept, so the
+    next failure still waits longer. *)
 
 val started : t -> t
 (** A read of this surface began, whatever started it. *)

@@ -21578,7 +21578,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 "no call-log row" until the operator cycles the view. The
                 loader is inflight-guarded and a mid-flight load turns force
                 into one queued follow-up, so a burst of turns collapses. *)
-             if state.msg_tool_visibility <> Tools_compact then
+             (* The calls slot is shared with the Keeper_calls surface, so only
+                the chat on screen reads it. *)
+             if state.view = Keepers Keeper_message
+                && state.msg_tool_visibility <> Tools_compact then
                launch_keeper_calls_load ~force:true state ~mailbox keeper_name
          | None -> ());
       (* A frame of a turn this pane did not open: its journal grew, so read

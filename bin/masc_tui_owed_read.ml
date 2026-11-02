@@ -10,7 +10,7 @@ let changed = function
   | Settled -> Owed { failures = 0 }
   | Owed _ as owed -> owed
   | Reading reading -> Reading { reading with changed_since = true }
-  | Waiting _ as waiting -> waiting
+  | Waiting { failures; _ } -> Owed { failures }
 
 let started = function
   | Settled -> Reading { failures = 0; changed_since = false }

@@ -66,8 +66,7 @@ need the full verification required by the repository. Ordinary MASC PRs do not
 require an Actions run simply because they belong to a stack.
 
 A reviewer can submit an ordinary GitHub APPROVE for the head they actually
-reviewed; a prescribed body or footer is not required. For each PR, inspect all
-review pages and the latest submitted formal state for each GitHub account. A
+reviewed. For each PR, inspect all review pages and the latest submitted formal state for each GitHub account. A
 later formal approval replaces that account's earlier change request; a request
 from another account remains. Comments and pending drafts do not clear requests.
 An ambiguous or unreadable history is unknown. The review's `commit_id` binds

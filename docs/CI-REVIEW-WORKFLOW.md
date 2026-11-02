@@ -5,8 +5,8 @@ in stacked PRs: each later PR targets the preceding branch. Native Stack metadat
 names the trunk and the included parents.
 Review function, logic and code cleanliness independently; approve the current
 head when no P0/P1/P2 issue remains and collect P3 findings for later. A reviewer
-may submit GitHub APPROVE directly for the reviewed head; no fixed body or footer
-is required. Record the completed successful full run separately for Release.
+may submit GitHub APPROVE directly for the reviewed head. Record the completed
+successful full run separately for Release.
 Before integration check the current independent review, head, base, complete
 diff and unresolved findings. A non-native branch chain lands parent first; a
 native stack lands whole through its top PR.
@@ -219,7 +219,7 @@ Only an actual successful completion is build evidence.
 
 A combined candidate receipt names that candidate and selected coverage. It does
 not become an individual PR's check, an independent source approval or merge
-permission. Ordinary review guards do not need a CI receipt; Release admission
+permission. A source review does not establish a CI result; Release admission
 still requires its current-head full verification evidence.
 
 For real browser Addon checks, dispatch `browser-stagehand-proof.yml` with a full

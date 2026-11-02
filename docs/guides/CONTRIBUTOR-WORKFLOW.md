@@ -319,8 +319,7 @@ gh api --method POST "repos/$repo/pulls/$pr/reviews" \
   -f event=APPROVE -f commit_id="$head"
 ```
 
-No fixed body, footer or approval helper is required. If the change differs,
-review it again. Once the source review passes, approve without waiting for CI;
+If the change differs, review it again. Once the source review passes, approve without waiting for CI;
 Release merge and publication decisions separately require completed full CI.
 After publication, read back review ID, state and commit ID. If publication or
 readback is uncertain, inspect the existing effect before retrying. A GitHub

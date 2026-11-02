@@ -34,7 +34,7 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 def _preserve_bytes(raw: bytes, reason: str) -> str:
     """Best-effort: keep the exact bytes for review.
 
-    ``GUARD_EVIDENCE_DIR`` names the directory when set, else the caller's
+    ``MASC_REVIEW_EVIDENCE_DIR`` names the directory when set, else the caller's
     cwd, else /tmp. Never raises: evidence preservation must not change the
     refusal cause. Returns the path or a short note when nothing was written.
     """
@@ -42,14 +42,14 @@ def _preserve_bytes(raw: bytes, reason: str) -> str:
     from pathlib import Path
 
     candidates = []
-    override = os.environ.get("GUARD_EVIDENCE_DIR")
+    override = os.environ.get("MASC_REVIEW_EVIDENCE_DIR")
     if override:
         candidates.append(Path(override))
     candidates += [Path.cwd(), Path("/tmp")]
     for directory in candidates:
         if not directory.is_dir():
             continue
-        path = directory / "guard-unparsed-compare.json"
+        path = directory / "review-unparsed-compare.json"
         try:
             path.write_bytes(raw)
         except OSError:

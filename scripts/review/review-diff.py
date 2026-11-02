@@ -63,7 +63,7 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     # not invent a different one. Exact objects are sufficient after this read.
     # The comparison is read without interpreting file patches, whose bytes can
     # break whole-response JSON parsing (see _gh_merge_base.py).
-    base_commit = merge_base(os.environ.get("GUARD_GH", "gh"), repo, base, head)
+    base_commit = merge_base(os.environ.get("MASC_REVIEW_GH", "gh"), repo, base, head)
     git_flags = ["--no-replace-objects"]
     if _supports_no_lazy_fetch():
         git_flags.append("--no-lazy-fetch")
@@ -97,7 +97,7 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
                 subprocess.run(
                     [*git, "-c", "credential.helper=",
                      "-c", "credential.helper=!" + shlex.quote(
-                         os.environ.get("GUARD_GH", "gh")) + " auth git-credential",
+                         os.environ.get("MASC_REVIEW_GH", "gh")) + " auth git-credential",
                      "fetch", "--no-tags", "--depth=1", "--filter=blob:none",
                      f"https://github.com/{repo}.git", commit],
                     env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
@@ -143,7 +143,7 @@ def main() -> int:
     parser.add_argument("--head", required=True)
     args = parser.parse_args()
     root = Path(
-        os.environ.get("GUARD_REPO_ROOT", str(Path(__file__).resolve().parents[2]))
+        os.environ.get("MASC_REVIEW_REPO_ROOT", str(Path(__file__).resolve().parents[2]))
     )
     try:
         print(diff_identity(args.repo, args.base, args.head, root))

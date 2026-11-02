@@ -287,7 +287,7 @@ gh api --method POST "repos/$repo/pulls/$pr/reviews" \
   -f event=APPROVE -f commit_id="$head"
 ```
 
-승인에 정해진 본문 형식이나 footer는 필요하지 않습니다. 변경 내용이 달라지면 다시 리뷰하세요.
+변경 내용이 달라지면 다시 리뷰하세요.
 소스 검토를 마치면 CI 완료를 기다리지 않고 승인합니다. Release 병합·게시 때 전체 CI를 따로
 확인합니다. 게시 후 리뷰 ID,
 상태와 commit ID를 다시 확인합니다. 게시나 재조회 결과가 불확실하면 재시도 전에 기존 효과를

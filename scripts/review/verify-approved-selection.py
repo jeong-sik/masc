@@ -52,7 +52,7 @@ def main():
     try:
         receipt = json.loads(Path(args.selection).read_text())
         verified = verify(receipt, repo=args.repo, candidate=args.candidate,
-                          git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"))
+                          git_dir=args.git_dir, gh=os.environ.get("MASC_REVIEW_GH", "gh"))
         print(json.dumps(verified, sort_keys=True))
         return 0
     except (P.Rejected, argparse.ArgumentTypeError) as error:

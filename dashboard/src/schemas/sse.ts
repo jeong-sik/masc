@@ -90,6 +90,11 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
   SSE_APPROVAL_RULES_CHANGED_EVENT,
+  // Held tool calls and tool approval modes changed
+  // (lib/keeper/keeper_tool_approval_broadcast.ml). The TUI re-reads on them;
+  // the dashboard follows held calls on the chat stream.
+  'keeper_tool_approval_waits_changed',
+  'keeper_tool_approval_mode_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

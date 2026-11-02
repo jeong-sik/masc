@@ -83,7 +83,11 @@ val await :
 
     The entry is removed before returning on every path, so a caller that
     raises through [await] — cancellation included — does not leave a waiter
-    behind. *)
+    behind.
+
+    Registering, a timeout and a wait ending with its turn each broadcast
+    {!Keeper_tool_approval_broadcast.waits_changed}; a timeout and an ending
+    turn broadcast it after the entry is removed. *)
 
 val settle :
   t -> keeper_name:string -> tool_call_id:string -> approval_id:string -> decision -> bool
@@ -91,7 +95,8 @@ val settle :
     immutable approval ID are compared under the registry lock before removal.
     Returns [false] for a replacement, timed-out, answered or unknown wait. Callers report that
     rather than treating it as success, so an operator is not told a call was
-    approved when nothing was listening. *)
+    approved when nothing was listening. A settled wait broadcasts
+    {!Keeper_tool_approval_broadcast.waits_changed} once it is removed. *)
 
 (** One wait, for the operator-facing listing. The description fields say
     what is being asked; [approval_id] identifies the exact wait. [asked_at] is the

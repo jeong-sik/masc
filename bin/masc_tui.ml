@@ -16591,7 +16591,7 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
    session id, then the stream, read until it ends. Every step reports back
    through the mailbox; the render fiber owns all state. The fiber ends with
    the stream, and whether to open another is the main loop's decision. *)
-let launch_observer state ~host ~port ~mailbox =
+let launch_observer state ~expected_workspace ~host ~port ~mailbox =
   let enqueue_async = workspace_enqueue state in
   state.observer <- Observer_opening;
   let session = state.mcp_session in
@@ -16626,7 +16626,7 @@ let launch_observer state ~host ~port ~mailbox =
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events ~clock ~host ~port
+                Masc_tui_http.observe_runtime_events ~clock ~expected_workspace ~host ~port
                   ~session_id ~cursor ~on_open ~on_chunk)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -16654,21 +16654,23 @@ let launch_observer state ~host ~port ~mailbox =
    fetch -- so walking the surfaces retried a refused feed once per surface and
    filled the eleven-entry event panel with its own refusals. *)
 let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
-  match state.workspace_identity with
-  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> ()
-  | Workspace_identity_match | Workspace_identity_mismatch _ ->
-  match (state.connection_status, state.observer) with
+  match state.workspace_identity, state.server_identity with
+  | (Workspace_identity_match | Workspace_identity_mismatch _), Some expected_workspace
+    when server_authority_ready state ->
+  (match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
-      launch_observer state ~host ~port ~mailbox
+      launch_observer state ~expected_workspace ~host ~port ~mailbox
   | (Connected | Degraded),
     (Observer_closed_before_answer _ | Observer_closed_after_live _)
     when retry_closed ->
-      launch_observer state ~host ~port ~mailbox
+      launch_observer state ~expected_workspace ~host ~port ~mailbox
   | (Connected | Degraded),
     ( Observer_closed_before_answer _ | Observer_closed_after_live _
     | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting), _ ->
-      ()
+      ())
+  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_match | Workspace_identity_mismatch _), _ -> ()
 
 (* The fleet stream reconnects at the default refresh cadence, so a server that
    is down costs one failed connection per refresh, as the poll it replaces
@@ -20914,9 +20916,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             end;
             "observer replay cannot resume; reconnecting: " ^ detail
         | Error (Masc_tui_http.Http_refused { status; detail }) ->
-            (* Explicit missing/conflicting MCP sessions can be reinitialized.
-               EOF and transport errors never invalidate a session by count. *)
-            (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
+            (* A workspace refusal also uses 409, but it retires the reading,
+               not the MCP session. Only a session conflict reinitializes it. *)
+            if Masc_tui_http.observer_workspace_refused ~status ~detail then
+              apply_refused_workspace_identity state ~mailbox ~detail None
+            else
+              (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
       let at = Unix.gettimeofday () in

@@ -147,8 +147,9 @@ val sse_stream_headers :
   deps:deps -> string -> string -> string -> (string * string) list
 (** [sse_stream_headers ~deps session_id protocol_version origin] is
     {!sse_headers} plus [cache-control: no-cache] and
-    [connection: keep-alive].  Used for long-lived SSE streams (the
-    AG-UI bridge and the per-session event stream). *)
+    [connection: close]. The stream remains open until its writer closes;
+    the connection then closes to delimit the response. Used by the AG-UI
+    bridge and the per-session event stream. *)
 
 val json_headers :
   deps:deps -> string -> string -> string -> (string * string) list

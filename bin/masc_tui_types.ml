@@ -14440,9 +14440,11 @@ let selected_tools_skill_profile (state : state) =
 let tools_skill_cell_image_owner (state : state) =
   if not state.image_open || state.msx_open || state.view <> Tools then None
   else match state.image_cell_view with
-  | Some (Image_cells {ic_workspace;
-      ic_origin={sir_view=Tools; sir_keeper=Some keeper; sir_skill_reference=Some reference;_};_})
-      when ic_workspace=state.workspace_authority -> Some (keeper,reference)
+  | Some (Image_cells {ic_workspace;ic_origin;_}) when ic_workspace=state.workspace_authority ->
+      if ic_origin.sir_view <> Tools then None
+      else (match ic_origin.sir_keeper, ic_origin.sir_skill_reference with
+        | Some keeper, Some reference -> Some (keeper,reference)
+        | None, (Some _ | None) | Some _, None -> None)
   | Some (Image_cells _ | Image_cells_withdrawn _) | None -> None
 
 let tools_skill_reference_for_refresh state ~keeper_name =
@@ -17957,12 +17959,18 @@ let withdraw_image_open (state : state) =
    until the loop can announce the interrupted Skill preview. *)
 let retired_skill_image_notice (state : state) =
   match state.sent_image_read with
-  | Some ({sir_view=Tools; sir_skill_reference=Some _; sir_purpose=Open_image;
-           sir_owner=Peer_image_read reading;_} as pending)
-      when reading != state.workspace_read_authority && state.view=Tools
-        && pending.sir_generation=state.image_request_generation && not state.msx_open ->
-      Some pending
-  | Some _ | None -> None
+  | None -> None
+  | Some pending ->
+      let retired = match pending.sir_owner with
+        | Peer_image_read reading -> reading != state.workspace_read_authority
+        | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _
+        | Board_image_read _ -> false in
+      let opening = match pending.sir_purpose with
+        | Open_image -> true | Inspect_image _ -> false in
+      if pending.sir_view=Tools && Option.is_some pending.sir_skill_reference
+         && opening && retired && state.view=Tools
+         && pending.sir_generation=state.image_request_generation && not state.msx_open
+      then Some pending else None
 
 let board_successor (state : state) =
   Option.bind (board_post_on_screen state) (fun post ->

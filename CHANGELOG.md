@@ -327,6 +327,8 @@
 
 ### Fixed
 
+- Read named model declarations from the published catalog snapshot in runtime discovery and setup, restoring compilation after removal of the old global catalog API. (#47577)
+
 - Let Librarian resume a proven original Memory judgment when an invalid working context would otherwise block recovery (#46911).
 
 - Wake the enabled Librarian after a failed official-client turn durably records its end boundary; do not wake on a failed append (#46926).

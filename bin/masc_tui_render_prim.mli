@@ -739,8 +739,8 @@ val context_split_width : int -> int
 (** The stack band of the context inspector for the row [turn_back] steps
     behind the newest: composition rows with their bytes and, when the turn
     holds both a serialized body and a per-request input count, an
-    estimated token figure; the serialized request led by the provider's
-    token count; history reach; recent turns. *)
+    estimated token figure; recorded input and observed serialization;
+    history reach; recent turns. *)
 val context_composition_lines :
   ?runtime_details:(string -> string list) ->
   cols:int ->

@@ -36,11 +36,25 @@ let empty_and_negative_inputs () =
   check_shares "negative capacity keeps percentages but has no cells" ~cells:min_int
     [29; 71] [29, 0; 71, 0]
 
+let sparkline_levels () =
+  let check = Alcotest.(check (list int)) in
+  check "large nonnegative values retain the full scale" [0; 7]
+    (Chart.sparkline_levels [0; max_int]);
+  check "the full integer range does not overflow" [0; 3; 7]
+    (Chart.sparkline_levels [min_int; 0; max_int]);
+  check "explicit bounds clamp values" [0; 1; 7; 7]
+    (Chart.sparkline_levels ~min:0 ~max:100 [-5; 25; 100; 500]);
+  check "a constant positive series uses the middle" [3; 3]
+    (Chart.sparkline_levels [4; 4]);
+  check "a constant zero series uses the lowest level" [0; 0]
+    (Chart.sparkline_levels [0; 0])
+
 let () =
-  Alcotest.run "Exact chart count shares"
+  Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
       [ Alcotest.test_case "decimal boundaries and floor" `Quick exact_decimal_boundaries
       ; Alcotest.test_case "large totals and products" `Quick large_counts
       ; Alcotest.test_case "empty and negative inputs" `Quick empty_and_negative_inputs
+      ; Alcotest.test_case "sparkline scale and integer limits" `Quick sparkline_levels
       ]
     ]

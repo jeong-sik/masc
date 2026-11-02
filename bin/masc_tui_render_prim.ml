@@ -4138,6 +4138,17 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
    no-value mark both sit in it, so the rows line up on the same column. *)
 let token_cell_width = 7
 
+let context_wrapped_lines ~width ~style text =
+  Context_bars.wrap ~width text
+  |> List.concat_map (Message_layout.split_cells ~max_cells:width)
+  |> List.map (fun line -> "  " ^ style ^ line ^ Ansi.reset)
+
+let context_error_lines ~cols ~label detail =
+  let width = max 1 (framed_inner_width cols - 2) in
+  let detail = Keeper_chat.bounded_http_error_ends detail in
+  context_wrapped_lines ~width ~style:(Theme.bad ())
+    (label ^ ": " ^ Keeper_chat.terminal_safe_text detail)
+
 let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     ?forecast
     (selection : Masc_tui_context_inspector.selection) =
@@ -4194,12 +4205,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
       Ansi.reset
   in
   (* Every size on this screen is read in tokens: the window is sized in
-     tokens and the provider counts them, while masc measured bytes before
+     tokens and the input figure is recorded in tokens, while masc measured bytes before
      dispatch. The scale is this record's own wire body over its
      per-request count when it has both, else the page's median, else the
      fleet figure; the sentence under the rows names which. *)
   let scale = Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows record in
-  (* The count the provider made leads the band; the estimate from the
+  (* The recorded input figure leads the band; the estimate from the
      prepared body follows it, with the bytes it was read from. *)
   let wire_lines =
     match record.request_wire_observation with
@@ -4267,7 +4278,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         | Some tokens, Some maximum when maximum > 0 && tokens > maximum ->
             fact
               (Printf.sprintf
-                 "%s provider input tokens exceed the %s-token MASC shaping ceiling; \
+                 "%s recorded input tokens exceed the %s-token MASC shaping ceiling; \
                   ctx-fill against that ceiling is unavailable"
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum))
@@ -4603,12 +4614,11 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         in
         gap @ bar @ rows @ into_request @ against_wire
   in
-  (* The per-turn input the provider itself counted, newest first, one row
-     per dispatched turn the page holds. A provider that reports its usage
-     across the whole conversation gets a row that says so rather than a
-     number that looks like this turn's and is not: the operator asked what
-     goes in each turn, and only the provider's own per-request figure
-     answers it. *)
+  (* Recorded per-request-scoped input, newest first, one row per decoded
+     turn the page holds. Some runtimes store a post-compaction estimate in
+     the same field, with no retained distinction from a request count.
+     A provider that reports its usage across the whole conversation gets a
+     row that says so rather than a number that looks like this turn's. *)
   let recent_turns_lines =
     let row index (recent : Inspector.recent_turn) =
       let ts = Masc_domain.iso8601_of_unix_seconds recent.ts in
@@ -4682,43 +4692,62 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                 (Inspector.format_tokens window))
          | (Some _ | None), None -> [])
     in
-    let inputs =
-      List.filter_map
-        (fun (r : Inspector.recent_turn) ->
-          match r.Inspector.input_tokens with
-          | Some n when n > 0 -> Some n
-          | _ -> None)
-        selection.Inspector.recent
-      |> List.rev
-    in
-    let velocity_lines =
+    let trend = Inspector.recent_input_trend selection.Inspector.recent in
+    let inputs = trend.Inspector.samples in
+    let wrapped style text = context_wrapped_lines ~width ~style text in
+    let input_trend_lines =
       match inputs with
-      | [] | [ _ ] -> []
-      | _ ->
-          let latest_tokens =
-            match selection.Inspector.recent with
-            | { input_tokens = Some n; _ } :: _ -> Inspector.format_tokens n
-            | _ -> Masc_tui_theme.Glyph.no_value
-          in
-          [ Printf.sprintf "  %sVelocity:%s %s  %s(%d turns recorded)  ·  latest %s tokens%s"
-              Ansi.dim Ansi.reset
-              (Chart.sparkline inputs)
-              Ansi.dim
-              (List.length inputs)
-              latest_tokens
-              Ansi.reset
-          ]
+      | _ :: _ ->
+          let bars, scale = match trend.Inspector.bounds with
+            | None -> List.map (fun _ -> "") inputs, "no scale"
+            | Some (minimum, maximum) ->
+                let scaled_inputs = List.map (function
+                  | Inspector.Input_count n -> n
+                  | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
+                Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
+                Printf.sprintf "scale %d–%d tokens" minimum maximum in
+          let marks = List.map2 (fun sample bar -> match sample with
+            | Inspector.Input_unavailable -> "·"
+            | Inspector.Input_invalid _ -> "!"
+            | Inspector.Input_count 0 -> "0"
+            | Inspector.Input_count _ -> bar) inputs bars |> String.concat "" in
+          let legends =
+            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, "· unavailable")
+            ; (List.exists (( = ) (Inspector.Input_count 0)) inputs, "0 recorded zero")
+            ; (List.exists (function Inspector.Input_invalid _ -> true
+                       | Inspector.Input_count _ | Inspector.Input_unavailable -> false) inputs,
+               "! invalid negative count")
+            ]
+            |> List.filter_map (fun (present, text) -> if present then Some text else None) in
+          wrapped "" ("Input by turn: " ^ marks)
+          @ wrapped Ansi.dim (Printf.sprintf
+              "Oldest to newest; %d of %d valid per-request-scoped values; %s%s."
+              trend.Inspector.valid_count (List.length inputs) scale
+              (if legends = [] then "" else "; " ^ String.concat "; " legends))
+          @ wrapped Ansi.dim
+              "Values can include post-compaction context estimates, not just dispatched-request counts."
+      | [] -> []
+    in
+    let source_warning = match selection.Inspector.recent, selection.skipped_rows with
+      | [], _ | _, Some 0 -> []
+      | _ :: _, Some count ->
+          wrapped Ansi.dim (Printf.sprintf
+            "Source omitted %d unreadable records on this page; their positions are unknown."
+            count)
+      | _ :: _, None ->
+          wrapped Ansi.dim "Source skipped-record count unavailable; page completeness unknown."
     in
     [ "  "
       ^ Context_bars.band ~width ~title:"RECENT TURNS"
           ~caption:
-            "input the provider counted, one row per dispatched turn"
+            "recorded input, one row per decoded turn"
     ]
-    @ velocity_lines
+    @ input_trend_lines
+    @ source_warning
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
   (* Read top to bottom as the turn is built: what came in, what was sent,
-     how far back it reached, and what the provider counted on the turns
+     how far back it reached, and what was recorded on the turns
      before it. The request stood above the components it is made of, so the
      screen opened on a total whose parts were three sections further down. *)
   [ identity; turn; trace; "" ]
@@ -4728,10 +4757,17 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     ]
   @ component_lines @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"THIS REQUEST, AS SENT"
-          ~caption:"the provider's count of it, then the estimate from the body masc built"
+      ^ Context_bars.band ~width ~title:"RECORDED INPUT"
+          ~caption:"input value and observed serialized body, when available"
     ]
   @ token_lines
+  @ (match record.usage.scope, record.usage.input_tokens with
+     | Runtime_usage_scope.Per_request, Some _ ->
+         context_wrapped_lines ~width ~style:Ansi.dim
+           "Recorded input can be a post-compaction context estimate; its provenance is not recorded."
+     | Runtime_usage_scope.Per_request, None
+     | (Runtime_usage_scope.Turn_total | Runtime_usage_scope.Conversation_cumulative
+       | Runtime_usage_scope.Usage_scope_unavailable), _ -> [])
   @ provider_context_lines
   @ wire_lines
   @ cache_lines
@@ -4745,7 +4781,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
   @ Option.fold ~none:[] ~some:(context_next_request_lines ~runtime_details ~cols ~scale) forecast
   @ (if selection.Inspector.recent = [] then [] else recent_turns_lines) @ [ "" ]
   @ prose
-      "Three measurements of one turn, not three views of one number: none of \
+      "Three readings of one turn, not three views of one number: none of \
        them is a breakdown of another, and they do not add up."
 
 
@@ -5026,8 +5062,7 @@ let context_response_lines ~cols state observation =
   let lines = match observation with
     | Inspector.Pending -> [ Ansi.dim ^ "  Response observation is still loading" ^ Ansi.reset ]
     | Inspector.Observed (Error detail) ->
-        [ (Theme.bad ()) ^ "  Response unavailable: "
-          ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+        context_error_lines ~cols ~label:"Response unavailable" detail
     | Inspector.Observed (Ok { Inspector.parts; source }) ->
         let caption, empty = match source with
           | Inspector.Newest_history_page ->
@@ -5570,33 +5605,27 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         , None )
   | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
       Plain
-        ( [ (Theme.bad ()) ^ "  Context read failed: "
-            ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+        ( context_error_lines ~cols ~label:"Context read failed" detail
         , None )
   | Some (_, Masc_tui_context_inspector.Turn_read_failed { detail; forecast }) ->
-      let detail = Keeper_chat.terminal_safe_text detail in
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            Plain
-             ( [ (Theme.bad ()) ^ "  Composition unavailable: " ^ detail
-                 ^ Ansi.reset
-               ; ""
-               ]
+             ( context_error_lines ~cols ~label:"Composition unavailable" detail
+               @ [ "" ]
                @ context_next_request_lines ~runtime_details ~cols
                    ~scale:Masc_tui_token_scale.fleet
                    ~show_scale_note:true forecast
              , None )
        | Masc_tui_context_inspector.Exact_input ->
            Plain
-             ( [ (Theme.bad ()) ^ "  Exact input unavailable: " ^ detail
-                 ^ Ansi.reset ]
+             ( context_error_lines ~cols ~label:"Exact input unavailable" detail
              , None )
        | Masc_tui_context_inspector.Response ->
            context_response_lines ~cols state (Masc_tui_context_inspector.Observed (Error detail))
        | Masc_tui_context_inspector.Input_map ->
            Plain
-             ( [ (Theme.bad ()) ^ "  Input map unavailable: " ^ detail
-                 ^ Ansi.reset ]
+             ( context_error_lines ~cols ~label:"Input map unavailable" detail
              , None ))
   | Some (_, Masc_tui_context_inspector.Exact_read reading) ->
       let module Inspector = Masc_tui_context_inspector in
@@ -5638,7 +5667,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                        (fun components -> { Inspector.record; components; turns_behind_latest = 0 })
                        record.input_components
                    ; recent = []
-                   ; rows = [ record ] } in
+                   ; rows = [ record ]
+                   ; skipped_rows = None } in
                  Plain (context_composition_lines ~cols ~turn_back:0 selection, None))
         | Inspector.Exact_input ->
             (match reading.provider_input with

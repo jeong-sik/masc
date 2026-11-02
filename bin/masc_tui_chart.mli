@@ -9,10 +9,17 @@
 
 (** {1 Sparklines} *)
 
+val sparkline_levels : ?min:int -> ?max:int -> int list -> int list
+(** The zero-based height for each input on the sparkline's shared scale.
+    Bounds and scaled differences do not overflow for OCaml integers. *)
+
 val sparkline : ?min:int -> ?max:int -> int list -> string
 (** [sparkline ?min ?max values] renders a single-row sparkline string.
     Each value maps to one of the 8 height levels.
     Returns [""] for empty list. *)
+
+val sparkline_marks : ?min:int -> ?max:int -> int list -> string list
+(** The same scale as [sparkline], with one mark per value. *)
 
 (** {1 Gauges and Utilization Bars} *)
 

@@ -8566,6 +8566,11 @@ let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
   (match state.context_inspector_target with
    | Masc_tui_context_inspector.Recent _ -> ()
    | Masc_tui_context_inspector.Pinned _ ->
+       (match state.context_inspector_reading with
+        | Some (_, reading) when Masc_tui_context_inspector.page_read_failed reading ->
+            state.context_inspector_scroll <- 0;
+            state.context_inspector_response_scroll <- 0
+        | Some _ | None -> ());
        state.context_inspector_reading <- None;
        state.context_inspector_read_at <- None);
   let generation = state.context_inspector_generation in
@@ -24211,8 +24216,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         && Option.exists (String.equal keeper_name)
              state.context_inspector_keeper
       then begin
+        let previous = Option.map snd state.context_inspector_reading in
         let reading = Masc_tui_context_inspector.merge_progress
-            ~previous:(Option.map snd state.context_inspector_reading) reading in
+            ~previous reading in
+        if Masc_tui_context_inspector.page_scroll_should_reset ~previous reading
+        then begin
+          state.context_inspector_scroll <- 0;
+          state.context_inspector_response_scroll <- 0
+        end;
         state.context_inspector_loading <- Masc_tui_context_inspector.is_loading reading;
         state.context_inspector_reading <- Some (keeper_name, reading);
         state.context_inspector_read_at <- Some (Unix.gettimeofday ());
@@ -30527,6 +30538,9 @@ Use relative paths for resources already held in the package. -->
                       Masc_tui_context_inspector.input_map_rows record
                         (Masc_tui_context_inspector.observed_input reading))
            in
+           let page_failed = match state.context_inspector_reading with
+             | Some (_, reading) -> Masc_tui_context_inspector.page_read_failed reading
+             | None -> false in
            let close () = close_context_inspector state in
            (match k with
             | "esc" when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
@@ -30653,7 +30667,8 @@ Use relative paths for resources already held in the package. -->
             | ("j" | "down" | "k" | "up")
               when Option.is_some state.context_inspector_exact
                    || state.context_inspector_tab
-                      = Masc_tui_context_inspector.Composition ->
+                      = Masc_tui_context_inspector.Composition
+                   || page_failed ->
                 let count, height =
                   Masc_tui_render.context_inspector_viewport state
                 in

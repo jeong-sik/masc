@@ -103,6 +103,97 @@ let test_recent_turns_carry_the_provider_counts () =
             (unavailable_row.Inspector.input_tokens = None)
       | _ -> fail "the page held four rows")
 
+let test_recent_input_trend_keeps_unavailable_and_zero () =
+  let with_input input_tokens (record : Turn_record.t) =
+    { record with usage = { record.usage with input_tokens } }
+  in
+  let oldest = record ~trace:"trend" ~turn:1 () |> with_input (Some 100) in
+  let cumulative =
+    record ~trace:"trend" ~turn:2
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative ()
+    |> with_input (Some 999)
+  in
+  let zero = record ~trace:"trend" ~turn:3 () |> with_input (Some 0) in
+  let absent = record ~trace:"trend" ~turn:4 () |> with_input None in
+  let invalid = record ~trace:"trend" ~turn:5 () |> with_input (Some (-1)) in
+  let newest = record ~trace:"trend" ~turn:6 () |> with_input (Some 200) in
+  let trend records =
+    match Inspector.decode_turn_records (envelope records) with
+    | Error detail -> fail detail
+    | Ok selection -> Inspector.recent_input_trend selection.recent in
+  let observed = trend [oldest; cumulative; zero; absent; invalid; newest] in
+  check bool "one typed observation per turn, oldest first" true
+    (observed.samples =
+       [ Inspector.Input_count 100; Inspector.Input_unavailable; Inspector.Input_count 0
+       ; Inspector.Input_unavailable; Inspector.Input_invalid (-1); Inspector.Input_count 200 ]);
+  check int "only nonnegative counts set the scale" 3 observed.valid_count;
+  check (option (pair int int)) "zero is included in the bounds"
+    (Some (0, 200)) observed.bounds;
+  let no_valid = trend [absent; invalid] in
+  check bool "missing and invalid turns remain distinct" true
+    (no_valid.samples = [Inspector.Input_unavailable; Inspector.Input_invalid (-1)]);
+  check int "no valid counts" 0 no_valid.valid_count;
+  check (option (pair int int)) "no valid counts have no scale" None no_valid.bounds;
+  let only_zero = trend [zero] in
+  check int "one zero is valid" 1 only_zero.valid_count;
+  check (option (pair int int)) "one zero has a zero scale"
+    (Some (0, 0)) only_zero.bounds
+
+let test_recent_page_skipped_count_is_not_invented () =
+  let row = record ~trace:"skipped" ~turn:1 () in
+  let count fields =
+    match envelope [row] with
+    | `Assoc entries ->
+        (match Inspector.decode_turn_records (`Assoc (fields @ entries)) with
+         | Error detail -> fail detail
+         | Ok selection -> selection.skipped_rows)
+    | _ -> fail "envelope is an object" in
+  check (option int) "reported skips survive" (Some 2)
+    (count ["skipped_rows", `Int 2]);
+  check (option int) "reported zero remains known" (Some 0)
+    (count ["skipped_rows", `Int 0]);
+  check (option int) "missing count stays unknown" None (count []);
+  check (option int) "negative count stays unknown" None
+    (count ["skipped_rows", `Int (-1)]);
+  check (option int) "malformed count stays unknown" None
+    (count ["skipped_rows", `String "2"])
+
+let test_page_failure_is_distinct_from_partial_failures () =
+  let offline = Inspector.Request_failed "offline" in
+  let unreadable = Inspector.Turn_read_failed
+      { detail = "unreadable"; forecast = Error "unavailable" } in
+  check bool "request failure has no page" true
+    (Inspector.page_read_failed offline);
+  check bool "first failure starts at the beginning" true
+    (Inspector.page_scroll_should_reset ~previous:None offline);
+  check bool "the same failure keeps its reading position" false
+    (Inspector.page_scroll_should_reset ~previous:(Some offline) offline);
+  check bool "a changed failure starts at the beginning" true
+    (Inspector.page_scroll_should_reset ~previous:(Some offline)
+       (Inspector.Request_failed "timeout"));
+  check bool "turn failure has no page" true
+    (Inspector.page_read_failed unreadable);
+  check bool "same turn failure keeps its reading position" false
+    (Inspector.page_scroll_should_reset ~previous:(Some unreadable) unreadable);
+  check bool "a different turn failure starts at the beginning" true
+    (Inspector.page_scroll_should_reset ~previous:(Some unreadable)
+       (Inspector.Turn_read_failed { detail = "damaged"; forecast = Error "unavailable" }));
+  check bool "a different failure kind starts at the beginning" true
+    (Inspector.page_scroll_should_reset ~previous:(Some offline) unreadable);
+  let selection =
+    match Inspector.decode_turn_records (envelope [record ~trace:"page" ~turn:1 ()]) with
+    | Ok selection -> selection
+    | Error detail -> fail detail in
+  let partial = Inspector.Turn_read
+      { selection; provider_input = Error "unavailable"
+      ; response = Error "unavailable"; forecast = Error "unavailable" } in
+  check bool "partial errors still have a page" false
+    (Inspector.page_read_failed partial);
+  check bool "a recovered page starts at the beginning" true
+    (Inspector.page_scroll_should_reset ~previous:(Some offline) partial);
+  check bool "a successful refresh keeps its reading position" false
+    (Inspector.page_scroll_should_reset ~previous:(Some partial) partial)
+
 let test_newest_exact_composition_wins () =
   let observed =
     record ~trace:"trace-a" ~turn:1
@@ -734,6 +825,12 @@ let () =
             test_page_without_attribution_still_reads
         ; test_case "recent turns carry the provider counts" `Quick
             test_recent_turns_carry_the_provider_counts
+        ; test_case "recent input history keeps gaps and zero" `Quick
+            test_recent_input_trend_keeps_unavailable_and_zero
+        ; test_case "recent page keeps skipped-count availability" `Quick
+            test_recent_page_skipped_count_is_not_invented
+        ; test_case "page failure is distinct from partial failures" `Quick
+            test_page_failure_is_distinct_from_partial_failures
         ; test_case "fetch, drawing and keys read one row" `Quick
             test_viewing_record_names_one_row
         ; test_case "an empty page is an error" `Quick

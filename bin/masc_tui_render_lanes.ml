@@ -1681,7 +1681,9 @@ let measurement_output_preview ~width ~output_path parts =
       if bytes <= remaining then take (remaining - bytes) (part :: reversed) rest
       else
         let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) value in
-        List.rev (with_text part prefix :: reversed), true
+        (* The final part needs no following separator. *)
+        List.rev (with_text part prefix :: reversed),
+        String.length prefix < String.length value || not (List.is_empty rest)
   in
   let preview, truncated = take lane_run_preview_source_max_bytes [] parts in
   let notice =

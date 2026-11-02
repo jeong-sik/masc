@@ -267,10 +267,29 @@ let test_each_provider_names_the_callback_it_accepts () =
               ("asana with the server bound on " ^ host) expected
               (Oauth.redirect_uri_for asana)))
         [ "0.0.0.0", Ok loopback
+        ; "::", Ok loopback
         ; "127.0.0.1", Ok loopback
         ; "::1", Ok "http://[::1]:55137/api/v1/keepers/oauth/callback"
+        ; "127.0.0.2", Error ""
         ; "192.168.0.5", Error ""
-        ]))
+        ];
+      (* The providers listing names the same callback per row. *)
+      with_env "MASC_HOST" "127.0.0.1" (fun () ->
+        let row id =
+          match Oauth.declarations_json ~base_path:(base_path ()) with
+          | `List rows ->
+            List.find_map
+              (function
+                | `Assoc pairs when List.assoc_opt "id" pairs = Some (`String id) -> Some pairs
+                | _ -> None)
+              rows
+          | _ -> Alcotest.fail "the listing is not a list"
+        in
+        check Alcotest.bool "asana's row names its loopback callback" true
+          (Option.bind (row "asana") (List.assoc_opt "callback")
+           = Some (`Assoc [ "kind", `String "loopback"; "url", `String loopback ]));
+        check Alcotest.bool "slack's row names none of its own" true
+          (Option.bind (row "slack") (List.assoc_opt "callback") = None))))
 
 let () =
   Alcotest.run "server_keeper_oauth_client"

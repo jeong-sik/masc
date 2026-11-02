@@ -12,6 +12,13 @@ type identity_callback =
   | Callback_url of string
   | Callback_unknown of string (** why the server does not know it *)
 
+(** A callback a row names for itself. *)
+type identity_row_callback =
+  | Loopback_row of identity_callback
+      (** The service accepts only an RFC 8252 loopback redirect. *)
+  | Row_callback_unreadable
+      (** The row carried a callback in a shape this screen does not read. *)
+
 type identity_provider =
   | Identity_declared of
       { idp_id : string
@@ -36,9 +43,9 @@ type identity_provider =
       ; idp_app : identity_app option
         (** Whether an app the operator made is on file for this service.
             [None] when the server did not say. *)
-      ; idp_callback : identity_callback option
-        (** The service's own callback when it is not the server's: a
-            service that accepts only an RFC 8252 loopback redirect. *)
+      ; idp_callback : identity_row_callback option
+        (** The service's own callback when it is not the server's. [None]
+            when the row carries none. *)
       }
   | Identity_unreadable of
       { idp_id : string
@@ -114,9 +121,18 @@ val identity_filter_rows
   -> string option
   -> string list
 
-val identity_callback_rows : identity_callback option -> string list
-(** The callback line under the summary, or nothing when the server did not
-    say. Shared by the renderer and the key handler so both count it. *)
+val identity_server_callback_rows : identity_callback option -> string list
+(** The server's callback line under the summary, or nothing when the server
+    did not say. *)
+
+val identity_loopback_callback_rows : identity_provider list -> string list
+(** The loopback callback line, when any service names one, so the URL a
+    loopback-only service sends the browser to is on screen. *)
+
+val identity_callback_rows :
+  providers:identity_provider list -> identity_callback option -> string list
+(** Both of the above, in order. Shared by the renderer and the key handler so
+    both count the same lines. *)
 
 val identity_started_rows :
   cols:int -> keeper_name:string -> identity_login_started list -> string list

@@ -12,6 +12,13 @@ type identity_callback =
   | Callback_url of string
   | Callback_unknown of string (** why the server does not know it *)
 
+(** A callback a row names for itself. *)
+type identity_row_callback =
+  | Loopback_row of identity_callback
+      (** The service accepts only an RFC 8252 loopback redirect. *)
+  | Row_callback_unreadable
+      (** The row carried a callback in a shape this screen does not read. *)
+
 (** One line of the Identity tab. A declaration nobody can read is carried
     rather than dropped: an operator who came looking for a provider needs to
     see why it is not on offer, not a shorter list. *)
@@ -39,9 +46,9 @@ type identity_provider =
       ; idp_app : identity_app option
         (** Whether an app the operator made is on file for this service.
             [None] when the server did not say. *)
-      ; idp_callback : identity_callback option
-        (** The service's own callback when it is not the server's: a
-            service that accepts only an RFC 8252 loopback redirect. *)
+      ; idp_callback : identity_row_callback option
+        (** The service's own callback when it is not the server's. [None]
+            when the row carries none. *)
       }
   | Identity_unreadable of
       { idp_id : string
@@ -253,12 +260,40 @@ let identity_preamble ~summary ~callback ~notice = (summary :: callback) @ ("" :
 (** The callback line under the summary. The value comes from the server,
     which follows [MASC_HTTP_BASE_URL] or the address it bound, so this is
     the line that says where providers will send the browser back to. *)
-let identity_callback_rows = function
+let identity_server_callback_rows = function
   | None -> []
   | Some (Callback_url url) ->
     [ "  callback  " ^ Masc_tui_ansi.Terminal_text.single_line url ]
   | Some (Callback_unknown why) ->
     [ "  callback  unknown: " ^ Masc_tui_ansi.Terminal_text.single_line why ]
+;;
+
+(* Every loopback service names the same URL -- this server on 127.0.0.1 --
+   so one line says it, with the condition it carries. *)
+let identity_loopback_callback_rows providers =
+  let named =
+    List.filter_map
+      (function
+        | Identity_declared { idp_callback; _ } ->
+          (match idp_callback with
+           | Some (Loopback_row callback) -> Some callback
+           | Some Row_callback_unreadable | None -> None)
+        | Identity_unreadable _ -> None)
+      providers
+    |> List.sort_uniq compare
+  in
+  List.map
+    (function
+      | Callback_url url ->
+        "  loopback  " ^ Masc_tui_ansi.Terminal_text.single_line url
+        ^ "  (browser on this machine)"
+      | Callback_unknown why ->
+        "  loopback  unavailable: " ^ Masc_tui_ansi.Terminal_text.single_line why)
+    named
+;;
+
+let identity_callback_rows ~providers callback =
+  identity_server_callback_rows callback @ identity_loopback_callback_rows providers
 ;;
 
 (** Which pane line the provider at [index] is drawn on.
@@ -551,6 +586,22 @@ let decode_identity_providers (json : Yojson.Safe.t)
       | Some (`Assoc [ ("problem", `String why) ]) -> Some (Callback_unknown why)
       | Some _ | None -> None
     in
+    (* A row's own callback carries its kind. A present one this screen cannot
+       read is said to be unreadable, not taken for the server's. *)
+    let row_callback_of = function
+      | None -> None
+      | Some (`Assoc fields) ->
+        (match List.assoc_opt "kind" fields with
+         | Some (`String "loopback") ->
+           (match
+              callback_of
+                (Some (`Assoc (List.filter (fun (key, _) -> key <> "kind") fields)))
+            with
+            | Some callback -> Some (Loopback_row callback)
+            | None -> Some Row_callback_unreadable)
+         | Some _ | None -> Some Row_callback_unreadable)
+      | Some _ -> Some Row_callback_unreadable
+    in
     let callback =
       match json with
       | `Assoc fields -> callback_of (List.assoc_opt "callback" fields)
@@ -618,7 +669,7 @@ let decode_identity_providers (json : Yojson.Safe.t)
                     | Some _ | None -> None)
                   | Some _ | None -> None
                 in
-                let idp_callback = callback_of (field "callback") in
+                let idp_callback = row_callback_of (field "callback") in
                 Some
                   (Identity_declared
                      { idp_id; idp_label; idp_tools; idp_also_on

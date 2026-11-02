@@ -1056,12 +1056,26 @@ let test_the_callback_and_app_state_are_read_strictly () =
     | Ok _ -> Alcotest.fail "the row did not decode as one declared provider"
     | Error detail -> Alcotest.failf "decode failed: %s" detail
   in
-  check Alcotest.bool "a row's own callback is read" true
-    (own_callback (`Assoc [ "url", `String "http://127.0.0.1:8935/cb" ])
-     = Some (Masc_tui_identity_model.Callback_url "http://127.0.0.1:8935/cb"));
-  check Alcotest.bool "a row's own callback problem is read" true
-    (own_callback (`Assoc [ "problem", `String "not on loopback" ])
-     = Some (Masc_tui_identity_model.Callback_unknown "not on loopback"))
+  let loopback fields = `Assoc (("kind", `String "loopback") :: fields) in
+  check Alcotest.bool "a loopback row's callback is read" true
+    (own_callback (loopback [ "url", `String "http://127.0.0.1:8935/cb" ])
+     = Some
+         (Masc_tui_identity_model.Loopback_row
+            (Masc_tui_identity_model.Callback_url "http://127.0.0.1:8935/cb")));
+  check Alcotest.bool "a loopback row's problem is read" true
+    (own_callback (loopback [ "problem", `String "not on loopback" ])
+     = Some
+         (Masc_tui_identity_model.Loopback_row
+            (Masc_tui_identity_model.Callback_unknown "not on loopback")));
+  List.iter
+    (fun (why, value) ->
+      check Alcotest.bool (why ^ " is unreadable, not the server's callback") true
+        (own_callback value = Some Masc_tui_identity_model.Row_callback_unreadable))
+    [ "a callback with no kind", `Assoc [ "url", `String "http://127.0.0.1:8935/cb" ]
+    ; "an unknown kind", `Assoc [ "kind", `String "public"; "url", `String "https://x" ]
+    ; "a loopback url that is not a string", loopback [ "url", `Int 1 ]
+    ; "a callback that is not an object", `String "http://127.0.0.1:8935/cb"
+    ]
 
 let test_a_read_keeps_the_servers_callback () =
   let state = identity_state () in

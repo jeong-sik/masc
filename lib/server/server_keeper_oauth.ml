@@ -47,27 +47,37 @@ let redirect_uri () =
 ;;
 
 (* RFC 8252 7.3: a provider that accepts only native-app redirects takes
-   http://127.0.0.1:<port>/... and refuses a public host. The browser that
-   consents has to reach this server there, which holds when it bound a
-   loopback address or every interface. Bound anywhere else, 127.0.0.1 is
-   not this server, and saying so beats a callback that lands nowhere. *)
+   http://127.0.0.1:<port>/... or http://[::1]:<port>/... and refuses a
+   public host. Those two literals are the whole of what 7.3 names, so a
+   server has to have bound one of them, or every interface, for the browser
+   that consents to land on it. Bound anywhere else -- 127.0.0.2 included,
+   which a provider reads as plain http -- saying so beats a callback that
+   lands nowhere.
+
+   A wildcard bind is read as reachable on 127.0.0.1. That holds when the
+   operator's browser runs on this machine, which is the case the Identity
+   tab and the manual tell the operator they need. *)
 let loopback_redirect_uri () =
   let host = Env_config_core.masc_host () in
   let port = Env_config_core.masc_http_port () in
   let literal =
-    if Masc_network_defaults.is_unspecified_host host
-    then Some Masc_network_defaults.masc_http_loopback_peer
-    else if Masc_network_defaults.is_loopback_host host
-    then Some (if String.contains host ':' then "[" ^ host ^ "]" else host)
-    else None
+    match Ipaddr.of_string host with
+    | Ok (Ipaddr.V4 address) when Ipaddr.V4.(compare address any) = 0
+                                  || Ipaddr.V4.(compare address localhost) = 0 ->
+      Some (Ipaddr.V4.to_string Ipaddr.V4.localhost)
+    | Ok (Ipaddr.V6 address) when Ipaddr.V6.(compare address unspecified) = 0 ->
+      Some (Ipaddr.V4.to_string Ipaddr.V4.localhost)
+    | Ok (Ipaddr.V6 address) when Ipaddr.V6.(compare address localhost) = 0 ->
+      Some ("[" ^ Ipaddr.V6.to_string Ipaddr.V6.localhost ^ "]")
+    | Ok (Ipaddr.V4 _ | Ipaddr.V6 _) | Error _ -> None
   in
   match literal with
   | Some literal -> Ok (Printf.sprintf "http://%s:%s%s" literal port callback_path)
   | None ->
     Error
       (Printf.sprintf
-         "this provider accepts only a loopback callback (RFC 8252), and this \
-          server listens on %s, which a browser cannot reach as 127.0.0.1"
+         "this provider accepts only an RFC 8252 loopback callback \
+          (127.0.0.1 or [::1]), and this server listens on %s"
          host)
 ;;
 
@@ -89,12 +99,19 @@ let callback_json () = callback_result_json (redirect_uri ())
 ;;
 
 (* A row names its own callback only when it is not the server's: the
-   loopback providers. *)
+   loopback providers. The kind is on the wire so a reader decodes it into
+   its own variant instead of inferring it from the key being there. *)
 let row_callback_fields (provider : Provider.t) =
   match provider.Provider.callback with
   | Provider.Server_callback -> []
   | Provider.Loopback_callback ->
-    [ "callback", callback_result_json (loopback_redirect_uri ()) ]
+    [ ( "callback"
+      , `Assoc
+          (("kind", `String "loopback")
+           :: (match loopback_redirect_uri () with
+               | Ok url -> [ "url", `String url ]
+               | Error problem -> [ "problem", `String problem ])) )
+    ]
 ;;
 
 let provider_of_id provider_id =
@@ -135,10 +152,11 @@ let declarations_json ~base_path =
        (function
          | Declarations.Declared provider ->
            `Assoc
-             [ "id", `String provider.Provider.id
-             ; "label", `String provider.Provider.label
-             ; "app_state", app_state ~base_path ~provider |> app_state_to_json
-             ]
+             ([ "id", `String provider.Provider.id
+              ; "label", `String provider.Provider.label
+              ; "app_state", app_state ~base_path ~provider |> app_state_to_json
+              ]
+              @ row_callback_fields provider)
          | Declarations.Unreadable { id; problem } ->
            `Assoc [ "id", `String id; "problem", `String problem ])
        (Declarations.all ()))
@@ -183,10 +201,19 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
         ])
 ;;
 
-let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
+let start ?transports ?register ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now () =
   let base_path = config.Workspace.base_path in
   let* provider = provider_of_id provider_id in
-  let transports = Keeper_identity_tools.http_transports ~clock in
+  let transports =
+    match transports with
+    | Some transports -> transports
+    | None -> Keeper_identity_tools.http_transports ~clock
+  in
+  let register =
+    match register with
+    | Some register -> register
+    | None -> register_with ~clock
+  in
   match provider.Provider.credential_source with
   | Provider.Github_cli { hostname } ->
     let attachment =
@@ -229,7 +256,7 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
     let* started =
       Result.map_error Session.start_error_to_string
         (Session.start ~discover:transports.Keeper_identity_tools.discover
-           ~register:(register_with ~clock) ~provider ~app ~client_name
+           ~register ~provider ~app ~client_name
            ~redirect_uri ~keeper ~pending:(pending_for_base_path base_path) ~now ~ttl_sec:login_window_sec ())
     in
     Ok

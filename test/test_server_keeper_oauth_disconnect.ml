@@ -611,6 +611,64 @@ let test_logins_survive_a_moved_callback_and_each_keeper_renews () =
   check (list string) "the provider refused nothing" [] fake.Fake_provider.refused
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv name previous
+      | None -> Unix.unsetenv name)
+    f
+
+(* The login route's own call: a loopback provider registers and authorizes
+   with 127.0.0.1 on the bound port, and a provider without one with the base
+   URL. Putting the base URL back at that call site fails here. *)
+let test_a_login_names_the_callback_its_provider_accepts () =
+  with_disconnect_router
+  @@ fun ~base_path:_ ~clock ~router:_ ~token:_ ->
+  with_env "MASC_HTTP_BASE_URL" "https://masc.example.org" @@ fun () ->
+  with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
+  with_env "MASC_HTTP_PORT" "55137" @@ fun () ->
+  let registered_for = ref [] in
+  let register ~registration_url:_ ~client_name:_ ~redirect_uri =
+    registered_for := redirect_uri :: !registered_for;
+    Ok
+      { Keeper_oauth_registration.client_id = "client-for-test"
+      ; client_secret = None
+      ; secret_expires_at = None
+      ; issued_at = 0.
+      }
+  in
+  let transports =
+    { Masc.Keeper_identity_tools.mcp_post = (fun ~url:_ ~headers:_ ~body:_ ->
+          Alcotest.fail "a login start reached the MCP server")
+    ; token_post = (fun ~url:_ ~headers:_ ~body:_ -> Alcotest.fail "a login start redeemed a token")
+    ; discover = Fake_provider.discover
+    }
+  in
+  let authorize_redirect provider_id =
+    match
+      Server_keeper_oauth.start ~transports ~register ~clock ~config:(workspace_config ())
+        ~keeper ~provider_id ~now:0. ()
+    with
+    | Error message -> Alcotest.failf "%s start failed: %s" provider_id message
+    | Ok answer ->
+      (match member answer "authorize_url" with
+       | Some (`String url) ->
+         (match List.assoc_opt "redirect_uri" (Uri.query (Uri.of_string url)) with
+          | Some [ value ] -> value
+          | Some _ | None -> Alcotest.failf "%s authorize URL has no redirect_uri" provider_id)
+       | _ -> Alcotest.failf "%s answered no authorize_url" provider_id)
+  in
+  let loopback = "http://127.0.0.1:55137/api/v1/keepers/oauth/callback" in
+  let public = "https://masc.example.org/api/v1/keepers/oauth/callback" in
+  check string "asana authorizes with the loopback callback" loopback (authorize_redirect "asana");
+  check string "linear authorizes with the base URL callback" public (authorize_redirect "linear");
+  check (list string) "and each registered for the callback it authorizes with"
+    [ loopback; public ] (List.rev !registered_for)
+;;
+
 let () =
   Alcotest.run "server_keeper_oauth_disconnect"
     [ ( "detaching a Keeper from a provider",
@@ -627,5 +685,7 @@ let () =
             `Quick test_disconnect_sends_no_revoke_without_the_logins_client;
           Alcotest.test_case "logins survive a moved callback and each keeper renews"
             `Quick test_logins_survive_a_moved_callback_and_each_keeper_renews;
+          Alcotest.test_case "a login names the callback its provider accepts" `Quick
+            test_a_login_names_the_callback_its_provider_accepts;
         ] );
     ]

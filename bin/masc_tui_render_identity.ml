@@ -123,10 +123,16 @@ let lines ~cols (view : view) =
             back to 127.0.0.1, so the browser has to run on this machine. *)
          let own_callback =
            match callback_of id with
-           | Some (Masc_tui_identity_model.Callback_url _) ->
+           | Some
+               (Masc_tui_identity_model.Loopback_row
+                  (Masc_tui_identity_model.Callback_url _)) ->
              Ansi.dim ^ "  · loopback callback" ^ Ansi.reset
-           | Some (Masc_tui_identity_model.Callback_unknown _) ->
+           | Some
+               (Masc_tui_identity_model.Loopback_row
+                  (Masc_tui_identity_model.Callback_unknown _)) ->
              Theme.bad () ^ "  · loopback callback unavailable" ^ Ansi.reset
+           | Some Masc_tui_identity_model.Row_callback_unreadable ->
+             Theme.bad () ^ "  · callback unreadable" ^ Ansi.reset
            | None -> ""
          in
          Printf.sprintf "%s %2d  %s %s%s%s%s" marker (index + 1) shown row_state app
@@ -164,13 +170,19 @@ let lines ~cols (view : view) =
   (* The callback the server will name, coloured as a fact when it is known
      and as a problem when it is not: a login cannot start without it. *)
   let callback =
-    let rows = Masc_tui_identity_model.identity_callback_rows view.callback in
-    match view.callback with
-    | Some (Masc_tui_identity_model.Callback_url _) ->
-      List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset) rows
-    | Some (Masc_tui_identity_model.Callback_unknown _) ->
-      List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) rows
-    | None -> rows
+    let server = Masc_tui_identity_model.identity_server_callback_rows view.callback in
+    let server =
+      match view.callback with
+      | Some (Masc_tui_identity_model.Callback_url _) ->
+        List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset) server
+      | Some (Masc_tui_identity_model.Callback_unknown _) ->
+        List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) server
+      | None -> server
+    in
+    server
+    @ List.map
+        (fun line -> Ansi.dim ^ line ^ Ansi.reset)
+        (Masc_tui_identity_model.identity_loopback_callback_rows providers)
   in
   (* What one attempt answered. Wrapped, because the message that matters
      most here is the long one: a provider that registers no client says what

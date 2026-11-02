@@ -1,0 +1,33 @@
+{
+  "head": "ed7c00c5922f1014faf052787923012689bef432",
+  "files": {
+    "lib/keeper/keeper_antigravity_runtime.ml": "a3ecfdd52380bb9e0e1d4b49eee215215905b48e28d6923cbf035625e3e50b4b",
+    "lib/keeper/keeper_antigravity_runtime.mli": "bc49c4ae064e85a9db544bbf948dad8f92f78f6b1d173ab15e2da6a7b8c5f08f",
+    "lib/keeper/keeper_turn_driver.ml": "e79b867d4b55023649ee96f321398759558ec58b082f5051e1febea4b22c169f",
+    "lib/keeper/keeper_turn_driver.mli": "28ebc72ef13869cc4f7db050c72bbb04c0be10ad3a82c30d9396deb6ddc1c7e5",
+    "lib/keeper/keeper_official_client_host.ml": "6e3aa4b3e451adfefcbdac525aa597498ebf7e68d28386718a5904ba06436112",
+    "lib/keeper/keeper_official_client_host.mli": "2449a0d64a489e3079512bd6d4e4f5b06f465da0938ae2ad5ba52dad65925fba",
+    "lib/runtime/runtime_inference.ml": "f27f2b85767e1db02b491d15c67a2651f555293eb119f87d81d6c17003dfb5b6",
+    "lib/runtime/runtime_inference.mli": "80c4cc3dca3a28f1f8bfa26209d9b2b6d753f26a4926b1e6b47f9f8cf4a36e75",
+    "lib/runtime/runtime.ml": "70049493b49713135752873031bc8e6eac0fa30194c065677ec3724d0a743e89",
+    "lib/runtime/runtime.mli": "8e285a8f684aea4d39e6887129cf749cef662be32bff69312a6f051ceac30a02",
+    "lib/runtime/runtime_antigravity.ml": "158cee3739d1be5c0b7734c0eee89fee45dd12a322d728f93dba40b30e35e3e2",
+    "lib/runtime/runtime_antigravity.mli": "d6816b33feb9bdeba46943615b58193cd5fae318d85275b72b9026e4fde52d89",
+    "test/test_keeper_antigravity_selected_inference.ml": "c47cf1adf64e7b84667fa89040a14d2bfafb19c087f930a804bcc15e84bbc3d1",
+    "test/stanzas/test_keeper_antigravity_selected_inference.inc": "c523a761ba23bfacb7bfa37f2c586675ce1c06e78b9a069193cd9da5db7058ec",
+    "test/dune": "6282da0242d4808a0f9e4a62556879be99874b494ad24ee68f85c130f64250f4",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    "test/deps/dune": "67a195fc8b4d7c7858634e5cd05c2999d0bf2565c88220ab82dc2c692c503dd9",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "test/test_keeper_antigravity_runtime.ml": "1317d1befb07b89ca4e02dc9d89eac2a46e4acb41869082996ae13b17062a1af",
+    "test/test_official_client_claim_cause.ml": "a01ac668fc23feebdd62d18e2ac34a8b356133e7b2354926c7c650a7cf701176",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b"
+  },
+  "trees": {
+    "lib": "1a2358688faa86925c4cc95c574dc60afbd6409d",
+    "test": "ff85b4bbf6cceaecb839db5dbaadac250787b38c",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b",
+    "packages/agent_core": "c4b3002ea517ec584858ee05971ca84f0da15819"
+  }
+}

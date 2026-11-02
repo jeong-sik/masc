@@ -42,9 +42,13 @@ type json_cache_entry = {
   expires_at : float;
 }
 
+type json_cache_slot =
+  | Cache_computing of unit ref
+  | Cache_value of json_cache_entry
+
 type json_cache = {
   generation : int;
-  entries : json_cache_entry Cache_map.t;
+  entries : json_cache_slot Cache_map.t;
 }
 (* Only explicit invalidation changes this identity. Publishing another
    reader's key must not make a completed roster read start over, and
@@ -87,59 +91,74 @@ let keeper_list_cache_ttl_s () =
 let invalidate_json_cache cache_ref =
   Atomic.set cache_ref (empty_json_cache ())
 let invalidate_keeper_list_cache () = invalidate_json_cache keeper_list_cache
-let rec publish_json_cache_entry cache_ref ~expected ~generation ~key ~entry =
-  if not (Int.equal expected.generation generation) then false
+type json_cache_publication = Cache_published | Cache_superseded | Cache_invalidated
+
+let rec remove_pending_json_cache_entry cache_ref ~generation ~key ~ticket =
+  let cache = Atomic.get cache_ref in
+  if Int.equal cache.generation generation then
+    match Cache_map.find_opt key cache.entries with
+    | Some (Cache_computing pending) when pending == ticket ->
+        let next = { cache with entries = Cache_map.remove key cache.entries } in
+        if not (Atomic.compare_and_set cache_ref cache next) then
+          remove_pending_json_cache_entry cache_ref ~generation ~key ~ticket
+    | Some (Cache_computing _ | Cache_value _) | None -> ()
+
+let rec publish_json_cache_entry cache_ref ~generation ~key ~ticket ~entry =
+  let cache = Atomic.get cache_ref in
+  if not (Int.equal cache.generation generation) then Cache_invalidated
   else
-    let now = Time_compat.now () in
-    let live_entries =
-      Cache_map.filter
-        (fun _ cached -> Stdlib.Float.compare now cached.expires_at < 0)
-        expected.entries
-    in
-    let next =
-      { expected with entries = Cache_map.add key entry live_entries }
-    in
-    if Atomic.compare_and_set cache_ref expected next then true
-    else begin
-      Otel_metric_store.inc_counter
-        Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
-      let current = Atomic.get cache_ref in
-      if not (Int.equal current.generation generation) then false
-      else
-        let same_key_published =
-          match
-            Cache_map.find_opt key expected.entries,
-            Cache_map.find_opt key current.entries
-          with
-          | Some previous, Some published -> previous != published
-          | None, Some _ -> true
-          | (Some _ | None), None -> false
+    match Cache_map.find_opt key cache.entries with
+    | Some (Cache_computing pending) when pending == ticket ->
+        let now = Time_compat.now () in
+        let live_entries =
+          Cache_map.filter
+            (fun _ -> function
+              | Cache_computing _ -> true
+              | Cache_value cached -> Stdlib.Float.compare now cached.expires_at < 0)
+            cache.entries
         in
-        (* Entries are immutable: a changed identity means another reader won
-           this key. Return the completed reading without replacing that winner
-           or renewing its TTL, even if it has already expired. Other keys may
-           still be merged without repeating the completed computation. *)
-        if same_key_published then true
-        else
-          publish_json_cache_entry cache_ref ~expected:current ~generation ~key ~entry
-    end
+        let next =
+          { cache with entries = Cache_map.add key (Cache_value entry) live_entries }
+        in
+        if Atomic.compare_and_set cache_ref cache next then Cache_published
+        else begin
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
+          publish_json_cache_entry cache_ref ~generation ~key ~ticket ~entry
+        end
+    | Some (Cache_computing _ | Cache_value _) | None -> Cache_superseded
+
 let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
   let cache = Atomic.get cache_ref in
+  let compute_for_ticket ticket =
+    let generation = cache.generation in
+    let value, publication =
+      Fun.protect
+        ~finally:(fun () ->
+          remove_pending_json_cache_entry cache_ref ~generation ~key ~ticket)
+        (fun () ->
+          let value = compute () in
+          let entry = { value; expires_at = Time_compat.now () +. ttl_s } in
+          value, publish_json_cache_entry cache_ref ~generation ~key ~ticket ~entry)
+    in
+    match publication with
+    | Cache_published | Cache_superseded -> value
+    | Cache_invalidated -> cached_json_by_key cache_ref ~key ~ttl_s compute
+  in
   match Cache_map.find_opt key cache.entries with
-  | Some entry when Stdlib.Float.compare now entry.expires_at < 0 ->
+  | Some (Cache_value entry) when Stdlib.Float.compare now entry.expires_at < 0 ->
       entry.value
-  | _ ->
-      let value = compute () in
-      let entry = { value; expires_at = Time_compat.now () +. ttl_s } in
-      if
-        publish_json_cache_entry
-          cache_ref
-          ~expected:cache
-          ~generation:cache.generation
-          ~key
-          ~entry
-      then value
+  | Some (Cache_computing ticket) -> compute_for_ticket ticket
+  | Some (Cache_value _) | None ->
+      (* A miss group shares one publication ticket. Only its first result may
+         replace that slot. Pruning a completed value cannot recreate the
+         ticket, and unrelated publications retain slots still computing. *)
+      let ticket = ref () in
+      let next =
+        { cache with entries = Cache_map.add key (Cache_computing ticket) cache.entries }
+      in
+      if Atomic.compare_and_set cache_ref cache next then compute_for_ticket ticket
       else cached_json_by_key cache_ref ~key ~ttl_s compute
 
 module For_testing = struct

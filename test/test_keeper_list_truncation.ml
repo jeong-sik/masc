@@ -597,6 +597,41 @@ let test_same_list_query_does_not_renew_an_expired_winner () =
     check string "an older computation cannot extend the winning roster's TTL"
       "current roster" (Yojson.Safe.Util.to_string current))
 
+let test_same_list_query_does_not_restore_a_pruned_winner () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    ignore (read ~key:"roster" ~ttl_s:3600. (fun () ->
+      ignore (read ~key:"roster" ~ttl_s:0. (fun () -> `String "expired winner"));
+      ignore (read ~key:"other" ~ttl_s:3600. (fun () -> `String "other query"));
+      `String "older roster"));
+    let current = read ~key:"roster" ~ttl_s:3600. (fun () -> `String "current roster") in
+    check string "pruning a winner cannot authorize its older competitor"
+      "current roster" (Yojson.Safe.Util.to_string current))
+
+let test_failed_list_query_removes_its_pending_slot () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    let failed = ref false in
+    (try ignore (read ~key:"roster" ~ttl_s:3600. (fun () -> failwith "fixture failure"))
+     with Failure _ -> failed := true);
+    check bool "the computation failure propagates" true !failed;
+    check int "failed computation leaves no pending query" 0
+      (Keeper_tool_surface.For_testing.keeper_list_cache_entry_count ());
+    let current = read ~key:"roster" ~ttl_s:3600. (fun () -> `String "current roster") in
+    check string "a later query can publish" "current roster"
+      (Yojson.Safe.Util.to_string current))
+
+let test_failed_list_query_preserves_a_completed_winner () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    (try ignore (read ~key:"roster" ~ttl_s:3600. (fun () ->
+       ignore (read ~key:"roster" ~ttl_s:3600. (fun () -> `String "winning roster"));
+       failwith "fixture failure")) with Failure _ -> ());
+    let current = read ~key:"roster" ~ttl_s:3600.
+        (fun () -> fail "failed competitor removed the winning roster") in
+    check string "completed winner survives failed competitor cleanup" "winning roster"
+      (Yojson.Safe.Util.to_string current))
+
 let test_expired_list_query_releases_payload_without_evicting_live_queries () =
   with_empty_roster_cache (fun () ->
     let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
@@ -811,6 +846,12 @@ let () =
             test_same_list_query_retains_the_winning_publication
         ; test_case "an older query cannot renew an expired winner" `Quick
             test_same_list_query_does_not_renew_an_expired_winner
+        ; test_case "a pruned winner cannot restore its older competitor" `Quick
+            test_same_list_query_does_not_restore_a_pruned_winner
+        ; test_case "failed computations release pending cache slots" `Quick
+            test_failed_list_query_removes_its_pending_slot
+        ; test_case "failed competitors preserve completed winners" `Quick
+            test_failed_list_query_preserves_a_completed_winner
         ; test_case "expired queries release payloads without evicting live queries" `Quick
             test_expired_list_query_releases_payload_without_evicting_live_queries
         ; test_case "explicit invalidation rejects obsolete work" `Quick

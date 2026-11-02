@@ -370,93 +370,169 @@ let identity_payload = function
     ) as payload ->
     payload
 
-let fusion_terminal_equal left right =
-  match left, right with
-  | Fusion_succeeded left, Fusion_succeeded right
-  | Fusion_failed left, Fusion_failed right -> String.equal left right
-  | Fusion_cancelled, Fusion_cancelled -> true
-  | Fusion_succeeded _, (Fusion_failed _ | Fusion_cancelled)
-  | Fusion_failed _, (Fusion_succeeded _ | Fusion_cancelled)
-  | Fusion_cancelled, (Fusion_succeeded _ | Fusion_failed _) -> false
+type payload_identity =
+  | Identity_board_post_created
+  | Identity_board_comment_added of string
+  | Identity_board_attention_comment_added of string * string
+  | Identity_board_post_updated of float
+  | Identity_board_attention_post_updated of string * float
+  | Identity_fusion_completed of string * fusion_terminal * string
+  | Identity_schedule_due
+  | Identity_canonical_payload of stimulus_payload
 
-let fusion_completion_identity_equal left right =
-  String.equal left.run_id right.run_id
-  && fusion_terminal_equal left.terminal right.terminal
-  && String.equal left.board_post_id right.board_post_id
-  (* The first durably committed row owns recipient authority. The channel is
-     recipient metadata, not result identity: a replay sources it from the
-     durable delivery obligation, but a first commit can legitimately carry
-     [Unrouted] (obligation unavailable at projection time) while a later
-     startup recovery replays the same result with the recovered channel.
-     Treating [channel] as event identity would turn that exact result replay
-     into a false conflict. [enqueue_external_decision] retains the existing
-     row, so excluding the channel here never overwrites the authoritative
-     recipient. *)
+type stimulus_identity =
+  { id_post_id : post_id
+  ; id_urgency : urgency
+  ; id_payload : payload_identity
+  }
 
-let stimulus_identity_equal a b =
-  String.equal a.post_id b.post_id
-  && a.urgency = b.urgency
-  &&
-  match a.payload, b.payload with
-  | Board_signal {kind=Post_created; _}, Board_signal {kind=Post_created; _} -> true
-  | Board_signal {kind=Comment_added left; _}, Board_signal {kind=Comment_added right; _} ->
-    String.equal left.comment_id right.comment_id
-  | Board_attention {candidate_id=left_id; signal={kind=Comment_added left; _}},
-    Board_attention {candidate_id=right_id; signal={kind=Comment_added right; _}} ->
-    String.equal left_id right_id && String.equal left.comment_id right.comment_id
-  | Board_signal {kind=Post_updated left; _}, Board_signal {kind=Post_updated right; _} ->
-    Float.equal left.content_updated_at right.content_updated_at
-  | Board_attention {candidate_id=left_id; signal={kind=Post_updated left; _}},
-    Board_attention {candidate_id=right_id; signal={kind=Post_updated right; _}} ->
-    String.equal left_id right_id && Float.equal left.content_updated_at right.content_updated_at
-  | Fusion_completed left, Fusion_completed right ->
-    fusion_completion_identity_equal left right
-  | Schedule_due _, Schedule_due _ ->
-    (* [post_id] is the scheduler occurrence identity.  Pre-occurrence-id
+let payload_identity_of_payload = function
+  | Board_signal { kind = Post_created; _ } -> Identity_board_post_created
+  | Board_signal { kind = Comment_added comment; _ } ->
+    Identity_board_comment_added comment.comment_id
+  | Board_attention
+      { candidate_id; signal = { kind = Comment_added comment; _ } } ->
+    Identity_board_attention_comment_added (candidate_id, comment.comment_id)
+  | Board_signal { kind = Post_updated update; _ } ->
+    Identity_board_post_updated update.content_updated_at
+  | Board_attention
+      { candidate_id; signal = { kind = Post_updated update; _ } } ->
+    Identity_board_attention_post_updated
+      (candidate_id, update.content_updated_at)
+  | Fusion_completed fusion ->
+    (* The first durably committed row owns recipient authority. The channel is
+       recipient metadata, not result identity: a replay sources it from the
+       durable delivery obligation, but a first commit can legitimately carry
+       [Unrouted] (obligation unavailable at projection time) while a later
+       startup recovery replays the same result with the recovered channel.
+       Treating [channel] as event identity would turn that exact result replay
+       into a false conflict. [enqueue_external_decision] retains the existing
+       row, so excluding the channel here never overwrites the authoritative
+       recipient. *)
+    Identity_fusion_completed
+      (fusion.run_id, fusion.terminal, fusion.board_post_id)
+  | Schedule_due _ ->
+    (* [post_id] is the scheduler occurrence identity. Pre-occurrence-id
        durable rows decode with an empty payload [occurrence_id], while a
-       replay after upgrade carries the same occurrence in both places.  The
+       replay after upgrade carries the same occurrence in both places. The
        first committed row owns the payload, so comparing the payload again
        would turn that representation upgrade into a second execution. *)
-    true
-  | ( ( Board_signal
-          { kind =
-              ( Post_created | Post_updated _ | Comment_added _
-              | Reaction_changed _ | Vote_cast _ )
-          ; _
-          }
-      | Board_attention
-          { signal =
-              { kind =
-                  ( Post_created | Post_updated _ | Comment_added _
-                  | Reaction_changed _ | Vote_cast _ )
-              ; _
-              }
-          ; _
-          }
-      | Bootstrap | Fusion_completed _
-      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ )
-    , ( Board_signal
-          { kind =
-              ( Post_created | Post_updated _ | Comment_added _
-              | Reaction_changed _ | Vote_cast _ )
-          ; _
-          }
-      | Board_attention
-          { signal =
-              { kind =
-                  ( Post_created | Post_updated _ | Comment_added _
-                  | Reaction_changed _ | Vote_cast _ )
-              ; _
-              }
-          ; _
-          }
-      | Bootstrap | Fusion_completed _
-      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ ) ) ->
-    identity_payload a.payload = identity_payload b.payload
+    Identity_schedule_due
+  | ( Board_signal { kind = Reaction_changed _ | Vote_cast _; _ }
+    | Board_attention
+        { signal =
+            { kind = Post_created | Reaction_changed _ | Vote_cast _; _ }
+        ; _
+        }
+    | Bootstrap
+    | Connector_attention _
+    | Hitl_resolved _
+    | Ask_answered _
+    | Completion_authority_rejected _
+    | Task_cancelled _
+    | Workspace_message _
+    | Delegate_completed _
+    | Composition_completed _
+    | Tool_result_ready _
+    | Owned_job_completed _
+    | Addon_operation_changed _
+    | Task_outcome _ ) as payload ->
+    Identity_canonical_payload (identity_payload payload)
+
+let payload_identity_rank = function
+  | Identity_board_post_created -> 0
+  | Identity_board_comment_added _ -> 1
+  | Identity_board_attention_comment_added _ -> 2
+  | Identity_board_post_updated _ -> 3
+  | Identity_board_attention_post_updated _ -> 4
+  | Identity_fusion_completed _ -> 5
+  | Identity_schedule_due -> 6
+  | Identity_canonical_payload _ -> 7
+
+let fusion_terminal_rank = function
+  | Fusion_succeeded _ -> 0
+  | Fusion_failed _ -> 1
+  | Fusion_cancelled -> 2
+
+let compare_fusion_terminal left right =
+  match left, right with
+  | Fusion_succeeded l, Fusion_succeeded r | Fusion_failed l, Fusion_failed r ->
+    String.compare l r
+  | Fusion_cancelled, Fusion_cancelled -> 0
+  | ( (Fusion_succeeded _ | Fusion_failed _ | Fusion_cancelled)
+    , (Fusion_succeeded _ | Fusion_failed _ | Fusion_cancelled) ) ->
+    Int.compare (fusion_terminal_rank left) (fusion_terminal_rank right)
+
+let compare_payload_identity left right =
+  match left, right with
+  | Identity_board_post_created, Identity_board_post_created
+  | Identity_schedule_due, Identity_schedule_due ->
+    0
+  | Identity_board_comment_added l_cid, Identity_board_comment_added r_cid ->
+    String.compare l_cid r_cid
+  | ( Identity_board_attention_comment_added (l_cand, l_cid)
+    , Identity_board_attention_comment_added (r_cand, r_cid) ) ->
+    let cmp = String.compare l_cand r_cand in
+    if cmp <> 0 then cmp else String.compare l_cid r_cid
+  | Identity_board_post_updated l_ts, Identity_board_post_updated r_ts ->
+    Float.compare l_ts r_ts
+  | ( Identity_board_attention_post_updated (l_cand, l_ts)
+    , Identity_board_attention_post_updated (r_cand, r_ts) ) ->
+    let cmp = String.compare l_cand r_cand in
+    if cmp <> 0 then cmp else Float.compare l_ts r_ts
+  | ( Identity_fusion_completed (l_run, l_term, l_post)
+    , Identity_fusion_completed (r_run, r_term, r_post) ) ->
+    let cmp = String.compare l_run r_run in
+    if cmp <> 0
+    then cmp
+    else (
+      let cmp = compare_fusion_terminal l_term r_term in
+      if cmp <> 0 then cmp else String.compare l_post r_post)
+  | Identity_canonical_payload l_payload, Identity_canonical_payload r_payload ->
+    Stdlib.compare l_payload r_payload
+  | ( ( Identity_board_post_created
+      | Identity_board_comment_added _
+      | Identity_board_attention_comment_added _
+      | Identity_board_post_updated _
+      | Identity_board_attention_post_updated _
+      | Identity_fusion_completed _
+      | Identity_schedule_due
+      | Identity_canonical_payload _ )
+    , ( Identity_board_post_created
+      | Identity_board_comment_added _
+      | Identity_board_attention_comment_added _
+      | Identity_board_post_updated _
+      | Identity_board_attention_post_updated _
+      | Identity_fusion_completed _
+      | Identity_schedule_due
+      | Identity_canonical_payload _ ) ) ->
+    Int.compare (payload_identity_rank left) (payload_identity_rank right)
+
+let compare_stimulus_identity (a : stimulus_identity) (b : stimulus_identity) =
+  let cmp = String.compare a.id_post_id b.id_post_id in
+  if cmp <> 0
+  then cmp
+  else (
+    let cmp = Int.compare (urgency_rank a.id_urgency) (urgency_rank b.id_urgency) in
+    if cmp <> 0 then cmp else compare_payload_identity a.id_payload b.id_payload)
+
+let stimulus_identity (s : stimulus) : stimulus_identity =
+  { id_post_id = s.post_id
+  ; id_urgency = s.urgency
+  ; id_payload = payload_identity_of_payload s.payload
+  }
+
+module Stimulus_identity_order = struct
+  type t = stimulus_identity
+
+  let compare = compare_stimulus_identity
+end
+
+module Stimulus_identity_set = Set.Make (Stimulus_identity_order)
+module Stimulus_identity_map = Map.Make (Stimulus_identity_order)
+
+let stimulus_identity_equal a b =
+  Stimulus_identity_order.compare (stimulus_identity a) (stimulus_identity b) = 0
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with
@@ -485,18 +561,22 @@ let remove_by_post_id post_id queue =
 (* Scans both halves of the queue directly instead of rebuilding it through
    repeated [dequeue], so membership stays allocation-free. *)
 let contains (queue : t) (stimulus : stimulus) : bool =
-  let same head = stimulus_identity_equal head stimulus in
+  let target = stimulus_identity stimulus in
+  let same head = Stimulus_identity_order.compare (stimulus_identity head) target = 0 in
   List.exists same queue.front || List.exists same queue.back_rev
 
 let uniq_stimuli stimuli =
-  List.fold_left
-    (fun acc stimulus ->
-       if List.exists (stimulus_identity_equal stimulus) acc
-       then acc
-       else stimulus :: acc)
-    []
-    stimuli
-  |> List.rev
+  let _, rev_acc =
+    List.fold_left
+      (fun (seen, acc) stimulus ->
+         let key = stimulus_identity stimulus in
+         if Stimulus_identity_set.mem key seen
+         then seen, acc
+         else Stimulus_identity_set.add key seen, stimulus :: acc)
+      (Stimulus_identity_set.empty, [])
+      stimuli
+  in
+  List.rev rev_acc
 
 let sort_by_urgency (queue : t) : t =
   queue
@@ -505,28 +585,32 @@ let sort_by_urgency (queue : t) : t =
        (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
   |> of_list
 
-(* Starvation fix for #31597: [Low] competes forever against a Keeper's own
-   continuous [Normal] backlog (explicit task work, board mentions) under a
-   strict-priority selector with no fairness correction — measured as a
-   16-day-old recurring schedule that dispatched "succeeded" every hour
-   without a single Board post ever landing. 3600s matches the cadence most
-   recurring schedules in this fleet already use; it is a reasoned default,
-   not a measured distribution (unlike the dated comments elsewhere in this
-   file — there is no equivalent aging measurement yet). [Normal] is never
-   aged into [Immediate]: [Immediate] is a producer-declared contract (see
-   keeper_composition_completion_wake.ml) reserved for "this Keeper is
-   waiting on an answer to something it asked for," and letting aging blur
-   into that would erode the one guarantee Immediate still gives callers. *)
-let low_to_normal_aging_threshold_sec = 3600.0
-
-let effective_urgency ~now (s : stimulus) : urgency =
-  match s.urgency with
-  | Low when now -. s.arrived_at >= low_to_normal_aging_threshold_sec -> Normal
-  | (Immediate | Normal | Low) as u -> u
+(* Deterministic starvation-free [Normal]/[Low] alternation (#31597):
+   [Immediate] remains strictly highest priority (rank 0) because it is a
+   producer-declared contract ("this Keeper is waiting on an answer to
+   something it asked for"). Between [Normal] and [Low], selection alternates
+   based on the last non-immediate urgency served, bounding [Low] wait to at
+   most one [Normal] turn when both lanes have ready work without relying on
+   wall-clock aging thresholds. *)
+let preferred_non_immediate_urgency ~last_non_immediate_served =
+  match last_non_immediate_served with
+  | Some Normal -> Low
+  | None | Some (Low | Immediate) -> Normal
 ;;
 
-let effective_urgency_rank ~now (s : stimulus) : int =
-  urgency_rank (effective_urgency ~now s)
+let selection_urgency_rank ~last_non_immediate_served urgency =
+  match urgency with
+  | Immediate -> 0
+  | (Normal | Low) as candidate ->
+    if candidate = preferred_non_immediate_urgency ~last_non_immediate_served
+    then 1
+    else 2
+;;
+
+let compare_selection_urgency ~last_non_immediate_served left right =
+  Int.compare
+    (selection_urgency_rank ~last_non_immediate_served left)
+    (selection_urgency_rank ~last_non_immediate_served right)
 ;;
 
 let payload_kind_label = function

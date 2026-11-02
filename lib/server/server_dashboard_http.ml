@@ -290,7 +290,8 @@ let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Yojson.Safe.t
   =
   Dashboard_cache.get_or_compute
-    (Server_dashboard_http_core_cache.scheduled_automation_cache_key config)
+    (Server_dashboard_http_core_cache.scheduled_automation_cache_key
+       ~base_path:config.base_path)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_dashboard_json

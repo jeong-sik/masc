@@ -56,6 +56,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('pending_confirms_changed')).toBe('pending_confirms_changed')
   })
 
+  it('accepts schedule changes', () => {
+    expect(SSEEventTypeSchema.parse('schedules_changed')).toBe('schedules_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

@@ -107,6 +107,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // deadline (lib/operator/operator_pending_confirm_broadcast.ml). The TUI
   // re-reads on it.
   'pending_confirms_changed',
+  // A workspace's schedules changed (lib/server/server_schedule_broadcast.ml).
+  // The TUI re-reads on it.
+  'schedules_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

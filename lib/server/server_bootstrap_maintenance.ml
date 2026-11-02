@@ -189,7 +189,8 @@ let run_schedule_runner_tick ~clock config ~state =
         "schedule_runner: idle due_changed=%d held=%d pending_settlements=%d"
         result.due_changed (List.length result.held) (List.length result.pending_settlements);
       record_schedule_runner_tick_outcome "ok";
-      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation
+        ~base_path:config.base_path;
       Schedule_runner_status.record_tick_ok ~wake_enqueue_counts
         ~started_at ~finished_at result
     | Error failure ->
@@ -207,7 +208,8 @@ let run_schedule_runner_tick ~clock config ~state =
           "error", Schedule_runner_status.record_tick_error in
       record_schedule_runner_tick_outcome outcome;
       Log.Server.warn "schedule_runner: tick %s: %s" outcome error;
-      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation
+        ~base_path:config.base_path;
       record ~started_at ~finished_at error
   in
   (try
@@ -226,7 +228,8 @@ let run_schedule_runner_tick ~clock config ~state =
            let finished_at = observe_clock () in
            record_schedule_runner_tick_outcome "error";
            Log.Server.warn "schedule_runner: %s" error;
-           Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+           Server_dashboard_http_core_cache.invalidate_scheduled_automation
+             ~base_path:config.base_path;
            Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
            None
      in
@@ -238,7 +241,8 @@ let run_schedule_runner_tick ~clock config ~state =
      (* Invalidation is an observation effect too. The crash is already on
         record; a second observation failure cannot erase captured progress. *)
      Cancel_safe.protect ~on_exn:(fun _ -> ()) (fun () ->
-       Server_dashboard_http_core_cache.invalidate_scheduled_automation config));
+       Server_dashboard_http_core_cache.invalidate_scheduled_automation
+         ~base_path:config.base_path));
   !next_state
 ;;
 

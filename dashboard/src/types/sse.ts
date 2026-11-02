@@ -47,6 +47,7 @@ export type SSEEventType =
   | 'lane_addon_asks_changed'
   | 'keeper_async_requests_changed'
   | 'pending_confirms_changed'
+  | 'schedules_changed'
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'

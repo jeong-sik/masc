@@ -105,7 +105,7 @@ let run_task ~run_id (post : Board.post) =
        Error (Storage_failure (Printf.sprintf
          "Fusion run %s evidence carries an unreadable source_context: %s" run_id detail)))
 
-let record ~config ~keeper ~turn_ref (proposal : proposal) = protect (fun () ->
+let record_durably ~config ~keeper ~turn_ref (proposal : proposal) = protect (fun () ->
   let* post = source ~keeper ~run_id:proposal.run_id in
   let* () = match run_task ~run_id:proposal.run_id post with
     | Error _ as error -> error
@@ -151,6 +151,19 @@ let record ~config ~keeper ~turn_ref (proposal : proposal) = protect (fun () ->
        | Fs_compat.Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
          Error (Storage_failure (Fs_compat.private_jsonl_append_error_to_string error ^ "; cleanup: "
            ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))))
+
+(* The run's detail shows its Keeper decisions, so a recorded decision is a
+   change of the run: subscribers re-read it on [fusion_run_status] as they do
+   after a stage change (RFC-0480 L2b). Announced after the write and its
+   locks, and only when the decision is held. *)
+let record ~config ~keeper ~turn_ref (proposal : proposal) =
+  let result = record_durably ~config ~keeper ~turn_ref proposal in
+  (match result with
+   | Ok _ ->
+       Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ())
+         ~run_id:proposal.run_id
+   | Error _ -> ());
+  result
 
 let read_for_keeper ~config ~keeper ~run_id =
   let* _ = source ~keeper ~run_id in

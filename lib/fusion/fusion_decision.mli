@@ -16,6 +16,10 @@ type proposal
 val parse : Yojson.Safe.t -> (proposal, string) result
 val record : config:Workspace.config -> keeper:string -> turn_ref:Ids.Turn_ref.t ->
   proposal -> (recorded, error) result
+(** A held decision, newly written or already recorded by this turn, is
+    announced as a [fusion_run_status] of its run when the run is in the
+    global registry; the broadcast is best-effort and never changes the
+    result. *)
 val read : config:Workspace.config -> run_id:string -> (Yojson.Safe.t list, error) result
 val read_for_keeper : config:Workspace.config -> keeper:string -> run_id:string ->
   (Yojson.Safe.t list, error) result

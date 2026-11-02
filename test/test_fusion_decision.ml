@@ -427,6 +427,35 @@ let test_a_decision_names_the_task_its_run_was_requested_for () = with_fixture (
    | Ok _ -> ()
    | Error error -> fail ("the run's own Task was refused: " ^ Fusion_decision.error_to_string error)))
 
+(* The run's detail shows its decisions, so a held decision is announced as a
+   change of its run, the push the TUI and dashboard re-read the detail on. A
+   refused decision announces nothing. *)
+let test_a_held_decision_announces_its_run () = with_fixture (fun config task_id _ ->
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id:"run-advice"
+    ~keeper:"fusion-keeper" ~preset:"test" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.0;
+  let announced = ref [] in
+  let subscriber = "fusion-decision-announcement" in
+  Sse.subscribe_external ~id:subscriber
+    ~callback:(fun (event : Sse.external_event) ->
+      let open Yojson.Safe.Util in
+      if event.ext_payload |> member "type" = `String "fusion_run_status" then
+        announced := (event.ext_payload |> member "run" |> member "run_id" |> to_string) :: !announced)
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscriber) (fun () ->
+    let record decision = Fusion_decision.parse (args task_id decision "Measured evidence supports it")
+      |> require "parse" |> Fusion_decision.record ~config ~keeper:"foreign" ~turn_ref in
+    (match record "adopted" with
+     | Error (Fusion_decision.Rejected _) -> ()
+     | Error error -> fail ("foreign Keeper misclassified: " ^ Fusion_decision.error_to_string error)
+     | Ok _ -> fail "a foreign Keeper recorded a decision");
+    check (list string) "a refused decision announces nothing" [] !announced;
+    (match Fusion_decision.parse (args task_id "adopted" "Measured evidence supports it") |> require "parse"
+           |> Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref with
+     | Ok _ -> ()
+     | Error error -> fail ("the decision was refused: " ^ Fusion_decision.error_to_string error));
+    check (list string) "the held decision announces its run" ["run-advice"] !announced))
+
 let () = run "Fusion decision attribution" ["behavior", [
   test_case "omitted task selection captures current owned work without hiding read failures" `Quick test_current_work_context;
   test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
@@ -436,4 +465,5 @@ let () = run "Fusion decision attribution" ["behavior", [
     test_historical_turn_spelling_preserves_conflict_and_retry;
   test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage;
-  test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for]]
+  test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for;
+  test_case "a held decision announces its run" `Quick test_a_held_decision_announces_its_run]]

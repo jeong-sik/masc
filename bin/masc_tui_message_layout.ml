@@ -366,6 +366,16 @@ let display_width_for_wrapping text =
   | Some cells -> cells
   | None -> wrapping_pieces_width 0 (wrapping_pieces text)
 
+let display_width_uncached text =
+  match ascii_display_width text with
+  | Some cells -> cells
+  | None ->
+      let width = ref 0 in
+      iter_display_pieces text
+        ~piece:(fun _ _ cells _ -> width := !width + cells)
+        ~ascii:(fun start stop -> width := !width + stop - start);
+      !width
+
 let fits_within_cells ~max_cells text =
   if max_cells < 0 then false
   else
@@ -1032,47 +1042,51 @@ let take_last count values =
    rest of that run, so the following split starts at the exact source byte. *)
 let wrapping_prefix ~prefix_cells pieces =
   let rec take used cut = function
-    | [] -> cut, []
+    | [] -> cut, used, []
     | Wrapping_piece (_, stop, width, ansi) :: rest
       when ansi || used + width <= prefix_cells ->
         take (used + width) stop rest
     | Wrapping_ascii (start, stop) :: rest as pieces ->
         let count = min (stop - start) (max 0 (prefix_cells - used)) in
         if count = stop - start then take (used + count) stop rest
-        else if count = 0 then cut, pieces
-        else let cut = start + count in cut, Wrapping_ascii (cut, stop) :: rest
-    | (Wrapping_piece _ :: _ as pieces) -> cut, pieces
+        else if count = 0 then cut, used, pieces
+        else
+          let cut = start + count in
+          cut, used + count, Wrapping_ascii (cut, stop) :: rest
+    | (Wrapping_piece _ :: _ as pieces) -> cut, used, pieces
   in
-  if prefix_cells <= 0 then 0, pieces else take 0 0 pieces
+  if prefix_cells <= 0 then 0, 0, pieces else take 0 0 pieces
 
 (* Cut at grapheme boundaries using the same compact runs as width measurement. *)
-let split_cells_with_runs ~prefix_cells ~max_cells text =
+let split_cells_with_runs ~make_chunk ~prefix_cells ~max_cells text =
   let length = String.length text in
-  let cut, remaining = wrapping_prefix ~prefix_cells (wrapping_pieces text) in
+  let cut, prefix_width, remaining = wrapping_prefix ~prefix_cells (wrapping_pieces text) in
+  let add_chunk start stop used rows =
+    make_chunk (String.sub text start (stop - start)) used :: rows in
   let rec chunks start stop used rows = function
     | [] ->
         if start = length then List.rev rows
-        else List.rev (String.sub text start (stop - start) :: rows)
+        else List.rev (add_chunk start stop used rows)
     | Wrapping_piece (_, piece_end, width, ansi) :: rest
       when ansi || used = 0 || used + width <= max_cells ->
         chunks start piece_end (used + width) rows rest
     | Wrapping_piece (piece_start, piece_end, width, _) :: rest ->
-        chunks piece_start piece_end width (String.sub text start (stop - start) :: rows) rest
+        chunks piece_start piece_end width (add_chunk start stop used rows) rest
     | Wrapping_ascii (run_start, run_end) :: rest as pieces ->
         let room =
           if used = 0 then max 1 max_cells
           else if used >= max_cells then 0 else max_cells - used in
         if room = 0 then
-          chunks run_start run_start 0 (String.sub text start (stop - start) :: rows) pieces
+          chunks run_start run_start 0 (add_chunk start stop used rows) pieces
         else
           let count = min room (run_end - run_start) in
           let next = run_start + count in
           if next = run_end then chunks start next (used + count) rows rest
           else
-            chunks next next 0 (String.sub text start (next - start) :: rows)
+            chunks next next 0 (add_chunk start next (used + count) rows)
               (Wrapping_ascii (next, run_end) :: rest)
   in
-  String.sub text 0 cut, chunks cut cut 0 [] remaining
+  String.sub text 0 cut, prefix_width, chunks cut cut 0 [] remaining
 
 let split_cells ~max_cells text =
   if String.equal text "" then [ "" ]
@@ -1102,30 +1116,54 @@ let split_cells ~max_cells text =
     in
     loop 0 0 0 [] (display_pieces text)
 
-let split_cells_after_prefix ~prefix_cells ~max_cells text =
+let split_cells_after_prefix_using ~make_chunk ~prefix_cells ~max_cells text =
   let length = String.length text in
   let limit = max 1 max_cells in
+  let ascii_chunks text start =
+    let rec chunks start rows =
+      if start >= String.length text then List.rev rows
+      else
+        let size = min limit (String.length text - start) in
+        chunks (start + size) (make_chunk (String.sub text start size) size :: rows)
+    in
+    chunks start [] in
   if printable_ascii_range text 0 length then begin
     let cut = min length (max 0 prefix_cells) in
-    let rec chunks start rows =
-      if start >= length then List.rev rows
-      else
-        let size = min limit (length - start) in
-        chunks (start + size) (String.sub text start size :: rows)
-    in
-    String.sub text 0 cut, chunks cut []
+    String.sub text 0 cut, cut, ascii_chunks text cut, true
   end else if not (String.is_valid_utf_8 text) then begin
     (* A malformed prefix can make the original whole line use scalar
        segmentation while its valid suffix uses grapheme segmentation. *)
-    let cut, _ = wrapping_prefix ~prefix_cells (wrapping_pieces text) in
+    let cut, prefix_width, _ = wrapping_prefix ~prefix_cells (wrapping_pieces text) in
     let head = String.sub text 0 cut in
     let tail = String.sub text cut (length - cut) in
-    head,
-    (if String.equal tail "" then []
-     else if printable_ascii_range tail 0 (String.length tail) then split_cells ~max_cells tail
-     else snd (split_cells_with_runs ~prefix_cells:0 ~max_cells tail))
-  end else
-    split_cells_with_runs ~prefix_cells ~max_cells text
+    let chunks =
+      if String.equal tail "" then []
+      else if printable_ascii_range tail 0 (String.length tail) then ascii_chunks tail 0
+      else
+        let _, _, chunks = split_cells_with_runs ~make_chunk ~prefix_cells:0 ~max_cells tail in
+        chunks
+    in
+    head, prefix_width, chunks, false
+  end else begin
+    let head, prefix_width, chunks =
+      split_cells_with_runs ~make_chunk ~prefix_cells ~max_cells text in
+    head, prefix_width, chunks, true
+  end
+
+let split_cells_after_prefix ~prefix_cells ~max_cells text =
+  let head, _, chunks, _ = split_cells_after_prefix_using
+      ~make_chunk:(fun chunk _ -> chunk) ~prefix_cells ~max_cells text in
+  head, chunks
+
+let split_cells_after_prefix_with_widths ~prefix_cells ~max_cells text =
+  let head, head_cells, chunks, valid = split_cells_after_prefix_using
+      ~make_chunk:(fun chunk cells -> chunk, cells) ~prefix_cells ~max_cells text in
+  if valid then head, head_cells, chunks
+  else
+    (* A valid chunk cut from invalid input can form graphemes that the
+       original scalar walk could not. Measure the emitted chunks themselves. *)
+    head, display_width_uncached head,
+    List.map (fun (chunk, _) -> chunk, display_width_uncached chunk) chunks
 
 let split_styled_cells ~max_cells text =
   (* Replaying the preceding SGR commands restores the exact style at a

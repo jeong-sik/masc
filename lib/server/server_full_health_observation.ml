@@ -1,4 +1,5 @@
 type snapshot = {
+  workspace_epoch : Mcp_server.Workspace_scope_epoch.t option;
   fields : (string * Yojson.Safe.t) list;
   computed_at : float;
   duration_ms : int;
@@ -42,7 +43,8 @@ let fail ~now ~failure ~cold_fields ~critical_threshold state =
     match state.snapshot with
     | Some snapshot -> snapshot
     | None ->
-        { fields = cold_fields;
+        { workspace_epoch = None;
+          fields = cold_fields;
           computed_at = now;
           duration_ms = 0;
           failure = None;

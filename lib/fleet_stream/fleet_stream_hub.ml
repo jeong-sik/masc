@@ -111,6 +111,17 @@ let note_degraded t ~since reason =
       deliver t (Degraded { revision; degradation }))
 ;;
 
+let note_unavailable_if_unmeasured t ~since reason =
+  locked t (fun () ->
+    match t.state with
+    | None ->
+      let revision = Fleet_stream.Revision.first in
+      let degradation = { Fleet_stream.since; reason } in
+      t.state <- Some (Unavailable { revision; degradation });
+      deliver t (Unavailable_snapshot { revision; degradation })
+    | Some (Unavailable _ | Measured _) -> [])
+;;
+
 let subscribe t ~on_event =
   let id = ref None in
   locked t (fun () ->

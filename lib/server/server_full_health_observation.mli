@@ -2,6 +2,7 @@
     acquisition, refresh ownership and publication effects belong to the caller. *)
 
 type snapshot = {
+  workspace_epoch : Mcp_server.Workspace_scope_epoch.t option;
   fields : (string * Yojson.Safe.t) list;
   computed_at : float;
   duration_ms : int;

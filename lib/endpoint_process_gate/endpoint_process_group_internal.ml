@@ -171,10 +171,12 @@ let release t = Eio.Cancel.protect (fun () ->
             | Handles_closed result -> Ok (result, false)
             | Admitting -> Error Protocol_error
             | Admission_retired ->
-                let* () = Eio_unix.run_in_systhread (fun () -> remove_raw t.raw) |> native_status in
+                let removed = Eio_unix.run_in_systhread (fun () -> remove_raw t.raw) |> native_status in
                 let result = match close_raw t.raw with
-                  | None -> Ok ()
-                  | Some error -> Error (Cleanup_failed {primary=None; error}) in
+                  | None -> removed
+                  | Some error ->
+                      let primary = match removed with Ok () -> None | Error error -> Some error in
+                      Error (Cleanup_failed {primary; error}) in
                 t.lifecycle <- Handles_closed result;
                 Ok (result, true)) |> function
             | Ok pair -> pair | Error error -> Error error, false in

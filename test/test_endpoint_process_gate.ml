@@ -247,6 +247,30 @@ let exclusive_group_and_reused_name = run (fun fixture -> Eio.Switch.run (fun sw
     check "owner removed replacement group"
       (not (Sys.file_exists (Filename.concat "/sys/fs/cgroup" (group_name fixture)))))
 
+let group_remove_failure_still_closes = run (fun fixture ->
+    let expected = ref None in
+    match Eio.Switch.run (fun sw ->
+        let parent_path = "/sys/fs/cgroup" and name = group_name fixture ^ "-remove-failure" in
+        let group = get_group (G.Group.create ~sw ~parent_path ~name) in
+        let path = Filename.concat parent_path name in
+        let nested = Filename.concat path "empty-child" in
+        (* No processes, so the tree is empty, but its child cgroup prevents
+           removal. Only these newly-created fixture directories are removed. *)
+        Unix.mkdir nested 0o700;
+        Fun.protect ~finally:(fun () -> Unix.rmdir nested; Unix.rmdir path) (fun () ->
+            check "the nested group has no processes" (not (get_group (G.Group.populated group)));
+            let error = match G.Group.release group with
+              | Error (G.Group.Syscall_failed {stage=G.Group.Remove_group; _} as error) -> error
+              | Error error -> Alcotest.failf "expected a removal failure, got %s" (G.Group.error_to_string error)
+              | Ok () -> Alcotest.fail "the child cgroup must prevent removal" in
+            expected := Some error;
+            check "the failed settlement is cached" (G.Group.release group = Error error);
+            check "the closed handle keeps the removal error" (G.Group.populated group = Error error);
+            check "an empty waiter observes the failed settlement" (G.Group.await_empty group = Error error))) with
+    | () -> Alcotest.fail "switch cleanup must preserve the removal failure"
+    | exception G.Group.Release_failed error ->
+        check "owner cleanup preserves the same failure" (!expected = Some error))
+
 let private_group_waiters_keep_their_transition = run (fun fixture -> Eio.Switch.run (fun sw ->
     let group=get_group (G.Group.create ~sw ~parent_path:"/sys/fs/cgroup"
         ~name:(group_name fixture ^ "-waiters")) in
@@ -360,6 +384,7 @@ let () =
           "root payload refusal", invalid_owner;
           "recursive tree cancellation and independent progress", recursive_tree_and_progress;
           "exclusive group and original handle after name reuse", exclusive_group_and_reused_name;
+          "failed group removal still closes and preserves its error", group_remove_failure_still_closes;
           "private group waiters retain transitions across other reads", private_group_waiters_keep_their_transition;
           "cancelling an acquired group waiter preserves its owner", cancel_private_group_waiter_preserves_owner] in
   Alcotest.run "Endpoint process gate" ["kernel", List.map (fun (name, test) -> Alcotest.test_case name `Quick test) cases]

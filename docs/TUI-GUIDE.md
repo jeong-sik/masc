@@ -1622,10 +1622,12 @@ producer's components under it, largest first. One colour and one shade per
 producer, the same three on all three tabs, so a shade read here is the same
 shade on the request and proof tabs. It is a proportion table, not a breakdown
 of the request: the attributed total and the serialized bytes are measured at
-different points and the gap is not explained, and the arrow into SERIALIZED
-REQUEST is drawn only when both readings describe the same turn. SERIALIZED
-REQUEST is the request the dispatcher actually serialized, in bytes and in the
-provider's own token count. HISTORY REACH shows the last observed history
+different points and the gap is not explained, and the arrow into RECORDED
+INPUT is drawn only when both readings describe the same turn. RECORDED INPUT
+shows the dispatcher's serialized byte observation when available and
+the recorded input figure. A per-request-scoped input can instead be a
+post-compaction context estimate; the stored field does not distinguish it
+from a provider's request count. HISTORY REACH shows the last observed history
 range: a wire-shape projection or history prepared for a client. Its runtime
 is not recorded, so the turn's runtime does not identify who measured it.
 Atoms are the indivisible units a cut falls between, keeping a tool call and
@@ -1634,12 +1636,19 @@ it does not prove what the provider received or what a client retained. A provid
 that reports usage across the whole conversation rather than per request
 gets no window percentage here, only the number it reported and a note that
 this request's own share was not. RECENT TURNS, the section at the bottom,
-is one row per dispatched turn on the fetched page, carrying the input,
-cache read, and output the provider itself counted — the per-turn answer to
-how much context goes in, newest first. A turn whose provider counted
+is one row per decoded turn on the fetched page, with recorded input, cache
+read, and output values, newest first. A turn whose provider counted
 across the conversation states that instead of figures, and a turn whose
 provider reported nothing says the input was not reported; neither gets a
-number that looks like its own and is not.
+number that looks like its own and is not. The input trend keeps one mark per
+turn, oldest first, and shows the range of nonnegative per-request-scoped
+values used for the bar scale on the page, or says there is no scale when none
+are valid. The values can include post-compaction context estimates and are not
+all necessarily counts from dispatched requests. `0` is a recorded zero,
+`·` means a per-request-scoped value is unavailable, and `!`
+marks a negative count as invalid. If the source could not decode records on
+the page, the inspector reports how many were omitted; their positions in the
+trend are unknown. It also says when the omitted-record count is unavailable.
 
 `[` and `]` step back and forward through the page's turns -- the caret on
 a RECENT TURNS row names the one on screen -- and every tab re-reads the

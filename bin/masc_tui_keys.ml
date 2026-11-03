@@ -2477,6 +2477,9 @@ let context_bindings ~cols (state : state) =
     | Inspector.Pinned _ -> [] in
   let refresh = [b Meta "r" "refresh"] in
   let help = [b Meta "?" "help"] in
+  let page_failed = match state.context_inspector_reading with
+    | Some (_, reading) -> Inspector.page_read_failed reading
+    | None -> false in
   if Option.is_some state.search then
     [b Search "type" "query"; b Act "Enter" "keep search"; b Meta "Esc" "cancel search"]
   else match state.context_inspector_tab, state.context_inspector_exact with
@@ -2485,6 +2488,8 @@ let context_bindings ~cols (state : state) =
         b Navigate "Home/End" "top/bottom"] @ refresh @ [b Meta "Esc" "return"] @ help
   | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
       [b Navigate "4" "response"; b Navigate "j/k" "scroll"; b Meta "Esc" "list"] @ help
+  | (Inspector.Exact_input | Inspector.Input_map), None when page_failed ->
+      tabs @ turns @ [b Navigate "j/k" "scroll"] @ refresh @ [b Meta "Esc" "close"] @ help
   | (Inspector.Exact_input | Inspector.Input_map), None ->
       tabs @ turns
       @ (if state.context_inspector_tab = Inspector.Exact_input

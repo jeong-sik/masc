@@ -214,6 +214,9 @@ end
 
 val compact_request_id : string -> string
 val terminal_safe_text : ?preserve_newlines:bool -> string -> string
+val bounded_http_error_ends : string -> string
+(** Use the shared HTTP error preview limit, retaining both ends and marking
+    the omitted middle. *)
 val decode_response : request:request -> string -> (response, stream_error) result
 val decode_response_with_provenance :
   request:request -> string -> (response, protocol_error) result

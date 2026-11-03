@@ -31,35 +31,44 @@ let repeat glyph count =
   else String.concat "" (List.init count (fun _ -> glyph))
 ;;
 
-let sparkline ?min ?max values =
+let sparkline_levels ?min ?max values =
   match values with
-  | [] -> ""
-  | _ ->
+  | [] -> []
+  | first :: rest ->
     let v_min =
       match min with
       | Some m -> m
-      | None -> List.fold_left Stdlib.min (List.hd values) values
+      | None -> List.fold_left Stdlib.min first rest
     in
     let v_max =
       match max with
       | Some m -> m
-      | None -> List.fold_left Stdlib.max (List.hd values) values
+      | None -> List.fold_left Stdlib.max first rest
     in
-    let range = v_max - v_min in
-    let buf = Buffer.create (List.length values * 3) in
-    List.iter
+    let lower = Z.of_int v_min in
+    let range = Z.sub (Z.of_int v_max) lower in
+    let top = Array.length sparkline_glyphs - 1 in
+    List.map
       (fun v ->
-        let level =
-          if range <= 0 then
-            if v_min <= 0 then 0 else 3
+          if Z.sign range <= 0 then
+            if v_min <= 0 then 0 else top / 2
           else
             let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
-            let raw = ((clamped_v - v_min) * 7) / range in
-            Stdlib.max 0 (Stdlib.min 7 raw)
-        in
-        Buffer.add_string buf sparkline_glyphs.(level))
-      values;
-    Buffer.contents buf
+            let offset = Z.sub (Z.of_int clamped_v) lower in
+            Z.to_int (Z.div (Z.mul offset (Z.of_int top)) range))
+      values
+;;
+
+let sparkline ?min ?max values =
+  let levels = sparkline_levels ?min ?max values in
+  let buf = Buffer.create (List.length levels * 3) in
+  List.iter (fun level -> Buffer.add_string buf sparkline_glyphs.(level)) levels;
+  Buffer.contents buf
+;;
+
+let sparkline_marks ?min ?max values =
+  List.map (fun level -> sparkline_glyphs.(level))
+    (sparkline_levels ?min ?max values)
 ;;
 
 let format_compact_num n =

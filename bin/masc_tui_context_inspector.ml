@@ -39,11 +39,38 @@ type recent_turn =
   ; scope : Runtime_usage_scope.t
   }
 
+type input_sample =
+  | Input_unavailable
+  | Input_invalid of int
+  | Input_count of int
+
+type input_trend =
+  { samples : input_sample list
+  ; valid_count : int
+  ; bounds : (int * int) option
+  }
+
+let recent_input_trend recent =
+  let samples = List.rev_map (fun (turn : recent_turn) ->
+    match turn.input_tokens with
+    | None -> Input_unavailable
+    | Some count when count < 0 -> Input_invalid count
+    | Some count -> Input_count count) recent in
+  let valid_count, bounds = List.fold_left (fun (valid_count, bounds) -> function
+    | Input_unavailable | Input_invalid _ -> valid_count, bounds
+    | Input_count count ->
+        let bounds = match bounds with
+          | None -> count, count
+          | Some (minimum, maximum) -> min minimum count, max maximum count in
+        valid_count + 1, Some bounds) (0, None) samples in
+  { samples; valid_count; bounds }
+
 type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option
   ; recent : recent_turn list
   ; rows : Turn_record.t list
+  ; skipped_rows : int option
   }
 
 type response_part =
@@ -165,6 +192,19 @@ type reading =
       }
   | Exact_read of exact_reading
 
+let page_read_failed = function
+  | Request_failed _ | Turn_read_failed _ -> true
+  | Turn_read _ | Exact_read _ -> false
+
+let page_scroll_should_reset ~previous reading =
+  match previous, reading with
+  | Some (Request_failed old), Request_failed detail -> not (String.equal old detail)
+  | Some (Turn_read_failed old), Turn_read_failed next ->
+      not (String.equal old.detail next.detail)
+  | Some (Request_failed _ | Turn_read_failed _), (Turn_read _ | Exact_read _) -> true
+  | _, (Request_failed _ | Turn_read_failed _) -> true
+  | _, (Turn_read _ | Exact_read _) -> false
+
 let is_loading = function
   | Request_failed _ | Turn_read_failed _ | Turn_read _ -> false
   | Exact_read { record; provider_input; response; _ } ->
@@ -248,6 +288,9 @@ let decode_turn_records = function
   | `Assoc fields ->
       (match List.assoc_opt "entries" fields with
        | Some (`List rows) ->
+           let skipped_rows = match List.assoc_opt "skipped_rows" fields with
+             | Some (`Int count) when count >= 0 -> Some count
+             | Some _ | None -> None in
            let rec decode reversed = function
              | [] -> Ok (List.rev reversed)
              | row :: rest ->
@@ -256,7 +299,14 @@ let decode_turn_records = function
            in
            let* records = decode [] rows in
            (match List.rev records with
-            | [] -> Error "turn-records returned no rows"
+            | [] ->
+                (match skipped_rows with
+                 | Some 0 -> Error "turn-records returned no rows"
+                 | Some count -> Error (Printf.sprintf
+                     "turn-records returned no readable rows; %d source records were unreadable"
+                     count)
+                 | None -> Error
+                     "turn-records returned no readable rows; skipped-record count unavailable")
             | (latest : Turn_record.t) :: _ as newest_first ->
                 let rec newest_attributed = function
                   | [] -> None
@@ -271,7 +321,8 @@ let decode_turn_records = function
                              }
                        | None -> newest_attributed rest)
                 in
-                (* Only a per-request figure describes one request's input. *)
+                (* Other scopes cannot describe one request. Even this scope
+                   can carry a post-compaction estimate without provenance. *)
                 let per_request_tokens (record : Turn_record.t) =
                   match record.usage.scope with
                   | Runtime_usage_scope.Turn_total
@@ -299,6 +350,7 @@ let decode_turn_records = function
                   ; attributed = newest_attributed newest_first
                   ; recent
                   ; rows = newest_first
+                  ; skipped_rows
                   })
        | Some _ -> Error "turn-records entries is not a list"
        | None -> Error "turn-records response is missing entries")

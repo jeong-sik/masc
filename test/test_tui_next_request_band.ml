@@ -421,7 +421,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
   in
   let turn_read =
     Inspector.Turn_read
-      { selection = { latest; attributed = None; recent = []; rows = [ latest ] }
+      { selection = { latest; attributed = None; recent = []; rows = [ latest ]; skipped_rows = None }
       ; provider_input = Error "absent"
       ; response = Error "absent"
       ; forecast = Ok measured

@@ -6,6 +6,21 @@ module Position = Masc.Keeper_chat_event_log
 let json_string json = Yojson.Safe.to_string json
 let sse_event json = "data: " ^ json_string json ^ "\n\n"
 
+let test_http_error_preview_bounds () =
+  let short = String.make 100 'x' in
+  let long = "xx" ^ String.concat "" (List.init 100_000 (fun _ -> "한")) ^ "end-42" in
+  let short_preview = Chat.bounded_http_error_ends short in
+  let long_preview = Chat.bounded_http_error_ends long in
+  check int "short detail keeps its byte length" (String.length short)
+    (String.length short_preview);
+  check bool "large detail stays within the shared preview budget" true
+    (String.length long_preview <= 240);
+  check bool "the bounded preview is valid UTF-8" true
+    (String.is_valid_utf_8 long_preview);
+  check bool "both ends of a long detail remain" true
+    (String.starts_with ~prefix:"xx" long_preview
+     && String.ends_with ~suffix:"end-42" long_preview)
+
 let request : Chat.request =
   { request_id = "tui-request-1";
     keeper_name = "keeper.one";
@@ -1727,6 +1742,8 @@ let () =
         ; test_case "stale completion identity" `Quick
             test_stale_completion_identity
         ] )
+    ; ( "resource bounds"
+      , [ test_case "HTTP error preview is bounded" `Quick test_http_error_preview_bounds ] )
     ; ( "attachments"
       , [ test_case "attachment reaches both wire fields" `Quick
             test_attachment_reaches_both_wire_fields

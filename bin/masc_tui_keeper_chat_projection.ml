@@ -311,6 +311,16 @@ let bounded_http_error_body value =
     ~suffix:Masc_tui_message_layout.cut_mark value
   |> String_util.to_string
 
+let bounded_http_error_ends value =
+  if String.length value <= http_error_preview_max_bytes then value
+  else
+    let marker = Masc_tui_message_layout.cut_mark in
+    let remaining = http_error_preview_max_bytes - String.length marker in
+    let head_bytes = remaining / 2 in
+    let tail_bytes = remaining - head_bytes in
+    String_util.utf8_prefix ~max_bytes:head_bytes value ^ marker
+    ^ String_util.utf8_suffix ~max_bytes:tail_bytes value
+
 let stream_error_to_string = function
   | Malformed_event detail -> "invalid Keeper chat stream: " ^ detail
   | Request_id_mismatch { expected; received } ->

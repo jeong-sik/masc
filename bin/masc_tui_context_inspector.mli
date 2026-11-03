@@ -67,6 +67,22 @@ type recent_turn =
   ; scope : Runtime_usage_scope.t
   }
 
+type input_sample =
+  | Input_unavailable
+  | Input_invalid of int
+  | Input_count of int
+
+type input_trend =
+  { samples : input_sample list
+  ; valid_count : int
+  ; bounds : (int * int) option
+  }
+
+val recent_input_trend : recent_turn list -> input_trend
+(** Project decoded turns from oldest to newest, keeping missing and invalid
+    observations distinct from valid counts. Only nonnegative counts set the
+    bounds; they may still include post-compaction estimates. *)
+
 (** What one turn-records page yields.
 
     Two readings rather than one, because a keeper can keep turning while its
@@ -88,6 +104,9 @@ type selection =
             [recent] is its projection; the list itself is what turn
             navigation steps through, so the row an operator stepped back to
             is the same row the page decoded, not a re-derived one. *)
+  ; skipped_rows : int option
+        (** Unreadable source rows in this page, if the server reported a
+            nonnegative count. Their positions among [rows] are unknown. *)
   }
 
 (** What the chat transcript holds for the inspected turn -- the answer
@@ -280,6 +299,10 @@ type reading =
           source. A missing record never prevents its known input read. There
           is no current next-request forecast in a historical reading. *)
 
+val page_read_failed : reading -> bool
+(** A page-level failure displays a scrollable error instead of item rows. *)
+val page_scroll_should_reset : previous:reading option -> reading -> bool
+(** Reset when a page error begins, changes, or recovers. *)
 val is_loading : reading -> bool
 val merge_progress : previous:reading option -> reading -> reading
 (** Within one admitted generation, late pending fields cannot erase an

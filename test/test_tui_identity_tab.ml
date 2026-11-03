@@ -61,8 +61,6 @@ let test_nothing_connectable_is_not_an_error () =
   let providers = [ unreadable "jira" "unreadable" ] in
   check (Alcotest.list Alcotest.string) "no numbers to press" [] (ids providers)
 
-(* ── when the tick stops asking ──────────────────────────────────────── *)
-
 let login ~provider =
   {
     Masc_tui_identity_model.ils_keeper = "attaching-fixture";
@@ -73,35 +71,31 @@ let login ~provider =
     ils_attempt_id = "attempt-slack";
   }
 
-let test_a_login_lands_when_its_service_reports_tools () =
-  let providers = [ declared ~tools:[ "getJiraIssue" ] "atlassian" "Atlassian" ] in
-  check Alcotest.bool "landed" true
-    (Masc_tui_identity_model.identity_login_landed ~providers
-       ~login:(login ~provider:"atlassian"))
+(* ── when a service counts as attached ─────────────────────────────── *)
 
-let test_attached_with_no_tools_still_counts_as_landed () =
-  (* A service can be attached and offer nothing. The login did happen, and
-     a tick that kept asking would ask forever. *)
-  let providers = [ declared ~tools:[] "atlassian" "Atlassian" ] in
-  check Alcotest.bool "landed" true
-    (Masc_tui_identity_model.identity_login_landed ~providers
-       ~login:(login ~provider:"atlassian"))
+let attached providers =
+  Masc_tui_identity_model.identity_provider_attached ~providers
+    ~provider_id:"atlassian"
 
-let test_not_attached_has_not_landed () =
-  let providers = [ declared "atlassian" "Atlassian" ] in
-  check Alcotest.bool "still waiting" false
-    (Masc_tui_identity_model.identity_login_landed ~providers
-       ~login:(login ~provider:"atlassian"))
+let test_a_service_that_reports_tools_is_attached () =
+  check Alcotest.bool "attached" true
+    (attached [ declared ~tools:[ "getJiraIssue" ] "atlassian" "Atlassian" ])
 
-let test_another_service_landing_does_not_end_this_login () =
+let test_attached_with_no_tools_still_counts () =
+  (* A service can be attached and offer nothing. The login did happen. *)
+  check Alcotest.bool "attached" true
+    (attached [ declared ~tools:[] "atlassian" "Atlassian" ])
+
+let test_a_declaration_without_tools_is_not_attached () =
+  check Alcotest.bool "not attached" false
+    (attached [ declared "atlassian" "Atlassian" ])
+
+let test_another_service_does_not_count () =
   (* Matched by id, not by the label a screen shows: a declaration is free
      to change what it is called. *)
-  let providers =
-    [ declared ~tools:[ "sendMessage" ] "slack" "Whatever The Screen Calls It" ]
-  in
-  check Alcotest.bool "this login is still outstanding" false
-    (Masc_tui_identity_model.identity_login_landed ~providers
-       ~login:(login ~provider:"atlassian"))
+  check Alcotest.bool "not attached" false
+    (attached
+       [ declared ~tools:[ "sendMessage" ] "slack" "Whatever The Screen Calls It" ])
 
 let pending_login ?(expires_at = 100.) ~keeper ~provider ~url () =
   { (login ~provider) with ils_keeper = keeper; ils_url = url; ils_expires_at = expires_at }
@@ -1447,15 +1441,15 @@ let () =
           Alcotest.test_case "the cursor indexes what is left" `Quick
             test_the_cursor_indexes_what_is_left;
         ] );
-      ( "when the tick stops asking",
-        [ Alcotest.test_case "a login lands when its service reports tools"
-            `Quick test_a_login_lands_when_its_service_reports_tools;
-          Alcotest.test_case "attached with no tools still counts as landed"
-            `Quick test_attached_with_no_tools_still_counts_as_landed;
-          Alcotest.test_case "not attached has not landed" `Quick
-            test_not_attached_has_not_landed;
-          Alcotest.test_case "another service landing does not end this login"
-            `Quick test_another_service_landing_does_not_end_this_login;
+      ( "when a service counts as attached",
+        [ Alcotest.test_case "a service that reports tools is attached"
+            `Quick test_a_service_that_reports_tools_is_attached;
+          Alcotest.test_case "attached with no tools still counts" `Quick
+            test_attached_with_no_tools_still_counts;
+          Alcotest.test_case "a declaration without tools is not attached"
+            `Quick test_a_declaration_without_tools_is_not_attached;
+          Alcotest.test_case "another service does not count" `Quick
+            test_another_service_does_not_count;
         ] );
       ( "pending consent lifecycle",
         [ Alcotest.test_case "completed attempt requires current owned catalog" `Quick test_completed_attempt_requires_current_owned_catalog;

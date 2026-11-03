@@ -5322,59 +5322,6 @@ let test_chat_visibility_defaults_and_cycles () =
 
 ;;
 
-(* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
-   the take-newest operation has to return exactly the last-pushed pair and
-   leave the drain order of everything older untouched. *)
-let test_take_newest_returns_last_and_keeps_order () =
-  check bool "empty queue has no newest" true
-    (Masc_tui_keeper_chat_queue.take_newest
-       Masc_tui_keeper_chat_queue.empty
-     = None);
-  (* [fun q -> match …] in a [|>] chain swallows the rest of the chain into
-     the match, so the stages are a plain application instead. *)
-  let push_ok queue keeper text =
-    let request =
-      Masc_tui_keeper_chat_projection.create_request ~attachments:[]
-        ~keeper_name:keeper ~message:text ()
-    in
-    match
-      Masc_tui_keeper_chat_queue.push queue ~submitted_at:42. request
-    with
-    | Ok (next, _) -> next
-    | Error detail -> failf "push failed: %s" detail
-  in
-  let queue =
-    push_ok
-      (push_ok
-         (push_ok Masc_tui_keeper_chat_queue.empty "a" "first")
-         "b" "second")
-      "c" "third"
-  in
-  match Masc_tui_keeper_chat_queue.take_newest queue with
-  | None -> failf "take_newest returned None with three waiting"
-  | Some (newest_item, rest) ->
-      let newest = newest_item.Masc_tui_keeper_chat_queue.request in
-      check string "newest request is the last pushed" "c"
-        newest.Masc_tui_keeper_chat_projection.keeper_name;
-      check string "newest text is the last pushed" "third"
-        newest.Masc_tui_keeper_chat_projection.message;
-      check int "drain order of the rest is untouched" 2
-        (Masc_tui_keeper_chat_queue.length rest);
-      (match
-         Masc_tui_keeper_chat_queue.take_first_sendable rest
-           ~sendable:(fun _ -> true)
-       with
-       | Some (oldest_item, remaining) ->
-           let oldest = oldest_item.Masc_tui_keeper_chat_queue.request in
-           check string "oldest still drains first" "a"
-             oldest.Masc_tui_keeper_chat_projection.keeper_name;
-           check (list string) "and what is left keeps its order" [ "second" ]
-             (Masc_tui_keeper_chat_queue.waiting remaining
-              |> List.map (fun item ->
-                     item.Masc_tui_keeper_chat_queue.request.message))
-       | None -> failf "oldest no longer drains first after take_newest")
-;;
-
 let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
   let queue =
     List.fold_left
@@ -7327,9 +7274,7 @@ let () =
         ; test_case "hidden roster releases focus and retains the conversation" `Quick
             test_hidden_chat_roster_releases_focus_without_changing_conversation ] )
     ; ( "queue"
-      , [ test_case "take_newest returns the last and keeps order" `Quick
-            test_take_newest_returns_last_and_keeps_order
-        ; test_case "pending preview is bounded" `Quick
+      , [ test_case "pending preview is bounded" `Quick
             test_pending_preview_is_bounded_and_keeps_the_newest_submission
         ] )
     ; ( "skill marks"

@@ -525,9 +525,9 @@ let test_resource_catalog_keeps_explanatory_metadata () =
       ; `Assoc [ ("uri", `String "masc://minimal") ]
       ]
   in
-  match Mcp.resources_of_body ~request_id:"res-1" body with
+  match Mcp.resources_page_of_body ~request_id:"res-1" body with
   | Error detail -> failf "expected resources, got %s" detail
-  | Ok [ full; minimal ] ->
+  | Ok ([ full; minimal ], _) ->
       check string "uri" "masc://status.json" full.Mcp.uri;
       check string "name" "MASC Status JSON" full.name;
       check (option string) "title" (Some "Project Status") full.title;
@@ -537,7 +537,7 @@ let test_resource_catalog_keeps_explanatory_metadata () =
       check (option int) "size" (Some 4096) full.size;
       check string "missing name falls back to uri" "masc://minimal" minimal.name;
       check (option string) "missing purpose stays absent" None minimal.description
-  | Ok rows -> failf "expected two resources, got %d" (List.length rows)
+  | Ok (rows, _) -> failf "expected two resources, got %d" (List.length rows)
 
 let resources_page ~id ?next_cursor resources =
   let fields = [ ("resources", `List resources) ] in

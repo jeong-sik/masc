@@ -83,7 +83,8 @@ let launch_read state ~host ~share_origin ~launch ~check ~key =
                 entry.base_path = origin.wi_base_path && entry.masc_root = origin.wi_masc_root
                 && entry.artifact_id = report.id) entries in
               Share_journal_checked {journal_workspace=origin;journal_pending=pending;journal_observed=observed;
-                journal_stable=(before = after && Option.is_none pending && observed = [])}
+                journal_stable=(Masc_tui_artifact_share_pending.same_cursor before after
+                                && Option.is_none pending && observed = [])}
             | (Some _ | None), Error detail, (Ok _ | Error _) -> Share_journal_unavailable (detail, observed)
             | (Some _ | None), Ok _, Error detail -> Share_journal_unavailable (detail, observed)
             | None, Ok _, Ok _ -> Share_journal_unavailable ("Share recovery workspace is unavailable", observed) in

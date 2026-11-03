@@ -221,28 +221,6 @@ let health_label reading =
   | Absent -> "absent"
   | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
 
-(* The roster header's tally, counted with the same function that labels the
-   status column so the header and the column cannot disagree. Counting the
-   label itself removes the second spelling of the same reading rather than
-   keeping it in step by hand. *)
-let tally_by label_of readings =
-  List.fold_left
-    (fun counts reading ->
-      let label = label_of reading in
-      let rec bump = function
-        | [] -> [ (label, 1) ]
-        | (name, n) :: rest when String.equal name label -> (name, n + 1) :: rest
-        | entry :: rest -> entry :: bump rest
-      in
-      bump counts)
-    []
-    readings
-
-(* Counted with [health_label] because that is the word the status column now
-   shows. The header and the column are one reading drawn twice; whichever
-   function labels the column has to be the one that counts it. *)
-let health_tally readings = tally_by health_label readings
-
 type action =
   | Pause
   | Resume

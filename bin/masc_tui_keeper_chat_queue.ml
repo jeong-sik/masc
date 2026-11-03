@@ -160,26 +160,6 @@ let take_first_sendable queue ~sendable =
   walk [] queue.items
 ;;
 
-let take_newest queue =
-  let newest =
-    List.fold_left
-      (fun newest item ->
-        match newest with
-        | None -> Some item
-        | Some current when item.submission_seq > current.submission_seq ->
-            Some item
-        | Some _ -> newest)
-      None queue.items
-  in
-  let rec remove request_id skipped = function
-    | [] -> None
-    | item :: rest when String.equal item.request.Chat.request_id request_id ->
-        Some (item, { queue with items = List.rev_append skipped rest })
-    | item :: rest -> remove request_id (item :: skipped) rest
-  in
-  Option.bind newest (fun item -> remove item.request.request_id [] queue.items)
-;;
-
 let take queue ~request_id =
   let rec walk skipped = function
     | [] -> None

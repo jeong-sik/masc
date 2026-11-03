@@ -159,13 +159,6 @@ val health_label : reading -> string
     the lack of one either - a complete roster without the keeper means no
     fiber is running it. *)
 
-val health_tally : reading list -> (string * int) list
-(** How many readings carry each {!health_label}, in first-seen order.
-
-    Counted through {!health_label} on purpose: the roster header and the
-    status column are one reading drawn twice, and a tally that groups the
-    column's own labels cannot report a word the column does not show. *)
-
 (** A lifecycle action the operator can take on one keeper.
 
     The pairs are deliberate. [Pause] and [Resume] move a live lane in and out

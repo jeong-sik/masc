@@ -152,8 +152,6 @@ let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
   end
 ;;
 
-let place_rgb = encode_rgb ~identity:""
-
 let identity ~image_id ~placement_id =
   Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id
 

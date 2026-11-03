@@ -87,8 +87,12 @@ def call(binary: Path, root: Path, config: Path, major: int, argv: list[str], ti
 # Two attempts, paused long enough (0.2s) that the second one only reaches
 # the parent if the supervise select loop is still watching the listener
 # after draining the first -- the exact window bug (2) closed early.
+#
+# A third attempt is io_uring_setup: IORING_OP_SOCKET makes a socket without
+# socket(2), so the box answers io_uring through the supervisor as well.
+IO_URING_SETUP = 425
 CHILD_SCRIPT = (
-    "import socket, time\n"
+    "import ctypes, errno, socket, time\n"
     "def attempt(label):\n"
     "    try:\n"
     "        socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
@@ -98,6 +102,10 @@ CHILD_SCRIPT = (
     "attempt('first')\n"
     "time.sleep(0.2)\n"
     "attempt('second')\n"
+    "libc = ctypes.CDLL(None, use_errno=True)\n"
+    "params = ctypes.create_string_buffer(120)\n"
+    f"fd = libc.syscall({IO_URING_SETUP}, 4, params)\n"
+    "print('io_uring:' + ('EPERM' if fd == -1 and ctypes.get_errno() == errno.EPERM else 'ALLOWED'))\n"
 )
 
 
@@ -125,6 +133,9 @@ def main():
         if "first:EPERM" not in text_out or "second:EPERM" not in text_out:
             raise AssertionError(
                 f"observe must still deny both socket attempts: stdout={text_out!r}")
+        if "io_uring:EPERM" not in text_out:
+            raise AssertionError(
+                f"observe must deny io_uring_setup: stdout={text_out!r}")
         # The evidence lives in the wire trailer itself now (Exec_ssh_protocol
         # .trailer.observed_syscalls), not a side-channel stderr text line --
         # a completion verdict (vrf-75b5116cabdef13de98a595b19a8295d) rejected
@@ -144,11 +155,16 @@ def main():
             raise AssertionError(
                 f"no observed_syscalls field in the trailer at all -- readfds "
                 f"wiring or the seccomp filter race is back. trailer={trailer!r}")
-        count = len(trailer["observed_syscalls"])
-        if count != 2:
+        observed = trailer["observed_syscalls"]
+        count = len(observed)
+        if count != 3:
             raise AssertionError(
-                f"expected exactly 2 observed socket attempts, got {count} "
+                f"expected 2 socket attempts and 1 io_uring_setup observed, got {observed!r} "
                 f"(stderr={text_err!r}) -- the second-attempt window closed early")
+        if observed[-1] != IO_URING_SETUP:
+            raise AssertionError(
+                f"the last observed attempt must be io_uring_setup ({IO_URING_SETUP}), "
+                f"got {observed!r}")
     print(json.dumps({"kind": "observe-supervise-drain-e2e", "observed_attempts": count}))
 
 

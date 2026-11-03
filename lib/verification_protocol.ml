@@ -498,34 +498,24 @@ let retry_delay_sentence ~now = function
     "retry scheduled when the shared retry timer fires (next attempt time unknown)"
 
 type stalled_subject =
-  | Task_review of
-      { task_id : string
-      ; verification_id : string
-      ; disposition : stall_disposition
-      }
   | Goal_review of { goal_id : string; request_id : string; disposition : stall_disposition }
 
 (* The scheduling owner reports whether this exact review has a retry. *)
 let subject_disposition = function
-  | Task_review { disposition; _ } -> disposition
   | Goal_review { disposition; _ } -> disposition
 
 (* The subject's identity as metadata fields. The same list is what a post
    writes and what the repeat check compares, so a post and its lookup
    cannot name the subject two ways. *)
 let subject_identity_fields = function
-  | Task_review { task_id; verification_id; disposition = _ } ->
-    [ ("task_id", task_id); ("verification_id", verification_id) ]
   | Goal_review { goal_id; request_id; disposition = _ } ->
     [ ("goal_id", goal_id); ("request_id", request_id) ]
 
 let subject_kind = function
-  | Task_review _ -> "task_review"
   | Goal_review _ -> "goal_review"
 
 (* The id the error log is filed under. *)
 let subject_owner_id = function
-  | Task_review { task_id; _ } -> task_id
   | Goal_review { goal_id; _ } -> goal_id
 
 (* The gate as the post names it. A reviewed stop knows which evaluator
@@ -543,33 +533,6 @@ let gate_clause ~gate ~evaluator_runtime =
 let stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime ~now =
   let gate = gate_clause ~gate ~evaluator_runtime in
   match subject with
-  | Task_review { task_id; verification_id; disposition = Retry_scheduled { delay } } ->
-    Printf.sprintf
-      "Stalled task %s (vrf:%s) — %s. gate=%s: %s. The authority reviews \
-       this verification again on its own; resubmitting now would supersede \
-       that review."
-      task_id
-      verification_id
-      (retry_delay_sentence ~now delay)
-      gate
-      detail
-  | Task_review {task_id;verification_id;disposition=Original_observation_scheduled {delay}} ->
-    Printf.sprintf "Task %s (vrf:%s) awaits its original execution: %s. gate=%s: %s. Only the recorded original journal is observed; no model replay is authorized."
-      task_id verification_id (retry_delay_sentence ~now delay) gate detail
-  | Task_review {task_id;verification_id;disposition=Original_repair_required} ->
-    Printf.sprintf "Task %s (vrf:%s) requires operator reconciliation of its original execution. gate=%s: %s. No automatic model replay is authorized."
-      task_id verification_id gate detail
-  | Task_review { task_id; verification_id; disposition = No_retry_armed } ->
-    Printf.sprintf
-      "Stalled task %s (vrf:%s) — no retry armed. gate=%s: %s. Forward path: \
-       the assignee resubmits with submit_for_verification (supersedes this \
-       verification), or an operator commits a HITL verdict. The authority's \
-       whole-backlog sweep (at boot, or after a failed backlog read) reviews \
-       it again without either."
-      task_id
-      verification_id
-      gate
-      detail
   | Goal_review { goal_id; request_id; disposition = Retry_scheduled { delay } } ->
     Printf.sprintf
       "Stalled goal %s (request:%s) — %s. gate=%s: %s. The authority retries this unchanged proof request; no resubmission is needed."

@@ -89,13 +89,8 @@ type stall_disposition =
   | No_retry_armed
 
 (** Each review carries its durable identity and the scheduling owner's actual
-    retry disposition. Goal and Task notices never schedule work themselves. *)
+    retry disposition. Notices never schedule work themselves. *)
 type stalled_subject =
-  | Task_review of
-      { task_id : string
-      ; verification_id : string
-      ; disposition : stall_disposition
-      }
   | Goal_review of { goal_id : string; request_id : string; disposition : stall_disposition }
 
 val notify_stalled_verification_with_runtime :
@@ -112,33 +107,22 @@ val notify_stalled_verification :
   gate:string ->
   detail:string ->
   unit
-(** Board projection for every review that stopped without a verdict —
-    for a Task: [Not_reviewed], [Infrastructure_unavailable],
-    [Commit_failed], [Raised]; for a Goal: every deferral of a request that
-    still stands — whether or not a retry is armed: without this post the
-    only surface is the bounded run registry and the subject waits
-    invisibly. The post names the subject, its request, the gate, and what
-    happens next. Under [Retry_scheduled] it says a retry is armed and how
-    soon. Under [No_retry_armed] a Task post names the two forward paths
-    that exist today — the assignee resubmitting through
-    [submit_for_verification] (a legal transition from
-    [AwaitingVerification] that supersedes this verification), or an
-    operator HITL verdict — and the sweep that reviews it again without
-    either. A Goal post with [No_retry_armed] describes [request_complete] as
-    conditional on the current Goal and retained review state. A Task caller
-    passes, inside [Task_review], the disposition the scheduling owner
-    reported after it acted, so the post follows the timer, never the other
-    way round.
+(** Board projection for every deferral of a Goal request that still
+    stands, whether or not a retry is armed. The post names the subject, its
+    request, the gate, and what happens next. Under [Retry_scheduled] it says
+    a retry is armed and how soon. A post with [No_retry_armed] describes
+    [request_complete] as conditional on the current Goal and retained review
+    state.
 
     One post per disposition change: for a (subject, gate) the notice
     compares against the disposition of the latest post on the Board
     (chronological by [created_at]) and posts only when that differs or no
-    post decodes. The subject is compared by its identity fields —
-    [task_id]/[verification_id] or [goal_id]/[request_id]. [detail] travels
-    as evidence and is not part of the comparison. Visibility only: the
-    post schedules nothing and gates nothing. A board write that returns an
-    error is logged here and does not affect the review outcome; an
-    exception out of the Board is the caller's to contain. *)
+    post decodes. The subject is compared by its identity fields
+    [goal_id]/[request_id]. [detail] travels as evidence and is not part of
+    the comparison. Visibility only: the post schedules nothing and gates
+    nothing. A board write that returns an error is logged here and does not
+    affect the review outcome; an exception out of the Board is the caller's
+    to contain. *)
 
 module For_testing : sig
   val verdict_event_json :

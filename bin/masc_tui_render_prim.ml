@@ -5436,8 +5436,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     | Inspector.Observed (Error detail) ->
         ( Inspector.input_map_rows record None
         , None
-        , [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
-            ^ Ansi.reset ] )
+        , context_error_lines ~cols ~label:"Exact input unavailable" detail )
   in
   match state.context_inspector_exact with
   | Some index ->
@@ -5681,8 +5680,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         @ (match reading.record with
            | Inspector.Pending -> [ Ansi.dim ^ "  Turn record is still loading" ^ Ansi.reset ]
            | Inspector.Observed (Error detail) ->
-               [ (Theme.bad ()) ^ "  Turn record unavailable: "
-                 ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+               context_error_lines ~cols ~label:"Turn record unavailable" detail
            | Inspector.Observed (Ok exact) ->
                if exact.skipped_rows = 0 then [] else
                  [ Ansi.dim ^ Printf.sprintf "  Exact record found; %d unreadable history rows were encountered"
@@ -5694,9 +5692,11 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         | Split body -> Split { body with common = prefix @ body.common }
       in
       let pending label = Plain ([ Ansi.dim ^ "  " ^ label ^ " is still loading" ^ Ansi.reset ], None) in
-      let unavailable label detail = Plain
-          ([ (Theme.bad ()) ^ "  " ^ label ^ " unavailable: "
-             ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ], None) in
+      let unavailable label detail =
+        Plain
+          ( context_error_lines ~cols
+              ~label:(label ^ " unavailable") detail
+          , None ) in
       let scale = Option.fold ~none:Masc_tui_token_scale.fleet
           ~some:(fun record -> Masc_tui_token_scale.of_turn ~rows:[ record ] record) record in
       let body = match state.context_inspector_tab with
@@ -5757,9 +5757,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                   ~response_parts:(Masc_tui_context_inspector.Observed response) input
             | Error detail ->
                 Plain
-                  ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ]
+                  ( context_error_lines ~cols
+                      ~label:"Exact input unavailable" detail
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
            (

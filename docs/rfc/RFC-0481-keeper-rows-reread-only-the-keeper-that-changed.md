@@ -65,6 +65,7 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 | activation mode, sandbox profile 등 설정 필드 | 키퍼 TOML. 행은 TOML 값을 meta 위에 덮어 읽고(`keeper_meta_contract.ml:331`, `:343`), meta 파일에는 이 필드를 쓰지 않는다(`keeper_meta_json_parse.ml:318~324`). keeper_up 은 TOML 을 쓴 뒤 Owner `Update_profile` 을 commit 한다 | keeper_up 경로는 위 Owner 와 같음. 파일을 직접 고치거나 git 으로 바꾸면 없음 |
 | lane 관찰 | 실행 영수증 쓰기(`keeper_execution_receipt.ml:544`) | 일부 영수증만 Activity_graph 이벤트(`:521`) |
 | 초상, Candle 잔액 | Candle 원장(`Candle_ledger.update`)과 Candle 설정(`candle_observe.ml:6~27`). 원장 쓰기 하나가 여러 키퍼에 닿을 수 있다(선물) | 없음(`lib/candle*` 에 `Sse.` 호출 없음) |
+| provider 쉼(`runtime_path_rest`) | 그 키퍼 경로의 runtime 마다 쌓인 쉼 기록과 읽는 시각(`keeper_turn_driver.ml:345~404`). runtime 하나의 기록이 그 runtime 을 지나는 모든 키퍼에 닿는다 | 없음 |
 | 턴 자리, chat control token | 턴 자리는 `publish_turn_in_flight`(`keeper_owner.ml:610~615`)가 Atomic 으로 바꾸고 meta 를 쓰지 않는다. token 은 pause 전이(`:931~933`)와 `Pause_and_interrupt`(`:2529`)에서 바뀐다 | pause 전이만 Owner observer |
 | turn ref | `Keeper_autonomous_stream.create`(`:82`)·`finish`(`:195`). Owner 가 턴 자리를 알린 뒤에 생긴다(`keeper_unified_turn_execution.ml:176`, `keeper_owner.ml:2917`) | 없음 |
 
@@ -73,6 +74,11 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 ### 1.4 읽는 시각으로 정해지는 값
 
 `next_action` 은 턴을 한 번도 돌지 않은 키퍼가 만든 지 120초(`agent_staleness_threshold_s`)가 지났는지로 정해진다. 지나기 전이면 `Probe`, 지나면 `Direct_message` 다(`keeper_status_runtime.ml:230~243`, `:286~303`). 그 순간에는 아무것도 쓰이지 않는다. `health` 는 시각에 기대지 않는다(`:268`).
+
+읽는 시각으로 바뀌는 값이 둘 더 있다.
+
+- Candle 잔액은 반감기에 따라 줄어든다. `Candle_decay.remaining ~half_life ~since ~at ~amount_milli` 는 시계도 파일도 쓰지 않는 순수 함수다.
+- provider 쉼은 두 가지다. `Rest_until_answered` 는 provider 가 다시 응답해야(쉼 기록이 바뀌어야) 끝나고, 읽을 때마다 끝나는 시각이 `now` 뒤로 밀린다. `Rest_dated` 는 기록된 시각에 쓰기 없이 끝난다. 행은 끝나는 시각을 싣지 않는다(`keeper_tool_surface_ops.ml:307~316`).
 
 ### 1.5 미리보기
 
@@ -123,12 +129,13 @@ roster 경로에 `name=<키퍼>` 를 더한다. 그 키퍼의 행 하나(또는 
 | 쓰기 | 신호 |
 |---|---|
 | Owner commit(meta 저장소 `replace`·`remove`). paused, latched reason, 사용 카운터, `updated_at` 이 여기를 지난다. keeper_up 의 설정 변경도 `Update_profile` 로 여기를 지난다. 예외를 낸 쓰기와 저장소를 막은 첫 실패도 파일을 바꿨을 수 있어서 같이 알린다 | 그 키퍼 `keeper_row_changed` |
-| 키퍼 TOML 을 keeper_up 밖에서 바꿈(직접 편집, git) | 키퍼 설정 디렉터리 감시. 그 전까지는 Revalidate·`r` 로만 맞는다 |
+| 키퍼 TOML 을 keeper_up 밖에서 바꿈(직접 편집, git) | 없음. §6 의 한계대로 Revalidate·`r` 에서 맞는다 |
 | registry 항목 commit(단계, 실패 이유와 시각, keepalive). 맵을 바꾸는 곳은 `swap_in`·`swap_out` 둘뿐이다 | 그 키퍼. 행이 읽는 값이 바뀔 때만 |
 | registry 에 항목이 들어오고 나감 | 그 키퍼 |
 | `runtime.toml` 배정 트랜잭션, 기본 경로 변경, 설정 다시 읽기(catalogue publication 하나하나) | 모든 행(`keeper_roster_changed`). 행의 provider 쉼이 lane 후보, runtime, binding 까지 catalogue 전체를 읽어서, 배정 id 만 비교하면 놓친다 |
 | 실행 영수증 쓰기 | 그 키퍼 |
-| `Candle_ledger.update`, Candle 설정 변경 | 원장 쓰기가 닿는 키퍼마다. 설정은 모든 키퍼 |
+| `Candle_ledger.update`, Candle 설정 변경 | 원장 쓰기가 닿는 키퍼마다. 설정은 모든 행(`keeper_roster_changed`). 원장 라이브러리는 키퍼도 SSE 도 모르므로, 서버가 append 를 받는 hook 으로 이벤트에서 키퍼를 찾는다 |
+| provider 쉼 기록이 생기거나 지워짐 | 그 runtime 을 지나는 키퍼마다 |
 | `Keeper_autonomous_stream.create`·`finish` | 그 키퍼 |
 
 Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owner.ml:20~24`). 신호는 `Sse.broadcast` 한 번이라 이 조건을 지킨다. 다시 계산은 신호를 받은 쪽(TUI)이 읽기로 한다.
@@ -157,6 +164,11 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 
 `Probe` 는 health 가 failing 일 때와, healthy·idle 인 키퍼가 아직 시작 중일 때만 나온다(`keeper_status_runtime.ml:286~303`). 그래서 health 가 failing 이 아닌데 `next_action` 이 `Probe` 이면 시작 중이고, 값은 `created_at + 120초` 에 바뀐다. 행의 identity 에 `created_at` 이 있다. TUI 는 그 시각에 그 키퍼에 읽을 빚을 한 번 남긴다. 120초는 서버 상수 `Keeper_status_runtime.agent_staleness_threshold_s` 를 그대로 쓴다(TUI 가 이미 `Masc` 를 링크한다). 서버와 TUI 의 시계가 다르면 그만큼 늦거나 이르게 읽는다. 이르면 값이 아직 같고, 다음 신호나 다시 읽기가 맞춘다.
 
+### 3.7 읽는 시각으로 바뀌는 다른 값
+
+- Candle 잔액: 행에 잔액을 계산한 시각과 반감기를 같이 싣는다. TUI 는 그릴 때 같은 `Candle_decay.remaining` 으로 그 시각의 잔액을 계산한다. 서버 타이머도, 다시 읽기도 없다.
+- provider 쉼: `Rest_dated` 는 끝나는 시각을 행에 싣는다. TUI 는 §3.6 처럼 그 시각에 그 키퍼에 읽을 빚을 한 번 남긴다. `Rest_until_answered` 는 시각으로 끝나지 않으므로 싣지 않고, 쉼 기록이 바뀔 때의 신호(§3.2)로 맞춘다.
+
 ## 4. 규모
 
 - 키퍼 하나 읽기는 행 하나(약 0.2 KB)다. 빈도는 그 키퍼의 쓰기 수다. 2026-11-02 측정에서 `keeper_composite_changed` 는 전체 초당 0.40건, 키퍼 하나 최대 0.20건이었다. Owner commit 은 이보다 잦을 수 있다(턴마다 카운터). L2 에서 잰다.
@@ -176,6 +188,8 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 | L4 | 대기 목록 빈 곳 알림(일정, 확인 대기, fusion), TUI turns 의 2초 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
 | L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |
 | L6 | `next_action` 시각 읽기 | 120초 뒤 읽기 하나 |
+| L6b | Candle 잔액을 TUI 가 계산(§3.7), Candle 원장·설정 신호 | 원장 이벤트 하나 → 닿은 키퍼마다 신호, 그린 잔액 = 서버가 같은 시각에 계산한 잔액 |
+| L6c | provider 쉼 기록 신호, `Rest_dated` 끝나는 시각 읽기(§3.7) | 쉼이 생기고 끝날 때 그 runtime 의 키퍼마다 신호, 끝나는 시각에 읽기 하나 |
 
 L2 가 다 들어가기 전에는 L3 을 넣지 않는다. 신호가 빠진 필드는 L3 뒤에 멈추기 때문이다.
 

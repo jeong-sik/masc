@@ -204,7 +204,7 @@ else
   resolve_stderr=""
   # A signal trap replaces the default "terminate" action, so each signal
   # trap must exit itself (128+n); that exit then runs the EXIT trap.
-  trap 'rm -f "$resolve_stderr"' EXIT
+  trap 'rm -f "$resolve_stderr"' EXIT HUP INT TERM
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -213,7 +213,7 @@ else
   resolution=$("$preflight_helper" "${resolve_args[@]}" 2>"$resolve_stderr") || resolve_status=$?
   resolve_errors=$(cat "$resolve_stderr")
   rm -f "$resolve_stderr"
-  trap - EXIT HUP INT TERM
+  trap - EXIT HUP INT TERM HUP INT TERM
   if [ "$resolve_status" -eq 0 ]; then
     :
   elif "$preflight_helper" build-commit >/dev/null 2>&1 \

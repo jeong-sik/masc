@@ -32,6 +32,9 @@ class RuntimeInstallArtifact(unittest.TestCase):
             destination = self.repo / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / name, destination)
+            # The tree dune copies into _build can arrive without owner-write;
+            # the fixture repo is this test's own to edit.
+            destination.chmod(destination.stat().st_mode | 0o200)
             # dune copies sources into _build without owner-write; the fixture
             # repo is this test's own to edit.
             destination.chmod(destination.stat().st_mode | 0o200)

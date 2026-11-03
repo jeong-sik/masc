@@ -39807,9 +39807,9 @@ Use relative paths for resources already held in the package. -->
                 at human speed. *)
              ()
          | Schedules ->
-             (* Rows cross their due time and turn terminal while an operator
-                watches; the page that answers "why is this keeper awake"
-                holds a reading from when the operator arrived otherwise. *)
+             (* A row's own changes are announced ([schedules_changed]), but
+                each row also carries its Keeper's queue and reaction
+                evidence, and those stores announce nothing yet. *)
              launch_schedules_load state ~mailbox:async_messages
          (* Changes is not on the timer. The read parses every row in the
             window's date files -- seconds, not milliseconds -- and the answer

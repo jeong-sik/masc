@@ -627,7 +627,9 @@ let test_only_a_confirmation_change_reads_the_confirmations () =
        [ pending_confirms_frame ])
 
 let schedules_frame =
-  Printf.sprintf "data: {\"type\":%S}\n\n" Masc.Schedules_changed_event.event_type
+  {|data: {"type":"schedules_changed"}
+
+|}
 
 let test_only_a_schedule_change_reads_the_schedules () =
   check (list string) "a schedule change decodes as one" [ "schedules" ]

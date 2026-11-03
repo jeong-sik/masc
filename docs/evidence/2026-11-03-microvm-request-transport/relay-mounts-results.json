@@ -1,0 +1,48 @@
+[
+  {
+    "variant": "readonly_volume",
+    "flags": [
+      "--cap-add",
+      "CAP_SETUID",
+      "--cap-add",
+      "CAP_SETGID",
+      "--cap-drop",
+      "ALL",
+      "--rm",
+      "--read-only",
+      "--tmpfs",
+      "/tmp",
+      "-v",
+      "masc-relayprobe-vol:/agentvol"
+    ],
+    "guest_sock": "/agentvol/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "b''",
+    "held_open": "b''",
+    "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\"}",
+    "agent_log": "cat: /tmp/agent-conn.log: No such file or directory"
+  },
+  {
+    "variant": "readonly_hostdir",
+    "flags": [
+      "--cap-add",
+      "CAP_SETUID",
+      "--cap-add",
+      "CAP_SETGID",
+      "--cap-drop",
+      "ALL",
+      "--rm",
+      "--read-only",
+      "--tmpfs",
+      "/tmp",
+      "-v",
+      "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/sshprobe/bindprobe:/agentbind"
+    ],
+    "guest_sock": "/agentbind/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "b''",
+    "held_open": "b''",
+    "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\"}",
+    "agent_log": "cat: /tmp/agent-conn.log: No such file or directory"
+  }
+]

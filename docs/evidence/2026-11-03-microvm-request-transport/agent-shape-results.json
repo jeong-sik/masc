@@ -1,0 +1,89 @@
+{
+  "started_at": "2026-11-03T12:04:44+0900",
+  "cases": [
+    {
+      "case": "naive",
+      "run_rc": 0,
+      "run_err": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [0s]",
+      "ready": "EOFError('closed before reply')",
+      "guest_log_tail": "",
+      "agent_status": "{\"mode\": \"same-uid\", \"start_uid\": 502, \"uid\": 502, \"gid\": 20, \"dumpable\": 1, \"no_new_privs\": 0, \"dir_mode\": null}",
+      "inspect_init": [
+        "python3",
+        "/opt/probe/agent_probe.py",
+        "/tmp/masc-agent/agent.sock",
+        "same-uid"
+      ],
+      "inspect_user": {
+        "raw": {
+          "userString": "502:20"
+        }
+      },
+      "inspect_published_sockets": [
+        {
+          "containerPath": "/tmp/masc-agent/agent.sock",
+          "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/sa/naive.sock"
+        }
+      ],
+      "inspect_has_init_field": {
+        "useInit": false
+      }
+    },
+    {
+      "case": "root_drop",
+      "run_rc": 0,
+      "run_err": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [0s]",
+      "ready": "EOFError('closed before reply')",
+      "guest_log_tail": "",
+      "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\"}",
+      "inspect_init": [
+        "python3",
+        "/opt/probe/agent_probe.py",
+        "/run/masc-agent/agent.sock",
+        "root-drop"
+      ],
+      "inspect_user": {
+        "raw": {
+          "userString": "root"
+        }
+      },
+      "inspect_published_sockets": [
+        {
+          "containerPath": "/run/masc-agent/agent.sock",
+          "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/sa/root_drop.sock"
+        }
+      ],
+      "inspect_has_init_field": {
+        "useInit": false
+      }
+    },
+    {
+      "case": "root_drop_init",
+      "run_rc": 0,
+      "run_err": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [0s]",
+      "ready": "EOFError('closed before reply')",
+      "guest_log_tail": "",
+      "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\"}",
+      "inspect_init": [
+        "python3",
+        "/opt/probe/agent_probe.py",
+        "/run/masc-agent/agent.sock",
+        "root-drop"
+      ],
+      "inspect_user": {
+        "raw": {
+          "userString": "root"
+        }
+      },
+      "inspect_published_sockets": [
+        {
+          "containerPath": "/run/masc-agent/agent.sock",
+          "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/sa/root_drop_init.sock"
+        }
+      ],
+      "inspect_has_init_field": {
+        "useInit": true
+      }
+    }
+  ]
+}

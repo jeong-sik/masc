@@ -18,7 +18,7 @@
 
 ## 결과
 
-### `bin/measure.py` — SSH 와 `container exec` (결과: `ssh-and-exec-results.json`)
+### `bin/measure.py` — SSH 와 `container exec` (결과: `ssh-and-exec-results.json`, 스크립트가 쓰는 이름은 `results.json`)
 
 이미지 `masc-ssh-wkbl-team:20261028`, `-p 127.0.0.1:22299:22`, 게스트 sshd 는 `kit/entrypoint.sh`.
 
@@ -60,6 +60,8 @@ Keeper 이미지 `masc-sandbox-ocaml:20260928T0216Z-c48e1e05`, Keeper 와 같은
 | 같은 컨테이너에 `container exec -i` 20번 (대조군) | +20 | +20 |
 
 macOS 의 unix 소켓 경로 제한(104 바이트) 때문에 호스트 소켓은 저장소의 짧은 `.tmp/sp/` 아래에 두었어요. 측정 뒤 지웠어요.
+이 시험의 클라이언트는 요청을 보낸 뒤 쓰기 쪽을 닫았어요(`shutdown(SHUT_WR)`). 쓰기 쪽을 열어 둔 요청은 아래 `agent_shape.py` 측정에서 따로 쟀어요.
+이 시험의 원본 출력 파일은 없어요. 표는 실행 당시 출력을 옮긴 거예요.
 
 ### `bin/msb_exec.py` — msb `exec`
 
@@ -73,6 +75,26 @@ alpine 샌드박스 하나. 세는 대상은 이름에 msb·krun 이 들어간 �
 | `msb exec ... -- true` | 30 | 1 → 1 | 45 |
 
 msb 쪽은 누수를 일부러 일으키는 대조군이 없어요.
+
+### Keeper VM 조건의 agent (`bin/agent_shape.py`, `bin/relay_flags.py`, `kit/agent_probe.py`, `kit/hijack.py`)
+
+리뷰에서 앞 측정이 Keeper VM 조건(`--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`, `--rm`)이 아니라는 지적을 받고 다시 쟀어요.
+게스트 쪽은 python stand-in(`kit/agent_probe.py`)이에요. 요청은 4 바이트 길이 + 본문이고, 호스트는 응답을 받을 때까지 쓰기 쪽을 열어 둬요.
+
+1. `agent-shape-results.json`: Keeper 조건 그대로(`--read-only --tmpfs /tmp`, 소켓은 `/tmp` 또는 `--tmpfs /run` 위). 세 경우 모두 agent 는 떴지만 호스트 요청이 응답 전에 닫혔어요.
+   같은 파일에 `container inspect` 결과가 있어요. `--init` 은 `initProcess` 를 바꾸지 않고 `useInit` 만 `true` 로 바꿔요. `publishedSockets` 도 inspect 에 나와요.
+2. `relay-flags-results.json`: 옵션을 하나씩 바꿔서 원인을 찾았어요. 소켓이 tmpfs 위에 있을 때만 relay 가 agent 에 닿지 않아요(agent 연결 로그가 비어 있음). rootfs 하위 디렉터리, `--cap-drop ALL --rm`, 쓰기 쪽을 열어 둔 요청은 모두 됐어요.
+3. `relay-mounts-results.json`: `--read-only` 에서 소켓을 이름 붙은 볼륨이나 호스트 디렉터리 마운트 위에 두어도 닿지 않았어요.
+4. `agent-rootfs-results.json`: `--cap-drop ALL --rm`, rootfs 위 소켓. `agent_shape.py` 의 `KEEPER_FLAGS`·`CASES` 를 이 두 경우로 바꿔 실행했어요.
+   - Keeper uid agent + Keeper uid 디렉터리: 순차 100(p50 3.4ms)·동시 20·60초 대기 정상, 전체 fd 48 → 48. Keeper uid 의 가로채기가 성공했고 다음 요청에 가짜가 답했어요.
+   - root 로 0700 디렉터리에 묶고 502 로 내려감(`--cap-add CAP_SETUID --cap-add CAP_SETGID`): 같은 요청 정상(p50 0.5ms), 가로채기는 unlink·bind 모두 권한 거부, 다음 요청에 진짜가 답했어요.
+5. `agent-remount-results.json`: 위 root 배치에 `--tmpfs /tmp` 를 더하고, 한 경우는 `CAP_SYS_ADMIN` 을 더해 묶은 직후 `/` 를 `MS_REMOUNT|MS_RDONLY` 로 다시 마운트했어요.
+   - 다시 마운트하지 않은 경우: Keeper uid 가 `/var/tmp` 에 썼어요.
+   - 다시 마운트한 경우: 다시 마운트가 성공했고, Keeper uid 의 같은 쓰기는 `Read-only file system` 이었어요. 요청은 모두 정상(p50 0.6ms), 가로채기는 권한 거부였어요.
+   - 두 경우 모두 agent 가 내려간 뒤 `dumpable` 0, `no_new_privs` 1 이에요. capability 값은 읽지 않았어요.
+
+`bin/agent_shape.py` 는 2번 측정 뒤 연결 로그를 남기게, `kit/agent_probe.py` 는 5번 측정 전에 `root-drop-ro` 모드와 rootfs 쓰기 확인을 더하게 고쳤어요. 저장소의 파일은 마지막 상태예요.
+`bin/pipeleak.py` 는 10-28 부터 쓴 호스트 pipe 측정 스크립트예요(`once` 가 표를 찍어요). PIPE fd 만 세므로 소켓이나 vsock 누수는 못 봐요. 그래서 위 측정은 runtime 의 전체 fd 수도 같이 셌어요.
 
 ## 로그 집계 (`<base-path>/.masc/logs/system_log_<날짜>.jsonl`)
 
@@ -101,4 +123,5 @@ msb 쪽은 누수를 일부러 일으키는 대조군이 없어요.
   `ssh-keygen -t ed25519 -N '' -f client/id_probe` 로 만들고 `client/id_probe.pub` 를 `kit/authorized_keys` 로 복사해요.
 - `python3 -I bin/measure.py`, `python3 -I bin/variants.py`, `python3 -I bin/socket_relay.py`, `python3 -I bin/msb_exec.py`.
   모두 시험 컨테이너를 만들고 끝나면 지워요.
-- `socket_relay.py` 의 `SOCK_DIR` 은 소켓 경로 제한 때문에 짧은 로컬 경로로 고쳐 써야 해요.
+- `socket_relay.py`, `agent_shape.py`, `relay_flags.py` 의 `SOCK_DIR` 은 소켓 경로 제한 때문에 짧은 로컬 경로로 고쳐 써야 해요.
+- `python3 -I bin/agent_shape.py`, `python3 -I bin/relay_flags.py` 도 같은 방식이에요. 4·5번 측정은 위에 적은 대로 `KEEPER_FLAGS`·`CASES` 를 바꿔 실행했어요.

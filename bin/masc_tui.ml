@@ -8767,8 +8767,9 @@ let keeper_schedules_on_screen state =
       None
 
 (* One Keeper's schedules read again under the same rules as the fleet list,
-   while the chat pane or the Automation tab draws them. Opening either reads
-   them directly. *)
+   while the chat pane or the Automation tab draws them: drawing a Keeper owes
+   the read, and so do a change, a revalidation, a resumed authority and a
+   failed read. *)
 let owe_keeper_schedules_read state =
   Option.iter
     (fun keeper ->
@@ -8802,17 +8803,29 @@ let keeper_schedules_reading state ~keeper_name =
       | None -> false)
   | Some _ | None -> false
 
-(* Runs on every loop iteration. A Keeper no longer drawn drops its record:
-   drawing it again reads it. *)
+(* The answer is the current read of its Keeper's schedules, not one a newer
+   read replaced. *)
+let keeper_schedules_answer_current state (request : keeper_schedule_page_request) =
+  match pending_detail_read state ~tab:Detail_automation ~keeper:request.kspr_detail.drr_keeper with
+  | Some current -> current.drr_generation = request.kspr_detail.drr_generation
+  | None -> false
+
+(* Runs on every loop iteration. The record follows the Keeper drawn: a
+   Keeper no longer drawn drops it, and a Keeper newly drawn owes the read,
+   which a read already on the wire for it answers. *)
 let launch_owed_keeper_schedules state ~mailbox =
-  match state.keeper_schedules_owed with
-  | None -> ()
-  | Some owed
-    when not (Option.equal String.equal (keeper_schedules_on_screen state) (Some owed.kso_keeper)) ->
-      state.keeper_schedules_owed <- None
-  | Some owed ->
-      let keeper_name = owed.kso_keeper in
+  match keeper_schedules_on_screen state with
+  | None -> state.keeper_schedules_owed <- None
+  | Some keeper_name ->
       let reading = keeper_schedules_reading state ~keeper_name in
+      let owed =
+        match state.keeper_schedules_owed with
+        | Some owed when String.equal owed.kso_keeper keeper_name -> owed
+        | Some _ | None ->
+            let read = Masc_tui_owed_read.changed Masc_tui_owed_read.settled in
+            { kso_keeper = keeper_name;
+              kso_read = (if reading then Masc_tui_owed_read.started read else read) }
+      in
       let read =
         if reading then owed.kso_read else Masc_tui_owed_read.abandoned owed.kso_read
       in
@@ -24027,10 +24040,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
   | Keeper_schedules_loaded (request, result) ->
-      let keeper = request.kspr_detail.drr_keeper in
-      let current = keeper_schedules_reading state ~keeper_name:keeper in
+      let current = keeper_schedules_answer_current state request in
       apply_keeper_schedules_read state request result;
-      if current then settle_keeper_schedules_read state ~keeper result
+      if current then
+        settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper result
   | Schedule_cancel_done (schedule_id, result) -> (
       match result with
       | Ok message ->

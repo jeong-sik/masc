@@ -4931,7 +4931,7 @@ let test_truncated_auth_probe_keeps_cli_stderr () =
          ~auth_stderr:"boom:\tkeychain denied" []
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+            | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
                 check bool "truncated probe names the stage" true
                   (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
                 check bool "truncated probe keeps the cli stderr" true
@@ -4966,11 +4966,43 @@ let test_cut_auth_probe_reports_stdout_bytes () =
     (fun () ->
        with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
          match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+         | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
              check bool "persistent cut names the byte count" true
                (Astring.String.is_infix ~affix:"(stdout 18 bytes)" detail)
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok _ -> fail "cut auth probe completed the Keeper turn"))
+;;
+
+(* Only this binding reads its CLI's auth document, before any request is
+   built. A cut one is that binding refusing the turn (#47787): nothing was
+   sent, and the lane walk moves to its next candidate instead of ending the
+   turn on the first one. *)
+let test_cut_auth_probe_rotates_the_lane_before_dispatch () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         let attempt =
+           run_direct_attempt ~base_path ~cli_path ~goal:"AUTH_PROBE" ~tools:[] ()
+         in
+         (match attempt.Keeper_claude_code_runtime.result with
+          | Error
+              (Agent_core.Error.Api
+                 (Llm_provider.Retry.InvalidRequest
+                    { reason = Llm_provider.Retry.Attempt_rejected; _ }) as error) ->
+              check bool "the lane walk moves to the next candidate" true
+                (Keeper_turn_driver.For_testing.lane_should_retry
+                   ~is_last:false ~allow_retry:true ~allow_accept_no_progress_retry:true
+                   error);
+              check string "the walk records no dispatch" "rejected_before_dispatch"
+                (Keeper_attempt_dispatch.to_string
+                   (Keeper_turn_driver.For_testing.official_client_dispatch
+                      ~provider_config_transform:None (Error error)))
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ -> fail "cut auth probe completed the Keeper turn");
+         check string "cut auth probe is proven pre-dispatch" "no_effect_observed"
+           (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
 ;;
 
 let test_truncated_auth_probe_without_stderr_keeps_detail () =
@@ -4980,7 +5012,7 @@ let test_truncated_auth_probe_without_stderr_keeps_detail () =
     (fun () ->
        with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
          match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+         | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
              check bool "truncated probe names the stage" true
                (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
              check bool "no stderr marker without stderr" false
@@ -4998,7 +5030,7 @@ let test_truncated_auth_probe_truncates_long_stderr () =
          ~auth_stderr:(String.make 400 'a') []
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+            | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
                 check bool "long stderr is capped with an ellipsis" true
                   (Astring.String.is_infix
                      ~affix:("; stderr: " ^ String.make 300 'a' ^ "…") detail)
@@ -5014,7 +5046,7 @@ let test_blank_auth_stderr_keeps_detail_bare () =
        with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 ~auth_stderr:"   " []
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+            | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
                 check bool "no stderr marker for blank stderr" false
                   (Astring.String.is_infix ~affix:"; stderr:" detail)
             | Error error -> fail (Agent_core.Error.to_string error)
@@ -5492,84 +5524,118 @@ let test_incomplete_user_write_timeout_fences_retry () =
         (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)))
 ;;
 
+(* A one-shot walk over a two-candidate Claude Code lane: the first CLI, then
+   the second. Returns the candidates attempted, in order, and the outcome. *)
+let run_claude_failover_lane ~base_path ~first_cli ~second_cli =
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path ~sandbox_profile:None "claude-fixture";
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let config_path = Filename.temp_file "masc-keeper-claude-failover-" ".toml" in
+  let toml =
+    Printf.sprintf
+      "[providers.claude_first]\n\
+       protocol = \"claude-code\"\n\
+       command = %S\n\
+       is-non-interactive = true\n\
+       \n\
+       [providers.claude_second]\n\
+       protocol = \"claude-code\"\n\
+       command = %S\n\
+       is-non-interactive = true\n\
+       \n\
+       [models.claude]\n\
+       api-name = \"claude-fixture\"\n\
+       max-context = 200000\n\
+       tools-support = true\n\
+       \n\
+       [claude_first.claude]\n\
+       \n\
+       [claude_second.claude]\n\
+       \n\
+       [runtime.lanes.claude_failover]\n\
+       candidates = [\"claude_first.claude\", \"claude_second.claude\"]\n\
+       \n\
+       [runtime]\n\
+       default = \"claude_failover\"\n"
+      first_cli
+      second_cli
+  in
+  let attempted = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists config_path then Sys.remove config_path;
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       Out_channel.with_open_bin config_path (fun oc -> output_string oc toml);
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           Eio_context.set_env env;
+           Eio_context.with_test_env
+             ~net:(Eio.Stdenv.net env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~mono_clock:(Eio.Stdenv.mono_clock env)
+             ~sw
+             (fun () ->
+                Runtime.init_default ~config_path |> Result.get_ok;
+                let outcome =
+                  Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-fixture" })
+                    ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                    ~runtime_id:"claude_failover"
+                    ~keeper_name:"claude-fixture"
+                    ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+                    ~goal:"FAILOVER_GOAL"
+                    ~system_prompt:"pre-dispatch fixture system prompt"
+                    ~tools:[]
+                    ~agent_core_tools:[]
+                    ~initial_messages:[]
+                    ~raw_trace:None
+                    ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
+                      attempted := !attempted @ [ attempt.runtime_id ])
+                    ~sw
+                    ~net:(Eio.Stdenv.net env)
+                    ()
+                in
+                !attempted, outcome))))
+;;
+
+(* #47787: the first candidate's auth document is cut on every probe. The
+   walk hands the turn to the second candidate, which answers it. *)
+let test_cut_auth_probe_hands_the_turn_to_the_next_candidate () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cut_auth_cli ->
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-after-cut-auth" "MASC_CLAUDE_AUTH_FAILOVER_OK")
+           ; Emit (result ~turn_id:"turn-after-cut-auth" "MASC_CLAUDE_AUTH_FAILOVER_OK")
+           ]
+           (fun fallback_cli ->
+              let attempted, outcome =
+                run_claude_failover_lane
+                  ~base_path ~first_cli:cut_auth_cli ~second_cli:fallback_cli
+              in
+              check (list string)
+                "cut auth probe rotates to the second candidate"
+                [ "claude_first.claude"; "claude_second.claude" ]
+                attempted;
+              match outcome with
+              | Error error -> fail (Agent_core.Error.to_string error)
+              | Ok selected ->
+                check string "selected fallback candidate"
+                  "claude_second.claude" selected.selected_runtime_id;
+                check string "fallback answer"
+                  "MASC_CLAUDE_AUTH_FAILOVER_OK"
+                  (keeper_response_text selected.run_result))))
+;;
+
 (* #42212: when a Claude Code child exits before the turn prompt is sent
    ([turn_admitted = false]), no turn was submitted, so [effect_disposition]
    stays [No_effect_observed] and the lane walk rotates to the next candidate.
    Once the prompt is sent ([turn_admitted = true]), an exit before a terminal
    result fences the turn with [Observation_unavailable]. *)
 let test_exit_before_turn_admission_rotates_to_next_candidate () =
-  let run_failover_lane ~base_path ~first_cli ~second_cli =
-    Masc_test_deps.declare_fixture_keeper
-      ~base_path ~sandbox_profile:None "claude-fixture";
-    let runtime_snapshot = Runtime.For_testing.snapshot () in
-    let config_path = Filename.temp_file "masc-keeper-claude-failover-" ".toml" in
-    let toml =
-      Printf.sprintf
-        "[providers.claude_first]\n\
-         protocol = \"claude-code\"\n\
-         command = %S\n\
-         is-non-interactive = true\n\
-         \n\
-         [providers.claude_second]\n\
-         protocol = \"claude-code\"\n\
-         command = %S\n\
-         is-non-interactive = true\n\
-         \n\
-         [models.claude]\n\
-         api-name = \"claude-fixture\"\n\
-         max-context = 200000\n\
-         tools-support = true\n\
-         \n\
-         [claude_first.claude]\n\
-         \n\
-         [claude_second.claude]\n\
-         \n\
-         [runtime.lanes.claude_failover]\n\
-         candidates = [\"claude_first.claude\", \"claude_second.claude\"]\n\
-         \n\
-         [runtime]\n\
-         default = \"claude_failover\"\n"
-        first_cli
-        second_cli
-    in
-    let attempted = ref [] in
-    Fun.protect
-      ~finally:(fun () ->
-        if Sys.file_exists config_path then Sys.remove config_path;
-        Keeper_tool_call_log.reset_for_testing ();
-        Runtime.For_testing.restore runtime_snapshot)
-      (fun () ->
-         Out_channel.with_open_bin config_path (fun oc -> output_string oc toml);
-         Eio_main.run (fun env ->
-           Eio.Switch.run (fun sw ->
-             Eio_context.set_env env;
-             Eio_context.with_test_env
-               ~net:(Eio.Stdenv.net env)
-               ~clock:(Eio.Stdenv.clock env)
-               ~mono_clock:(Eio.Stdenv.mono_clock env)
-               ~sw
-               (fun () ->
-                  Runtime.init_default ~config_path |> Result.get_ok;
-                  let outcome =
-                    Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-fixture" })
-                      ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
-                      ~runtime_id:"claude_failover"
-                      ~keeper_name:"claude-fixture"
-                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
-                      ~goal:"FAILOVER_GOAL"
-                      ~system_prompt:"pre-dispatch fixture system prompt"
-                      ~tools:[]
-                      ~agent_core_tools:[]
-                      ~initial_messages:[]
-                      ~raw_trace:None
-                      ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
-                        attempted := !attempted @ [ attempt.runtime_id ])
-                      ~sw
-                      ~net:(Eio.Stdenv.net env)
-                      ()
-                  in
-                  !attempted, outcome))))
-  in
   let base_path = temp_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -5603,7 +5669,7 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
                   | _ -> fail (Agent_core.Error.to_string error))
                | Ok _ -> fail "pre-admission exit completed the direct attempt");
               let attempted, outcome =
-                run_failover_lane
+                run_claude_failover_lane
                   ~base_path
                   ~first_cli:pre_admission_cli
                   ~second_cli:fallback_cli
@@ -5631,7 +5697,7 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
            ]
            (fun fallback_cli ->
               let attempted, outcome =
-                run_failover_lane
+                run_claude_failover_lane
                   ~base_path:post_admission_base
                   ~first_cli:post_admission_cli
                   ~second_cli:fallback_cli
@@ -6745,6 +6811,10 @@ let () =
             `Quick
             test_cut_auth_probe_reports_stdout_bytes
         ; test_case
+            "cut auth probe rotates the lane before dispatch"
+            `Quick
+            test_cut_auth_probe_rotates_the_lane_before_dispatch
+        ; test_case
             "truncated auth probe without stderr keeps detail"
             `Quick
             test_truncated_auth_probe_without_stderr_keeps_detail
@@ -6862,6 +6932,10 @@ let () =
             "a process exit before turn admission rotates to the next lane candidate"
             `Quick
             test_exit_before_turn_admission_rotates_to_next_candidate
+        ; test_case
+            "a cut auth probe hands the turn to the next lane candidate"
+            `Quick
+            test_cut_auth_probe_hands_the_turn_to_the_next_candidate
         ; test_case
             "an unhandled runtime exception is a masc internal error"
             `Quick

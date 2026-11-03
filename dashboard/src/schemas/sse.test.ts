@@ -38,6 +38,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('reaction_changed')).toBe('reaction_changed')
   })
 
+  it('accepts board post changes', () => {
+    expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
+  })
+
   it('rejects an unknown event type', () => {
     const r = SSEEventTypeSchema.safeParse('this_is_not_a_real_event')
     expect(r.success).toBe(false)

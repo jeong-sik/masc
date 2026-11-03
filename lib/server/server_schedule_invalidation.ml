@@ -15,12 +15,16 @@ let invalidate ~base_path =
 
 (* The store callback only records work and wakes a switch-owned worker.
    Fanout and disconnect hooks may yield, so they must not run on a schedule
-   mutation's completion path. *)
+   mutation's completion path. A change is counted when it is published,
+   since a reader can read the list only after that. *)
 let start_with ~sw ~mono_clock ~publish ~invalidate =
+  let publish ~base_path =
+    Atomic.incr notice_count;
+    publish ~base_path
+  in
   let enqueue = Server_workspace_invalidation.start ~sw ~mono_clock ~publish in
   let observer ~base_path =
     invalidate ~base_path;
-    Atomic.incr notice_count;
     enqueue ~base_path
   in
   Schedule_store.install_change_observer observer;

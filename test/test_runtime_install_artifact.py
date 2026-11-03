@@ -32,6 +32,9 @@ class RuntimeInstallArtifact(unittest.TestCase):
             destination = self.repo / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / name, destination)
+            # dune copies sources into _build without owner-write; the fixture
+            # repo is this test's own to edit.
+            destination.chmod(destination.stat().st_mode | 0o200)
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         subprocess.run(["git", "-C", str(self.repo), "add", "scripts"], check=True)
         subprocess.run(["git", "-C", str(self.repo), "-c", "core.hooksPath=/dev/null", "-c", "user.name=Fixture",

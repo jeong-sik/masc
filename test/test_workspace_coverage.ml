@@ -574,6 +574,12 @@ let test_claim_next_claims_another_task_while_holding_one () =
       holders)
 ;;
 
+let write_tasks config tasks =
+  (* [write_backlog] stamps version/last_updated at the commit point. *)
+  let backlog = Workspace.read_backlog config in
+  Workspace.write_backlog config { backlog with tasks }
+;;
+
 (* Every commit must advance [version] by exactly one, stamped at the single
    commit point rather than by caller convention. A caller that kept a manual
    bump would surface here as a +2 jump. *)

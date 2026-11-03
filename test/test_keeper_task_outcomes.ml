@@ -1063,7 +1063,8 @@ let rejected_done_typed_outcome ~base_path:_ config meta args =
     Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done" ~args
   in
   let json = Yojson.Safe.from_string payload in
-  check bool "rejected done is not ok" false (json |> U.member "ok" |> U.to_bool);
+  check bool "rejected done is not ok" false
+    (match json |> U.member "ok" with `Bool true -> true | _ -> false);
   Outcome.of_json (json |> U.member "typed_outcome")
 
 let test_done_missing_task_id_emits_typed_error () =

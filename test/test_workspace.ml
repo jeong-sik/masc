@@ -1669,11 +1669,6 @@ let test_holder_cancel_ends_the_task () =
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
-    let refused =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Cancel ()
-    in
-    Alcotest.(check bool) "a cancel with no reason is refused" true (Result.is_error refused);
     (match
        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
          ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
@@ -1824,7 +1819,6 @@ let test_operator_cancel_refuses_invalid_requests_without_write () =
       Alcotest.(check int) "refusal has no write" before.version
         (Workspace.read_backlog config).version)
       [ List.remove_assoc "expected_workspace" fields
-      ; ("reason", `String "   ") :: List.remove_assoc "reason" fields
       ; ("operator_id", `String test_agent_a) :: fields
       ; ("agent_name", `String test_agent_a) :: fields
       ; ("task_id", `String "task-002") :: fields

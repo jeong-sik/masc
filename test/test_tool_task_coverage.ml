@@ -2095,7 +2095,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
-let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () ->
+let () = test "handle_claim_takes_a_second_task_while_holding_one" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task
@@ -2126,12 +2126,7 @@ let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () 
       ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
-  assert (not (Tool_result.is_success second));
-  (* This asserted "task(s) in progress: task-001", the wording of the by-id
-     refusal before it shared claim_next's sentence. What it was pinning -- that
-     the refusal names the Task actually held -- is unchanged. *)
-  assert (str_contains (Tool_result.message second) "already holds");
-  assert (str_contains (Tool_result.message second) "task-001");
+  if not (Tool_result.is_success second) then failwith (Tool_result.message second);
   let task_001 =
     Workspace.get_tasks_raw ctx.config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
@@ -2146,8 +2141,9 @@ let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () 
   | Some _ -> failwith "task-001 should remain claimed"
   | None -> failwith "task-001 missing");
   match task_002 with
-  | Some { task_status = Masc_domain.Todo; _ } -> ()
-  | Some _ -> failwith "task-002 should remain todo"
+  | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ } ->
+    assert (String.equal assignee "test-agent")
+  | Some _ -> failwith "task-002 should be claimed"
   | None -> failwith "task-002 missing"
 )
 

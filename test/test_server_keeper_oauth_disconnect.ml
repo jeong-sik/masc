@@ -344,8 +344,11 @@ let test_disconnect_revokes_with_the_logins_client_and_forgets_it () =
    | Error message -> Alcotest.failf "seeding the binding failed: %s" message);
   let revoked = ref [] in
   let transports =
-    { Masc.Keeper_identity_tools.mcp_post = (fun ~url:_ ~headers:_ ~body:_ ->
-          Alcotest.fail "disconnect reached the MCP server")
+    { Masc.Keeper_identity_tools.mcp_post =
+            { Mcp_client.deadline_s = 60.
+            ; send = (fun ~deadline:_ ~url:_ ~headers:_ ~body:_ ->
+                Alcotest.fail "disconnect reached the MCP server")
+            }
     ; token_post = (fun ~url ~headers:_ ~body ->
           revoked := (url, body) :: !revoked;
           Ok (200, "{}"))
@@ -402,8 +405,11 @@ let test_disconnect_sends_no_revoke_without_the_logins_client () =
        Out_channel.with_open_bin path (fun oc -> output_string oc "{not json"));
     let posted = ref 0 in
     let transports =
-      { Masc.Keeper_identity_tools.mcp_post = (fun ~url:_ ~headers:_ ~body:_ ->
-            Alcotest.fail "disconnect reached the MCP server")
+      { Masc.Keeper_identity_tools.mcp_post =
+              { Mcp_client.deadline_s = 60.
+              ; send = (fun ~deadline:_ ~url:_ ~headers:_ ~body:_ ->
+                  Alcotest.fail "disconnect reached the MCP server")
+              }
       ; token_post = (fun ~url:_ ~headers:_ ~body:_ ->
             incr posted;
             Ok (200, "{}"))
@@ -641,8 +647,11 @@ let test_a_login_names_the_callback_its_provider_accepts () =
       }
   in
   let transports =
-    { Masc.Keeper_identity_tools.mcp_post = (fun ~url:_ ~headers:_ ~body:_ ->
-          Alcotest.fail "a login start reached the MCP server")
+    { Masc.Keeper_identity_tools.mcp_post =
+            { Mcp_client.deadline_s = 60.
+            ; send = (fun ~deadline:_ ~url:_ ~headers:_ ~body:_ ->
+                Alcotest.fail "a login start reached the MCP server")
+            }
     ; token_post = (fun ~url:_ ~headers:_ ~body:_ -> Alcotest.fail "a login start redeemed a token")
     ; discover = Fake_provider.discover
     }

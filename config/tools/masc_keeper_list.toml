@@ -32,5 +32,6 @@ name = "name"
 type = "string"
 description = """
 Return only this keeper's row (or its error row), or no row when it is not \
-listed. total counts the matched names. The answer is never served from the \
-list cache and carries projection_cache_bypassed=true."""
+listed. The answer echoes name, total counts the matched names, and limit does \
+not hide the row. It is never served from the list cache and carries \
+projection_cache_bypassed=true."""

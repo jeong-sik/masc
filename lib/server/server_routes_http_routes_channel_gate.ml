@@ -469,7 +469,8 @@ let keeper_list_max_limit = 200
     Authenticated keeper discovery for channel-side connectors. [limit] only
     narrows: it is clamped to [1, keeper_list_max_limit] and defaults to the
     bound. [name] narrows the roster to that Keeper's row, or to no row when
-    it is not listed; that read never uses the list cache. *)
+    it is not listed; that read never uses the list cache and is not cut by
+    [limit]. A [name] that is not one Keeper name answers 400. *)
 let handle_gate_keepers ~sw ~clock state request reqd =
   let config = Mcp_server.workspace_config state in
   let expected_fields =
@@ -514,15 +515,13 @@ let handle_gate_keepers ~sw ~clock state request reqd =
     |> function
        | [] -> Ok None
        | [ (_, [ raw ]) ] ->
-           (match String.trim raw with
-            | "" -> Error ()
-            | name -> Ok (Some name))
-       | _ -> Error ()
+           Result.map Option.some (Keeper_id.Keeper_name.of_string (String.trim raw))
+       | _ -> Error "name must be one keeper name"
   in
   match named with
-  | Error () ->
+  | Error detail ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
-        (Channel_gate.error_json "name must be one keeper name")
+        (Channel_gate.error_json detail)
   | Ok named ->
   let limit =
     int_query_param request "limit" ~default:keeper_list_max_limit
@@ -534,7 +533,7 @@ let handle_gate_keepers ~sw ~clock state request reqd =
       ([ ("limit", `Int limit); ("detailed", `Bool detailed); ("fresh", `Bool fresh) ]
        @ match named with
          | None -> []
-         | Some name -> [ ("name", `String name) ])
+         | Some name -> [ ("name", `String (Keeper_id.Keeper_name.to_string name)) ])
   in
   let project =
     match authorize_token_bound_permission_request ~base_path:config.base_path

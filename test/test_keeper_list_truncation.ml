@@ -264,6 +264,10 @@ let rows json =
   | other -> failf "expected a keepers list, got %s" (Yojson.Safe.to_string other)
 ;;
 
+let row_names json =
+  List.map (fun row -> Yojson.Safe.Util.(row |> member "name" |> to_string)) (rows json)
+;;
+
 let roster_row name json =
   match
     List.find_opt
@@ -283,6 +287,10 @@ let test_named_read_answers_the_roster_row () =
         [ Yojson.Safe.to_string (roster_row "beta" (read whole)) ]
         (List.map Yojson.Safe.to_string (rows named));
       check int "total counts the matched name" 1 (int_field named "total");
+      check string "the narrowed answer names the Keeper it was asked for" "beta"
+        (string_field named "name");
+      check bool "a whole roster names no Keeper" true
+        (Json_util.assoc_member_opt "name" (read whole) = None);
       check bool "a matched name is not truncated" false (bool_field named "truncated");
       let compact = read (named_args ~detailed:false "beta") in
       check (list string) "the compact shape names only that Keeper" [ "beta" ]
@@ -325,13 +333,42 @@ let test_named_read_neither_uses_nor_replaces_the_cache () =
     ~after_list_with_args:(fun config read ->
       seed_keepers config [ "beta" ];
       let named = read (named_args "beta") in
-      check int "the named read sees the Keeper the cache predates" 1
-        (list_length named "keepers");
+      check (list string) "the named read answers the Keeper the cache predates"
+        [ "beta" ] (row_names named);
       check bool "the named read certifies the bypass" true
         (Json_util.assoc_member_opt "projection_cache_bypassed" named = Some (`Bool true));
-      check int "the cached roster is still the earlier census" 1
-        (int_field (read cached) "total"))
-    (fun json -> check int "initial census" 1 (int_field json "total"))
+      check (list string) "the cached roster is still the earlier census"
+        [ "alpha" ] (row_names (read cached)))
+    (fun json -> check (list string) "initial census" [ "alpha" ] (row_names json))
+;;
+
+(* The named arguments build the same cache key as a whole detailed read, so
+   a named answer stored there would come back as a complete one-Keeper roster. *)
+let test_named_read_does_not_fill_the_cache () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  keeper_list ~names:[ "alpha"; "beta" ] ~args:(named_args "beta")
+    ~after_list_with_args:(fun _config read ->
+      let whole = read (`Assoc [ "detailed", `Bool true ]) in
+      check (list string) "the first whole read computes the roster"
+        [ "alpha"; "beta" ] (row_names whole);
+      check bool "the whole read came from the cache path" true
+        (Json_util.assoc_member_opt "projection_cache_bypassed" whole = None))
+    (fun json -> check (list string) "the named read" [ "beta" ] (row_names json))
+;;
+
+let test_named_read_is_not_cut_by_the_limit_window () =
+  let args =
+    `Assoc [ "detailed", `Bool true; "limit", `Int 2; "name", `String "k07" ]
+  in
+  keeper_list ~names:(List.init 10 (Printf.sprintf "k%02d")) ~args
+    ~after_list_with_args:(fun _config read ->
+      check (list string) "an empty window still answers the named row" [ "k07" ]
+        (row_names
+           (read (`Assoc [ "detailed", `Bool true; "limit", `Int 0; "name", `String "k07" ]))))
+    (fun json ->
+      check (list string) "a Keeper past the window answers its row" [ "k07" ]
+        (row_names json);
+      check bool "nothing was cut" false (bool_field json "truncated"))
 ;;
 
 let test_invalid_name_tool_argument_is_rejected () =
@@ -344,6 +381,7 @@ let test_invalid_name_tool_argument_is_rejected () =
             failf "invalid name argument was accepted: %s"
               (Yojson.Safe.to_string (`Assoc fields)))
         [ [ "name", `String "" ]; [ "name", `String "  " ]; [ "name", `Int 1 ]
+        ; [ "name", `String "a/b" ]; [ "name", `String ".." ]
         ; [ "name", `Null ]; [ "name", `String "alpha"; "name", `String "beta" ] ])
     (fun _ -> ())
 ;;
@@ -1001,6 +1039,10 @@ let () =
             test_named_read_of_an_unlisted_name_has_no_row
         ; test_case "a named read neither uses nor replaces the cache" `Quick
             test_named_read_neither_uses_nor_replaces_the_cache
+        ; test_case "a named read does not fill the cache" `Quick
+            test_named_read_does_not_fill_the_cache
+        ; test_case "a named read is not cut by the limit window" `Quick
+            test_named_read_is_not_cut_by_the_limit_window
         ; test_case "invalid name arguments are refused" `Quick
             test_invalid_name_tool_argument_is_rejected
         ] )

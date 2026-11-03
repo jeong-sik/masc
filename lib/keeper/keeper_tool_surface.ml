@@ -24,16 +24,17 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
     | _ -> Ok false
   in
   (* [name] narrows the listed names to one Keeper, so a reader told that one
-     Keeper changed rereads only that row (RFC-0481 §3.1). *)
+     Keeper changed rereads only that row (RFC-0481 §3.1). The roster's
+     [limit] window does not hide it: a Keeper sorted past the window still
+     answers its row. *)
   let named =
     match args with
     | `Assoc fields ->
         (match List.filter (fun (key, _) -> String.equal key "name") fields with
          | [] -> Ok None
          | [ (_, `String raw) ] ->
-             (match String.trim raw with
-              | "" -> Error "name must be a non-empty keeper name"
-              | name -> Ok (Some name))
+             Result.map Option.some
+               (Keeper_id.Keeper_name.of_string (String.trim raw))
          | _ -> Error "name must be one keeper name")
     | _ -> Ok None
   in
@@ -45,7 +46,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
      comes from the list cache and never replaces it. *)
   let cache_bypassed = match fresh, named with
     | false, None -> false
-    | true, _ | false, Some _ -> true
+    | true, (None | Some _) | false, Some _ -> true
   in
   (* Read before consulting the projection cache: a previously readable
      roster cannot certify a directory that has since become unreadable.
@@ -79,7 +80,10 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
         in
         let all_names = match named with
           | None -> listed_names
-          | Some named -> List.filter (String.equal named) listed_names
+          | Some named ->
+              List.filter
+                (String.equal (Keeper_id.Keeper_name.to_string named))
+                listed_names
         in
         (* [total] is measured before [limit] is applied, so a caller can tell
            a short answer from a complete one. Without it [count] reports the
@@ -88,7 +92,10 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
            operational keepers, sorting after ~90 benchmark ones, all fell off
            the end. *)
         let total = List.length all_names in
-        let names = take limit all_names in
+        let names = match named with
+          | None -> take limit all_names
+          | Some _ -> all_names
+        in
         let truncated = List.length names < total in
         let rows =
           names
@@ -105,6 +112,10 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
             ("limit", `Int limit);
             ("truncated", `Bool truncated);
           ]
+          @ match named with
+            | None -> []
+            | Some named ->
+                [ ("name", `String (Keeper_id.Keeper_name.to_string named)) ]
         in
         let json =
           if not detailed then

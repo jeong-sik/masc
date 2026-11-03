@@ -582,7 +582,7 @@ let test_gate_named_roster_reads_one_keeper_with_auth () =
       List.iter (fun suffix ->
         check int ("a malformed name is refused: " ^ suffix) 400
           (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
-        [ "name="; "name"; "name=%20"; "name=a&name=b"; "name=a,b" ]))
+        [ "name="; "name"; "name=%20"; "name=a&name=b"; "name=a,b"; "name=a%2Fb"; "name=.." ]))
 
 (* Once HTTP auth is strict the portrait is a read like any other: no token is
    a 401, a token that may read state is a 200, a token that may only play a

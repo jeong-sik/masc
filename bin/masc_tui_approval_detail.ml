@@ -10,7 +10,9 @@ type gate_origin =
   | Gate_key | Gate_key_with_bytes of int
   | Gate_key_continuation | Gate_key_with_bytes_continuation of int
   | Gate_key_bytes of int | Gate_key_bytes_continuation of int
-  | Gate_string | Gate_json | Gate_unreadable
+  | Gate_string | Gate_string_bytes | Gate_json | Gate_unreadable
+
+type gate_string_reading = Readable_string | Exact_string_bytes
 
 type gate_line =
   { gate_label : string option
@@ -26,14 +28,15 @@ let prefix = function
   | Gate_key_bytes index -> Printf.sprintf "[b%d] " index
   | Gate_key_bytes_continuation index -> Printf.sprintf "[b%d+] " index
   | Gate_string -> "[str] "
+  | Gate_string_bytes -> "[str bytes] "
   | Gate_json -> "[json] "
   | Gate_unreadable -> "!"
 
-(* A quoted ASCII byte literal is unambiguous even when two Unicode strings
-   look alike, or a control byte looks like a literal escape in the readable
-   key. It describes the decoded key, not the original JSON spelling. *)
-let gate_key_bytes key =
-  let out = Buffer.create (String.length key + 2) in
+(* A quoted ASCII byte literal distinguishes controls from literal escapes
+   and visually similar strings. It describes decoded bytes, not their
+   original JSON spelling. *)
+let decoded_bytes value =
+  let out = Buffer.create (String.length value + 2) in
   let hex = "0123456789ABCDEF" in
   Buffer.add_char out '"';
   String.iter
@@ -46,7 +49,7 @@ let gate_key_bytes key =
         Buffer.add_string out "\\x";
         Buffer.add_char out hex.[value lsr 4];
         Buffer.add_char out hex.[value land 0x0f])
-    key;
+    value;
   Buffer.add_char out '"';
   Buffer.contents out
 
@@ -55,6 +58,16 @@ let gate_key_needs_bytes key =
   || String.exists
        (function '!' .. '~' as byte -> byte = '"' || byte = '\\' | _ -> true)
        key
+
+let byte_literal_fits ~room value =
+  room >= 1
+  && (room >= 4
+      || String.for_all
+           (function
+             | '"' | '\\' -> room >= 2
+             | '!' .. '~' -> true
+             | _ -> false)
+           value)
 
 (* A visible control/JSON escape must not be cut between rows. The input is
    already terminal-safe; recognizing a literal escape too only changes its
@@ -313,7 +326,7 @@ let of_fields ~width fields =
 
 (* The marker is owned by the renderer and is repeated for every physical
    value row. It is not part of a key or value supplied by the producer. *)
-let of_gate_fields ~width fields =
+let of_gate_fields ~string_reading ~width fields =
   let safe_text value =
     value
     |> Masc.Tui_terminal_text.escape_invisible
@@ -355,18 +368,17 @@ let of_gate_fields ~width fields =
       let byte_room = width - String.length (prefix (Gate_key_bytes_continuation number)) in
       (* Refuse an impossible token before allocating rows for a long key.
          The byte literal's widest token is a four-cell [\xHH] escape. *)
-      let bytes_fit =
-        not needs_bytes
-        || (byte_room >= 1
-            && (byte_room >= 4
-                || String.for_all
-                     (function
-                       | '"' | '\\' -> byte_room >= 2
-                       | '!' .. '~' -> true
-                       | _ -> false)
-                     raw_key))
+      let bytes_fit = not needs_bytes || byte_literal_fits ~room:byte_room raw_key in
+      let value_fits =
+        match value with
+        | `String text ->
+          (match string_reading with
+           | Readable_string -> true
+           | Exact_string_bytes ->
+             byte_literal_fits ~room:(width - String.length (prefix Gate_string_bytes)) text)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> true
       in
-      let rows = if key_room < 1 || not bytes_fit then unreadable (), []
+      let rows = if key_room < 1 || not bytes_fit || not value_fits then unreadable (), []
       else
       let key =
         raw_key
@@ -378,7 +390,7 @@ let of_gate_fields ~width fields =
       | Some key_rows ->
         let byte_rows =
           if needs_bytes then
-            split_escaped_cells ~syntax:Json ~max_cells:byte_room (gate_key_bytes raw_key)
+            split_escaped_cells ~syntax:Json ~max_cells:byte_room (decoded_bytes raw_key)
           else Some []
         in
         (match byte_rows with
@@ -386,7 +398,10 @@ let of_gate_fields ~width fields =
         | Some byte_rows ->
         let origin, syntax, text =
           match value with
-          | `String value -> Gate_string, Text, safe_text value
+          | `String value ->
+            (match string_reading with
+             | Readable_string -> Gate_string, Text, safe_text value
+             | Exact_string_bytes -> Gate_string_bytes, Json, decoded_bytes value)
           | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) as json ->
             Gate_json, Json,
             (Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview)

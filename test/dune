@@ -4343,7 +4343,7 @@
 (test
  (name test_tui_approval_authority)
  (modules test_tui_approval_authority)
- (libraries masc_tui_approvals_model alcotest masc_tui_approval_authority masc_tui_types masc_tui_loader masc_tui_chat_row_actions masc_tui_presented))
+ (libraries masc_tui_approvals_model alcotest masc_tui_approval_authority masc_tui_types masc_tui_scroll masc_tui_loader masc_tui_chat_row_actions masc_tui_presented))
 
 (test
  (name test_tui_terminal_profile)
@@ -4856,6 +4856,11 @@
  (name test_tui_approval_detail)
  (modules test_tui_approval_detail)
  (libraries alcotest masc_tui_approval_detail yojson))
+
+(test
+ (name test_tui_approval_value_reading)
+ (modules test_tui_approval_value_reading)
+ (libraries alcotest masc_tui_approval_value_reading yojson))
 
 (test
  (name test_tui_connector_state)

@@ -10220,6 +10220,9 @@ type state = {
   mutable gate_error: string option;
   mutable gate_snapshot_observed: bool;
   mutable gate_snapshot_read: Snapshot_read.t;
+  (* The accepted queue belongs to the read authority under which it arrived.
+     The last rows may stay visible after that authority is withdrawn. *)
+  mutable gate_snapshot_authority: unit ref option;
   mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
@@ -10264,6 +10267,8 @@ type state = {
      that is gone. *)
   mutable approval_detail_open: bool;
   mutable approval_detail_scroll: int;
+  mutable approval_value_reading:
+    (workspace_authority * Masc_tui_approval_value_reading.t) option;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
   mutable board_listing: board_list_snapshot Masc_tui_fetched.view;
@@ -19516,6 +19521,7 @@ let create_state
   gate_error = None;
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
+  gate_snapshot_authority = None;
   gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
@@ -19534,6 +19540,7 @@ let create_state
   tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;
   approval_detail_open = false;
   approval_detail_scroll = 0;
+  approval_value_reading = None;
   approval_cursor = 0;
   pending_approval_action = None;
   board_listing = Masc_tui_fetched.Absent;
@@ -20795,6 +20802,14 @@ let composer_extra_rows (state : state) =
     which value they used and the loop stores it, which is not the same as the
     drawing reaching back into the state it is drawing from: the drawing is a
     function of the state again, and every write lives on one side of it. *)
+type approval_detail_presentation = Approval_text | Approval_string_bytes
+
+type approval_detail_viewport = {
+  adv_count : int;
+  adv_height : int;
+  adv_presentation : approval_detail_presentation;
+}
+
 type clamped_scroll =
   | Task_detail of int * (int * int) option
   | Board_read of (int * int)
@@ -20843,7 +20858,7 @@ type clamped_scroll =
      bottom of a section at all -- without a report there is nothing to
      correct the row it names. *)
   | Metrics_scroll of { scroll : int; content_height : int; card_rows : int option }
-  | Approval_detail_scroll of int
+  | Approval_detail_scroll of int * approval_detail_viewport option
   (* Both modals draw over a surface rather than being one, and both counted
      their rows the same way the diff does: the patch modal out of the recorded
      diff, the link preview out of the card the drawing formats. Neither count
@@ -20873,6 +20888,21 @@ type clamped_scroll =
      the stored value past it until the frame says where it drew from. *)
   | Context_inspector_scroll of int
   | Context_inspector_response_scroll of int
+
+let approval_detail_viewport_of_reader = function
+  | Some (Approval_detail_scroll (_, viewport)) -> viewport
+  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+         | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
+         | Resource_scroll _ | Metrics_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _
+         | Queue_panel_presented _ | Help_presented)
+  | None -> None
 
 let task_detail_of_reader = function
   | Some (Task_detail (offset, viewport)) -> Some (offset, viewport)
@@ -21020,7 +21050,7 @@ let apply_clamped_scroll (state : state) = function
       state.metrics_scroll <- scroll;
       state.metrics_content_height <- content_height;
       state.metrics_scroll_card_rows <- card_rows
-  | Approval_detail_scroll value -> state.approval_detail_scroll <- value
+  | Approval_detail_scroll (value, _) -> state.approval_detail_scroll <- value
   | Patch_modal_scroll (vertical, horizontal) ->
       state.patch_modal_scroll <- vertical;
       state.patch_modal_hscroll <- horizontal

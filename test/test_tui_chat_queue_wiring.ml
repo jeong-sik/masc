@@ -5177,7 +5177,7 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.approval_detail_scroll <- 42;
-  Tui_types.apply_clamped_scroll state (Tui_types.Approval_detail_scroll 3);
+  Tui_types.apply_clamped_scroll state (Tui_types.Approval_detail_scroll (3, None));
   check int "requested scroll is normalized to the drawn row" 3
     state.approval_detail_scroll
 ;;

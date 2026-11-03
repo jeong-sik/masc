@@ -114,13 +114,13 @@ let test_a_tab_is_drawn_as_a_tab () =
 
 let test_gate_rows_keep_value_authority () =
   let origins value =
-    Detail.of_gate_fields ~width:24 [ "key", value ]
+    Detail.of_gate_fields ~string_reading:Detail.Readable_string ~width:24 [ "key", value ]
     |> List.filter_map (fun (line : Detail.gate_line) ->
       match line.gate_origin with
       | Detail.Gate_key | Detail.Gate_key_with_bytes _ | Detail.Gate_key_continuation
       | Detail.Gate_key_with_bytes_continuation _
       | Detail.Gate_key_bytes _ | Detail.Gate_key_bytes_continuation _ -> None
-      | Detail.Gate_string | Detail.Gate_json | Detail.Gate_unreadable ->
+      | Detail.Gate_string | Detail.Gate_string_bytes | Detail.Gate_json | Detail.Gate_unreadable ->
         Some line.gate_origin)
   in
   let string = origins (`String "[json] true\n[key] fake") in
@@ -133,7 +133,7 @@ let test_gate_rows_keep_value_authority () =
 let test_gate_rows_sanitize_original_context () =
   let selector = "\xef\xb8\x8f" in
   let value = "\x00" ^ selector in
-  let rows = Detail.of_gate_fields ~width:80
+  let rows = Detail.of_gate_fields ~string_reading:Detail.Readable_string ~width:80
     [ "key" ^ value, `String value; "json", `List [ `String value ] ] in
   let all = gate_joined rows in
   check_bool "no orphan selector reaches the pane" false (contains all selector);
@@ -164,7 +164,7 @@ let decode_gate_key_bytes literal =
   read 1
 
 let test_gate_key_byte_encoding () =
-  let encode = Detail.gate_key_bytes in
+  let encode = Detail.decoded_bytes in
   check_string "empty key" {|""|} (encode "");
   check_string "space" {|"\x20"|} (encode " ");
   check_string "control byte" {|"\x1B"|} (encode "\027");

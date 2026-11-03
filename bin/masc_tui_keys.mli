@@ -178,7 +178,8 @@ val footer_hints_board_compose_armed : reply:bool -> string
 (** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
     comment has no use for. *)
 
-val footer_hints_approval_detail : string
+type approval_value_hint = No_value_reading | Readable_values | Byte_values
+val footer_hints_approval_detail : value_hint:approval_value_hint -> string
 (** The keys an open approval answers to. The decision keys are one item
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)

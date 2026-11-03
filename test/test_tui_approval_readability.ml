@@ -49,8 +49,8 @@ let test_a_grapheme_needs_enough_width () =
   check bool "the same input fits when its grapheme has two cells" false
     (unreadable ~width:4 "a中b")
 
-let gate_unreadable ~width fields =
-  Detail.of_gate_fields ~width fields
+let gate_unreadable ?(string_reading = Detail.Readable_string) ~width fields =
+  Detail.of_gate_fields ~string_reading ~width fields
   |> List.exists (fun (line : Detail.gate_line) -> line.gate_origin = Detail.Gate_unreadable)
 
 let test_gate_key_escape_reflow () =
@@ -68,6 +68,14 @@ let test_gate_json_escape_reflow () =
   check bool "fitting Gate JSON is readable" false
     (gate_unreadable ~width:13 [ "key", `List [ `String value ] ])
 
+let test_gate_string_bytes_need_whole_tokens () =
+  let prefix = String.length (Detail.prefix Detail.Gate_string_bytes) in
+  let input = [ "key", `String "\027" ] in
+  check bool "a byte escape that cannot fit requires more width" true
+    (gate_unreadable ~string_reading:Detail.Exact_string_bytes ~width:(prefix + 3) input);
+  check bool "the same bytes fit when the escape fits" false
+    (gate_unreadable ~string_reading:Detail.Exact_string_bytes ~width:(prefix + 4) input)
+
 let () =
   run "Approval input disclosure"
     [ "decisions",
@@ -77,4 +85,5 @@ let () =
         test_case "a wide grapheme requires enough width" `Quick test_a_grapheme_needs_enough_width;
         test_case "Gate key reflow retains readability" `Quick test_gate_key_escape_reflow;
         test_case "Gate string reflow retains readability" `Quick test_gate_string_escape_reflow;
-        test_case "Gate JSON reflow retains readability" `Quick test_gate_json_escape_reflow ] ]
+        test_case "Gate JSON reflow retains readability" `Quick test_gate_json_escape_reflow;
+        test_case "Gate string bytes require whole escapes" `Quick test_gate_string_bytes_need_whole_tokens ] ]

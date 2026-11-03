@@ -21627,10 +21627,10 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  (* The same open asks Approvals walks, read on every refresh whatever the
-     view. Kept rows stay on the list through a failed re-read, the way the
-     held calls above do: the asks were open when last seen, and dropping
-     them would say nothing is waiting. *)
+  (* The same open asks Approvals walks, read again on their announcement
+     whatever the view. Kept rows stay on the list through a failed re-read,
+     the way the held calls above do: the asks were open when last seen, and
+     dropping them would say nothing is waiting. *)
   let asking =
     match state.asks_snapshot, state.asks_error with
     | Some snapshot, _ ->

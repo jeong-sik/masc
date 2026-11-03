@@ -184,31 +184,23 @@ let test_failure_observer_only_follows_successful_writes () =
       check int "stale lane did not notify" 1 !calls)
 ;;
 
-(* RFC-0481 §3.2: a committed registry swap announces what it changed on the
-   roster -- a new or removed entry as a roster change, a moved phase or
-   failure as that Keeper's row. *)
-let hearing_roster_signals f =
-  let id = Printf.sprintf "keeper-registry-roster-signals-%d" (Unix.getpid ()) in
+(* RFC-0481 §3.2: a committed registry swap announces that Keeper's row when
+   it added or removed the entry or moved its phase or failure. *)
+let hearing_row_signals ~base_path f =
+  let id = Printf.sprintf "keeper-registry-row-signals-%d-%s" (Unix.getpid ())
+    (Digest.to_hex (Digest.string base_path)) in
   let heard = ref [] in
   (* The signals go to this workspace's observers only. *)
   if not (Sys.file_exists base_path) then Unix.mkdir base_path 0o755;
   Masc.Sse.subscribe_external ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path) ~id
-    ~callback:(fun (ev : Masc.Sse.external_event) ->
-      match Masc.Sse.data_payload_of_frame ev.Masc.Sse.ext_frame with
-      | Error Masc.Sse.Missing_data_payload -> ()
-      | Ok payload ->
-        (match Yojson.Safe.from_string payload with
-         | `Assoc fields ->
-           (match List.assoc_opt "type" fields, List.assoc_opt "name" fields with
-            | Some (`String kind), Some (`String name)
-              when String.equal kind Masc.Keeper_row_broadcast.row_changed_event ->
-              heard := ("row", name) :: !heard
-            | Some (`String kind), None
-              when String.equal kind Masc.Keeper_row_broadcast.roster_changed_event ->
-              heard := ("roster", "") :: !heard
-            | _ -> ())
-         | _ -> ()
-         | exception Yojson.Json_error _ -> ()))
+    ~callback:(fun (event : Masc.Sse.external_event) ->
+      match
+        Json_util.assoc_string_opt "type" event.ext_payload,
+        Json_util.assoc_string_opt "name" event.ext_payload
+      with
+      | Some kind, Some name when String.equal kind Masc.Keeper_row_broadcast.row_changed_event ->
+        heard := name :: !heard
+      | (Some _ | None), (Some _ | None) -> ())
     ();
   Fun.protect ~finally:(fun () -> Masc.Sse.unsubscribe_external id) (fun () ->
     f (fun () ->
@@ -219,36 +211,44 @@ let hearing_roster_signals f =
 
 let test_registry_swaps_announce_roster_rows () =
   KR.For_testing.clear ();
-  let signals = list (pair string string) in
-  hearing_roster_signals (fun take ->
-    ignore (register "alice");
-    check signals "a new entry is a roster change" [ "roster", "" ] (take ());
+  let other_path = base_path ^ "-other-workspace" in
+  hearing_row_signals ~base_path:other_path (fun elsewhere ->
+  hearing_row_signals ~base_path (fun take ->
+    let captured = register "alice" in
+    check (list string) "a new entry is the Keeper's row" [ "alice" ] (take ());
     KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "boom"));
-    check signals "a failure is the Keeper's row" [ "row", "alice" ] (take ());
+    check (list string) "a failure is the Keeper's row" [ "alice" ] (take ());
     (match KR.update_entry ~base_path "alice" (fun entry ->
        { entry with last_failure_at = Some 1.0 }) with
      | Ok () -> ()
      | Error _ -> fail "failure time update was rejected");
-    check signals "a failure time is the Keeper's row" [ "row", "alice" ] (take ());
+    check (list string) "a failure time is the Keeper's row" [ "alice" ] (take ());
     (match KR.update_entry ~base_path "alice" (fun entry ->
        { entry with restart_count = entry.restart_count + 1 }) with
      | Ok () -> ()
      | Error _ -> fail "restart count update was rejected");
-    check signals "a field the row does not show announces nothing" [] (take ());
+    check (list string) "a field the row does not show announces nothing" [] (take ());
     (match KR.update_entry ~base_path "alice" (fun entry ->
        { entry with base_path = "wrong"; last_failure_reason = None }) with
      | Error (KR.Base_path_mismatch _) -> ()
      | _ -> fail "invalid update was not rejected");
-    check signals "a rejected write announces nothing" [] (take ());
+    check (list string) "a rejected write announces nothing" [] (take ());
+    (match KR.update_entry_exact captured (fun entry ->
+       { entry with last_failure_at = Some 2.0 }) with
+     | KR.Exact_updated -> ()
+     | _ -> fail "exact failure time update was rejected");
+    check (list string) "an exact update is the Keeper's row" [ "alice" ] (take ());
     (* A registered entry starts running; pausing it moves the phase. *)
     (match KR.dispatch_event ~base_path "alice" KSM.Operator_pause with
      | Ok _ -> ()
      | Error error -> fail (KSM.transition_error_to_string error));
-    let phase_signals = take () in
-    check bool "a phase change is the Keeper's row" true
-      (phase_signals <> [] && List.for_all (( = ) ("row", "alice")) phase_signals);
+    check (list string) "a phase change is one signal for the Keeper's row" [ "alice" ] (take ());
+    ignore (register "alice");
+    check (list string) "a re-registration that moves the phase is the Keeper's row"
+      [ "alice" ] (take ());
     KR.For_testing.unregister ~base_path "alice";
-    check signals "a removed entry is a roster change" [ "roster", "" ] (take ()))
+    check (list string) "a removed entry is the Keeper's row" [ "alice" ] (take ()));
+  check (list string) "another workspace hears none of it" [] (elsewhere ()))
 ;;
 
 let test_failure_observer_exception_preserves_commit () =

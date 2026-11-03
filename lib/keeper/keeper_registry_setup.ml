@@ -50,16 +50,16 @@ let row_fields_changed (before : registry_entry) (after : registry_entry) =
 ;;
 
 (* Every swap of [registry] goes through [swap_in] or [swap_out], so a
-   committed swap that changes what the roster shows is announced
-   (RFC-0481 §3.2): a new or removed Keeper as a roster change, a changed
-   entry as that Keeper's row. Both run inside the lifecycle key lock, which
-   is why the announcement is one non-yielding [Sse.broadcast]. *)
+   committed swap that changes what the roster shows announces that Keeper's
+   row (RFC-0481 §3.2): an added or removed entry always, a replaced one when
+   its phase or failure moved. Both run inside the lifecycle key lock, which
+   is why the announcement is one non-yielding broadcast that never raises. *)
 let swap_in ~current ~key (entry : registry_entry) =
   let before = StringMap.find_opt key current in
   if Atomic.compare_and_set registry current (StringMap.add key entry current)
   then begin
     (match before with
-     | None -> Keeper_row_broadcast.roster_changed ~base_path:entry.base_path
+     | None -> Keeper_row_broadcast.changed ~base_path:entry.base_path ~keeper_name:entry.name
      | Some before ->
        if row_fields_changed before entry
        then Keeper_row_broadcast.changed ~base_path:entry.base_path ~keeper_name:entry.name);
@@ -71,7 +71,7 @@ let swap_in ~current ~key (entry : registry_entry) =
 let swap_out ~current ~key (entry : registry_entry) =
   if Atomic.compare_and_set registry current (StringMap.remove key current)
   then begin
-    Keeper_row_broadcast.roster_changed ~base_path:entry.base_path;
+    Keeper_row_broadcast.changed ~base_path:entry.base_path ~keeper_name:entry.name;
     true
   end
   else false

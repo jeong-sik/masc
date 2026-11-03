@@ -111,16 +111,31 @@ describe('FleetQueueSection (fl-q-*)', () => {
         ready: true,
         loading: false,
         error: null,
+        observerCurrent: true,
       } as never,
     }
   }
 
   it('renders nothing when neither queue rows nor heartbeat signal exist', async () => {
+    seedInventory([])
     await act(async () => {
       render(html`<${FleetQueueSection} keeper=${makeKeeper({ keepalive_running: undefined, keeper_keepalive_interval_s: undefined })} />`, container)
     })
     await flushUi()
     expect(container.querySelector('.fl-q')).toBeNull()
+  })
+
+  it('marks retained rows as stale and does not invent a stopped heartbeat', async () => {
+    seedInventory([{ source: 'hitl_pending', waiting_on: 'approval', what: 'approval' }])
+    keeperWaitingInventoryStates.value = {
+      sangsu: { ...keeperWaitingInventoryStates.value.sangsu!, observerCurrent: false },
+    }
+    await act(async () => {
+      render(html`<${FleetQueueSection} keeper=${makeKeeper({ keepalive_running: undefined })} />`, container)
+    })
+    expect(container.textContent).toContain('마지막으로 확인한 대기 상태입니다.')
+    expect(container.querySelectorAll('.fl-q-item')).toHaveLength(1)
+    expect(container.querySelector('.fl-q-hb.off')).toBeNull()
   })
 
   it('renders waiting rows from the live keeper waiting inventory', async () => {

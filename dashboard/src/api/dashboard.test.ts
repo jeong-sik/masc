@@ -1596,17 +1596,30 @@ describe('fetchDashboardTools', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(rawResponse), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-masc-sse-instance-id': 'process.epoch' },
       }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchKeeperWaitingInventory('exampleorg')
+    const result = await fetchKeeperWaitingInventory('exampleorg', 'process.epoch')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/exampleorg/waiting-inventory')
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual(expect.objectContaining({
+      'x-masc-sse-instance-id': 'process.epoch',
+    }))
     expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
   })
+
+  it.each([null, 'another.epoch'])(
+    'refuses a keeper-scoped waiting inventory without the matching observer generation (%s)',
+    async instance => {
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      if (instance) headers.set('x-masc-sse-instance-id', instance)
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"keepers":[]}', { status: 200, headers })))
+      await expect(fetchKeeperWaitingInventory('exampleorg', 'process.epoch')).rejects.toThrow('observer generation')
+    },
+  )
 
   it('fills missing category and tier with defaults', async () => {
     const rawResponse = {

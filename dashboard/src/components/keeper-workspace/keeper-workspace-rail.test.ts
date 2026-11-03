@@ -12,6 +12,10 @@ import type { DashboardKeeperWaitingInventory } from '../../api'
 import { keeperWaitingInventoryStates } from '../../keeper-waiting-inventory-store'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
 
+vi.mock('../../keeper-waiting-observer-client', () => ({
+  startKeeperWaitingObserver: vi.fn(() => ({ stop: vi.fn(), invalidate: vi.fn() })),
+}))
+
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
 // than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
 // the network; its rendering is covered directly in keeper-workspace-tool-calls.test.ts.
@@ -925,7 +929,7 @@ describe('KeeperWorkspaceRail', () => {
       ],
     } as unknown as DashboardKeeperWaitingInventory
     keeperWaitingInventoryStates.value = {
-      'masc-improver': { inventory, ready: true, loading: false, error: null },
+      'masc-improver': { inventory, ready: true, loading: false, error: null, observerCurrent: true },
     }
     const k = mkKeeper({ lifecycle_phase: 'Draining' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)

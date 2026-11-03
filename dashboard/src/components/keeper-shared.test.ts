@@ -118,6 +118,7 @@ vi.mock('../keeper-waiting-inventory-store', () => ({
     ready: mockedToolsData.value !== null,
     loading: false,
     error: mockedToolsError.value,
+    observerCurrent: true,
   }),
   subscribeKeeperWaitingInventory: vi.fn(() => vi.fn()),
   refreshKeeperWaitingInventory: vi.fn(async () => undefined),

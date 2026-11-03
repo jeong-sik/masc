@@ -512,6 +512,9 @@ export function KeeperWaitQueueRail({ keeperName, dev = false }: { keeperName: s
           ? html`<${CountBadge}>${waitingCount}<//>`
           : null}
       </h4>
+      ${!current?.observerCurrent
+        ? html`<div>${current?.ready ? '마지막으로 확인한 대기 상태입니다.' : '대기 상태를 확인 중입니다.'}</div>`
+        : null}
       ${!entry || !present
         ? html`<div class="lq-gap"><b>상태 알 수 없음</b></div>`
         : html`
@@ -638,6 +641,7 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
   const waitingKeeperCount = tabIds.filter(name =>
     inventoryEntryFor(waitingStates[name]?.inventory, name) !== null,
   ).length
+  const waitingCountCurrent = tabIds.every(name => waitingStates[name]?.observerCurrent === true)
   const misses = schedule ? countQueueDrainMisses(schedule.requests) : 0
   const drainRows = sortedDrainRows(schedule?.requests ?? [])
   const lifecycleEvents = selLifecycle?.events ?? null
@@ -661,7 +665,7 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
 
       <div class="lq-kpis">
         <div class="lq-kpi"><span class="k">멈춘 진행</span><b class="${stalls > 0 ? 'warn' : 'ok'}" data-testid="lane-kpi-stalls">${stalls}</b></div>
-        <div class="lq-kpi"><span class="k">기다리는 keeper</span><b data-testid="lane-kpi-waiting">${waitingKeeperCount}</b></div>
+        <div class="lq-kpi"><span class="k">기다리는 keeper</span><b data-testid="lane-kpi-waiting">${waitingCountCurrent ? waitingKeeperCount : '확인 중'}</b></div>
         <div class="lq-kpi"><span class="k">실행 안 된 예약</span><b class="${misses > 0 ? 'bad' : 'ok'}" data-testid="lane-kpi-misses">${misses}</b></div>
         <div class="lq-kpi"><span class="k">보는 구간</span><b>${Math.floor(LANE_QUEUE_WINDOW_S / 60)}분</b></div>
       </div>
@@ -718,6 +722,9 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
                 `
               : null}
           </div>
+          ${sel !== null && !selInventoryState?.observerCurrent
+            ? html`<div>${selInventoryState?.ready ? '마지막으로 확인한 대기 상태입니다.' : '대기 상태를 확인 중입니다.'}</div>`
+            : null}
           ${selEntry
             ? html`
                 <${LanePipeline} entry=${selEntry} dev=${dev} />

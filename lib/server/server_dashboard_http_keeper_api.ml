@@ -1437,14 +1437,22 @@ let handle_keeper_get_subroutes state req request reqd =
            [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ])
         reqd
     else
-      let config = Mcp_server.workspace_config state in
-      let json =
-        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-          Server_keeper_waiting_inventory.dashboard_json_for_keeper
-            config
-            ~keeper_name:name)
-      in
-      Http.Response.json_value ~compress:true ~request:req json reqd
+      let expected_instances = Httpun.Headers.get_multi req.headers Sse_wire.instance_header in
+      let result = Server_observer_scope.read_if_current ~state ~expected_instances
+        ~read:(fun config ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Server_keeper_waiting_inventory.dashboard_json_for_keeper
+              config ~keeper_name:name)) in
+      (match result with
+       | Ok (instance, json) ->
+         Http.Response.json_value ~compress:true ~request:req
+           ~extra_headers:[Sse_wire.instance_header, instance] json reqd
+       | Error error ->
+         let status, code = match error with
+           | Server_observer_scope.Ambiguous_instance -> `Bad_request, "observer_instance_ambiguous"
+           | Instance_mismatch | Scope_changed -> `Conflict, "observer_instance_changed" in
+         Http.Response.json_value ~status ~request:req
+           (`Assoc ["code", `String code; "error", `String "observer generation unavailable"]) reqd)
   else if ends_with "/feedback" then
     (* keeper-v2 #9: aggregated response-feedback tally (read API).
        GET /api/v1/keepers/:name/feedback. The per-keeper feedback log is the

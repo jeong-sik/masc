@@ -197,7 +197,7 @@ let settle_rows ~masc_root ~agent_name ~observed_at rows =
   }
 ;;
 
-let settle ~masc_root ~agent_name ~observed_at =
+let settle ~masc_root ~agent_name ~born_at ~observed_at =
   let store = Cost_ledger.store_of_masc_root masc_root in
   let scanned = ref 0 in
   (* The Keeper's rows as visited, newest first, down to and including its
@@ -215,16 +215,40 @@ let settle ~masc_root ~agent_name ~observed_at =
         | [] -> Some ()
         | _ :: _ -> None)
   in
-  match Dated_jsonl.find_latest_entry_result store stop_at_newest_resolved with
+  (* A row lands in the day file of the moment it is appended, and the Keeper
+     appends nothing before it is created, so its rows are all in the day
+     files from its creation day to the day it is observed. *)
+  let rec visit_newest_first = function
+    | [] -> Ok ()
+    | path :: older ->
+      (match Dated_jsonl.find_latest_entry_in_file_result path stop_at_newest_resolved with
+       | Error _ as error -> error
+       | Ok (Some ()) -> Ok ()
+       | Ok None -> visit_newest_first older)
+  in
+  match
+    Dated_jsonl.range_day_file_paths_result store
+      ~since:(Jsonl_writer.day_key ~ts:born_at)
+      ~until:(Jsonl_writer.day_key ~ts:observed_at)
+  with
   | Error error -> Error error
-  | Ok (_ : unit option) ->
-    let rows = unsettled_rows ~agent_name (List.rev !visited_oldest_first) in
-    let outcome = settle_rows ~masc_root ~agent_name ~observed_at rows in
-    Ok { outcome with scanned_rows = !scanned }
+  | Ok days_oldest_first ->
+    (match visit_newest_first (List.rev days_oldest_first) with
+     | Error error -> Error error
+     | Ok () ->
+       let rows = unsettled_rows ~agent_name (List.rev !visited_oldest_first) in
+       let outcome = settle_rows ~masc_root ~agent_name ~observed_at rows in
+       Ok { outcome with scanned_rows = !scanned })
 ;;
 
-let settle_before_execution ~masc_root ~agent_name =
-  match settle ~masc_root ~agent_name ~observed_at:(Time_compat.now ()) with
+let settle_before_execution ~masc_root ~agent_name ~created_at =
+  match Workspace_resilience.Time.parse_iso8601_opt created_at with
+  | None ->
+    Log.Keeper.warn ~keeper_name:agent_name
+      "spend a cancelled execution left out is not settled: created_at %S is not an ISO 8601 time"
+      created_at
+  | Some born_at ->
+  match settle ~masc_root ~agent_name ~born_at ~observed_at:(Time_compat.now ()) with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Log.Keeper.warn ~keeper_name:agent_name

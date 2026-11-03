@@ -11,6 +11,9 @@
     every raw row the Keeper wrote after its newest resolved row belongs to an
     execution that ended without committing: a commit writes a resolved row
     for every reading its attempts read, after the raw rows they came from.
+    A row lands in the day file of the moment it is appended, so the Keeper's
+    rows are in the day files from the day it was created on. Older day files
+    hold other Keepers' rows only and are not opened.
     Each raw row carries the {!Keeper_spend_observation} its execution handed
     {!Keeper_turn_spend}. Those observations are handed to it again, attempt
     by attempt and in the order they were written, resolved, and written as
@@ -47,16 +50,23 @@ val settle_rows
   -> Yojson.Safe.t list
   -> outcome
 
-(** Read the ledger newest first down to the Keeper's newest resolved row and
-    settle what lies above it. *)
+(** Read the day files from [born_at]'s day to [observed_at]'s day newest
+    first, down to the Keeper's newest resolved row, and settle what lies above
+    it. [born_at] is when the Keeper was created. *)
 val settle
   :  masc_root:string
   -> agent_name:string
+  -> born_at:float
   -> observed_at:float
   -> (outcome, Dated_jsonl.read_error) result
 
-(** {!settle} before an execution starts. Failures are logged and the
-    execution goes on: what could not be settled stays in the ledger as raw
-    rows and is settled before a later execution. Rows that do not decode
-    are logged as a warning with the oldest one's reason. *)
-val settle_before_execution : masc_root:string -> agent_name:string -> unit
+(** {!settle} before an execution starts, from the Keeper's [created_at]
+    (ISO 8601). Failures are logged and the execution goes on: what could not
+    be settled stays in the ledger as raw rows and is settled before a later
+    execution. Rows that do not decode are logged as a warning with the oldest
+    one's reason. *)
+val settle_before_execution
+  :  masc_root:string
+  -> agent_name:string
+  -> created_at:string
+  -> unit

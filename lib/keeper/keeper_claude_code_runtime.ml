@@ -448,6 +448,39 @@ let claude_error_to_core_error = function
       "Claude Code host stop escaped the typed checkpoint boundary"
 ;;
 
+(* The subscription probe runs on the host before any request is built, and
+   only this binding runs it: no other candidate in the lane reads this CLI's
+   auth document. An auth document the probe could not read is this binding
+   refusing the turn before dispatch, not a reply every candidate would
+   misread, so it is [Attempt_rejected]: the walk moves to the next candidate
+   ([Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next]), the
+   dispatch ledger records [Rejected_before_dispatch], and no standing
+   evidence outlives the turn (#47787). Fusion makes the same split with
+   [Claude_admission_failure]. The probe's other failures keep the class the
+   turn mapping gives them. *)
+let admission_probe_error_to_core_error = function
+  | Runtime_claude_code.Protocol_error { stage; detail } ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = Printf.sprintf "%s: %s" stage detail
+         ; reason = Llm_provider.Retry.Attempt_rejected
+         })
+  | ( Runtime_claude_code.Invalid_config _
+    | Runtime_claude_code.Spawn_failed _
+    | Runtime_claude_code.Subscription_required _
+    | Runtime_claude_code.Unsupported_control_request _
+    | Runtime_claude_code.Turn_transport_interrupted _
+    | Runtime_claude_code.Context_window_exceeded _
+    | Runtime_claude_code.Turn_failed _
+    | Runtime_claude_code.Turn_failed_with_observation _
+    | Runtime_claude_code.Stopped_by_host _
+    | Runtime_claude_code.Quota_blocked _
+    | Runtime_claude_code.Process_exited _
+    | Runtime_claude_code.Unhandled_exception _
+    | Runtime_claude_code.Timeout _ ) as error ->
+    claude_error_to_core_error error
+;;
+
 let recovery_failure_of_client_error = function
   | Runtime_claude_code.Spawn_failed _ -> Session_store.Transient_spawn_failed
   | Runtime_claude_code.Process_exited _ | Runtime_claude_code.Timeout _ ->
@@ -1006,7 +1039,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
           probe_config
       with
       | Ok subscription -> Ok subscription
-      | Error error -> Error (claude_error_to_core_error error)
+      | Error error -> Error (admission_probe_error_to_core_error error)
     in
     (* Claude Code owns the native vocabulary. The prepared intent reaches
        that admission directly, independent of a bare HTTP catalog row.

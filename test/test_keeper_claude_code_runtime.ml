@@ -4931,7 +4931,7 @@ let test_truncated_auth_probe_keeps_cli_stderr () =
          ~auth_stderr:"boom:\tkeychain denied" []
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+            | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
                 check bool "truncated probe names the stage" true
                   (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
                 check bool "truncated probe keeps the cli stderr" true
@@ -4966,11 +4966,39 @@ let test_cut_auth_probe_reports_stdout_bytes () =
     (fun () ->
        with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
          match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+         | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
              check bool "persistent cut names the byte count" true
                (Astring.String.is_infix ~affix:"(stdout 18 bytes)" detail)
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok _ -> fail "cut auth probe completed the Keeper turn"))
+;;
+
+(* Only this binding reads its CLI's auth document, before any request is
+   built. A cut one is that binding refusing the turn (#47787): nothing was
+   sent, and the lane walk moves to its next candidate instead of ending the
+   turn on the first one. *)
+let test_cut_auth_probe_rotates_the_lane_before_dispatch () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         let attempt =
+           run_direct_attempt ~base_path ~cli_path ~goal:"AUTH_PROBE" ~tools:[] ()
+         in
+         (match attempt.Keeper_claude_code_runtime.result with
+          | Error
+              (Agent_core.Error.Api
+                 (Llm_provider.Retry.InvalidRequest
+                    { reason = Llm_provider.Retry.Attempt_rejected; _ }) as error) ->
+              check bool "the lane walk moves to the next candidate" true
+                (Keeper_turn_driver.For_testing.lane_should_retry
+                   ~is_last:false ~allow_retry:true ~allow_accept_no_progress_retry:true
+                   error)
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ -> fail "cut auth probe completed the Keeper turn");
+         check string "cut auth probe is proven pre-dispatch" "no_effect_observed"
+           (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
 ;;
 
 let test_truncated_auth_probe_without_stderr_keeps_detail () =
@@ -4980,7 +5008,7 @@ let test_truncated_auth_probe_without_stderr_keeps_detail () =
     (fun () ->
        with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
          match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+         | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
              check bool "truncated probe names the stage" true
                (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
              check bool "no stderr marker without stderr" false
@@ -4998,7 +5026,7 @@ let test_truncated_auth_probe_truncates_long_stderr () =
          ~auth_stderr:(String.make 400 'a') []
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+            | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
                 check bool "long stderr is capped with an ellipsis" true
                   (Astring.String.is_infix
                      ~affix:("; stderr: " ^ String.make 300 'a' ^ "…") detail)
@@ -5014,7 +5042,7 @@ let test_blank_auth_stderr_keeps_detail_bare () =
        with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 ~auth_stderr:"   " []
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+            | Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message = detail })) ->
                 check bool "no stderr marker for blank stderr" false
                   (Astring.String.is_infix ~affix:"; stderr:" detail)
             | Error error -> fail (Agent_core.Error.to_string error)
@@ -6744,6 +6772,10 @@ let () =
             "cut auth probe reports stdout bytes"
             `Quick
             test_cut_auth_probe_reports_stdout_bytes
+        ; test_case
+            "cut auth probe rotates the lane before dispatch"
+            `Quick
+            test_cut_auth_probe_rotates_the_lane_before_dispatch
         ; test_case
             "truncated auth probe without stderr keeps detail"
             `Quick

@@ -113,13 +113,59 @@ instruction-only arm that regressed in the synthetic experiment. Both paths
 count the exact selected question in their request capacity check. This preserves
 the empty-input behavior; it does not prove semantic model quality.
 
-Serialized observations count toward the existing provider request boundary. If
-an evidence-bearing pair cannot fit, the pass fails before dispatch and the entire
-Memory range stays pending, including new claims. A typed input-capacity failure
-is forwarded to the existing source-range narrowing path, allowing a smaller
-range to retry against the unchanged snapshot. It does not silently omit the
-evidence or append a candidate while leaving its originals unreviewed. Selecting
-or splitting large evidence ranges for forward review is still future work.
+Each pair carries only the observations its candidate cites. The Librarian names
+them in the claim's `evidence` (RFC-0456 §4.1): the conversation positions it read
+as `turn=N`, the tool executions by the `index` the prompt shows, and whether it
+used the counterpart block or the historical task contexts. The runtime takes
+those entries from the observations it built for the pass; it does not read the
+claim text to find them. A claim that cites nothing has no observation behind its
+absorptions, so its pairs are asked the pair-only question. That is the question
+for such a pair, not a fallback. An answer that omits `evidence`, or a field of
+it, cites nothing there, as an omitted `absorbs` absorbs nothing.
+
+Adding `evidence` changes the output schema every retained Librarian request
+captured, and a retained request is restored only when its captured schema
+equals the binary's (`Keeper_librarian_runtime.check_durable_preparation`).
+Fresh state: this binary reads no Librarian request record stored before it,
+the `keeper-librarian` scopes in `lane-addons/tool-request-owners`. Stop the
+server, delete those records, and install.
+
+Serialized observations count toward the existing provider request boundary,
+pair by pair. A request's size is set by what one candidate cites, not by how many
+turns the pass read, so a pass does not fail as a whole for size. When a
+candidate's cited observations still do not fit beside its pair, that pair is
+asked the pair-only question, and its verdict records that the observations were
+left out because they exceed the boundary. Every verdict records how its pair was
+asked as a closed value (`asked`: with the cited observations, alone because
+nothing was cited, or alone because the citations exceed the boundary), not as a
+message. Only `mergeable` retires the source; any other answer keeps it current
+beside the candidate, as for every judged pair. If the pair-only question does not
+fit either, the pair is unjudgeable and its original stays current, as in a pass
+without observations. Nothing is omitted silently: a pair carries what its
+candidate cites, and the one case that leaves cited observations out is recorded.
+
+That case gives up the observations' help with same-event follow-up resolutions,
+which the pair-only question refuses more often (see Validation). Such a refusal
+retains the original, so the cost is a redundant current record, not lost
+knowledge.
+
+Implementation state (2026-11-03, main `09c019bbc23`): none of this runs. Every
+question carries all observations of the pass (`Keeper_librarian_absorb_gate`
+`classify`), and one pair that does not fit fails the whole pass (`judge`). The
+durable commit keeps that refusal as a publication wait, and the consumer does not
+count a wait as a failed range, so the same pass waits on every wake. The
+floor-step gate waits the same way. On 2026-11-02, 23 Keepers had such a refusal.
+sangsu's Librarian has read no official turn since 2026-10-26: its last two passes
+carried 4.36 MB and 5.11 MB of observations against a 32,000-byte request
+boundary, and its Keeper requests outgrew the model window (#42211, #47789).
+
+Measurement for this change: run the six development scenarios of #41922 again
+with the Librarian's own citations and compare the decisions with every
+observation (18/18) and with the pair-only question (15/18). Live, count the pairs
+asked with cited observations, the pairs whose candidate cites nothing, the pairs
+whose cited observations were left out for size, the unjudgeable pairs, and the
+Librarian answers refused for citing an observation their input does not have,
+per Keeper and per day.
 
 The closed choices are `mergeable`, `different_context`, `loses_knowledge`, and
 `uncertain`. Only `mergeable` permits that source to leave current memory.
@@ -134,9 +180,9 @@ source/candidate relationship; it does not independently verify the truth of
 new assertions against the world. Every request has its own durable evaluation
 record, including the new observations before provider dispatch. Invalid answers, incomplete dispatch and cancellation keep the existing
 failure semantics. A pair outside the provider request boundary is explicitly
-unjudgeable and its original remains current; with new observations this also
-fails the pass so the candidate is not committed. Large-pair decomposition is not
-implemented here.
+unjudgeable and its original remains current. A pair whose cited observations do
+not fit is first asked the pair-only question (above). Large-pair decomposition is
+not implemented here.
 
 The reverse copy question checks whether an unabsorbing new claim merely repeats
 its sources. Its semantic criterion is unchanged. If its request fails, the
@@ -203,8 +249,9 @@ policy but do not establish reliable temporal consolidation. That historical sou
 probe lacked independently identifiable follow-up evidence. Forward requests now
 include conversation, tool-outcome, counterpart and historical-range observations
 from the same selected Librarian input, retaining their distinct provenance. Empty
-input preserves the original pair-only request; oversized evidence leaves the
-whole range pending without truncation. This corrects the missing input path,
+input preserves the original pair-only request; a pair whose cited observations do
+not fit is asked the pair-only question and recorded as such. This corrects the
+missing input path,
 not the semantic-quality measurement. The subsequent controlled experiment in
 `experiments/memory-transition-evidence` (PR #41922) motivates the source-observation
 path above: 15/18 pair-only, 12/18 instruction-only, 18/18 with evidence. These remain

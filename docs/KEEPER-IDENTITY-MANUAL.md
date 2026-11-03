@@ -219,6 +219,7 @@ Drop a TOML into `config/identity/` and rebuild. No OCaml. The file name and
 | `renew_before_sec` | how far before expiry to exchange again |
 | `client_group` | which app to share; defaults to `id` |
 | `[authorize_params]` | anything the service asks for beyond the specs |
+| `callback` | `"loopback"` for a service that accepts only an RFC 8252 redirect, `http://127.0.0.1:<port>/api/v1/keepers/oauth/callback`; absent means this server's base URL. Measure it before writing it: registration or the authorize step refuses the public callback, and accepts the loopback one. The browser that consents has to run on the server's machine. |
 
 Not in the file: the authorize, token and registration endpoints, the scopes,
 and whether a secret is needed. All of that comes from what the service

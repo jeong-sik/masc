@@ -18,6 +18,16 @@ let base_path () =
   Unix.mkdir path 0o700;
   path
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv name previous
+      | None -> Unix.unsetenv name)
+    f
+
 let identity_dir base_path =
   Filename.concat (Filename.concat base_path ".masc") "identity"
 
@@ -237,6 +247,50 @@ let test_clearing_an_app_removes_old_secret_and_scopes () =
   | Ok None -> Alcotest.fail "clearing optional fields removed the client id"
   | Error message -> Alcotest.failf "reading cleared app failed: %s" message
 
+(* A provider declared [callback = "loopback"] names 127.0.0.1 on the port the
+   server bound, whatever the public base URL says; every other provider names
+   the base URL. A server bound where a browser cannot reach it as 127.0.0.1
+   gets an error rather than a callback that lands nowhere. *)
+let test_each_provider_names_the_callback_it_accepts () =
+  let asana = provider_or_fail "asana" and slack = provider_or_fail "slack" in
+  let loopback = "http://127.0.0.1:55137/api/v1/keepers/oauth/callback" in
+  with_env "MASC_HTTP_BASE_URL" "https://masc.example.org" (fun () ->
+    with_env "MASC_HTTP_PORT" "55137" (fun () ->
+      check (Alcotest.result Alcotest.string Alcotest.pass) "the public base URL for slack"
+        (Ok "https://masc.example.org/api/v1/keepers/oauth/callback")
+        (Oauth.redirect_uri_for slack);
+      List.iter
+        (fun (host, expected) ->
+          with_env "MASC_HOST" host (fun () ->
+            check
+              (Alcotest.result Alcotest.string Alcotest.pass)
+              ("asana with the server bound on " ^ host) expected
+              (Oauth.redirect_uri_for asana)))
+        [ "0.0.0.0", Ok loopback
+        ; "::", Ok loopback
+        ; "127.0.0.1", Ok loopback
+        ; "::1", Ok "http://[::1]:55137/api/v1/keepers/oauth/callback"
+        ; "127.0.0.2", Error ""
+        ; "192.168.0.5", Error ""
+        ];
+      (* The providers listing names the same callback per row. *)
+      with_env "MASC_HOST" "127.0.0.1" (fun () ->
+        let row id =
+          match Oauth.declarations_json ~base_path:(base_path ()) with
+          | `List rows ->
+            List.find_map
+              (function
+                | `Assoc pairs when List.assoc_opt "id" pairs = Some (`String id) -> Some pairs
+                | _ -> None)
+              rows
+          | _ -> Alcotest.fail "the listing is not a list"
+        in
+        check Alcotest.bool "asana's row names its loopback callback" true
+          (Option.bind (row "asana") (List.assoc_opt "callback")
+           = Some (`Assoc [ "kind", `String "loopback"; "url", `String loopback ]));
+        check Alcotest.bool "slack's row names none of its own" true
+          (Option.bind (row "slack") (List.assoc_opt "callback") = None))))
+
 let () =
   Alcotest.run "server_keeper_oauth_client"
     [ ( "recording an operator's own app",
@@ -262,5 +316,7 @@ let () =
             `Quick test_no_scopes_means_ask_for_what_the_service_publishes;
           Alcotest.test_case "clearing removes old secret and scopes" `Quick
             test_clearing_an_app_removes_old_secret_and_scopes;
+          Alcotest.test_case "each provider names the callback it accepts" `Quick
+            test_each_provider_names_the_callback_it_accepts;
         ] );
     ]

@@ -218,6 +218,7 @@ let handle_keeper_oauth_login_post ~clock state req reqd body_str =
                  ~keeper:name
                  ~provider_id
                  ~now:(Unix.gettimeofday ())
+                 ()
              with
              | Error message -> respond_error reqd message
              | Ok payload ->

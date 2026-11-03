@@ -17,14 +17,17 @@ val callback_path : string
     state is unguessable and redeemable once. *)
 
 val callback_json : unit -> Yojson.Safe.t
-(** The callback a login started now would name: [{url}], or [{problem}] when
-    this server does not know its own base URL. It follows
-    [MASC_HTTP_BASE_URL], or the address the server bound when that is unset,
-    so it changes when the server moves. *)
+(** The callback a login started now would name for a provider without a
+    callback of its own: [{url}], or [{problem}] when this server does not
+    know its own base URL. It follows [MASC_HTTP_BASE_URL], or the address the
+    server bound when that is unset, so it changes when the server moves. A
+    provider declared [callback = "loopback"] carries its own in each row. *)
 
 val declarations_json : base_path:string -> Yojson.Safe.t
 (** Every provider declared under [config/identity/], as a screen could list
-    them. A readable declaration carries a tagged [app_state] object whose
+    them. A provider declared [callback = "loopback"] also carries
+    [callback: {kind: "loopback", url | problem}]. A readable declaration
+    carries a tagged [app_state] object whose
     [kind] says whether an operator app is on file: ["on_file"], ["none"], or
     ["problem"]. The last also carries the store's [problem]. A declaration
     nobody can read is
@@ -59,11 +62,22 @@ val set_client :
     most needs to check. *)
 
 val start :
+  ?transports:Keeper_identity_tools.transports ->
+      (** How the provider is reached; production passes nothing and gets
+          {!Keeper_identity_tools.http_transports}. *)
+  ?register:
+    (registration_url:string ->
+     client_name:string ->
+     redirect_uri:string ->
+     (Keeper_oauth_registration.registered, Keeper_oauth_registration.error) result) ->
+      (** How a client is registered; production passes nothing and gets the
+          clock-bound RFC 7591 request. *)
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Workspace.config ->
   keeper:string ->
   provider_id:string ->
   now:float ->
+  unit ->
   (Yojson.Safe.t, string) result
 (** Begin a login. Finds the declaration, asks the provider's server where
     its authorization lives, uses the operator's app or registers a fresh client
@@ -130,7 +144,17 @@ val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
     Keeper never attached to is listed as such rather than left out, because
     "not attached" and "attached with no tools" are different things to
     whoever is looking. Each readable row also carries [app_state], the same
-    object {!declarations_json} gives. *)
+    object {!declarations_json} gives, and a provider declared
+    [callback = "loopback"] carries its own
+    [callback: {kind: "loopback", url | problem}]. *)
+
+val redirect_uri_for : Keeper_oauth_provider.t -> (string, string) result
+(** The redirect URI a login for this provider names: this server's callback
+    under its base URL, or for a provider declared [callback = "loopback"]
+    the RFC 8252 loopback form: [http://127.0.0.1:<bound port>/...] when the
+    server bound 127.0.0.1 or a wildcard, [http://[::1]:<bound port>/...]
+    when it bound ::1, and an [Error] for any other bind, 127.0.0.2
+    included. *)
 
 val finish :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

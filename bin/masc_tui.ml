@@ -499,7 +499,7 @@ let move_identity_cursor (state : state) ~delta =
                      ~summary:
                        (Masc_tui_identity_model.identity_summary ~providers ~query)
                      ~callback:
-                       (Masc_tui_identity_model.identity_callback_rows
+                       (Masc_tui_identity_model.identity_callback_rows ~providers
                           state.identity_callback)
                      ~notice:
                        (Masc_tui_identity_model.identity_notice

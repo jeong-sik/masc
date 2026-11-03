@@ -2004,6 +2004,43 @@ let test_renewal_redeems_with_the_logins_own_client () =
     (redeem (Store.Bound_to_registered (registered "public")) ~now:1.7e9
      = Ok ("public", None))
 
+(* Where a provider sends the browser back to is a declared fact, measured
+   per provider: absent is this server's callback, "loopback" is RFC 8252's
+   127.0.0.1 form, and anything else is a declaration error, not a default. *)
+let test_a_declaration_names_its_callback () =
+  let with_callback value =
+    Str.global_replace (Str.regexp_string "renew_before_sec = 600")
+      ("renew_before_sec = 600\ncallback = " ^ value) atlassian_toml
+  in
+  check Alcotest.bool "absent is the server's own callback" true
+    ((load_or_fail atlassian_toml).Keeper_oauth_provider.callback
+     = Keeper_oauth_provider.Server_callback);
+  check Alcotest.bool "loopback is the RFC 8252 form" true
+    ((load_or_fail (with_callback {|"loopback"|})).Keeper_oauth_provider.callback
+     = Keeper_oauth_provider.Loopback_callback);
+  expect_rejected ~why:"names a callback kind nobody defined" (with_callback {|"public"|});
+  expect_rejected ~why:"gives the callback as a number" (with_callback "1")
+
+(* The ten providers measured on 2026-11-02 to refuse a public callback and
+   take the loopback one ship declaring it, and one measured to take the
+   public callback does not. *)
+let test_the_shipped_loopback_providers_declare_it () =
+  let callback id =
+    match Keeper_oauth_declarations.find id with
+    | Some (Keeper_oauth_declarations.Declared provider) -> provider.Keeper_oauth_provider.callback
+    | Some (Keeper_oauth_declarations.Unreadable { problem; _ }) ->
+      Alcotest.failf "the shipped %s declaration does not read: %s" id problem
+    | None -> Alcotest.failf "no shipped declaration %s" id
+  in
+  List.iter
+    (fun id ->
+      check Alcotest.bool (id ^ " names the loopback callback") true
+        (callback id = Keeper_oauth_provider.Loopback_callback))
+    [ "asana"; "canva"; "circleci"; "prismic"; "rudderstack"; "shortcut"; "square"
+    ; "storyblok"; "turso"; "vercel" ];
+  check Alcotest.bool "linear keeps the server's callback" true
+    (callback "linear" = Keeper_oauth_provider.Server_callback)
+
 let test_the_id_has_to_be_one_path_component () =
   (* [t] is private and the client store joins the id onto a directory
      without checking, so the check has to be here. *)
@@ -2214,6 +2251,10 @@ let () =
             test_renewal_redeems_with_the_logins_own_client;
           Alcotest.test_case "the id has to be one path component" `Quick
             test_the_id_has_to_be_one_path_component;
+          Alcotest.test_case "a declaration names its callback" `Quick
+            test_a_declaration_names_its_callback;
+          Alcotest.test_case "the shipped loopback providers declare it" `Quick
+            test_the_shipped_loopback_providers_declare_it;
         ] );
       ( "what the declaration says against what stores it",
         [ Alcotest.test_case "the shipped file entry is storable" `Quick

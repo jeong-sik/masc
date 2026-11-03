@@ -1334,6 +1334,7 @@ type waiting_source =
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
   | Waiting_source_read_error
+  | Waiting_source_observation_unavailable
 
 type wake_producer =
   | Wake_board_dispatch

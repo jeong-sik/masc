@@ -271,6 +271,7 @@ const LANE_SOURCE_DEFS: Record<string, LaneSourceDef> = {
   owner_shutdown: { label: '종료 정리', tone: 'dim', stage: 'keeper' },
   operator_pending_confirm: { label: '운영자 확인', tone: 'warn', stage: 'operator' },
   read_error: { label: '읽기 오류', tone: 'bad', stage: 'queue' },
+  observation_unavailable: { label: '관측 불가', tone: 'bad', stage: 'operator' },
 }
 
 export function laneSourceLabel(source: string): string {

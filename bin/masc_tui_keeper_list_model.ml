@@ -18,6 +18,7 @@ type waiting_source = Masc.Tui_decode.waiting_source =
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
   | Waiting_source_read_error
+  | Waiting_source_observation_unavailable
 
 type wake_producer = Masc.Tui_decode.wake_producer =
   | Wake_board_dispatch
@@ -224,7 +225,9 @@ let primary_activity_of_row row =
 let badges_of_row row =
   let items = waiting_items row in
   let running, ownership_unknown, queued, cancelling = async_counts row.async_requests in
-  [ (if waiting_has_source Waiting_source_read_error items then Some Badge_read_error else None)
+  [ (if waiting_has_source Waiting_source_read_error items
+        || waiting_has_source Waiting_source_observation_unavailable items
+     then Some Badge_read_error else None)
   ; (if waiting_unavailable row then Some Badge_waiting_unavailable else None)
   ; (if running > 0 then Some (Badge_async { running; ownership_unknown }) else None)
   ; (if queued > 0 then Some (Badge_async_queued queued) else None)

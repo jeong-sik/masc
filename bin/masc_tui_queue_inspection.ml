@@ -244,7 +244,7 @@ let row_phase ~now source row detail =
   | Event_queue_pending | Chat_operation_queued | Hitl_pending | Operator_pending_confirm -> Ok Pending
   | Chat_operation_running | Fusion_running -> Ok Running
   | Owner_shutdown -> Ok Settling
-  | Read_error -> Ok Unavailable
+  | Read_error | Observation_unavailable -> Ok Unavailable
   | Schedule_waiting ->
     let* status = string "status" detail in
     let* status = Schedule_domain.schedule_status_of_string status in
@@ -273,7 +273,7 @@ let describe_row ~now row =
     | Inventory.Chat_operation_queued -> count_field "queued_count" detail
     | Event_queue_pending -> count_field ~default:1 "group_count" detail
     | Chat_operation_running | Hitl_pending | Fusion_running | Schedule_waiting
-    | Owner_shutdown | Operator_pending_confirm | Read_error -> Ok 1 in
+    | Owner_shutdown | Operator_pending_confirm | Read_error | Observation_unavailable -> Ok 1 in
   let* phase = row_phase ~now source row detail in
   let* since = optional_timestamp "since" row in
   let clock = match since with Some at -> clock_text at ^ "  " | None -> "       " in
@@ -344,7 +344,8 @@ let inventory_item row described =
        | Some id, Some instance -> Some (Schedule (id, instance))
        | Some _, None | None, Some _ | None, None -> None)
     | Inventory.Chat_operation_queued | Inventory.Hitl_pending | Inventory.Fusion_running
-    | Inventory.Owner_shutdown | Inventory.Operator_pending_confirm | Inventory.Read_error -> None in
+    | Inventory.Owner_shutdown | Inventory.Operator_pending_confirm | Inventory.Read_error
+    | Inventory.Observation_unavailable -> None in
   { id; text = first_line described.line }
 
 let inventory_items row described =
@@ -363,7 +364,8 @@ let inventory_items row described =
     | Inventory.Event_queue_pending | Inventory.Chat_operation_queued
     | Inventory.Chat_operation_running | Inventory.Hitl_pending | Inventory.Fusion_running
     | Inventory.Schedule_waiting | Inventory.Owner_shutdown
-    | Inventory.Operator_pending_confirm | Inventory.Read_error -> None in
+    | Inventory.Operator_pending_confirm | Inventory.Read_error
+    | Inventory.Observation_unavailable -> None in
   match members with
   | None ->
     (match described.source with
@@ -372,7 +374,8 @@ let inventory_items row described =
      | Inventory.Event_queue_pending | Inventory.Chat_operation_queued
      | Inventory.Chat_operation_running | Inventory.Hitl_pending | Inventory.Fusion_running
      | Inventory.Schedule_waiting | Inventory.Owner_shutdown
-     | Inventory.Operator_pending_confirm | Inventory.Read_error -> [summary])
+     | Inventory.Operator_pending_confirm | Inventory.Read_error
+     | Inventory.Observation_unavailable -> [summary])
   | Some values ->
     let parse_member = function
       | `Assoc fields ->

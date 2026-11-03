@@ -89,6 +89,7 @@ const QUEUE_SOURCE_GLYPH: Record<DashboardKeeperWaitingSource, string> = {
   owner_shutdown: '■',
   operator_pending_confirm: '⚿',
   read_error: '!',
+  observation_unavailable: '!',
 }
 
 function queueRowFrom(row: DashboardKeeperWaitingRow): string {

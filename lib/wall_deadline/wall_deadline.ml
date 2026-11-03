@@ -13,15 +13,17 @@ let rec sleep_until_with ~now ~wait_once deadline =
   end
 ;;
 
-let wait_once deadline =
+let wait_once ~on_armed deadline =
   let timer = create deadline in
   Fun.protect ~finally:(fun () -> close timer) (fun () ->
-    Eio_unix.await_readable (descriptor timer))
+    let fd = descriptor timer in
+    on_armed ();
+    Eio_unix.await_readable fd)
 ;;
 
-let sleep_until deadline =
+let sleep_until ?(on_armed = fun () -> ()) deadline =
   if not (Float.is_finite deadline) then invalid_arg "wall deadline must be finite";
-  sleep_until_with ~now:Unix.gettimeofday ~wait_once deadline
+  sleep_until_with ~now:Unix.gettimeofday ~wait_once:(wait_once ~on_armed) deadline
 ;;
 
 module For_testing = struct

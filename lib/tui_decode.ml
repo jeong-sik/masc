@@ -4641,6 +4641,7 @@ type waiting_source =
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
   | Waiting_source_read_error
+  | Waiting_source_observation_unavailable
 
 type wake_producer =
   | Wake_board_dispatch
@@ -4721,6 +4722,7 @@ let waiting_source_of_string raw =
     ; "owner_shutdown", Waiting_source_owner_shutdown
     ; "operator_pending_confirm", Waiting_source_operator_pending_confirm
     ; "read_error", Waiting_source_read_error
+    ; "observation_unavailable", Waiting_source_observation_unavailable
     ]
     raw
 
@@ -4994,8 +4996,9 @@ let decode_keeper_turns_projection json =
             Error "fleet waiting error must be an object"
       in
       let* item = decode_waiting_item json in
-      if item.kwi_source = Waiting_source_read_error then Ok item
-      else Error "fleet waiting error must have read_error source"
+      if item.kwi_source = Waiting_source_read_error
+         || item.kwi_source = Waiting_source_observation_unavailable then Ok item
+      else Error "fleet waiting error must have an unavailable source"
     in
     let rec errors acc = function
       | [] -> Ok (List.rev acc)

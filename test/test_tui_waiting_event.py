@@ -232,6 +232,7 @@ class WaitingHandler(FixtureHandler):
                 "collision-during": "collision-ignored",
                 "schedule": "schedule-refreshed",
                 "confirm": "confirm-refreshed",
+                "confirm-recovered": "confirm-recovered",
                 "schedule-held": "obsolete-schedule",
                 "schedule-follow": "final-schedule",
                 "reconnect": "reconnected-waiting",
@@ -285,7 +286,7 @@ class WaitingHandler(FixtureHandler):
                 ],
                 "waiting_errors": [],
             }
-            if phase == "collision-poll":
+            if phase in ("collision-poll", "confirm-unavailable"):
                 body["keepers"] = [
                     {"keeper_name": name, "status": "ok", "turn": None, "waiting": None}
                     for name in ("analyst", "beta", "gamma")
@@ -293,9 +294,17 @@ class WaitingHandler(FixtureHandler):
                 body["waiting_errors"] = [
                     {
                         "keeper_name": None,
-                        "source": "read_error",
+                        "source": (
+                            "observation_unavailable"
+                            if phase == "confirm-unavailable"
+                            else "read_error"
+                        ),
                         "waiting_on": "fixture",
-                        "what": "unavailable",
+                        "what": (
+                            "운영자 확인 기한 관측 불가"
+                            if phase == "confirm-unavailable"
+                            else "unavailable"
+                        ),
                         "wake_producer": "read_model_reader",
                         "since": None,
                         "due_at": None,
@@ -648,6 +657,31 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 drain_for(0.5)
                 self.assertEqual(server.count("confirm", SCHEDULE_PATH), 0)
+                server.set_phase("confirm-unavailable")
+                confirm_failure_start = len(output)
+                server.events.put((12, "__pending_confirm__"))
+                wait_until(
+                    lambda: (
+                        server.response_count("confirm-unavailable", TURNS_PATH) == 1
+                    ),
+                    "confirmation observation failure did not trigger a read",
+                )
+                wait_until(
+                    lambda: (
+                        "운영자 확인 기한 관측 불가".encode()
+                        in output[confirm_failure_start:]
+                    ),
+                    "confirmation observation failure was not displayed",
+                )
+                server.set_phase("confirm-recovered")
+                confirm_recovery_start = len(output)
+                server.events.put((13, "__pending_confirm__"))
+                wait_until(
+                    lambda: rendered_row_contains(
+                        confirm_recovery_start, b"analyst", b"confirm-recovered"
+                    ),
+                    "confirmation observation recovery was not displayed",
+                )
                 # Keep the general refresh in flight: a loss signal must still
                 # start its own schedule read before that refresh completes.
                 server.set_phase("recovery")
@@ -661,7 +695,7 @@ class WaitingEventTest(unittest.TestCase):
                     "the general refresh's schedule read did not finish",
                 )
                 server.set_phase("loss-inflight")
-                server.events.put((12, "__loss2__"))
+                server.events.put((14, "__loss2__"))
                 wait_until(
                     lambda: server.response_count("loss-inflight", SCHEDULE_PATH) == 1,
                     "source loss did not independently revalidate the agenda",

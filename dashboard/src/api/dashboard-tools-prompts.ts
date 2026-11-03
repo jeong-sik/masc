@@ -380,6 +380,7 @@ export type DashboardKeeperWaitingSource =
   | 'owner_shutdown'
   | 'operator_pending_confirm'
   | 'read_error'
+  | 'observation_unavailable'
 
 export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'event_queue_pending',
@@ -391,6 +392,7 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'owner_shutdown',
   'operator_pending_confirm',
   'read_error',
+  'observation_unavailable',
 ] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>
 
 type NoMissingWaitingSource<Missing extends never> = Missing

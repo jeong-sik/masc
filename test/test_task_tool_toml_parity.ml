@@ -70,7 +70,7 @@ let test_properties_keep_their_order_and_requirement () =
     [ "masc_task_history", [ "task_id"; "limit" ], [ "task_id" ]
     ; "masc_tasks", [ "status"; "include_done"; "include_cancelled" ], []
     ; "masc_update_priority", [ "task_id"; "priority" ], [ "task_id"; "priority" ]
-    ; "masc_task_set_goal", [ "task_id"; "goal_id" ], [ "task_id"; "goal_id" ]
+    ; "masc_task_set_goal", [ "task_id"; "goal_id"; "expected_workspace" ], [ "task_id"; "goal_id" ]
     ]
 ;;
 

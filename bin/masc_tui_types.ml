@@ -12005,8 +12005,9 @@ let take_early_asks_observation (state : state) early =
   then take_asks_observation state early.ea_observation
   else None
 
-let begin_keeper_roster_read (state : state) =
-  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_roster_read in
+(* [Poll] shares a whole read already in flight; [Refresh] owns a new one. *)
+let begin_keeper_roster_read ~intent (state : state) =
+  let reading, request = Snapshot_read.start ~intent state.keeper_roster_read in
   state.keeper_roster_read <- reading;
   request
 

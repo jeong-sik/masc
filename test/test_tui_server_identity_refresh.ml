@@ -1925,7 +1925,7 @@ let early_roster_fixture () =
   state.server_identity <- Some server;
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   begin_http_refresh_state state ~ticket ~started_ns:0L;
-  let request = match begin_keeper_roster_read state with
+  let request = match begin_keeper_roster_read ~intent:Snapshot_read.Refresh state with
     | Some request -> request | None -> Alcotest.fail "roster read did not start" in
   state,
   { er_ticket=ticket; er_authority=state.workspace_authority; er_identity=server;
@@ -1974,7 +1974,7 @@ let test_early_roster_preserves_read_ownership () =
      && state.http_refresh_started_ns=Some 0L);
   Alcotest.(check bool) "terminal failure no longer owns a roster reading" true
     (take_keeper_roster_observation state failure=None);
-  let successor=match begin_keeper_roster_read state with
+  let successor=match begin_keeper_roster_read ~intent:Snapshot_read.Refresh state with
     | Some request -> request | None -> Alcotest.fail "successor roster did not start" in
   Alcotest.(check bool) "newer scoped roster supersedes the old full copy" true
     (take_early_keeper_roster_observation state early=None

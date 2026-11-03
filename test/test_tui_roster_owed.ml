@@ -76,6 +76,12 @@ let test_a_failed_row_does_not_hold_back_another () =
   let t = R.row_changed ~keeper_name:"beta" (failed ~now:0.0 (R.Read_row "alpha") t) in
   check (option read) "the other row reads now" (Some (R.Read_row "beta")) (next ~now:0.0 t)
 
+let test_rows_wait_while_a_failed_roster_read_waits () =
+  let t = R.started R.Read_roster (R.roster_changed R.settled) in
+  let t = R.row_changed ~keeper_name:"alpha" (failed ~now:10.0 R.Read_roster t) in
+  check (option read) "no row before the roster's wait ends" None (next ~now:11.9 t);
+  check (option read) "the whole roster after it" (Some R.Read_roster) (next ~now:12.0 t)
+
 let test_an_abandoned_read_is_owed_again () =
   let t = R.started (R.Read_row "alpha") (R.row_changed ~keeper_name:"alpha" R.settled) in
   check bool "reading" true (R.reading t);
@@ -102,6 +108,8 @@ let () =
             test_a_failed_row_read_retries_with_backoff
         ; test_case "a failed row does not hold back another" `Quick
             test_a_failed_row_does_not_hold_back_another
+        ; test_case "rows wait while a failed roster read waits" `Quick
+            test_rows_wait_while_a_failed_roster_read_waits
         ; test_case "an abandoned read is owed again" `Quick
             test_an_abandoned_read_is_owed_again
         ] )

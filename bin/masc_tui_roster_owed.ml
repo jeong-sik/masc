@@ -31,8 +31,14 @@ let roster_changed t = { t with roster = Owed.changed t.roster }
 
 let reading t = is_reading t.roster || Names.exists (fun _ owed -> is_reading owed) t.rows
 
+(* A failed whole read dropped the roster a row would go into, and the whole
+   read that follows its wait reads every owed row. *)
+let waiting_out_a_failure ~now = function
+  | Owed.Waiting { retry_at; _ } -> now < retry_at
+  | Owed.Settled | Owed.Owed _ | Owed.Reading _ -> false
+
 let next_read ~now t =
-  if reading t then None
+  if reading t || waiting_out_a_failure ~now t.roster then None
   else
     let due = Names.filter (fun _ owed -> Owed.due ~now owed) t.rows in
     match Owed.due ~now t.roster, Names.bindings due with

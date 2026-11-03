@@ -11209,7 +11209,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           | None -> Error "Workspace identity is unavailable; input remains retained" in
         let* owner_paused =
           if not local_resume then Ok true else
-            (match Masc_tui_loader.load_keeper_roster ~host ~port ~fresh:false ~expected_workspace with
+            (match Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace with
              | Error failure -> Error (Keeper_control.roster_failure_message
                  ~credential_sent:(Masc_tui_http.operator_token_present ()) failure)
              | Ok (roster, _) ->
@@ -15456,7 +15456,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
            (fun () ->
              let roster_result = match expected_workspace with
                | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
-               | Some expected_workspace -> load_keeper_roster ~host ~port ~fresh:false ~expected_workspace in
+               | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace in
              let observation = {roster_request;roster_result} in
              (* Success and failure settle the same request. A failed read
                 withdraws stale actions without waiting for sibling readers. *)
@@ -17949,10 +17949,9 @@ let resolve_opening_chat state ~base_path ~mailbox =
   end
 
 (* The Keeper roster reads again when the server says a row or every row
-   changed, on a revalidation or a resumed authority, and after a failed read
-   (RFC-0481 §3.3). A named row is read alone; every row, or two or more rows
-   due at once, is read whole with [fresh=true], so the server's list cache
-   cannot hand back a row older than one already read. *)
+   changed, on a resumed authority, and after a failed read (RFC-0481 §3.3).
+   A named row is read alone; every row, or two or more rows due at once, is
+   read whole. A revalidation reads it whole in its refresh. *)
 let owe_whole_keeper_roster_read state =
   state.keeper_roster_owed <- Masc_tui_roster_owed.roster_changed state.keeper_roster_owed
 
@@ -17961,6 +17960,13 @@ let owe_keeper_roster_change state = function
       state.keeper_roster_owed <-
         Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed
   | Masc_tui_observer.Every_row_changed -> owe_whole_keeper_roster_read state
+
+(* A refresh that starts while the roster's owed read runs shares that read
+   instead of throwing its answer away. Any other read in flight is replaced
+   as before. *)
+let keeper_roster_read_intent state =
+  if Masc_tui_roster_owed.reading state.keeper_roster_owed then Snapshot_read.Poll
+  else Snapshot_read.Refresh
 
 let fail_keeper_roster_read state read =
   state.keeper_roster_owed <-
@@ -17984,8 +17990,8 @@ let launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read =
           ~deliver:(fun roster_result ->
             enqueue_async mailbox (Keeper_roster_reloaded { roster_request; roster_result }))
           (fun () ->
-            Masc_tui_loader.load_keeper_roster ~host ~port ~fresh:true ~expected_workspace))
-        (Masc_tui_types.begin_keeper_roster_read state)
+            Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace))
+        (Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state)
   | Masc_tui_roster_owed.Read_row keeper_name ->
       Option.iter (fun row_request ->
         launch
@@ -18064,7 +18070,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_held_calls_read state;
        owe_tool_modes_read state;
        owe_async_requests_read state;
-       owe_whole_keeper_roster_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state
@@ -18120,7 +18125,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       | Cadence -> { current with needs_board = false }
     in
     let roster_request = if needs.needs_keeper_roster
-      then Masc_tui_types.begin_keeper_roster_read state else None in
+      then Masc_tui_types.begin_keeper_roster_read state
+          ~intent:(match intent with
+            | Revalidate -> Snapshot_read.Refresh
+            | Cadence -> keeper_roster_read_intent state)
+      else None in
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -18701,7 +18710,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     in
     let ask_request = if needs.needs_asks then Masc_tui_types.begin_asks_read state else None in
     let roster_request = if needs.needs_keeper_roster
-      then Masc_tui_types.begin_keeper_roster_read state else None in
+      then Masc_tui_types.begin_keeper_roster_read ~intent:(keeper_roster_read_intent state) state
+      else None in
     (* Chat history has its own generation-guarded loader rather than a field
        in the HTTP surface record. It still follows the same delta: entering
        chat asks once; moving among Keeper modes that share the roster does
@@ -21160,6 +21170,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect)
          | Some _ | None -> ())
       end else (match message with
+        (* The read answers nothing the screen may use, but it is over: its
+           slot is freed, so the roster's owed read starts again once the
+           server's authority is back. *)
+        | Keeper_roster_reloaded observation ->
+          ignore (Masc_tui_types.take_keeper_roster_observation state observation)
+        | Keeper_row_reloaded observation ->
+          ignore (Masc_tui_types.take_keeper_row_observation state observation)
         | Gate_snapshot_loaded (request, _, _) ->
           Log.Transport.debug "discarded Gate snapshot request=%d: workspace authority superseded"
             (Snapshot_read.request_id request)
@@ -21260,7 +21277,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
         | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _
-        | Keeper_roster_reloaded _ | Keeper_row_reloaded _
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
         | Keeper_chat_control_received (_, _, _) | Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
@@ -21854,7 +21870,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 hrr_approval = dispatch_approvals_listing state;
                 hrr_asks = Masc_tui_types.begin_asks_read state;
                 hrr_roster = if initial.hir_needs.needs_keeper_roster
-                  then Masc_tui_types.begin_keeper_roster_read state else None;
+                  then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
+                  else None;
                 hrr_surfaces = context } in
             ignore (Eio.Promise.try_resolve initial.hir_acknowledge (Some admitted));
             Log.Transport.info "tui_surface_read_rebound previous_request=%d context=%s"

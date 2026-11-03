@@ -1594,6 +1594,82 @@ let test_health_observer_wakes_after_persistence_exception () =
       (!observations = [ Some true; None; Some true ]))
 ;;
 
+(* RFC-0481 §3.2: every metadata write the Owner attempts tells the roster
+   readers to reread that Keeper's row. *)
+let hearing_row_changes f =
+  let id = Printf.sprintf "keeper-owner-row-changed-%d" (Unix.getpid ()) in
+  let heard = ref [] in
+  Sse.subscribe_external ~id
+    ~callback:(fun (ev : Sse.external_event) ->
+      match Sse.data_payload_of_frame ev.Sse.ext_frame with
+      | Error Sse.Missing_data_payload -> ()
+      | Ok payload ->
+        (match Yojson.Safe.from_string payload with
+         | `Assoc fields ->
+           (match List.assoc_opt "type" fields, List.assoc_opt "name" fields with
+            | Some (`String kind), Some (`String name)
+              when String.equal kind Keeper_row_broadcast.row_changed_event ->
+              heard := name :: !heard
+            | _ -> ())
+         | _ -> ()
+         | exception Yojson.Json_error _ -> ()))
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () -> f heard)
+;;
+
+let operator_pause updated_at =
+  Reducer.Pause
+    { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+    ; updated_at }
+;;
+
+let test_metadata_writes_announce_the_keeper_row () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let initial = make_meta "row-announce" in
+  let owner = owner_ok (start_owner ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~keeper_name:initial.name ~initial_meta:(Some initial)) in
+  let failing = make_meta "row-announce-fenced" in
+  let fenced = owner_ok (start_owner ~sw
+    ~store:{ replace = (fun _ -> Error "unconfirmed"); remove = (fun _ -> Ok ()) }
+    ~keeper_name:failing.name ~initial_meta:(Some failing)) in
+  hearing_row_changes (fun heard ->
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "row-pause")));
+    check (list string) "a committed write announces its Keeper" [ initial.name ] !heard;
+    ignore (owner_ok (Owner.apply_meta owner (Reducer.Resume { updated_at = "row-resume" })));
+    check (list string) "each committed write announces" [ initial.name; initial.name ] !heard;
+    owner_ok (Owner.begin_stopping owner);
+    check int "a transition that persists nothing announces nothing" 2 (List.length !heard);
+    heard := [];
+    (match Owner.apply_meta fenced (operator_pause "row-fenced") with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "a refused write was accepted");
+    check (list string) "the failure that fences the store announces, since the file may have changed"
+      [ failing.name ] !heard;
+    (match Owner.apply_meta fenced (operator_pause "row-fenced-again") with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "a fenced store accepted a write");
+    check (list string) "a fenced store announces nothing more" [ failing.name ] !heard)
+;;
+
+let test_raised_metadata_write_announces_the_keeper_row () =
+  Eio_main.run @@ fun _env ->
+  let initial = make_meta "row-announce-raised" in
+  let state = match Reducer.create ~keeper_name:initial.name (Some initial) with
+    | Ok state -> state | Error error -> fail (Reducer.error_to_string error) in
+  let pause = match Reducer.apply_meta state (operator_pause "row-raised") with
+    | Ok transition -> transition | Error error -> fail (Reducer.error_to_string error) in
+  let raised = Failure "write outcome unknown" in
+  let store : Owner.store =
+    { replace = (fun _ -> raise raised); remove = (fun _ -> fail "unexpected remove") } in
+  hearing_row_changes (fun heard ->
+    (match Owner.For_testing.commit_metadata_transition ~keeper_name:initial.name store pause with
+     | _ -> fail "the write exception did not propagate"
+     | exception exn when exn == raised -> ());
+    check (list string) "a write that raised announces its Keeper" [ initial.name ] !heard)
+;;
+
 let test_health_observer_callback_cancellation_is_isolated () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -6971,6 +7047,14 @@ let () =
             "health observer wakes after persistence exceptions"
             `Quick
             test_health_observer_wakes_after_persistence_exception
+        ; test_case
+            "metadata writes announce the Keeper row"
+            `Quick
+            test_metadata_writes_announce_the_keeper_row
+        ; test_case
+            "a raised metadata write announces the Keeper row"
+            `Quick
+            test_raised_metadata_write_announces_the_keeper_row
         ; test_case
             "health observer isolates callback cancellation"
             `Quick

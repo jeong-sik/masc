@@ -118,11 +118,11 @@ roster 경로에 `name=<키퍼>` 를 더한다. 그 키퍼의 행 하나(또는 
 
 ### 3.2 신호
 
-새 SSE `keeper_row_changed { name }` 를 하나 둔다. 키퍼 목록이 바뀌면 `keeper_roster_changed` 를 낸다. 신호는 쓰기 함수 안에서 쓰기가 끝난 뒤 낸다(RFC-0480 §3.4). roster 캐시는 신호 전에 지운다.
+새 SSE `keeper_row_changed { name }` 를 하나 둔다. 키퍼 목록이 바뀌면 `keeper_roster_changed` 를 낸다. 신호는 쓰기 함수 안에서 쓰기가 끝난 뒤 낸다(RFC-0480 §3.4). 신호를 받은 쪽은 캐시를 거치지 않는 읽기로 읽는다. 키퍼 하나는 `name=`(§3.1), 목록 전체는 `fresh=true` 다. 그래서 신호 전에 roster 캐시를 지우지 않는다.
 
 | 쓰기 | 신호 |
 |---|---|
-| Owner commit(meta 저장소 `replace`·`remove`). paused, activation, 사용 카운터, `updated_at`, sandbox profile, 턴 자리, chat control token 이 모두 여기를 지난다 | 그 키퍼 `keeper_row_changed` |
+| Owner commit(meta 저장소 `replace`·`remove`). paused, activation, 사용 카운터, `updated_at`, sandbox profile, 턴 자리, chat control token 이 모두 여기를 지난다. 예외를 낸 쓰기와 저장소를 막은 첫 실패도 파일을 바꿨을 수 있어서 같이 알린다 | 그 키퍼 `keeper_row_changed` |
 | registry 항목 commit(단계, 실패 이유와 시각, keepalive) | 그 키퍼 |
 | registry 목록 변화 | `keeper_roster_changed` |
 | `runtime.toml` 배정 트랜잭션, 기본 경로 변경, 설정 다시 읽기 | 배정이 닿는 키퍼마다. 기본 경로는 모든 키퍼 |
@@ -135,7 +135,7 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 ### 3.3 TUI 의 roster
 
 - `keeper_row_changed` 마다 그 키퍼에 읽을 빚을 남긴다(RFC-0480 §3.1 의 읽을 빚). 키퍼마다 하나다. 읽은 행은 roster 안의 그 키퍼 자리를 바꿔 끼운다.
-- `keeper_roster_changed`, 다시 읽기(Revalidate), 권한 회복은 roster 전체를 읽는다.
+- `keeper_roster_changed`, 다시 읽기(Revalidate), 권한 회복은 roster 전체를 `fresh=true` 로 읽는다. 캐시된 전체 목록이 그 사이에 받은 키퍼 행을 옛 값으로 덮지 않게 하기 위해서다.
 - 실패한 읽기는 키퍼마다 늘어나는 간격으로 다시 읽는다. 전체 읽기 실패는 지금처럼 옛 목록을 버리고 수명 동작을 거둔다(§1.8).
 - 2초 묶음의 roster 읽기와 `needs_keeper_roster` 의 2초 갈래를 지운다.
 
@@ -170,7 +170,7 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 |---|---|---|
 | L0 | 이 RFC | 리뷰 |
 | L1 | roster 경로의 `name=` 키퍼 하나 읽기 | 같은 키퍼의 행이 전체 읽기의 행과 같은지, 오류 행, 인증 |
-| L2a~ | §3.2 의 신호. 쓰기 하나가 층 하나다 | 쓰기마다 신호가 한 번 나가는지, 신호 전에 캐시가 지워졌는지 |
+| L2a~ | §3.2 의 신호. 쓰기 하나가 층 하나다 | 쓰기마다 신호가 한 번 나가는지 |
 | L3 | TUI roster: 키퍼별 빚 읽기, 목록 변화 전체 읽기, 2초 roster 읽기 삭제 | 신호 하나 → 요청 하나, 실패 재시도 |
 | L4 | 대기 목록 빈 곳 알림(일정, 확인 대기, fusion), TUI turns 의 2초 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
 | L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |

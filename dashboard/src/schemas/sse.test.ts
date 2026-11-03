@@ -65,6 +65,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_child_content_appended')).toBe('keeper_child_content_appended')
   })
 
+  it('accepts keeper row changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_row_changed')).toBe('keeper_row_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

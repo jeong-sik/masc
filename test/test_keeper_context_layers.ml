@@ -12,6 +12,7 @@ module L = Masc.Keeper_context_layers
 let all_layers =
   [
     L.Active_goals;
+    L.Goal_observations;
     L.Current_task;
     L.Approval_authority;
     L.Connected_surfaces;

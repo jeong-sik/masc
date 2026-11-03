@@ -179,6 +179,31 @@ let goals_heading count =
     [ "count", string_of_int count ]
 ;;
 
+(* The text of the Goal Observations layer alone. Its rows start with the
+   same "- <goal id>" as the Active Goals rows, so a row lookup reads only
+   this layer. *)
+let goal_observations_of partition =
+  let observed, _ =
+    Keeper_context_layers.partition_layer Keeper_context_layers.Goal_observations partition
+  in
+  Keeper_context_layers.text observed
+;;
+
+(* The Goal Observations row of [goal_id], found by its own template. The
+   held-Task link marker lives here, not on the Active Goals row, because it
+   changes on every claim and release and the Active Goals layer sits in the
+   System prompt (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
+let observation_row observations ~goal_id =
+  let row = fragment Prompt_names.keeper_world_goal_observations_row [ "goal_id", goal_id ] in
+  match
+    List.find_opt
+      (fun line -> String.equal line row || String.starts_with ~prefix:(row ^ " ") line)
+      (String.split_on_char '\n' observations)
+  with
+  | Some line -> line
+  | None -> fail ("no Goal Observations row for " ^ goal_id)
+;;
+
 (* The rendered Active Goals row of [goal_id], found by its own template. *)
 let goal_row world ~goal_id ~title =
   let row =
@@ -216,7 +241,7 @@ let test_held_tasks_mark_their_goals_without_hiding_others () =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
   in
   let world ~keeper_name =
-    let { Keeper_unified_prompt.world_state; _ } =
+    let { Keeper_unified_prompt.world_state; world_partition; _ } =
       Keeper_unified_prompt.build_prompt
         ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
         ~current_task:Keeper_world_observation_inputs.No_current_task
@@ -224,30 +249,32 @@ let test_held_tasks_mark_their_goals_without_hiding_others () =
           (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name)
         ~observation ()
     in
-    world_state
+    world_state, goal_observations_of world_partition
   in
   let yours = fragment Prompt_names.keeper_world_active_goals_yours_annotation [] in
   let unknown =
     fragment Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
   in
-  let marked = world ~keeper_name:meta.name in
+  let marked, marked_observations = world ~keeper_name:meta.name in
   check bool "a held task that is not the current task marks its goal" true
+    (contains_in (observation_row marked_observations ~goal_id:"goal-verifying") yours);
+  check bool "the Active Goals row carries no held-Task marker" false
     (contains_in (goal_row marked ~goal_id:"goal-verifying" ~title:"proof pending") yours);
   check bool "the other open goal stays listed, unmarked" false
-    (contains_in (goal_row marked ~goal_id:"goal-executing" ~title:"still work") yours);
+    (contains_in (observation_row marked_observations ~goal_id:"goal-executing") yours);
   check bool "both open goals are counted" true (contains_in marked (goals_heading 2));
-  let other_keeper = world ~keeper_name:"keeper-holding-nothing" in
+  let other_keeper, _ = world ~keeper_name:"keeper-holding-nothing" in
   check bool "a keeper holding nothing marks nothing" false (contains_in other_keeper yours);
   check bool "and sees the same goals" true (contains_in other_keeper (goals_heading 2));
   Fs_compat.save_file (Workspace_goal_index.goal_task_links_path config) "unreadable";
-  let unreadable = world ~keeper_name:meta.name in
+  let unreadable, unreadable_observations = world ~keeper_name:meta.name in
   check bool "a recovery copy does not stand in for the registry" false
     (contains_in unreadable yours);
   check bool "every open goal is marked unknown" true
-    (contains_in (goal_row unreadable ~goal_id:"goal-executing" ~title:"still work") unknown
-     && contains_in (goal_row unreadable ~goal_id:"goal-verifying" ~title:"proof pending") unknown);
+    (contains_in (observation_row unreadable_observations ~goal_id:"goal-executing") unknown
+     && contains_in (observation_row unreadable_observations ~goal_id:"goal-verifying") unknown);
   check bool "a keeper holding nothing needs no links" false
-    (contains_in (world ~keeper_name:"keeper-holding-nothing") unknown)
+    (contains_in (fst (world ~keeper_name:"keeper-holding-nothing")) unknown)
 ;;
 
 let test_world_observation_drops_terminal_goals () =
@@ -577,6 +604,79 @@ let test_goal_measurement_tracks_current_revision_and_read_failure () =
     (contains_in unavailable_world "Its value is unknown; preserve the Goal")
 ;;
 
+(* RFC-goal-observations-leave-the-system-prompt. The Active Goals layer becomes
+   the System suffix that precedes the history, so a recorded measurement or a
+   claimed linked Task must leave its bytes as they were; only the Goal
+   Observations layer, which rides the trailing context, moves. *)
+let test_a_measurement_or_a_claim_moves_only_the_goal_observations () =
+  with_workspace @@ fun config ->
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ { (goal_in Goal_phase.Executing "goal-executing" "still work") with
+            metric = Some "observed fixture cases"
+          ; target_value = Some "3 of 3 fixture cases observed"
+          }
+        ; goal_in Goal_phase.Verifying "goal-verifying" "proof pending"
+        ]
+    };
+  let meta = keeper_meta () in
+  let layers () =
+    let observation =
+      Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+    in
+    let { Keeper_unified_prompt.world_partition; _ } =
+      Keeper_unified_prompt.build_prompt
+        ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+        ~current_task:Keeper_world_observation_inputs.No_current_task
+        ~active_goal_summaries:
+          (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name:meta.name)
+        ~observation ()
+    in
+    let goals, rest =
+      Keeper_context_layers.partition_layer Keeper_context_layers.Active_goals world_partition
+    in
+    Keeper_context_layers.text goals, goal_observations_of rest
+  in
+  let goals_before, observed_before = layers () in
+  check bool "the observations name every open Goal" true
+    (contains_in observed_before "goal-executing" && contains_in observed_before "goal-verifying");
+  let goal =
+    match Goal_store.find_goal config ~goal_id:"goal-executing" with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent | Goal_store.Store_unavailable _ -> fail "fixture Goal unavailable"
+  in
+  (match Goal_measurement.record config ~goal_id:goal.id
+           ~criterion_revision:goal.criterion_revision
+           ~observed_value:"1 of 3 fixture cases observed"
+           ~evidence:"note:fixture measurement" ~actor:meta.name with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  let goals_measured, observed_measured = layers () in
+  check string "a recorded measurement leaves the Active Goals bytes" goals_before goals_measured;
+  check bool "the measurement reaches the observations" true
+    (contains_in observed_measured "1 of 3 fixture cases observed");
+  check bool "the Active Goals layer carries no measurement" false
+    (contains_in goals_measured "1 of 3 fixture cases observed");
+  let held =
+    match
+      Workspace.add_task_with_result config ~title:"held work" ~priority:2
+        ~description:"linked to the executing goal"
+    with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace.add_task_error_to_string error)
+  in
+  (match Workspace.claim_task_r config ~agent_name:meta.name ~task_id:held () with
+   | Ok _ -> ()
+   | Error _ -> fail "the keeper could not claim its task");
+  Workspace_goal_index.write_goal_task_links config [ "goal-executing", [ held ] ];
+  let goals_claimed, observed_claimed = layers () in
+  check string "a claimed linked Task leaves the Active Goals bytes" goals_before goals_claimed;
+  check bool "the claim reaches the observations" false
+    (String.equal observed_measured observed_claimed)
+;;
+
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
@@ -590,6 +690,8 @@ let () =
             test_turn_surface_drops_terminal_goals
         ; test_case "held tasks mark their goals without hiding others" `Quick
             test_held_tasks_mark_their_goals_without_hiding_others
+        ; test_case "a measurement or a claim moves only the Goal observations" `Quick
+            test_a_measurement_or_a_claim_moves_only_the_goal_observations
         ; test_case "world observation drops terminal goals" `Quick
             test_world_observation_drops_terminal_goals
         ; test_case "all-terminal yields no goals at either surface" `Quick

@@ -276,6 +276,9 @@ let keeper_world_active_goals_held_task_link_unreadable_annotation =
   "keeper.world.active_goals.held_task_link_unreadable_annotation"
 ;;
 
+let keeper_world_goal_observations_heading = "keeper.world.goal_observations.heading"
+let keeper_world_goal_observations_row = "keeper.world.goal_observations.row"
+
 let keeper_world_current_task_heading_held = "keeper.world.current_task.heading.held"
 
 let keeper_world_current_task_heading_submitted =

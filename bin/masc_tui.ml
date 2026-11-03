@@ -21384,6 +21384,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let detail = "Observer generation changed; rechecking workspace" in
         state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
         apply_server_identity_reading ~withdraw_on_error:true state ~mailbox (Error detail);
+        (* The withdrawal drops the MCP session with every other reading, but
+           this stream was just admitted under [session_id]: the successor
+           accepted it, so the session is not part of what the old generation
+           owned. Keeping it lets the reopened stream reuse it instead of
+           initializing a second one; a session the server no longer knows
+           still answers 404/409 and is dropped by [Observer_closed]. *)
+        state.mcp_session <- Some session_id;
         (* A path-only match cannot authorize automatic delivery of input
            retained from the old generation. Keep it for explicit resume. *)
         let retained = suspend_keeper_input state in

@@ -71,10 +71,14 @@ let sparkline_marks ?min ?max values =
     (sparkline_levels ?min ?max values)
 ;;
 
+(* [abs min_int] overflows back to [min_int], a negative number, so the
+   sign of the magnitude is what tells that one value apart. It prints as
+   its exact integer string rather than a rung its magnitude does not
+   reach, and the check holds on any word size. *)
 let format_compact_num n =
-  if n = min_int then "-4.6M"
+  let abs_n = abs n in
+  if abs_n < 0 then string_of_int n
   else
-    let abs_n = abs n in
     if abs_n >= 1_000_000 then
       Printf.sprintf "%.1fM" (float_of_int n /. 1_000_000.0)
     else if abs_n >= 10_000 then

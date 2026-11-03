@@ -49,6 +49,20 @@ let sparkline_levels () =
   check "a constant zero series uses the lowest level" [0; 0]
     (Chart.sparkline_levels [0; 0])
 
+let compact_number_boundaries () =
+  let check = Alcotest.(check string) in
+  check "min_int prints as its exact integer, not a made-up rung"
+    (string_of_int min_int)
+    (Chart.format_compact_num min_int);
+  check "one above min_int keeps its negative magnitude rung"
+    "-4611686018427.4M"
+    (Chart.format_compact_num (min_int + 1));
+  check "a million keeps the M rung" "-2.0M" (Chart.format_compact_num (-2_000_000));
+  check "ten thousand keeps the k rung" "-10k" (Chart.format_compact_num (-10_000));
+  check "a thousand and a half keeps one decimal" "-1.5k"
+    (Chart.format_compact_num (-1_500));
+  check "below a thousand is the plain integer" "999" (Chart.format_compact_num 999)
+
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -56,5 +70,6 @@ let () =
       ; Alcotest.test_case "large totals and products" `Quick large_counts
       ; Alcotest.test_case "empty and negative inputs" `Quick empty_and_negative_inputs
       ; Alcotest.test_case "sparkline scale and integer limits" `Quick sparkline_levels
+      ; Alcotest.test_case "compact number boundaries" `Quick compact_number_boundaries
       ]
     ]

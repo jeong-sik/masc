@@ -1,6 +1,6 @@
 (* RFC machine-spectating-goes-through-lanes §5 3a (#38815) — the spectator
    TUI over a real PTY against an in-process server with the real lane-addon
-   router and the DOS fixture worker. Three observed behaviors:
+   router and the DOS fixture worker. Three asserted behaviors:
 
      a. while the first live read is pending, the spectator screen still
         processes keys (the raw capture grows before any answer lands);
@@ -10,16 +10,27 @@
      c. with the change counter unchanged the answers are "unchanged" and no
         picture repaint happens.
 
-   The candidate TUI binary arrives as an artifact, not from this tree: the
-   scenarios run only when MASC_TUI_3A_BIN names it; without it the test
-   skips with a reason, so the suite stays green on plain checkouts.
+   Every behavior above is asserted: a violated condition is recorded and the
+   run exits 1. Setup gates (identity never confirmed, no live read, the
+   broker dying mid-run) abort immediately instead — when the rig itself is
+   broken there is no product observation worth keeping. Evidence on either
+   path: the raw PTY capture plus a run log binding the binary sha256,
+   commands and times.
 
-   The PTY comes from [script] (the workspace capture convention). The races
-   are manufactured by the test-owned request handler: the first live request
-   is answered by this test with a captured pre-advance snapshot after the
-   machine has advanced and an F5 re-read has drawn the newer picture. Every
-   later live request goes through the real router. Evidence: the raw PTY
-   capture plus a run log binding the binary sha256, commands and times. *)
+   The candidate TUI binary arrives as an artifact, not from this tree: the
+   scenarios run only when MASC_TUI_3A_BIN names it; without it the run
+   skips with a reason. This is an (executable), not a (test): no @runtest
+   alias runs it, so a plain checkout never reports that skip as green.
+   Run it explicitly:
+   MASC_TUI_3A_BIN=<candidate> dune exec test/test_tui_machine_pty_3a.exe
+
+   The PTY comes from test/pty_broker_3a.py (the keys feed is a plain pipe
+   into the broker's stdin; the broker also answers the kitty graphics
+   capability probe without which the candidate refuses to draw pictures).
+   The races are manufactured by the test-owned request handler: the first
+   live request is answered by this test with a captured pre-advance snapshot
+   after the machine has advanced and an F5 re-read has drawn the newer
+   picture. Every later live request goes through the real router. *)
 
 let log_channel = ref Format.std_formatter
 let log fmt =
@@ -80,7 +91,6 @@ let broker =
   | None -> "test/pty_broker_3a.py"
 
 let spawn_brokered_tui ~clock ~keys_read ~raw ~tui_exe ~workdir ~env =
-  ignore clock;
   let argv =
     [| "python3"; broker; tui_exe; raw; workdir |]
   in
@@ -105,6 +115,70 @@ let send_keys fd keys =
       all (off + n)
   in
   all 0
+
+(* Verdicts accumulate: one slow PTY run reports every violated condition,
+   then exits 1. Setup gates abort immediately instead (see [setup_failed]):
+   when the rig itself is broken there is no product observation to keep. *)
+let failures : string list ref = ref []
+
+let check name cond detail =
+  if cond then log "CHECK pass: %s (%s)" name detail
+  else begin
+    log "CHECK FAIL: %s (%s)" name detail;
+    failures := (name ^ ": " ^ detail) :: !failures
+  end
+
+let setup_failed stage detail =
+  log "SETUP FAIL: %s (%s)" stage detail;
+  Format.pp_print_flush !log_channel ();
+  exit 1
+
+(* Mid-run liveness: if the broker already exited, the candidate is gone and
+   every later observation would be taken against a dead screen. Abort now. *)
+let ensure_broker_alive tui_pid stage =
+  match Unix.waitpid [Unix.WNOHANG] tui_pid with
+  | 0, _ -> ()
+  | _, Unix.WEXITED code ->
+    setup_failed ("broker alive at " ^ stage)
+      (Printf.sprintf "broker already exited with code %d" code)
+  | _, Unix.WSIGNALED signal ->
+    setup_failed ("broker alive at " ^ stage)
+      (Printf.sprintf "broker already killed by signal %d" signal)
+  | _, Unix.WSTOPPED signal ->
+    setup_failed ("broker alive at " ^ stage)
+      (Printf.sprintf "broker already stopped by signal %d" signal)
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+    setup_failed ("broker alive at " ^ stage) "broker pid already reaped"
+
+(* End-of-run shutdown verdict: the broker exits with the candidate's exit
+   code (0 on a clean q q quit), 124 on its own 240s timeout. Anything else
+   — including a broker that never exits — fails the run. *)
+let assert_broker_exit ~clock tui_pid =
+  let deadline = Unix.gettimeofday () +. 20. in
+  let rec wait () =
+    match Unix.waitpid [Unix.WNOHANG] tui_pid with
+    | 0, _ ->
+      if Unix.gettimeofday () > deadline then `Timeout
+      else (Eio.Time.sleep clock 0.2; wait ())
+    | _, status -> `Done status
+    | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+      setup_failed "broker exit" "broker pid already reaped (harness bug)"
+  in
+  (match wait () with
+   | `Done (Unix.WEXITED 0) ->
+     check "broker exit" true "candidate quit cleanly (exit 0)"
+   | `Done (Unix.WEXITED 124) ->
+     check "broker exit" false "broker hit its 240s timeout"
+   | `Done (Unix.WEXITED code) ->
+     check "broker exit" false (Printf.sprintf "candidate exited with code %d" code)
+   | `Done (Unix.WSIGNALED signal) ->
+     check "broker exit" false (Printf.sprintf "broker killed by signal %d" signal)
+   | `Done (Unix.WSTOPPED signal) ->
+     check "broker exit" false (Printf.sprintf "broker stopped by signal %d" signal)
+   | `Timeout ->
+     (try Unix.kill tui_pid Sys.sigkill with Unix.Unix_error _ -> ());
+     (try ignore (Unix.waitpid [] tui_pid) with Unix.Unix_error _ -> ());
+     check "broker exit" false "broker did not exit within 20s of the quit keys; killed")
 
 let raw_size raw = (Unix.stat raw).Unix.st_size
 
@@ -249,15 +323,22 @@ let main env =
     in
     (* Live-read orchestration state, owned by the request handler. *)
     let live_seen = ref 0 in
+    (* Stale-release gate: live #1's answer is the pre-advance snapshot. The
+       handler sets [stale_released] when it lands; scenario (b) waits for it
+       before comparing placements, so "before" is measured pre-release and
+       "after" post-release. *)
+    let stale_released = ref false in
+    (* Server-side since gate: every live read at/after #2 must carry the
+       newer since-count (an incremental read), not a full snapshot. Recorded
+       as (request number, since, incarnation). *)
+    let since_log : (int * int option * string option) list ref = ref [] in
     (* The DOS capture snapshot the way the route test reads it, before the
        machine advances: scenario (b)'s stale answer body. *)
     let dos_body ?(since=None) ?(incarnation=None) () =
       let module R = Server_routes_http_routes_lane_addons in
       let mark =
         match (since, incarnation) with
-        | Some count, Some inc ->
-          let module R = Server_routes_http_routes_lane_addons in
-          Some { R.count; incarnation = inc }
+        | Some count, Some inc -> Some { R.count; incarnation = inc }
         | _ -> None in
       match
         R.live_json ~config:(Masc.Workspace.default_config base_path)
@@ -284,6 +365,15 @@ let main env =
         else go (i + 1)
       in
       go 0
+    in
+    let record_since n target =
+      let since =
+        match param_of_target "since" target with
+        | Some v -> (try Some (int_of_string v) with _ -> None)
+        | None -> None
+      in
+      let incarnation = param_of_target "incarnation" target in
+      since_log := (n, since, incarnation) :: !since_log
     in
     (* The real deployment learns machine changes through the keeper event
        bridge. The fake in-process worker never wires that bridge, and the
@@ -325,6 +415,7 @@ let main env =
         incr live_seen;
         let n = !live_seen in
         log "live request #%d arrived: %s" n target;
+        record_since n target;
         (* Evidence peek (read-only): what state will this request get,
            answered with the request's own since/incarnation? *)
         let peek () =
@@ -363,6 +454,7 @@ let main env =
           log "watchers woken after the held-window advance";
           Eio.Time.sleep clock 5.0;
           log "live #1: releasing the stale pre-advance answer now";
+          stale_released := true;
           Masc.Http_server_eio.Response.json ~status:`OK stale reqd
           (* The held connection has been answered; the handler must not fall
              through to dispatch (a second respond would corrupt it). *)
@@ -386,8 +478,7 @@ let main env =
         ~request_handler:serve_connection);
     Eio.Time.sleep clock 0.2;
     Machine_worker_fixture.with_dos ~clock ~sw ~base_path
-      (fun ~invoke ~detach ->
-        ignore invoke;
+      (fun ~invoke:_ ~detach:_ ->
         log "dos fixture attached";
         (match Dos_lane.eject ~who:"tui-3a" ~announce:ignore () with
          | Ok () | Error Dos_lane.No_machine -> ()
@@ -419,8 +510,6 @@ let main env =
            exit 2);
         let raw = Filename.concat evidence_dir "pty-raw.bin" in
         let keys_read, keys_write = Unix.pipe () in
-        let inner = Printf.sprintf "cd '%s' && exec '%s'" base_path tui_exe in
-        ignore inner;
         let env_child =
           Unix.environment ()
           |> Array.to_list
@@ -435,11 +524,9 @@ let main env =
           spawn_brokered_tui ~clock ~keys_read ~raw ~tui_exe ~workdir:base_path
             ~env:env_child in
         log "candidate TUI session started pid=%d raw=%s" tui_pid raw;
-        Eio.Fiber.fork ~sw (fun () ->
-          Eio.Time.sleep clock 150.0;
-          send_keys keys_write "q";
-          Eio.Time.sleep clock 5.0;
-          send_keys keys_write "y");
+        (* No watchdog fiber: the run ends with an explicit Esc q q quit and a
+           broker-exit verdict (see below). A timed q y would race the
+           scenarios and quit with the wrong keys (quit needs q q). *)
         (* Wait for the workspace identity to confirm. *)
         let confirmed =
           let deadline = Unix.gettimeofday () +. 30. in
@@ -451,6 +538,10 @@ let main env =
           loop ()
         in
         log "workspace identity confirmed=%b" confirmed;
+        if not confirmed then
+          setup_failed "workspace identity"
+            "candidate never showed [connected]/[partial] within 30s";
+        ensure_broker_alive tui_pid "after identity confirm";
         (* Enter the DOS spectator through the global palette (: + "dos" +
            Enter); it starts the DOS live poll whose first read the handler
            holds. *)
@@ -463,8 +554,10 @@ let main env =
           else ( Eio.Time.sleep clock 0.2; wait_first () )
         in
         (match wait_first () with
-         | Ok () -> log "first live read is in flight (held)"
-         | Error e -> log "scenario a FAILED: %s" e);
+         | Ok () ->
+           log "first live read is in flight (held)";
+           ensure_broker_alive tui_pid "first live read held"
+         | Error e -> setup_failed "first live read" e);
         (* Scenario (a): while live #1 is held, reopen the command palette
            (the menu) and move its selection row with "down" (the palette's
            navigation key; plain 'j' types into the query). The raw capture
@@ -487,6 +580,10 @@ let main env =
         let grew = raw_size raw > size_menu && raw_size raw > size_at_hold in
         log "scenario a: menu open + selection moved while pending=%b (hold %d → menu %d → moved %d)"
           grew size_at_hold size_menu (raw_size raw);
+        check "scenario a keys processed while pending" grew
+          (Printf.sprintf "raw hold %d → menu %d → moved %d" size_at_hold
+             size_menu (raw_size raw));
+        ensure_broker_alive tui_pid "after scenario a";
         (* Scenario (b): the machine advanced inside live #1's window (the
            handler did it); an F5 re-read draws the newer picture through the
            real router, then the stale answer lands and must not overwrite. *)
@@ -509,31 +606,109 @@ let main env =
           else ( Eio.Time.sleep clock 0.2; wait_second () )
         in
         (match wait_second () with
-         | Ok () -> log "second live read answered through the router (newer picture)"
-         | Error e -> log "scenario b setup FAILED: %s" e);
-        (* The handler releases the stale answer 2s after the advance; give
-           it time, then verify the screen kept the newer picture by checking
-           that no full-screen DOS repaint follows the release. *)
-        Eio.Time.sleep clock 3.0;
-        log "scenario b window elapsed (stale answer was due); requests seen=%d"
-          !live_seen;
-        let places_before = count_in raw "\x1b_Gf=24,s=640,v=400,a=T,i=32" in
-        log "kitty placements before the stale lands: %d" places_before;
+         | Ok () ->
+           log "second live read answered through the router (newer picture)";
+           ensure_broker_alive tui_pid "second live read answered"
+         | Error e -> setup_failed "second live read" e);
+        (* The newer picture is drawn now; the stale answer has not landed
+           yet (the handler holds it ~6s). Measure placements BEFORE the
+           release, then wait for the release and compare after. *)
+        let placement_needle = "\x1b_Gf=24,s=640,v=400,a=T,i=32" in
+        let places_before = count_in raw placement_needle in
+        log "kitty placements with the newer picture (pre-release): %d"
+          places_before;
+        let release_deadline = Unix.gettimeofday () +. 10. in
+        let rec wait_release () =
+          if !stale_released then ()
+          else if Unix.gettimeofday () > release_deadline then
+            setup_failed "stale release"
+              "live #1's held answer never landed within 10s of the re-read"
+          else (Eio.Time.sleep clock 0.2; wait_release ())
+        in
+        wait_release ();
+        log "stale answer landed; requests seen=%d" !live_seen;
+        (* Give the TUI time to (not) repaint from the stale answer, then
+           compare. A buggy overwrite would add a full-screen placement. *)
+        Eio.Time.sleep clock 2.0;
+        let places_after = count_in raw placement_needle in
+        log "scenario b verdict: placements after stale landed = %d (before %d; equal means no overwrite)"
+          places_after places_before;
+        check "scenario b stale does not overwrite"
+          (places_after = places_before)
+          (Printf.sprintf "placements before %d after %d" places_before
+             places_after);
+        (* Server-side since gate: every post-release read (n >= 2) must be
+           an incremental read carrying the newer since-count. *)
+        let post_release =
+          List.filter (fun (n, _, _) -> n >= 2) !since_log
+        in
+        let since_ok =
+          post_release <> []
+          && List.for_all (fun (_, since, _) -> since <> None) post_release
+          &&
+          let first =
+            match post_release with
+            | (_, since, _) :: _ -> since
+            | [] -> None
+          in
+          List.for_all (fun (_, since, _) -> since = first) post_release
+        in
+        let since_detail =
+          let show (n, since, _) =
+            Printf.sprintf "#%d:since=%s" n
+              (match since with Some c -> string_of_int c | None -> "none")
+          in
+          String.concat "," (List.map show (List.rev post_release))
+        in
+        check "scenario b post-release reads carry newer since" since_ok
+          (if since_detail = "" then "no post-release reads seen"
+           else since_detail);
+        ensure_broker_alive tui_pid "after scenario b";
         (* Scenario (c): quiescent machine → unchanged answers → no repaint. *)
+        check "scenario c picture rendered at all" (places_after > 0)
+          (Printf.sprintf "placements after stale: %d" places_after);
         let size_before = raw_size raw in
+        let places_c_before = count_in raw placement_needle in
         Eio.Time.sleep clock 8.0;
         let size_after = raw_size raw in
-        log "scenario c: raw bytes %d → %d (delta %d)" size_before size_after
-          (size_after - size_before);
-        let places_after = count_in raw "\x1b_Gf=24,s=640,v=400,a=T,i=32" in
-        log "scenario b verdict: placements after stale landed = %d (before %d; unchanged means no overwrite)"
-          places_after places_before;
-        log "scenario c verdict: picture rendered at all = %b" (places_after > 0);
-        ignore detach;
+        let places_c_after = count_in raw placement_needle in
+        let delta = size_after - size_before in
+        log "scenario c: raw bytes %d → %d (delta %d); placements %d → %d"
+          size_before size_after delta places_c_before places_c_after;
+        check "scenario c placements stable while unchanged"
+          (places_c_after = places_c_before)
+          (Printf.sprintf "placements before %d after %d" places_c_before
+             places_c_after);
+        (* A full 640x400 repaint is ~1MB on the wire; 16KB allows cursor and
+           status churn but not a picture repaint. Placements equality above
+           is the direct verdict; this is a smoke bound. *)
+        check "scenario c no raw growth spike" (delta < 16384)
+          (Printf.sprintf "raw delta %d bytes over 8s quiescence" delta);
+        ensure_broker_alive tui_pid "after scenario c";
+        (* Clean shutdown: leave any screen for the dashboard, then quit with
+           two consecutive quit keys (q q per bin/masc_tui.ml; Esc only steps
+           back a screen). *)
+        send_keys keys_write "\027";
+        Eio.Time.sleep clock 0.8;
+        send_keys keys_write "q";
+        Eio.Time.sleep clock 0.8;
+        send_keys keys_write "q";
+        Eio.Time.sleep clock 1.0;
+        (try Unix.close keys_write with Unix.Unix_error _ -> ());
+        log "sent Esc q q; waiting for the broker to exit";
+        assert_broker_exit ~clock tui_pid;
         Dos_lane.install_activity_observer None);
     log "finished; live requests seen: %d" !live_seen;
     log "evidence dir: %s" evidence_dir;
-    Format.pp_print_flush !log_channel ();
-    exit 0))
+    (match List.rev !failures with
+     | [] ->
+       log "VERDICT pass: scenarios a/b/c and broker exit all held";
+       Format.pp_print_flush !log_channel ();
+       exit 0
+     | fs ->
+       log "VERDICT FAIL: %d condition(s) violated" (List.length fs);
+       List.iter (fun f -> log "  failed: %s" f) fs;
+       Format.pp_print_flush !log_channel ();
+       exit 1)))
 
 let () = Eio_main.run main

@@ -6502,12 +6502,17 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
             | Tui_decode.Lane_turn_unknown raw ->
                 Alcotest.(check string) "unknown turn" "future_turn" raw
             | _ -> Alcotest.fail "future turn was folded into a known turn");
+           let condition read (lane : Tui_decode.keeper_lane) =
+             match lane.kl_conditions with
+             | Some conditions -> read conditions
+             | None -> Alcotest.failf "%s lost its phase diagnosis" lane.kl_keeper
+           in
            Alcotest.(check bool) "alpha's last turn is healthy" true
-             alpha.kl_conditions.Tui_decode.klc_turn_healthy;
+             (condition (fun c -> c.Tui_decode.klc_turn_healthy) alpha);
            Alcotest.(check bool) "beta's last turn failed" false
-             beta.kl_conditions.Tui_decode.klc_turn_healthy;
+             (condition (fun c -> c.Tui_decode.klc_turn_healthy) beta);
            Alcotest.(check bool) "beta's heartbeat is healthy" true
-             beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
+             (condition (fun c -> c.Tui_decode.klc_heartbeat_healthy) beta)
        | lanes ->
            Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
 
@@ -11564,6 +11569,44 @@ let test_decode_secret_projection_skips_unprojected_keeper () =
   | Ok other ->
       Alcotest.failf "expected one projection, read %d" (List.length other)
 
+(* One Keeper's [/api/v1/keepers/<name>/composite] body: its lane row and,
+   when the producer projected one, its secret projection. *)
+let test_decode_keeper_composite_reads_its_row_and_projection () =
+  let body =
+    match keeper_lane_json "alpha" with
+    | `Assoc fields ->
+        `Assoc
+          (fields
+           @ [ "secret_projection",
+               secret_projection_json ~status:"absent" ~env_names:[] ~mounts:[] ])
+    | json -> json
+  in
+  match Tui_decode.decode_keeper_composite body with
+  | Error err -> Alcotest.fail err
+  | Ok (lane, Some projection) ->
+      Alcotest.(check string) "the row is the Keeper's" "alpha" lane.Tui_decode.kl_keeper;
+      Alcotest.(check string) "the projection is the Keeper's" "alpha"
+        projection.Tui_decode.ksp_keeper
+  | Ok (_, None) -> Alcotest.fail "the projection was dropped"
+
+(* A Keeper with no registry entry is answered without a phase diagnosis
+   (offline_keeper_composite_json). Its row is still read, with no
+   conditions rather than invented ones. *)
+let test_decode_keeper_composite_reads_an_offline_keeper () =
+  let body =
+    match keeper_lane_json ~phase:"offline" ~turn_phase:"idle" ~idle_seconds:0 "beta" with
+    | `Assoc fields -> `Assoc (List.remove_assoc "phase_diagnosis" fields)
+    | json -> json
+  in
+  match Tui_decode.decode_keeper_composite body with
+  | Error err -> Alcotest.fail err
+  | Ok (lane, None) ->
+      Alcotest.(check bool) "the offline phase is read" true
+        (lane.Tui_decode.kl_phase = Tui_decode.Lane_phase_offline);
+      Alcotest.(check bool) "no conditions are invented" true
+        (Option.is_none lane.Tui_decode.kl_conditions)
+  | Ok (_, Some _) -> Alcotest.fail "a projection appeared from nowhere"
+
 let test_decode_secret_projection_keeps_an_unknown_status () =
   (* Folding a word this reader does not know into [Secret_absent] would tell
      the operator the credential is missing when the producer said something
@@ -14715,6 +14758,10 @@ let () =
           test_decode_secret_projection_reads_names_not_values;
         Alcotest.test_case "skips a Keeper with no projection" `Quick
           test_decode_secret_projection_skips_unprojected_keeper;
+        Alcotest.test_case "a Keeper composite reads its row and projection" `Quick
+          test_decode_keeper_composite_reads_its_row_and_projection;
+        Alcotest.test_case "an offline Keeper composite reads without conditions" `Quick
+          test_decode_keeper_composite_reads_an_offline_keeper;
         Alcotest.test_case "keeps an unknown status" `Quick
           test_decode_secret_projection_keeps_an_unknown_status;
         Alcotest.test_case "rejects a wrong env name type" `Quick

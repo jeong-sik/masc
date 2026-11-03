@@ -1695,26 +1695,7 @@ let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
   ; sls_lanes = lanes
   }
 
-let keeper_lane name : Tui_decode.keeper_lane =
-  { Tui_decode.kl_keeper = name
-  ; kl_phase = Tui_decode.Lane_phase_running
-  ; kl_turn_phase = Tui_decode.Lane_turn_idle
-  ; kl_idle_seconds = 0
-  ; kl_last_outcome = None
-  ; kl_conditions =
-      { Tui_decode.klc_launch_pending = false
-      ; klc_heartbeat_healthy = true
-      ; klc_turn_healthy = true
-      }
-  }
-
-let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =
-  { Tui_decode.kls_generated_at = 0.
-  ; kls_count = List.length lanes
-  ; kls_lanes = lanes
-  }
-
-let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
+let lanes_state () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Lanes;
   let exact_snapshot = standalone_snapshot four_standalone_lanes in
@@ -1729,7 +1710,6 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   replace_lane_inventory state { Inventory.observed_at=0.; exact_snapshot;
     rows=exact_rows @ [machine]; package_read={directory="/fixture/lane-addons";
       complete=true;owner_present=true;issues=[]} };
-  state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
   state
 
 let test_inventory_selection_keeps_exact_editor_identity () =

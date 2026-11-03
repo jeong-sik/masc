@@ -3388,6 +3388,15 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** The Candle destination follows its section as asynchronous rows change;
+    its integer is the last visible offset for a subsequent manual move. *)
+type planning_scroll =
+  | Planning_scroll_offset of int
+  | Planning_scroll_candle of int
+
+let planning_scroll_value = function
+  | Planning_scroll_offset value | Planning_scroll_candle value -> value
+
 (** Lanes surface sub-mode. The overview lists every Lane family;
     [Lanes_run_list] drills into one standalone
     lane's recent durable runs, and [Lanes_run_detail] reads one run's exact
@@ -10349,7 +10358,7 @@ type state = {
   mutable planning_baseline: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
-  mutable planning_scroll: int;
+  mutable planning_scroll: planning_scroll;
   mutable planning_list_page_rows: int;
   mutable runtime_mode: runtime_mode;
   mutable planning_mode: planning_mode;
@@ -19564,7 +19573,7 @@ let create_state
   planning_baseline = None;
   planning_error = None;
   planning_cursor = 0;
-  planning_scroll = 0;
+  planning_scroll = Planning_scroll_offset 0;
   planning_list_page_rows = 1;
   runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
@@ -20993,8 +21002,12 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
       state.log_wrap_cols <- Some cols
-  | Planning_detail_scroll value
-  | Planning_confirmation_scroll (value, _) -> state.planning_scroll <- value
+  | Planning_detail_scroll value ->
+      state.planning_scroll <- Planning_scroll_offset value
+  | Planning_confirmation_scroll (value, _) ->
+      state.planning_scroll <- (match state.planning_scroll with
+        | Planning_scroll_offset _ -> Planning_scroll_offset value
+        | Planning_scroll_candle _ -> Planning_scroll_candle value)
   | Planning_list_page_rows value -> state.planning_list_page_rows <- max 1 value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;

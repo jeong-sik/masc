@@ -106,6 +106,14 @@ val dashboard_schedule_prune_http_json :
 val dashboard_planning_http_json :
   config:Workspace.config -> Yojson.Safe.t
 
+val planning_cache_key : base_path:string -> string
+val cached_planning_payload :
+  config:Workspace.config -> Dashboard_cache.cached_payload
+(** Read the cached planning projection. *)
+
+val install_planning_cache_invalidation : unit -> unit
+(** Invalidate the workspace's projection after Goal rows or audit events commit. *)
+
 val dashboard_goals_tree_http_json :
   config:Workspace.config -> Yojson.Safe.t
 

@@ -709,6 +709,22 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
     ]
 ;;
 
+let planning_cache_key ~base_path =
+  Printf.sprintf "planning:%s" base_path
+;;
+
+let cached_planning_payload ~(config : Workspace.config) =
+  Dashboard_cache.get_or_compute_payload (planning_cache_key ~base_path:config.base_path)
+    ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+       dashboard_planning_http_json ~config))
+;;
+
+let install_planning_cache_invalidation () =
+  Atomic.set Workspace_hooks.on_goal_projection_mutation_fn (fun ~base_path ->
+    Dashboard_cache.invalidate (planning_cache_key ~base_path))
+;;
+
 let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   Dashboard_goals.dashboard_goals_tree_json ~config
 ;;
@@ -900,13 +916,7 @@ let dashboard_bootstrap_http_json
        The entry is filled as a payload, as the route fills it: a JSON-only
        fill would leave the route's read to serialize it on the executor. *)
     slice "planning" (fun () ->
-      let cache_key =
-        Printf.sprintf "planning:%s" (Mcp_server.workspace_config state).base_path
-      in
-      (Dashboard_cache.get_or_compute_payload cache_key
-         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-           dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
-        .json)
+      (cached_planning_payload ~config:(Mcp_server.workspace_config state)).json)
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
@@ -946,12 +956,8 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
   let warm_planning () =
     try
       let t_start = Time_compat.now () in
-      let cache_key = Printf.sprintf "planning:%s" base_path in
       (* fire-and-forget: pre-warm planning cache *)
-      ignore
-        (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-             dashboard_planning_http_json ~config)));
+      ignore (cached_planning_payload ~config);
       Log.Dashboard.info "planning surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

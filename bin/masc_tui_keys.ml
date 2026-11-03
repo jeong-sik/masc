@@ -834,8 +834,8 @@ let for_surface = function
           ~help:"in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop"
       ; b Act "o" "reopen" ~detail:Detail_only
           ~help:"in Goal detail, press twice to request reopening"
-      ; b Act goal_candle_refresh_key "Candle read" ~detail:Detail_only
-          ~help:"read the selected Goal's Candle payout record again without changing the Goal"
+      ; b Act goal_candle_refresh_key "Candle"
+          ~help:"open the selected Goal's Candle payout from the list, or read it again in detail"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
@@ -1245,12 +1245,15 @@ let footer_hints ?detail_open surface =
 
 (* [r] is Resume for a paused Goal, so the generic refresh label must not
    advertise it as a read in this detail. The Candle read has its own key. *)
-let footer_hints_planning_goal_detail =
+let planning_goal_hints ~detail_open =
   let bindings = for_surface Planning
-    |> List.filter (answers_in_state ~detail_open:true)
-    |> List.filter (fun binding -> not (String.equal binding.key "r")) in
+    |> List.filter (answers_in_state ~detail_open)
+    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
+
+let footer_hints_planning_goal_list = planning_goal_hints ~detail_open:false
+let footer_hints_planning_goal_detail = planning_goal_hints ~detail_open:true
 
 let footer_hints_tools ~pane =
   let bracket = tools_bracket_binding ~pane in

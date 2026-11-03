@@ -57,10 +57,11 @@ The command palette is `:`.
 | `f` | cycle all / active / completed / dropped |
 | `s` | cycle phase / updated / due |
 | `[ / ]` | while a detail is open, step to the row before or after it |
-| `c` | send the goal to the completion judge; press again to submit |
-| `a` | read the proven Goal evidence; press again to confirm that exact proof |
-| `x` | type why the goal is dropped; Enter drops it and cancels its unclaimed tasks |
-| `o` | reopen |
+| `c` | in Goal detail, request completion or recovery; press again to submit |
+| `a` | in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation |
+| `x` | in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop |
+| `o` | in Goal detail, press twice to request reopening |
+| `z` | open the selected Goal's Candle payout from the list, or read it again in detail |
 | `Y` | copy the selected goal reference |
 | `/` | jump the cursor to a matching goal id or title |
 | `n / N` | next / previous match |

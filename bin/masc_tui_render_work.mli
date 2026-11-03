@@ -9,6 +9,13 @@ val planning_detail_viewport : Masc_tui_types.state -> int * int
 (** Physical row count and reader height of the current Goal detail,
     including its pinned action rows and actual split-pane width. *)
 
+val planning_detail_candle_scroll :
+  Masc_tui_types.state -> Masc_tui_types.planning_goal -> int
+(** Locate the Candle section in the same wrapped content the detail draws. *)
+
+val planning_missing_goal_notice : Masc_tui_types.state -> goal_id:string -> bool
+(** Whether a missing Goal is shown as a Home request rather than a list. *)
+
 val schedule_detail_viewport : Masc_tui_types.state -> int * int
 (** Physical-row count and height of the current Schedule evidence reader. *)
 

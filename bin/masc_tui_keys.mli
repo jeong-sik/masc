@@ -112,10 +112,13 @@ val for_surface : Masc_tui_types.surface -> binding list
     still read by the help overlay. *)
 
 val goal_candle_refresh_key : string
-(** Read the open Goal's Candle record without issuing a Goal action. *)
+(** Open or reread the selected Goal's Candle record without a Goal action. *)
 
 val keeper_navigation_hints : string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
+
+val footer_hints_planning_goal_list : string
+(** The Goal list offers a direct route to its selected Candle record. *)
 
 val footer_hints_planning_goal_detail : string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)

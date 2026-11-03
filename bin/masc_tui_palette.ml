@@ -47,6 +47,7 @@ type palette_action =
   (* One installation's Results, by its declaration id. *)
   | Palette_addon_results of string
   | Palette_goto of surface
+  | Palette_goal_payouts
   | Palette_usage_scope of string option
   | Palette_config of config_pane
   | Palette_ui_language of ui_language
@@ -179,7 +180,13 @@ let addon_result_targets (state : state) =
     [] (from_asks @ from_inventory @ from_addons)
 
 let palette_entries (state : state) =
+  let work_surfaces, other_surfaces =
+    List.partition (fun (surface, _) -> surface = Planning) surface_ring in
   [ "settings", Palette_config Config_params ]
+  @ List.map
+      (fun (surface, label) -> ("go " ^ label ^ " / Goals", Palette_goto surface))
+      work_surfaces
+  @ [ "go Candle payouts / choose a Goal", Palette_goal_payouts ]
   @ List.concat_map (fun lane ->
       List.map (fun mode ->
         ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
@@ -230,7 +237,7 @@ let palette_entries (state : state) =
   @ [ "go Fusion", Palette_goto Fusion ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
-      surface_ring
+      other_surfaces
   (* After the ring, so "go system" still leads with the System surface: the
      ranks tie on a label that starts with the query, and a tie keeps entry
      order. *)
@@ -325,7 +332,7 @@ let palette_action_words = function
         | Resources -> [ "artifacts"; "reports"; "resources"; "리소스"; "산출물" ]
         | Metrics -> [ "metrics"; "telemetry"; "charts"; "stats"; "사용량"; "비용" ]
         | Overview -> [ "대시보드"; "홈" ]
-        | Planning -> [ "작업"; "플래닝"; "목표" ]
+        | Planning -> [ "goals"; "작업"; "플래닝"; "목표" ]
         | Keepers _ -> [ "키퍼"; "에이전트" ]
         | Board -> [ "보드"; "게시판" ]
         | Repositories -> [ "워크스페이스"; "저장소" ]
@@ -360,6 +367,7 @@ let palette_action_words = function
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
   | Palette_task_creation _ -> ["task-inspect"; "original Task"]
+  | Palette_goal_payouts -> ["candle"; "지급"]
   | Palette_lane_history lane -> [Lane_run_identity.to_id lane]
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
@@ -384,7 +392,7 @@ let palette_matches (state : state) =
                | ( _
                  , ( Palette_browser_lane | Palette_hide_browser_lane
                    | Palette_connectors | Palette_collab | Palette_msx
-                   | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _ | Palette_goto _
+                   | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _ | Palette_goto _ | Palette_goal_payouts
                    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
@@ -432,7 +440,7 @@ let selected_file state =
   | Some (_, Palette_code_file path) -> Some path
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
-    | Palette_goto _
+    | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_location _))
@@ -445,7 +453,7 @@ let selected_location state =
   | Some (_, Palette_code_location (offer, location)) -> Some (offer, location)
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
-    | Palette_goto _
+    | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_file _))

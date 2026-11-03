@@ -8,6 +8,11 @@ type network =
   | Network_inherit
   | Network_policy of { name : string }
 
+type published_socket =
+  { host_path : string
+  ; guest_path : string
+  }
+
 type t =
   { image : string
   ; guest_size : Keeper_microvm_guest_size.t
@@ -16,6 +21,8 @@ type t =
   ; command : string list
   ; mounts : guest_mount list
   ; isolation : Keeper_microvm_backend.guest_constraint list
+  ; capabilities_added : string list
+  ; published_sockets : published_socket list
   ; network : network
   ; environment : (string * string) list
   ; labels : (string * string) list
@@ -42,27 +49,43 @@ let canonical_mounts mounts =
   List.map (fun mount -> Yojson.Safe.to_string (mount_json mount)) mounts
   |> List.sort String.compare
 
+let canonical_sockets sockets =
+  List.map (fun {host_path; guest_path} -> host_path, guest_path) sockets
+  |> List.sort compare_string_pair
+
 let digest (plan : t) =
   let network = match plan.network with
     | Network_none -> strings ["none"]
     | Network_inherit -> strings ["inherit"]
     | Network_policy {name} -> strings ["policy"; name]
   in
+  (* A list with no entries has no key, so a plan that adds no capability and
+     publishes no socket is the same identity as one that never names them. *)
+  let unless_empty key json = function
+    | [] -> []
+    | _ :: _ -> [key, json]
+  in
   let json = `Assoc
-    [ "schema", `String "masc.keeper-boot-plan.v2"
-    ; "image", `String plan.image
-    ; "memory_mib", `Int (Keeper_microvm_guest_size.memory_mib plan.guest_size.memory)
-    ; "cpus", `Int (Keeper_microvm_guest_size.cpus_count plan.guest_size.cpus)
-    ; "user", `String plan.user
-    ; "working_directory", `String plan.working_directory
-    ; "command", strings plan.command
-    ; "mounts", strings (canonical_mounts plan.mounts)
-    ; "isolation", strings (List.map Keeper_microvm_backend.guest_constraint_to_string
-        plan.isolation |> List.sort String.compare)
-    ; "network", network
-    ; "environment", pairs plan.environment
-    ; "labels", pairs plan.labels
-    ]
+    ([ "schema", `String "masc.keeper-boot-plan.v2"
+     ; "image", `String plan.image
+     ; "memory_mib", `Int (Keeper_microvm_guest_size.memory_mib plan.guest_size.memory)
+     ; "cpus", `Int (Keeper_microvm_guest_size.cpus_count plan.guest_size.cpus)
+     ; "user", `String plan.user
+     ; "working_directory", `String plan.working_directory
+     ; "command", strings plan.command
+     ; "mounts", strings (canonical_mounts plan.mounts)
+     ; "isolation", strings (List.map Keeper_microvm_backend.guest_constraint_to_string
+         plan.isolation |> List.sort String.compare)
+     ]
+     @ unless_empty "capabilities_added"
+         (strings (List.sort String.compare plan.capabilities_added))
+         plan.capabilities_added
+     @ unless_empty "published_sockets" (pairs (canonical_sockets plan.published_sockets))
+         plan.published_sockets
+     @ [ "network", network
+       ; "environment", pairs plan.environment
+       ; "labels", pairs plan.labels
+       ])
   in
   Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
 
@@ -77,6 +100,8 @@ type invalid_plan =
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
   | Duplicate_constraint of Keeper_microvm_backend.guest_constraint
+  | Duplicate_capability of string
+  | Duplicate_published_socket of string
   | Invalid_environment_key of string
   | Invalid_label_key of string
   | Reserved_plan_label of string
@@ -115,6 +140,11 @@ let plan_errors (plan : t) =
   @ duplicate_errors (fun key -> Duplicate_label_key key) label_keys
   @ duplicate_errors (fun destination -> Duplicate_mount_destination destination) destinations
   @ duplicate_errors (fun constraint_ -> Duplicate_constraint constraint_) plan.isolation
+  @ duplicate_errors (fun capability -> Duplicate_capability capability) plan.capabilities_added
+  @ duplicate_errors (fun path -> Duplicate_published_socket path)
+      (List.map (fun socket -> socket.host_path) plan.published_sockets)
+  @ duplicate_errors (fun path -> Duplicate_published_socket path)
+      (List.map (fun socket -> socket.guest_path) plan.published_sockets)
   @ List.filter_map (fun key -> if valid_key key then None else Some (Invalid_environment_key key)) environment_keys
   @ List.filter_map (fun key -> if valid_key key then None else Some (Invalid_label_key key)) label_keys
   @ List.filter_map (fun key ->
@@ -142,6 +172,8 @@ let invalid_plan_message = function
   | Duplicate_mount_destination destination -> Printf.sprintf "duplicate mount destination %S" destination
   | Duplicate_constraint constraint_ ->
     "duplicate constraint " ^ Keeper_microvm_backend.guest_constraint_to_string constraint_
+  | Duplicate_capability capability -> Printf.sprintf "duplicate added capability %S" capability
+  | Duplicate_published_socket path -> Printf.sprintf "duplicate published socket path %S" path
   | Invalid_environment_key key -> Printf.sprintf "invalid environment key %S" key
   | Invalid_label_key key -> Printf.sprintf "invalid label key %S" key
   | Reserved_plan_label key -> Printf.sprintf "reserved stable-plan label %S" key
@@ -162,6 +194,8 @@ type facts =
   ; read_only : bool
   ; cap_drop : string list
   ; cap_add : string list
+  ; published_sockets : published_socket list
+  ; use_init : bool
   ; networks : string list
   ; environment : (string * string) list
   ; labels : (string * string) list
@@ -170,7 +204,8 @@ type facts =
 type reading = Facts of facts | Unreadable of string
 type difference =
   | Plan_label | Image | Resources | User | Working_directory | Command
-  | Mounts | Root_filesystem | Capabilities | Network | Environment | Labels
+  | Mounts | Root_filesystem | Capabilities | Published_sockets | Init_process
+  | Network | Environment | Labels
   | Policy_route
   | Identity_snapshot
 type refusal =
@@ -189,6 +224,8 @@ let difference_label = function
   | Mounts -> "mounts"
   | Root_filesystem -> "root_filesystem"
   | Capabilities -> "capabilities"
+  | Published_sockets -> "published_sockets"
+  | Init_process -> "init_process"
   | Network -> "network"
   | Environment -> "environment"
   | Labels -> "labels"
@@ -241,7 +278,13 @@ let observed_differences ~image_difference ~command_difference (plan : t) (facts
     ; different (canonical_mounts (expected_mounts plan) <> canonical_mounts facts.mounts) Mounts
     ; different (read_only <> facts.read_only) Root_filesystem
     ; different (List.sort String.compare cap_drop <> List.sort String.compare facts.cap_drop
-        || facts.cap_add <> []) Capabilities
+        || List.sort String.compare plan.capabilities_added
+           <> List.sort String.compare facts.cap_add) Capabilities
+    ; different (canonical_sockets plan.published_sockets
+        <> canonical_sockets facts.published_sockets) Published_sockets
+    (* No plan asks the runtime for its own init: the plan's command is the
+       guest's first process. *)
+    ; different facts.use_init Init_process
     ; different (List.sort String.compare networks <> List.sort String.compare facts.networks) Network
     ; different (not (contains_pairs plan.environment facts.environment)) Environment
     ; different (not (contains_pairs plan.labels facts.labels)) Labels

@@ -12,6 +12,12 @@ type network =
   | Network_inherit
   | Network_policy of { name : string }
 
+type published_socket =
+  { host_path : string  (** where the host connects *)
+  ; guest_path : string  (** the guest's unix socket the runtime relays to *)
+  }
+(** One [container run --publish-socket host_path:guest_path]. *)
+
 type t =
   { image : string
   ; guest_size : Keeper_microvm_guest_size.t
@@ -20,6 +26,8 @@ type t =
   ; command : string list
   ; mounts : guest_mount list
   ; isolation : Keeper_microvm_backend.guest_constraint list
+  ; capabilities_added : string list
+  ; published_sockets : published_socket list
   ; network : network
   ; environment : (string * string) list
   ; labels : (string * string) list
@@ -28,7 +36,9 @@ type t =
     policy gateway/port, owner PID and start time belong to boot execution,
     not to the plan. Credential mount paths are those of the guest snapshot.
     [command] is the exact init process: a nonempty executable followed by its
-    arguments. Boot overrides the image entrypoint with that executable. *)
+    arguments. Boot overrides the image entrypoint with that executable.
+    [capabilities_added] are given back after [Drop_all_capabilities], by the
+    names [container run --cap-add] takes (["CAP_SYS_ADMIN"]). *)
 
 val label_key : string
 
@@ -38,6 +48,8 @@ type invalid_plan =
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
   | Duplicate_constraint of Keeper_microvm_backend.guest_constraint
+  | Duplicate_capability of string
+  | Duplicate_published_socket of string
   | Invalid_environment_key of string
   | Invalid_label_key of string
   | Reserved_plan_label of string
@@ -61,8 +73,10 @@ val invalid_plan_message : invalid_plan -> string
 (** Names the malformed key/constraint/destination, never environment values. *)
 
 val digest : t -> string
-(** Canonical SHA-256 for valid plans: mounts, constraints, labels and environment
-    do not depend on enumeration order. Command order is significant. *)
+(** Canonical SHA-256 for valid plans: mounts, constraints, added
+    capabilities, published sockets, labels and environment do not depend on
+    enumeration order. Command order is significant. A plan that adds no
+    capability and publishes no socket has no entry for either. *)
 
 val expected_mounts : t -> guest_mount list
 (** Includes the scratch tmpfs requested by [Scratch_tmpfs], without asking
@@ -81,6 +95,8 @@ type facts =
   ; read_only : bool
   ; cap_drop : string list
   ; cap_add : string list
+  ; published_sockets : published_socket list
+  ; use_init : bool  (** whether the runtime put its own init in front *)
   ; networks : string list
   ; environment : (string * string) list
   ; labels : (string * string) list
@@ -98,6 +114,8 @@ type difference =
   | Mounts
   | Root_filesystem
   | Capabilities
+  | Published_sockets
+  | Init_process
   | Network
   | Environment
   | Labels

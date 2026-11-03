@@ -1,19 +1,33 @@
 open Result.Syntax
 
-type unavailable = Ego_user_owned_name of { space : string; observed_at : float }
+type unavailable = Ego_user_owned_name of { space : string; ids : int list; observed_at : float }
 let unavailable_to_json = function
-  | Ego_user_owned_name {space; observed_at} -> `Assoc ["backend",`String "ego";
+  | Ego_user_owned_name {space; ids; observed_at} -> `Assoc ["backend",`String "ego";
       "reason",`String "user_owned_name";"space",`String space;
-      "observedAt",`Float observed_at;"recheck",`String "worker_restart"]
+      "ids",`List (List.map (fun id -> `Int id) ids);
+      "observedAt",`Float observed_at;"recheck",`String "take_over"]
 
 let unavailable_of_json = function
   | `Assoc fields ->
+    (* A JSON number may arrive without its decimal point; both spell a
+       wall-clock second. *)
+    let seconds = function
+      | Some (`Float value) -> Some value
+      | Some (`Int value) -> Some (Float.of_int value)
+      | Some _|None -> None in
     (match List.assoc_opt "backend" fields, List.assoc_opt "reason" fields,
-           List.assoc_opt "space" fields, List.assoc_opt "observedAt" fields, List.assoc_opt "recheck" fields with
-     | Some (`String "ego"), Some (`String "user_owned_name"), Some (`String space),
-       Some (`Float observed_at), Some (`String "worker_restart")
-       when space <> "" && Float.is_finite observed_at && observed_at >= 0. ->
-       Ok (Ego_user_owned_name {space; observed_at})
+           List.assoc_opt "space" fields, List.assoc_opt "ids" fields,
+           seconds (List.assoc_opt "observedAt" fields), List.assoc_opt "recheck" fields with
+     | Some (`String "ego"), Some (`String "user_owned_name"), Some (`String space), Some (`List rows),
+       Some observed_at, Some (`String "take_over") ->
+       (if space = "" || not (Float.is_finite observed_at) || observed_at < 0. then
+          Error "invalid unavailable browser backend"
+        else
+          let rec ids acc = function
+            | [] -> Ok (List.rev acc)
+            | `Int id :: rest when id > 0 && not (List.mem id acc) -> ids (id :: acc) rest
+            | _ :: _ -> Error "invalid unavailable browser backend" in
+          ids [] rows |> Result.map (fun ids -> Ego_user_owned_name {space; ids; observed_at}))
      | _ -> Error "invalid unavailable browser backend")
   | _ -> Error "invalid unavailable browser backend"
 

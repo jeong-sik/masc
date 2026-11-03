@@ -31,6 +31,12 @@ type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages 
   | Release_tab of int
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+(* The one control a live lane answers without a client: reclaiming the ego
+   task space whose task ended while the operator held it. *)
+let is_take_over = function
+  | Control Take_over -> true
+  | Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _)
+  | Open_tab _|Open_window _|On_tab _ -> false
 let reply_timeout_sec = function
   | Open_tab _ | Open_window _ | Control _ | On_tab _ -> 60.
 open Result.Syntax

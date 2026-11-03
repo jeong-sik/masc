@@ -9,7 +9,7 @@ const client = { clientId: 'b932c512-51e0-45bc-9fcb-3fde7bd2767b', browser: 'ego
   version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Research' }, spaceObservation: null, spacePresence: null,
   interactions: [work, { ...work, requestId: 'request-2', actor: 'agent/helper', phase: 'queued', tabId: null }],
   lastActivities: [{ work: { ...work, requestId: 'previous', actor: 'operator' }, outcome: 'unknown' }] }
-const unavailable = { backend: 'ego', reason: 'user_owned_name', space: 'Research', observedAt: 42, recheck: 'worker_restart' }
+const unavailable = { backend: 'ego', reason: 'user_owned_name', space: 'Research', ids: [36], observedAt: 42, recheck: 'take_over' }
 const instance = { instance_id: 'worker', run_id: 'run', addon_id: 'browser', title: 'Browser connections',
   revision: 'revision', runtime_presence: 'live', incarnation: 'original', action_schema: null,
   configuration: null, phase: { kind: 'attached' }, observation_seq: 1, rows_count: 1,
@@ -111,6 +111,8 @@ describe('browser caller observations', () => {
     [{ ...unavailable, space: '' }], [{ ...unavailable, observedAt: -1 }],
     [{ ...unavailable, observedAt: Infinity }], [{ ...unavailable, observedAt: Number.NaN }],
     [{ ...unavailable, observedAt: '42' }], [{ ...unavailable, recheck: 'automatic' }],
+    [{ ...unavailable, ids: [0] }], [{ ...unavailable, ids: [36, 36] }],
+    [{ ...unavailable, ids: '36' }], [{ ...unavailable, ids: undefined }],
     [{ ...unavailable, authority: 'agent' }], [{ backend: 'ego', reason: 'user_owned_name', space: 'Research' }],
   ])('keeps malformed unavailable records unreadable', invalid => {
     expect(show({ ...row.fields, unavailable: invalid }).getByRole('status').textContent).toContain('observation unreadable')

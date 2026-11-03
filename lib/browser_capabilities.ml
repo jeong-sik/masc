@@ -366,8 +366,8 @@ let support backend operation = match backend with
     | Release_tab -> manage_page backend ~action:"release_tab"
     | Take_over -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"take_over" Act
-          ["Requires the exact observed clientId. Only after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them.";
-           "Refused before any effect when the agent already holds the space. The receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step."]
+          ["Takes the space back after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them. With the exact observed clientId it resumes a space handed off with hand_off; without a clientId it reclaims the Space whose task ended while the operator held it, which the lane's inventory reports as a user-owned refusal, and the receipt says reclaimed and names no tab.";
+           "Refused before any effect when the agent already holds the space. The clientId receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Only an ego connection takes its task space back from the operator.")
     | Upload_file -> (match backend with

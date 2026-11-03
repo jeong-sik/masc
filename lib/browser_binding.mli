@@ -4,6 +4,10 @@
 type t
 val of_browser : Browser_selection.selected -> Browser_selection.browser -> t
 (** The identity of the browser the host chose from a worker snapshot. *)
+val of_lane : Browser_selection.selected -> t
+(** A lane-level selection that names no connection: the live lane answers
+    without a client, as when it reclaims a refused ego task space. It
+    reports the lane's ego task space transport and no Space. *)
 val to_json : t -> Yojson.Safe.t
 val selected : t -> Browser_selection.selected
 val connection_fields : t -> (string * Yojson.Safe.t) list

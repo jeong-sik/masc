@@ -7294,14 +7294,20 @@ module Browser_lane_view = struct
     match List.filter (fun (key,_) -> key="inventoryComplete") fields with
     | [] -> issues
     | [_,`Bool complete] ->
+        (* Completeness speaks about workers that did not answer whole; a
+           lane fact the worker reported (a refused ego task Space) is an
+           issue beside a complete inventory. The server and this rule share
+           the same predicate. *)
+        let breaking=List.exists Masc.Browser_connection_inventory.breaks_completeness in
         (match complete,issues with
-         | (true,Inventory_reported [] | false,Inventory_reported (_::_)) -> issues
+         | (true,Inventory_reported reported) when not (breaking reported) -> issues
+         | (false,Inventory_reported reported) when breaking reported -> issues
          | (true|false),Inventory_report_unreadable _ -> issues
          | (true|false),Inventory_not_reported ->
              Inventory_report_unreadable "inventoryComplete requires inventoryIssues"
-         | true,Inventory_reported (_::_) ->
+         | true,Inventory_reported _ ->
              Inventory_report_unreadable "complete browser inventory reports issues"
-         | false,Inventory_reported [] ->
+         | false,Inventory_reported _ ->
              Inventory_report_unreadable "incomplete browser inventory has no issue details")
     | [_,_] -> Inventory_report_unreadable "invalid inventoryComplete field"
     | _::_::_ -> Inventory_report_unreadable "duplicate inventoryComplete field"
@@ -7334,10 +7340,20 @@ module Browser_lane_view = struct
     let automatic = match decode_automatic data with
       | Ok automatic -> automatic
       | Error message -> invalid_automatic message in
+    (* An issue list the completeness predicate clears (a lane fact the
+       worker answered whole) leaves the server's automatic choice standing,
+       the same way an empty issue list does; an incomplete inventory still
+       asks for an explicit choice. *)
+    let lane_facts_only = function
+      | Inventory_reported reported ->
+          not (List.exists Masc.Browser_connection_inventory.breaks_completeness reported)
+      | Inventory_not_reported|Inventory_report_unreadable _ -> false in
     let automatic = match inventory_report,automatic with
       | Inventory_report_unreadable detail,_ -> invalid_automatic detail
       | Inventory_reported (_::_),Some {browse=Error browse;work=Error work}
           when not (can_offer_work_browser browse.kind) && not (can_offer_work_browser work.kind) -> automatic
+      | _,(Some {browse=(Ok _|Error _);work=(Ok _|Error _)}|None)
+          when lane_facts_only inventory_report -> automatic
       | Inventory_reported (_::_),(Some {browse=(Ok _|Error _);work=(Ok _|Error _)}|None) ->
           invalid_automatic "Browser inventory is incomplete; choose an observed browser explicitly"
       | (Inventory_not_reported|Inventory_reported []),(Some {browse=(Ok _|Error _);work=(Ok _|Error _)}|None) -> automatic in

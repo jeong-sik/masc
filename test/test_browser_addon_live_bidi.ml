@@ -264,7 +264,7 @@ let scenario mode =
               let published=ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner)) in
               check bool "Ego's exact unavailability is visible" true
                 (match published.unavailable with
-                 | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at}] -> observed_at > 0.
+                 | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=_;observed_at}] -> observed_at > 0.
                  | [] | _::_ -> false);
               let snapshot : Masc.Browser_selection.snapshot = {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;
                 automation=published.automation;stagehand=published.stagehand} in

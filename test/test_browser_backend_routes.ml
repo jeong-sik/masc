@@ -88,6 +88,18 @@ let every_source_reaches_its_own_worker () =
       List.iter (fun backend -> check bool (B.Backend.to_wire backend ^ " is observed on its own worker") true
         (Result.is_ok (Browser_addon_host.snapshot host ~backend))) B.Backend.all)
 
+let a_user_owned_refusal_routes_its_reclaim () =
+  run_with [one Ego []]
+    (fun ~config:_ ~host ~issue:_ ~attached ->
+      let worker=match attached with [worker] -> worker | _ -> fail "expected the one ego worker" in
+      let verb=B.Page_act (B.Action.Control B.Action.Take_over) in
+      let call ()=Browser_addon_host.issue host ~preference:(Browser_selection.Exact (B.Live_route None)) verb in
+      refuses_before_dispatch "a live lane that refused no Space is not reclaimed" attached
+        Tool_result.Workflow_rejection call;
+      worker.F.set_snapshot (F.Snapshot_ego_refused {space="masc-keepers";ids=[36]});
+      reaches_instance "a user-owned refusal routes its reclaim to the refusing worker"
+        attached worker (B.Live_route None) verb call)
+
 let a_missing_source_fails_alone () =
   run_with [one Automation [];one Owned_firefox [bidi]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
@@ -236,6 +248,7 @@ let a_first_poll_needs_the_one_external_host_worker () =
 let () = run "browser backend routes" ["one worker per source",[
   test_case "every source reaches its own worker" `Slow every_source_reaches_its_own_worker;
   test_case "a missing source fails alone" `Slow a_missing_source_fails_alone;
+  test_case "a user-owned refusal routes its reclaim" `Slow a_user_owned_refusal_routes_its_reclaim;
   test_case "a doubled source fails alone" `Slow a_doubled_source_fails_alone;
   test_case "independent Ego Spaces route exact clients and reject duplicate controllers" `Slow independent_ego_spaces_route_exact_clients;
   test_case "unknown live controllers refuse Ego input and reads before dispatch" `Slow unreadable_live_controller_never_authorizes_ego_input;

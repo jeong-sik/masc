@@ -38,8 +38,10 @@ const client = Schema.Union(
 const unavailable = Schema.Struct({
   backend: Schema.Literal('ego'), reason: Schema.Literal('user_owned_name'),
   space: Schema.NonEmptyString,
+  ids: Schema.Array(Schema.Number.pipe(Schema.filter(value => Number.isInteger(value) && value > 0)))
+    .pipe(Schema.filter(ids => new Set(ids).size === ids.length)),
   observedAt: Schema.Number.pipe(Schema.filter(value => Number.isFinite(value) && value >= 0)),
-  recheck: Schema.Literal('worker_restart'),
+  recheck: Schema.Literal('take_over'),
 })
 const ownedBrowser = Schema.Struct({
   activity: Schema.Literal('enabled', 'disabled', 'unobserved'),

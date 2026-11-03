@@ -53,6 +53,60 @@ let scenario () = Eio_main.run (fun env ->
       (pre_effect (send (W.Deliver {client_id=id;id=issued.id;payload=`Null})));
     check bool "unpinned browser cannot execute" true
       (pre_effect (send (W.Issue {route=B.Live_route None;verb=B.Tabs_list;actor=None;timeout_sec=2.;only_if_idle=false})));
+    let take_over_route () = W.Issue {route=B.Live_route None;
+      verb=B.Page_act (B.Action.Control B.Action.Take_over);actor=None;timeout_sec=2.;only_if_idle=false} in
+    check bool "take_over without a client is refused until the lane refused a Space" true
+      (pre_effect (send (take_over_route ())));
+    let claimed_ids=ref [] in
+    ok (Owner.attach_ego_recovery owner (fun ids ->
+      claimed_ids:=ids; match ids with
+      | [space_id] -> Ok (space_id,"masc-keepers")
+      | _ -> Error "the owner never passes an ambiguous id list"));
+    check bool "a recovery hook alone does not admit the claim" true
+      (pre_effect (send (take_over_route ())));
+    ok (Owner.mark_ego_user_owned_name owner ~space:"masc-keepers" ~ids:[7] ~observed_at:1.);
+    (match send (take_over_route ()) with
+     | W.Issue_result (Ok (B.Answered receipt)) ->
+         check (list int) "the claim sees exactly the published Space id" [7] !claimed_ids;
+         check bool "the claim receipt names the reclaimed Space" true
+           (receipt=`Assoc ["action",`String "take_over";"spaceId",`Int 7;
+             "spaceName",`String "masc-keepers";"reclaimed",`Bool true])
+     | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
+         check bool "the claim answers with a reclaimed receipt" true false);
+    check bool "a second refusal is not published over the first" true
+      (Result.is_error (Owner.mark_ego_user_owned_name owner ~space:"second" ~ids:[9] ~observed_at:2.));
+    Owner.clear_ego_unavailable owner;
+    ok (Owner.mark_ego_user_owned_name owner ~space:"shared" ~ids:[3;4] ~observed_at:3.);
+    check bool "an ambiguous published refusal does not claim" true
+      (pre_effect (send (take_over_route ())));
+    check (list int) "an ambiguous refusal never reaches the claim" [7] !claimed_ids;
+    Owner.clear_ego_unavailable owner;
+    check bool "a cleared refusal admits no claim" true
+      (pre_effect (send (take_over_route ())));
+    (* One claim at a time: a second while one runs is refused before the
+       SDK is asked anything. *)
+    ok (Owner.mark_ego_user_owned_name owner ~space:"busy" ~ids:[11] ~observed_at:4.);
+    Owner.detach_ego_recovery owner;
+    let claimed,claim_entered=Eio.Promise.create () and release,release_claim=Eio.Promise.create () in
+    ok (Owner.attach_ego_recovery owner (fun ids ->
+      ignore (Eio.Promise.try_resolve claim_entered ());
+      ignore (Eio.Promise.await release);
+      Ok (11,"busy")));
+    let running=Eio.Fiber.fork_promise ~sw (fun () -> send (take_over_route ())) in
+    ignore (Eio.Promise.await claimed);
+    check bool "a second reclaim while one runs is refused" true
+      (pre_effect (send (take_over_route ())));
+    ignore (Eio.Promise.try_resolve release_claim ());
+    (match Eio.Promise.await_exn running with
+     | W.Issue_result (Ok (B.Answered receipt)) ->
+         check bool "the running reclaim answers with a receipt" true
+           (receipt=`Assoc ["action",`String "take_over";"spaceId",`Int 11;
+             "spaceName",`String "busy";"reclaimed",`Bool true])
+     | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
+         check bool "the running reclaim answers with a receipt" true false);
+    Owner.clear_ego_unavailable owner;
     check bool "wrong incarnation cannot register" true
       (pre_effect (Owner.dispatch owner {W.incarnation=other_incarnation;command=W.Poll {client;window_sec=2.}}));
     let poll = Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in

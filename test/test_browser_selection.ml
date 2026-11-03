@@ -390,9 +390,55 @@ let test_multi_worker_inventory () =
     [`List [`Assoc ["kind",`String "unknown"]];
      `List [`Assoc ["kind",`String "unready";"kind",`String "unready";"instanceId",`String "x";"message",`String "bad"]]]
 
+let test_ego_user_owned_inventory () =
+  let module I=Masc.Browser_connection_inventory in
+  let member=Yojson.Safe.Util.member in
+  let off:Selection.work_browser={activity=Lane.Disabled;registered=false;session=Lane.Browser_closed;locate=false} in
+  let observation instance_id clients unavailable : I.observation =
+    {instance_id;published={Masc.Browser_addon_observation.clients;
+      space_presence=[];client_rows=List.map (fun (client:Lane.client_info) ->
+        Masc.Browser_addon_observation.publish_client client ~space_observation:None ~space_presence:None) clients;
+      automation=off;stagehand=off;unavailable}} in
+  let refusal=Masc.Browser_addon_observation.Ego_user_owned_name
+    {space="masc-keepers";ids=[1];observed_at=1793617161.} in
+  let refused=observation "ego-worker" [] [refusal] in
+  let report=I.to_json (I.build ~observations:[refused] ~issues:[]) in
+  let issue=I.Ego_user_owned_space {instance_id="ego-worker";space="masc-keepers";observed_at=1793617161.} in
+  check bool "a user-owned Space refusal is reported, not silent" true
+    (I.issues_of_json (member "inventoryIssues" report)=Ok [issue]);
+  check bool "the worker answered whole, so the refusal does not make the inventory incomplete" true
+    (member "inventoryComplete" report=`Bool true);
+  check bool "the refusal names the Space and the recovery" true
+    (String.equal (I.issue_message issue)
+       "Browser worker ego-worker: ego task space \"masc-keepers\" is user-owned, so the live ego lane refuses it; take_over reclaims it after the operator asks to continue");
+  let code name=member "automatic" report |> member name |> member "error" |> member "code" in
+  check bool "automatic selection says there is no browser, not that the answer is missing" true
+    (code "browse"=`String "no_available_browser" && code "work"=`String "no_available_browser");
+  (* The same worker serving a healthy client of another transport keeps
+     automatic selection working; the refusal stays listed beside it. *)
+  let firefox=client "2" Lane.Webdriver_bidi in
+  let mixed=I.to_json (I.build ~observations:[observation "both" [firefox] [refusal]] ~issues:[]) in
+  check bool "a refusal beside a healthy client does not block automatic browse" true
+    (member "automatic" mixed |> member "browse" |> member "ok"=`Bool true
+     && member "automatic" mixed |> member "browse" |> member "data" |> member "clientId"
+       =`String (Lane.client_id_to_string firefox.client_id));
+  check bool "the refusal is still listed beside the chosen client" true
+    (I.issues_of_json (member "inventoryIssues" mixed)=Ok [I.Ego_user_owned_space
+      {instance_id="both";space="masc-keepers";observed_at=1793617161.}]);
+  check bool "user-owned issue wire round trip" true
+    (I.issues_of_json (I.issues_to_json [issue])=Ok [issue]);
+  List.iter (fun value -> check bool "invalid user-owned issue metadata is refused" true
+    (Result.is_error (I.issues_of_json value)))
+    [`List [`Assoc ["kind",`String "ego_user_owned_space";"instanceId",`String "w";"space",`String "s"]];
+     `List [`Assoc ["kind",`String "ego_user_owned_space";"instanceId",`String "w";"space",`String "s";
+       "observedAt",`Float (-1.)]];
+     `List [`Assoc ["kind",`String "ego_user_owned_space";"instanceId",`String "w";"space",`String "";
+       "observedAt",`Float 2.]]]
+
 let () = run "browser selection" ["policy",[
   test_case "native Space absence is distinct from transport disconnection" `Quick test_space_presence;
   test_case "multiple worker inventory preserves choices and uncertainty" `Quick test_multi_worker_inventory;
+  test_case "user-owned ego Space refusal surfaces as an inventory issue" `Quick test_ego_user_owned_inventory;
   test_case "Goal Space assignment and reconnect preserve browser identity" `Quick test_goal_space_default;
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
   test_case "exact browser binding" `Quick test_explicit_binding;

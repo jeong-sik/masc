@@ -117,6 +117,10 @@ type gathered = {
   listed : Browser_lane.client_info list;
   incomplete : bool;
   ego_identities : Browser_addon_observation.ego_identity_knowledge;
+  (* The live workers whose own snapshot reports an unavailable backend, each
+     with that snapshot, so a lane-level recovery reaches the one worker that
+     published the refusal. *)
+  unavailable : (served * Browser_addon_observation.published) list;
 }
 (* [reach] names the services a request can go to; only those are asked, so
    a slow worker of another source does not hold the request up. Whether a
@@ -162,6 +166,7 @@ let gather t ~reach =
     let ego_identities=Browser_addon_observation.ego_identity_knowledge identities in
     let incomplete=List.exists (fun (_,answer) -> Result.is_error answer) answers || unready<>[] in
     Ok {published;conflicts;listed;incomplete;ego_identities;
+        unavailable=List.filter (fun (_, (listed:Browser_addon_observation.published)) -> listed.unavailable<>[]) live;
         selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
           live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand};
         holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
@@ -256,7 +261,11 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
       |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
         refuse "requiredActions applies only to initial tab discovery or session open" in
   let* ()=match preference,verb with
-    | Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _|Control _)
+    | Browser_selection.Exact (Browser_lane.Live_route None),
+      Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> Ok ()
+    | Browser_selection.Exact (Browser_lane.Live_route None),
+      Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _|
+        Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _))
     | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
         refuse "live creation, control and Page management actions require an explicit observed clientId"
     | Exact (Browser_lane.Automation_route|Stagehand_route),Browser_lane.Page_act (Browser_lane.Action.Control _) ->
@@ -279,6 +288,39 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
         owned Browser_lane.Backend.Automation Browser_selection.Owned_automation Browser_lane.Automation_route
     | Exact Stagehand_route,[] ->
         owned Browser_lane.Backend.Stagehand Browser_selection.Owned_stagehand Browser_lane.Stagehand_route
+    | Exact (Browser_lane.Live_route None),[]
+      when (match verb with
+            | Browser_lane.Page_act action -> Browser_lane.Action.is_take_over action
+            |Browser_lane.Tabs_list|Session_open _|Session_close|Session_status
+            |Browser_lane.Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _
+            |Browser_lane.Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
+            |Browser_lane.Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _
+            |Browser_lane.Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> false) ->
+      (* The route names no client because the lane has none: the worker
+         that published the user-owned refusal is the target, and it checks
+         its own state again before it claims the Space. A worker that did
+         not answer its snapshot does not join this choice: the target is
+         the one refuser that did answer, and its own gate re-reads the
+         refusal, so an unobserved second refuser can only stay unclaimed
+         and visible, never be claimed by mistake. *)
+      (match gather t ~reach:(fun (served:served) ->
+         Browser_addon_observation.serves_live served.service.backend) with
+       | Error (Snapshot_unavailable detail) ->
+           fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
+             ("browser snapshot is unavailable; no browser command was dispatched: " ^ detail)
+       | Error (Snapshot_unreadable detail) ->
+           fail ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+             ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail)
+       | Ok gathered ->
+         (match gathered.unavailable with
+          | [served,_] ->
+              Ok (Browser_binding.of_lane
+                {Browser_selection.route=Browser_lane.Live_route None;reason=Browser_selection.Explicit_browser},
+                served)
+          | [] ->
+              refuse "take_over without a clientId reclaims a user-owned ego task space; no live worker reports one"
+          | _::_::_ ->
+              refuse "more than one live worker reports an unavailable ego task space; inspect the inventory issues"))
     | (Automatic|Exact (Live_route _)),_ | Exact (Automation_route|Stagehand_route),_::_ ->
       let reach=match preference with
         | Browser_selection.Automatic -> (fun _ -> true)

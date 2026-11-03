@@ -239,6 +239,30 @@ let observe_space_name ~run ~space =
   | Ok (`List rows) -> matches [] false rows
   | Ok _ -> Space_names_unavailable "ego did not list task spaces as an array"
 
+(* SDK contract: only claimTaskSpace reclaims a Space whose task ended while
+   the operator held it; takeOverTaskSpace on that Space ends the whole
+   nodejs process instead of throwing (measured 2026-11-02, ego 0.6.2.5).
+   The caller asks only after the operator said to continue in the Space. *)
+let claim_space ~run ~space_id =
+  let script = frame ~step:"space.claim" ~args:(obj ["spaceId",`Int space_id]) [
+    "  const back = await claimTaskSpace(args.spaceId);";
+    "  emit({ok: true, value: {spaceId: back.spaceId, name: back.name, ownership: back.ownership}});" ] in
+  match run ~window_s:read_window_s script with
+  | Error failure -> Error (run_failure_message failure)
+  | Ok output ->
+    let open Result.Syntax in
+    let* claimed = Result.map_error step_failure_message (answer output) in
+    match claimed with
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=["name";"ownership";"spaceId"] ->
+      (match List.assoc_opt "spaceId" fields, List.assoc_opt "name" fields, List.assoc_opt "ownership" fields with
+       | Some (`Int id), Some (`String name), Some (`String "agent")
+         when id=space_id && String.trim name<>"" -> Ok (id,name)
+       | Some (`Int id), Some name, Some ownership ->
+         Error (Printf.sprintf "ego returned Space %d with name %s held by %s, not by an agent"
+           id (Yojson.Safe.to_string name) (Yojson.Safe.to_string ownership))
+       | _ -> Error "ego answered a claimed Space without its identity")
+    | _ -> Error "ego answered a claimed Space outside the answer frame"
+
 let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (script ~step ~space ~holder ~args body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output

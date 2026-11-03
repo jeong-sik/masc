@@ -80,6 +80,9 @@ type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages 
     Neither transfers Space control or changes the Page's origin. *)
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+val is_take_over : t -> bool
+(** The one control a live lane answers without a client: reclaiming the ego
+    task space whose task ended while the operator held it. *)
 (** Reply observation window shared by built-in and Add-on action callers.
     Expiry does not prove that a dispatched browser effect did not happen. *)
 val reply_timeout_sec : t -> float

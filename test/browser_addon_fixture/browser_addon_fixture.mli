@@ -34,6 +34,7 @@ val with_worker :
 type worker = { serves : Browser_lane.Backend.t; clients : Browser_lane.client_info list; exports : bool }
 
 type snapshot_state = Snapshot_clients of Browser_lane.client_info list | Snapshot_unavailable
+  | Snapshot_ego_refused of { space : string; ids : int list }
 (** [Snapshot_unavailable] returns an incorrect reply type without stopping
     the serving worker, so its controller identity is unknown to the host. *)
 

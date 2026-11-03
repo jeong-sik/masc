@@ -273,6 +273,8 @@ def run(script,answer):
         if mode=='inspect-fails-in-use':answer(error='listing unavailable')
         elif mode=='user-owned':answer([{'id':36,'createdBy':'user','ownership':'user'}])
         else:answer([])
+    elif step=='space.claim':
+        answer({'spaceId':args['spaceId'],'name':'masc','ownership':'agent'})
     elif step=='space.open':
         if mode in ['in-use','inspect-fails-in-use']:answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
         else:answer({'spaceId':51,'name':'masc','ownership':'agent'})
@@ -386,11 +388,41 @@ let scenario mode =
           check bool "the worker keeps serving" false (Owner.is_retired owner);
           check bool "the exact unavailability is published" true
             (match (ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner))).unavailable with
-             | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at}] -> observed_at > 0.
+             | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=[36];observed_at}] -> observed_at > 0.
              | [] | _::_ -> false);
           check bool "the SDK child has exited before serving" true
             (List.for_all (fun text -> not (running (int_of_string text))) (lines (Filename.concat root "processes")));
           check (array string) "its temporary directory is gone before serving" [||] (Sys.readdir temporary);
+          (* The operator returns the Space; the lane reclaims it through
+             take_over without a clientId and reconnects on its own. *)
+          write (Filename.concat root "mode") "normal";
+          (match dispatch (W.Issue {route=B.Live_route None;
+              verb=B.Page_act (B.Action.Control B.Action.Take_over);actor=None;timeout_sec=30.;only_if_idle=false}) with
+           | reply ->
+               check bool "the reclaim receipt names the Space it took back" true
+                 (answered reply=`Assoc ["action",`String "take_over";"spaceId",`Int 36;
+                   "spaceName",`String "masc";"reclaimed",`Bool true]));
+          (* Each cycle starts an SDK process, so the wait is on the clock,
+             not on scheduler passes. *)
+          let clock = Eio.Stdenv.clock env in
+          let rec reconnected deadline =
+            match B.connected_clients () with
+            | [client] -> client
+            | [] ->
+                if Eio.Time.now clock > deadline then fail "the reclaimed Space did not reconnect"
+                else (Eio.Time.sleep clock 0.05; reconnected deadline)
+            | _ -> fail "the reclaimed Space connected more than one client" in
+          let client = reconnected (Eio.Time.now clock +. 10.) in
+          check bool "the reclaimed client serves the configured Space" true
+            (client.space=Some {B.id=51;name="masc"});
+          check bool "the published refusal is gone" true
+            ((ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner))).unavailable=[]);
+          (* A reclaimed connection retires the way any connected run does:
+             the Space is completed first, so its settlement is not an
+             error at retirement. *)
+          ignore (answered (dispatch (W.Issue {route=B.Live_route (Some client.client_id);
+            verb=B.Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels [])));
+            actor=None;timeout_sec=B.default_timeout_sec;only_if_idle=false})));
           check bool "the remaining worker retires normally" true (dispatch W.Retire = W.Receipt))
         else (
         let client = match B.connected_clients () with [client] -> client | _ -> fail "expected one ego client" in
@@ -622,8 +654,9 @@ let scenario mode =
       check int "no session process started" 0 processes
     | "user-owned" ->
       check bool "caller work ran" true !entered;
-      check (list string) "only the read-only inspection ran" ["space.inspect"] steps;
-      check int "one inspected SDK process was joined" 1 processes
+      check (list string) "inspection, claim, reconnection and completion are the only steps"
+        ["space.inspect";"space.claim";"space.inspect";"space.open";"space.finish"] steps;
+      check int "each SDK session ran its own process" 3 processes
     | _ ->
       check bool "caller work never ran" false !entered;
       check (list string) "an inconclusive or stale listing preserves the open refusal" ["space.inspect";"space.open"] steps)

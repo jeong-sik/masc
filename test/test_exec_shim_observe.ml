@@ -100,6 +100,31 @@ let test_observe_discard_without_persistent_effects () =
                   assert_denied "network socket" Unix.EPERM (fun () ->
                     Unix.close (Unix.socket Unix.PF_INET kind 0)))
                [ Unix.SOCK_STREAM; Unix.SOCK_DGRAM ];
+             (* IORING_OP_SOCKET makes a socket without socket(2), so the box
+                refuses io_uring_setup itself. The seccomp answer comes
+                before the kernel's own, so the check holds on a kernel
+                without io_uring as well. *)
+             let io_uring =
+               Unix.create_process
+                 "python3"
+                 [| "python3"; "-I"; "-B"; "-c";
+                    "import ctypes, errno, sys\n\
+                     IO_URING_SETUP = 425\n\
+                     IO_URING_PARAMS_BYTES = 120\n\
+                     QUEUE_ENTRIES = 4\n\
+                     libc = ctypes.CDLL(None, use_errno=True)\n\
+                     params = ctypes.create_string_buffer(IO_URING_PARAMS_BYTES)\n\
+                     fd = libc.syscall(IO_URING_SETUP, QUEUE_ENTRIES, params)\n\
+                     sys.exit(0 if fd == -1 and ctypes.get_errno() == errno.EPERM else 3)\n" |]
+                 Unix.stdin
+                 Unix.stdout
+                 Unix.stderr
+             in
+             check
+               bool
+               "io_uring_setup is refused with EPERM"
+               true
+               (snd (Unix.waitpid [] io_uring) = Unix.WEXITED 0);
              with_fd scratch_file [ Unix.O_CREAT; Unix.O_WRONLY ] (fun fd ->
                check int "scratch is still writable" 1 (Unix.write_substring fd "x" 0 1));
              0
@@ -123,7 +148,8 @@ let test_observe_discard_without_persistent_effects () =
        check bool "workspace file not created" false (Sys.file_exists created);
        Printf.printf
          "Observe child: /dev/null read/write and shell discard succeeded; persistent \
-          writes, creation, TCP/UDP sockets denied; parent verified unchanged content.\n\
+          writes, creation, TCP/UDP sockets and io_uring_setup denied; parent verified \
+          unchanged content.\n\
           %!")
 ;;
 

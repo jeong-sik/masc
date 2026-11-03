@@ -20,8 +20,10 @@
  *   deny_net: a seccomp filter that answers socket(2) with EPERM for every
  *   address family. Landlock ABI 4 restricts TCP only and leaves UDP (DNS)
  *   open until ABI 10; refusing the socket itself closes both on any
- *   kernel with seccomp filtering. Foreign-architecture syscalls are
- *   killed, as every seccomp filter must.
+ *   kernel with seccomp filtering. io_uring_setup, io_uring_enter and
+ *   io_uring_register get the same answer: IORING_OP_SOCKET makes a socket
+ *   without calling socket(2). Foreign-architecture syscalls are killed,
+ *   as every seccomp filter must.
  *
  *   Raises Unix.Unix_error naming the failing call. Non-Linux: raises
  *   ENOSYS, and the shim never gets here because support reads 0.
@@ -78,6 +80,17 @@
 #endif
 #ifndef SYS_landlock_restrict_self
 #define SYS_landlock_restrict_self 446
+#endif
+/* io_uring shares the unified syscall numbers on aarch64 and x86_64, like
+   landlock above. */
+#ifndef SYS_io_uring_setup
+#define SYS_io_uring_setup 425
+#endif
+#ifndef SYS_io_uring_enter
+#define SYS_io_uring_enter 426
+#endif
+#ifndef SYS_io_uring_register
+#define SYS_io_uring_register 427
 #endif
 
 #define LL_CREATE_RULESET_VERSION (1U << 0)
@@ -281,6 +294,9 @@ fail:
   return -1;
 }
 
+/* io_uring creates sockets with IORING_OP_SOCKET, which never reaches the
+   socket(2) check below, so a box that refuses sockets refuses io_uring as
+   well. Each jump below lands on the refusal at the end. */
 static int deny_sockets(void)
 {
   struct shim_sock_filter filter[] = {
@@ -289,9 +305,12 @@ static int deny_sockets(void)
     { BPF_JMP_JEQ_K, 1, 0, SHIM_AUDIT_ARCH },
     { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
     { BPF_LD_W_ABS, 0, 0, 0 },
-    { BPF_JMP_JEQ_K, 0, 1, (uint32_t) SYS_socket },
-    { BPF_RET_K, 0, 0, SECCOMP_RET_ERRNO | (EPERM & 0xffff) },
+    { BPF_JMP_JEQ_K, 4, 0, (uint32_t) SYS_socket },
+    { BPF_JMP_JEQ_K, 3, 0, (uint32_t) SYS_io_uring_setup },
+    { BPF_JMP_JEQ_K, 2, 0, (uint32_t) SYS_io_uring_enter },
+    { BPF_JMP_JEQ_K, 1, 0, (uint32_t) SYS_io_uring_register },
     { BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_ERRNO | (EPERM & 0xffff) },
   };
   struct shim_sock_fprog prog = { sizeof filter / sizeof filter[0], filter };
   return (int) prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
@@ -397,9 +416,10 @@ CAMLprim value ocaml_shim_user_notif_supported(value vunit)
 
 /* --- task-1571: the observation filter and the supervisor drain --------- */
 
-/* The observe variant of deny_sockets: socket(2) is answered by the
-   supervisor (SECCOMP_RET_USER_NOTIF) instead of the filter itself, so
-   the supervisor can record the attempt and then answer EPERM.  The
+/* The observe variant of deny_sockets: socket(2) and the three io_uring
+   calls are answered by the supervisor (SECCOMP_RET_USER_NOTIF) instead of
+   the filter itself, so the supervisor can record the attempt and then
+   answer EPERM.  The
    child calls this through install_user_notif below, which hands the
    listener fd back across [sock] before execvpe.  Linux only, like every
    helper above: the filter constants and prctl/syscall are Linux headers,
@@ -412,9 +432,12 @@ static int install_observe_sockets(int sock)
     { BPF_JMP_JEQ_K, 1, 0, SHIM_AUDIT_ARCH },
     { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
     { BPF_LD_W_ABS, 0, 0, 0 },
-    { BPF_JMP_JEQ_K, 0, 1, (uint32_t) SYS_socket },
-    { BPF_RET_K, 0, 0, SECCOMP_RET_USER_NOTIF },
+    { BPF_JMP_JEQ_K, 4, 0, (uint32_t) SYS_socket },
+    { BPF_JMP_JEQ_K, 3, 0, (uint32_t) SYS_io_uring_setup },
+    { BPF_JMP_JEQ_K, 2, 0, (uint32_t) SYS_io_uring_enter },
+    { BPF_JMP_JEQ_K, 1, 0, (uint32_t) SYS_io_uring_register },
     { BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_USER_NOTIF },
   };
   struct shim_sock_fprog prog = { sizeof filter / sizeof filter[0], filter };
   long fd;

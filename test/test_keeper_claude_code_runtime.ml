@@ -2301,31 +2301,18 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
                | _ -> "not-in-recovery")))
 ;;
 
-let test_blank_completion_rejected_without_losing_session () =
+let test_blank_completion_completes_and_keeps_session () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture
       [Emit (assistant ~turn_id:"blank" ""); Emit (result ~turn_id:"blank" "")]
       (fun cli_path ->
         (match run_keeper_turn ~base_path ~cli_path ~goal:"Reply to this request"
-            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+            ~accept:Keeper_tooling.Response.accepts_response () with
+         | Ok _ -> ()
          | Error error ->
-             (match Keeper_internal_error.classify_masc_internal_error error with
-              (* Claude's spawned process cannot prove absence of native
-                 effects. The driver fences automatic retry while preserving
-                 the exact typed acceptance cause and the settled session. *)
-              | Some (Keeper_internal_error.Provider_attempt_effect_fenced
-                  { runtime_id = "claude.claude"
-                  ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
-                  ; cause = Keeper_internal_error.Fenced_masc
-                      (Keeper_internal_error.Accept_rejected
-                        { reason_kind = Some Accept_no_usable_progress
-                        ; response_shape = Some Accept_response_blank_text_only
-                        ; stop_reason = Some Agent_core.Types.EndTurn
-                        ; _ }) }) -> ()
-              | _ -> fail ("blank completion was not a fenced blank-progress rejection: "
-                           ^ Agent_core.Error.to_string error))
-         | Ok _ -> fail "blank completion was accepted as progress");
+           fail ("a blank completion did not complete the turn: "
+                 ^ Agent_core.Error.to_string error));
         let module Store = Keeper_official_client_session_store in
         let binding = load_state base_path in
         let settled_session = match binding.phase with
@@ -6698,8 +6685,8 @@ let () =
             test_start_authority_is_user_context_not_standing_system
         ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
         ; test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
-        ; test_case "blank completion rejects progress but preserves session" `Quick
-            test_blank_completion_rejected_without_losing_session
+        ; test_case "blank completion completes and keeps the session" `Quick
+            test_blank_completion_completes_and_keeps_session
         ; test_case "resume prompt carries the task reference" `Quick
             test_resume_prompt_carries_the_task_reference
         ; test_case "resume prompt sends only changed blocks" `Quick

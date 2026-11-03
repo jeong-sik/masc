@@ -282,7 +282,6 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   let progress = Atomic.make Attempt.No_checkpoint_stage in
   let before = Attempt.For_testing.tool_result_save_count progress in
   let tool_executions = ref 0 in
-  let executed_names = ref [] in
   let provider_calls = ref 0 in
   let replies = ref
       [ response ~stop_reason:Core.Types.StopToolUse
@@ -302,7 +301,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
       ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
       ~model_id:"mock-model" () in
   let tool = Core.Tool.create ~name:"observe" ~description:"Observe once" ~parameters:[]
-      (fun _ -> incr tool_executions; executed_names := "observe" :: !executed_names;
+      (fun _ -> incr tool_executions;
         Ok {Core.Types.content="observed"; content_blocks=None; _meta=None}) in
   let observed_provider_turn_ordinal = ref None in
   let hooks = { Core.Hooks.empty with after_turn = Some (function
@@ -385,10 +384,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
     Alcotest.(check bool) "actual checkpoint retained" true
       (Option.fold ~none:false ~some:(fun saved -> saved == checkpoint) completed.checkpoint);
     Alcotest.(check string) "provider response id is unavailable" "" completed.response.id;
-    Alcotest.(check bool) "usage is unavailable, not invented" true (completed.response.usage = None);
-    Alcotest.(check (result string string)) "actual executed tool names support finalization" (Ok "")
-      (Keeper_tooling.Response.normalize_response_text
-         ~text:(Core.Types.visible_text_of_response completed.response) ~tool_names:!executed_names ())
+    Alcotest.(check bool) "usage is unavailable, not invented" true (completed.response.usage = None)
   | Ahead_checkpoint, Error retained ->
     Alcotest.(check bool) "stale owner made no new tool-save proof" true (!stale_noops > 0);
     Alcotest.(check int) "no save advanced behind canonical" 0 !saves;
@@ -477,31 +473,31 @@ let test_terminal_tool_completion_bypasses_empty_response_rejection () =
     0
     !accept_calls
 
-let test_open_terminal_state_keeps_empty_response_rejection () =
+let test_open_terminal_state_keeps_truncation_rejection () =
   match
     Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
       ~runtime_id:"runtime.official-client"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.accepts_response
       ~terminal_effect_state:(fun () ->
         Masc.Keeper_tools_agent_core.Terminal_effect_open)
-      (run_result ~content:[] ())
+      (run_result ~content:[] ~stop_reason:Agent_core.Types.MaxTokens ())
   with
   | Error error ->
     (match Keeper_internal_error.classify_masc_internal_error error with
      | Some (Keeper_internal_error.Accept_rejected { reason; _ }) ->
        Alcotest.(check bool)
-         "ordinary empty response remains typed no-progress"
+         "a truncated response remains typed no-progress"
          true
          (contains ~needle:"response rejected by accept" reason)
      | Some other ->
        Alcotest.failf
-         "ordinary empty response produced %s"
+         "a truncated response produced %s"
          (Keeper_internal_error.kind_of_masc_internal_error other)
      | None ->
        Alcotest.failf
-         "ordinary empty response produced the wrong rejection: %s"
+         "a truncated response produced the wrong rejection: %s"
          (Agent_core.Error.to_string error))
-  | Ok _ -> Alcotest.fail "ordinary empty response was incorrectly accepted"
+  | Ok _ -> Alcotest.fail "a truncated response was accepted"
 
 let test_replay_projection_failure_rejects_completed_attempt () =
   let open Agent_core.Types in
@@ -967,13 +963,14 @@ let test_reject_reason_describes_thinking_only_response () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-model"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.accepts_response
       (run_result
          ~content:
            [
              Llm_provider.Types.Thinking
                { signature = None; content = "abcde" };
            ]
+         ~stop_reason:Agent_core.Types.MaxTokens
          ())
   in
   let err, reason_kind, reason = expect_accept_rejected result in
@@ -1020,101 +1017,11 @@ let test_reject_reason_describes_thinking_only_response () =
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
-let test_finalization_blank_response_is_typed_accept_rejection () =
-  let result =
-    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
-      ~runtime_id:"ollama.gemma4-26b-a4b-qat"
-      ~run_result:(run_result ())
-      ~text:""
-      ~tool_names:[]
-      ()
-  in
-  match result with
-  | Ok text -> Alcotest.failf "blank response should fail, got %S" text
-  | Error err ->
-    (match Keeper_internal_error.classify_masc_internal_error err with
-     | Some
-         (Keeper_internal_error.Accept_rejected
-            { scope; reason_kind; reason; _ }) ->
-       Alcotest.(check string)
-         "scope"
-         "ollama.gemma4-26b-a4b-qat"
-         scope;
-       Alcotest.(check bool)
-         "reason kind is no usable progress"
-         true
-         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-       Alcotest.(check bool)
-         "reason identifies empty shape"
-         true
-         (contains ~needle:"shape=empty" reason);
-       Alcotest.(check bool)
-         "typed no-progress classification"
-         true
-         (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err)
-     | Some other ->
-       Alcotest.failf "expected Accept_rejected, got %s"
-         (Keeper_internal_error.kind_of_masc_internal_error other)
-     | None ->
-       Alcotest.failf "expected typed keeper error, got %s"
-         (Agent_core.Error.to_string err))
-
-let test_finalization_does_not_surface_hidden_reasoning () =
-  let hidden = "private chain of thought must not become a user reply" in
-  let response =
-    run_result
-      ~content:
-        [ Llm_provider.Types.Thinking { signature = None; content = hidden }
-        ; Llm_provider.Types.ReasoningDetails
-            { reasoning_content = Some "provider-private reasoning"
-            ; details = []
-            }
-        ]
-      ()
-  in
-  let finalize tool_names =
-    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
-      ~runtime_id:"runtime.reasoning-model"
-      ~run_result:response
-      ~text:""
-      ~tool_names
-      ()
-  in
-  (match finalize [ "masc_schedule_get" ] with
-   | Error err ->
-     Alcotest.failf "tool fallback should succeed: %s" (Agent_core.Error.to_string err)
-   | Ok text ->
-     Alcotest.(check string)
-       "tool-only completion does not fabricate assistant prose"
-       ""
-       text;
-     Alcotest.(check bool)
-       "Thinking content is not user-facing"
-       false
-       (contains ~needle:hidden text);
-     Alcotest.(check bool)
-       "ReasoningDetails content is not user-facing"
-       false
-       (contains ~needle:"provider-private reasoning" text));
-  let _err, reason_kind, reason = expect_accept_rejected (finalize []) in
-  Alcotest.(check bool)
-    "reasoning-only finalization keeps the typed no-progress rejection"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "typed rejection diagnostic does not expose Thinking content"
-    false
-    (contains ~needle:hidden reason);
-  Alcotest.(check bool)
-    "typed rejection diagnostic does not expose ReasoningDetails content"
-    false
-    (contains ~needle:"provider-private reasoning" reason)
-
 let test_thinking_with_text_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-text"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.accepts_response
       (run_result
          ~content:
            [
@@ -1135,7 +1042,7 @@ let test_thinking_with_tool_use_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-tool"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.accepts_response
       (run_result
          ~content:
            [
@@ -1153,729 +1060,11 @@ let test_thinking_with_tool_use_is_accepted () =
     Alcotest.failf "thinking plus tool use should pass accept: %s"
       (Agent_core.Error.to_string err)
 
-let check_accept_matches_agent_core_shape label content =
-  let response = response ~content () in
-  let expected =
-    response
-    |> Agent_core.Response_shape.summarize
-    |> Agent_core.Response_shape.has_deliverable_content
-  in
-  Alcotest.(check bool)
-    label
-    expected
-    (Keeper_tooling.Response.response_has_text_or_tool_progress response)
-
-let test_accept_contract_delegates_to_agent_core_response_shape () =
-  check_accept_matches_agent_core_shape "empty" [];
-  check_accept_matches_agent_core_shape
-    "thinking only"
-    [
-      Llm_provider.Types.Thinking
-        { signature = None; content = "internal chain" };
-    ];
-  check_accept_matches_agent_core_shape "blank text" [ Llm_provider.Types.Text " \n\t " ];
-  check_accept_matches_agent_core_shape "text" [ Llm_provider.Types.Text "visible answer" ];
-  check_accept_matches_agent_core_shape
-    "tool use"
-    [
-      Llm_provider.Types.ToolUse
-        { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
-    ];
-  check_accept_matches_agent_core_shape
-    "tool result"
-    [
-      Llm_provider.Types.ToolResult
-        {
-          tool_use_id = "tool-1";
-          content = "ok";
-          outcome = Agent_core.Types.Tool_succeeded;
-          json = None;
-          content_blocks = None;
-        };
-    ];
-  check_accept_matches_agent_core_shape
-    "media"
-    [
-      Llm_provider.Types.Image
-        { media_type = "image/png"
-        ; source = Llm_provider.Types.Base64 "redacted"
-        };
-    ]
-
-let test_thinking_only_non_end_turn_response_is_rejected () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.thinking-stop-sequence"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
-      (run_result
-         ~content:
-           [
-             Llm_provider.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ~stop_reason:Agent_core.Types.StopSequence
-         ())
-  in
-  let _err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason identifies thinking-only shape"
-    true
-    (contains ~needle:"shape=thinking_only" reason);
-  Alcotest.(check bool)
-    "reason keeps non-end stop reason"
-    true
-    (contains ~needle:"stop_reason=stop_sequence" reason)
-
-let test_thinking_only_no_tool_can_try_next_candidate () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.thinking-only-no-tool"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
-      (run_result
-         ~content:
-           [
-             Llm_provider.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason identifies thinking-only shape"
-    true
-    (contains ~needle:"shape=thinking_only" reason);
-  Alcotest.(check bool)
-    "thinking-only no-tool can try next provider candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
-  Alcotest.(check (option string))
-    "thinking-only no-tool classified by internal-error SSOT"
-    (Some "thinking_only_no_progress")
-    (accept_no_progress_retry_kind_string err);
-  Alcotest.(check (option string))
-    "thinking-only no-tool is runtime-recoverable"
-    (Some "thinking_only_no_progress")
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
-
-let test_empty_non_end_turn_response_is_rejected () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.empty-stop-sequence"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
-      (run_result ~stop_reason:Agent_core.Types.StopSequence ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason identifies empty shape"
-    true
-    (contains ~needle:"shape=empty" reason);
-  Alcotest.(check bool)
-    "reason keeps non-end stop reason"
-    true
-    (contains ~needle:"stop_reason=stop_sequence" reason);
-  Alcotest.(check bool)
-    "no-progress accept rejection is typed"
-    true
-    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
-  Alcotest.(check bool)
-    "empty no-progress can try next candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
-  Alcotest.(check (option string))
-    "empty no-progress classified by internal-error SSOT"
-    (Some "empty_no_progress")
-    (accept_no_progress_retry_kind_string err);
-  Alcotest.(check (option string))
-    "empty no-progress is runtime-recoverable"
-    (Some "empty_no_progress")
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
-  (match Masc.Keeper_turn_driver.classify_masc_internal_error err with
-   | Some internal_error ->
-     Alcotest.(check string)
-       "accept rejection runtime id uses scope"
-       "runtime.empty-stop-sequence"
-       (Masc.Keeper_turn_driver.runtime_id_of_masc_internal_error internal_error);
-     Alcotest.(check bool)
-       "summary describes provider empty turn"
-       true
-       (Option.value
-          ~default:false
-          (Option.map
-             (contains ~needle:"empty assistant turn")
-             (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
-   | None -> Alcotest.fail "expected typed accept rejection")
-
-let test_blank_text_non_end_turn_response_is_rejected () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.blank-max-tokens"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
-      (run_result
-         ~content:[ Llm_provider.Types.Text " \n\t " ]
-         ~stop_reason:Agent_core.Types.MaxTokens
-         ())
-  in
-  let _err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason identifies blank text"
-    true
-    (contains ~needle:"shape=blank_text_only" reason);
-  Alcotest.(check bool)
-    "reason reports zero trimmed text chars"
-    true
-    (contains ~needle:"text_chars=0" reason);
-  Alcotest.(check bool)
-    "reason keeps max-token stop reason"
-    true
-    (contains ~needle:"stop_reason=max_tokens" reason)
-
-let test_quiet_final_passes_when_policy_allows () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.quiet-final"
-      ~accept:
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Allow_quiet_final)
-      (run_result ~content:[ Llm_provider.Types.Text "" ] ())
-  in
-  match result with
-  | Ok kept ->
-    Alcotest.(check string)
-      "session preserved"
-      "session-test"
-      kept.session_id
-  | Error err ->
-    Alcotest.failf
-      "explicit quiet final should pass when the policy allows it: %s"
-      (Agent_core.Error.to_string err)
-
-let test_quiet_final_rejected_when_policy_requires_progress () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.require-progress"
-      ~accept:
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Require_progress)
-      (run_result ~content:[ Llm_provider.Types.Text "" ] ())
-  in
-  let _err, reason_kind, _reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "blank final without a quiet policy stays no-progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
-
-let test_quiet_final_does_not_extend_past_end_turn () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.quiet-max-tokens"
-      ~accept:
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Allow_quiet_final)
-      (run_result
-         ~content:[ Llm_provider.Types.Text "" ]
-         ~stop_reason:Agent_core.Types.MaxTokens
-         ())
-  in
-  let _err, reason_kind, _reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "interrupted blank output is not a chosen quiet final"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
-
-(* A Muse turn whose model wrote no message settles with [content = []].
-   When the wake allows silence, that is the same choice as a blank text
-   block. *)
-let test_no_content_final_passes_when_policy_allows () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.quiet-no-content"
-      ~accept:
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Allow_quiet_final)
-      (run_result ~content:[] ())
-  in
-  match result with
-  | Ok kept ->
-    Alcotest.(check string) "session preserved" "session-test" kept.session_id
-  | Error err ->
-    Alcotest.failf
-      "a completed turn with no content should pass when the policy allows it: %s"
-      (Agent_core.Error.to_string err)
-
-let test_no_content_final_rejected_when_policy_requires_progress () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.require-progress-no-content"
-      ~accept:
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Require_progress)
-      (run_result ~content:[] ())
-  in
-  let _err, reason_kind, _reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "no content without a quiet policy stays no-progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
-
-(* A lane with thinking on says nothing as reasoning blocks and no text, with
-   or without an empty text block beside them (#41925). The replay half of
-   why this is safe is in test_keeper_replay_checkpoint. *)
-let test_thinking_only_final_follows_the_quiet_policy () =
-  let thinking = Llm_provider.Types.Thinking { signature = Some "sig"; content = "hidden" } in
-  let accept ~policy content =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.quiet-thinking-only"
-      ~accept:(Keeper_tooling.Response.accepts_response ~policy)
-      (run_result ~content ())
-  in
-  List.iter
-    (fun (label, content) ->
-       (match accept ~policy:Keeper_tooling.Response.Allow_quiet_final content with
-        | Ok _ -> ()
-        | Error err ->
-          Alcotest.failf
-            "%s should pass when the policy allows silence: %s"
-            label
-            (Agent_core.Error.to_string err));
-       let _err, reason_kind, _reason =
-         expect_accept_rejected
-           (accept ~policy:Keeper_tooling.Response.Require_progress content)
-       in
-       Alcotest.(check bool)
-         (label ^ " without a quiet policy stays no-progress")
-         true
-         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress))
-    [ "thinking alone", [ thinking ]
-    ; "thinking with an empty text block", [ thinking; Llm_provider.Types.Text "" ]
-    ; "redacted thinking", [ Llm_provider.Types.RedactedThinking "opaque" ]
-    ]
-
-let test_finalization_settles_no_content_quiet_final () =
-  let finalize ~policy content =
-    Masc.Keeper_agent_run.For_testing.normalize_final_response_text
-      ~response_policy:policy
-      ~keeper_name:"keeper-test"
-      ~runtime_id:"runtime.quiet-no-content"
-      ~run_result:(run_result ~content ())
-      ~text:""
-      ~tool_names:[]
-      ()
-  in
-  List.iter
-    (fun (label, content) ->
-       (match finalize ~policy:Keeper_tooling.Response.Allow_quiet_final content with
-        | Ok text -> Alcotest.(check string) (label ^ " settles as an empty reply") "" text
-        | Error err ->
-          Alcotest.failf
-            "an accepted %s final must also settle: %s"
-            label
-            (Agent_core.Error.to_string err));
-       match finalize ~policy:Keeper_tooling.Response.Require_progress content with
-       | Ok _ -> Alcotest.failf "%s under Require_progress must not settle" label
-       | Error _ -> ())
-    [ "no content", []
-    ; "reasoning-only", [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
-    ]
-
-let test_quiet_final_shape_names_the_settled_form () =
-  let shape ?stop_reason content =
-    Keeper_tooling.Response.quiet_final_shape
-      ~policy:Keeper_tooling.Response.Allow_quiet_final
-      (response ~content ?stop_reason ())
-  in
-  Alcotest.(check bool)
-    "blank text"
-    true
-    (shape [ Llm_provider.Types.Text " " ] = Some Keeper_tooling.Response.Quiet_blank_text);
-  Alcotest.(check bool)
-    "no content"
-    true
-    (shape [] = Some Keeper_tooling.Response.Quiet_no_content);
-  Alcotest.(check bool)
-    "reasoning alone"
-    true
-    (shape [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
-     = Some Keeper_tooling.Response.Quiet_thinking_only);
-  List.iter
-    (fun stop_reason ->
-       Alcotest.(check bool)
-         "reasoning alone that did not end its turn"
-         true
-         (shape ~stop_reason
-            [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
-          = None))
-    [ Agent_core.Types.MaxTokens; Agent_core.Types.StopToolUse ];
-  Alcotest.(check bool)
-    "no content cut by max tokens"
-    true
-    (shape ~stop_reason:Agent_core.Types.MaxTokens [] = None)
-
-(* The label is the [shape] value of masc_keeper_quiet_finals_total; the
-   dashboards and alerts that read the counter match these exact values. *)
-let test_quiet_final_shape_labels_are_the_metric_values () =
-  List.iter
-    (fun (shape, expected) ->
-       Alcotest.(check string)
-         expected
-         expected
-         (Keeper_tooling.Response.quiet_final_shape_label shape))
-    [ Keeper_tooling.Response.Quiet_blank_text, "blank_text"
-    ; Keeper_tooling.Response.Quiet_no_content, "no_content"
-    ; Keeper_tooling.Response.Quiet_thinking_only, "thinking_only"
-    ]
-
-let wake_observation
-    ~pending_messages
-    ~pending_board_events
-  : Masc.Keeper_world_observation.world_observation
-  =
-  { pending_messages
-  ; pending_board_events
-  ; idle_seconds = 0
-  ; active_goals = Ok []
-  ; unclaimed_task_count = 0
-  ; claimable_tasks = []
-  ; held_task_skills = []
-  ; failed_task_count = 0
-  ; scheduled_automation =
-      Masc.Keeper_world_observation.empty_scheduled_automation_observation
-  ; approval_authority =
-      { revision = 1
-      ; state = Masc.Keeper_world_observation.Approval_authority_complete
-      ; pending = []
-      }
-  ; backlog_revision = None
-  ; running_keeper_fiber_count = 0
-  ; connected_surfaces = []
-  ; connected_surface_failures = []
-  ; own_recent_board_posts = []
-  ; fleet_messages = []
-  ; own_recent_actions = Ok []
-  }
-
-let board_event event_kind : Masc.Keeper_world_observation.pending_board_event =
-  { event_kind
-  ; post_id = "post-test"
-  ; author = "peer"
-  ; title = Some "event"
-  ; preview = Some "preview"
-  ; hearth = None
-  ; post_kind = Masc.Board.Human_post
-  ; updated_at = 0.0
-  ; explicit_mention = false
-  ; matched_targets = []
-  ; replies_after_own_comment = None
-  ; latest_external_author = None
-  ; latest_external_preview = None
-  }
-
-let scheduled_wake ~result_delivery : Keeper_event_queue.scheduled_wake =
-  { occurrence_id = "occurrence-test"
-  ; schedule_instance_id = "instance-test"
-  ; schedule_id = "schedule-test"
-  ; due_at = 0.0
-  ; payload_digest = "digest-test"
-  ; title = None
-  ; message = "reminder"
-  ; result_delivery
-  }
-
-let autonomous_wake_speaker =
-  Masc.Keeper_input_speaker.Host_prompt
-    (Masc.Keeper_input_speaker.Autonomous_wake { answered_asks = [] })
-
-(* The autonomous unified turn runs with this history source
-   (Keeper_unified_turn_execution). *)
-let policy_for_turn ~turn_kind ~speaker ~observation ~hitl_resolution =
-  Masc.Keeper_agent_run.For_testing.response_policy_for_turn
-    ~turn_kind
-    ~input_speaker:speaker
-    ~world_observation:observation
-    ~hitl_resolution
-    ~history_assistant_source:"internal_assistant"
-
-let check_policy label expected actual =
-  Alcotest.(check bool)
-    label
-    true
-    (actual = expected)
-
-let test_response_policy_autonomous_wake_without_input_allows_quiet_final () =
-  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
-  check_policy
-    "empty autonomous wake allows a quiet final"
-    Keeper_tooling.Response.Allow_quiet_final
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some observation)
-       ~hitl_resolution:None)
-
-(* #41925: a thinking lane's silence is reasoning with no text, and only an
-   internal turn's finalization keeps that reasoning out of replay. An
-   autonomous wake on a turn that replays its reply may not end quietly, so a
-   caller that forgets the internal source cannot replay that reasoning. *)
-let test_response_policy_requires_progress_when_the_reply_is_replayed () =
-  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
-  check_policy
-    "a wake whose reply is replayed requires progress"
-    Keeper_tooling.Response.Require_progress
-    (Masc.Keeper_agent_run.For_testing.response_policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~input_speaker:autonomous_wake_speaker
-       ~world_observation:(Some observation)
-       ~hitl_resolution:None
-       ~history_assistant_source:"direct_assistant")
-
-let test_response_policy_pending_message_requires_progress () =
-  let message =
-    { Masc.Keeper_world_observation_message_scope.message_id = "message-test"
-    ; speaker = "owner"
-    ; content = "what changed?"
-    ; kind = Masc.Keeper_world_observation_message_scope.Mention
-    }
-  in
-  let observation =
-    wake_observation ~pending_messages:[ message ] ~pending_board_events:[]
-  in
-  check_policy
-    "an unacknowledged message keeps the response contract"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some observation)
-       ~hitl_resolution:None)
-
-let test_response_policy_board_event_requires_progress () =
-  let observation =
-    wake_observation
-      ~pending_messages:[]
-      ~pending_board_events:
-        [ board_event Masc.Keeper_world_observation.Board_post_created ]
-  in
-  check_policy
-    "a delivered board event keeps the response contract"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some observation)
-       ~hitl_resolution:None)
-
-let test_response_policy_reminder_only_schedule_allows_quiet_final () =
-  let reminder_event result_delivery =
-    board_event
-      (Masc.Keeper_world_observation.Schedule_due
-         (scheduled_wake ~result_delivery))
-  in
-  let no_delivery =
-    wake_observation
-      ~pending_messages:[]
-      ~pending_board_events:[ reminder_event None ]
-  in
-  check_policy
-    "a schedule without authorized result delivery may end quietly"
-    Keeper_tooling.Response.Allow_quiet_final
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some no_delivery)
-       ~hitl_resolution:None);
-  let dashboard_channel =
-    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
-    | Ok channel -> channel
-    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
-  in
-  let with_delivery =
-    wake_observation
-      ~pending_messages:[]
-      ~pending_board_events:[ reminder_event (Some dashboard_channel) ]
-  in
-  check_policy
-    "an authorized result delivery keeps the response contract"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some with_delivery)
-       ~hitl_resolution:None)
-
-let test_response_policy_non_autonomous_input_requires_progress () =
-  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
-  check_policy
-    "a direct turn never allows a quiet final"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Direct
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some observation)
-       ~hitl_resolution:None);
-  check_policy
-    "an autonomous turn without a world observation keeps the response contract"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:None
-       ~hitl_resolution:None);
-  let dashboard_channel =
-    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
-    | Ok channel -> channel
-    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
-  in
-  let hitl_resolution =
-    { Keeper_event_queue.approval_id = "approval-test"
-    ; decision = Keeper_event_queue.Hitl_approved
-    ; channel = dashboard_channel
-    }
-  in
-  check_policy
-    "a Gate answer keeps the response contract"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:autonomous_wake_speaker
-       ~observation:(Some observation)
-       ~hitl_resolution:(Some hitl_resolution));
-  let answered_speaker =
-    Masc.Keeper_input_speaker.Host_prompt
-      (Masc.Keeper_input_speaker.Autonomous_wake
-         { answered_asks = [ Masc.Keeper_input_speaker.Owner ] })
-  in
-  check_policy
-    "answered asks keep the response contract"
-    Keeper_tooling.Response.Require_progress
-    (policy_for_turn
-       ~turn_kind:Turn_record.Autonomous
-       ~speaker:answered_speaker
-       ~observation:(Some observation)
-       ~hitl_resolution:None)
-
-(* The wake input closes with the line the accept policy selects, so the model
-   reads the same decision the accept check applies. Compared against the
-   rendered slot, not its wording. *)
-let rendered_clause key =
-  match Prompt_registry.render_prompt_template key [] with
-  | Ok text -> text
-  | Error detail -> Alcotest.failf "clause %s should render: %s" key detail
-
-let test_wake_input_closes_with_the_policy_clause () =
-  let wake = "wake" in
-  let allowed =
-    rendered_clause Prompt_names.keeper_wake_completion_quiet_final_allowed
-  in
-  let required =
-    rendered_clause Prompt_names.keeper_wake_completion_progress_required
-  in
-  let clause_for observation =
-    let response_policy =
-      policy_for_turn
-        ~turn_kind:Turn_record.Autonomous
-        ~speaker:autonomous_wake_speaker
-        ~observation:(Some observation)
-        ~hitl_resolution:None
-    in
-    Masc.Keeper_agent_run.For_testing.with_completion_clause
-      ~input_speaker:autonomous_wake_speaker
-      ~response_policy
-      wake
-  in
-  Alcotest.(check string)
-    "a wake that may end quietly says so"
-    (wake ^ "\n\n" ^ allowed)
-    (clause_for (wake_observation ~pending_messages:[] ~pending_board_events:[]));
-  Alcotest.(check string)
-    "a wake with a delivered board event says it must answer"
-    (wake ^ "\n\n" ^ required)
-    (clause_for
-       (wake_observation
-          ~pending_messages:[]
-          ~pending_board_events:
-            [ board_event Masc.Keeper_world_observation.Board_post_created ]));
-  Alcotest.(check bool) "the two clauses differ" false (String.equal allowed required);
-  let empty = wake_observation ~pending_messages:[] ~pending_board_events:[] in
-  let clause_with ~speaker ~hitl_resolution =
-    Masc.Keeper_agent_run.For_testing.with_completion_clause
-      ~input_speaker:speaker
-      ~response_policy:
-        (policy_for_turn
-           ~turn_kind:Turn_record.Autonomous
-           ~speaker
-           ~observation:(Some empty)
-           ~hitl_resolution)
-      wake
-  in
-  Alcotest.(check string)
-    "a wake quoting an answered Ask says it must answer"
-    (wake ^ "\n\n" ^ required)
-    (clause_with
-       ~speaker:
-         (Masc.Keeper_input_speaker.Host_prompt
-            (Masc.Keeper_input_speaker.Autonomous_wake
-               { answered_asks = [ Masc.Keeper_input_speaker.Owner ] }))
-       ~hitl_resolution:None);
-  let dashboard_channel =
-    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
-    | Ok channel -> channel
-    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
-  in
-  Alcotest.(check string)
-    "a wake carrying a Gate answer says it must answer"
-    (wake ^ "\n\n" ^ required)
-    (clause_with
-       ~speaker:autonomous_wake_speaker
-       ~hitl_resolution:
-         (Some
-            { Keeper_event_queue.approval_id = "approval-test"
-            ; decision = Keeper_event_queue.Hitl_approved
-            ; channel = dashboard_channel
-            }))
-
-let test_non_wake_input_carries_no_clause () =
-  let message = "operator request" in
-  Alcotest.(check string)
-    "a person's message is left as written"
-    message
-    (Masc.Keeper_agent_run.For_testing.with_completion_clause
-       ~input_speaker:(Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner)
-       ~response_policy:Keeper_tooling.Response.Require_progress
-       message);
-  Alcotest.(check string)
-    "an official-client resume cue is left as written"
-    message
-    (Masc.Keeper_agent_run.For_testing.with_completion_clause
-       ~input_speaker:
-         (Masc.Keeper_input_speaker.Host_prompt
-            Masc.Keeper_input_speaker.Official_client_resume)
-       ~response_policy:Keeper_tooling.Response.Require_progress
-       message)
-
 let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.max-tokens"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.accepts_response
       (run_result
          ~content:[ Llm_provider.Types.Text "partial partial partial" ]
          ~stop_reason:Agent_core.Types.MaxTokens
@@ -1966,7 +1155,7 @@ let test_media_with_tool_result_is_deliverable () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.mixed"
-      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.accepts_response
       (run_result
          ~content:
            [
@@ -2470,9 +1659,9 @@ let () =
             `Quick
             test_terminal_tool_completion_bypasses_empty_response_rejection;
           Alcotest.test_case
-            "open terminal state keeps empty response rejection"
+            "open terminal state keeps the truncation rejection"
             `Quick
-            test_open_terminal_state_keeps_empty_response_rejection;
+            test_open_terminal_state_keeps_truncation_rejection;
           Alcotest.test_case
             "replay projection failure rejects completed attempt"
             `Quick
@@ -2489,26 +1678,10 @@ let () =
             "max_tokens without content keeps its rotation kind"
             `Quick
             test_max_tokens_without_content_keeps_rotation_kind;
-          Alcotest.test_case
-            "blank finalization response is typed no-progress"
-            `Quick
-            test_finalization_blank_response_is_typed_accept_rejection;
-          Alcotest.test_case
-            "finalization does not surface hidden reasoning"
-            `Quick
-            test_finalization_does_not_surface_hidden_reasoning;
 	          Alcotest.test_case "thinking plus text is accepted" `Quick
 	            test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
-          Alcotest.test_case "accept delegates to AGENT_CORE response shape" `Quick
-            test_accept_contract_delegates_to_agent_core_response_shape;
-          Alcotest.test_case "thinking-only non-end-turn response is rejected" `Quick
-            test_thinking_only_non_end_turn_response_is_rejected;
-          Alcotest.test_case
-            "thinking-only no-tool response rotates typed no-progress"
-            `Quick
-            test_thinking_only_no_tool_can_try_next_candidate;
           Alcotest.test_case
             "Accept_rejected threads typed stop_reason (RFC-0271 §4.5)"
             `Quick
@@ -2517,78 +1690,6 @@ let () =
             "Accept_rejected stop_reason survives codec (RFC-0271 §4.5)"
             `Quick
             test_accept_rejected_stop_reason_survives_codec;
-          Alcotest.test_case "empty non-end-turn response is rejected" `Quick
-            test_empty_non_end_turn_response_is_rejected;
-          Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
-            test_blank_text_non_end_turn_response_is_rejected;
-          Alcotest.test_case
-            "quiet final passes when the turn policy allows it"
-            `Quick
-            test_quiet_final_passes_when_policy_allows;
-          Alcotest.test_case
-            "quiet final rejected when the turn policy requires progress"
-            `Quick
-            test_quiet_final_rejected_when_policy_requires_progress;
-          Alcotest.test_case
-            "quiet final does not extend past an EndTurn stop"
-            `Quick
-            test_quiet_final_does_not_extend_past_end_turn;
-          Alcotest.test_case
-            "no-content final passes when the turn policy allows it"
-            `Quick
-            test_no_content_final_passes_when_policy_allows;
-          Alcotest.test_case
-            "no-content final rejected when the turn policy requires progress"
-            `Quick
-            test_no_content_final_rejected_when_policy_requires_progress;
-          Alcotest.test_case
-            "thinking-only final follows the quiet policy"
-            `Quick
-            test_thinking_only_final_follows_the_quiet_policy;
-          Alcotest.test_case
-            "finalization settles an accepted no-content or reasoning-only final"
-            `Quick
-            test_finalization_settles_no_content_quiet_final;
-          Alcotest.test_case
-            "quiet final shape names the settled form"
-            `Quick
-            test_quiet_final_shape_names_the_settled_form;
-          Alcotest.test_case
-            "quiet final shape labels are the metric values"
-            `Quick
-            test_quiet_final_shape_labels_are_the_metric_values;
-          Alcotest.test_case
-            "autonomous wake without input allows a quiet final"
-            `Quick
-            test_response_policy_autonomous_wake_without_input_allows_quiet_final;
-          Alcotest.test_case
-            "a wake whose reply is replayed requires progress"
-            `Quick
-            test_response_policy_requires_progress_when_the_reply_is_replayed;
-          Alcotest.test_case
-            "pending message requires progress"
-            `Quick
-            test_response_policy_pending_message_requires_progress;
-          Alcotest.test_case
-            "board event requires progress"
-            `Quick
-            test_response_policy_board_event_requires_progress;
-          Alcotest.test_case
-            "reminder-only schedule allows a quiet final"
-            `Quick
-            test_response_policy_reminder_only_schedule_allows_quiet_final;
-          Alcotest.test_case
-            "non-autonomous input requires progress"
-            `Quick
-            test_response_policy_non_autonomous_input_requires_progress;
-          Alcotest.test_case
-            "wake input closes with the policy clause"
-            `Quick
-            test_wake_input_closes_with_the_policy_clause;
-          Alcotest.test_case
-            "non-wake input carries no clause"
-            `Quick
-            test_non_wake_input_carries_no_clause;
           Alcotest.test_case
             "MaxTokens text uses checkpoint continuation"
             `Quick

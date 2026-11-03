@@ -2044,9 +2044,7 @@ let emit_prompt_metrics
      intact; unknown calls are rejected explicitly by typed dispatch. *)
   (* The only caller is the pre-request hook of [run_turn]
      (keeper_run_tools_hooks.ml, [prepare_request_dynamic_context]), for
-     autonomous turns. Its [user_message] is the message [run_turn] sends,
-     after [Keeper_agent_run.with_completion_clause] appended the wake's
-     completion clause, so the [user_message] segment counts that clause. *)
+     autonomous turns. Its [user_message] is the message [run_turn] sends. *)
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported

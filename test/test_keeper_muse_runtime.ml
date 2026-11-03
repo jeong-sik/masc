@@ -2668,8 +2668,7 @@ let test_hook_tool_surface_controls_session_binding () =
 ;;
 
 (* Muse spells a chosen silence as a completed turn with no message item.
-   The runtime settles it with no content block, the shape a wake that allows
-   silence accepts. *)
+   The runtime settles it with no content block, and the turn accepts it. *)
 let test_a_turn_without_a_message_settles_with_no_content () =
   with_scripted_host ~fixture:(scenario "no_message") (fun ~base_path ->
     let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
@@ -2677,13 +2676,8 @@ let test_a_turn_without_a_message_settles_with_no_content () =
     | Error error -> fail (Agent_core.Error.to_string error)
     | Ok result ->
       check int "no content block" 0 (List.length result.response.content);
-      check bool "a quiet final when the wake allows silence" true
-        (Keeper_tooling.Response.quiet_final_shape
-           ~policy:Keeper_tooling.Response.Allow_quiet_final result.response
-         = Some Keeper_tooling.Response.Quiet_no_content);
-      check bool "still no progress when the wake requires it" false
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Require_progress result.response))
+      check bool "silence is a complete response" true
+        (Keeper_tooling.Response.accepts_response result.response))
 ;;
 
 (* Narration the model declared as commentary is not its answer: a turn

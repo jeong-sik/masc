@@ -23,7 +23,9 @@ val sparkline_marks : ?min:int -> ?max:int -> int list -> string list
 (** {1 Gauges and Utilization Bars} *)
 
 val format_compact_num : int -> string
-(** Compact number formatter: 1200 -> "1.2k", 1500000 -> "1.5M". Safe on min_int. *)
+(** Compact number formatter: 1200 -> "1.2k", 1500000 -> "1.5M". [min_int]
+    prints as its exact integer string: no compact rung states a magnitude
+    the value does not have. *)
 
 val gauge :
   width:int ->

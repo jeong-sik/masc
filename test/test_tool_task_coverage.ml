@@ -210,7 +210,7 @@ let start_task_001 ctx =
 
 let create_executing_goal ctx ~goal_id =
   match
-    Goal_store.upsert_goal
+    Goal_store.upsert_goal_with_events ~actor:"test"
       ctx.Task.Tool.config
       ~id:goal_id
       ~title:("Goal " ^ goal_id)

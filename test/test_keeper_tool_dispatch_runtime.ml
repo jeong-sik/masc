@@ -9236,7 +9236,7 @@ let composable_output_probes =
               them in front of the schema. Same shape of blind spot that let
               the keeper_tasks_list cursor drift through (masc #33000). *)
            ignore
-             (Goal_store.upsert_goal
+             (Goal_store.upsert_goal_with_events ~actor:"test"
                 config
                 ~title:"composable output probe goal"
                 ~metric:"probes covered"

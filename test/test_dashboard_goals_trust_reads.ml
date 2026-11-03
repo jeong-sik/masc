@@ -78,8 +78,8 @@ let test_reads_trust_once_for_assigned_keepers_only () =
   List.iter (write_keeper config) [ "alpha"; "beta" ];
   let goal title =
     get_ok Goal_store.write_error_to_string
-      (Goal_store.upsert_goal config ~title ~metric:"tasks" ~target_value:"1" ())
-    |> fst
+      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"tasks" ~target_value:"1" ())
+    |> (fun (goal, _, _) -> goal)
   in
   let assigned_task (goal : Goal_store.goal) title =
     let created =

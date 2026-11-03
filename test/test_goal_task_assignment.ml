@@ -44,10 +44,10 @@ let with_test_env f =
 ;;
 
 let make_goal config ~id =
-  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id)
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~id ~title:("Goal " ^ id)
           ~metric:"m" ~target_value:"1" () with
   | Ok _ -> ()
-  | Error error -> failf "upsert_goal %s failed: %s" id (Goal_store.write_error_to_string error)
+  | Error error -> failf "Goal upsert %s failed: %s" id (Goal_store.write_error_to_string error)
 ;;
 
 (* Create a single goalless task and return its minted id. A fresh workspace

@@ -692,9 +692,9 @@ hooks = ["validate_input", "validate_output"]
    | Ok _|Error _ -> fail "fixture client registration failed");
   let metadata=public Browser_capabilities.Tabs ["mode",`String "connections"] in
   check bool "connection discovery succeeds across two visible workers" true (Tool_result.is_success metadata);
-  let goal=match Goal_store.upsert_goal config ~title:"Worker-bound browser Goal"
+  let goal=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Worker-bound browser Goal"
       ~metric:"verified" ~target_value:"1" () with
-    | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+    | Ok (goal, _, _) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
   (match Browser_goal_space.bind config ~goal_id:goal ~installation:(Lane_addon_tool_request_owner.Manual other_id)
       ~space:{id=51;name="Goal fixture"} ~actor:"goal-fixture" with
    | Ok _ -> () | Error error -> fail (Browser_goal_space.error_message error));

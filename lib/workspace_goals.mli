@@ -161,28 +161,6 @@ val reconcile_committed_proof :
     write and the phase/event write. The existing verdict is reused without a
     model call or ledger rewrite. *)
 
-type goal_refusal = { code : Tool_args.error_code; message : string }
-(** A goal call the transaction refused. [code] says whose it is to fix
-    ({!Tool_args.failure_class_of_error_code}). *)
-
-type proof_request_error =
-  | Store of Goal_store.write_error
-      (** The store could not be read or written. [Store_unavailable] carries
-          the store's own value so the caller can answer the RFC-0444
-          envelope. *)
-  | Refused of goal_refusal
-      (** The goal's phase or the caller's [evidence_refs] do not admit the
-          request; nothing was written. *)
-
-val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
-  (Goal_store.goal * Goal_verification.record, proof_request_error) result
-(** Bind a proof request and Verifying phase to the same current criterion.
-    Explicit Board/Fusion/Task source references are captured with the request;
-    omitting references on retry retains the same immutable submitted bytes.
-    While Verifying, an existing pending request keeps its identity and
-    submitted evidence. Different explicit evidence is refused while the prior
-    review may still be active. A current committed verdict is reconciled. *)
-
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, Goal_store.write_error) result
 (** Retain a matching pending request only while the Goal remains Verifying.

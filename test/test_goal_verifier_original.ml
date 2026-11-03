@@ -35,19 +35,22 @@ let with_workspace f = with_initialized_workspace (fun config ->
 
 let stored = function
   | Ok value -> value | Error error -> Alcotest.fail (Goal_store.write_error_to_string error)
-let proof = function
-  | Ok value -> value
-  | Error (Workspace_goals.Store error) -> Alcotest.fail (Goal_store.write_error_to_string error)
-  | Error (Workspace_goals.Refused {message; _}) -> Alcotest.fail message
+let request_complete config goal_id =
+  match Tool_workspace.dispatch { Tool_workspace.config; agent_name = "planner" }
+          ~name:"masc_goal_transition"
+          ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "request_complete" ]) with
+  | Some result when Tool_result.is_success result -> ()
+  | Some result -> Alcotest.fail (Tool_result.message result)
+  | None -> Alcotest.fail "masc_goal_transition not handled"
 let submit_items config goal_id items =
   ignore (stored (Goal_store.transact_goal config ~goal_id (fun goal ->
     Result.map (fun record -> goal, record) (Goal_verification.mark_proof_pending
       ~submitted_evidence:items config ~goal_id ~criterion:(Goal_store.criterion_of_goal goal)))))
 let pending ?id ?(items=evidence) config =
-  let goal, _ = stored (Goal_store.upsert_goal config ?id
+  let goal, _, _ = stored (Goal_store.upsert_goal_with_events ~actor:"test" config ?id
     ~title:"Measure the actual result" ~metric:"artifact:measurement.json" ~target_value:"100" ()) in
   submit_items config goal.id items;
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
+  request_complete config goal.id;
   goal.id
 let authority config goal_id = get (A.create_goal_review ~config ~goal_id)
 let original authority = get (V.prepare ~attempt:0 ~authority)
@@ -58,10 +61,14 @@ let test_fresh_goal_without_keeper_or_manual_playground () =
     Alcotest.(check bool) "bootstrap supplies the shared root" true (Sys.is_directory root);
     Alcotest.(check int) "no Keeper or producer was created" 0
       (Array.length (Sys.readdir root));
-    let goal, _ = stored (Goal_store.upsert_goal config
+    let goal, _, _ = stored (Goal_store.upsert_goal_with_events ~actor:"test" config
       ~title:"Read a public measurement without creating a Keeper"
       ~metric:"https://example.com/measurement.json" ~target_value:"100" ()) in
-    let current, requested = proof (Workspace_goals.request_current_proof config ~goal_id:goal.id) in
+    request_complete config goal.id;
+    let requested = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+      | Ok (Some record) -> record
+      | Ok None -> Alcotest.fail "public proof request left no record"
+      | Error detail -> Alcotest.fail detail in
     let request_id = match requested.Goal_verification.completion with
       | Goal_verification.Proof_pending {request_id; _} -> request_id
       | Completion_idle | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
@@ -72,7 +79,7 @@ let test_fresh_goal_without_keeper_or_manual_playground () =
     Alcotest.(check string) "same Goal" goal.id subject.goal_id;
     Alcotest.(check string) "same request" request_id subject.request_id;
     Alcotest.(check bool) "same criterion" true
-      (Goal_store.criterion_equal (Goal_store.criterion_of_goal current) subject.criterion);
+      (Goal_store.criterion_equal (Goal_store.criterion_of_goal goal) subject.criterion);
     Alcotest.(check bool) "known-empty shared layout" true (V.root_layout prepared = []);
     Unix.rmdir root;
     (match A.create_goal_review ~config ~goal_id:goal.id with
@@ -161,8 +168,8 @@ let test_other_subject_evidence_and_workspace_refuse () = with_workspace (fun co
      the public Verifying retry no longer permits this replacement. *)
   submit_items config goal_id [Evidence.Evidence_note "Changed submission"];
   let changed_submission = authority config goal_id in
-  ignore (stored (Goal_store.upsert_goal config ~id:goal_id ~target_value:"101" ()));
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id));
+  ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"101" ()));
+  request_complete config goal_id;
   let changed_criterion = authority config goal_id in
   List.iter (fun other -> Alcotest.(check bool) "different current proof or submission refuses" false
     (V.matches_authority prepared other)) [other_goal; changed_submission; changed_criterion];
@@ -259,8 +266,8 @@ let test_only_current_goal_revision_is_reported () = with_workspace (fun config 
   check_prompt_observation "missing report is explicit" (original admitted) (Ok None);
   let stale = reported config goal_id ~value:"old criterion"
     ~source:"https://example.com/old-criterion" in
-  ignore (stored (Goal_store.upsert_goal config ~id:goal_id ~target_value:"101" ()));
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id));
+  ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"101" ()));
+  request_complete config goal_id;
   let current = authority config goal_id in
   Alcotest.(check bool) "changed revision has no inherited report" true
     (A.goal_review_measurement current = Ok None);

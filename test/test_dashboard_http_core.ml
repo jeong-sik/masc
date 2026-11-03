@@ -2804,7 +2804,7 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
-  (match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
@@ -2979,7 +2979,7 @@ let test_goal_source_failure_is_not_empty () =
     (planning () |> member "goals" |> to_list |> List.length);
   check int "fresh tree store is empty" 0
     (tree () |> member "tree" |> to_list |> List.length);
-  let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
+  let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Source availability"
       ~metric:"visible goals" ~target_value:"1" () with
     | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -3097,7 +3097,7 @@ let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
        | Error error -> fail ("write meta: " ^ error));
       ignore
         (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name meta);
-      (match Goal_store.upsert_goal config ~title:"Keeper detail source"
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Keeper detail source"
                ~metric:"visible goals" ~target_value:"1" () with
        | Ok _ -> ()
        | Error error -> fail (Goal_store.write_error_to_string error));
@@ -3142,8 +3142,8 @@ let test_goal_link_source_failure_preserves_unrelated_planning () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let get_ok = function Ok value -> value | Error detail -> fail detail in
-  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
-      (Goal_store.upsert_goal config ~title:"Linked source"
+  let goal, _, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Linked source"
          ~metric:"tasks" ~target_value:"1" ())) in
   let created = match Workspace.add_task_with_result ~goal_id:goal.id config
       ~title:"Linked task" ~priority:3 ~description:"evidence" with
@@ -3193,8 +3193,8 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let get_ok = function Ok value -> value | Error detail -> fail detail in
-  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
-      (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
+  let goal, _, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Measured dashboard Goal"
          ~metric:"passing cases" ~target_value:"10" ())) in
   let goal_id = goal.Goal_store.id in
   let open Yojson.Safe.Util in
@@ -3239,11 +3239,16 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending =
-    match Lib.Workspace_goals.request_current_proof config ~goal_id with
-    | Ok requested -> requested
-    | Error (Lib.Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
-    | Error (Lib.Workspace_goals.Refused { message; _ }) -> fail message
+  (match Lib.Tool_workspace.dispatch { Lib.Tool_workspace.config; agent_name = "dashboard" }
+           ~name:"masc_goal_transition"
+           ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "request_complete" ]) with
+   | Some result when Tool_result.is_success result -> ()
+   | Some result -> fail (Tool_result.message result)
+   | None -> fail "masc_goal_transition not handled");
+  let pending = match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some record) -> record
+    | Ok None -> fail "request did not persist a proof record"
+    | Error detail -> fail detail
   in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
@@ -3263,7 +3268,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
       ~criterion_revision:goal.criterion_revision)));
   let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
   ignore (get_ok (Result.map_error Goal_store.write_error_to_string
-    (Goal_store.upsert_goal config ~id:goal_id
+    (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id
        ~title:"Measured dashboard Goal" ~target_value:"20" ())));
   let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
   check string "stale projection preserves the original proof"

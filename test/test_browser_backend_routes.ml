@@ -132,8 +132,8 @@ let independent_ego_spaces_route_exact_clients () =
       reaches_instance "second Space reaches exactly its publisher" attached (List.nth attached 1) (live second) B.Tabs_list
         (fun () -> fst (issue (live second)));
       check (list string) "all distinct live clients remain visible" (ids [first;second;extension]) (ids (snapshot host).clients);
-      let goal=match Goal_store.upsert_goal config ~title:"Second Space routing" ~metric:"verified" ~target_value:"1" () with
-        | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+      let goal=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Second Space routing" ~metric:"verified" ~target_value:"1" () with
+        | Ok (goal, _, _) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
       let bound=match Browser_addon_host.bind_goal_space host ~goal_id:goal ~client_id:second.client_id with
         | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
       let second_instance=(List.nth attached 1).F.instance_id in
@@ -161,8 +161,8 @@ let unreadable_live_controller_never_authorizes_ego_input () =
       let first_worker=List.nth attached 0 and second_worker=List.nth attached 1
       and extension_worker=List.nth attached 2 and automation=List.nth attached 3 in
       let bind title client =
-        let goal=match Goal_store.upsert_goal config ~title ~metric:"verified" ~target_value:"1" () with
-          | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+        let goal=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"verified" ~target_value:"1" () with
+          | Ok (goal, _, _) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
         match Browser_addon_host.bind_goal_space host ~goal_id:goal ~client_id:client.B.client_id with
         | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
       let first_goal=bind "First owned Space" first and second_goal=bind "Second owned Space" second in
@@ -182,8 +182,8 @@ let unreadable_live_controller_never_authorizes_ego_input () =
         (goal first_goal open_session);
       refuses_before_dispatch "unreadable sibling cannot authorize exact Ego document read" attached Tool_result.Dependency_unavailable
         (exact first (B.Page_document {tab_id=1}));
-      let unbound_goal=match Goal_store.upsert_goal config ~title:"Unknown controller pin" ~metric:"verified" ~target_value:"1" () with
-        | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+      let unbound_goal=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Unknown controller pin" ~metric:"verified" ~target_value:"1" () with
+        | Ok (goal, _, _) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
       check bool "unknown controller prevents a new Goal pin" true
         (match Browser_addon_host.bind_goal_space host ~goal_id:unbound_goal ~client_id:first.client_id with
          | Error (Browser_goal_space.Unavailable _) -> true

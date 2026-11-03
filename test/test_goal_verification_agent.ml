@@ -191,7 +191,7 @@ let stored_phase config goal_id =
 ;;
 
 let ledger_record config goal_id =
-  match Goal_verification.get_record config ~goal_id with
+  match Goal_verification.get_record_authoritative config ~goal_id with
   | Ok (Some record) -> record
   | Ok None -> fail ("no ledger row for " ^ goal_id)
   | Error msg -> fail msg
@@ -869,16 +869,13 @@ let test_missing_request_does_not_block_other_goals () =
   let goal_id = create_goal ctx "Wedged goal" in
   (* Model a Verifying Goal whose original proof row is no longer available. *)
   (match
-     Goal_store.update_goal_if_phase config ~goal_id
-       ~expected_phase:Goal_phase.Executing
-       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
+     Goal_store.transact_goal config ~goal_id
+       (fun goal -> Ok ({ goal with Goal_store.phase = Goal_phase.Verifying }, ()))
    with
-   | Ok (Goal_store.Goal_updated _) -> ()
-   | Ok (Goal_store.Goal_phase_mismatch phase) ->
-     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
+   | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation has not written a ledger row for this Goal. *)
-  (match Goal_verification.get_record config ~goal_id with
+  (match Goal_verification.get_record_authoritative config ~goal_id with
    | Ok None -> ()
    | Ok (Some _) -> fail "test setup: the wedge needs no durable request"
    | Error msg -> fail msg);
@@ -902,7 +899,7 @@ let test_missing_request_does_not_block_other_goals () =
   check string "the uncertain Goal remains verifying" "verifying" (stored_phase config goal_id);
   check string "the independent Goal proceeds" "awaiting_confirmation" (stored_phase config other_goal);
   check (list string) "only the independent review ran" ["verifier-a"] !calls;
-  (match Goal_verification.get_record config ~goal_id with
+  (match Goal_verification.get_record_authoritative config ~goal_id with
    | Ok None -> () | Ok (Some _) -> fail "scan recreated the missing request" | Error msg -> fail msg)
 ;;
 
@@ -1007,7 +1004,7 @@ let strip_criterion_revision path =
    line that starts with the counted literal. Two cycles, two of each. *)
 let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =
   with_workspace @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Rows without criterion_revision"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Rows without criterion_revision"
       ~metric:"cases" ~target_value:"1" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
@@ -1059,7 +1056,7 @@ let test_healthy_store_scan_records_no_skipped_row () =
 
 let test_scan_preserves_source_failure () =
   with_workspace @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Review source"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Review source"
       ~metric:"cases" ~target_value:"1" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
@@ -1359,7 +1356,7 @@ let test_a_clean_scan_replaces_the_unreconciled_list () =
      check bool "the server row names the re-arm step" true
        (List.assoc_opt "step" fields = Some (`String "rearm_proof"))
    | _ -> fail "the stuck goal is not marked on the server's planning row");
-  (match Goal_store.upsert_goal config ~id:goal_id ~target_value:"4" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"4" () with
    | Ok _ -> ()
    | Error e -> fail (Goal_store.write_error_to_string e));
   (* The edit takes the request back to Executing; submitting again puts the
@@ -1589,7 +1586,7 @@ let retain_daemon_original config store ~title ~priority =
   let module Worker = Goal_verifier_worker in
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx title in
-  (match Goal_store.upsert_goal config ~id:goal_id ~priority () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~priority () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   ignore (must_succeed "request daemon verification" (transition ctx goal_id "request_complete"));
   let authority = match Verification_authority_tools.create_goal_review ~config ~goal_id with

@@ -171,7 +171,7 @@ let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
     (schema.input_schema |> member "required" |> to_list |> List.map to_string);
   check (list string) "Task source has no live listing filters" ["cursor";"task_ids"]
     (schema.input_schema |> member "properties" |> keys);
-  let goal, _ = Goal_store.upsert_goal config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
+  let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
     |> require "Goal" in
   let ctx : Tool_workspace.context = {config;agent_name="producer"} in
   let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
@@ -330,7 +330,7 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
 
 let test_fusion_original_and_separate_decision () = with_fixture (fun config ->
   let id = "opaque-source-id" in
-  let goal_record, _ = Goal_store.upsert_goal config ~title:"Compare designs" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
+  let goal_record, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Compare designs" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
   let work = Task.Goal_assignment.add_task_with_result config ~goal_id:goal_record.id
       ~title:"Make a decision" ~priority:2 ~description:"Compare the evidence" |> require "task" in
   Workspace.claim_task_r config ~agent_name:"producer" ~task_id:work.task_id () |> require "claim" |> ignore;
@@ -383,7 +383,7 @@ let test_original_fusion_producer_before_submit () = with_fixture (fun config ->
 
 let test_goal_request_freezes_sources () = with_fixture (fun config ->
   let post = post ~author:"peer" ~visibility:Board.Internal "Goal proof source" in
-  let goal, _ = Goal_store.upsert_goal config ~title:"Frozen Goal proof" ~metric:"proof" ~target_value:"1" () |> require "Goal" in
+  let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Frozen Goal proof" ~metric:"proof" ~target_value:"1" () |> require "Goal" in
   let ctx : Tool_workspace.context = {config; agent_name="producer"} in
   let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
     ~args:(`Assoc ["goal_id", `String goal.id; "action", `String "request_complete";

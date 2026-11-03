@@ -69,9 +69,9 @@ let test_active_mention_survives_projection () = with_workspace @@ fun config ->
   check bool "existing mention authority survives the passive fleet pass" true (rows config=before)
 
 let create_goal config =
-  match Goal_store.upsert_goal config ~title:"Notification identity"
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Notification identity"
     ~metric:"durable notifications" ~target_value:"1" () with
-  | Ok (goal, _) -> goal
+  | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 
 let test_notification_id request_id should_accept () = with_workspace @@ fun config ->
@@ -92,7 +92,7 @@ let test_notification_id request_id should_accept () = with_workspace @@ fun con
       (match failure.reason with
        | Goal_store.Schema_rejected {field="pending_notifications";_} -> ()
        | _ -> fail (Goal_store.unavailable_to_string failure));
-      (match Goal_store.upsert_goal config ~id:goal.id ~title:"must not commit" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~title:"must not commit" () with
        | Error (Goal_store.Store_unavailable _) -> ()
        | _ -> fail "a corrupt notification outbox authorized a Goal mutation");
       check string "failed mutation preserves the primary" before (Fs_compat.load_file path)

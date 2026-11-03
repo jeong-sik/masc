@@ -140,7 +140,7 @@ let goal_files config =
    primary and its mirror. Written raw so no writer of the store plants it.
    Returns the id the rows carry. *)
 let seed_rows_without_criterion_revision config =
-  let goal, _ = match Goal_store.upsert_goal config ~title:"Goal before the hard cut"
+  let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Goal before the hard cut"
       ~metric:"goals" ~target_value:"1" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   let row = match Goal_store.goal_to_yojson goal with
@@ -158,7 +158,7 @@ let test_goal_list_preserves_source_failure () =
   with_workspace @@ fun config ->
   let list () = Tool_workspace.dispatch (workspace_ctx config)
     ~name:"masc_goal_list" ~args:(`Assoc []) in
-  let _goal, _ = match Goal_store.upsert_goal config ~title:"Visible source"
+  let _goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Visible source"
       ~metric:"goals" ~target_value:"1" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -213,7 +213,7 @@ let test_goal_transition_unavailable_store () =
    [not_found]. *)
 let test_goal_transition_unknown_goal_not_found () =
   with_workspace @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Present goal" ~metric:"goals"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Present goal" ~metric:"goals"
            ~target_value:"1" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
@@ -298,23 +298,16 @@ let test_goal_upsert_and_list () =
   | _ -> fail "expected one listed goal"
 ;;
 
-(* A goal in [phase], for fixtures. upsert_goal only creates Executing goals;
-   the phase is then seeded with the store's compare-and-update. Production
-   cancellation decides and records its audit through a Goal transaction. *)
+(* A goal in [phase], for fixtures. Creation makes Executing goals; the
+   phase is then seeded through a Goal transaction. *)
 let upsert_goal_in_phase config ~title phase =
-  match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
   | Error error -> Error error
-  | Ok (goal, _) when goal.Goal_store.phase = phase -> Ok goal
-  | Ok (goal, _) ->
-    (match
-       Goal_store.update_goal_if_phase config ~goal_id:goal.Goal_store.id
-         ~expected_phase:goal.Goal_store.phase
-         (fun current -> { current with Goal_store.phase })
-     with
-     | Ok (Goal_store.Goal_updated goal) -> Ok goal
-     | Ok (Goal_store.Goal_phase_mismatch actual) ->
-       failwith ("fixture goal moved to " ^ Goal_phase.to_string actual)
-     | Error error -> Error error)
+  | Ok (goal, _, _) when goal.Goal_store.phase = phase -> Ok goal
+  | Ok (goal, _, _) ->
+    Goal_store.transact_goal config ~goal_id:goal.Goal_store.id
+      (fun current -> Ok ({ current with Goal_store.phase }, ()))
+    |> Result.map fst
 ;;
 
 let test_goal_list_filters_by_phase () =
@@ -354,7 +347,7 @@ let test_goal_list_filters_by_phase () =
 let test_goal_list_includes_rollup () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Executing goal" ~metric:"m"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Executing goal" ~metric:"m"
            ~target_value:"1" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
@@ -381,7 +374,7 @@ let test_goal_list_includes_rollup () =
 let test_goal_list_ignores_blank_optional_filters () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Blank filter goal" ~metric:"m"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Blank filter goal" ~metric:"m"
            ~target_value:"1" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
@@ -822,9 +815,9 @@ let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
   @@ fun config ->
   (* Made without the tool, so nothing has opened the events file yet and no
      cached handle can hide the failure. *)
-  let goal, _ =
+  let goal, _, _ =
     match
-      Goal_store.upsert_goal
+      Goal_store.upsert_goal_with_events ~actor:"test"
         config
         ~title:"Dated later"
         ~metric:"goals counted"
@@ -879,8 +872,8 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     "phase error points at transition"
     true
     (String_util.contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
-  let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Existing goal" ~metric:"m"
+  let goal, _kind, _ =
+    match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Existing goal" ~metric:"m"
             ~target_value:"1" () with
     | Ok payload -> payload
     | Error error -> fail (Goal_store.write_error_to_string error)
@@ -1117,9 +1110,9 @@ let test_callers_share_a_goal_without_private_delivery () =
 let test_goal_completion_accepts_goal_without_tasks () =
   with_workspace
   @@ fun config ->
-  let goal, _ =
+  let goal, _, _ =
     match
-      Goal_store.upsert_goal config ~title:"Direct completion" ~metric:"m"
+      Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Direct completion" ~metric:"m"
         ~target_value:"1" ()
     with
     | Ok payload -> payload
@@ -1134,9 +1127,9 @@ let test_goal_completion_accepts_goal_without_tasks () =
 let test_goal_completion_ignores_open_task_count () =
   with_workspace
   @@ fun config ->
-  let goal, _ =
+  let goal, _, _ =
     match
-      Goal_store.upsert_goal config ~title:"Open task completion" ~metric:"m"
+      Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Open task completion" ~metric:"m"
         ~target_value:"1" ()
     with
     | Ok payload -> payload
@@ -1158,9 +1151,9 @@ let test_goal_completion_ignores_open_task_count () =
 let test_goal_completion_ignores_metric_text () =
   with_workspace
   @@ fun config ->
-  let goal, _ =
+  let goal, _, _ =
     match
-      Goal_store.upsert_goal
+      Goal_store.upsert_goal_with_events ~actor:"test"
         config
         ~title:"Metric completion"
         ~metric:"coverage %"
@@ -1196,7 +1189,7 @@ let test_confirmation_uses_token_bound_operator () =
 
 let test_memory_confirmation_reports_backend_unavailable () =
   with_workspace @@ fun config ->
-  let goal, _ = match Goal_store.upsert_goal config ~title:"Proof backend unavailable"
+  let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Proof backend unavailable"
     ~metric:"observed artifacts" ~target_value:"1" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
@@ -1245,7 +1238,7 @@ let test_memory_confirmation_reports_backend_unavailable () =
 
 let test_operator_confirmation_binds_current_proof () =
   with_workspace @@ fun config ->
-  let goal, _ = match Goal_store.upsert_goal config ~title:"Human confirmed goal"
+  let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Human confirmed goal"
     ~metric:"observed artifacts" ~target_value:"1" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
@@ -1330,7 +1323,7 @@ let test_operator_confirmation_binds_current_proof () =
   ignore (request_complete config goal.id);
   ignore (prove_complete config goal.id);
   (match confirm () with Error _ -> () | Ok _ -> fail "new request accepted old confirmation binding");
-  (match Goal_store.upsert_goal config ~id:goal.id ~title:"Changed criterion"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~title:"Changed criterion"
      ~metric:"observed artifacts" ~target_value:"2" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
@@ -1340,7 +1333,7 @@ let test_operator_confirmation_binds_current_proof () =
 (* {1 The caller's step after a confirmation is recorded} *)
 
 let goal_awaiting_confirmation config title =
-  let goal, _ = match Goal_store.upsert_goal config ~title
+  let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title
     ~metric:"observed artifacts" ~target_value:"1" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);

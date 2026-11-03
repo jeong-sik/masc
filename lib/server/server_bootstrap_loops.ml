@@ -144,12 +144,6 @@ let board_sse_event_params event =
       ]
 ;;
 
-(* Origin label carried on the [keeper_chat_appended] SSE event. Derived from
-   the surface the row is written with rather than spelled out here:
-   [Surface_ref.lane_label] is the single derivation site for these labels, so
-   a writer that invents its own string drifts from the row it announces. *)
-let workspace_message_chat_source = Surface_ref.lane_label Surface_ref.Agent
-
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
@@ -233,17 +227,6 @@ let deliver_broadcast_mention
             |> List.filter_map Keeper_identity.Keeper_id.of_string
             |> List.sort_uniq Keeper_identity.Keeper_id.compare
           in
-          (* The transcript row is committed but the dashboard is not told, so
-             the conversation window shows the message only after a reload —
-             every other intake (Slack, Discord, fusion, dashboard) announces
-             its row. *)
-          let announce_chat_row () =
-            Keeper_chat_broadcast.chat_appended
-              ~keeper_name:target
-              ~source:workspace_message_chat_source
-              ~content:delivery.content
-              ()
-          in
           (* The message becomes an entry in the target's linear drain, so it
              is ordered against every other stimulus, deduplicated by the
              workspace request identity, and readable in the operator queue
@@ -308,7 +291,6 @@ let deliver_broadcast_mention
                ()
            with
            | Ok (Keeper_chat_store.Appended _) ->
-             announce_chat_row ();
              request_wake ();
              Workspace_broadcast.Accepted
            | Ok (Keeper_chat_store.Already_present { row_id }) ->
@@ -392,12 +374,7 @@ let append_workspace_message_to_recipient ~base_path ~sender_authority
   let appended=Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
       ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
       ~speaker ~mention_policy:Keeper_chat_store.Passive_context () in
-  match appended with
-  | Error detail -> Error detail
-  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
-  | Ok (Keeper_chat_store.Appended _) ->
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:workspace_message_chat_source
-        ~content:delivery.content (); Ok ()
+  Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ()) appended
 
 let goal_notification_backend : Goal_delivery.backend = {
   snapshot=(fun ~config ->
@@ -496,13 +473,7 @@ let project_workspace_message_to_fleet
             ~speaker
             ()
         with
-        | Ok (Keeper_chat_store.Appended _) ->
-          incr appended;
-          Keeper_chat_broadcast.chat_appended
-            ~keeper_name
-            ~source:workspace_message_chat_source
-            ~content:delivery.content
-            ()
+        | Ok (Keeper_chat_store.Appended _) -> incr appended
         | Ok (Keeper_chat_store.Already_present _) -> ()
         | Error detail ->
           incr failed;

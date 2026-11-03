@@ -163,27 +163,6 @@ let handle_speak_with_outcome
           in
           Keeper_chat_store.append_assistant_message
             ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();
-          (match clip with
-           | Some c ->
-             Keeper_chat_broadcast.chat_appended_with_audio
-               ~keeper_name:meta.name
-               ~source:"agent"
-               ~audio:
-                 { Keeper_chat_broadcast.token = c.token
-                 ; audio_url = c.audio_url
-                 ; mime = c.mime
-                 ; duration_sec = c.duration_sec
-                 ; message_text = c.message_text
-                 ; device_id = c.device_id
-                 ; expired = c.expired
-                 }
-               ~content:message
-               ()
-           | None ->
-             Keeper_chat_broadcast.chat_appended
-               ~keeper_name:meta.name ~source:"agent"
-               ~content:message
-               ());
           Keeper_tool_execution.success (Yojson.Safe.to_string json)
         | Ok
             { Voice_bridge.completion = Voice_bridge.Dedup_skipped

@@ -568,11 +568,7 @@ let run (ctx : ctx)
        persisted.Keeper_loop_tool_projection.quarantined;
      (match persisted.Keeper_loop_tool_projection.outcome with
       | Keeper_loop_tool_projection.Nothing_to_project -> ()
-      | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Appended _) ->
-        Keeper_chat_broadcast.chat_appended
-          ~keeper_name:meta.name
-          ~source:"continuation_tool_calls"
-          ()
+      | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Appended _) -> ()
       | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Already_present _) ->
         Log.Keeper.info
           ~keeper_name:meta.name

@@ -282,7 +282,6 @@ let finish_ambient_original ~base_dir ~keeper_name ~team_id ~channel_id ~thread_
   let* () = Server_connector_attention_delivery.deliver ~base_path:base_dir
     ~keeper_name ~event_id:original.event_id ~channel
     |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
-  Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
   Slack_observability.record_ambient Slack_observability.Ambient_recorded;
   Ok Gw.Durable_accepted
 

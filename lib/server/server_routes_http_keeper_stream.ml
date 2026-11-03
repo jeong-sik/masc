@@ -1991,7 +1991,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
             observe_stream_event_cutoff "client_disconnected")
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
-     [chat_source] is its derivation, used for broadcast metadata. *)
+     [chat_source] is its derivation, used for metric labels. *)
   let chat_surface =
     match submission with
     | Owner_operation { surface; _ } -> surface
@@ -2288,14 +2288,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     let persisted =
       append_queued_request_failure_once ~tool_calls ?blocks ?turn_ref content
     in
-    Result.bind persisted (fun () ->
-      Result.map
-        (fun () ->
-           Keeper_chat_broadcast.chat_appended
-             ~keeper_name:payload.name ~source:chat_source
-             ~content:(persisted_error_reply err)
-             ())
-        (publish_tool_transcript_bindings tool_calls))
+    Result.bind persisted (fun () -> publish_tool_transcript_bindings tool_calls)
   in
   let run_turn request_sw =
     let start_time = Tool_timing.start () in
@@ -2492,16 +2485,13 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    then Ok ()
                    else append_queued_tool_calls_once ?turn_ref tool_calls
                  in
-                 let delivered_after_persist ?content persisted =
+                 let delivered_after_persist persisted =
                    match
                      committed_delivery_outcome ~turn_ref persisted
                    with
                    | Ok queued_outcome ->
                        Result.map
-                         (fun () ->
-                            Keeper_chat_broadcast.chat_appended
-                              ~keeper_name:payload.name ~source:chat_source ?content ();
-                            Some queued_outcome)
+                         (fun () -> Some queued_outcome)
                          (publish_tool_transcript_bindings tool_calls)
                    | Error _ as error -> error
                  in
@@ -2538,18 +2528,13 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                        with
                        | `Assistant_row assistant_content ->
                            persist_assistant_reply ~assistant_content
-                           |> delivered_after_persist ?content:spoken
+                           |> delivered_after_persist
                        | `Tool_calls_only ->
                            Result.bind
                              (persist_tool_calls_only ())
                              (fun () ->
                                 Result.map
-                                  (fun () ->
-                                     Keeper_chat_broadcast.chat_appended
-                                       ~keeper_name:payload.name
-                                       ~source:chat_source
-                                       ();
-                                     Some (queued_delivery_outcome_of_turn_ref turn_ref))
+                                  (fun () -> Some (queued_delivery_outcome_of_turn_ref turn_ref))
                                   (publish_tool_transcript_bindings tool_calls)))
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
@@ -2565,12 +2550,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                             (persist_tool_calls_only ())
                             (fun () ->
                                Result.map
-                                 (fun () ->
-                                    Keeper_chat_broadcast.chat_appended
-                                      ~keeper_name:payload.name
-                                      ~source:chat_source
-                                      ();
-                                    Some (queued_delivery_outcome_of_turn_ref turn_ref))
+                                 (fun () -> Some (queued_delivery_outcome_of_turn_ref turn_ref))
                                  (publish_tool_transcript_bindings tool_calls))
                         | `Failure ->
                           let failure =
@@ -2587,7 +2567,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                                  Some (Failed { kind = No_visible_reply; detail })))
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
-                       |> delivered_after_persist ~content:visible_reply
+                       |> delivered_after_persist
                  in
                  (match delivery_result with
                   | Error persist_error ->

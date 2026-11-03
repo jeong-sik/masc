@@ -85,23 +85,12 @@ let broadcast_pending entry audit_receipt =
       exn
 ;;
 
-let publish_chat_projection_append ~keeper_name = function
-  | Error _ as error -> error
-  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
-  | Ok (Keeper_chat_store.Appended _) ->
-    Keeper_chat_broadcast.chat_appended
-      ~keeper_name
-      ~source:"approval_lifecycle"
-      ();
-    Ok ()
-;;
-
 let append_chat_projection ~base_path ~keeper_name lifecycle =
   Keeper_chat_store.append_approval_lifecycle_once
     ~base_dir:base_path
     ~keeper_name
     ~lifecycle
-  |> publish_chat_projection_append ~keeper_name
+  |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
 ;;
 
 let record_pending ~call_summary (entry : pending_approval) =
@@ -324,7 +313,7 @@ let ensure_replay_chat_projection
       ; artifact_ref = Some artifact_ref
       ; call_summary
       }
-  |> publish_chat_projection_append ~keeper_name
+  |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
 ;;
 
 let continuation_settled_chat_projection_present
@@ -367,20 +356,18 @@ let project_settled_continuation
            })
 ;;
 
-let publish_settled_continuation ~keeper_name = function
+let publish_settled_continuation = function
   | Error _ as error -> error
   | Ok Continuation_not_ready -> Ok Continuation_projection_not_ready
-  | Ok (Continuation_appended result) ->
-    Result.map
-      (fun () -> Continuation_projection_recorded)
-      (publish_chat_projection_append ~keeper_name (Ok result))
+  | Ok (Continuation_appended (_ : Keeper_chat_store.append_once_result)) ->
+    Ok Continuation_projection_recorded
 ;;
 
 let record_settled_continuation ~base_path ~keeper_name ~approval_id ~readiness =
   project_settled_continuation
     ~base_path ~keeper_name ~approval_id ~readiness
     ~phase:Keeper_approval_lifecycle.Approval_continuation_recorded
-  |> publish_settled_continuation ~keeper_name
+  |> publish_settled_continuation
 ;;
 
 (* #32956: the turn that received the replay failed after the provider
@@ -415,5 +402,5 @@ let record_failed_continuation
    | Ok (Continuation_appended (Keeper_chat_store.Already_present _))
    | Ok Continuation_not_ready
    | Error _ -> ());
-  publish_settled_continuation ~keeper_name projected
+  publish_settled_continuation projected
 ;;

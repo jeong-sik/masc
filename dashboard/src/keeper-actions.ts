@@ -1115,7 +1115,7 @@ async function handoffCancelledStreamToOperationHydration(
  *  rich blocks; the current implementation refreshes history (which now
  *  persists blocks) so the dashboard's normalizeHistoryEntry path prefers
  *  them automatically. */
-export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: unknown): void {
+export function noteKeeperChatAppended(name: string, audio?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
   if (!hydratedChatKeepers.has(keeperName)) {

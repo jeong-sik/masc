@@ -735,19 +735,10 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
         | Error _ -> None
         (* board 생성 실패 시 카드 링크를 생략하되 결론은 남긴다(키퍼가 인지). *)
       in
-      (* .mli 계약: chat store append 예외 시 [Error msg]를 반환한다. unit 버전은
-         실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
-         surface한다. 성공한 경우에만 broadcast한다. *)
-      match
-        Keeper_chat_store.append_assistant_message_once ~base_dir
-          ~keeper_name:keeper ~delivery_key ~content ?blocks ()
-      with
-      | Ok (Keeper_chat_store.Appended _) ->
-        Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
-          ~source:"fusion" ~content ();
-        Ok ()
-      | Ok (Keeper_chat_store.Already_present _) -> Ok ()
-      | Error _ as e -> e
+      (* .mli 계약: chat store append 예외 시 [Error msg]를 반환한다. *)
+      Keeper_chat_store.append_assistant_message_once ~base_dir
+        ~keeper_name:keeper ~delivery_key ~content ?blocks ()
+      |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
     in
     (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*
        (chat lane)로 판정한다. board post는 증거 카드일 뿐이므로 그 생성 실패는 fatal이
@@ -833,16 +824,9 @@ let emit_failure ~registry ~base_dir ~keeper ~run_id ~channel ~failure =
     Printf.sprintf "Fusion run `%s` failed (%s): %s" run_id failure_code detail
   in
   let* () =
-    match
-      Keeper_chat_store.append_assistant_message_once ~base_dir
-        ~keeper_name:keeper ~delivery_key ~content ()
-    with
-    | Ok (Keeper_chat_store.Appended _) ->
-      Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
-        ~source:"fusion" ~content ();
-      Ok ()
-    | Ok (Keeper_chat_store.Already_present _) -> Ok ()
-    | Error _ as error -> error
+    Keeper_chat_store.append_assistant_message_once ~base_dir
+      ~keeper_name:keeper ~delivery_key ~content ()
+    |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
   in
   Fusion_run_registry.mark_completed registry ~run_id
     ~outcome:(Fusion_run_registry.Failed { reason = detail; code = failure_code });

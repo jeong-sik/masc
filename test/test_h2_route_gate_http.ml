@@ -38,6 +38,14 @@ let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ ru
           | Ok (token, _) -> token
           | Error error -> fail (Masc_domain.masc_error_to_string error)
         in
+        (* A Player holds only CanPlayMachine (#39707): strict Public_read
+           paths demand CanReadState, so positive read assertions use this
+           Worker token while Player assertions lock the designed refusal. *)
+        let reader =
+          match Auth.create_token base_path ~agent_name:"reader" ~role:Masc_domain.Worker with
+          | Ok (token, _) -> token
+          | Error error -> fail (Masc_domain.masc_error_to_string error)
+        in
         Server_auth.For_testing.restore_server_state (Some state);
         let trust_policy =
           match
@@ -66,7 +74,7 @@ let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ ru
           ~error_handler:(fun _ -> if not !closing then fail "H2 connection error") client_flow in
         Fun.protect ~finally:(fun () ->
           closing := true;
-          Eio.Flow.shutdown client_flow `All) (fun () -> with_runtime ~env ~sw (fun () -> run ~player client));
+          Eio.Flow.shutdown client_flow `All) (fun () -> with_runtime ~env ~sw (fun () -> run ~player ~reader client));
         Eio.Promise.await_exn server))
 
 let request_with_headers ?token ?(extra_headers = []) ~meth client path =
@@ -104,7 +112,7 @@ let strict value run =
    auth. Before the gate read the router, the HTTP/2 arm of the agent card had no
    gate and answered without one. *)
 let test_public_read_follows_the_router () =
-  with_gateway ~make_routes:production (fun ~player:_ client ->
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     strict None (fun () ->
       check int "agent card, default config" 200
         (status ~meth:`GET client "/.well-known/agent.json"));
@@ -117,7 +125,7 @@ let test_public_read_follows_the_router () =
         (status ~meth:`GET client "/health")))
 
 let test_token_permission_follows_the_router () =
-  with_gateway ~make_routes:production (fun ~player client ->
+  with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
     check int "no credential" 401 (status ~meth:`GET client "/api/v1/lanes");
     check int "a Player token lacks the CanAdmin the router records" 403
       (status ~token:player ~meth:`GET client "/api/v1/lanes"))
@@ -125,24 +133,24 @@ let test_token_permission_follows_the_router () =
 (* The keepers prefix is [Subpath_dispatch]: the router holds no kind for its
    sub-routes, so its arms keep their own token check. *)
 let test_subpath_arms_keep_their_own_gate () =
-  with_gateway ~make_routes:production (fun ~player:_ client ->
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     check int "github identity needs a credential" 401
       (status ~meth:`GET client "/api/v1/keepers/someone/github-identity"))
 
 (* [namespace-truth] was an alias only HTTP/2 served. *)
 let test_a_path_the_router_lacks_is_not_found () =
-  with_gateway ~make_routes:production (fun ~player:_ client ->
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     check int "namespace-truth" 404
       (status ~meth:`GET client "/api/v1/dashboard/namespace-truth"));
   with_gateway
     ~make_routes:(fun ~sw:_ ~clock:_ -> Masc.Http_server_eio.Router.create ())
-    (fun ~player:_ client ->
+    (fun ~player:_ ~reader:_ client ->
       check int "an empty table" 404 (status ~meth:`GET client "/health"));
   with_gateway
     ~make_routes:(fun ~sw:_ ~clock:_ ->
       Masc.Http_server_eio.Router.create ()
       |> Server_route.post Server_route.Always_public "/health" (fun _request _reqd -> ()))
-    (fun ~player:_ client ->
+    (fun ~player:_ ~reader:_ client ->
       check int "a method the table lacks" 405 (status ~meth:`GET client "/health"))
 
 (* The arm of [/api/v1/lanes] needs an actor. A table that records a kind with no
@@ -153,7 +161,7 @@ let test_a_table_that_disagrees_with_an_arm_refuses () =
       Masc.Http_server_eio.Router.create ()
       |> Server_route.get Server_route.Public_read "/api/v1/lanes"
            (fun _state _request _reqd -> ()))
-    (fun ~player:_ client ->
+    (fun ~player:_ ~reader:_ client ->
       check int "public_read where the arm needs an actor" 500
         (status ~meth:`GET client "/api/v1/lanes"));
   with_gateway
@@ -163,12 +171,12 @@ let test_a_table_that_disagrees_with_an_arm_refuses () =
            (Server_route.Self_authenticated Masc.Route_access.Subpath_dispatch)
            "/api/v1/lanes"
            (fun _request _reqd -> ()))
-    (fun ~player:_ client ->
+    (fun ~player:_ ~reader:_ client ->
       check int "a kind HTTP/2 does not serve" 500
         (status ~meth:`GET client "/api/v1/lanes"))
 
 let test_fusion_workspace_admission () =
-  with_gateway ~make_routes:production (fun ~player client ->
+  with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
     strict None (fun () ->
       let state = match Server_auth.For_testing.snapshot_server_state () with
         | Some state -> state | None -> fail "fixture server has no workspace" in
@@ -224,7 +232,7 @@ let test_fusion_workspace_admission () =
         check int "strict mode still requires authentication" 401 code)))
 
 let test_physical_skill_turn_evidence () =
-  with_gateway ~make_routes:production (fun ~player client ->
+  with_gateway ~make_routes:production (fun ~player ~reader client ->
     let state = match Server_auth.For_testing.snapshot_server_state () with
       | Some state -> state | None -> fail "fixture server has no workspace" in
     let config = Masc.Mcp_server.workspace_config state in
@@ -265,7 +273,9 @@ let test_physical_skill_turn_evidence () =
     strict (Some "1") (fun () ->
       check int "strict Public_read still requires a credential" 401
         (status ~meth:`GET client (target receiving));
-      let code, headers, body = request_with_headers ~token:player ~meth:`GET client (target receiving) in
+      check int "a Player token lacks the CanReadState a strict Public_read requires" 403
+        (status ~token:player ~meth:`GET client (target receiving));
+      let code, headers, body = request_with_headers ~token:reader ~meth:`GET client (target receiving) in
       check int "authenticated physical lookup is served over H2" 200 code;
       check bool "unbound lookup has no workspace admission receipt" false (List.mem admission headers);
       let json = Yojson.Safe.from_string body in
@@ -281,32 +291,32 @@ let test_physical_skill_turn_evidence () =
         (observed |> member "async_result_deliveries" |> to_list |> List.length);
       check int "keeps all physical action links" 3
         (observed |> member "async_actions" |> to_list |> List.length);
-      let code, headers, body = request_with_headers ~token:player ~meth:`GET client
+      let code, headers, body = request_with_headers ~token:reader ~meth:`GET client
         (target ~workspace:matching receiving) in
       check int "matching workspace serves physical evidence" 200 code;
       check bool "matching workspace is attested" true (List.mem admission headers);
       check bool "workspace binding preserves the scoped evidence" true
         (Yojson.Safe.equal json (Yojson.Safe.from_string body));
-      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client
+      let code, headers, _ = request_with_headers ~token:reader ~meth:`GET client
         (target ~workspace:foreign receiving) in
       check int "foreign workspace is refused before projection" 409 code;
       check bool "foreign workspace is not attested" false (List.mem admission headers);
-      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client
+      let code, headers, _ = request_with_headers ~token:reader ~meth:`GET client
         (target ~workspace:[ "expected_base_path", [ base ] ] receiving) in
       check int "partial workspace binding is refused" 400 code;
       check bool "partial workspace is not attested" false (List.mem admission headers);
-      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client
+      let code, headers, _ = request_with_headers ~token:reader ~meth:`GET client
         (target ~workspace:matching "trace#0") in
       check int "matched workspace still rejects an invalid physical turn" 400 code;
       check bool "matched workspace remains attested on owner rejection" true (List.mem admission headers);
-      let code, body = request ~token:player ~meth:`GET client (target "new-physical-trace#74") in
+      let code, body = request ~token:reader ~meth:`GET client (target "new-physical-trace#74") in
       check int "adjacent physical turn remains readable" 200 code;
       check int "adjacent turn does not borrow the original's evidence" 0
         (Yojson.Safe.from_string body |> member "origins" |> to_list |> List.length)))
 
 let test_goal_tree_bound_read_bypasses_stale_cache () =
   let captured_routes = ref None in
-  with_gateway ~on_routes:(fun routes -> captured_routes := Some routes) ~make_routes:production (fun ~player client ->
+  with_gateway ~on_routes:(fun routes -> captured_routes := Some routes) ~make_routes:production (fun ~player ~reader:_ client ->
     strict None (fun () ->
       let state = match Server_auth.For_testing.snapshot_server_state () with
         | Some state -> state | None -> fail "fixture server has no workspace" in
@@ -462,7 +472,7 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
               Eio.Promise.resolve release_worker ();
               Eio.Promise.await_exn blocker)) run)))) in
   with_gateway ~on_routes:(fun value -> routes := Some value) ~with_runtime ~make_routes:production
-    (fun ~player client -> strict None (fun () ->
+    (fun ~player ~reader:_ client -> strict None (fun () ->
       let env, sw, clock = match !runtime with
         | Some runtime -> runtime | None -> fail "fixture runtime missing" in
       let routes = match !routes with Some routes -> routes | None -> fail "fixture routes missing" in

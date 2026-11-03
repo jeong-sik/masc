@@ -383,7 +383,7 @@ let test_split_secret_held_across_native_side_events () =
           let live,replay = F.snapshots direct in
           List.iter (fun log ->
             let transcript = T.of_log ~now:2000. log in
-            let visible = if thinking then String.concat "\n" (T.thinking_lines transcript)
+            let visible = if thinking then T.thinking transcript
               else T.text transcript in
             check bool "neither live nor replay reconstructs the secret" false
               (Astring.String.is_infix ~affix:secret visible)) [live;replay];

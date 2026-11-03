@@ -229,8 +229,8 @@ let test_measured_height_matches_full_render () =
     List.iter (fun chunk ->
       Buffer.add_string source chunk;
       let text = Buffer.contents source in
-      let actual = Cache.measure_growing cache ~theme_revision:1 ~palette_generation:0
-          ~width ~renderer:(growing_renderer calls) ~identity:"thought" ~text in
+      let actual = (Cache.measure_growing_details cache ~theme_revision:1 ~palette_generation:0
+          ~width ~renderer:(growing_renderer calls) ~identity:"thought" ~text).height in
       check int "incremental trimmed height equals unfolded Markdown"
         (trimmed_height (full_markdown ~width text)) actual)
       [ ""; "alpha\n"; "beta\n"; "gamma"; " delta"; "\n\n";
@@ -243,8 +243,8 @@ let test_height_measurement_reuses_closed_blocks_and_resets_owners () =
   let calls = ref [] in
   let measure ?(width = 40) ?(theme_revision = 1) ?(palette_generation = 0)
       ?(identity = "thought-a") text =
-    Cache.measure_growing cache ~theme_revision ~palette_generation ~width
-      ~renderer:(growing_renderer calls) ~identity ~text in
+    (Cache.measure_growing_details cache ~theme_revision ~palette_generation ~width
+      ~renderer:(growing_renderer calls) ~identity ~text).height in
   ignore (measure "alpha\n");
   ignore (measure "alpha\nbeta\n");
   ignore (measure "alpha\nbeta\ngamma");

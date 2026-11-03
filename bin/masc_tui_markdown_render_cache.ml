@@ -233,9 +233,6 @@ let measure_growing_details cache ~theme_revision ~palette_generation ~width ~re
         measure_height; measure_logical_lines };
     {height=measure_height; nonblank_lines=measure_logical_lines.nonblank}
 
-let measure_growing cache ~theme_revision ~palette_generation ~width ~renderer ~identity ~text =
-  (measure_growing_details cache ~theme_revision ~palette_generation ~width ~renderer ~identity ~text).height
-
 module For_testing = struct
   let retained_entries cache = Masc_tui_lru.size cache.completed
   let retained_growing_entries cache = Masc_tui_lru.size cache.growing

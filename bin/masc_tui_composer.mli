@@ -97,10 +97,6 @@ val accepts_input : t -> bool
     unfocused, and false when there is nothing to send to, so a draft cannot
     be typed into a row that has no recipient. *)
 
-val can_send : t -> bool
-(** Whether the draft can be dispatched: a reachable target and a draft that is
-    not only whitespace. *)
-
 (** What a keypress does to the composer. *)
 type key_outcome =
   | Take_focus of string

@@ -37,7 +37,9 @@ let test_unreachable_target_keeps_its_name_and_reason () =
   in
   Alcotest.(check string) "name and reason" "beta — no longer in the roster"
     (Composer.prompt composer);
-  Alcotest.(check bool) "cannot send" false (Composer.can_send composer)
+  check_key ~label:"enter cannot send"
+    { composer with Composer.focus = Composer.Focused; draft = "hi" }
+    Composer.send_key Composer.Edit
 
 (* Every surface binds single letters. A row that took every printable key
    while idle would take [p] from pause and [q] from quit. *)
@@ -87,15 +89,17 @@ let test_input_is_refused_without_a_recipient () =
     (Composer.accepts_input (make ~focus:Composer.Unfocused ()))
 
 let test_send_requires_a_reachable_target () =
-  Alcotest.(check bool) "ready with text" true
-    (Composer.can_send (make ~draft:"hi" ()));
-  Alcotest.(check bool) "ready without text" false
-    (Composer.can_send (make ~draft:"" ()));
-  Alcotest.(check bool) "unreachable with text" false
-    (Composer.can_send
-       (make ~draft:"hi"
-          ~target:(Composer.Unreachable { keeper = "beta"; reason = "gone" })
-          ()))
+  check_key ~label:"ready with text"
+    (make ~focus:Composer.Focused ~draft:"hi" ())
+    Composer.send_key (Composer.Send "analyst");
+  check_key ~label:"ready without text"
+    (make ~focus:Composer.Focused ~draft:"" ())
+    Composer.send_key Composer.Edit;
+  check_key ~label:"unreachable with text"
+    (make ~focus:Composer.Focused ~draft:"hi"
+       ~target:(Composer.Unreachable { keeper = "beta"; reason = "gone" })
+       ())
+    Composer.send_key Composer.Edit
 
 (* Ctrl-Y asks for a capture. It has to be a control code: in a focused row
    every printable key is draft text, so a letter binding would take that

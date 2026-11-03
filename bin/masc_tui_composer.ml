@@ -91,11 +91,6 @@ let accepts_input composer =
 
 let has_draft_text draft = String.trim draft <> ""
 
-let can_send composer =
-  match composer.target with
-  | No_target | Unreachable _ -> false
-  | Ready _ -> has_draft_text composer.draft
-
 (* The key that sends. Named so a caller that has to send without a keypress
    -- a voice capture that ends the sentence itself -- can hand it to
    [classify_key] instead of reaching into the send path directly, which would

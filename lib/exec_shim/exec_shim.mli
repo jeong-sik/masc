@@ -432,5 +432,7 @@ val probe : unit -> Exec_ssh_protocol.probe
 
 val main : unit -> unit
 (** [masc-exec-shim --probe] prints {!probe} via
-    {!Exec_ssh_protocol.render_probe} and exits [0]; with no arguments
-    runs [run]; anything else prints usage and exits [2]. *)
+    {!Exec_ssh_protocol.render_probe} and exits [0];
+    [masc-exec-shim --serve SOCKET UID:GID] runs the guest agent
+    ({!Shim_agent.main}); with no arguments runs [run]; anything else prints
+    usage and exits [2]. *)

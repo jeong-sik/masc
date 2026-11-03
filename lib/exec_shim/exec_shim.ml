@@ -1349,7 +1349,9 @@ let main () =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   match Array.to_list Sys.argv with
   | [ _; "--probe" ] -> print_endline (Exec_ssh_protocol.render_probe (probe ()))
+  | [ argv0; "--serve"; socket; owner ] ->
+    Shim_agent.main ~host_signal_number ~argv0 ~socket ~owner
   | [ _ ] -> run ()
   | _ ->
-    prerr_endline "usage: masc-exec-shim [--probe]";
+    prerr_endline "usage: masc-exec-shim [--probe | --serve SOCKET UID:GID]";
     exit 2

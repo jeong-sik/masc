@@ -169,6 +169,8 @@ let summary = function
       Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
         (Option.value ~default:"-" lr_detail)
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
+  | Observer.Event Observer.Execution_snapshot ->
+      "snapshot:" ^ Masc.Dashboard_event_slices.execution_snapshot_type
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
 

@@ -2289,7 +2289,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           in
           let handoff_context : Masc_domain.task_handoff_context =
             { summary = ""; reason = None; next_step = None; failure_mode = None
-            ; reclaim_policy = None; evidence_refs; updated_at = None; updated_by = None
+            ; evidence_refs; updated_at = None; updated_by = None
             }
           in
           ignore
@@ -2903,7 +2903,7 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
   let summary = "alpha-only artifact ready for inspection" in
   let handoff_context : Masc_domain.task_handoff_context =
     { summary; reason = None; next_step = None; failure_mode = None
-    ; reclaim_policy = None; evidence_refs = [reference]
+    ; evidence_refs = [reference]
     ; updated_at = Some "2026-10-25T00:00:00Z"; updated_by = Some producer } in
   ignore (W.add_task config ~title:"Independent artifact retry" ~priority:1
     ~description:"No Goal association is required for a Task submission");

@@ -183,9 +183,7 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     contract = None;
     handoff_context;
     cycle_count = 0;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = None;
     skills = [];
   }
 
@@ -554,7 +552,6 @@ let test_current_task_section_renders () =
              reason = None;
              next_step = Some "wire parser to store";
              failure_mode = None;
-             reclaim_policy = None;
              evidence_refs = [];
              updated_at = None;
              updated_by = None;
@@ -753,7 +750,6 @@ let test_direct_turn_reuses_current_task_context () =
              reason = None;
              next_step = Some "answer with the current parser status";
              failure_mode = None;
-             reclaim_policy = None;
              evidence_refs = [];
              updated_at = None;
              updated_by = None;

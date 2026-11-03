@@ -211,9 +211,7 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
          (Astring.String.is_infix ~affix:"no producer Keeper" handoff.summary);
        Alcotest.(check (option string)) "and what the next agent does with it"
          (Some "Any agent may claim this task and answer the rejection")
-         handoff.next_step;
-       Alcotest.(check bool) "the task is offered rather than held" true
-         (handoff.reclaim_policy = Some D.Allow_reclaim)
+         handoff.next_step
      | { task_status; _ } ->
        Alcotest.failf "a rejection with no Keeper must release the Task, found %s"
          (D.task_status_to_string task_status));

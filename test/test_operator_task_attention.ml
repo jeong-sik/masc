@@ -81,7 +81,6 @@ let test_a_holders_cancel_is_not_an_operator_row () =
       ; reason = Some stop_reason
       ; next_step = None
       ; failure_mode = None
-      ; reclaim_policy = None
       ; evidence_refs = []
       ; updated_at = None
       ; updated_by = Some live_keeper

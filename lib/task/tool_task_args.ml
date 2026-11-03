@@ -181,7 +181,6 @@ let parse_handoff_context ~(agent_name : string)
             && Option.is_none handoff_context.reason
             && Option.is_none handoff_context.next_step
             && Option.is_none handoff_context.failure_mode
-            && Option.is_none handoff_context.reclaim_policy
             && handoff_context.evidence_refs = []
           then
             (* An empty handoff_context object is the same as none. *)

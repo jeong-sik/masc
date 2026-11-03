@@ -9,8 +9,7 @@
     - {!Workspace_task_classify} — state classification, task actor kind,
       working agents, event helpers
     - {!Workspace_task_create} — dedup logic, add_task, batch_add_tasks
-    - {!Workspace_task_claim} — claim_task, claim_task_r, release/reclaim
-      helpers *)
+    - {!Workspace_task_claim} — claim_task_r and claim helpers *)
 
 include module type of Workspace_utils
 include module type of Workspace_state
@@ -199,17 +198,6 @@ val release_unroutable_rejected_task_r :
     checked under the deciding lock. Release retires pending and delivered
     relations in the same lease-fenced Task commit. A later submission or
     rejection by the same producer is never released using the old identity.
-
-    [reclaim_policy] and [do_not_reclaim_reason] are left as they stand, which
-    is where this differs from {!recover_owned_task_to_todo_r} beside it. That
-    one clears them because an operator is deliberately overriding what the
-    previous owner set; this one is a system reacting to an owner that is no
-    longer there, and clearing a [Block_reclaim] would erase a stop somebody
-    chose. The pair survives claim, start and submit unchanged, so a task
-    released under [Block_reclaim] can come back to exactly the [InProgress]
-    this function fires on still carrying it; it is also what the next ordinary
-    [Release] inherits, and what two surfaces print. Unifying the two functions
-    here would drop all three.
 
     The released-by actor is read from [authority], never supplied by the
     caller: recording the vanished assignee would leave the ledger claiming

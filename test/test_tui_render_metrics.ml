@@ -180,7 +180,7 @@ let domain_task ~id ~created_at ~status : Masc_domain.task =
     files = []; created_at; created_by = Some "producer";
     predecessor_task_id = None; contract = None;
     execution_links = Masc_domain.no_execution_links; handoff_context = None;
-    cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None; skills = [] }
+    cycle_count = 0; skills = [] }
 
 let test_calculate_kpis_empty () =
   let state = make_state () in

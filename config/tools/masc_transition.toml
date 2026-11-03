@@ -99,15 +99,6 @@ type = "string"
 description = "If released due to failure, describe the failure mode."
 
 [[params.params]]
-name = "reclaim_policy"
-type = "string"
-enum = ["allow_reclaim", "block_reclaim"]
-description = """
-Explicit reclaim policy. Omit or use allow_reclaim for normal handoff. Use \
-block_reclaim only for deterministic terminal mismatches that must require \
-operator review."""
-
-[[params.params]]
 name = "evidence_refs"
 type = "array"
 items = { type = "string", min_length = 1 }

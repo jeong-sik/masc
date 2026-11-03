@@ -178,9 +178,7 @@ let claim_next_r
              List.map
                (fun (t : task) ->
                   if t.id = task.id
-                  then (
-                    let t = Workspace_task.clear_reclaim_decision t in
-                    { t with task_status = final_status })
+                  then { t with task_status = final_status }
                   else t)
                working_tasks
            in

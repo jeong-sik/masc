@@ -1,4 +1,4 @@
-(** Workspace_task_claim — claim_task_r, release/reclaim helpers.
+(** Workspace_task_claim — claim_task_r and claim helpers.
 
     This module is [include]d by {!Workspace_task}; all bindings are part of
     the public Workspace interface.  Re-exports {!Workspace_utils} and
@@ -6,11 +6,6 @@
 
 include module type of Workspace_utils
 include module type of Workspace_state
-
-(** {1 Reclaim helpers} *)
-
-val clear_reclaim_decision : Masc_domain.task -> Masc_domain.task
-(** Clears non-blocking reclaim policy metadata before a task is claimed. *)
 
 val active_owned_task_ids_for_agent :
   config -> agent_name:string -> Masc_domain.backlog -> string list
@@ -61,13 +56,3 @@ val emit_auto_start_side_effects :
 (** Emit post-commit side effects (broadcast, activity, transition observer,
     hook push, and transition log event) for an atomic [Claimed -> InProgress]
     auto-start transition. *)
-
-(** {1 Release/reclaim helpers} *)
-
-val derive_release_do_not_reclaim_reason :
-  Masc_domain.task -> Masc_domain.task_handoff_context option -> string option
-
-val derive_release_reclaim_policy :
-  Masc_domain.task ->
-  Masc_domain.task_handoff_context option ->
-  Masc_domain.task_reclaim_policy option

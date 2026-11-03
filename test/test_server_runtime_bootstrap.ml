@@ -1232,9 +1232,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
     contract = None;
     handoff_context = None;
     cycle_count = 0;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = None;
     skills = [];
   }
 

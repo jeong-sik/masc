@@ -668,7 +668,7 @@ let test_backlog_to_yojson_with_tasks () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0;
     skills = [];
   } in
   let b : Masc_domain.backlog = { tasks = [task]; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
@@ -982,18 +982,20 @@ let test_task_of_yojson_with_diagnostics_absent () =
   match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
   | Ok (_, d) ->
     check bool "handoff absent" true
-      (d.handoff_context_outcome = Masc_domain.Field_absent);
-    check bool "reclaim absent" true
-      (d.reclaim_policy_outcome = Masc_domain.Field_absent)
+      (d.handoff_context_outcome = Masc_domain.Field_absent)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_task_of_yojson_with_diagnostics_decoded () =
-  let json = task_json_for ~extra:[ ("reclaim_policy", `String "block_reclaim") ] "task-590" in
+  let json =
+    task_json_for
+      ~extra:[ ("handoff_context", `Assoc [ ("summary", `String "halfway") ]) ]
+      "task-590"
+  in
   match Masc_domain.task_of_yojson_with_diagnostics json with
   | Ok (task, d) ->
-    check bool "reclaim decoded" true
-      (d.reclaim_policy_outcome = Masc_domain.Field_decoded);
-    check bool "reclaim Some" true (task.reclaim_policy <> None)
+    check bool "handoff decoded" true
+      (d.handoff_context_outcome = Masc_domain.Field_decoded);
+    check bool "handoff Some" true (task.handoff_context <> None)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_task_of_yojson_with_diagnostics_unreadable () =
@@ -1039,7 +1041,7 @@ let test_backlog_of_yojson_with_diagnostics_reports_drop () =
 let test_backlog_of_yojson_still_drops_diagnostics () =
   let corrupt =
     task_json_for
-      ~extra:[ ("reclaim_policy", `Int 7) ]
+      ~extra:[ ("handoff_context", `Assoc [ ("summary", `Int 7) ]) ]
       "task-bad"
   in
   let json =
@@ -1697,7 +1699,7 @@ let test_task_to_yojson () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0;
     skills = [];
   } in
   let json = Masc_domain.task_to_yojson t in
@@ -1731,7 +1733,7 @@ let test_task_of_yojson_error () =
   | Error _ -> ()
   | Ok _ -> fail "expected Error (missing title)"
 
-let test_task_reclaim_gate_ignores_free_text_without_policy () =
+let test_task_claim_todo_is_available () =
   let t : Masc_domain.task = {
     id = "task-004";
     title = "Retryable task";
@@ -1745,9 +1747,7 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     contract = None;
     handoff_context = None;
     cycle_count = 9;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = Some "worktree path not found";
     skills = [];
   } in
   match Masc_domain.task_claim_decision t with
@@ -1756,34 +1756,7 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
       (Masc_domain.Claim_block_pending_verdict _) ->
     fail "todo task must not be blocked by a pending verdict"
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
-    fail "do_not_reclaim_reason should not influence claim readiness"
-
-let test_task_reclaim_gate_blocks_only_typed_policy () =
-  let t : Masc_domain.task = {
-    id = "task-005";
-    title = "Terminal task";
-    description = "";
-    task_status = Masc_domain.Todo;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-15T12:00:00Z";
-    created_by = None;
-    predecessor_task_id = None;
-    contract = None;
-    handoff_context = None;
-    cycle_count = 0;
-    reclaim_policy = Some Masc_domain.Block_reclaim;
-    execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = Some "operator hard stop";
-    skills = [];
-  } in
-  match Masc_domain.task_claim_decision t with
-  | Masc_domain.Claim_available -> ()
-  | Masc_domain.Claim_unavailable
-      (Masc_domain.Claim_block_pending_verdict _) ->
-    fail "todo task must not be blocked by a pending verdict"
-  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
-    fail "claim-ready task must stay claimable regardless of reclaim policy"
+    fail "todo task must be claimable"
 
 let test_task_claim_awaiting_verification_is_pending_verdict () =
   let t : Masc_domain.task = {
@@ -1804,9 +1777,7 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
     contract = None;
     handoff_context = None;
     cycle_count = 0;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = None;
     skills = [];
   } in
   (match Masc_domain.task_claim_decision t with
@@ -2136,7 +2107,6 @@ let () =
         test_agent_status_rank_covers_every_constructor;
     ];
     ( "defined but never registered until task-1768",
-        [ Alcotest.test_case "task reclaim gate ignores free text without policy" `Quick test_task_reclaim_gate_ignores_free_text_without_policy
-        ; Alcotest.test_case "task reclaim gate blocks only typed policy" `Quick test_task_reclaim_gate_blocks_only_typed_policy
+        [ Alcotest.test_case "todo task is claimable" `Quick test_task_claim_todo_is_available
         ] );
   ]

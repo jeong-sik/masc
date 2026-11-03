@@ -196,19 +196,11 @@ type task_contract =
   }
 [@@deriving show, yojson { strict = false }, eq]
 
-type task_reclaim_policy =
-  | Allow_reclaim
-  | Block_reclaim
-[@@deriving show, eq]
-
-val task_reclaim_policy_to_string : task_reclaim_policy -> string
-val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
 type task_handoff_context =
   { summary : string [@default ""]
   ; reason : string option [@default None]
   ; next_step : string option [@default None]
   ; failure_mode : string option [@default None]
-  ; reclaim_policy : task_reclaim_policy option [@default None]
   ; evidence_refs : string list [@default []]
   ; updated_at : string option [@default None]
   ; updated_by : string option [@default None]
@@ -252,8 +244,6 @@ type task =
             rewrites what counts as done. *)
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
-  ; reclaim_policy : task_reclaim_policy option [@default None]
-  ; do_not_reclaim_reason : string option [@default None]
   ; skills : Skill_reference.t list [@default []]
         (** Exact, immutable Skill references attached at Task creation.
             Source, package, canonical name, and content revision remain one
@@ -287,10 +277,9 @@ type nested_field_outcome =
 
 val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
 
-(** Per-field decode outcome for the two optional nested fields. *)
+(** Per-field decode outcome for the optional nested [handoff_context]. *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
-  ; reclaim_policy_outcome : nested_field_outcome
   }
 [@@deriving show, eq]
 

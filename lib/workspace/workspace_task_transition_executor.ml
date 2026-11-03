@@ -2,8 +2,8 @@
     
     This module was extracted from [Workspace_task] as part of #16078.
     It owns the pure backlog-shape construction for task lifecycle
-    transitions: normalizing tasks before status changes, computing
-    release counters, and building the persisted backlog update. *)
+    transitions: counting releases and building the persisted backlog
+    update. *)
 
 open Masc_domain
 
@@ -53,37 +53,18 @@ let handoff_context_authored_by ~action ~argument =
   | Masc_domain.Claim | Masc_domain.Start -> None
 ;;
 
-let normalize_task_before_status ~action task =
+let release_cycle_count ~action task =
   match action with
-  | Masc_domain.Claim ->
-    Workspace_task_claim.clear_reclaim_decision task
-  | Masc_domain.Release -> task
-  | Masc_domain.Start
-  | Masc_domain.Done_action
+  | Masc_domain.Release -> task.cycle_count + 1
   | Masc_domain.Cancel
-  | Masc_domain.Submit_for_verification ->
-    task
-;;
-
-let release_counters ~action task handoff_context =
-  match action with
-  | Masc_domain.Release ->
-    ( task.cycle_count + 1
-    , Workspace_task_claim.derive_release_reclaim_policy task handoff_context
-    , Workspace_task_claim.derive_release_do_not_reclaim_reason task handoff_context )
-  | Masc_domain.Cancel -> task.cycle_count, None, None
   | Masc_domain.Claim
   | Masc_domain.Start
   | Masc_domain.Done_action
   | Masc_domain.Submit_for_verification ->
-    task.cycle_count, task.reclaim_policy, task.do_not_reclaim_reason
+    task.cycle_count
 ;;
 
 let update_task_for_transition ~action ~new_status ~handoff_context task =
-  let task = normalize_task_before_status ~action task in
-  let cycle_count, reclaim_policy, do_not_reclaim_reason =
-    release_counters ~action task handoff_context
-  in
   { task with
     task_status = new_status
   ; handoff_context =
@@ -91,9 +72,7 @@ let update_task_for_transition ~action ~new_status ~handoff_context task =
         ~action
         ~previous:task.handoff_context
         ~argument:handoff_context
-  ; cycle_count
-  ; reclaim_policy
-  ; do_not_reclaim_reason
+  ; cycle_count = release_cycle_count ~action task
   }
 ;;
 

@@ -60,7 +60,7 @@ short_description = "Hand your claimed task back to the backlog."
 when_to_use = "Use when you hold a task you cannot finish and it should go back so someone else can take it."
 key_constraints = [
   "Caller must own the task.",
-  "The task returns to the backlog and can be reclaimed. It is not cancelled.",
+  "The task returns to the backlog and can be claimed again. It is not cancelled.",
 ]
 details_markdown = "Issues release. Include evidence_refs to retain the current sources with your handoff; the next owner's claim preserves them and your attribution. Export files separately when the next owner needs their bytes."
 examples = ["task_id='task-384' summary='4 verification rejections, no path forward from this Keeper' reason='no completion authority accepted the evidence' next_step='re-read the rejection notes before re-claiming'"]

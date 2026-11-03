@@ -1742,7 +1742,6 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
            ; reason = None
            ; next_step = None
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = []
            ; updated_at = None
            ; updated_by = None
@@ -1841,7 +1840,7 @@ let test_operator_cancel_pending_submission_refuses_late_verdict () =
     (match Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
       ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
       ~handoff_context:{ summary = "owner evidence"; reason = None; next_step = None;
-        failure_mode = None; reclaim_policy = None; evidence_refs = [];
+        failure_mode = None; evidence_refs = [];
         updated_at = Some "2026-10-21T00:00:00Z"; updated_by = Some test_agent_a }
       ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
         Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with

@@ -922,7 +922,6 @@ let commit_verdict_r
                  ; reason = Some reason
                  ; next_step = None
                  ; failure_mode = None
-                 ; reclaim_policy = None
                  ; evidence_refs = []
                  ; updated_at = Some now
                  ; updated_by = Some authority_actor

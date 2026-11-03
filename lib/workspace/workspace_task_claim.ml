@@ -1,4 +1,4 @@
-(** Workspace_task_claim — claim_task, claim_task_r, release/reclaim helpers.
+(** Workspace_task_claim — claim_task_r and claim helpers.
 
     Extracted from Workspace_task to separate claim logic from classification,
     creation, and transitions.  All bindings are re-exported by [Workspace_task]
@@ -9,13 +9,6 @@ include Workspace_utils
 include Workspace_state
 include Workspace_broadcast
 open Workspace_backlog
-
-let clear_reclaim_decision (task : Masc_domain.task) =
-  match task.reclaim_policy with
-  | Some Masc_domain.Block_reclaim -> task
-  | Some Masc_domain.Allow_reclaim | None ->
-    { task with reclaim_policy = None; do_not_reclaim_reason = None }
-;;
 
 let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.backlog)
   =
@@ -163,7 +156,6 @@ let claim_task_with_details_r
                       t
                   with
                   | Workspace_task_lifecycle.Worker_claim claimed_status ->
-                    let t = clear_reclaim_decision t in
                     let final_status =
                       if auto_start
                       then Masc_domain.InProgress { assignee = agent_name; started_at = now }
@@ -330,60 +322,4 @@ let claim_task_r config ~agent_name ~task_id ?(auto_start = false) ()
   : string Masc_domain.masc_result
   =
   Result.map snd (claim_task_with_details_r config ~agent_name ~task_id ~auto_start ())
-;;
-
-(** Collect typed release handoff text. Task ownership and orphan
-    reconciliation are enforced by their respective transition services. *)
-let release_handoff_texts (handoff_context : Masc_domain.task_handoff_context option) =
-  let fields =
-    match handoff_context with
-    | None -> []
-    | Some handoff_context ->
-      [ Some handoff_context.summary
-      ; handoff_context.reason
-      ; handoff_context.next_step
-      ; handoff_context.failure_mode
-      ]
-  in
-  List.filter_map
-    (function
-     | None -> None
-     | Some text ->
-       let trimmed = String.trim text in
-       if trimmed = "" then None else Some trimmed)
-    fields
-;;
-
-let release_reclaim_policy (handoff_context : Masc_domain.task_handoff_context option) =
-  match handoff_context with
-  | Some ({ reclaim_policy = Some policy; _ } : Masc_domain.task_handoff_context) ->
-    Some policy
-  | Some ({ reclaim_policy = None; _ } : Masc_domain.task_handoff_context) | None -> None
-;;
-
-let derive_release_do_not_reclaim_reason
-      (task : Masc_domain.task)
-      (handoff_context : Masc_domain.task_handoff_context option)
-  =
-  if release_reclaim_policy handoff_context = Some Masc_domain.Block_reclaim
-  then (
-    match release_handoff_texts handoff_context with
-    | text :: _ -> Some text
-    | [] -> Some "release hard-stop requested")
-  else
-    match task.reclaim_policy with
-    | Some Masc_domain.Block_reclaim -> task.do_not_reclaim_reason
-    | Some Masc_domain.Allow_reclaim | None -> None
-;;
-
-let derive_release_reclaim_policy
-      (task : Masc_domain.task)
-      (handoff_context : Masc_domain.task_handoff_context option)
-  =
-  match release_reclaim_policy handoff_context with
-  | Some policy -> Some policy
-  | None -> (
-    match task.reclaim_policy with
-    | Some Masc_domain.Block_reclaim -> Some Masc_domain.Block_reclaim
-    | Some Masc_domain.Allow_reclaim | None -> None)
 ;;

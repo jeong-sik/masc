@@ -621,15 +621,6 @@ let test_sub_board_access_advertised_values_decode () =
     ~advertised:(advertised_values_for ~property:"access")
 ;;
 
-(* Task reclaim policy. Same shape: [Masc_domain.task_reclaim_policy_of_string]
-   owns it and the schema writes the two strings by hand. *)
-let test_reclaim_policy_advertised_values_decode () =
-  check_every_advertised_value_decodes
-    ~label:"task reclaim_policy"
-    ~decodes:(fun v -> Result.is_ok (Masc_domain.task_reclaim_policy_of_string v))
-    ~advertised:(advertised_values_for ~property:"reclaim_policy")
-;;
-
 let test_memory_search_source_mirror () =
   check_mirror_in_sync
     ~label:"memory_search_source_enum_strings"
@@ -799,8 +790,6 @@ let () =
         ; test_case "interact arguments match the schema" `Quick test_interact_arguments_match_the_schema
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
-        ; test_case "reclaim_policy values decode" `Quick
-            test_reclaim_policy_advertised_values_decode
         ; test_case "owner lists are non-empty" `Quick test_owners_are_non_empty
         ; test_case "schemas publish enums" `Quick test_schema_set_is_non_empty
         ] )

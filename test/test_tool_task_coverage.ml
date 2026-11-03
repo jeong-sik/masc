@@ -266,19 +266,6 @@ let register_test_keeper ctx ~keeper_name =
            keeper_name meta)
   | Error e -> failwith ("failed to build keeper meta: " ^ e)
 
-let set_only_task_do_not_reclaim_reason ctx reason =
-  let config = ctx.Task.Tool.config in
-  let backlog = Workspace.read_backlog config in
-  match backlog.Masc_domain.tasks with
-  | [ task ] ->
-      Workspace.write_backlog config
-        { backlog with
-          tasks = [ { task with do_not_reclaim_reason = Some reason } ];
-        }
-  | tasks ->
-      failwith
-        (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
-
 let only_task ctx =
   match Workspace.get_tasks_raw ctx.Task.Tool.config with
   | [ task ] -> task
@@ -696,7 +683,6 @@ let () = test "handle_transition_release_persists_handoff" (fun () ->
   if not (Tool_result.is_success result_release) then failwith (Tool_result.message result_release);
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
-      assert (task.do_not_reclaim_reason = None);
       match task.handoff_context with
       | Some handoff_context ->
           assert (handoff_context.summary = "blocked on integration fixture");
@@ -1496,7 +1482,6 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
           ; reason = None
           ; next_step = None
           ; failure_mode = None
-          ; reclaim_policy = None
           ; evidence_refs = [ "tests green: dune runtest" ]
           ; updated_at = None
           ; updated_by = None
@@ -2413,33 +2398,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
 (* No local substring or reference-shape gate is asserted for submission.
    Verification sufficiency belongs to the verifier decision boundary. *)
 
-let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->
-  (
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-    let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-        (`Assoc
-          [
-            ("title", `String "Strict accessor PR evidence");
-            ("priority", `Int 1);
-          ])
-    in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-    set_only_task_do_not_reclaim_reason ctx "auto: 3 releases";
-    let claim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "claim");
-          ])
-    in
-    if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
-    assert_task_claimed_by ctx "codex-mcp-client";
-    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
-)
-
-let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun () ->
+let () = test "transition_release_then_claim_again" (fun () ->
   (
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
@@ -2478,7 +2437,6 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     in
     if not (Tool_result.is_success release_result) then failwith (Tool_result.message release_result);
     assert_task_todo ctx;
-    assert ((only_task ctx).do_not_reclaim_reason = None);
     let reclaim_result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
@@ -2490,67 +2448,6 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     if not (Tool_result.is_success reclaim_result) then failwith (Tool_result.message reclaim_result);
     assert_task_claimed_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
-)
-
-(* RFC-0323 G-10 (+ #23661): the typed reclaim claim gate is retired. A
-   block_reclaim release persists policy + reason as operator-facing data,
-   but the recycled Todo is claimable again. *)
-let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () ->
-  (
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-    let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-        (`Assoc
-          [
-            ("title", `String "Terminal mismatch");
-            ("priority", `Int 1);
-          ])
-    in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-    let claim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "claim");
-          ])
-    in
-    if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
-    let release_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "release");
-            ( "handoff_context",
-              `Assoc
-                [
-                  ("summary", `String "upstream PR already completed this scope");
-                  ("reclaim_policy", `String "block_reclaim");
-                ] );
-          ])
-    in
-    if not (Tool_result.is_success release_result) then failwith (Tool_result.message release_result);
-    assert_task_todo ctx;
-    assert
-      ((only_task ctx).do_not_reclaim_reason
-       = Some "upstream PR already completed this scope");
-    assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
-    let reclaim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "claim");
-          ])
-    in
-    if not (Tool_result.is_success reclaim_result)
-    then failwith (Tool_result.message reclaim_result);
-    (* Block_reclaim + reason survive the claim as operator context. *)
-    assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
-    assert
-      ((only_task ctx).do_not_reclaim_reason
-       = Some "upstream PR already completed this scope"))
 )
 
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->

@@ -108,8 +108,6 @@ let task_named id : Masc_domain.task =
   ; execution_links = Masc_domain.no_execution_links
   ; handoff_context = None
   ; cycle_count = 0
-  ; reclaim_policy = None
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 ;;

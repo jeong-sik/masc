@@ -118,18 +118,6 @@
         <rationale>시간이 지났다는 사실은 상태를 죽일 근거가 아니다. forbidden#budget_gate 와 같은 뿌리다.</rationale>
       </expiry>
 
-      <reclaim src="lib/workspace/workspace_task_claim.mli">
-        <policy>Allow_reclaim | Block_reclaim</policy>
-        <rule note="RFC-0323 갱신: typed reclaim claim gate 는 폐지됐다.
-                    reclaim_policy 는 claim 을 막지 않고 release/cancel 데이터 파이프라이닝
-                    용도로만 생존한다. Done 재실행은 predecessor_task_id 로 새 task 를 만든다.">
-              정책은 handoff context 의 reclaim_policy 필드에서 유도한다.
-              claim 경로에 policy 파라미터는 없고, release 시점 handoff context 가 원천이다.</rule>
-        <rule>claim 직전 clear_reclaim_decision 으로 non-blocking 회수 메타데이터를 지운다.
-              Block_reclaim 메타데이터는 claim 후에도 생존한다.</rule>
-        <rule>소유권 충돌은 claim 시점에 판정하고 거절 사유를 문장으로 돌려준다.</rule>
-      </reclaim>
-
       <goal_link src="lib/task/task_goal_assignment.mli">
         <rule>goalless Task 는 정상 상태다. Goal 없이 살아 있어도 된다 (RFC-0267 §2).</rule>
         <rule>나중에 set_task_goal 로 기존 Goal 에 연결할 수 있다.</rule>

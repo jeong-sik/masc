@@ -293,7 +293,6 @@ let test_task_snapshot_names_actor_and_handoff () =
     ; reason = None
     ; next_step = None
     ; failure_mode = None
-    ; reclaim_policy = None
     ; evidence_refs = []
     ; updated_at = Some "2026-08-21T03:00:00Z"
     ; updated_by = Some "alpha"
@@ -318,8 +317,6 @@ let test_task_snapshot_names_actor_and_handoff () =
     ; execution_links = Masc_domain.no_execution_links
     ; handoff_context = Some handoff
     ; cycle_count = 1
-    ; reclaim_policy = None
-    ; do_not_reclaim_reason = None
     ; skills = []
     }
   in
@@ -374,8 +371,6 @@ let task_with_status task_status : Masc_domain.task =
   ; execution_links = Masc_domain.no_execution_links
   ; handoff_context = None
   ; cycle_count = 1
-  ; reclaim_policy = None
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 ;;

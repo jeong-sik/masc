@@ -463,34 +463,12 @@ type task_contract = {
   verify_gate_evidence : string list; [@default []]
 } [@@deriving show, yojson { strict = false }, eq]
 
-(** Handoff context persisted across release/reclaim cycles *)
-type task_reclaim_policy =
-  | Allow_reclaim
-  | Block_reclaim
-[@@deriving show, eq]
-
-let task_reclaim_policy_to_string = function
-  | Allow_reclaim -> "allow_reclaim"
-  | Block_reclaim -> "block_reclaim"
-
-let task_reclaim_policy_of_string = function
-  | "allow_reclaim" -> Ok Allow_reclaim
-  | "block_reclaim" -> Ok Block_reclaim
-  | value -> Error (Printf.sprintf "unknown task_reclaim_policy: %s" value)
-
-let task_reclaim_policy_to_yojson policy =
-  `String (task_reclaim_policy_to_string policy)
-
-let task_reclaim_policy_of_yojson = function
-  | `String value -> task_reclaim_policy_of_string value
-  | _ -> Error "task_reclaim_policy must be a string"
-
+(** Handoff context persisted across release and claim *)
 type task_handoff_context = {
   summary : string; [@default ""]
   reason : string option; [@default None]
   next_step : string option; [@default None]
   failure_mode : string option; [@default None]
-  reclaim_policy : task_reclaim_policy option; [@default None]
   evidence_refs : string list; [@default []]
   updated_at : string option; [@default None]
   updated_by : string option; [@default None]
@@ -553,8 +531,6 @@ type task = {
   execution_links: task_execution_links; [@default no_execution_links]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
-  reclaim_policy: task_reclaim_policy option; [@default None]
-  do_not_reclaim_reason: string option; [@default None]
   (* Exact immutable Skill references are Task evidence. Their source,
      package, name, and content revision survive every state transition and do
      not depend on whichever catalog is current when the Task is later read. *)
@@ -655,24 +631,13 @@ let task_to_yojson t =
     if t.cycle_count = 0 then with_handoff_context
     else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
   in
-  let with_reclaim_policy =
-    match t.reclaim_policy with
-    | None -> with_cycle_count
-    | Some policy ->
-        with_cycle_count
-        @ [("reclaim_policy", task_reclaim_policy_to_yojson policy)]
-  in
-  let with_do_not_reclaim = match t.do_not_reclaim_reason with
-    | None -> with_reclaim_policy
-    | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
-  in
   (* Omitted when the Task declares no Skill. A present value always uses the
      canonical exact-reference wire shape. *)
   let with_skills =
     match t.skills with
-    | [] -> with_do_not_reclaim
+    | [] -> with_cycle_count
     | skills ->
-        with_do_not_reclaim
+        with_cycle_count
         @ [("skills", Skill_reference.list_to_yojson skills)]
   in
   (* Merge status fields into task *)
@@ -710,18 +675,15 @@ let nested_field_outcome_is_unreadable = function
   | Field_unreadable _ -> true
   | Field_absent | Field_decoded -> false
 
-(** Per-field decode outcome for the two nested fields whose corruption the
-    decoder drops instead of propagating ([handoff_context],
-    [reclaim_policy]). *)
+(** Per-field decode outcome for the nested field whose corruption the
+    decoder drops instead of propagating ([handoff_context]). *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
-  ; reclaim_policy_outcome : nested_field_outcome
   }
 [@@deriving show, eq]
 
 let task_decode_diagnostics_is_unreadable d =
   nested_field_outcome_is_unreadable d.handoff_context_outcome
-  || nested_field_outcome_is_unreadable d.reclaim_policy_outcome
 
 let task_of_yojson_with_diagnostics json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
@@ -787,15 +749,6 @@ let task_of_yojson_with_diagnostics json =
            | Error error -> None, Field_unreadable error)
     in
     let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
-    let reclaim_policy, reclaim_outcome =
-      match m "reclaim_policy" with
-      | `Null -> None, Field_absent
-      | reclaim_policy_json ->
-          (match task_reclaim_policy_of_yojson reclaim_policy_json with
-           | Ok policy -> Some policy, Field_decoded
-           | Error error -> None, Field_unreadable error)
-    in
-    let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
     match
       skills_result, contract_result, execution_links_result,
       task_status_of_yojson json
@@ -816,13 +769,9 @@ let task_of_yojson_with_diagnostics json =
               execution_links;
               handoff_context;
               cycle_count;
-              reclaim_policy;
-              do_not_reclaim_reason;
               skills;
             },
-            { handoff_context_outcome = handoff_outcome
-            ; reclaim_policy_outcome = reclaim_outcome
-            } )
+            { handoff_context_outcome = handoff_outcome } )
     | Error error, _, _, _ -> Error error
     | _, Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
     | _, _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)

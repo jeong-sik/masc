@@ -50,6 +50,7 @@ Current `[keeper]` fields:
 - `microvm_backend`
 - `microvm_memory`
 - `microvm_cpus`
+- `microvm_delivery`
 - `observation_run`
 - `max_context_override`
 - `telemetry_feedback_enabled`

@@ -92,9 +92,12 @@ agent 는 PID 1 이라 고아 프로세스를 거둬야 해요. `--init` 은 쓰
 ### 3.6 boot plan 과 붙이기(attach)
 
 - `Keeper_microvm_boot_plan` 의 사실에 `publishedSockets`, `useInit`, relay 형식 버전을 더해요. `container inspect` 는 `--init` 을 명령 줄이 아닌 `useInit` 필드로 보여 줘요(4.2). 그래서 지금의 명령 줄 비교는 그대로 둬요.
+  - relay 형식 버전은 agent plan 의 안정 라벨(`masc.mcp.agent_relay`)로 digest 에 들어가요. 다른 버전을 말하는 서버는 게스트를 붙이지 않고 교체해요.
 - plan 이 달라지면 `assess` 가 교체를 허용해요. 서버 재시작 뒤 붙이는 경로(attach)는 `assess` 를 거치지 않아요. 그래서 붙일 때 hello 를 읽고, agent 가 없거나 형식 버전이 다르면 타입이 있는 오류로 교체를 요청해요.
 - 첫 프로세스는 `--user 0:0` 으로 띄워요. `--user` 를 빼면 이미지의 기본 사용자로 뜨는데, 그 값에 기대지 않으려는 거예요. inspect 의 `userString` 은 `"0:0"` 이라 plan 과 그대로 비교돼요(4.5).
 - 호스트 소켓 경로는 base path 와 게스트 이름에서 정해요. 붙이기(attach)가 이름만으로 endpoint 를 다시 만들기 때문이에요. TMPDIR 같은 프로세스 환경에는 기대지 않아요.
+  - 경로는 `<base>/.masc/microvm/agent/<게스트 이름 SHA-256 앞 16자>.sock` 이에요. 게스트 이름은 63자까지라, 이름을 그대로 쓰면 `/Users/<사용자>/me` 아래에서도 105바이트가 돼요.
+  - 디렉터리는 서버 uid 만 쓰는 0700 이에요. 소켓에 붙을 수 있는 프로세스는 그 게스트의 agent 에게 Keeper 로 요청을 돌리게 할 수 있어서예요.
   - macOS 의 unix 소켓 경로는 103바이트까지예요. 넘으면 VM 을 띄우지 않고 타입이 있는 오류로 거절해요. 1.6.1 은 112바이트 경로를 받아 놓고 부팅 단계에서 실패했어요(4.5).
   - VM 이 끝나면 runtime 이 소켓 파일을 지워요. 남은 소켓 파일은 VM 이 정상적으로 끝나지 못했을 때만 생기고, 그 파일이 있으면 `container run` 이 실패해요(4.5). 그래서 같은 이름의 게스트가 없을 때만, 부팅 직전에 남은 소켓 파일을 지워요.
 
@@ -110,6 +113,8 @@ agent 소켓은 root 전용 디렉터리에 있어서 Keeper uid 는 경로로 �
 ### 3.9 옮기는 순서
 
 1. `Agent_socket` 전달 방식을 Keeper 별 선택으로 더해요. canary 동안에만 두 경로가 같이 있어요. 되돌리기는 그 Keeper 의 선택을 원래대로 바꾸는 거예요.
+   - 선택은 Keeper TOML 의 `microvm_delivery` 예요(`exec_per_request` 가 기본, `agent_socket`). `sandbox_profile = "microvm"` 이고 `microvm_backend = "apple_container"` 일 때만 `agent_socket` 을 받아요.
+   - 턴마다 게스트를 다시 판정하면서 TOML 을 읽어요. 값을 바꾸면 다음 턴에 plan 이 달라져 게스트가 교체돼요.
 2. canary 기준(7절)을 넘으면 나머지 Apple Keeper 를 옮겨요.
 3. 모두 옮기면 `Exec_per_request` 전달 방식과 선택 값을 한 PR 에서 지워요. 그 뒤 되돌리기는 그 PR 의 revert 예요.
 

@@ -16139,13 +16139,16 @@ let selected_planning_goal_id (state : state) =
    identity and everything it authorized stay; the state is no longer
    [Workspace_identity_match], so decisions and new reads wait for a read that
    matches again. Only a read that names a workspace goes on to compare it. *)
-let apply_server_identity_reading state ~mailbox reading =
+let apply_server_identity_reading ?(withdraw_on_error = false) state ~mailbox reading =
   withdraw_resource_diagram_pending state;
   let previous_identity = state.server_identity in
   let previous_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
   (match
-    Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
-      ~local_paths:state.local_workspace_paths reading
+    (match reading with
+     | Error _ when withdraw_on_error -> Workspace_identity_unread
+     | Ok _ | Error _ ->
+         Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
+           ~local_paths:state.local_workspace_paths reading)
   with
   | Workspace_identity_match_unconfirmed _ as unconfirmed ->
     state.workspace_identity <- unconfirmed;
@@ -21361,37 +21364,66 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Observer_session_ready session_id ->
       state.mcp_session <- Some session_id
   | Observer_opened { session_id; handshake } ->
-      state.mcp_session <- Some session_id;
-      (match state.workspace_identity with
-       | Workspace_identity_match ->
-           let scoped = handshake in
-           state.observer_scope_binding <- note_observer_scope state.observer_scope_binding scoped
-       | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
-       | Workspace_identity_mismatch _ -> ());
-      (match handshake with
-       | Some handshake ->
-           (match handshake.replay with
-            | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
-            | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
-           state.observer_replay <- Observer_replay_scoped handshake
-       | None ->
-           state.observer_cursor <- None;
-           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
-      record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
-      launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
-      request_schedule_agenda_revalidation state ~mailbox;
-      (* A change can land between the initial read and subscription, or
-         during a disconnected interval. Read under the current authority. *)
-      launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-      revalidate_visible_fusion state ~mailbox;
-      (* The feed announces changes only while it is open. Unless this
-         connection replays every event since the last applied one, the
-         visible surfaces read once more (RFC-0480 §3.3). *)
-      if not (Masc_tui_types.observer_replay_is_complete handshake) then
+      let scope_replaced =
+        match state.workspace_identity, state.observer_scope_binding with
+        | Workspace_identity_match, Observer_scope_bound previous ->
+            (match handshake with
+             | Some current -> not (String.equal previous current.Sse_wire.instance_id)
+             | None -> true)
+        | Workspace_identity_match, (Observer_scope_unbound | Observer_scope_retired)
+        | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+          | Workspace_identity_mismatch _), _ -> false
+      in
+      if scope_replaced then begin
+        (* A path-matching health response cannot distinguish a replacement
+           at that path. Retire its reads and in-flight refresh before asking
+           the successor to establish a new authority. *)
+        let detail = "Observer generation changed; rechecking workspace" in
+        state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
+        apply_server_identity_reading ~withdraw_on_error:true state ~mailbox (Error detail);
+        (* A path-only match cannot authorize automatic delivery of input
+           retained from the old generation. Keep it for explicit resume. *)
+        let retained = suspend_keeper_input state in
+        state.keeper_interactive_waiting <- retained.ski_waiting;
+        state.connection_status <- Degraded;
+        add_event state "observer" detail;
         start_http_refresh state ~host:server_peer_host ~port:state.port
           ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox
+      end else begin
+        state.mcp_session <- Some session_id;
+        (match state.workspace_identity with
+         | Workspace_identity_match ->
+             let scoped = handshake in
+             state.observer_scope_binding <- note_observer_scope state.observer_scope_binding scoped
+         | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+         | Workspace_identity_mismatch _ -> ());
+        (match handshake with
+         | Some handshake ->
+             (match handshake.replay with
+              | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
+              | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
+             state.observer_replay <- Observer_replay_scoped handshake
+         | None ->
+             state.observer_cursor <- None;
+             state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
+        record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
+        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+        request_schedule_agenda_revalidation state ~mailbox;
+        (* A change can land between the initial read and subscription, or
+           during a disconnected interval. Read under the current authority. *)
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+        revalidate_visible_fusion state ~mailbox
+        (* The feed announces changes only while it is open. Unless this
+           connection replays every event since the last applied one, the
+           visible surfaces read once more (RFC-0480 §3.3). *)
+        if not (Masc_tui_types.observer_replay_is_complete handshake) then
+          start_http_refresh state ~host:server_peer_host ~port:state.port
+            ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+            ~scoped_refresh_inflight:http_scoped_refresh_inflight
+            ~scoped_refresh_followup ~mailbox
+      end
   | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane

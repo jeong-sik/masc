@@ -45,6 +45,7 @@ class WaitingServer(FixtureServer):
         self.events: queue.Queue[tuple[int, str] | None] = queue.Queue()
         self.valid_admission = True
         self.invalid_schedule_query: dict[str, list[str]] | None = None
+        self.observer_instance = "waiting-fixture-instance"
 
 
 class WaitingHandler(FixtureHandler):
@@ -79,7 +80,7 @@ class WaitingHandler(FixtureHandler):
             ]:
                 self.respond(409, {"error": "workspace precondition failed"})
                 return
-            instance = "waiting-fixture-instance"
+            instance = server.observer_instance
             requested_id = self.headers.get("Last-Event-ID")
             requested_instance = self.headers.get("x-masc-sse-instance-id")
             if requested_id is None:
@@ -91,6 +92,7 @@ class WaitingHandler(FixtureHandler):
                 replay = "reset-unscoped-cursor"
             else:
                 replay = "reset-instance-changed"
+                server.record("observer-instance-changed")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("x-masc-sse-instance-id", instance)
@@ -236,6 +238,7 @@ class WaitingHandler(FixtureHandler):
                 "schedule-held": "obsolete-schedule",
                 "schedule-follow": "final-schedule",
                 "reconnect": "reconnected-waiting",
+                "restored-epoch": "replacement-waiting",
             }.get(phase, "old-waiting")
             beta_detail = {
                 "held": "beta-updated",

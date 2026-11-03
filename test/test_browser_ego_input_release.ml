@@ -118,8 +118,40 @@ let memory_persistence () =
   check bool "report shows the unknown lock time as null" true
     (member "heldAt" (member "pending" (Input.lock_report reopened)) = `Null)
 
+
+(* The operator form used to turn every refusal into the same "not applied"
+   text. A refused confirmation now carries why, and an applied one still works. *)
+let operator_view_keeps_the_reason () =
+  let module Operator = Browser_ego_operator in
+  let input = Input.create () in
+  let first = hold input ~command_id:"c1" ~now:100. in
+  ok (Input.not_started input ~generation:first.generation);
+  let second = hold input ~command_id:"c2" ~now:150. in
+  let connection : Operator.connection = {client_id = "client"; space = {Browser_lane.id = 3; name = "masc-keepers"};
+    recovery = {status = (fun () -> Input.status input); busy = (fun () -> Input.busy input);
+      assert_reset = (fun ~generation -> Input.assert_reset input ~generation ~now:160.);
+      space_observation = (fun () -> None);
+      space_presence = (fun () -> {Browser_ego_space_observation.space_id = 3; observed_at = 0.; state = Present})}} in
+  let request generation = `Assoc ["action", `String "assert_input_reset"; "arguments", `Assoc [
+    "clientId", `String "client"; "spaceId", `String "3"; "generation", `String generation;
+    "confirmation", `String "checked_and_reset"]] in
+  let stale = Operator.invoke (Some connection) (request first.generation) in
+  check string "a stale confirmation is reported as not applied" "not_applied" (string_of (member "outcome" stale));
+  let reason = string_of (member "reason" stale) in
+  check bool "the operator sees the requested generation" true (contains ~sub:first.generation reason);
+  check bool "the operator sees the current generation" true (contains ~sub:second.generation reason);
+  check bool "the message carries the reason too" true (contains ~sub:"사유" (string_of (member "message" stale)));
+  check string "still locked after the refused confirmation" "release_uncertain" (Input.provenance input);
+  let wrong_client = Operator.invoke (Some {connection with client_id = "other"}) (request second.generation) in
+  check bool "a client mismatch says so" true (contains ~sub:"client" (string_of (member "reason" wrong_client)));
+  let applied = Operator.invoke (Some connection) (request second.generation) in
+  check string "the current generation is applied" "operator_asserted" (string_of (member "outcome" applied));
+  check bool "no reason is attached to an applied confirmation" true
+    (match applied with `Assoc fields -> not (List.mem_assoc "reason" fields) | _ -> false)
+
 let () = run "Ego input keeper release" ["release",[
   test_case "keeper release unblocks the same peer" `Quick keeper_release_unblocks;
   test_case "overtaken generation is visible and recoverable" `Quick overtaken_generation_is_visible;
   test_case "operator and command-scope guards hold" `Quick guards_hold;
-  test_case "released state and legacy records persist" `Quick memory_persistence]]
+  test_case "released state and legacy records persist" `Quick memory_persistence;
+  test_case "operator view keeps the refusal reason" `Quick operator_view_keeps_the_reason]]

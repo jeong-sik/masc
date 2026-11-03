@@ -1296,6 +1296,12 @@ type keeper_calls_owed = {
   kclo_read : Masc_tui_owed_read.t;
 }
 
+(* The read the open Board post owes. *)
+type board_post_owed = {
+  bpo_post : string;
+  bpo_read : Masc_tui_owed_read.t;
+}
+
 type keeper_history_owed = {
   kho_keeper : string;
   kho_authority : workspace_authority;
@@ -10134,6 +10140,7 @@ type state = {
   mutable keeper_calls_loading: bool;
   mutable keeper_calls_refresh_pending: bool;
   mutable keeper_calls_owed: keeper_calls_owed option;
+  mutable board_post_owed: board_post_owed option;
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
@@ -14445,6 +14452,9 @@ let suspend_workspace_readings state =
   state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
   state.lane_addons_reading <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
+  (* The open post reads again when authority is recovered
+     ([resume_reads_after_authority_change]). *)
+  state.board_post_owed <- None;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
   state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
@@ -19480,6 +19490,7 @@ let create_state
   keeper_calls_loading = false;
   keeper_calls_refresh_pending = false;
   keeper_calls_owed = None;
+  board_post_owed = None;
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   keeper_logs = Masc_tui_fetched.initial;

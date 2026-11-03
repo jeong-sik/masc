@@ -17,6 +17,8 @@ val clear : 'a t -> 'a t
 val suspend : 'a t -> 'a t
 (** Retire an in-flight read without discarding the detail already shown. *)
 val is_ready : 'a t -> post_id:string -> bool
+val reading : 'a t -> post_id:string -> bool
+(** A read of [post_id] is in flight. *)
 val request_post_id : request -> string
 val same_request : request -> request -> bool
 val is_current : 'a t -> request -> bool

@@ -2021,9 +2021,12 @@ let test_a_declaration_names_its_callback () =
   expect_rejected ~why:"names a callback kind nobody defined" (with_callback {|"public"|});
   expect_rejected ~why:"gives the callback as a number" (with_callback "1")
 
-(* The ten providers measured on 2026-11-02 to refuse a public callback and
-   take the loopback one ship declaring it, and one measured to take the
-   public callback does not. *)
+(* The providers that name the loopback callback ship declaring it: the ten
+   measured on 2026-11-02 to refuse a public callback and take the loopback
+   one, and the ones whose authorize step goes to sign-in before it looks at
+   the redirect, where Atlassian and Datadog refused the public callback after
+   sign-in on 2026-11-03. One measured to take the public callback before
+   sign-in does not. *)
 let test_the_shipped_loopback_providers_declare_it () =
   let callback id =
     match Keeper_oauth_declarations.find id with
@@ -2036,8 +2039,11 @@ let test_the_shipped_loopback_providers_declare_it () =
     (fun id ->
       check Alcotest.bool (id ^ " names the loopback callback") true
         (callback id = Keeper_oauth_provider.Loopback_callback))
-    [ "asana"; "atlassian"; "canva"; "circleci"; "datadog"; "prismic"; "rudderstack"
-    ; "shortcut"; "square"; "storyblok"; "turso"; "vercel" ];
+    [ "airtable"; "algolia"; "apify"; "asana"; "atlassian"; "betterstack"; "braze"
+    ; "calendly"; "canva"; "circleci"; "datadog"; "flagsmith"; "incidentio"
+    ; "make"; "mintlify"; "mixpanel"; "monday"; "netlify"; "posthog"; "prisma"
+    ; "prismic"; "ramp"; "rootly"; "rudderstack"; "shortcut"; "square"
+    ; "storyblok"; "stripe"; "turso"; "upstash"; "vercel"; "webflow" ];
   check Alcotest.bool "linear keeps the server's callback" true
     (callback "linear" = Keeper_oauth_provider.Server_callback)
 

@@ -349,6 +349,14 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check bool "the successor completes freshness under a live observer" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Last_read);
+  let read, during_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Refresh state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  state.schedules_owed <-
+    Masc_tui_owed_read.changed (Masc_tui_owed_read.started Masc_tui_owed_read.settled);
+  Types.apply_schedule_agenda_read state (ticket during_change) (Ok (snapshot 7));
+  check bool "a read that answers while a change is owed leaves the agenda uncertain" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
+  state.schedules_owed <- Masc_tui_owed_read.settled;
   state.observer <- Types.Observer_closed_after_live
     { reason = "disconnected"; at = 1.; events = 0 };
   let read, disconnected = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in

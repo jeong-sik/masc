@@ -157,11 +157,11 @@ let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
   | Ok { Pool.status; body; _ } -> Ok (status, body)
   | Error e -> Error e
 
-let delete_sync ?clock ?timeout_sec ~url ~headers () =
+let delete_sync ?clock ?timeout_sec ?body ~url ~headers () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
-          ~method_:`DELETE ~url ~headers () with
+          ~method_:`DELETE ~url ?body ~headers () with
   | Ok { Pool.status; body; _ } -> Ok (status, body)
   | Error e -> Error e
 

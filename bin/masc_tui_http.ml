@@ -464,6 +464,7 @@ module Masc_http_client : sig
   val delete_sync :
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?timeout_sec:float ->
+    ?body:string ->
     url:string ->
     headers:(string * string) list ->
     unit ->
@@ -521,9 +522,9 @@ end = struct
     on_io_domain (fun () ->
       Masc_http_client.patch_sync ?clock ?timeout_sec ~url ~headers ~body ())
 
-  let delete_sync ?clock ?timeout_sec ~url ~headers () =
+  let delete_sync ?clock ?timeout_sec ?body ~url ~headers () =
     on_io_domain (fun () ->
-      Masc_http_client.delete_sync ?clock ?timeout_sec ~url ~headers ())
+      Masc_http_client.delete_sync ?clock ?timeout_sec ?body ~url ~headers ())
 
   let post_stream = Masc_http_client.post_stream
   let get_stream = Masc_http_client.get_stream
@@ -825,12 +826,12 @@ let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : s
   http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
   |> mutation_outcome
 
-let http_delete ~(host : string) ~(port : int) ~(path : string) =
+let http_delete ?(body = None) ~(host : string) ~(port : int) ~(path : string) () =
   let url = url_of ~host ~port ~path in
   timed ~verb:"DELETE" ~path @@ fun () ->
   with_credential_refresh @@ fun () ->
   match Masc_http_client.delete_sync ?clock:(request_clock ())
-          ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) () with
+          ~timeout_sec:(request_timeout_sec ()) ?body ~url ~headers:(auth_headers ()) () with
   | Ok answer -> Ok answer
   | Error detail ->
       Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
@@ -873,6 +874,7 @@ let revoke_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name
       ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name
         ^ "?expected_base_path=" ^ percent_encode_query_value expected_base_path
         ^ "&expected_masc_root=" ^ percent_encode_query_value expected_masc_root)
+      ()
   in
   match response with
   | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->
@@ -4044,6 +4046,19 @@ let post_skill_editor_save ~host ~port ~reference ~source_text =
          && Skill_reference.equal_content_revision receipt.ses_reference.content_revision
               (Skill_reference.content_revision_of_source_text source_text) -> Ok receipt
      | Ok _ -> Error (Skill_write_unconfirmed "Save receipt does not match the submitted identity and bytes"))
+;;
+
+let delete_skill_editor ~host ~port ~reference =
+  match
+    http_delete ~body:(Some (skill_editor_delete_body reference))
+      ~host ~port ~path:"/api/v1/skills/editor" ()
+    |> mutation_outcome
+  with
+  | Post_refused detail -> Error (Skill_write_refused detail)
+  | Post_unanswered detail -> Error (Skill_write_unconfirmed detail)
+  | Post_answered json ->
+    decode_skill_editor_delete_receipt ~reference json
+    |> Result.map_error (fun detail -> Skill_write_unconfirmed detail)
 ;;
 
 let fetch_skill_editor_sources ~host ~port =

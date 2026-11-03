@@ -743,6 +743,54 @@ let read_file path =
     (fun () -> really_input_string channel (in_channel_length channel))
 ;;
 
+(* The TUI's delete request carries the exact reference and its own
+   confirmation, and the receipt readback refuses a response that names any
+   other reference: a mismatch is a protocol break, not a deletion. *)
+let test_tui_delete_wire_pins_reference_and_reads_receipt () =
+  with_workspace @@ fun base_path ->
+  let _, _, reference, refresh = setup base_path ~access:"read-write" in
+  let open Masc_tui_editor_wire in
+  (match Yojson.Safe.from_string (skill_editor_delete_body reference) with
+   | `Assoc fields ->
+     (match List.assoc_opt "reference" fields, List.assoc_opt "confirmed" fields with
+      | Some reference_json, Some (`Bool true) ->
+        (match Skill_reference.of_yojson reference_json with
+         | Ok decoded ->
+           check bool "delete body pins the exact reference" true
+             (Skill_reference.equal reference decoded)
+         | Error _ -> fail "delete body reference is invalid")
+      | _ -> fail "delete body is not the exact reference with confirmed=true")
+   | _ -> fail "delete body is not an object");
+  let outcome =
+    match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+    | Ok outcome -> outcome
+    | Error error -> fail (Editor.error_to_string error)
+  in
+  (match decode_skill_editor_delete_receipt ~reference (Editor.delete_outcome_to_yojson outcome) with
+   | Ok receipt ->
+     check bool "TUI reads the deleted reference" true
+       (Skill_reference.equal reference receipt.sed_reference);
+     check bool "TUI reads a non-empty recovery id" true
+       (String.length receipt.sed_recovery_id > 0);
+     (match receipt.sed_status with
+      | Skill_deleted_and_published -> ()
+      | Skill_deleted_but_unpublished _ -> fail "delete was published but read as unpublished")
+   | Error detail -> fail detail);
+  let other_revision =
+    match Skill_reference.content_revision_of_string (String.make 64 '0') with
+    | Ok revision ->
+      Skill_reference.make ~identity:reference.Skill_reference.identity ~content_revision:revision
+    | Error (Skill_reference.Invalid_revision_length { actual }) ->
+      fail (Printf.sprintf "zero revision rejected by length %d" actual)
+    | Error (Skill_reference.Invalid_revision_character { index; found }) ->
+      fail (Printf.sprintf "zero revision rejected at %d by %C" index found)
+  in
+  check bool "receipt naming another reference is refused" true
+    (Result.is_error
+       (decode_skill_editor_delete_receipt ~reference:other_revision
+          (Editor.delete_outcome_to_yojson outcome)))
+;;
+
 let test_delete_exact_reference_and_publish () =
   with_workspace @@ fun base_path ->
   let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
@@ -1484,6 +1532,8 @@ let () =
             test_missing_writable_source_is_discoverable_without_initializing_it
         ; test_case "create behind an earlier source names the winner" `Quick
             test_create_behind_an_earlier_source_names_the_winner
+        ; test_case "TUI delete wire pins reference and reads receipt" `Quick
+            test_tui_delete_wire_pins_reference_and_reads_receipt
         ; test_case "delete exact reference and publish" `Quick
             test_delete_exact_reference_and_publish
         ; test_case "delete removes the empty package and the id is reusable" `Quick

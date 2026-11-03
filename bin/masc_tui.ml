@@ -28211,6 +28211,58 @@ Use relative paths for resources already held in the package. -->
                         report_action state "error"
                           (name ^ " was saved but NOT published: " ^ reason)))))))
   in
+  (* Deleting a Skill is the editor DELETE route, which no $EDITOR roundtrip
+     covers: the first [d] arms the selected identity, and only a second [d]
+     on the same row sends the delete. The read that precedes the write is
+     what the edit flow does too -- it yields the fresh exact reference the
+     server's revision CAS demands and refuses read-only sources up front. *)
+  let handle_skill_delete () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
+    match selected_tools_skill_profile state with
+    | None -> report_action state "error" "no published Skill selected"
+    | Some profile ->
+      let name = profile.Masc.Tui_decode_tools.esp_name in
+      let identity = profile.Masc.Tui_decode_tools.esp_reference.Skill_reference.identity in
+      let host = server_peer_host in
+      let port = state.port in
+      if state.tools_skill_delete_armed <> Some identity then begin
+        state.tools_skill_delete_armed <- Some identity;
+        report_action state "system"
+          (Printf.sprintf "press d again to delete %s" name)
+      end
+      else begin
+        state.tools_skill_delete_armed <- None;
+        match
+          Result.bind (check ()) (fun () ->
+            Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference)
+        with
+        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
+        | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
+          report_action state "error" (name ^ " belongs to a read-only Skill source")
+        | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
+          (match
+             Result.bind (Result.map_error
+               (fun detail -> Masc_tui_http.Skill_write_refused ("Delete not sent: " ^ detail))
+               (check ())) (fun () ->
+               Masc_tui_http.delete_skill_editor ~host ~port ~reference:loaded.sel_reference)
+           with
+           | Error (Masc_tui_http.Skill_write_refused detail) ->
+             report_action state "error" (Terminal_text.single_line ("Skill delete refused: " ^ detail))
+           | Error (Skill_write_unconfirmed detail) ->
+             report_action state "error" (Terminal_text.single_line
+               ("Skill delete effect not confirmed; read the current package before retrying: " ^ detail))
+           | Ok receipt ->
+             (match receipt.Masc_tui_http.sed_status with
+              | Masc_tui_http.Skill_deleted_and_published ->
+                report_action state "system"
+                  (Printf.sprintf "%s deleted + published · recovery %s"
+                     name receipt.Masc_tui_http.sed_recovery_id);
+                launch_tools_load state ~mailbox:async_messages
+              | Masc_tui_http.Skill_deleted_but_unpublished reason ->
+                report_action state "error"
+                  (name ^ " was deleted but NOT published: " ^ reason)))
+      end
+  in
   (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
      actually gets, and the server persists what comes back. The effective
      text is the stem rather than the file's, because an overridden prompt is
@@ -30654,6 +30706,9 @@ Use relative paths for resources already held in the package. -->
          Config arm below. A delete cannot be put back, so the first input
          seen anywhere else ends the arm. *)
       if state.view <> Config && input_seen then state.preset_armed <- None;
+      (* Same rule for the Skills list: a surface change with no key, such as
+         a dispatched task opening its view, must not keep a delete armed. *)
+      if state.view <> Tools && input_seen then state.tools_skill_delete_armed <- None;
       (match state.view with
        | Approvals ->
            if cancelled [ "y"; "Y"; "n"; "N" ] then
@@ -30716,9 +30771,13 @@ Use relative paths for resources already held in the package. -->
                 then state.preset_armed <- None)
        | Runtime ->
            if cancelled [ "D" ] then state.runtime_lane_remove_armed <- None
+       | Tools ->
+           (* A Skill deletion arm ends the same way every armed destructive
+              action here does: any input that is not its own second press. *)
+           if cancelled [ "d"; "D" ] then state.tools_skill_delete_armed <- None
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
        | Repositories
-       | Changes | Connectors | Resources | Tools
+       | Changes | Connectors | Resources
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
@@ -34675,6 +34734,8 @@ Use relative paths for resources already held in the package. -->
                 handle_skill_evidence ())
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
+       | Some "d" when state.view = Tools && state.tools_pane <> Tools_async ->
+           handle_skill_delete ()
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->
            if Option.is_some state.tools_async_selection then begin
              state.tools_async_detail_open <- true;

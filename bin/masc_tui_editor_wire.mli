@@ -36,6 +36,16 @@ type skill_editor_write_error =
   | Skill_write_refused of string
   | Skill_write_unconfirmed of string
 
+type skill_editor_delete_status =
+  | Skill_deleted_and_published
+  | Skill_deleted_but_unpublished of string
+
+type skill_editor_delete_receipt =
+  { sed_status : skill_editor_delete_status
+  ; sed_reference : Skill_reference.t
+  ; sed_recovery_id : string
+  }
+
 val runtime_config_text_revision : string -> string
 val runtime_config_conflict_document : string -> (Masc_tui_runtime_config_edit.document, string) result
 val skill_editor_body : Skill_reference.t -> string option -> string
@@ -43,3 +53,5 @@ val decode_skill_editor_loaded : Yojson.Safe.t -> (skill_editor_loaded, string) 
 val decode_skill_editor_save_receipt : Yojson.Safe.t -> (skill_editor_save_receipt, string) result
 val skill_editor_create_body : composition:bool -> source_id:string -> package_id:string -> source_text:string -> string
 val decode_skill_editor_create_receipt : source_id:string -> package_id:string -> source_text:string -> Yojson.Safe.t -> (skill_editor_create_receipt, string) result
+val skill_editor_delete_body : Skill_reference.t -> string
+val decode_skill_editor_delete_receipt : reference:Skill_reference.t -> Yojson.Safe.t -> (skill_editor_delete_receipt, string) result

@@ -53,6 +53,16 @@ type skill_editor_write_error =
   | Skill_write_refused of string
   | Skill_write_unconfirmed of string
 
+type skill_editor_delete_status =
+  | Skill_deleted_and_published
+  | Skill_deleted_but_unpublished of string
+
+type skill_editor_delete_receipt =
+  { sed_status : skill_editor_delete_status
+  ; sed_reference : Skill_reference.t
+  ; sed_recovery_id : string
+  }
+
 let skill_editor_create_body ~composition ~source_id ~package_id ~source_text =
   Yojson.Safe.to_string (`Assoc
     [ "kind", `String (if composition then "composition" else "instruction")
@@ -132,6 +142,39 @@ let decode_skill_editor_loaded = function
        Ok { sel_reference; sel_source_text = source_text; sel_access }
      | _ -> Error "Skill editor read response is incomplete")
   | _ -> Error "Skill editor read response must be an object"
+;;
+
+let skill_editor_delete_body reference =
+  Yojson.Safe.to_string
+    (`Assoc [ "reference", Skill_reference.to_yojson reference; "confirmed", `Bool true ])
+;;
+
+let decode_skill_editor_delete_receipt ~reference = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    (* The delete receipt carries its exact reference at the top level; only
+       the preview-bearing routes fold it under preview.profile. *)
+    let* sed_reference = match List.assoc_opt "reference" fields with
+      | Some json ->
+        Skill_reference.of_yojson json
+        |> Result.map_error (fun _ -> "Skill delete receipt has an invalid exact reference")
+      | None -> Error "Skill delete receipt has no reference" in
+    let* () =
+      if Skill_reference.equal reference sed_reference
+      then Ok () else Error "Skill delete receipt does not match the submitted exact reference" in
+    let* sed_recovery_id = match List.assoc_opt "recovery_id" fields with
+      | Some (`String recovery_id) when recovery_id <> "" -> Ok recovery_id
+      | Some _ | None -> Error "Skill delete receipt has no recovery id" in
+    let* sed_status = match List.assoc_opt "status" fields with
+      | Some (`String "deleted_and_published") -> Ok Skill_deleted_and_published
+      | Some (`String "deleted_but_unpublished") ->
+        (match List.assoc_opt "reason" fields with
+         | Some (`String reason) -> Ok (Skill_deleted_but_unpublished reason)
+         | _ -> Error "Unpublished delete receipt has no reason")
+      | Some (`String unknown) -> Error ("unknown Skill delete status: " ^ unknown)
+      | Some _ | None -> Error "Skill delete status is missing" in
+    Ok { sed_status; sed_reference; sed_recovery_id }
+  | _ -> Error "Skill delete response must be an object"
 ;;
 
 let decode_skill_editor_save_receipt = function

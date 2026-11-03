@@ -48,7 +48,8 @@ package, `evidence`를 담은 `skill_write` 행을 시도한다.
 예외·취소·프로세스 중단 뒤 감사 행이 없을 수 있다. 감사 상태와 별도로 반환된
 발행 상태와 정확한 참조를 확인한다. `evidence`의 참 여부는 판정하지 않는다.
 HTTP 편집기 응답은 감사 상태를 전달하지 않는다.
-삭제는 운영자의 편집기 DELETE 경로로 한다.
+삭제는 운영자의 편집기 DELETE 경로로 하며, TUI Tools 화면의 `d` 두 번 누름이
+같은 경로를 호출한다.
 
 Keeper가 composition을 저장하는 `keeper_compose_save`는
 [writes-own-compositions](rfc/RFC-keeper-writes-own-compositions.md)의 제안이며

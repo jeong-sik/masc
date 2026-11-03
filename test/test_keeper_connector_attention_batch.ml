@@ -805,6 +805,8 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
 ;;
 
 let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
   with_ctx "connector-missing-prefix" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let messages = List.init 3 (fun index ->
       connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"same-channel"
@@ -861,12 +863,18 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
     check (list string) "unrelated completion retains all missing pointers"
       (List.map (fun (source : Q.stimulus) -> source.post_id) (messages @ [later])) (pending_ids ());
     Fs_compat.save_file path (original ^ Fs_compat.load_file path);
-    let restored = intake () in
-    check (list string) "restored prefix delivers in one turn"
-      ["recoverable 0"; "recoverable 1"; "recoverable 2"]
+    let first = intake () in
+    check (list string) "restored prefix delivers within the admission bound"
+      ["recoverable 0"; "recoverable 1"]
       (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
-         restored.pending_board_events);
-    complete restored.source_batch;
+         first.pending_board_events);
+    complete first.source_batch;
+    let last = intake () in
+    check (list string) "remaining restored body is delivered"
+      ["recoverable 2"]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
+         last.pending_board_events);
+    complete last.source_batch;
     check (list string) "another conversation was not mixed with restored messages"
       [later.post_id] (pending_ids ());
     let separate = intake () in
@@ -881,6 +889,8 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
 (* A shared store failure needs one diagnostic, regardless of backlog size.
    The independent source behind that backlog must still reach the next turn. *)
 let test_failed_connector_batch_skips_shared_store_without_starving_other_work () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
   with_ctx "connector-failed-backlog" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let messages = List.init 5 (fun index ->
       connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"failed-batch"
@@ -1293,6 +1303,8 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
 ;;
 
 let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
   with_ctx "checkpoint-conversation-rotation" (fun ~base_path ~keeper_name ~meta ~ctx ->
     (match Keeper_owner_registry.install_from_store
         ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
@@ -1309,21 +1321,21 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
     let a1 = make "conversation-A" "a1" 1.
     and a2 = make "conversation-A" "a2" 2.
     and a3 = make "conversation-A" "a3" 3. in
-    List.iter (enqueue_exn ~base_path keeper_name) [a1;a2];
+    List.iter (enqueue_exn ~base_path keeper_name) [a1;a2;a3];
     let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
       ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     let module Batch = Keeper_heartbeat_source_batch in
     let original = (intake ()).source_batch in
     let ids selections = List.map (fun (s : Keeper_event_queue_state.pending_selection) ->
       s.source.post_id) selections in
-    check (list string) "intake admits A in FIFO order"
+    check (list string) "bounded intake admits A's prefix in FIFO order"
       [a1.post_id;a2.post_id] (ids (Batch.selections original));
     let scope = Keeper_chat_operation.Operation_id.of_string "original-A-consumer"
       |> require |> Keeper_execution_scope_id.direct_operation in
     let admitted = Keeper_event_queue_persistence.bind_pending_repetition_scope_result
       ~base_path ~keeper_name ~selections:(Batch.selections original) ~scope () |> require in
     let b1 = make "conversation-B" "b1" 4. in
-    List.iter (enqueue_exn ~base_path keeper_name) [a3;b1];
+    enqueue_exn ~base_path keeper_name b1;
     let pending () =
       Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
       Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name |> require in
@@ -1359,8 +1371,11 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
         ~base_path keeper_name ~applied_at:10. ~selection |> require |> ignore) selections in
     complete selected_b;
     let resumed_a = (intake ()).source_batch |> Batch.selections in
-    check (list string) "A resumes as a whole conversation after B completes"
-      [a1.post_id;a2.post_id;a3.post_id] (ids resumed_a))
+    check (list string) "A resumes its original prefix after B completes"
+      [a1.post_id;a2.post_id] (ids resumed_a);
+    complete resumed_a;
+    check (list string) "A's original unadmitted suffix remains next"
+      [a3.post_id] (ids ((intake ()).source_batch |> Batch.selections)))
 ;;
 
 let test_stale_connector_member_preserves_fifo_and_independent_progress () =

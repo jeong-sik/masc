@@ -101,10 +101,23 @@ type sleep_outcome =
                   update; the caller should dispatch the next cycle. *)
   | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
 
+(** Whether a wakeup may end the sleep before its duration elapses.
+    [Interrupt_on_wakeup] is the heartbeat default. Under
+    [Serve_wakeup_after_duration] a wakeup raised during the sleep is consumed
+    when the duration ends, so the tick happens once per signal, only later;
+    [stop] ends either policy at once. Used for the provider backoff after a
+    rate-limited or exhausted turn, where waking sooner only re-runs the same
+    failing call (#34653). *)
+type wake_policy =
+  | Interrupt_on_wakeup
+  | Serve_wakeup_after_duration
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
   ?cadence_sleeping:bool Atomic.t ->
+  ?wake_policy:wake_policy ->
+  ?interrupt_when:(unit -> bool) ->
   clock:'a Eio.Time.clock ->
   stop:bool Atomic.t ->
   wakeup:bool Atomic.t ->
@@ -114,7 +127,10 @@ val interruptible_sleep :
     A runtime cadence decrease consumes it with CAS, avoiding a queued wake
     during active cycle setup and closing both the duration-resolution and
     timeout-edge races. [duration] is resolved only after the handshake is
-    visible. [stop] has precedence. *)
+    visible. [interrupt_when], when supplied, revalidates the dependency of
+    the wait at each existing sleep boundary. A true result returns [Woken]
+    even under [Serve_wakeup_after_duration]; ordinary stimulus/cadence hints
+    still cannot interrupt that policy. [stop] has precedence. *)
 
 (** Wake up a specific keeper immediately.
 

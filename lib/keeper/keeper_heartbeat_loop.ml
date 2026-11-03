@@ -161,12 +161,21 @@ let owner_turn_rejection_cycle_status
       | Keeper_owner.Owner_closed ) -> Turn_cycle_crashed
 ;;
 
-(* What a failed cycle leaves the next one (RFC-provider-path-rest).
+(* What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
+   belongs to the path that received the rate limit or quota answer, so the
+   keeper waits only while the path it would send next rests.
    [Continue_on_deferred_lane]: the walk head of the deferred suffix is not
-   resting, and a pending input runs on it without a sleep. Any other failure
-   keeps the ordinary cadence. *)
+   resting, and a pending input runs on it without a sleep.
+   [Wait_for_path_release]: the sleep lasts until [release_at]; [waiting_on]
+   names the runtime or assignment whose release that is. A wakeup does not
+   cut the wait short (#34653). *)
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
+  | Wait_for_path_release of
+      { release_at : float
+      ; waiting_on : string
+      ; basis : Keeper_turn_driver.wait_basis
+      }
 
 type keepalive_turn_outcome = {
   meta : keeper_meta;
@@ -371,10 +380,35 @@ let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failur
   | None -> None
   | Some (Keeper_turn_driver.Dispatch_now { runtime_id }) ->
     Some (Continue_on_deferred_lane { next_runtime_id = runtime_id })
-  | Some (Keeper_turn_driver.Wait_until _) -> None
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on; basis }) ->
+    Some (Wait_for_path_release { release_at; waiting_on; basis })
 ;;
 
 exception Event_queue_cycle_failed of string
+
+(* A provider wait belongs to the dispatch that failed. The runtime snapshot
+   includes same-named lane/binding edits, not only the assignment label.
+   A fresh success can also release an observed path without a config edit.
+   Route-only waits with no stored rest retain their original deadline. *)
+let provider_wait_interrupt
+      ~keeper_name ~dispatch_snapshot ~assignment_id ~deferred_runtime_lane ~basis =
+  let walk_rest ~now =
+    match deferred_runtime_lane with
+    | Some lane -> Keeper_turn_driver.deferred_lane_rest ~now lane
+    | None -> Keeper_turn_driver.assignment_walk_rest ~now assignment_id
+  in
+  fun ~now ->
+    not
+      (Runtime.same_keeper_dispatch dispatch_snapshot
+         (Runtime.keeper_dispatch_snapshot ~keeper_name))
+    || (match basis with
+        | Keeper_turn_driver.Failure_response -> false
+        | Keeper_turn_driver.Observed_path_rest ->
+          match walk_rest ~now with
+          | Keeper_turn_driver.Walk_head_serving _ -> true
+          | Keeper_turn_driver.Walk_waits_until _ -> false)
+;;
+
 
 (* Which stimuli own a turn-entry reaction. Both halves of the turn read this
    one predicate: a finish row for a stimulus that never wrote a start row would
@@ -797,12 +831,14 @@ let pending_stimulus_remains ~ctx ~keeper_name =
 ;;
 
 (* A serving deferred suffix is the failed turn's unfinished input. It does
-   not need a second Event Queue row to authorize the next cycle. Ordinary
-   cadence keeps the acknowledged-pending-stimulus rule. *)
+   not need a second Event Queue row to authorize the next cycle. Path waits
+   and ordinary cadence keep the existing acknowledged-pending-stimulus rule;
+   in particular this does not let a wake cut short #34653's resting-path
+   wait. *)
 let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
   match after_failure with
   | Some (Continue_on_deferred_lane _) -> true
-  | None ->
+  | Some (Wait_for_path_release _) | None ->
     stimuli_acked && pending_stimulus ()
 ;;
 
@@ -1803,9 +1839,15 @@ let run_heartbeat_loop
            cycle keeps the cadence so a turn that made no progress is not
            re-run back to back.
 
-           A failed cycle whose input was deferred to a path that is not
-           resting runs on it at once; any other failed cycle keeps the
-           cadence. *)
+           A failed cycle follows [turn_outcome.after_failure]
+           (RFC-provider-path-rest). When the driver deferred the input to a
+           path that is not resting, a pending input runs on it at once: the
+           next turn is that path, not the same turn again. When the path the
+           input goes to next rests, the sleep lasts until its release, and a
+           rate limit or quota wait is not cut short by a stimulus: every wake
+           that cut it short re-ran the same refused call (183 failed turns in
+           41 minutes, 2026-09-09, #34653). The queue keeps the stimulus; the
+           wakeup is consumed when the wait ends. *)
         periodic_cadence :=
           periodic_cadence_after_cycle
             ~periodic_due
@@ -1819,12 +1861,53 @@ let run_heartbeat_loop
               the next cycle takes it without waiting"
              m.name
              next_runtime_id
+         | Some (Wait_for_path_release { release_at; waiting_on; basis = _ }) ->
+           Log.Keeper.warn
+             ~keeper_name:m.name
+             "%s: the next dispatch waits %.0fs for %s to be released at %.0f; \
+              stimuli queued meanwhile are served when it ends"
+             m.name
+             (Float.max 0.0 (release_at -. Time_compat.now ()))
+             waiting_on
+             release_at
          | None -> ());
+        let wake_policy =
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release _) ->
+            Keeper_keepalive_signal.Serve_wakeup_after_duration
+          | Some (Continue_on_deferred_lane _) | None ->
+            Keeper_keepalive_signal.Interrupt_on_wakeup
+        in
+        let interrupt_when =
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release { basis; release_at = _; waiting_on = _ }) ->
+            let assignment_id = Keeper_meta_contract.runtime_id_of_meta turn_outcome.meta in
+            let deferred_runtime_lane =
+              Deferred_lane_slot.for_assignment deferred_runtime_lane_slot ~assignment_id
+            in
+            let invalidated =
+              provider_wait_interrupt ~keeper_name:m.name ~dispatch_snapshot
+                ~assignment_id ~deferred_runtime_lane ~basis
+            in
+            (fun () -> invalidated ~now:(Time_compat.now ()))
+          | Some (Continue_on_deferred_lane _) | None -> (fun () -> false)
+        in
+        (* The cadence handshake stays offered while a path rests: it is also
+           how [Keeper_status_runtime.keeper_metric_producer_active] knows a
+           failing lane is in its legitimate sleep, and withholding it (#34670)
+           marked the keeper's metric source stale once a wait outlived the
+           freshness SLO. A cadence change taken during a wait is honoured
+           when the wait ends; the producer is told its signal was taken,
+           which is true, only later than the outcome vocabulary can say. *)
         let sleep_duration () =
-          Keeper_keepalive_signal.periodic_remaining
-            ~now:(cadence_now ())
-            ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
-            !periodic_cadence
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release { release_at; waiting_on = _; basis = _ }) ->
+            Float.max 0.0 (release_at -. Time_compat.now ())
+          | Some (Continue_on_deferred_lane _) | None ->
+            Keeper_keepalive_signal.periodic_remaining
+              ~now:(cadence_now ())
+              ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+              !periodic_cadence
         in
         let next_cycle_now =
           next_cycle_starts_now
@@ -1839,6 +1922,8 @@ let run_heartbeat_loop
            else
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
+               ~wake_policy
+               ~interrupt_when
                ~clock:ctx.clock
                ~stop
                ~wakeup
@@ -1856,6 +1941,7 @@ module For_testing = struct
   let record_replay_owned_turn_started_reactions =
     record_replay_owned_turn_started_reactions
 
+  let provider_wait_interrupt = provider_wait_interrupt
   let retain_checkpoint_continuations = retain_checkpoint_continuations
   let checkpoint_source_may_ack = checkpoint_source_may_ack
   type deferred_lane_slot = Deferred_lane_slot.t

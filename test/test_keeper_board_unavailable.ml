@@ -15,7 +15,8 @@
       created) does not raise, is reported as [Error unavailable] naming the
       missing post, and the stimulus-intake layer consumes it without
       crashing — stable across a second pass.
-   2. a missing post does not block a readable source.
+   2. a source that renders no observation still spends an admission slot,
+      and a missing post does not.
    3. a queued comment keeps its own author and body after later replies.
    4. Board replay routes exact replies instead of historical participation. *)
 
@@ -246,9 +247,13 @@ let test_poison_durable_source_is_retired_during_intake () =
     (Keeper_event_queue.length queued)
 ;;
 
-(* Actual Board and durable queue stores. These cases do not run a provider or
-   claim that a full Keeper turn completed. *)
-let with_intake_sources f =
+(* Actual Board and durable queue stores. The configured admission limit bounds
+   the sources carried by one turn; these cases do not run a provider or claim
+   that a full Keeper turn completed. *)
+let with_intake_sources ~max_events f =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+    (Some (string_of_int max_events))
+  @@ fun () ->
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -319,8 +324,22 @@ let admitted_ids intake =
   |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
 ;;
 
-let test_permanent_absence_does_not_block_a_readable_source () =
-  with_intake_sources @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+let test_empty_observation_source_still_spends_an_admission_slot () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ~ack:_ ->
+  let bootstrap =
+    { (poison_board_signal_stimulus ()) with
+      post_id = "bootstrap-limit"; payload = Keeper_event_queue.Bootstrap }
+  in
+  seed bootstrap;
+  let (_ : string) = seed_board "must not join the Bootstrap turn at limit1" in
+  let selected = intake () in
+  check (list string) "Bootstrap is admitted despite producing no Board observation"
+    [ bootstrap.post_id ] (admitted_ids selected);
+  check int "the later source was not rendered" 0 (List.length selected.pending_board_events)
+;;
+
+let test_permanent_absence_does_not_spend_an_admission_slot () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
   seed (poison_board_signal_stimulus ());
   let readable = seed_board "readable source after permanently absent post" in
   let selected = intake () in
@@ -330,7 +349,7 @@ let test_permanent_absence_does_not_block_a_readable_source () =
 ;;
 
 let test_unavailable_posts_source_retains_the_exact_durable_selection () =
-  with_intake_sources @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
   let post_id = seed_board "retain this queued source" in
   let original = match pending () with
     | [selection] -> selection | _ -> fail "expected one queued Board source" in
@@ -372,7 +391,7 @@ let test_unavailable_posts_source_retains_the_exact_durable_selection () =
    selection must survive even if the post later disappears, without blocking
    a readable sibling or inventing a recipient from the current post. *)
 let test_unpinned_board_source_is_retained_without_blocking_siblings () =
-  with_intake_sources @@ fun ~seed ~seed_board ~intake ~pending ~ack ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack ->
   let legacy_id = seed_board "legacy audience was not recorded" in
   let pinned = match pending () with
     | [ selection ] -> selection
@@ -451,7 +470,7 @@ let prepare_intake_rejection () =
 ;;
 
 let test_delivered_rejection_remains_current_at_intake () =
-  with_intake_sources @@ fun ~seed ~seed_board:_ ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board:_ ~intake ~pending ~ack:_ ->
   let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
@@ -464,7 +483,7 @@ let test_delivered_rejection_remains_current_at_intake () =
 ;;
 
 let test_superseded_rejection_is_retired_before_projection () =
-  with_intake_sources @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
   let config,task_id,_verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   ignore (rejection_workspace_ok (Workspace.transition_task_r config
@@ -480,7 +499,7 @@ let test_superseded_rejection_is_retired_before_projection () =
   let before = rejection_ok (Workspace_backlog.read_backlog_r config) in
   let readable = seed_board "independent work after superseded rejection" in
   let selected = intake () in
-  check (list string) "obsolete rejection is not admitted" [readable] (admitted_ids selected);
+  check (list string) "obsolete rejection spends no admission slot" [readable] (admitted_ids selected);
   check int "obsolete rejection has no turn trigger" 0 (List.length selected.event_queue_triggers);
   check int "only independent work remains queued" 1 (List.length (pending ()));
   let after = rejection_ok (Workspace_backlog.read_backlog_r config) in
@@ -489,7 +508,7 @@ let test_superseded_rejection_is_retired_before_projection () =
 
 let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
   List.iter (fun malformed ->
-    with_intake_sources @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
     let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
     seed stimulus;
     rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
@@ -513,7 +532,7 @@ let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
 ;;
 
 let test_unread_rejection_authority_retains_source_and_allows_siblings () =
-  with_intake_sources @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
   let config,_task_id,_verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   let readable = seed_board "independent work after unread rejection authority" in
@@ -922,8 +941,10 @@ let () =
             test_poison_durable_source_is_retired_during_intake
         ] )
     ; ( "admission"
-      , [ test_case "a missing post does not block a readable source" `Quick
-            test_permanent_absence_does_not_block_a_readable_source
+      , [ test_case "an empty-observation source still spends an admission slot" `Quick
+            test_empty_observation_source_still_spends_an_admission_slot
+        ; test_case "permanent absence does not spend an admission slot" `Quick
+            test_permanent_absence_does_not_spend_an_admission_slot
         ; test_case "unavailable posts retain the exact durable selection" `Quick
             test_unavailable_posts_source_retains_the_exact_durable_selection
         ; test_case "unpinned Board source survives post removal without blocking siblings" `Quick

@@ -73,10 +73,38 @@ let show_after_failure = function
   | None -> "cadence"
   | Some (Loop.Continue_on_deferred_lane { next_runtime_id }) ->
     Printf.sprintf "continue on %s" next_runtime_id
+  | Some (Loop.Wait_for_path_release { release_at; waiting_on; basis = _ }) ->
+    Printf.sprintf "wait for %s until %.1f" waiting_on release_at
 ;;
 
 let check_decision label expected actual =
   check string label (show_after_failure expected) (show_after_failure actual)
+;;
+
+let wait ~after =
+  Some (Loop.Wait_for_path_release
+    { release_at = now +. after; waiting_on = "lane-a"; basis = Masc.Keeper_turn_driver.Failure_response })
+;;
+
+(* #34653: with no other path for the input, a rate limit or quota waits for
+   the failed path's own rest and a wakeup does not cut that wait short
+   (pinned in test_keeper_keepalive_helpers).
+   The rest is the provider's answer: a stated 5 s waits 5 s, not a cadence. *)
+let test_a_refusal_without_a_suffix_waits_for_the_failed_path () =
+  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
+  check_decision "a rate limit stating 5 s"
+    (wait ~after:5.0)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 5.0 }));
+  check_decision "a rate limit stating nothing"
+    (wait ~after:floor_sec)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None }));
+  check_decision "a stated reset beyond the fallback cap"
+    (wait ~after:4470.0)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 4470.0 }));
+  check_decision "a hard quota stating nothing"
+    (wait ~after:cap_sec)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None }))
 ;;
 
 (* #36583: the driver deferred the input to a path that is not resting, so the
@@ -99,11 +127,7 @@ let test_a_suffix_on_a_serving_path_continues_without_waiting () =
 let test_other_failures_without_a_suffix_keep_the_cadence () =
   List.iter
     (fun (label, route) -> check_decision label None (decide route))
-    [ ( "a rate limit stating 5 s"
-      , KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 5.0 } )
-    ; ( "a hard quota stating nothing"
-      , KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None } )
-    ; ( "network transient"
+    [ ( "network transient"
       , KFR.Retry_after_observed
           { retry_class = KFR.Network_transient; retry_after = None } )
     ; ( "empty completion"
@@ -124,11 +148,20 @@ let test_other_failures_without_a_suffix_keep_the_cadence () =
 ;;
 
 (* #36583: the deferred suffix is the unfinished turn. It starts the next
-   cycle even when no second Event Queue stimulus exists. Ordinary cadence
-   retains the acknowledged-pending rule. *)
+   cycle even when no second Event Queue stimulus exists. Resting paths and
+   ordinary cadence retain the previous acknowledged-pending rule, so #34653
+   still prevents a queued wake from cutting a provider rest short. *)
 let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
   let continued =
     Some (Loop.Continue_on_deferred_lane { next_runtime_id = "lane-b" })
+  in
+  let waiting =
+    Some
+      (Loop.Wait_for_path_release
+         { release_at = now +. 60.0
+         ; waiting_on = "lane-a"
+         ; basis = Masc.Keeper_turn_driver.Failure_response
+         })
   in
   let pending_calls = ref 0 in
   check bool
@@ -152,7 +185,9 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
             ~pending_stimulus:(fun () ->
               incr pending_calls;
               true)))
-    [ "ordinary cadence with unacked stimuli keeps sleeping", None ];
+    [ "a resting path with unacked stimuli keeps sleeping", waiting
+    ; "ordinary cadence with unacked stimuli keeps sleeping", None
+    ];
   check int "unacked outcomes do not inspect the Event Queue" 0 !pending_calls;
   List.iter
     (fun (label, after_failure, stimuli_acked, pending_stimulus, expected) ->
@@ -164,6 +199,8 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
             ~stimuli_acked
             ~pending_stimulus:(fun () -> pending_stimulus)))
     [ "deferred unfinished input starts without a stimulus", continued, false, false, true
+    ; "a resting path keeps sleeping", waiting, false, true, false
+    ; "an acknowledged pending stimulus retains the existing wake", waiting, true, true, true
     ; "ordinary cadence keeps sleeping without a pending stimulus", None, true, false, false
     ; "ordinary cadence retains the existing wake", None, true, true, true
     ]
@@ -500,6 +537,10 @@ let () =
         ] )
     ; ( "next dispatch after a failed cycle"
       , [ test_case
+            "a refusal without a suffix waits for the failed path"
+            `Quick
+            test_a_refusal_without_a_suffix_waits_for_the_failed_path
+        ; test_case
             "a suffix on a serving path continues without waiting"
             `Quick
             test_a_suffix_on_a_serving_path_continues_without_waiting

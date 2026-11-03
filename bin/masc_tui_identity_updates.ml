@@ -105,7 +105,10 @@ let providers_loaded (state : state) request ~report ~attempts result =
     | Ok (providers, callback) ->
       retire_identity_logins state ~keeper_name ~providers;
       state.identity_callback <- callback
-    | Error _ -> ());
+    | Error _ ->
+      (* A failed read says nothing about the callback either; keeping the
+         previous one would show a value this reading never saw. *)
+      state.identity_callback <- None);
   if current && keeper_detail_target_matches state keeper_name
   then (
     match providers_result with

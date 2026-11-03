@@ -257,6 +257,23 @@ let test_login_wire_preserves_the_server_deadline () =
     (match decode (`Assoc ["attached", `Bool true]) with
      | Masc_tui_identity_model.Login_attached _ -> true | _ -> false)
 
+(* A failed read leaves no callback behind from the reading before it. *)
+let test_failed_read_forgets_the_previous_callback () =
+  let state = identity_state () in
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
+  let load result =
+    let read = Masc_tui_types.mark_detail_read_started state
+      ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
+    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+      result
+  in
+  load (Ok ([], Some (Masc_tui_identity_model.Callback_url "https://example.org/cb")));
+  check Alcotest.bool "the first reading's callback is held" true
+    (state.identity_callback <> None);
+  load (Error "unavailable");
+  check Alcotest.bool "a failed reading forgets it" true
+    (state.identity_callback = None)
+
 let test_removed_provider_retires_display_and_late_start () =
   let state = identity_state () in
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
@@ -1189,6 +1206,8 @@ let () =
             test_the_callback_and_app_state_are_read_strictly;
           Alcotest.test_case "a read keeps the server's callback" `Quick
             test_a_read_keeps_the_servers_callback;
+          Alcotest.test_case "a failed read forgets the previous callback" `Quick
+            test_failed_read_forgets_the_previous_callback;
         ] );
       ( "numbering",
         [ Alcotest.test_case "a broken declaration does not take a number"

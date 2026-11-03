@@ -315,6 +315,8 @@ let test_goal_survives_read_then_task_creation () =
       (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
     check bool "Goal is not duplicated in the extra User carrier" false
       (List.exists (contains ~needle:goal.criterion_revision) contexts);
+    check bool "every receiver request carries the admission identity in its carrier" true
+      (List.exists (contains ~needle:"scheduled_admission_at_turn_entry") contexts);
     let extra = String.concat "" contexts in
     List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
       (contains ~needle extra)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
@@ -359,10 +361,18 @@ let test_goal_survives_read_then_task_creation () =
       Prompt_block_id.equal block.id Admitted_scheduled_input) capture.blocks in
   let physical = match Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt) with
     | Some issued -> issued | None -> fail "captured System issuer missing" in
+  check bool "admission leaves the cached System prefix untouched" false
+    (List.exists (fun (span : Keeper_context_assembly.span) ->
+      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) physical.partition.spans);
+  let carrier = match !previous with Some issued -> issued | None -> fail "issued assembly missing" in
+  let carrier_text = match carrier.Keeper_context_assembly.extra_system_context with
+    | Some text -> text | None -> fail "issued carrier missing" in
+  let carrier_partition = match carrier.Keeper_context_assembly.receipt with
+    | Some receipt -> receipt | None -> fail "carrier receipt missing" in
   (match List.filter (fun (span : Keeper_context_assembly.span) ->
-      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) physical.partition.spans with
-   | [span] -> check string "captured admission is the exact issued System span"
-       admission.text (String.sub physical.text span.offset span.bytes)
+      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) carrier_partition.spans with
+   | [span] -> check string "captured admission is the exact issued carrier span"
+       admission.text (String.sub carrier_text span.offset span.bytes)
    | _ -> fail "one exact issued admission span required");
   let captured_turn = Ids.Turn_ref.make ~trace_id:capture.trace_id ~absolute_turn:capture.absolute_turn in
   check bool "capture and direct preparation identify the same actual fixture turn" true
@@ -370,7 +380,8 @@ let test_goal_survives_read_then_task_creation () =
   check bool "captured direct admission is explicitly Unknown for the actual captured turn" true
     (contains ~needle:"availability=\"unknown\"" admission.text
      && contains ~needle:(Ids.Turn_ref.to_string captured_turn) admission.text);
-  check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
+  check (option string) "post-tool carrier retains exactly the admission identity"
+    (Some admission.text) capture.assembled;
   check (option string) "capture records the physical stable system value"
     (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)
       (Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt))) capture.system_prompt;

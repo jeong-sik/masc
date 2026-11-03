@@ -19,7 +19,6 @@ type system_observation = Active_goals of string | Completion_authority of strin
 let observation_block = function
   | Active_goals text -> Prompt_block_id.Active_goals, text
   | Completion_authority text -> Prompt_block_id.Completion_authority, text
-  | Admitted_scheduled_input text -> Prompt_block_id.Admitted_scheduled_input, text
 
 type system_prompt =
   { base_text : string

@@ -9251,8 +9251,8 @@ let carries_extra_system_context envelope =
 let captured_extra_context_blocks (blocks : Keeper_prompt_capture.block list) =
   List.filter_map (fun (block : Keeper_prompt_capture.block) ->
     match block.id with
-    | Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input -> None
-    | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
+    | Keeper_instructions | Active_goals | Completion_authority -> None
+    | Admitted_scheduled_input | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
     | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions ->
       Some (block.id, block.text)) blocks
 ;;
@@ -9270,7 +9270,8 @@ let test_capture_separates_system_and_extra_context_blocks () =
     ]
   in
   check (list (pair string string)) "only extra-context blocks in their issued order"
-    [ "memory_os_recall", "memory"; "dynamic_context", "current context"; "temporal_summary", "time" ]
+    [ "admitted_scheduled_input", "admission observation"; "memory_os_recall", "memory";
+      "dynamic_context", "current context"; "temporal_summary", "time" ]
     (captured_extra_context_blocks blocks
      |> List.map (fun (id, text) -> Prompt_block_id.to_string id, text))
 ;;

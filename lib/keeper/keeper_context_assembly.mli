@@ -18,8 +18,11 @@ type receipt = private
 type system_observation =
   | Active_goals of string
   | Completion_authority of string
-  | Admitted_scheduled_input of string
-(** Only these renderer-issued observations can become a System suffix. *)
+(** Only these renderer-issued observations can become a System suffix. The
+    turn-entry admission identity ([Prompt_block_id.Admitted_scheduled_input])
+    rides the tail carrier as its own retained block instead: it names the
+    turn (turn_ref, occurrence ids) and so changes on every turn, which would
+    invalidate the provider's cached System prefix over the whole history. *)
 val observation_block : system_observation -> Prompt_block_id.t * string
 
 type system_prompt = private

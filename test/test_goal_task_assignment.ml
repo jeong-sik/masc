@@ -632,10 +632,14 @@ let test_creation_tools_reject_closed_goal_without_writes () =
     let batch = Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc ["tasks", `List [item "valid" "goal-b"; item "closed" "goal-a"]]) in
     List.iter (function
-      | Tool_result.Failed { class_ = Tool_result.Workflow_rejection; _ } -> ()
-      | Tool_result.Failed { class_; message; _ } ->
-        failf "expected workflow rejection, got %s: %s"
-          (Tool_result.tool_failure_class_to_string class_) message
+      | Tool_result.Failed _ as failure ->
+        (match Tool_result.failure_class failure with
+         | Some Tool_result.Workflow_rejection -> ()
+         | Some class_ ->
+           failf "expected workflow rejection, got %s: %s"
+             (Tool_result.tool_failure_class_to_string class_)
+             (Tool_result.message failure)
+         | None -> fail "expected workflow rejection, got unclassified failure")
       | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "closed Goal accepted Task creation")
       [single; batch];
     check (option string) "tool refusals leave backlog unchanged" before_backlog (file_bytes backlog_path);

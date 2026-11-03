@@ -10650,6 +10650,9 @@ type state = {
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_inflight: bool;
+  (* The read the repository list owes after a catalog change, a
+     revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
+  mutable repositories_owed: Masc_tui_owed_read.t;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
   mutable workspace_activity_repo: string option;
@@ -14523,6 +14526,7 @@ let suspend_workspace_readings state =
   state.runtime_surface_force_pending <- false;
   state.clients_surface_inflight <- false;
   state.repositories_inflight <- false;
+  state.repositories_owed <- Masc_tui_owed_read.settled;
   state.tools_read_inflight <- None;
   state.harness_inflight <- false;
   state.verification_inflight <- false;
@@ -19806,6 +19810,7 @@ let create_state
   repositories = None;
   repositories_error = None;
   repositories_inflight = false;
+  repositories_owed = Masc_tui_owed_read.settled;
   repositories_scroll = 0;
   repositories_cursor = 0;
   workspace_activity_repo = None;

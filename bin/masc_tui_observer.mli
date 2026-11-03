@@ -345,8 +345,8 @@ val async_requests_changed : event -> bool
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)
 
-val turn_changed_keeper : event -> string option
-(** The Keeper a turns push names. *)
+val turn_change : event -> (string * turn_change) option
+(** The Keeper a turns push names, and what it says changed. *)
 
 val runtime_journal_appended : event -> (string * runtime_journal) option
 (** The Keeper and journal a runtime journal push names. *)

@@ -769,7 +769,7 @@ let test_a_turns_push_names_its_keeper () =
   let keepers frames =
     decode_all frames
     |> List.filter_map (function
-         | Observer.Event event -> Observer.turn_changed_keeper event
+         | Observer.Event event -> Option.map fst (Observer.turn_change event)
          | Observer.Undecodable _ -> None)
   in
   check (list string) "both owe that Keeper's turns a read" [ "lane-smith"; "lane-smith" ]

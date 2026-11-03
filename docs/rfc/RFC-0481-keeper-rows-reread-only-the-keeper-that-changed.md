@@ -85,7 +85,7 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 - `Keeper_turn_preview.change_entry` 는 값을 바꿀 때마다 `updated_at` 을 그 시각으로 바꾼다(`keeper_turn_preview.ml:104~113`). 2026-11-02 밤 라이브에서 `keeper_turn_stream_event` 는 초당 약 27건이었다(60초 1회, 신뢰 낮음).
 - `observe_preparation`(`:140`, `:159`, `:165`)과 `reset`(`:195`)은 `change_entry` 를 거치지 않고 쓴다.
 - 표에서 항목을 지우지 않는다. 미리보기를 고르는 열쇠는 Owner 의 interrupt token 이다(`server_routes_http_keeper_stream.ml:507~515`). 채팅 작업 턴은 turn ref 가 없다.
-- 쓰는 곳: 답변 중 배지(`bin/masc_tui_answering.ml:113~238`), 키퍼 목록의 마지막 활동 시각(`bin/masc_tui_types.ml:12317~12341`), 채팅 화면(`bin/masc_tui_render_chat.ml:1895~1976`).
+- 쓰는 곳: 그 키퍼 채팅 화면의 활동 줄(`Masc_tui_answering.chat_activity`), 키퍼 목록의 마지막 활동 시각(`Masc_tui_types.keeper_activity_at`). 답변 중 배지는 미리보기를 읽지 않는다.
 
 ### 1.6 Candle
 
@@ -174,7 +174,7 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 
 ### 3.5 미리보기
 
-미리보기를 쓰는 화면(답변 중 배지, 채팅 화면)이 열려 있을 때만 그 키퍼의 turns 를 다시 읽는다. 서버는 `Keeper_turn_preview` 의 쓰기(`change_entry`, `observe_preparation`, `reset`) 가운데 turns 답이 읽는 writer 에 쓴 것만 알린다. 옛 writer 의 쓰기는 turns 답을 바꾸지 않는다. 미리보기 표는 키퍼 이름으로만 잡혀 있으므로, `reset` 이 작업 공간(`base_path`)을 받아 writer 에 담는다.
+미리보기를 그리는 화면(그 키퍼의 채팅 화면, 키퍼 목록)이 열려 있을 때만 turns 를 다시 읽는다. 그런 화면이 없을 때 바뀐 키퍼는 기억해 두었다가, 그 미리보기를 그리는 화면에 들어오면 한 번 읽는다. 서버는 `Keeper_turn_preview` 의 쓰기(`change_entry`, `observe_preparation`, `reset`) 가운데 turns 답이 읽는 writer 에 쓴 것만 알린다. 옛 writer 의 쓰기는 turns 답을 바꾸지 않는다. 미리보기 표는 키퍼 이름으로만 잡혀 있으므로, `reset` 이 작업 공간(`base_path`)을 받아 writer 에 담는다.
 
 서버 fiber 하나가 쓰인 키퍼를 모아, 그 작업 공간의 관찰자에게 키퍼마다 `keeper_turn_preview_changed { name }` 를 한 번 보내고 `preview_post_interval_s` 를 기다린다. 첫 쓰기는 바로 나가고, 기다리는 동안의 쓰기는 기다림이 끝날 때 한 번에 나간다. 키퍼마다 타이머를 두지 않는다. 받는 쪽은 그때의 최신 값을 읽으므로 버려지는 값은 없다. 사이 값을 그리지 않을 뿐이다.
 

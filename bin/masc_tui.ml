@@ -3475,6 +3475,7 @@ let launch_keeper_turns_load state ~mailbox =
   else begin
     state.keeper_turns_inflight <- true;
     state.keeper_turns_owed <- Masc_tui_owed_read.started state.keeper_turns_owed;
+    state.keeper_previews_unread <- [];
     let waiting_receipt = Keeper_waiting_read.poll_receipt state.keeper_waiting_read in
     let waiting_snapshot = capture_keeper_waiting_snapshot state in
     let generation = state.keeper_chat_control_generations in
@@ -7881,12 +7882,27 @@ let owe_held_calls_read state =
 let owe_tool_modes_read state =
   state.tool_modes_owed <- Masc_tui_owed_read.changed state.tool_modes_owed
 
-(* The turns read when the server says a Keeper's turns or its running
-   turn's preview changed, on a revalidation or a resumed authority, and after
-   any failed turns read (RFC-0481 §3.4, §3.5). The answering badge is drawn on
-   every surface, so the read is owed whatever is on screen. *)
+(* The turns read when the server says a Keeper's turns changed, when a
+   preview changed that a surface on screen draws, on a revalidation or a
+   resumed authority, and after any failed turns read (RFC-0481 §3.4, §3.5).
+   The answering badge is drawn on every surface, so a turns change is owed
+   whatever is on screen. *)
 let owe_keeper_turns_read state =
   state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed
+
+(* Where a Keeper's running-turn preview is drawn: its own chat pane's
+   activity line, and the Keepers list's last activity. A preview change is
+   read only while one of them is on screen (RFC-0481 §3.5). *)
+let preview_on_screen state ~keeper_name =
+  match state.view with
+  | Keepers Keeper_list -> true
+  | Keepers Keeper_message ->
+      Option.equal String.equal state.msg_target_keeper_name (Some keeper_name)
+  | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs ->
+      false
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -8680,6 +8696,9 @@ let launch_owed_held_calls state ~mailbox =
    started it, is let finish first; a slot freed without an answer leaves the
    turns owed again. *)
 let launch_owed_keeper_turns state ~mailbox =
+  if List.exists (fun keeper_name -> preview_on_screen state ~keeper_name)
+       state.keeper_previews_unread
+  then owe_keeper_turns_read state;
   let reading = state.keeper_turns_inflight in
   let read =
     if reading then state.keeper_turns_owed
@@ -16113,6 +16132,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_waiting_read <- Keeper_waiting_read.clear state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
   state.keeper_turns_owed <- Masc_tui_owed_read.settled;
+  state.keeper_previews_unread <- [];
   state.keeper_turns <- [];
   state.keeper_waiting <- [];
   state.keeper_waiting_failure <- None;
@@ -22182,6 +22202,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
+      let previews_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
          asks once per batch. Agent-core events name their lane; the
@@ -22243,7 +22264,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
-              if Option.is_some (Masc_tui_observer.turn_changed_keeper event) then turns_changed := true;
+              (match Masc_tui_observer.turn_change event with
+               | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
+               | Some (keeper, Masc_tui_observer.Turn_preview) ->
+                   previews_changed := keeper :: !previews_changed
+               | None -> ());
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
               if Masc_tui_observer.schedules_changed event then schedules_changed := true;
               Option.iter (fun appended -> runtime_journals := appended :: !runtime_journals)
@@ -22426,6 +22451,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
+      state.keeper_previews_unread <-
+        List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a
          turn appended from anywhere else (API chat, another operator, a
          connector) stayed invisible until the operator left and re-entered.

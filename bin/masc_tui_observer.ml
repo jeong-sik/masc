@@ -313,8 +313,8 @@ let roster_change = function
   | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
-let turn_changed_keeper = function
-  | Keeper_turn_changed { keeper; _ } -> Some keeper
+let turn_change = function
+  | Keeper_turn_changed { keeper; change } -> Some (keeper, change)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _

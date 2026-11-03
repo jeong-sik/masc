@@ -1835,21 +1835,30 @@ let microvm_start_failure_cause failure =
   | Boot_command_failed _ -> Sandbox_unavailable detail
 ;;
 
-(* Read where a guest is assessed or booted, as [observation_run] is read
-   where a route is built: the switch is TOML-owned, and every turn assesses
-   its keeper's guest again, so a changed choice is the next turn's plan. *)
+(* Read where a guest's plan is made, as [observation_run] is read where a
+   route is built: the switch is TOML-owned, and every turn assesses its
+   keeper's guest again, so a changed choice is the next turn's plan.
+
+   A keeper with no declaration has chosen nothing, the same as a declaration
+   without the key. A running keeper was admitted with one, so this is a
+   declaration removed since, or a guest started with meta alone. A
+   declaration that is there and cannot be read is no choice to fall back
+   from: the plan waits until it can be read. *)
 let microvm_delivery_for ~base_path ~keeper_name =
+  let default = Keeper_types_profile_sandbox.default_microvm_delivery in
   match
     Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
       ~base_path
       keeper_name
   with
-  | Ok defaults ->
-    Ok
-      (Option.value
-         defaults.microvm_delivery
-         ~default:Keeper_types_profile_sandbox.default_microvm_delivery)
-  | Error error -> Error (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  | Ok defaults -> Ok (Option.value defaults.microvm_delivery ~default)
+  | Error { Keeper_types_profile.kind = Declaration_not_found _; _ } -> Ok default
+  | Error
+      ({ Keeper_types_profile.kind =
+           Keeper_types_profile.(
+             Read_error | Parse_error | Profile_error | Invalid_name | Unknown_deny_tool _)
+       ; _
+       } as error) -> Error (Keeper_types_profile.keeper_toml_load_error_to_string error)
 ;;
 
 (* The same immutable request drives comparison and Boot argv. Volume names,
@@ -2636,8 +2645,6 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
   let* guest_size = Env_config_sandbox.Runtime.microvm_guest_size
       ~memory:t.meta.microvm_memory ~cpus:t.meta.microvm_cpus
     |> Result.map_error (fun detail -> Guest_size_invalid detail) in
-  let* delivery = microvm_delivery_for ~base_path:t.config.base_path ~keeper_name:t.meta.name
-    |> Result.map_error (fun detail -> Delivery_unresolved detail) in
   let container_name = keeper_vm_name t in
   let* observation = read_apple_guest ~timeout_sec ~container_name in
   let* () = check_apple_guest_observation ~base_path:t.config.base_path ~keeper_name:t.meta.name
@@ -2670,6 +2677,8 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode) in
   let identity_host_dir = Store.host_path ~base_path:t.config.base_path
       ~keeper_name:t.meta.name ~backend ~network_mode:t.network_mode in
+  let* delivery = microvm_delivery_for ~base_path:t.config.base_path ~keeper_name:t.meta.name
+    |> Result.map_error (fun detail -> Delivery_unresolved detail) in
   let* plan = requested_apple_plan t ~delivery ~image ~guest_size ~identity_host_dir
       ~environment:identity_environment ~config_mount ~stable_labels in
   let* () = Plan.validate plan |> Result.map_error (fun errors -> Invalid_boot_plan errors) in

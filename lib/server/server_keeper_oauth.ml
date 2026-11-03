@@ -598,8 +598,9 @@ let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider
                deletion above never depended on this. *)
             let client =
               match detached.Keeper_identity_tools.client with
-              | None -> Error Store.Not_bound
-              | Some binding ->
+              | Ok None -> Error Store.Not_bound
+              | Error problem -> Error (Store.Binding_unreadable problem)
+              | Ok (Some binding) ->
                 Store.redeeming_client ~identity_dir:(identity_dir ~base_path)
                   ~provider ~binding ~now
             in

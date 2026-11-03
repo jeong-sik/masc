@@ -428,27 +428,35 @@ let test_disconnect_sends_no_revoke_without_the_logins_client () =
       | Ok receipt -> receipt
       | Error message -> Alcotest.failf "disconnect failed: %s" message
     in
-    let kind =
+    let kind, detail =
       match receipt with
       | `Assoc fields ->
         (match List.assoc_opt "revocation" fields with
          | Some (`Assoc revocation) ->
-           (match List.assoc_opt "kind" revocation with
-            | Some (`String kind) -> kind
-            | _ -> Alcotest.fail "the revocation has no kind")
+           (match List.assoc_opt "kind" revocation, List.assoc_opt "detail" revocation with
+            | Some (`String kind), Some (`String detail) -> kind, detail
+            | _ -> Alcotest.fail "the revocation has no kind and detail")
          | _ -> Alcotest.fail "the receipt has no revocation")
       | _ -> Alcotest.fail "the receipt is not an object"
     in
-    !posted, kind
+    !posted, kind, detail
   in
-  List.iter
-    (fun (label, binding) ->
-       let posted, kind = disconnect_with binding in
-       check int (label ^ ": nothing was sent to the provider") 0 posted;
-       check string (label ^ ": the receipt says it was not sent") "not_sent" kind)
-    [ "no record of the login's client", `Absent
-    ; "an unreadable record", `Unreadable
-    ]
+  let outcomes =
+    List.map
+      (fun (label, binding) ->
+         let posted, kind, detail = disconnect_with binding in
+         check int (label ^ ": nothing was sent to the provider") 0 posted;
+         check string (label ^ ": the receipt says it was not sent") "not_sent" kind;
+         detail)
+      [ "no record of the login's client", `Absent
+      ; "an unreadable record", `Unreadable
+      ]
+  in
+  match outcomes with
+  | [ absent; unreadable ] ->
+    check bool "a torn record is not reported as a missing one" false
+      (String.equal absent unreadable)
+  | _ -> Alcotest.fail "expected two outcomes"
 ;;
 
 (* A provider that enforces the two rules real ones were measured to enforce

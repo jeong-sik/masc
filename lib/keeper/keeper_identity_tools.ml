@@ -217,7 +217,7 @@ let save ~publication catalog =
 
 type local_detachment = {
   refresh_token : string option;
-  client : Keeper_oauth_client_store.binding option;
+  client : (Keeper_oauth_client_store.binding option, string) result;
   tools_removed : bool;
 }
 
@@ -244,11 +244,7 @@ let detach_local ~base_path ~keeper_name ~(provider : Provider.t) =
       let binding_path =
         client_binding_path ~base_path ~keeper_name ~provider_id:provider.id
       in
-      let client =
-        match Keeper_oauth_client_store.load_binding ~path:binding_path with
-        | Ok binding -> binding
-        | Error _ -> None
-      in
+      let client = Keeper_oauth_client_store.load_binding ~path:binding_path in
       let* () = Keeper_oauth_client_store.delete_binding ~path:binding_path in
       let* tools_removed =
         forget_catalog_file ~base_path ~keeper_name ~provider_id:provider.id

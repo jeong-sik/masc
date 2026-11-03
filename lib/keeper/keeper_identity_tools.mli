@@ -62,10 +62,11 @@ val client_binding_path :
 
 type local_detachment = private {
   refresh_token : string option;
-  client : Keeper_oauth_client_store.binding option;
+  client : (Keeper_oauth_client_store.binding option, string) result;
       (** The client the login used, read before its record is deleted, for
-          the same best-effort revocation as [refresh_token]. An unreadable
-          record is [None]: deletion never depends on it. *)
+          the same best-effort revocation as [refresh_token]: [Ok None] when
+          there was no record, [Error] when the record could not be read.
+          Deletion never depends on it. *)
   tools_removed : bool;
 }
 val detach_local :

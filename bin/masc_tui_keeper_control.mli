@@ -70,6 +70,27 @@ val roster_of_reading :
     policy. First observed rows and first errors retain their
     meaning; errors take precedence over observed rows of the same name. *)
 
+(** One Keeper's row as [GET /api/v1/gate/keepers?name=<keeper>] answers it
+    (RFC-0481 §3.1): its row, its error row, or no row. *)
+type row_reading =
+  | Row of Masc.Tui_decode.keeper_runtime
+  | Row_invalid of string
+  | No_row
+
+val row_reading_of_reading :
+  keeper_name:string ->
+  rows:Masc.Tui_decode.keeper_runtime list ->
+  errors:(string * string) list ->
+  (row_reading, string) result
+(** Read a narrowed answer. More than one row, or a row or error for another
+    name, is an [Error]: the route answers only the Keeper it was asked for. *)
+
+val replace_row : roster -> keeper_name:string -> row_reading -> roster option
+(** The roster with that Keeper's row replaced, added in name order, moved to
+    the errors, or removed. [None] when the roster is not complete (unread or
+    clamped): it does not say where the row belongs, so the reader reads the
+    whole roster instead. *)
+
 (** Why the roster reading is missing.
 
     [Unauthorized] is separate because it is the operator's to fix and names

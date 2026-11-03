@@ -1923,6 +1923,37 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
             | Ok (rows, errors, truncated, total, candle) ->
                 Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
+(** Load one Keeper's roster row (RFC-0481 §3.1). The answer must name the
+    Keeper it was asked for, so it cannot be read as a whole roster. *)
+let load_keeper_row ~(host : string) ~(port : int) ~expected_workspace ~keeper_name :
+    (Masc_tui_keeper_control.row_reading * (Candle_observation.t, string) result,
+     Masc_tui_keeper_control.roster_failure)
+    result =
+  match fetch_keeper_runtime ~host ~port ~expected_workspace ~keeper_name with
+  | Error transport ->
+      Error (Masc_tui_keeper_control.Roster_unreachable transport)
+  | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
+      Error (Masc_tui_keeper_control.roster_failure_of_status ~status ~body)
+  | Ok (_, body) ->
+      Masc_tui_response_decode.run ~name:"keeper.row.decode_wait" (fun () ->
+        match Yojson.Safe.from_string body with
+        | exception Yojson.Json_error detail ->
+            Error (Masc_tui_keeper_control.Roster_malformed detail)
+        | json -> (
+            match Yojson.Safe.Util.member "name" json with
+            | `String named when String.equal named keeper_name -> (
+                match Tui_decode.decode_keeper_runtime_list json with
+                | Error detail ->
+                    Error (Masc_tui_keeper_control.Roster_malformed detail)
+                | Ok (rows, errors, _truncated, _total, candle) -> (
+                    match Masc_tui_keeper_control.row_reading_of_reading ~keeper_name ~rows ~errors with
+                    | Ok reading -> Ok (reading, candle)
+                    | Error detail -> Error (Masc_tui_keeper_control.Roster_malformed detail)))
+            | named ->
+                Error (Masc_tui_keeper_control.Roster_malformed
+                         (Printf.sprintf "the row read for %s named %s" keeper_name
+                            (Yojson.Safe.to_string named)))))
+
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
   match

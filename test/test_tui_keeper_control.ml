@@ -127,6 +127,79 @@ let test_healthy_status_is_silent_and_unknown_failure_is_preserved () =
 let complete rows = Control.roster_of_reading
     ~errors:[] ~rows ~truncated:false ~total:(List.length rows)
 
+(* RFC-0481 §3.3: a signal names one Keeper, and its read replaces that row. *)
+let row_names rows = List.map (fun (row : Decode.keeper_runtime) -> row.kr_name) rows
+
+let spliced roster ~keeper_name reading =
+  match Control.replace_row roster ~keeper_name reading with
+  | Some roster -> Control.roster_view roster
+  | None -> Alcotest.failf "a complete roster refused the row for %s" keeper_name
+
+let test_one_row_takes_its_place_in_a_complete_roster () =
+  let roster = complete [ runtime "alpha"; runtime "gamma" ] in
+  (match spliced roster ~keeper_name:"beta" (Control.Row (runtime "beta")) with
+   | Control.Roster_complete rows ->
+     Alcotest.(check (list string)) "a new name joins in name order"
+       [ "alpha"; "beta"; "gamma" ] (row_names rows)
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_invalid _ ->
+     Alcotest.fail "an added row left the roster incomplete");
+  (match spliced roster ~keeper_name:"gamma" Control.No_row with
+   | Control.Roster_complete rows ->
+     Alcotest.(check (list string)) "no row removes the Keeper" [ "alpha" ] (row_names rows)
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_invalid _ ->
+     Alcotest.fail "a removed row left the roster incomplete");
+  let broken =
+    match Control.replace_row roster ~keeper_name:"alpha" (Control.Row_invalid "unreadable") with
+    | Some broken -> broken
+    | None -> Alcotest.fail "a complete roster refused an error row"
+  in
+  (match Control.roster_view broken with
+   | Control.Roster_invalid { observed; errors; complete } ->
+     Alcotest.(check (list string)) "the broken Keeper leaves the rows" [ "gamma" ] (row_names observed);
+     Alcotest.(check (list (pair string string))) "and joins the errors"
+       [ "alpha", "unreadable" ] errors;
+     Alcotest.(check bool) "the roster stays complete" true complete
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_complete _ ->
+     Alcotest.fail "an error row did not mark the roster invalid");
+  (match spliced broken ~keeper_name:"alpha" (Control.Row (runtime "alpha")) with
+   | Control.Roster_complete rows ->
+     Alcotest.(check (list string)) "a repaired row clears the error"
+       [ "alpha"; "gamma" ] (row_names rows)
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_invalid _ ->
+     Alcotest.fail "a repaired row left the roster invalid")
+;;
+
+let test_an_incomplete_roster_does_not_take_one_row () =
+  let clamped =
+    Control.roster_of_reading ~errors:[] ~rows:[ runtime "alpha" ] ~truncated:true ~total:2
+  in
+  Alcotest.(check bool) "an unread roster asks for a whole read" true
+    (Option.is_none
+       (Control.replace_row Control.unobserved_roster ~keeper_name:"alpha" Control.No_row));
+  Alcotest.(check bool) "a clamped roster asks for a whole read" true
+    (Option.is_none (Control.replace_row clamped ~keeper_name:"beta" (Control.Row (runtime "beta"))))
+;;
+
+let test_a_row_read_answers_only_its_keeper () =
+  let read ~rows ~errors = Control.row_reading_of_reading ~keeper_name:"alpha" ~rows ~errors in
+  (match read ~rows:[ runtime "alpha" ] ~errors:[] with
+   | Ok (Control.Row row) -> Alcotest.(check string) "its row" "alpha" row.kr_name
+   | Ok (Control.Row_invalid _ | Control.No_row) | Error _ -> Alcotest.fail "its row was not read");
+  (match read ~rows:[] ~errors:[ "alpha", "unreadable" ] with
+   | Ok (Control.Row_invalid detail) -> Alcotest.(check string) "its error" "unreadable" detail
+   | Ok (Control.Row _ | Control.No_row) | Error _ -> Alcotest.fail "its error row was not read");
+  (match read ~rows:[] ~errors:[] with
+   | Ok Control.No_row -> ()
+   | Ok (Control.Row _ | Control.Row_invalid _) | Error _ -> Alcotest.fail "no row was not read");
+  List.iter (fun (label, rows, errors) ->
+      match read ~rows ~errors with
+      | Error _ -> ()
+      | Ok (Control.Row _ | Control.Row_invalid _ | Control.No_row) -> Alcotest.fail label)
+    [ "another Keeper's row is refused", [ runtime "beta" ], []
+    ; "another Keeper's error is refused", [], [ "beta", "unreadable" ]
+    ; "two rows are refused", [ runtime "alpha"; runtime "alpha" ], [] ]
+;;
+
 let reading ?(paused = false) ?(liveness = Control.Unobserved) name :
     Control.reading =
   { name; paused; liveness }
@@ -1605,6 +1678,12 @@ let () =
             test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick
             test_a_row_without_a_sandbox_profile_is_rejected
+        ; Alcotest.test_case "one row takes its place in a complete roster" `Quick
+            test_one_row_takes_its_place_in_a_complete_roster
+        ; Alcotest.test_case "an incomplete roster does not take one row" `Quick
+            test_an_incomplete_roster_does_not_take_one_row
+        ; Alcotest.test_case "a row read answers only its Keeper" `Quick
+            test_a_row_read_answers_only_its_keeper
         ; Alcotest.test_case "rows decode in order" `Quick
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown health is rejected" `Quick

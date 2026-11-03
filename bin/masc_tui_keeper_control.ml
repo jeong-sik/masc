@@ -95,6 +95,53 @@ let roster_of_reading ~errors ~rows ~truncated ~total =
   in
   prepare_roster source
 
+(* One Keeper's row as [GET /api/v1/gate/keepers?name=] answers it
+   (RFC-0481 §3.1). *)
+type row_reading =
+  | Row of Decode.keeper_runtime
+  | Row_invalid of string
+  | No_row
+
+let row_reading_of_reading ~keeper_name ~rows ~errors =
+  match rows, errors with
+  | [ (row : Decode.keeper_runtime) ], [] when String.equal row.kr_name keeper_name -> Ok (Row row)
+  | [], [ (name, detail) ] when String.equal name keeper_name -> Ok (Row_invalid detail)
+  | [], [] -> Ok No_row
+  | _ :: _, _ | [], _ :: _ ->
+    Error (Printf.sprintf "the row read for %s answered %d rows and %d errors for other names"
+             keeper_name (List.length rows) (List.length errors))
+
+let replace_row roster ~keeper_name reading =
+  let by_name left right = String.compare left right in
+  let splice observed errors =
+    let observed =
+      List.filter (fun (row : Decode.keeper_runtime) -> not (String.equal row.kr_name keeper_name))
+        observed
+    in
+    let errors = List.filter (fun (name, _) -> not (String.equal name keeper_name)) errors in
+    let observed, errors =
+      match reading with
+      | Row row ->
+        ( List.sort (fun (left : Decode.keeper_runtime) (right : Decode.keeper_runtime) ->
+              by_name left.kr_name right.kr_name)
+            (row :: observed)
+        , errors )
+      | Row_invalid detail ->
+        observed, List.sort (fun (left, _) (right, _) -> by_name left right) ((keeper_name, detail) :: errors)
+      | No_row -> observed, errors
+    in
+    prepare_roster
+      (match errors with
+       | [] -> Roster_complete observed
+       | _ :: _ -> Roster_invalid { observed; errors; complete = true })
+  in
+  (* Only a complete roster can take one row: a clamped or unread one does not
+     say where the row belongs or what else is missing. *)
+  match roster.source with
+  | Roster_complete observed -> Some (splice observed [])
+  | Roster_invalid { observed; errors; complete = true } -> Some (splice observed errors)
+  | Roster_unobserved | Roster_partial _ | Roster_invalid { complete = false; _ } -> None
+
 type roster_failure =
   | Roster_unauthorized of Masc_tui_credential.server_reason
   | Roster_unreachable of string

@@ -429,6 +429,45 @@ let test_schema_nullable_union_preserves_non_null_type () =
       Alcotest.failf "expected one converted parameter, got %d"
         (List.length params)
 
+(* A property that declares [oneOf] alternatives and no [type] (BrowserAct
+   [keepPages]) is left off the typed view without raising, while its sibling
+   stays projected. The same property with a bare [type] array of several types
+   is still the #25272 ambiguity and must be refused. *)
+let test_schema_declared_alternatives_are_not_projected () =
+  let schema extra =
+    `Assoc
+      [ ("type", `String "object")
+      ; ( "properties"
+        , `Assoc
+            [ ("action", `Assoc [ ("type", `String "string") ])
+            ; ("keepPages", `Assoc extra)
+            ] )
+      ]
+  in
+  let alternatives =
+    [ ( "oneOf"
+      , `List
+          [ `Assoc [ ("type", `String "string"); ("enum", `List [ `String "all" ]) ]
+          ; `Assoc
+              [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]
+          ] )
+    ]
+  in
+  (match Tool_bridge.params_of_json_schema (schema alternatives) with
+   | [ (param : Agent_core.Types.tool_param) ] ->
+     Alcotest.(check string) "sibling stays projected" "action" param.name
+   | params ->
+     Alcotest.failf "expected only the sibling parameter, got %d" (List.length params));
+  (match Tool_bridge.params_of_json_schema (schema [ ("oneOf", `List []) ]) with
+   | _ -> Alcotest.fail "an empty oneOf declares no alternatives and must be refused"
+   | exception Invalid_argument _ -> ());
+  match
+    Tool_bridge.params_of_json_schema
+      (schema [ ("type", `List [ `String "string"; `String "array" ]) ])
+  with
+  | _ -> Alcotest.fail "a bare multi-type array must still be refused"
+  | exception Invalid_argument _ -> ()
+
 let test_all_masc_tool_schemas_project_through_agent_core () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
@@ -2716,6 +2755,8 @@ let () =
         test_schema_ambiguous_union_is_rejected;
       Alcotest.test_case "nullable schema union keeps its type" `Quick
         test_schema_nullable_union_preserves_non_null_type;
+      Alcotest.test_case "declared oneOf alternatives stay off the typed view" `Quick
+        test_schema_declared_alternatives_are_not_projected;
       Alcotest.test_case "all MASC schemas project through AGENT_CORE" `Quick
         test_all_masc_tool_schemas_project_through_agent_core;
     ]);

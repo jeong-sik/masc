@@ -44,6 +44,25 @@ let to_agent_core_typed_result = Tool_projection.to_agent_core_typed_result
     ambiguous property types fail at this boundary instead of being guessed
     as strings or reduced to the first union member. *)
 
+(* A property that names its accepted shapes with [oneOf]/[anyOf] and no
+   [type] has no single typed parameter, by design: the wire schema carries the
+   alternatives verbatim and the tool parses the value itself (BrowserAct
+   [keepPages] is "all" or a list of Page labels). It is therefore absent from
+   the derived parameter view on purpose. A [type] array that merely lists
+   several types is still refused, because that is the ambiguity #25272
+   guards: no alternatives are declared, so nothing says how to read it. *)
+let declares_disjoint_alternatives = function
+  | `Assoc fields ->
+    (not (List.mem_assoc "type" fields))
+    && List.exists
+         (fun key ->
+            match List.assoc_opt key fields with
+            | Some (`List (_ :: _)) -> true
+            | None | Some _ -> false)
+         [ "oneOf"; "anyOf" ]
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+;;
+
 let params_of_json_schema schema =
   let params =
     match Agent_core.Mcp.json_schema_to_params_result schema with
@@ -56,12 +75,13 @@ let params_of_json_schema schema =
       (match List.assoc_opt "properties" fields with
        | Some (`Assoc properties) ->
          List.find_opt
-           (fun (name, _) ->
-              not
-                (List.exists
-                   (fun (param : Agent_core.Types.tool_param) ->
-                      String.equal param.name name)
-                   params))
+           (fun (name, property) ->
+              (not (declares_disjoint_alternatives property))
+              && not
+                   (List.exists
+                      (fun (param : Agent_core.Types.tool_param) ->
+                         String.equal param.name name)
+                      params))
            properties
        | None | Some `Null | Some _ -> None)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->

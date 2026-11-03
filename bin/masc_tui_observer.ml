@@ -768,20 +768,21 @@ let reading_of_type type_name =
           match string_field fields "name" with
           | Some keeper -> Ok (Approval_change (Tool_approval_mode_changed { keeper }))
           | None -> Error (event ^ " carries no name"))
-  | "keeper_async_requests_changed" as event ->
+  | event when String.equal event Masc.Keeper_msg_async_broadcast.requests_changed_event ->
       From_fields
         (fun fields ->
           match string_field fields "name" with
           | Some keeper -> Ok (Keeper_async_requests_changed { keeper })
           | None -> Error (event ^ " carries no name"))
-  | "pending_confirms_changed" -> Named (Approval_change Pending_confirms_changed)
-  | "keeper_asks_changed" as event ->
+  | type_name when String.equal type_name Operator_pending_confirm_broadcast.changed_event ->
+      Named (Approval_change Pending_confirms_changed)
+  | event when String.equal event Masc.Keeper_ask_broadcast.asks_changed_event ->
       From_fields
         (fun fields ->
           match string_field fields "name" with
           | Some keeper -> Ok (Approval_change (Keeper_asks_changed { keeper }))
           | None -> Error (event ^ " carries no name"))
-  | "lane_addon_asks_changed" as event ->
+  | event when String.equal event Masc.Lane_addon_ask_broadcast.asks_changed_event ->
       From_fields
         (fun fields ->
           match string_field fields "declaration_id" with

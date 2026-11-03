@@ -85,7 +85,7 @@ esac
            || String.starts_with ~prefix:"delete " call) calls);
        Out_channel.with_open_bin calls_path (fun _ -> ());
        let remove_volumes () = Runtime.remove_keeper_volumes_by_name ~timeout_sec:30.
-           ~base_path:config.Workspace.base_path
+           ~base_path:config.Masc.Workspace.base_path
            ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
            ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container
            ~sandbox_image:"masc-test-minimal:image" () in

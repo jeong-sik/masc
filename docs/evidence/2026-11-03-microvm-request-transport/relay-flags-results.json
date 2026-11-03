@@ -1,0 +1,100 @@
+[
+  {
+    "variant": "plain_subdir",
+    "flags": [
+      "--user",
+      "502:20"
+    ],
+    "guest_sock": "/tmp/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "{\"agent\": \"genuine\", \"uid\": 502, \"size\": 4}",
+    "held_open": "{\"agent\": \"genuine\", \"uid\": 502, \"size\": 4}",
+    "agent_status": "{\"mode\": \"same-uid\", \"start_uid\": 502, \"uid\": 502, \"gid\": 20, \"dumpable\": 1, \"no_new_privs\": 0, \"dir_mode\": null}",
+    "agent_log": "1793675372.070 accept\n1793675372.070 header 4\n1793675372.071 replied\n1793675372.072 accept\n1793675372.074 header 4\n1793675372.074 replied"
+  },
+  {
+    "variant": "tmpfs_tmp",
+    "flags": [
+      "--user",
+      "502:20",
+      "--tmpfs",
+      "/tmp"
+    ],
+    "guest_sock": "/tmp/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "b''",
+    "held_open": "b''",
+    "agent_status": "{\"mode\": \"same-uid\", \"start_uid\": 502, \"uid\": 502, \"gid\": 20, \"dumpable\": 1, \"no_new_privs\": 0, \"dir_mode\": null}",
+    "agent_log": "cat: /tmp/agent-conn.log: No such file or directory"
+  },
+  {
+    "variant": "capdrop_rm",
+    "flags": [
+      "--user",
+      "502:20",
+      "--cap-drop",
+      "ALL",
+      "--rm"
+    ],
+    "guest_sock": "/tmp/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "{\"agent\": \"genuine\", \"uid\": 502, \"size\": 4}",
+    "held_open": "{\"agent\": \"genuine\", \"uid\": 502, \"size\": 4}",
+    "agent_status": "{\"mode\": \"same-uid\", \"start_uid\": 502, \"uid\": 502, \"gid\": 20, \"dumpable\": 1, \"no_new_privs\": 0, \"dir_mode\": null}",
+    "agent_log": "1793675397.781 accept\n1793675397.781 header 4\n1793675397.781 replied\n1793675397.783 accept\n1793675397.783 header 4\n1793675397.783 replied"
+  },
+  {
+    "variant": "readonly_tmpfs_flat",
+    "flags": [
+      "--user",
+      "502:20",
+      "--read-only",
+      "--tmpfs",
+      "/tmp"
+    ],
+    "guest_sock": "/tmp/agent.sock",
+    "run_rc": 0,
+    "half_close": "b''",
+    "held_open": "b''",
+    "agent_status": "{\"mode\": \"same-uid\", \"start_uid\": 502, \"uid\": 502, \"gid\": 20, \"dumpable\": 1, \"no_new_privs\": 0, \"dir_mode\": null}",
+    "agent_log": "cat: /tmp/agent-conn.log: No such file or directory"
+  },
+  {
+    "variant": "root_drop_rootfs",
+    "flags": [
+      "--cap-add",
+      "CAP_SETUID",
+      "--cap-add",
+      "CAP_SETGID",
+      "--cap-drop",
+      "ALL",
+      "--rm"
+    ],
+    "guest_sock": "/run/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "{\"agent\": \"genuine\", \"uid\": 502, \"size\": 4}",
+    "held_open": "{\"agent\": \"genuine\", \"uid\": 502, \"size\": 4}",
+    "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\"}",
+    "agent_log": "1793675421.001 accept\n1793675421.001 header 4\n1793675421.001 replied\n1793675421.002 accept\n1793675421.002 header 4\n1793675421.002 replied"
+  },
+  {
+    "variant": "root_drop_tmpfs_run",
+    "flags": [
+      "--cap-add",
+      "CAP_SETUID",
+      "--cap-add",
+      "CAP_SETGID",
+      "--cap-drop",
+      "ALL",
+      "--rm",
+      "--tmpfs",
+      "/run"
+    ],
+    "guest_sock": "/run/masc-agent/agent.sock",
+    "run_rc": 0,
+    "half_close": "b''",
+    "held_open": "b''",
+    "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\"}",
+    "agent_log": "cat: /tmp/agent-conn.log: No such file or directory"
+  }
+]

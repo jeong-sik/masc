@@ -1,0 +1,111 @@
+{
+  "started_at": "2026-11-03T12:16:01+0900",
+  "cases": [
+    {
+      "case": "rootfs_root_drop_rw",
+      "run_rc": 0,
+      "run_err": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]\n[6/6] Starting container [1s]",
+      "ready": true,
+      "agent_status": "{\"mode\": \"root-drop\", \"start_uid\": 0, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\", \"rootfs_write_as_keeper\": \"ok\"}",
+      "inspect_init": [
+        "python3",
+        "/opt/probe/agent_probe.py",
+        "/run/masc-agent/agent.sock",
+        "root-drop"
+      ],
+      "inspect_user": {
+        "raw": {
+          "userString": "root"
+        }
+      },
+      "inspect_published_sockets": [
+        {
+          "containerPath": "/run/masc-agent/agent.sock",
+          "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/sa/rootfs_root_drop_rw.sock"
+        }
+      ],
+      "inspect_has_init_field": {
+        "useInit": false
+      },
+      "fds_ready": {
+        "orphan_pipes": 0,
+        "all_fds": 48
+      },
+      "sequential": {
+        "n": 100,
+        "wrong": 0,
+        "p50_ms": 0.5,
+        "max_ms": 3.5
+      },
+      "concurrent": {
+        "n": 20,
+        "wrong": 0,
+        "max_ms": 9.8
+      },
+      "idle_60s": {
+        "seconds": 60.0,
+        "agent": "genuine"
+      },
+      "fds_after_requests": {
+        "orphan_pipes": 0,
+        "all_fds": 48
+      },
+      "hijack_exec_rc": 0,
+      "hijack_status": "{\"uid\": 502, \"unlink\": \"PermissionError(13, 'Permission denied')\", \"bind\": \"PermissionError(13, 'Permission denied')\"}",
+      "after_hijack_reply": "genuine"
+    },
+    {
+      "case": "rootfs_root_drop_remount_ro",
+      "run_rc": 0,
+      "run_err": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]",
+      "ready": true,
+      "agent_status": "{\"mode\": \"root-drop-ro\", \"start_uid\": 0, \"remount_ro\": {\"remount\": 0}, \"no_new_privs_set\": 0, \"uid\": 502, \"gid\": 20, \"dumpable\": 0, \"no_new_privs\": 1, \"dir_mode\": \"0o700\", \"rootfs_write_as_keeper\": \"Read-only file system\"}",
+      "inspect_init": [
+        "python3",
+        "/opt/probe/agent_probe.py",
+        "/run/masc-agent/agent.sock",
+        "root-drop-ro"
+      ],
+      "inspect_user": {
+        "raw": {
+          "userString": "root"
+        }
+      },
+      "inspect_published_sockets": [
+        {
+          "containerPath": "/run/masc-agent/agent.sock",
+          "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/sa/rootfs_root_drop_remount_ro.sock"
+        }
+      ],
+      "inspect_has_init_field": {
+        "useInit": false
+      },
+      "fds_ready": {
+        "orphan_pipes": 0,
+        "all_fds": 48
+      },
+      "sequential": {
+        "n": 100,
+        "wrong": 0,
+        "p50_ms": 0.6,
+        "max_ms": 1.3
+      },
+      "concurrent": {
+        "n": 20,
+        "wrong": 0,
+        "max_ms": 14.1
+      },
+      "idle_60s": {
+        "seconds": 60.0,
+        "agent": "genuine"
+      },
+      "fds_after_requests": {
+        "orphan_pipes": 0,
+        "all_fds": 48
+      },
+      "hijack_exec_rc": 0,
+      "hijack_status": "{\"uid\": 502, \"unlink\": \"PermissionError(13, 'Permission denied')\", \"bind\": \"PermissionError(13, 'Permission denied')\"}",
+      "after_hijack_reply": "genuine"
+    }
+  ]
+}

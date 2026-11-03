@@ -768,12 +768,6 @@ let handle_keeper_task_tool_with_outcome
                           ]
                         message)))))
     | Task_claim ->
-    let auto_claim_eligible task =
-      not
-        (Keeper_world_observation_inputs.task_is_self_authored_todo
-           ~meta
-           task)
-    in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
@@ -802,17 +796,7 @@ let handle_keeper_task_tool_with_outcome
       if requested_task_id <> "" then
         explicit_claim_result ()
       else
-        (* Auto-claim (no explicit task_id) must not select the keeper's own
-           authored tasks: that closes the routing/report feedback loop
-           (#25429) the claimable count already excludes. Explicit claim by
-           task_id above is intentional and left unfiltered. The self-author
-           exclusion is a [hard_filter], not a [task_filter]: a hard exclusion
-           must survive the [allow_scope_fallback] widening below, otherwise a
-           keeper whose backlog holds only its own routing/report tasks falls
-           into the fallback, drops the goal-scope filter, and claims its own
-           task right back — exactly the case this is meant to prevent. *)
         Workspace.claim_next_r config ~agent_name:meta.name
-          ~hard_filter:auto_claim_eligible
           ~auto_start:true
           ()
     in
@@ -886,14 +870,6 @@ let handle_keeper_task_tool_with_outcome
      | Workspace.Claim_next_claimed _
      | Workspace.Claim_next_no_unclaimed -> Keeper_tool_execution.success payload)
     | Task_release ->
-    (* Handing a task back is the other half of the claim refusal in
-       [Workspace_task_claim.held_tasks_refusal_message]: a keeper that
-       cannot finish what it holds is also barred from claiming anything
-       else, and before this tool existed its only way out was for the
-       keeper to be shut down (keeper_shutdown_finalize.ml:137). The
-       release is explicit and carries a summary; #18839 removed the
-       implicit auto-release because a task with no handoff note travelled
-       between keepers losing its progress. *)
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let summary = Safe_ops.json_string ~default:"" "summary" args |> String.trim in
     let optional_field name =
@@ -981,19 +957,6 @@ let handle_keeper_task_tool_with_outcome
              (Keeper_tool_outcome.Error
                 { reason = "keeper_task_cancel rejected: task_id required" })
            "task_id is required.")
-    else if reason = ""
-    then
-      (* The authority judges this and nothing else, so an empty reason is
-         refused here rather than sent as a case with no argument. *)
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Workflow_rejection
-        (workflow_rejection_error_json
-           ~typed_outcome:
-             (Keeper_tool_outcome.Error
-                { reason = "keeper_task_cancel rejected: reason required" })
-           "reason is required. Say why this task should stop existing rather \
-            than move to someone else. Example: reason='the defect was fixed \
-            in #32078; what this task describes no longer occurs'.")
     else (
       let args_for_transition =
         [ "task_id", `String task_id

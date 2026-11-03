@@ -277,7 +277,11 @@ let commit_operator_cancel_json ~config ~operator_id json =
         | Error message -> invalid message
       in
       let* task_id = required "task_id" in
-      let* reason = required "reason" in
+      let* reason =
+        match optional_string_field fields "reason" with
+        | Ok value -> Ok value
+        | Error message -> invalid message
+      in
       Workspace.cancel_task_as_operator_r config ~operator_id ~task_id ~reason ()
   | _ -> invalid "request body must be a JSON object"
 ;;

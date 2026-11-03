@@ -6,9 +6,9 @@ Hand your claimed task back to the backlog so another Keeper can take it.
 Use this when you cannot finish the task and it should not sit with you: the \
 work is blocked on something outside your reach, it needs a checkout or a \
 tool you do not have, or your verification keeps coming back rejected. The \
-task returns to the backlog with your summary attached, and you can claim \
-different work immediately. This does not cancel the task and does not \
-delete anything you already submitted. You must own the task."""
+task returns to the backlog with your summary attached. This does not cancel \
+the task and does not delete anything you already submitted. You must own the \
+task."""
 
 # 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
 # (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
@@ -65,6 +65,6 @@ key_constraints = [
   "summary is required; the next owner starts from it.",
   "The task returns to the backlog and can be reclaimed. It is not cancelled.",
 ]
-details_markdown = "Issues release. Holding a task you cannot finish also blocks you from claiming anything else, so hand it back rather than idling on it. Include evidence_refs to retain the current sources with your handoff; the next owner's claim preserves them and your attribution. Export files separately when the next owner needs their bytes."
+details_markdown = "Issues release. Include evidence_refs to retain the current sources with your handoff; the next owner's claim preserves them and your attribution. Export files separately when the next owner needs their bytes."
 examples = ["task_id='task-384' summary='4 verification rejections, no path forward from this Keeper' reason='no completion authority accepted the evidence' next_step='re-read the rejection notes before re-claiming'"]
 alternatives = ["keeper_task_done"]

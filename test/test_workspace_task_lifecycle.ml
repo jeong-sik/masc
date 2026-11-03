@@ -94,11 +94,14 @@ let test_cancel_of_a_pending_submission_ends_the_task () =
   |> cancelled_with_reason ~what:"pending submission"
 ;;
 
-let test_holder_cancel_requires_a_reason () =
-  decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
-  |> expect_error L.Cancel_reason_required;
-  decide ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
-  |> expect_error L.Cancel_reason_required
+let test_holder_cancel_without_a_reason_ends_the_task () =
+  List.iter
+    (fun task_status ->
+       match decide ~same_agent:true ~task_status ~action:D.Cancel () with
+       | Ok { L.new_status = D.Cancelled { cancelled_by; reason = None; _ }; _ }
+         when String.equal cancelled_by owner -> ()
+       | Ok _ | Error _ -> failwith "a holder's cancel without a reason must end the task")
+    [ in_progress; awaiting ]
 ;;
 
 let test_cancel_of_someone_elses_task_is_refused () =
@@ -153,7 +156,9 @@ let test_operator_cancel_states () =
     | Ok _ | Error _ -> failwith "operator cancellation must record the real actor")
     [ D.Todo; D.Claimed { assignee = owner; claimed_at = now }; in_progress; awaiting ];
   List.iter (fun reason ->
-    cancel in_progress reason |> expect_error L.Cancel_reason_required)
+    match cancel in_progress reason with
+    | Ok { L.new_status = D.Cancelled { reason = None; _ }; _ } -> ()
+    | Ok _ | Error _ -> failwith "operator cancellation without a reason must end the task")
     [ None; Some ""; Some "  " ];
   cancel (D.Done { assignee = owner; completed_at = now; notes = None })
     (Some producer_reason) |> expect_error L.Invalid_transition;
@@ -482,7 +487,7 @@ let () =
   test_operator_cancel_states ();
   test_holder_cancel_ends_the_task_at_once ();
   test_cancel_of_a_pending_submission_ends_the_task ();
-  test_holder_cancel_requires_a_reason ();
+  test_holder_cancel_without_a_reason_ends_the_task ();
   test_cancel_of_someone_elses_task_is_refused ();
   test_submit_refusal_preserves_holder_and_pending_submission ();
   test_held_action_refusals_and_pending_release ();

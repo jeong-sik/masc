@@ -499,8 +499,7 @@ type task_handoff_context = {
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. Two entry points supply it differently: [transition_task_r]
     takes an explicit [reason], while [release_task_r] takes none at all and
-    forwards only a handoff context, which the production release tool requires
-    for a strict release. [task_handoff_context.reason] is the same concept
+    forwards only a handoff context. [task_handoff_context.reason] is the same concept
     under a different argument, so it is read when the explicit one is empty.
 
     Single definition on purpose: the committed broadcast and the author wake
@@ -514,11 +513,8 @@ let stated_reason ~(reason : string option)
     | "" -> None
     | trimmed -> Some trimmed
   in
-  (* [reason] then [summary]. A strict release is rejected without
-     [handoff_context.summary] while [reason] stays optional, so a release
-     whose whole explanation is its summary would otherwise publish a bare
-     "Released <id>" — dropping text the caller was required to supply.
-     [failure_mode] is left out: it classifies, it does not explain. *)
+  (* [reason] then [summary]. [failure_mode] is left out: it classifies, it
+     does not explain. *)
   let from_handoff () =
     match handoff_context with
     | None -> None

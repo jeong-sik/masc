@@ -220,12 +220,10 @@ type task_handoff_context =
 
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. [transition_task_r] takes an explicit [reason];
-    [release_task_r] takes none and forwards only a handoff context, which the
-    production release tool requires for a strict release.
+    [release_task_r] takes none and forwards only a handoff context.
     [task_handoff_context.reason] is the same concept under a different
     argument, so it is read when the explicit one is blank, then
-    [task_handoff_context.summary] — which a strict release is rejected
-    without, while [reason] stays optional.
+    [task_handoff_context.summary].
 
     Single definition on purpose: the committed broadcast and the author wake
     both answer "why did this stop", and resolving it separately let them

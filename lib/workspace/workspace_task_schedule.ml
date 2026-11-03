@@ -109,18 +109,14 @@ let reconcile_agent_current_task_with_prepared_backlog
 (** Claim next highest priority unclaimed task.
 
     Scheduling logic:
-    - Preserves any active claim held by this agent; callers must explicitly
-      release or finish before claiming different work.
     - Uses the task's explicit priority without time-derived rewriting
     - Within the same priority, prefers older tasks (FIFO) *)
 let claim_next_r
       config
       ~agent_name
-      ?(hard_filter : Masc_domain.task -> bool = fun _ -> true)
       ?(auto_start = false)
       ()
   =
-  let exception Existing_claim of claim_next_result in
   ensure_initialized config;
   let lock_path = backlog_lock_path config in
   let claim_under_lock () =
@@ -130,116 +126,6 @@ let claim_next_r
       | Ok prepared ->
         let backlog = prepared.backlog in
         reconcile_agent_current_task_with_prepared_backlog config ~agent_name prepared;
-        (* #10421: If this agent already holds a Claimed or InProgress task,
-         return that task instead of implicitly releasing it.  Automatic
-         release caused keeper hot-potato loops: a repeated claim_next call
-         could drop InProgress work back to Todo and let another keeper steal
-         it before the original owner had a chance to finish.  AwaitingVerification
-         is still excluded: it is no longer active implementation work for
-         the claimant. *)
-        let active_owned_task_id_set =
-          Workspace_task.active_owned_task_ids_for_agent config ~agent_name backlog
-          |> Task_id_set.of_list
-        in
-        let previous_claim =
-          List.find_opt
-            (fun (t : Masc_domain.task) ->
-               Task_id_set.mem t.id active_owned_task_id_set)
-            backlog.tasks
-        in
-        (match previous_claim with
-         | None -> ()
-         | Some prev ->
-           let from_status = task_status_label prev.task_status in
-           Workspace_task_claim.run_post_commit
-             ~task_id:prev.id
-             ~agent_name
-             ~action:"claim_next_existing"
-             "existing_task_log"
-             (fun () ->
-                log_event
-                  config
-                  (`Assoc
-                      [ "type", `String "task_claim_next_existing_task"
-                      ; "agent", `String agent_name
-                      ; "task", `String prev.id
-                      ; "from_status", `String from_status
-                      ; "reason", `String "existing_claim_preserved"
-                      ; "ts", `String (now_iso ())
-                      ]));
-           Log.TaskState.info
-             "task_claim_next preserved existing task: agent=%s task=%s from_status=%s — \
-              finish or explicitly release before claiming different work (#10421)"
-             agent_name
-             prev.id
-             from_status;
-           let auto_started_existing =
-             match auto_start, prev.task_status with
-             | true, (Masc_domain.Claimed _ as prior_status) ->
-               let started_status =
-                 Masc_domain.InProgress { assignee = agent_name; started_at = now_iso () }
-               in
-               let new_tasks =
-                 List.map
-                   (fun (t : Masc_domain.task) ->
-                      if String.equal t.id prev.id
-                      then { t with task_status = started_status }
-                      else t)
-                   backlog.tasks
-               in
-               write_backlog
-                 ~after_commit:(fun () ->
-                   Task_cache_invariant.clear_stale_agent_task config
-                     ~cause:Task_cache_invariant.After_commit
-                     ~agent_name ~task_id:prev.id ~status:started_status
-                     ~module_name:"claim_next_r.existing_auto_start")
-                 config
-                 { backlog with tasks = new_tasks };
-               Some (prior_status, started_status)
-             | (true | false),
-               ( Masc_domain.Claimed _
-               | Masc_domain.InProgress _
-               | Masc_domain.Todo
-               | Masc_domain.AwaitingVerification _
-               | Masc_domain.Done _
-               | Masc_domain.Cancelled _ ) -> None
-           in
-           Workspace_task_claim.run_post_commit
-             ~task_id:prev.id
-             ~agent_name
-             ~action:"claim_next_existing"
-             "agent_state"
-             (fun () ->
-                Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
-                  { agent with status = Busy; current_task = Some prev.id }));
-           (match auto_started_existing with
-            | None -> ()
-            | Some (from_status, to_status) ->
-              Workspace_task_claim.emit_auto_start_side_effects
-                config
-                ~agent_name
-                ~task_id:prev.id
-                ~from_status
-                ~to_status);
-           let base_message =
-             (* Shared with the claim-by-task_id refusal, which used to say only
-                that a task was held. One constraint, one sentence. *)
-             Workspace_task.held_tasks_refusal_message ~agent_name [ prev ]
-           in
-           let message =
-             match auto_started_existing with
-             | Some _ ->
-               base_message ^ " Task auto-started — begin work now."
-             | None -> base_message
-           in
-           raise
-             (Existing_claim
-                (Claim_next_claimed
-                   { task_id = prev.id
-                   ; title = prev.title
-                   ; priority = prev.priority
-                   ; message
-                   })));
         let working_tasks = backlog.tasks in
         (* Eligibility and the claim outcome are one decision
            ([Workspace_task_lifecycle.resolve_claim]).
@@ -263,7 +149,6 @@ let claim_next_r
         let unclaimed =
           prepared.claimable_ordered_tasks
           |> List.filter resolves_claimable
-          |> List.filter hard_filter
         in
         (match unclaimed with
          | [] -> Claim_next_no_unclaimed
@@ -384,7 +269,6 @@ let claim_next_r
              ; message
              })
     with
-    | Existing_claim result -> result
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Claim_next_error (Printexc.to_string e)
   in

@@ -33,8 +33,6 @@ val agent_current_task_matches_assignments
 val claim_next_r
   :  config
   -> agent_name:string
-  -> ?hard_filter:(Masc_domain.task -> bool)
-       (** Excludes tasks from the claim pool. Default [fun _ -> true]. *)
   -> ?auto_start:bool
        (** When [true], atomically transitions the claimed task (or an already
            held [Claimed] task) to [InProgress] inside the same [.backlog]

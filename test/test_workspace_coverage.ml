@@ -545,115 +545,33 @@ let test_status_hides_stale_agent_current_task_without_writing () =
         (Masc_domain.agent_status_to_string agent_after.status)))
 ;;
 
-(* ============================================================ *)
-(* #10421: claim_next existing-task preservation                 *)
-(* ============================================================ *)
-
-(** Same agent calling claim_next twice should keep the current task bound.
-    Implicit release creates keeper hot-potato loops when a model repeats the
-    claim tool before doing the work. *)
-let test_claim_next_preserves_existing_task () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"First" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Second" ~priority:2 ~description:"" in
-    let r1 = claim_next config ~agent_name:"claude" in
-    Alcotest.(check bool) "first claim has task-001" true (str_contains r1 "task-001");
-    let r2 = claim_next config ~agent_name:"claude" in
-    Alcotest.(check bool)
-      "second claim keeps current task"
-      true
-      (str_contains r2 "already holds");
-    Alcotest.(check bool)
-      "second claim mentions task-001"
-      true
-      (str_contains r2 "task-001");
-    Alcotest.(check bool)
-      "second claim does not move to task-002"
-      false
-      (str_contains r2 "task-002");
-    let tasks = Workspace.get_tasks_raw config in
-    let task_001 =
-      List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-001") tasks
-    in
-    let task_002 =
-      List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-002") tasks
-    in
-    (match task_001 with
-     | Some t ->
-       Alcotest.(check string)
-         "task-001 stays claimed"
-         "claimed"
-         (Masc_domain.task_status_to_string t.task_status)
-     | None -> Alcotest.fail "task-001 not found in backlog");
-    match task_002 with
-    | Some t ->
-      Alcotest.(check string)
-        "task-002 stays todo"
-        "todo"
-        (Masc_domain.task_status_to_string t.task_status)
-    | None -> Alcotest.fail "task-002 not found in backlog")
-;;
-
-(** A repeated claim by the owner must not make the current task claimable by
-    other agents. Peers should move to the next Todo task. *)
-let test_claim_next_preserved_task_not_claimable_by_others () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Task A" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Task B" ~priority:2 ~description:"" in
-    let _ = claim_next config ~agent_name:"claude" in
-    let _ = claim_next config ~agent_name:"claude" in
-    let r = claim_next config ~agent_name:"gemini" in
-    Alcotest.(check bool)
-      "gemini does not get preserved task"
-      false
-      (str_contains r "task-001");
-    Alcotest.(check bool) "gemini gets task-002" true (str_contains r "task-002"))
-;;
-
-(** Repeated owner calls preserve the current task instead of releasing it. *)
-let test_claim_next_r_preserves_current_task () =
+(** An agent that already holds a Task claims the next unclaimed one. *)
+let test_claim_next_claims_another_task_while_holding_one () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
-    let r1 = Workspace.claim_next_r config ~agent_name:"claude" () in
-    (match r1 with
-     | Workspace.Claim_next_claimed { task_id; _ } ->
-       Alcotest.(check string) "first claim is task-001" "task-001" task_id
-     | _ -> Alcotest.fail "first claim should succeed");
-    let r2 = Workspace.claim_next_r config ~agent_name:"claude" () in
-    match r2 with
-    | Workspace.Claim_next_claimed { task_id; message; _ } ->
-      Alcotest.(check string) "still task-001" "task-001" task_id;
-      Alcotest.(check bool)
-        "message says already holds"
-        true
-        (str_contains message "already holds")
-    | _ -> Alcotest.fail "second claim should succeed")
-;;
-
-(** The single-claim refusal has to carry its own correction hint: the prompt
-    used to spell out the escape route in prose because the message named the
-    held Task but not the way out. *)
-let test_claim_next_refusal_names_the_release_path () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_next_r config ~agent_name:"claude" () in
-    match Workspace.claim_next_r config ~agent_name:"claude" () with
-    | Workspace.Claim_next_claimed { message; _ } ->
-      Alcotest.(check bool)
-        "names the transition tool"
-        true
-        (str_contains message "masc_transition");
-      Alcotest.(check bool)
-        "names the release action"
-        true
-        (str_contains message "action=release");
-      Alcotest.(check bool)
-        "names the required handoff summary"
-        true
-        (str_contains message "handoff_context.summary")
-    | _ -> Alcotest.fail "second claim should be refused with the held task")
+    let claimed_id = function
+      | Workspace.Claim_next_claimed { task_id; _ } -> task_id
+      | Workspace.Claim_next_no_unclaimed -> Alcotest.fail "expected a claim, got none"
+      | Workspace.Claim_next_error e -> Alcotest.fail e
+    in
+    let first = claimed_id (Workspace.claim_next_r config ~agent_name:"claude" ()) in
+    let second = claimed_id (Workspace.claim_next_r config ~agent_name:"claude" ()) in
+    Alcotest.(check (list string))
+      "both tasks claimed in priority order"
+      [ "task-001"; "task-002" ]
+      [ first; second ];
+    let holders =
+      Workspace.get_tasks_raw config
+      |> List.filter_map (fun (task : Masc_domain.task) ->
+        match Masc_domain.task_assignee_of_status task.task_status with
+        | Some holder -> Some (task.id, holder)
+        | None -> None)
+    in
+    Alcotest.(check (list (pair string string)))
+      "claude holds both tasks"
+      [ "task-001", "claude"; "task-002", "claude" ]
+      holders)
 ;;
 
 let test_release_hard_stop_todo_stays_claimable () =
@@ -2037,7 +1955,7 @@ let test_transition_done_from_claimed_emits_observability () =
            ]))
 ;;
 
-let test_claim_next_existing_task_does_not_emit_release_observability () =
+let test_claim_next_while_holding_does_not_emit_release_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
     let claude = find_agent_name_by_prefix config "claude" in
@@ -2048,8 +1966,8 @@ let test_claim_next_existing_task_does_not_emit_release_observability () =
      | _ -> Alcotest.fail "expected first claim_next_r to succeed");
     (match Workspace.claim_next_r config ~agent_name:claude () with
      | Workspace.Claim_next_claimed { task_id; _ } ->
-       Alcotest.(check string) "keeps task id" "task-001" task_id
-     | _ -> Alcotest.fail "expected existing task on second claim_next_r");
+       Alcotest.(check string) "claims the next task" "task-002" task_id
+     | _ -> Alcotest.fail "expected a second claim from claim_next_r");
     let audit_entries = Audit_log.read_entries ~n:50 config in
     Alcotest.(check bool)
       "audit release not recorded"
@@ -3872,21 +3790,9 @@ let () =
             `Quick
             test_claim_next_reconciles_stale_agent_current_task
         ; Alcotest.test_case
-            "#10421: preserves existing task"
+            "claims another task while holding one"
             `Quick
-            test_claim_next_preserves_existing_task
-        ; Alcotest.test_case
-            "#10421: preserved task not claimable"
-            `Quick
-            test_claim_next_preserved_task_not_claimable_by_others
-        ; Alcotest.test_case
-            "#10421: preserved task result"
-            `Quick
-            test_claim_next_r_preserves_current_task
-        ; Alcotest.test_case
-            "single-claim refusal names the release path"
-            `Quick
-            test_claim_next_refusal_names_the_release_path
+            test_claim_next_claims_another_task_while_holding_one
         ; Alcotest.test_case
             "release hard-stop persists policy, todo stays claimable"
             `Quick
@@ -3998,9 +3904,9 @@ let () =
             `Quick
             test_transition_done_from_claimed_emits_observability
         ; Alcotest.test_case
-            "claim_next existing task no release fan-out"
+            "claim_next while holding a task no release fan-out"
             `Quick
-            test_claim_next_existing_task_does_not_emit_release_observability
+            test_claim_next_while_holding_does_not_emit_release_observability
         ] )
     ; (* === Pause/Resume === *)
       ( "pause_resume"

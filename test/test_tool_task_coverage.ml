@@ -420,22 +420,13 @@ let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
          "expected typed add_task success, got %s"
          (Workspace.add_task_error_to_string err)))
 
-(* Regression for the self-author claim-path filter (issue #25459 / #25429):
-   the auto-claim path in keeper_tool_task_runtime composes
-   [not (task_is_self_authored_todo ~meta t)] into the [claim_next_r] hard
-   filter so
-   a keeper is not auto-assigned a task it authored itself. This exercises the
-   real [claim_next_r] selection (the predicate itself is unit-tested in
-   test_keeper_self_authored_task_exclusion). Ordering-independent: a single
-   self-authored task is claimable without the filter and NOT claimable with
-   it, so reverting the filter turns the second assertion RED. *)
 let claimed_title = function
   | Masc_domain.Claim_next_claimed { title; _ } -> Some title
   | Masc_domain.Claim_next_no_unclaimed
   | Masc_domain.Claim_next_error _ -> None
 ;;
 
-let () = test "auto_claim_takes_self_authored_task_without_filter" (fun () ->
+let () = test "auto_claim_takes_self_authored_task" (fun () ->
   let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
@@ -444,20 +435,6 @@ let () = test "auto_claim_takes_self_authored_task_without_filter" (fun () ->
   in
   let result = Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper" () in
   assert (claimed_title result = Some "self routing task"))
-
-let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "fixture-keeper" in
-  let _ =
-    Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
-      ~description:""
-  in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
-  let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
-      ~hard_filter:self_excluding ()
-  in
-  assert (claimed_title result = None))
 
 let () = test "handle_batch_add_tasks_returns_structured_task_ids" (fun () ->
   let ctx = make_test_ctx () in
@@ -3225,73 +3202,6 @@ let () = test "transition action description does not re-list the enum" (fun () 
     List.sort compare enum_actions
     = List.sort compare Masc_domain.valid_task_action_strings))
 ;;
-
-(* [claim_next] and a claim by task_id refuse the same limit. Only [claim_next]
-   named the route; the by-id path said "has task(s) in progress: task-149;
-   task-148 was not claimed." and stopped -- and that is the path Keepers hit,
-   38 of the week's 77 claim rejections. The three tokens asserted here are the
-   same three test_workspace_coverage pins on the [claim_next] message, so the
-   two cannot drift apart again. *)
-let () =
-  test "a claim-by-id refusal names the release route, as claim_next does"
-    (fun () ->
-       let ctx = make_test_ctx_with_agent "worker" in
-       List.iter
-         (fun title ->
-            ignore
-              (Task.Tool.handle_add_task
-                 ~tool_name:"test_tool"
-                 ~start_time:(Tool_timing.start ())
-                 ctx
-                 (`Assoc [ "title", `String title ])))
-         [ "Held work"; "Tempting other work" ];
-       let held =
-         Task.Tool.handle_claim
-           ~tool_name:"keeper_task_claim"
-           ~start_time:(Tool_timing.start ())
-           ctx
-           (`Assoc [ "task_id", `String "task-001" ])
-       in
-       if not (Tool_result.is_success held) then failwith (Tool_result.message held);
-       let refused =
-         Task.Tool.handle_claim
-           ~tool_name:"keeper_task_claim"
-           ~start_time:(Tool_timing.start ())
-           ctx
-           (`Assoc [ "task_id", `String "task-002" ])
-       in
-       assert (not (Tool_result.is_success refused));
-       let message = Tool_result.message refused in
-       assert (str_contains message "task-001");
-       assert (str_contains message "Held work");
-       assert (str_contains message "masc_transition");
-       assert (str_contains message "action=release");
-       assert (str_contains message "handoff_context.summary"))
-
-(* The message tells the assignee to release, so Release has to be admitted from
-   every status that can produce the refusal. [active_owned_task_ids_for_agent]
-   returns exactly Claimed and InProgress, so those are the two to pin: an FSM
-   change that stopped admitting Release would land here rather than as advice
-   Keepers cannot follow. *)
-let () =
-  test "release is admitted from every status that can trigger that refusal"
-    (fun () ->
-       List.iter
-         (fun status ->
-            let actions =
-              Workspace_task_lifecycle.valid_next_actions ~same_agent:true
-                ~task_status:status
-            in
-            if not (List.exists (( = ) Masc_domain.Release) actions)
-            then
-              failwith
-                (Printf.sprintf
-                   "Release must stay admitted from %s, or the ownership refusal \
-                    names an action the assignee cannot take"
-                   (Masc_domain.task_status_to_string status)))
-         [ Masc_domain.Claimed { assignee = "worker"; claimed_at = "t" }
-         ; Masc_domain.InProgress { assignee = "worker"; started_at = "t" }
-         ])
 
 (* [limit] counts THIS task's events. Counting raw lines instead meant the
    reader budgeted [min 500 (limit * 5)] lines and filtered afterwards, so a

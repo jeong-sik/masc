@@ -56,7 +56,7 @@ Evidence summary for submit_for_verification"""
 [[params]]
 name = "reason"
 type = "string"
-description = "Why this Task should stop existing (used with action='cancel'). Cancelling a Task you hold ends it at once, and this sentence is all the Task's author is told, so one must be stated — here, or in handoff_context (summary or reason), which exit-class actions already require. Cancelling an unclaimed Task needs none."
+description = "Why this Task should stop existing (used with action='cancel'). The Task's author is told this sentence; handoff_context.summary or reason can carry it instead."
 
 [[params]]
 name = "handoff_context"

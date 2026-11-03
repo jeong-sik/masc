@@ -1,7 +1,6 @@
 type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
-  | Cancel_reason_required
   | Current_owner_required of { current_assignee : string }
   | Claim_required
   | Invalid_transition
@@ -37,10 +36,13 @@ let decide_operator_cancel ~operator_id ~task_status ~now ~reason =
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.AwaitingVerification _ ->
-    (match Option.map String.trim reason with
-     | None | Some "" -> Error Cancel_reason_required
-     | Some reason ->
-       ok (cancelled_status ~agent_name:operator_id ~now ~reason:(Some reason)))
+    let reason =
+      Option.bind reason (fun reason ->
+        match String.trim reason with
+        | "" -> None
+        | trimmed -> Some trimmed)
+    in
+    ok (cancelled_status ~agent_name:operator_id ~now ~reason)
 ;;
 
 type claim_resolution =
@@ -130,29 +132,17 @@ let decide
       | Masc_domain.Cancelled _ ) ) ->
     Error Invalid_transition
   | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
-  | Masc_domain.Cancel, Masc_domain.Todo ->
-    (* Same gate as the holder's cancel below: an unclaimed Task's author is
-       owed the sentence too, and the persisted release note is the previous
-       owner's (RFC-0365), not this caller's reason. *)
-    (match reason with
-     | None -> Error Cancel_reason_required
-     | Some _ -> ok (cancelled_status ~agent_name ~now ~reason))
+  | Masc_domain.Cancel, Masc_domain.Todo -> ok (cancelled_status ~agent_name ~now ~reason)
   (* The holder stops its own work outright: giving up work you hold needs
      nobody's permission (RFC-0417 §4.1). A pending submission is the
-     producer's own, so withdrawing it ends the same way.
-
-     The reason is required: the Task's author is woken with it, and a
-     Cancelled record with no sentence tells that author nothing. *)
+     producer's own, so withdrawing it ends the same way. *)
   | ( Masc_domain.Cancel
     , ( Masc_domain.Claimed { assignee; _ }
       | Masc_domain.InProgress { assignee; _ }
       | Masc_domain.AwaitingVerification { assignee; _ } ) ) ->
     if not (same_agent assignee)
     then Error (Current_owner_required { current_assignee = assignee })
-    else (
-      match reason with
-      | None -> Error Cancel_reason_required
-      | Some _ -> ok (cancelled_status ~agent_name ~now ~reason))
+    else ok (cancelled_status ~agent_name ~now ~reason)
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->

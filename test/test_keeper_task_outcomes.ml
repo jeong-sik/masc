@@ -1651,39 +1651,21 @@ let with_release_fixture f =
        in
        f call)
 
-(* keeper_task_release exists so a Keeper holding work it cannot finish can go
-   take different work. "release returned ok" on its own does not show that:
-   the claim refusal reads backlog ownership, so the proof is the second claim
-   failing before the release and succeeding after it. Before this tool that
-   second claim stayed refused for the life of the Keeper. *)
-let test_release_frees_the_keeper_to_claim_again () =
+(* A Keeper that holds one task claims another, and releases either one. *)
+let test_keeper_claims_more_work_while_holding_a_task () =
   with_release_fixture (fun call ->
     let claim task_id = call "keeper_task_claim" (`Assoc [ "task_id", `String task_id ]) in
     check bool "first claim succeeds" true (accepted (claim "task-001"));
-    let second = claim "task-002" in
-    check bool "a second claim is refused while the first is held" true (refused second);
-    (* The refusal has to name something the reader can call. It used to name
-       only masc_transition, which the Keeper surface projects away behind
-       keeper_task_claim. *)
-    check
-      bool
-      "the refusal names keeper_task_release"
-      true
-      (contains ~needle:"keeper_task_release" (Yojson.Safe.to_string second));
-    let released =
-      call
-        "keeper_task_release"
-        (`Assoc
-          [ "task_id", `String "task-001"
-          ; "summary", `String "blocked on a checkout this Keeper does not have"
-          ])
-    in
-    check bool "release succeeds" true (accepted released);
-    check
-      bool
-      "the Keeper can claim different work once it has handed the task back"
-      true
-      (accepted (claim "task-002")))
+    check bool "a second claim succeeds while the first is held" true
+      (accepted (claim "task-002"));
+    check bool "release of the first succeeds" true
+      (accepted
+         (call
+            "keeper_task_release"
+            (`Assoc
+              [ "task_id", `String "task-001"
+              ; "summary", `String "blocked on a checkout this Keeper does not have"
+              ]))))
 
 (* The next owner reads the summary and nothing else about where the work
    stands, so an empty one is refused at the tool rather than stored. *)
@@ -1862,8 +1844,8 @@ let () =
             "done submits three rendered pages"
             `Quick test_done_submits_three_rendered_pages
         ; test_case
-            "release frees the Keeper to claim different work"
-            `Quick test_release_frees_the_keeper_to_claim_again
+            "a Keeper claims more work while holding a task"
+            `Quick test_keeper_claims_more_work_while_holding_a_task
         ; test_case
             "release without a summary is refused and keeps the task held"
             `Quick test_release_without_summary_is_refused

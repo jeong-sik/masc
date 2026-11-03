@@ -134,9 +134,11 @@ Serialized observations count toward the existing provider request boundary,
 pair by pair. A request's size is set by what one candidate cites, not by how many
 turns the pass read, so a pass does not fail as a whole for size. When a
 candidate's cited observations still do not fit beside its pair, that pair is
-asked the pair-only question, and its evaluation record says the observations were
-left out because they exceed the boundary. The record uses a closed direction, not
-a message. Only `mergeable` retires the source; any other answer keeps it current
+asked the pair-only question, and its verdict records that the observations were
+left out because they exceed the boundary. Every verdict records how its pair was
+asked as a closed value (`asked`: with the cited observations, alone because
+nothing was cited, or alone because the citations exceed the boundary), not as a
+message. Only `mergeable` retires the source; any other answer keeps it current
 beside the candidate, as for every judged pair. If the pair-only question does not
 fit either, the pair is unjudgeable and its original stays current, as in a pass
 without observations. Nothing is omitted silently: a pair carries what its

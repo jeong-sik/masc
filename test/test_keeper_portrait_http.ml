@@ -1108,6 +1108,13 @@ beanie = %d
        check string "purchase burns only its price" "200" supply.burned_milli;
        check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
      | Candle_observation.Off | Candle_observation.Disabled _ -> fail "paid ledger observation unavailable");
+    (match Candle_decay_basis.of_json (Yojson.Safe.Util.member "candle_decay" roster) with
+     | Ok { decay = Candle_decay_basis.Decaying { keepers; _ }; _ } ->
+       check (option int) "the decay basis holds the wallet from the same ledger reading" (Some 800)
+         (Option.map (fun (held : Candle_decay_basis.keeper) -> held.amount_milli)
+            (List.assoc_opt keeper keepers))
+     | Ok { decay = Candle_decay_basis.No_decaying_balance; _ } -> fail "the paid wallet has no decay basis"
+     | Error detail -> fail ("roster decay basis unreadable: " ^ detail));
     let reading = match runtime_rows with
       | [row] ->
         check (option string) "remote wallet comes from the same ledger reading" (Some "800") row.Tui_decode.kr_candle_balance_milli;

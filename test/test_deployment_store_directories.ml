@@ -70,6 +70,47 @@ let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
   check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
+(* The logger stamps a line with the second it was written, and a second run
+   starts a second later. *)
+let without_log_stamp line =
+  if String.length line > 22 && line.[0] = '[' && line.[20] = ']' && line.[21] = ' '
+  then String.sub line 22 (String.length line - 22)
+  else line
+
+(* The timings differ between runs, and with several jobs the start lines come
+   in another order than the reports. Everything else is the verdict. *)
+let without_timing output =
+  String.split_on_char '\n' output
+  |> List.filter (fun line ->
+    not (String_util.contains_substring line "scan_started"
+         || String_util.contains_substring line "scan_elapsed_s="))
+  |> List.map without_log_stamp
+
+let test_scan_jobs_do_not_change_the_report exe () = with_workspace (fun root keepers traces ->
+  write (Filename.concat keepers "keeper/turn-boundaries.jsonl") "{invalid boundary}\n";
+  write (Filename.concat traces "trace/history.jsonl") "{invalid fragment}\n";
+  let run jobs =
+    invoke_with_args exe root
+      ["validate-stores"; "--base-path"; root; "--jobs"; string_of_int jobs] in
+  let sequential_status, sequential = run 1 in
+  let parallel_status, parallel = run 4 in
+  check bool ("one job refuses the malformed stores: " ^ sequential) true
+    (sequential_status <> Unix.WEXITED 0);
+  check bool ("four jobs refuse them too: " ^ parallel) true
+    (parallel_status <> Unix.WEXITED 0);
+  check bool "the refused rows are named" true
+    (String_util.contains_substring parallel "keeper turn boundaries rows=1 refused=1");
+  check (list string) "the report lines are the same" (without_timing sequential)
+    (without_timing parallel))
+
+let test_zero_scan_jobs_are_refused exe () = with_workspace (fun root _keepers _traces ->
+  let status, output =
+    invoke_with_args exe root ["validate-stores"; "--base-path"; root; "--jobs"; "0"] in
+  check bool ("no scan runs without a process to run it: " ^ output) true
+    (status <> Unix.WEXITED 0);
+  check bool ("the refusal names the option: " ^ output) true
+    (String_util.contains_substring (diagnostic_words output) "--jobs must be at least 1"))
+
 let test_transcript_inventory_failure_stops_preflight exe () =
   with_workspace (fun root _keepers _traces ->
     let dir = Keeper_chat_store.chat_dir root in
@@ -986,6 +1027,9 @@ let () =
   run "deployment store directories"
     ["live layout", ([test_case "regular journals and locks are not stores" `Quick (test_regular_siblings exe);
       test_case "real decoder failures remain visible" `Quick (test_real_store_refusals exe);
+      test_case "the number of scan jobs does not change the report" `Quick
+        (test_scan_jobs_do_not_change_the_report exe);
+      test_case "zero scan jobs are refused" `Quick (test_zero_scan_jobs_are_refused exe);
       test_case "transcript inventory failure stops deployment" `Quick
         (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);

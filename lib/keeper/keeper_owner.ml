@@ -941,6 +941,10 @@ let apply_transition t store old_state transition =
   | Ok state ->
     let before = (Keeper_owner_reducer.projection old_state).meta in
     let pause_identity = Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused, meta.latched_reason) in
+    (* Creating or deleting the meta moves the identity between [None] and
+       [Some], so those commits rotate the token too. The turns answer lists
+       the Keepers whose meta is stored, so the signal below also tells its
+       readers that a Keeper appeared or left. *)
     let token_rotated = pause_identity before <> pause_identity transition.projection.meta in
     if token_rotated then
       Atomic.set t.chat_control_token (Random_id.uuid_v7 ());

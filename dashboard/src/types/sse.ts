@@ -52,6 +52,7 @@ export type SSEEventType =
   | 'keeper_child_content_appended'
   | 'keeper_row_changed'
   | 'keeper_roster_changed'
+  | 'keeper_turn_changed'
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'

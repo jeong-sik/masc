@@ -70,6 +70,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_roster_changed')).toBe('keeper_roster_changed')
   })
 
+  it('accepts keeper turn changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_turn_changed')).toBe('keeper_turn_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

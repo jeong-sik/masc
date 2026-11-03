@@ -120,6 +120,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // Every roster row may have changed (lib/keeper/keeper_row_broadcast.ml).
   // A roster reader re-reads the whole roster on it.
   'keeper_roster_changed',
+  // What /api/v1/keepers/turns answers for one Keeper may have changed
+  // (lib/keeper/keeper_turn_broadcast.ml). A turns reader re-reads on it.
+  'keeper_turn_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

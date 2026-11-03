@@ -872,22 +872,67 @@ let media_reading_maintenance_cmd =
          $ base_path))
 ;;
 
+module D = Masc.Keeper_durable_store
+module L = Masc.Lane_addon_store_preflight
+
+(* How many store scans read at once. The default stays sequential: on the one
+   real workspace measured so far, 4 processes read slower than 1 and used more
+   CPU (PR #47890 Evidence), so parallel reads stay opt-in through --jobs N
+   until a setup shows they help. *)
+let default_scan_jobs = 1
+
+(* What a scan hands back to the process that started it. Only plain data
+   crosses: the scan itself stays in the process that runs it. *)
+type scan_outcome =
+  | Durable_outcome of (D.report, string) result
+  | Lane_addon_outcome of (L.report, string) result
+
+type scan_job =
+  | Durable_scan of D.Id.t * D.scan
+  | Lane_addon_scan of L.Store.t
+
+let scan_name = function
+  | Durable_scan (id, _) -> D.name id
+  | Lane_addon_scan store -> L.name store
+;;
+
+let scan_on_refusal = function
+  | Durable_scan (_, scan) -> D.on_refusal scan
+  | Lane_addon_scan store -> L.on_refusal store
+;;
+
+let run_scan ~base_path = function
+  | Durable_scan (_, scan) -> Durable_outcome (D.run scan ~base_path)
+  | Lane_addon_scan store ->
+    Lane_addon_outcome
+      (L.scan
+         ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validator
+         store
+         ~base_path)
+;;
+
+(* A scan whose process ended without an answer failed: the store was not read. *)
+let failed_outcome job detail =
+  match job with
+  | Durable_scan _ -> Durable_outcome (Error detail)
+  | Lane_addon_scan _ -> Lane_addon_outcome (Error detail)
+;;
+
+let timed_scan ~base_path job =
+  let started = Mtime_clock.elapsed_ns () in
+  let outcome = run_scan ~base_path job in
+  let elapsed_s =
+    Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1_000_000_000.
+  in
+  elapsed_s, outcome
+;;
+
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
    the operator watches, so any file or row this build cannot read stops it.
    The Lane Add-on records follow, with current consumer payload checks for
    Librarian originals. Refusals name the file and its store-specific fresh
    state requirements; a coupled original is not repaired by moving one file. *)
-let validate_stores base_path =
-  let module D = Masc.Keeper_durable_store in
-  let module L = Masc.Lane_addon_store_preflight in
-  let timed_scan name scan =
-    Printf.printf "%s scan_started\n%!" name;
-    let started = Mtime_clock.elapsed_ns () in
-    let result = scan () in
-    let elapsed_s = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1_000_000_000. in
-    Printf.printf "%s scan_elapsed_s=%.3f\n%!" name elapsed_s;
-    result
-  in
+let validate_stores ~jobs base_path =
   let print_store (name, on_refusal, result) =
     match result with
     | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
@@ -905,18 +950,6 @@ let validate_stores base_path =
          Printf.printf "  on refusal: %s\n%!" on_refusal;
          Printf.printf
            "  fresh state: stop the server, delete what this store's Fresh state required entry names, run this check again (docs/guides/DURABLE-STORE-HARD-CUT.md)\n%!")
-  in
-  let reports =
-    List.filter_map
-      (fun id ->
-         Option.map
-           (fun scan ->
-              let result = timed_scan (D.name id) (fun () -> D.run scan ~base_path) in
-              let report = D.name id, D.on_refusal scan, result in
-              print_store report;
-              report)
-           (D.preflight_scan id))
-      D.Id.all
   in
   let print_lane_addon (name, on_refusal, result) =
     match result with
@@ -938,15 +971,56 @@ let validate_stores base_path =
         report.refusals;
       if report.refusals <> [] then Printf.printf "  on refusal: %s\n%!" on_refusal
   in
+  let scans =
+    List.filter_map
+      (fun id -> Option.map (fun scan -> Durable_scan (id, scan)) (D.preflight_scan id))
+      D.Id.all
+    @ List.map (fun store -> Lane_addon_scan store) L.Store.all
+  in
+  let scan_array = Array.of_list scans in
+  let outcome_of job = function
+    | Ok (elapsed_s, outcome) -> Some elapsed_s, outcome
+    | Error failure -> None, failed_outcome job (Forked_map.failure_to_string failure)
+  in
+  (* Scans start together and their results print in the order of the list, as
+     each earlier scan finishes. *)
+  let settled =
+    Forked_map.map
+      ~jobs
+      ~on_start:(fun index ->
+        Printf.printf "%s scan_started\n%!" (scan_name scan_array.(index)))
+      ~on_result:(fun index result ->
+        let job = scan_array.(index) in
+        let elapsed_s, outcome = outcome_of job result in
+        Option.iter
+          (fun elapsed_s ->
+             Printf.printf "%s scan_elapsed_s=%.3f\n%!" (scan_name job) elapsed_s)
+          elapsed_s;
+        match outcome with
+        | Durable_outcome result ->
+          print_store (scan_name job, scan_on_refusal job, result)
+        | Lane_addon_outcome result ->
+          print_lane_addon (scan_name job, scan_on_refusal job, result))
+      (List.map (fun job () -> timed_scan ~base_path job) scans)
+  in
+  let outcomes =
+    List.map2 (fun job result -> job, snd (outcome_of job result)) scans settled
+  in
+  let reports =
+    List.filter_map
+      (fun (job, outcome) ->
+         match outcome with
+         | Durable_outcome result -> Some (scan_name job, scan_on_refusal job, result)
+         | Lane_addon_outcome _ -> None)
+      outcomes
+  in
   let lane_addon_reports =
-    List.map
-      (fun store ->
-         let result = timed_scan (L.name store) (fun () ->
-           L.scan ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validator store ~base_path) in
-         let report = L.name store, L.on_refusal store, result in
-         print_lane_addon report;
-         report)
-      L.Store.all
+    List.filter_map
+      (fun (job, outcome) ->
+         match outcome with
+         | Lane_addon_outcome result -> Some (scan_name job, scan_on_refusal job, result)
+         | Durable_outcome _ -> None)
+      outcomes
   in
   let refused =
     List.fold_left
@@ -1015,6 +1089,14 @@ let validate_stores base_path =
       (String.concat "; " refused_stores)
 ;;
 
+let scan_jobs =
+  let doc =
+    "How many store scans read at once. 1 reads them one after another in this \
+     process."
+  in
+  Arg.(value & opt int default_scan_jobs & info [ "jobs" ] ~docv:"N" ~doc)
+;;
+
 let validate_stores_cmd =
   let doc =
     "read every durable store this gate knows with the production decoders \
@@ -1022,7 +1104,15 @@ let validate_stores_cmd =
   in
   Cmd.v
     (Cmd.info "validate-stores" ~doc)
-    Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
+    Term.(
+      ret
+        (const (fun base_path jobs ->
+           cmdliner_result
+             (if jobs < 1
+              then errorf "--jobs must be at least 1, got %d" jobs
+              else validate_stores ~jobs base_path))
+         $ base_path
+         $ scan_jobs))
 ;;
 
 (* The runtime.toml this BasePath's server reads, judged the way the raw save

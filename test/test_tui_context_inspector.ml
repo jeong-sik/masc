@@ -139,6 +139,35 @@ let test_recent_input_trend_keeps_unavailable_and_zero () =
   check (option (pair int int)) "one zero has a zero scale"
     (Some (0, 0)) only_zero.bounds
 
+(* The active-context figure adds two counts, and a sum the integer range
+   cannot hold is not a figure: reporting [None] keeps an unrepresentable
+   total in the same place as an unavailable one, while a real zero and a
+   single extreme count stay exact. (#47698) *)
+let test_client_context_sum_stays_representable () =
+  let read ~scope ~input_tokens ~output_tokens =
+    Inspector.client_context_tokens
+      ~scope:(scope : Runtime_usage_scope.t)
+      ~input_tokens ~output_tokens
+  in
+  check (option int) "a sum past max_int is not a figure" None
+    (read ~scope:Runtime_usage_scope.Per_request
+       ~input_tokens:(Some max_int) ~output_tokens:(Some 1));
+  check (option int) "a sum below min_int is not a figure" None
+    (read ~scope:Runtime_usage_scope.Per_request
+       ~input_tokens:(Some min_int) ~output_tokens:(Some (-1)));
+  check (option int) "a real zero stays a real zero" (Some 0)
+    (read ~scope:Runtime_usage_scope.Per_request
+       ~input_tokens:(Some 0) ~output_tokens:(Some 0));
+  check (option int) "an extreme count alone stays exact" (Some max_int)
+    (read ~scope:Runtime_usage_scope.Per_request
+       ~input_tokens:(Some max_int) ~output_tokens:None);
+  check (option int) "an ordinary sum still adds" (Some 1200)
+    (read ~scope:Runtime_usage_scope.Per_request
+       ~input_tokens:(Some 1000) ~output_tokens:(Some 200));
+  check (option int) "other scopes still report no figure" None
+    (read ~scope:Runtime_usage_scope.Conversation_cumulative
+       ~input_tokens:(Some 1000) ~output_tokens:(Some 200))
+
 let test_recent_page_skipped_count_is_not_invented () =
   let row = record ~trace:"skipped" ~turn:1 () in
   let count fields =
@@ -827,6 +856,8 @@ let () =
             test_recent_turns_carry_the_provider_counts
         ; test_case "recent input history keeps gaps and zero" `Quick
             test_recent_input_trend_keeps_unavailable_and_zero
+        ; test_case "client context sum stays representable" `Quick
+            test_client_context_sum_stays_representable
         ; test_case "recent page keeps skipped-count availability" `Quick
             test_recent_page_skipped_count_is_not_invented
         ; test_case "page failure is distinct from partial failures" `Quick

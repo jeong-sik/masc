@@ -1200,9 +1200,22 @@ let decode_forecast = function
        | _ -> Error "candidates is not a list")
   | _ -> Error "next-request response is not an object"
 
+(* Two representable counts can have a sum that is not representable, and
+   the wrapped value would be a negative "client context". A total the
+   integer range cannot hold is no client-context figure at all, so it is
+   reported the one way the readers already have for a total that is not
+   available: [None]. A real zero stays a real zero. *)
 let client_context_tokens ~scope ~input_tokens ~output_tokens =
   match (scope : Runtime_usage_scope.t), input_tokens with
-  | Per_request, Some input -> Some (input + Option.value output_tokens ~default:0)
+  | Per_request, Some input -> (
+      match output_tokens with
+      | None -> Some input
+      | Some output ->
+          let unrepresentable =
+            (input >= 0 && output > max_int - input)
+            || (input < 0 && output < min_int - input)
+          in
+          if unrepresentable then None else Some (input + output))
   | Per_request, None
   | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _ -> None
 ;;

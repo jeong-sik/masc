@@ -24565,9 +24565,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- None;
           report_action state "system" ("Schedule: " ^ message);
-          (* The row shown still carries the old status until this lands; a
-             cancelled row that reads "scheduled" invites a second cancel. *)
-          launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
+          (* The row shown still carries the old status until a read lands; a
+             cancelled row that reads "scheduled" invites a second cancel. The
+             server announces [schedules_changed] for this write too, so the
+             read is owed and both land on the one the loop launches. *)
+          owe_schedules_read state
       | Error err ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- Some (schedule_id, err);
@@ -29904,7 +29906,9 @@ Use relative paths for resources already held in the package. -->
                   report_action state "system" (action ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
-                  launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages))
+                  (* Owed, as after a cancel: the [schedules_changed] this
+                     write announces folds into the same read. *)
+                  owe_schedules_read state))
           | _ ->
             report_form_refusal "the editor form must be a JSON object"))
   in

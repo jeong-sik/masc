@@ -432,7 +432,6 @@ let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
 let claimed_title = function
   | Masc_domain.Claim_next_claimed { title; _ } -> Some title
   | Masc_domain.Claim_next_no_unclaimed
-  | Masc_domain.Claim_next_no_eligible _
   | Masc_domain.Claim_next_error _ -> None
 ;;
 
@@ -457,30 +456,6 @@ let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun (
   let result =
     Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
       ~hard_filter:self_excluding ()
-  in
-  assert (claimed_title result = None))
-
-(* Regression for the adversarial P1 on #25460: the self-author exclusion must
-   SURVIVE the scope fallback. The keeper auto-claim passes
-   [allow_scope_fallback:true]; a keeper whose backlog holds only its own
-   routing/report tasks has no goal-scoped task ([task_filter:(fun _ -> false)]
-   forces that here), so [claim_next_r] widens — and the widening used to drop
-   [task_filter], claiming the keeper's own task right back. With the exclusion
-   moved to [hard_filter] the widening still respects it, so the own-task is NOT
-   claimed. Reverting the exclusion back into [task_filter] turns this RED. *)
-let () = test "auto_claim_hard_filter_survives_scope_fallback" (fun () ->
-  let ctx = make_test_ctx_with_agent "fixture-keeper" in
-  let _ =
-    Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
-      ~description:""
-  in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
-  let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
-      ~task_filter:(fun _ -> false)
-      ~hard_filter:self_excluding
-      ~allow_scope_fallback:true ()
   in
   assert (claimed_title result = None))
 
@@ -2298,21 +2273,6 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
           = "claim_verified");
   assert (payload |> member "todo_claim" |> member "winner_actor_id" |> to_string
           = ctx.agent_name)
-)
-
-(* scope_widened is threaded from Claim_next_claimed through
-   build_claim_observation_payload into the todo_claim fragment. Assert both
-   boolean values so a regression that drops the field (or hardcodes it) is
-   caught. *)
-let () = test "claim_observation_payload_carries_scope_widened" (fun () ->
-  let open Yojson.Safe.Util in
-  let scope_widened_of b =
-    Task.Tool.build_claim_observation_payload ~now:0.0 ~agent_name:"agent-x"
-      ~task_id:"task-001" ~scope_widened:b
-    |> member "todo_claim" |> member "scope_widened" |> to_bool
-  in
-  assert (scope_widened_of true = true);
-  assert (scope_widened_of false = false)
 )
 
 let () =

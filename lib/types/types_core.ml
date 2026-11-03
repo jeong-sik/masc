@@ -1434,17 +1434,6 @@ type claim_next_result =
       title : string;
       priority : int;
       message : string;
-      scope_widened : bool;
-          (** True when goal-scope was widened to all_tasks because no scoped
-              task was admission-eligible (schedule-level fallback). Lets the
-              operator distinguish a scope-overriding claim from an ordinary
-              in-scope claim. *)
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; scope_excluded_count : int
-      ; explicit_excluded_count : int
-      ; claim_pool_candidate_count : int
-      }
   | Claim_next_error of string

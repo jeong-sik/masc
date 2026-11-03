@@ -320,11 +320,6 @@ let claim_next config ~agent_name =
   match Workspace.claim_next_r config ~agent_name () with
   | Masc_domain.Claim_next_claimed { message; _ } -> message
   | Masc_domain.Claim_next_no_unclaimed -> "No unclaimed tasks."
-  | Masc_domain.Claim_next_no_eligible { excluded_count; scope_excluded_count; _ } ->
-    Printf.sprintf
-      "No eligible unclaimed tasks. excluded=%d (goal_scope_or_filter=%d)."
-      excluded_count
-      scope_excluded_count
   | Masc_domain.Claim_next_error e -> Printf.sprintf "Error: %s" e
 ;;
 
@@ -890,8 +885,6 @@ let test_claim_next_done_allow_reclaim_is_terminal () =
         (Masc_domain.task_status_to_string task.task_status)
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "Done task must be terminal (RFC-0323 G-10), got claim of %s" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "Done task must not be counted as blocked — reclaim gate is retired"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -918,9 +911,6 @@ let test_claim_next_done_block_reclaim_is_terminal () =
         (Masc_domain.task_status_to_string task.task_status)
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "Block_reclaim completed task must not be claimed, got %s" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail
-        "Done task must not be counted as blocked — the reclaim claim gate is retired (RFC-0323 G-10)"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -952,8 +942,6 @@ let test_claim_next_ignores_non_authoritative_auto_cycle_text () =
         "narrative text cleared after claim"
         None
         task.do_not_reclaim_reason
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "non-authoritative auto-cycle text should be claimable"
     | Workspace.Claim_next_no_unclaimed ->
       Alcotest.fail "expected one claimable task"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
@@ -988,8 +976,6 @@ let test_claim_next_ignores_routing_handoff_text () =
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.(check string) "free-text routing handoff remains claimable" "task-001" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "normal unblocked task should remain claimable"
     | Workspace.Claim_next_no_unclaimed ->
       Alcotest.fail "expected normal unblocked task"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
@@ -1029,8 +1015,6 @@ let test_claim_next_does_not_deprioritize_narrative_text () =
         "priority still wins despite narrative text"
         "task-001"
         task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "normal unblocked task should be claimed before fallback"
     | Workspace.Claim_next_no_unclaimed -> Alcotest.fail "expected claimable tasks"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
@@ -2485,39 +2469,6 @@ let test_claim_task_r_already_claimed () =
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _)) -> ()
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed")
-;;
-
-(* Schedule-level scope fallback (#20673): a keeper must not idle when no
-   in-scope task passes [task_filter] while an out-of-scope task is claimable.
-   Hard scope returns no_eligible; [allow_scope_fallback] widens to all_tasks
-   and flags [scope_widened]. *)
-let test_scope_widen_claims_unscoped_when_scope_blocks_all () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~title:"only open" ~priority:1 ~description:""
-    in
-    let agent_name = "claude" in
-    (* task_filter rejects everything -> no scoped task is eligible. *)
-    let task_filter (_t : Masc_domain.task) = false in
-    (* Hard scope (default allow_scope_fallback=false): scope excludes the task
-       -> no eligible. *)
-    (match Workspace.claim_next_r config ~agent_name ~task_filter () with
-     | Workspace.Claim_next_no_eligible _ -> ()
-     | Workspace.Claim_next_claimed { task_id; _ } ->
-       Alcotest.failf "hard scope must not claim, got %s" task_id
-     | _ -> Alcotest.fail "expected no_eligible under hard scope");
-    (* Fallback: widen drops scope -> claims the out-of-scope task and flags
-       scope_widened. *)
-    match
-      Workspace.claim_next_r config ~agent_name ~task_filter
-        ~allow_scope_fallback:true ()
-    with
-    | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
-      Alcotest.(check string) "claimed via widen" "task-001" task_id;
-      Alcotest.(check bool) "scope_widened flag set" true scope_widened
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "fallback must claim the out-of-scope task, got no_eligible"
-    | _ -> Alcotest.fail "expected claim under fallback")
 ;;
 
 (* ============================================================ *)
@@ -4114,10 +4065,6 @@ let () =
             "claim_task_r already claimed"
             `Quick
             test_claim_task_r_already_claimed
-        ; Alcotest.test_case
-            "scope fallback claims out-of-scope when scope blocks all"
-            `Quick
-            test_scope_widen_claims_unscoped_when_scope_blocks_all
         ] )
     ; (* === GC === *)
       ( "gc"

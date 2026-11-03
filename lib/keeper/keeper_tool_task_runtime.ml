@@ -123,10 +123,6 @@ let task_create_failure_route : Workspace_task.add_task_error -> task_create_fai
   | Workspace_task.Unexpected_error _ -> Task_create_runtime_failure
 ;;
 
-let no_eligible_exclusion_summary =
-  Masc_task_handlers.Tool_task_no_eligible.no_eligible_exclusion_summary
-;;
-
 
 let find_task_goal_id config task_id =
   let index = Workspace_goal_index.build_task_goal_map_for_config config in
@@ -808,7 +804,6 @@ let handle_keeper_task_tool_with_outcome
           ; title = task.title
           ; priority = task.priority
           ; message
-          ; scope_widened = false
           }
       | Error e when Masc_domain.is_task_not_found e ->
         Workspace.Claim_next_error
@@ -835,36 +830,26 @@ let handle_keeper_task_tool_with_outcome
     in
     let result = claim_requested_task () in
     (match result with
-     | Workspace.Claim_next_claimed { task_id; scope_widened = _; _ } ->
+     | Workspace.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id
      | Workspace.Claim_next_no_unclaimed
-     | Workspace.Claim_next_no_eligible _
      | Workspace.Claim_next_error _ -> ());
     let message =
       match result with
       | Workspace.Claim_next_claimed { message; _ } -> message
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks."
-      | Workspace.Claim_next_no_eligible
-          { excluded_count
-          ; scope_excluded_count
-          ; _
-          } ->
-        Printf.sprintf
-          "No eligible tasks; searched all tasks, blocked/excluded=%d. %s"
-          excluded_count
-          (no_eligible_exclusion_summary ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claimed_task_fields =
       match result with
       | Workspace.Claim_next_claimed
-          { task_id; title; priority; scope_widened; _ } ->
+          { task_id; title; priority; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           [
             ( "claim_observation",
               Task.Tool.build_claim_observation_payload
                 ~now:(Time_compat.now ()) ~agent_name:meta.name
-                ~task_id ~scope_widened );
+                ~task_id );
             ( "claimed_task",
               `Assoc
                 [
@@ -874,24 +859,11 @@ let handle_keeper_task_tool_with_outcome
                   ("goal_id", Json_util.string_opt_to_json matched_goal_id);
                 ] );
           ]
-      | Workspace.Claim_next_no_eligible _
       | Workspace.Claim_next_no_unclaimed
       | Workspace.Claim_next_error _ -> []
     in
     let typed_outcome_field =
       match result with
-      | Workspace.Claim_next_no_eligible
-          { scope_excluded_count
-          ; _
-          } ->
-        Some
-          ( "typed_outcome"
-          , Keeper_tool_outcome.to_json
-              (Keeper_tool_outcome.No_progress
-                 { reason =
-                     Keeper_tool_outcome.No_eligible_tasks
-                       { scope_excluded_count }
-                 }) )
       | Workspace.Claim_next_no_unclaimed ->
         Some
           ( "typed_outcome"
@@ -924,8 +896,7 @@ let handle_keeper_task_tool_with_outcome
      | Workspace.Claim_next_error _ ->
        Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection payload
      | Workspace.Claim_next_claimed _
-     | Workspace.Claim_next_no_unclaimed
-     | Workspace.Claim_next_no_eligible _ -> Keeper_tool_execution.success payload)
+     | Workspace.Claim_next_no_unclaimed -> Keeper_tool_execution.success payload)
     | Task_release ->
     (* Handing a task back is the other half of the claim refusal in
        [Workspace_task_claim.held_tasks_refusal_message]: a keeper that

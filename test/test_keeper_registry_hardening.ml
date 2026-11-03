@@ -184,6 +184,73 @@ let test_failure_observer_only_follows_successful_writes () =
       check int "stale lane did not notify" 1 !calls)
 ;;
 
+(* RFC-0481 §3.2: a committed registry swap announces what it changed on the
+   roster -- a new or removed entry as a roster change, a moved phase or
+   failure as that Keeper's row. *)
+let hearing_roster_signals f =
+  let id = Printf.sprintf "keeper-registry-roster-signals-%d" (Unix.getpid ()) in
+  let heard = ref [] in
+  (* The signals go to this workspace's observers only. *)
+  if not (Sys.file_exists base_path) then Unix.mkdir base_path 0o755;
+  Masc.Sse.subscribe_external ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (ev : Masc.Sse.external_event) ->
+      match Masc.Sse.data_payload_of_frame ev.Masc.Sse.ext_frame with
+      | Error Masc.Sse.Missing_data_payload -> ()
+      | Ok payload ->
+        (match Yojson.Safe.from_string payload with
+         | `Assoc fields ->
+           (match List.assoc_opt "type" fields, List.assoc_opt "name" fields with
+            | Some (`String kind), Some (`String name)
+              when String.equal kind Masc.Keeper_row_broadcast.row_changed_event ->
+              heard := ("row", name) :: !heard
+            | Some (`String kind), None
+              when String.equal kind Masc.Keeper_row_broadcast.roster_changed_event ->
+              heard := ("roster", "") :: !heard
+            | _ -> ())
+         | _ -> ()
+         | exception Yojson.Json_error _ -> ()))
+    ();
+  Fun.protect ~finally:(fun () -> Masc.Sse.unsubscribe_external id) (fun () ->
+    f (fun () ->
+      let taken = List.rev !heard in
+      heard := [];
+      taken))
+;;
+
+let test_registry_swaps_announce_roster_rows () =
+  KR.For_testing.clear ();
+  let signals = list (pair string string) in
+  hearing_roster_signals (fun take ->
+    ignore (register "alice");
+    check signals "a new entry is a roster change" [ "roster", "" ] (take ());
+    KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "boom"));
+    check signals "a failure is the Keeper's row" [ "row", "alice" ] (take ());
+    (match KR.update_entry ~base_path "alice" (fun entry ->
+       { entry with last_failure_at = Some 1.0 }) with
+     | Ok () -> ()
+     | Error _ -> fail "failure time update was rejected");
+    check signals "a failure time is the Keeper's row" [ "row", "alice" ] (take ());
+    (match KR.update_entry ~base_path "alice" (fun entry ->
+       { entry with restart_count = entry.restart_count + 1 }) with
+     | Ok () -> ()
+     | Error _ -> fail "restart count update was rejected");
+    check signals "a field the row does not show announces nothing" [] (take ());
+    (match KR.update_entry ~base_path "alice" (fun entry ->
+       { entry with base_path = "wrong"; last_failure_reason = None }) with
+     | Error (KR.Base_path_mismatch _) -> ()
+     | _ -> fail "invalid update was not rejected");
+    check signals "a rejected write announces nothing" [] (take ());
+    (* A registered entry starts running; pausing it moves the phase. *)
+    (match KR.dispatch_event ~base_path "alice" KSM.Operator_pause with
+     | Ok _ -> ()
+     | Error error -> fail (KSM.transition_error_to_string error));
+    let phase_signals = take () in
+    check bool "a phase change is the Keeper's row" true
+      (phase_signals <> [] && List.for_all (( = ) ("row", "alice")) phase_signals);
+    KR.For_testing.unregister ~base_path "alice";
+    check signals "a removed entry is a roster change" [ "roster", "" ] (take ()))
+;;
+
 let test_failure_observer_exception_preserves_commit () =
   KR.For_testing.clear ();
   ignore (register "alice");
@@ -1134,6 +1201,8 @@ let () =
             test_failure_observer_only_follows_successful_writes
         ; test_case "observer exception preserves commit" `Quick
             test_failure_observer_exception_preserves_commit
+        ; test_case "registry swaps announce roster rows" `Quick
+            test_registry_swaps_announce_roster_rows
         ; test_case "heartbeat replacement notifies only when changed" `Quick
             test_heartbeat_replacement_notifies_only_when_replaced
         ] )

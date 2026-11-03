@@ -3,7 +3,7 @@ name: PR type-check (dune build @check)
 # Why this exists: no workflow that runs on `pull_request` executed
 # `dune build @check`. On 2026-11-03 three PRs merged with a green PR-stage
 # check (changelog format only) and each then broke main's type-check:
-# #47639 (e745acf9), #47672 (4845937b), #47661 (804372bf).
+# #47672 (e745acf9), #47639 (4845937b), #47661 (804372bf).
 #
 # This is deliberately NOT a required status check. A `paths:` filtered
 # workflow produces no check context for PRs outside the filter, and a
@@ -26,6 +26,9 @@ on:
       - 'dune-project'
       - '*.opam'
       - '.github/actions/**'
+      # Include this file so a change to the workflow itself is checked
+      # by the workflow itself; otherwise such a PR gets no check-run.
+      - '.github/workflows/pr-type-check.yml'
 
 permissions:
   contents: read

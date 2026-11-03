@@ -7,7 +7,10 @@ type line =
   }
 
 type gate_origin =
-  | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
+  | Gate_key | Gate_key_with_bytes of int
+  | Gate_key_continuation | Gate_key_with_bytes_continuation of int
+  | Gate_key_bytes of int | Gate_key_bytes_continuation of int
+  | Gate_string | Gate_json | Gate_unreadable
 
 type gate_line =
   { gate_label : string option
@@ -17,10 +20,41 @@ type gate_line =
 
 let prefix = function
   | Gate_key -> "[key] "
+  | Gate_key_with_bytes index -> Printf.sprintf "[k*%d] " index
   | Gate_key_continuation -> "[key+] "
+  | Gate_key_with_bytes_continuation index -> Printf.sprintf "[k*%d+] " index
+  | Gate_key_bytes index -> Printf.sprintf "[b%d] " index
+  | Gate_key_bytes_continuation index -> Printf.sprintf "[b%d+] " index
   | Gate_string -> "[str] "
   | Gate_json -> "[json] "
   | Gate_unreadable -> "!"
+
+(* A quoted ASCII byte literal is unambiguous even when two Unicode strings
+   look alike, or a control byte looks like a literal escape in the readable
+   key. It describes the decoded key, not the original JSON spelling. *)
+let gate_key_bytes key =
+  let out = Buffer.create (String.length key + 2) in
+  let hex = "0123456789ABCDEF" in
+  Buffer.add_char out '"';
+  String.iter
+    (function
+      | '"' -> Buffer.add_string out "\\\""
+      | '\\' -> Buffer.add_string out "\\\\"
+      | ('!' .. '~') as byte -> Buffer.add_char out byte
+      | byte ->
+        let value = Char.code byte in
+        Buffer.add_string out "\\x";
+        Buffer.add_char out hex.[value lsr 4];
+        Buffer.add_char out hex.[value land 0x0f])
+    key;
+  Buffer.add_char out '"';
+  Buffer.contents out
+
+let gate_key_needs_bytes key =
+  String.length key = 0
+  || String.exists
+       (function '!' .. '~' as byte -> byte = '"' || byte = '\\' | _ -> true)
+       key
 
 (* A visible control/JSON escape must not be cut between rows. The input is
    already terminal-safe; recognizing a literal escape too only changes its
@@ -308,32 +342,75 @@ let of_gate_fields ~width fields =
   in
   if fields <> [] && width <= String.length (prefix Gate_key_continuation) then unreadable ()
   else
-    let rows = List.concat_map
-    (fun (key, value) ->
+    let _, fields, byte_fields = List.fold_left
+    (fun (previous, fields, byte_fields) (key, value) ->
+      let raw_key = key in
+      let needs_bytes = gate_key_needs_bytes raw_key in
+      let number = if needs_bytes then previous + 1 else previous in
+      let first_key_origin = if needs_bytes then Gate_key_with_bytes number else Gate_key in
+      let next_key_origin =
+        if needs_bytes then Gate_key_with_bytes_continuation number else Gate_key_continuation in
+      let key_room = width - max (String.length (prefix first_key_origin))
+          (String.length (prefix next_key_origin)) in
+      let byte_room = width - String.length (prefix (Gate_key_bytes_continuation number)) in
+      (* Refuse an impossible token before allocating rows for a long key.
+         The byte literal's widest token is a four-cell [\xHH] escape. *)
+      let bytes_fit =
+        not needs_bytes
+        || (byte_room >= 1
+            && (byte_room >= 4
+                || String.for_all
+                     (function
+                       | '"' | '\\' -> byte_room >= 2
+                       | '!' .. '~' -> true
+                       | _ -> false)
+                     raw_key))
+      in
+      let rows = if key_room < 1 || not bytes_fit then unreadable (), []
+      else
       let key =
-        key
+        raw_key
         |> Masc.Tui_terminal_text.escape_invisible
         |> Masc.Tui_terminal_text.sanitize_terminal_text
       in
-      let key_room = width - String.length (prefix Gate_key_continuation) in
-      let origin, syntax, text =
-        match value with
-        | `String value -> Gate_string, Text, safe_text value
-        | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) as json ->
-          Gate_json, Json,
-          (Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview)
-      in
       match split_escaped_cells ~syntax:Text ~max_cells:key_room key with
-      | None -> unreadable ()
+      | None -> unreadable (), []
       | Some key_rows ->
-        List.mapi
+        let byte_rows =
+          if needs_bytes then
+            split_escaped_cells ~syntax:Json ~max_cells:byte_room (gate_key_bytes raw_key)
+          else Some []
+        in
+        (match byte_rows with
+        | None -> unreadable (), []
+        | Some byte_rows ->
+        let origin, syntax, text =
+          match value with
+          | `String value -> Gate_string, Text, safe_text value
+          | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) as json ->
+            Gate_json, Json,
+            (Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview)
+        in
+        let key_rows = List.mapi
           (fun index text ->
             { gate_label = Some text; gate_text = text;
-              gate_origin = if index = 0 then Gate_key else Gate_key_continuation })
-          key_rows
-        @ value_rows origin syntax text)
-      fields
-    in
+              gate_origin = if index = 0 then first_key_origin else next_key_origin })
+          key_rows in
+        let byte_rows = List.mapi
+          (fun index text ->
+            { gate_label = None; gate_text = text;
+              gate_origin = if index = 0 then Gate_key_bytes number
+                else Gate_key_bytes_continuation number })
+          byte_rows in
+        key_rows @ value_rows origin syntax text, byte_rows)
+      in
+      let input_rows, byte_rows = rows in
+      number, List.rev_append input_rows fields, List.rev_append byte_rows byte_fields)
+      (0, [], []) fields in
+    (* Keep every input value ahead of the potentially long byte appendix.
+       The starred-key number associates each appendix entry with its key,
+       even when distinct keys have the same readable spelling. *)
+    let rows = List.rev_append fields (List.rev byte_fields) in
     if List.exists (fun line -> line.gate_origin = Gate_unreadable) rows
     then unreadable ()
     else rows

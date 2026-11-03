@@ -118,12 +118,25 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
         | Gate_line line -> line.gate_origin = Approval_detail.Gate_unreadable)
       lines
   in
+  let key_has_bytes =
+    List.exists
+      (function
+        | Field_line _ -> false
+        | Gate_line line ->
+          (match line.gate_origin with
+           | Approval_detail.Gate_key_with_bytes _ -> true
+           | Gate_key | Gate_key_continuation | Gate_key_with_bytes_continuation _
+           | Gate_key_bytes _ | Gate_key_bytes_continuation _
+           | Gate_string | Gate_json | Gate_unreadable -> false))
+      lines
+  in
   box_top buf cols;
-  (* Opens on MASC and its name, like every other surface; the way out is the
-     footer's to say, and saying it here too spelled the same key twice in two
-     notations. *)
+  (* Keep the numbered-key legend visible while scrolling; unreadable input
+     takes precedence over it. The footer owns the way out. *)
   box_line buf cols (screen_title
-    (if input_unreadable then "!WIDEN Approval" else " MASC Approval"));
+    (if input_unreadable then "!WIDEN Approval"
+     else if key_has_bytes then "*N=bN bytes | Approval"
+     else " MASC Approval"));
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
   let scroll =

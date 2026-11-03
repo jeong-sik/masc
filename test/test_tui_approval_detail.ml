@@ -117,7 +117,9 @@ let test_gate_rows_keep_value_authority () =
     Detail.of_gate_fields ~width:24 [ "key", value ]
     |> List.filter_map (fun (line : Detail.gate_line) ->
       match line.gate_origin with
-      | Detail.Gate_key | Detail.Gate_key_continuation -> None
+      | Detail.Gate_key | Detail.Gate_key_with_bytes _ | Detail.Gate_key_continuation
+      | Detail.Gate_key_with_bytes_continuation _
+      | Detail.Gate_key_bytes _ | Detail.Gate_key_bytes_continuation _ -> None
       | Detail.Gate_string | Detail.Gate_json | Detail.Gate_unreadable ->
         Some line.gate_origin)
   in
@@ -138,6 +140,52 @@ let test_gate_rows_sanitize_original_context () =
   check_bool "no control byte reaches the pane" false (has_control_byte all);
   check_bool "the orphan selector remains visible" true (contains all "\\uFE0F")
 
+(* This checks the byte encoding itself, independently of terminal layout. *)
+let decode_gate_key_bytes literal =
+  let last = String.length literal - 1 in
+  if last < 1 || literal.[0] <> '"' || literal.[last] <> '"' then
+    Alcotest.fail "byte literal is not quoted";
+  let out = Buffer.create last in
+  let rec read i =
+    if i = last then Buffer.contents out
+    else if i > last then Alcotest.fail "byte literal ends inside an escape"
+    else if literal.[i] <> '\\' then begin
+      Buffer.add_char out literal.[i];
+      read (i + 1)
+    end else if i + 1 >= last then Alcotest.fail "incomplete byte escape"
+    else match literal.[i + 1] with
+      | ('"' | '\\') as byte -> Buffer.add_char out byte; read (i + 2)
+      | 'x' when i + 3 < last ->
+        let byte = int_of_string ("0x" ^ String.sub literal (i + 2) 2) in
+        Buffer.add_char out (Char.chr byte);
+        read (i + 4)
+      | _ -> Alcotest.fail "unknown byte escape"
+  in
+  read 1
+
+let test_gate_key_byte_encoding () =
+  let encode = Detail.gate_key_bytes in
+  check_string "empty key" {|""|} (encode "");
+  check_string "space" {|"\x20"|} (encode " ");
+  check_string "control byte" {|"\x1B"|} (encode "\027");
+  check_string "literal escape spelling" {|"\\x1B"|} (encode "\\x1B");
+  check_string "UTF-8 bytes" {|"\xED\x95\x9C"|} (encode "한");
+  let verify original =
+    let literal = encode original in
+    check_bool "encoded bytes are printable ASCII" true
+      (String.for_all (fun byte -> byte >= ' ' && byte <= '~') literal);
+    check_string "byte literal round trip" original (decode_gate_key_bytes literal)
+  in
+  for byte = 0 to 255 do verify (String.make 1 (Char.chr byte)) done;
+  List.iter verify
+    [ ""
+    ; " \027\\x1B\"\000"
+    ; "é"
+    ; "e\204\129"
+    ; "👩‍💻"
+    ; "\255\128x"
+    ]
+
 let () =
   Alcotest.run "tui_approval_detail"
     [ ( "the whole ask"
@@ -153,5 +201,7 @@ let () =
             test_gate_rows_keep_value_authority
         ; Alcotest.test_case "gate rows sanitize original context" `Quick
             test_gate_rows_sanitize_original_context
+        ; Alcotest.test_case "gate key byte encoding round trips" `Quick
+            test_gate_key_byte_encoding
         ] )
     ]

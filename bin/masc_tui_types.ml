@@ -10232,6 +10232,10 @@ type state = {
   mutable keeper_waiting_versions: (string * int) list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  (* The turns read owed after a server signal, a revalidation, a resumed
+     authority or a failed read (RFC-0481 §3.4). The answering badge is drawn
+     on every surface, so it is owed whatever is on screen. *)
+  mutable keeper_turns_owed: Masc_tui_owed_read.t;
   mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
@@ -14491,6 +14495,7 @@ let suspend_workspace_readings state =
   state.schedule_wake_history_inflight <- None;
   state.keeper_waiting_read <- Keeper_waiting_read.suspend state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
+  state.keeper_turns_owed <- Masc_tui_owed_read.settled;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
   state.keeper_calls_refresh_pending <- false;
@@ -19494,6 +19499,7 @@ let create_state
   keeper_waiting_versions = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_turns_owed = Masc_tui_owed_read.settled;
   keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];

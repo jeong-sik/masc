@@ -249,6 +249,10 @@ type event =
   | Keeper_roster_change of roster_change
       (** Named by {!Masc.Keeper_row_broadcast}. A server push: the roster
           reads the named row, or the whole roster, again. *)
+  | Keeper_turn_changed of { keeper : string }
+      (** Named by {!Masc.Keeper_turn_broadcast}. A server push: what
+          [/api/v1/keepers/turns] answers for that Keeper may have changed,
+          so the turns are read again (RFC-0481 §3.4). *)
   | Fusion_run_status of { keeper : string; run_id : string; status : string }
       (** A fusion deliberation changed stage or settled. A server push, not
           a keeper act: the Fusion surface re-fetches the run on it instead of
@@ -330,6 +334,9 @@ val async_requests_changed : event -> bool
 
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)
+
+val turn_changed_keeper : event -> string option
+(** The Keeper a turns push names. *)
 
 val runtime_journal_appended : event -> (string * runtime_journal) option
 (** The Keeper and journal a runtime journal push names. *)

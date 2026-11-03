@@ -155,6 +155,7 @@ let summary = function
   | Observer.Event (Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })) ->
       "roster_row:" ^ keeper
   | Observer.Event (Observer.Keeper_roster_change Observer.Every_row_changed) -> "roster_all"
+  | Observer.Event (Observer.Keeper_turn_changed { keeper }) -> "turns:" ^ keeper
   | Observer.Event (Observer.Board_changed { post_id }) ->
       Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
@@ -748,6 +749,30 @@ let test_a_roster_push_names_the_row_or_every_row () =
          String.starts_with ~prefix:"keeper_row_changed" reason
      | _ -> false)
 
+let turn_frame =
+  {|data: {"type":"keeper_turn_changed","name":"lane-smith","ts_unix":100.0}
+
+|}
+
+let test_a_turns_push_names_its_keeper () =
+  check (list string) "a turns push names its Keeper" [ "turns:lane-smith" ]
+    (List.map summary (decode_all [ turn_frame ]));
+  let keepers frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.turn_changed_keeper event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list string) "it owes that Keeper's turns a read" [ "lane-smith" ] (keepers [ turn_frame ]);
+  check (list string) "no roster push does" [] (keepers roster_frames);
+  check bool "a turns push without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_turn_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_turn_changed" reason
+     | _ -> false)
+
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"
     [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
@@ -1187,6 +1212,8 @@ let () =
             test_only_an_async_request_change_reads_the_async_requests
         ; test_case "a roster push names the row or every row" `Quick
             test_a_roster_push_names_the_row_or_every_row
+        ; test_case "a turns push names its Keeper" `Quick
+            test_a_turns_push_names_its_keeper
         ; test_case "only a confirmation change reads the confirmations" `Quick
             test_only_a_confirmation_change_reads_the_confirmations
         ; test_case "only a schedule change reads the schedules" `Quick

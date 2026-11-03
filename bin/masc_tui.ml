@@ -3474,6 +3474,7 @@ let launch_keeper_turns_load state ~mailbox =
   if state.keeper_turns_inflight then ()
   else begin
     state.keeper_turns_inflight <- true;
+    state.keeper_turns_owed <- Masc_tui_owed_read.started state.keeper_turns_owed;
     let waiting_receipt = Keeper_waiting_read.poll_receipt state.keeper_waiting_read in
     let waiting_snapshot = capture_keeper_waiting_snapshot state in
     let generation = state.keeper_chat_control_generations in
@@ -3484,7 +3485,9 @@ let launch_keeper_turns_load state ~mailbox =
       then state.msg_target_keeper_name else None in
     Masc_tui_async_read.launch
       ~source:Masc_tui_async_read.Keeper_turns
-      ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
+      ~on_not_run:(fun () ->
+        state.keeper_turns_inflight <- false;
+        state.keeper_turns_owed <- Masc_tui_owed_read.abandoned state.keeper_turns_owed)
       ~deliver:(fun result ->
         enqueue_async mailbox (Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result)))
       (capture_workspace_json_read state (fun () ->
@@ -7878,6 +7881,13 @@ let owe_held_calls_read state =
 let owe_tool_modes_read state =
   state.tool_modes_owed <- Masc_tui_owed_read.changed state.tool_modes_owed
 
+(* The turns read when the server says a Keeper's turns changed, on a
+   revalidation or a resumed authority, and after any failed turns read
+   (RFC-0481 §3.4). The answering badge is drawn on every surface, so the read
+   is owed whatever is on screen. *)
+let owe_keeper_turns_read state =
+  state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed
+
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
 let owe_async_requests_read state =
@@ -8665,6 +8675,19 @@ let launch_owed_held_calls state ~mailbox =
       launch_keeper_tool_approvals_load state ~mailbox
     end
   end
+
+(* Runs on every loop iteration. A turns read already in flight, whoever
+   started it, is let finish first; a slot freed without an answer leaves the
+   turns owed again. *)
+let launch_owed_keeper_turns state ~mailbox =
+  let reading = state.keeper_turns_inflight in
+  let read =
+    if reading then state.keeper_turns_owed
+    else Masc_tui_owed_read.abandoned state.keeper_turns_owed
+  in
+  state.keeper_turns_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    launch_keeper_turns_load state ~mailbox
 
 (* Runs on every loop iteration. The modes are not read while an operator's
    own mode press is in flight: the answer would be the stance from before
@@ -16089,6 +16112,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      retain an old pending slot nor release a successor workspace's slot. *)
   state.keeper_waiting_read <- Keeper_waiting_read.clear state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
+  state.keeper_turns_owed <- Masc_tui_owed_read.settled;
   state.keeper_turns <- [];
   state.keeper_waiting <- [];
   state.keeper_waiting_failure <- None;
@@ -18101,6 +18125,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_gate_snapshot_read state;
        owe_held_calls_read state;
        owe_tool_modes_read state;
+       owe_keeper_turns_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -18477,6 +18502,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_asks_read state;
     owe_async_requests_read state;
     owe_whole_keeper_roster_read state;
+    owe_keeper_turns_read state;
     owe_pending_confirms_read state;
     owe_schedules_read state;
     owe_keeper_schedules_read state;
@@ -22155,6 +22181,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let observer_source_loss_seen = ref false in
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
+      let turns_changed = ref false in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
          asks once per batch. Agent-core events name their lane; the
@@ -22216,6 +22243,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
+              if Option.is_some (Masc_tui_observer.turn_changed_keeper event) then turns_changed := true;
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
               if Masc_tui_observer.schedules_changed event then schedules_changed := true;
               Option.iter (fun appended -> runtime_journals := appended :: !runtime_journals)
@@ -22239,17 +22267,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
-               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_async_requests_changed _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
               (match event with
-               | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
+               | Masc_tui_observer.Fusion_run_status { keeper; run_id; _ } ->
                    fusion_status_seen :=
                      Masc_tui_fusion_updates.note_run_changed
-                       ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
+                       ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id;
+                   (* A running fusion is an item of its Keeper's waiting list. *)
+                   waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_roster_change change ->
@@ -22293,7 +22323,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
-               | Masc_tui_observer.Keeper_async_requests_changed _
+               | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
@@ -22383,9 +22413,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
-      if !waiting_inventory_changed <> [] then
+      (* Schedules and confirmations are items of the waiting list that
+         announce through their own events and name no Keeper, so they read
+         every Keeper's waiting list (RFC-0481 §3.4). *)
+      if !pending_confirms_changed || !schedules_changed then
+        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox
+      else if !waiting_inventory_changed <> [] then
         launch_keeper_waiting_load
           ~change:(Waiting_keepers (List.sort_uniq String.compare !waiting_inventory_changed)) state ~mailbox;
+      (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (* The pane otherwise reloads only on open and on its own sends — a
          turn appended from anywhere else (API chat, another operator, a
          connector) stayed invisible until the operator left and re-entered.
@@ -25186,6 +25222,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.keeper_turns_inflight <- false;
       (match result with
        | Ok { rows; waiting } ->
+           state.keeper_turns_owed <- Masc_tui_owed_read.succeeded state.keeper_turns_owed;
            let waiting_current = keeper_waiting_row_current state waiting_snapshot in
            let waiting_name_current = keeper_waiting_name_current state waiting_snapshot in
            let waiting_fresh, waiting_stale = List.partition waiting_current rows in
@@ -25247,7 +25284,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh;
            if reconcile_waiting then
              launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox
-       | Error detail -> refuse_keeper_turn_observation state detail)
+       | Error detail ->
+           state.keeper_turns_owed <- failed_read state.keeper_turns_owed;
+           refuse_keeper_turn_observation state detail)
   | Gate_snapshot_loaded (request, expected_workspace, result) ->
       (match Snapshot_read.settle state.gate_snapshot_read request with
        | None -> ()
@@ -31570,6 +31609,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_board_post state ~mailbox:async_messages;
       launch_owed_gate_snapshot state ~mailbox:async_messages;
       launch_owed_held_calls state ~mailbox:async_messages;
+      launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
       launch_owed_async_requests state ~mailbox:async_messages;

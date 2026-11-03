@@ -3,10 +3,11 @@ import { cleanup, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory } from '../../api'
+import type { KeeperWaitingInventoryChange } from '../../sse-store'
 
 const mocks = vi.hoisted(() => ({
   fetchKeeperWaitingInventory: vi.fn(),
-  refresh: null as ((keeperName: string) => void) | null,
+  refresh: null as ((change: KeeperWaitingInventoryChange) => void) | null,
   unregisterPush: vi.fn(),
 }))
 
@@ -18,13 +19,13 @@ vi.mock('../../api', async importOriginal => {
   }
 })
 vi.mock('../../sse-store', () => ({
-  registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (keeperName: string) => void) => {
+  registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (change: KeeperWaitingInventoryChange) => void) => {
     mocks.refresh = refresh
     return mocks.unregisterPush
   }),
 }))
 vi.mock('../../dashboard-ws-state', () => ({
-  dashboardWsReady: { value: true },
+  dashboardWsReady: { value: true, subscribe: vi.fn(() => vi.fn()) },
   dashboardWsReconnectCount: {
     value: 0,
     subscribe: vi.fn(() => vi.fn()),
@@ -74,10 +75,10 @@ describe('KeeperLaneSection', () => {
       expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
     })
 
-    mocks.refresh?.('rondo')
+    mocks.refresh?.({ scope: 'keeper', keeperName: 'rondo' })
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
 
-    mocks.refresh?.('exampleorg')
+    mocks.refresh?.({ scope: 'keeper', keeperName: 'exampleorg' })
     await waitFor(() => expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(2))
   })
 })

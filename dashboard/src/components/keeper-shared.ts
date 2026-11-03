@@ -430,8 +430,8 @@ function KeeperQueueControlPanel({
 
   useEffect(() => {
     void load()
-    const unsubscribe = registerKeeperWaitingInventoryRefresh(changedKeeper => {
-      if (changedKeeper === keeperName) void load(false)
+    const unsubscribe = registerKeeperWaitingInventoryRefresh(change => {
+      if (change.scope === 'keeper' && change.keeperName === keeperName) void load(false)
     })
     return () => {
       owner.abort()

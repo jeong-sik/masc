@@ -25,6 +25,8 @@ export type SSEEventType =
   | 'keeper_memory_journal_appended'
   | 'keeper_chat_operation_event'
   | 'keeper_waiting_inventory_changed'
+  | 'schedule_store_invalidated'
+  | 'operator_pending_confirm_invalidated'
   | 'agent_core_telemetry_sample'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'

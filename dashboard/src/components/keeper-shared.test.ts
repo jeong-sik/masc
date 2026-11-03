@@ -925,6 +925,18 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-operator-chat-operation="old-A"]')).toBeNull()
   })
 
+  it('does not reread chat operations for workspace schedule or confirmation changes', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    render(html`<${KeeperConversationPanel} keeperName="A" placeholder="" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]')!)
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledTimes(1))
+
+    hydrateServerPushEvent({ type: 'schedule_store_invalidated' })
+    hydrateServerPushEvent({ type: 'operator_pending_confirm_invalidated' })
+    await Promise.resolve()
+    expect(listQueuedKeeperChatOperations).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the latest queue read when an earlier read finishes last', async () => {
     shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const older = deferred<KeeperChatOperation[]>()

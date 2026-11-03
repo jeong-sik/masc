@@ -5340,6 +5340,17 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
     ignore (Workspace.init config ~agent_name:None);
     Server_auth.For_testing.restore_server_state (Some state);
     Unix.mkdir (Filename.concat config.base_path "fixture-dir") 0o755;
+    (* The absent auth file is the secure default (require_token), so the
+       fixture states its own config and reads with a real token: what is
+       under test is the kept bytes, not whether an anonymous read opens. *)
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token =
+      match Auth.create_token config.base_path ~agent_name:"cache-reader" ~role:Types.Admin with
+      | Ok (token, _) -> token
+      | Error detail -> Alcotest.fail (Masc_domain.masc_error_to_string detail)
+    in
+    let authorized = ["authorization", "Bearer " ^ token] in
     let router =
       Server_routes_http_routes_dashboard.add_routes ~sw
         ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ())
@@ -5353,8 +5364,8 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
         Dashboard_cache.For_testing.with_payload_prepared_hook
           (fun _ -> incr prepared)
           (fun () ->
-             let first = tools_h1_wire_response ~router ~headers:[] target in
-             first, tools_h1_wire_response ~router ~headers:[] target)
+             let first = tools_h1_wire_response ~router ~headers:authorized target in
+             first, tools_h1_wire_response ~router ~headers:authorized target)
       in
       check int (target ^ " answers") 200 first_status;
       check int (target ^ " answers again") 200 second_status;

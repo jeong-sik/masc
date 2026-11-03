@@ -71,6 +71,11 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
     reasons
 ;;
 
+(* A trailing Assistant with no visible text and no effect: blank text,
+   reasoning, or nothing. Reasoning that ended without an answer is not
+   conversation; replaying it would put text-less reasoning into the next
+   request (#41925). ToolUse, ToolResult and media are effects and keep the
+   message. *)
 let is_trailing_blank_assistant (message : Agent_core.Types.message) =
   match message.role, message.content with
   (* A native scalar carrier can be whitespace only and still own a replay row. *)
@@ -83,16 +88,30 @@ let is_trailing_blank_assistant (message : Agent_core.Types.message) =
       (function
         | Agent_core.Types.Text text -> String.trim text = ""
         | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
-        | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
-        | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+        | Agent_core.Types.RedactedThinking _ -> true
+        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _ | Agent_core.Types.Document _
         | Agent_core.Types.Audio _ -> false)
       blocks
   | (Agent_core.Types.System, _) | (Agent_core.Types.User, _) | (Agent_core.Types.Tool, _) -> false
 ;;
 
+(* Collection stores a [Historical_system_context] row immediately before the
+   response whose signed reasoning needed it. When that response leaves
+   replay, the row goes with it so it does not survive as a standalone User
+   message. *)
 let drop_trailing_blank_assistants messages =
+  let retained_context (message : Agent_core.Types.message) =
+    message.origin = Agent_core.Types.Historical_system_context
+  in
   let rec drop dropped = function
-    | message :: rest when is_trailing_blank_assistant message -> drop true rest
+    | message :: rest when is_trailing_blank_assistant message ->
+      let rest =
+        match rest with
+        | context :: rest when retained_context context -> rest
+        | _ -> rest
+      in
+      drop true rest
     | reversed -> List.rev reversed, dropped
   in
   drop false (List.rev messages)
@@ -160,8 +179,9 @@ let canonical_success_replay_checkpoint
   | Ok current_suffix ->
        (* A blank visible response is not authority to erase typed replay. The
           suffix may contain an actual user input, ToolUse/ToolResult pair,
-          thinking, or media whose effect has already happened. Ordinary blank
-          completion removes only an inert trailing Assistant shell. A typed
+          or media whose effect has already happened. Ordinary blank
+          completion removes only trailing Assistant messages that hold blank
+          text or reasoning, with their stored context. A typed
           terminal-effect receipt is stronger: the external post is already the
           visible result, so its trailing provider Assistant response is not
           durable conversation. An internal turn reaches the same place from

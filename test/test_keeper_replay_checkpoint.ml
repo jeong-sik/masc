@@ -1106,6 +1106,65 @@ let test_blank_response_drops_only_blank_assistant () =
     (List.length patched.messages)
 ;;
 
+(* #41925 on a Direct turn: every turn now accepts a reasoning-only EndTurn, so
+   the blank-response path removes the reasoning-only final and the context
+   stored for its signed reasoning. The operator's question and any tool pair
+   stay. *)
+let test_direct_reasoning_only_final_is_not_replayed () =
+  let open Agent_core.Types in
+  let question = message User [ Text "an actual user question" ] in
+  let context =
+    make_message ~role:User ~origin:Historical_system_context
+      [ Text "context for the signed reasoning" ]
+  in
+  let reasoning_only =
+    message Assistant [ Thinking { signature = Some "sig"; content = "nothing to say" } ]
+  in
+  let toolless, toolless_reason =
+    direct_persistence
+      ~history_messages:history_seed
+      ~response_text:""
+      (history_seed @ [ question; context; reasoning_only ])
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "the question stays and the reasoning-only final with its context leaves"
+    true
+    (toolless.messages = history_seed @ [ question ]);
+  Alcotest.(check (option string))
+    "reasoning-only final pruning is observable"
+    (Some "canonical_success_replay")
+    (prune_reason_to_string toolless_reason);
+  let tool_use =
+    message Assistant
+      [ Thinking { signature = Some "tool-sig"; content = "check status" }
+      ; ToolUse { id = "tool-7"; name = "keeper_context_status"; input = `Assoc [] }
+      ]
+  in
+  let tool_result =
+    message Tool
+      [ ToolResult
+          { tool_use_id = "tool-7"
+          ; content = "status"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let after_tools, _ =
+    direct_persistence
+      ~history_messages:history_seed
+      ~response_text:""
+      (history_seed @ [ question; tool_use; tool_result; context; reasoning_only ])
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "the tool pair and its reasoning stay, the reasoning-only final leaves"
+    true
+    (after_tools.messages = history_seed @ [ question; tool_use; tool_result ])
+;;
+
 let test_native_response_groups_survive_visible_normalization () =
   let open Agent_core.Types in
   let content=[Text "checking";Text "one";Text "two"] in
@@ -1415,6 +1474,10 @@ let () =
             "blank response drops only blank assistant"
             `Quick
             test_blank_response_drops_only_blank_assistant
+        ; Alcotest.test_case
+            "direct reasoning-only final is not replayed"
+            `Quick
+            test_direct_reasoning_only_final_is_not_replayed
         ] )
     ]
 ;;

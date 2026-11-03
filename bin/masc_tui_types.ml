@@ -1296,6 +1296,20 @@ type keeper_calls_owed = {
   kclo_read : Masc_tui_owed_read.t;
 }
 
+(* The read the schedules of one Keeper owe while the chat pane or the
+   Automation tab draws them. *)
+type keeper_schedules_owed = {
+  kso_keeper : string;
+  kso_read : Masc_tui_owed_read.t;
+}
+
+(* The read one journal of the chat pane's Keeper owes: its native tasks or
+   its child content. *)
+type chat_journal_owed = {
+  cjo_keeper : string;
+  cjo_read : Masc_tui_owed_read.t;
+}
+
 (* The read the open Board post owes. *)
 type board_post_owed = {
   bpo_post : string;
@@ -4830,7 +4844,16 @@ type early_asks_observation = {
 type keeper_roster_observation = {
   roster_request: Snapshot_read.request;
   roster_result:
-    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
+    (Masc_tui_keeper_control.roster * (Tui_decode.candle_reading, string) result,
+     Masc_tui_keeper_control.roster_failure) result;
+}
+
+(* One Keeper's roster row, read after the server named it (RFC-0481 §3.3). *)
+type keeper_row_observation = {
+  row_request: Snapshot_read.request;
+  row_keeper: string;
+  row_result:
+    (Masc_tui_keeper_control.row_reading * (Tui_decode.candle_reading, string) result,
      Masc_tui_keeper_control.roster_failure) result;
 }
 
@@ -4888,12 +4911,6 @@ type keeper_execute_stream = {
   kes_command : string;
 }
 
-type keeper_execute_request = {
-  ker_request : keeper_log_key Masc_tui_fetched.request;
-  ker_reading : unit ref;
-  ker_owner : unit ref;
-}
-
 type keeper_execute_reading =
   | Keeper_execute_none
   | Keeper_execute_snapshot of {
@@ -4907,8 +4924,8 @@ type keeper_execute_reading =
       kes_observed_at : float;
     }
 
-(* The Execute output stream the Terminal tab follows. The key says whose
-   output and for which window; [kxf_reading] is the workspace reading the
+(* The Execute output stream the logs view and the Terminal tab follow. The
+   key says whose output and for which window; [kxf_reading] is the workspace reading the
    stream was opened under; [kxf_owner] tells this job from the next one for
    the same key. *)
 type keeper_execute_follow = {
@@ -4939,42 +4956,6 @@ type keeper_execute_follow_event =
   | Execute_stream_down of keeper_execute_failure
       (** The connection ended, or the server refused it. The last reading
           stays on screen, marked stale. *)
-
-(* Decode this observation before it reaches the pane. An incomplete response
-   is unavailable, not an empty log or a claim that the command stopped. *)
-let decode_keeper_execute_output ~keeper json =
-  let open Yojson.Safe.Util in
-  try
-    let observed_keeper = json |> member "keeper" |> to_string in
-    if not (String.equal (String.lowercase_ascii (String.trim keeper)) observed_keeper)
-    then Error "Execute output belongs to another Keeper"
-    else match json |> member "type" |> to_string with
-    | "no_task" -> Ok Keeper_execute_none
-    | "snapshot" ->
-      let option_int = function `Int value -> Some value | `Null -> None | _ -> raise (Type_error ("stream_id", json)) in
-      let option_string = function `String value -> Some value | `Null -> None | _ -> raise (Type_error ("task_id", json)) in
-      let lines = json |> member "lines" |> to_list |> List.map (fun line ->
-        { kel_seq = line |> member "seq" |> to_int;
-          kel_stream_id = option_int (line |> member "stream_id");
-          kel_task_id = option_string (line |> member "task_id");
-          kel_stream = line |> member "stream" |> to_string;
-          kel_text = line |> member "text" |> to_string }) in
-      let active = json |> member "active_streams" |> to_list |> List.map (fun stream ->
-        { kes_id = stream |> member "stream_id" |> to_int;
-          kes_task = option_string (stream |> member "task_id");
-          kes_command = stream |> member "command" |> to_string }) in
-      let observed_at = match json |> member "generated_at" with
-        | `Float value -> value | `Int value -> float_of_int value
-        | _ -> raise (Type_error ("generated_at", json)) in
-      Ok (Keeper_execute_snapshot {
-        kes_lines = lines; kes_active = active;
-        kes_lines_omitted = json |> member "lines_omitted" |> to_int;
-        kes_first_seq = json |> member "first_retained_seq" |> to_int;
-        kes_active_count = json |> member "active_count" |> to_int;
-        kes_closed = json |> member "closed" |> to_bool;
-        kes_status = json |> member "status"; kes_observed_at = observed_at })
-    | _ -> Error "Execute output returned an unknown observation"
-  with Yojson.Safe.Util.Type_error _ -> Error "Execute output response is incomplete or malformed"
 
 (* What the Terminal tab holds still while the reader looks back: the reading
    as it was on screen, with the key it was read for. A reading held for
@@ -9983,13 +9964,17 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable keeper_roster_read: Snapshot_read.t;
+  mutable keeper_row_read: Snapshot_read.t;
+  (* The rows, or the whole roster, the server said changed and the TUI has
+     not read since (RFC-0481 §3.3). *)
+  mutable keeper_roster_owed: Masc_tui_roster_owed.t;
   mutable local_workspace_read_order: Local_read_order.t;
   mutable local_work_observation: Local_read_observation.t option;
   mutable local_keeper_observation: Local_read_observation.t option;
   mutable local_keeper_read_order: Local_read_order.t;
   mutable local_keeper_read_cancel: (unit ref * (unit -> unit)) option;
   mutable local_work_read_cancel: (unit ref * (unit -> unit)) option;
-  mutable candle_observation: (Candle_observation.t, string) result option;
+  mutable candle_observation: (Tui_decode.candle_reading, string) result option;
   mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
@@ -10144,12 +10129,32 @@ type state = {
   (* The read the Board list and hearth census owe while the Board is on
      screen. *)
   mutable board_list_owed: Masc_tui_owed_read.t;
+  (* The read the questions to the operator owe on every surface. *)
+  mutable asks_owed: Masc_tui_owed_read.t;
+  (* The read the durable async requests owe while the Keepers list or Tools is on screen. *)
+  mutable async_requests_owed: Masc_tui_owed_read.t;
+  (* The read the confirmations waiting for an operator owe on every surface. *)
+  mutable pending_confirms_owed: Masc_tui_owed_read.t;
+  (* The read the schedule list behind the agenda strip, and the Schedules
+     page, owe on every surface. *)
+  mutable schedules_owed: Masc_tui_owed_read.t;
+  (* The read the schedules of the Keeper the chat pane or the Automation tab
+     draws owe. *)
+  mutable keeper_schedules_owed: keeper_schedules_owed option;
+  (* The reads the native tasks and the child content of the chat pane's
+     Keeper owe. *)
+  mutable chat_native_tasks_owed: chat_journal_owed option;
+  mutable chat_child_content_owed: chat_journal_owed option;
+  (* The read the Gate snapshot owes. *)
+  mutable gate_snapshot_owed: Masc_tui_owed_read.t;
+  (* The reads the held tool calls (Overview, Approvals) and the tool
+     approval modes (Keepers) owe while their surface is on screen. *)
+  mutable held_calls_owed: Masc_tui_owed_read.t;
+  mutable tool_modes_owed: Masc_tui_owed_read.t;
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
   mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float, keeper_execute_failure) Masc_tui_fetched.source;
-  mutable keeper_execute_read: keeper_execute_request option;
-  mutable keeper_execute_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_execute_stream: (keeper_execute_follow * (unit -> unit)) option;
   mutable keeper_terminal: keeper_terminal_frozen Masc_tui_execute_terminal.hold;
   mutable keeper_log_read: keeper_log_request option;
@@ -10236,6 +10241,17 @@ type state = {
   mutable keeper_waiting_versions: (string * int) list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  (* The turns read owed after a server signal, a revalidation, a resumed
+     authority or a failed read (RFC-0481 §3.4). The answering badge is drawn
+     on every surface, so it is owed whatever is on screen. *)
+  mutable keeper_turns_owed: Masc_tui_owed_read.t;
+  (* Keepers whose running-turn preview changed while no surface drew it,
+     since the last turns read began. Opening a surface that draws one owes
+     the turns a read (RFC-0481 §3.5). *)
+  mutable keeper_previews_unread: string list;
+  (* A failed waiting read, read again after a growing wait (RFC-0481 §3.4).
+     A change is read at once by the waiting read itself. *)
+  mutable keeper_waiting_owed: Masc_tui_owed_read.t;
   mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
@@ -10926,6 +10942,9 @@ type state = {
   (* A verdict can commit while an older queue read is still in flight. Its
      answer is stale even if it arrives later; discard it and read again. *)
   mutable verification_refresh_after_inflight: bool;
+  (* The read the Verification queue owes after a server change, a
+     revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
+  mutable verification_owed: Masc_tui_owed_read.t;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -12021,8 +12040,9 @@ let take_early_asks_observation (state : state) early =
   then take_asks_observation state early.ea_observation
   else None
 
-let begin_keeper_roster_read (state : state) =
-  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_roster_read in
+(* [Poll] shares a whole read already in flight; [Refresh] owns a new one. *)
+let begin_keeper_roster_read ~intent (state : state) =
+  let reading, request = Snapshot_read.start ~intent state.keeper_roster_read in
   state.keeper_roster_read <- reading;
   request
 
@@ -12032,6 +12052,18 @@ let take_keeper_roster_observation (state : state) observation =
   | Some reading ->
       state.keeper_roster_read <- reading;
       Some observation.roster_result
+
+let begin_keeper_row_read (state : state) =
+  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_row_read in
+  state.keeper_row_read <- reading;
+  request
+
+let take_keeper_row_observation (state : state) observation =
+  match Snapshot_read.settle state.keeper_row_read observation.row_request with
+  | None -> None
+  | Some reading ->
+      state.keeper_row_read <- reading;
+      Some observation.row_result
 
 let take_early_keeper_roster_observation (state : state) early =
   if can_admit_early_http_read state ~ticket:early.er_ticket
@@ -12175,9 +12207,6 @@ let finish_keeper_log_read state request =
 let clear_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.clear state.keeper_logs;
   state.keeper_execute_output <- Masc_tui_fetched.clear state.keeper_execute_output;
-  state.keeper_execute_read <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-  state.keeper_execute_cancel <- None;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
   supersede_keeper_log_read state None
@@ -12185,9 +12214,6 @@ let clear_keeper_logs state =
 let suspend_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.suspend state.keeper_logs;
   state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
-  state.keeper_execute_read <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-  state.keeper_execute_cancel <- None;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
   supersede_keeper_log_read state None
@@ -12260,9 +12286,10 @@ let take_keeper_log_read state request result =
         clear_keeper_logs state;
         None
 
-(* The Terminal tab reads further back than the logs view does. Following a
-   build means seeing where it began, and a build prints more than 200 rows. *)
-let keeper_terminal_window = 500
+(* The rows of a Keeper's Execute output the logs view and the Terminal tab
+   follow. Following a build means seeing where it began, and a build prints
+   hundreds of rows. *)
+let keeper_execute_window = 500
 
 (* The Keeper detail view on its Terminal tab. *)
 let keeper_terminal_on_screen state =
@@ -12278,51 +12305,8 @@ let keeper_execute_target state =
   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
   | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
 
-let finish_keeper_execute_read state request =
-  match state.keeper_execute_cancel with
-  | Some (owner, _) when owner == request.ker_owner -> state.keeper_execute_cancel <- None
-  | Some _ | None -> ()
-
-let begin_keeper_execute_read state ~intent ~limit (keeper : keeper) =
-  match state.workspace_identity, keeper_execute_target state with
-  | Workspace_identity_match, Some selected when String.equal selected.k_name keeper.k_name ->
-    let key = keeper_log_key state ~limit keeper in
-    let start = match intent with
-      | Snapshot_read.Poll -> Masc_tui_fetched.start
-      | Snapshot_read.Refresh -> Masc_tui_fetched.refresh in
-    (match start ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
-     | Already_loading -> None
-     | Started (next, ticket) ->
-       Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-       state.keeper_execute_cancel <- None;
-       state.keeper_execute_output <- next;
-       let request = { ker_request = ticket; ker_reading = state.workspace_read_authority;
-                       ker_owner = ref () } in
-       state.keeper_execute_read <- Some request;
-       Some request)
-  | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
-    | Workspace_identity_match_unconfirmed _), (Some _ | None) -> None
-
-let take_keeper_execute_read state request result =
-  if request.ker_reading != state.workspace_read_authority
-     || not (Masc_tui_fetched.is_current ~equal:keeper_log_equal_key
-               state.keeper_execute_output request.ker_request)
-  then false
-  else match state.workspace_identity, keeper_execute_target state with
-    | Workspace_identity_match, Some keeper
-      when let key = Masc_tui_fetched.request_key request.ker_request in
-           keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) ->
-        state.keeper_execute_output <- Masc_tui_fetched.complete ~equal:keeper_log_equal_key
-            state.keeper_execute_output request.ker_request
-            (Result.map_error (fun detail -> Execute_read_failed detail) result);
-        true
-    | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
-      | Workspace_identity_match_unconfirmed _), (Some _ | None) -> false
-
-(* Settle the Execute output on a result that arrives by itself, such as a
-   reading the stream pushes, rather than as the answer to a request. One
-   request is taken and settled in a step, so the cell reads as a polled answer
-   reads, and a poll still in flight for this key is dropped as older. *)
+(* Settle the Execute output on a reading the stream pushes. One request is
+   taken and settled in a step, so the cell reads as an answered read does. *)
 let settle_keeper_execute state ~key result =
   match Masc_tui_fetched.refresh ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
   | Masc_tui_fetched.Started (next, ticket) ->
@@ -12332,19 +12316,9 @@ let settle_keeper_execute state ~key result =
     (* [refresh] supersedes a request in flight and never answers this. *)
     ()
 
-(* Stop the one-shot read of Execute output, if one is held; whether one was. *)
-let stop_keeper_execute_poll state =
-  let held = Option.is_some state.keeper_execute_read in
-  state.keeper_execute_read <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-  state.keeper_execute_cancel <- None;
-  held
-
-(* Stop following the stream; whether one was running. What the tab drew from
+(* Stop following the stream; whether one was running. What the view drew from
    it stays in the cell. A wait the stream opened and never settled ends with
-   it, but only while the cell still holds the stream's own window: leaving the
-   Terminal for the logs view starts the logs read, which asks for another
-   window of the same cell, before the loop stops the stream. *)
+   it, while the cell still holds the stream's key. *)
 let stop_keeper_execute_stream state =
   match state.keeper_execute_stream with
   | None -> false
@@ -12357,10 +12331,10 @@ let stop_keeper_execute_stream state =
      | Some _ | None -> ());
     true
 
-(* One message of the stream the Terminal tab follows. A message from a job
-   that is no longer the current one, from a reading of the workspace that was
-   left, or for output the tab no longer shows is not what is on screen, and is
-   dropped. *)
+(* One message of the stream the logs view and the Terminal tab follow. A
+   message from a job that is no longer the current one, from a reading of the
+   workspace that was left, or for output no view shows is not what is on
+   screen, and is dropped. *)
 let take_keeper_execute_stream state (stream : keeper_execute_follow) event =
   match state.keeper_execute_stream with
   | Some (current, _)
@@ -12368,9 +12342,8 @@ let take_keeper_execute_stream state (stream : keeper_execute_follow) event =
          && stream.kxf_reading == state.workspace_read_authority ->
     (match state.workspace_identity, keeper_execute_target state with
      | Workspace_identity_match, Some keeper
-       when keeper_terminal_on_screen state
-            && keeper_log_equal_key stream.kxf_key
-                 (keeper_log_key state ~limit:stream.kxf_key.klk_limit keeper) ->
+       when keeper_log_equal_key stream.kxf_key
+              (keeper_log_key state ~limit:stream.kxf_key.klk_limit keeper) ->
        settle_keeper_execute state ~key:stream.kxf_key
          (match event with
           | Execute_stream_reading (reading, observed_at) -> Ok (reading, observed_at)
@@ -12725,7 +12698,13 @@ type keeper_waiting_snapshot = {
   kws_pending_controls : string list;
 }
 
-type keeper_waiting_change = Waiting_all | Waiting_keepers of string list
+(* [Waiting_unattributed] is a change the event names no Keeper for (a
+   schedule or a confirmation). It owes the waiting list a read but marks no
+   Keeper unverified: the rows on screen stay until the read answers. *)
+type keeper_waiting_change =
+  | Waiting_all
+  | Waiting_keepers of string list
+  | Waiting_unattributed
 
 let note_keeper_waiting_change state change =
   let names = match change with
@@ -12739,7 +12718,8 @@ let note_keeper_waiting_change state change =
           let version = Option.value ~default:0 (List.assoc_opt name state.keeper_waiting_versions) in
           state.keeper_waiting_versions <- (name, version + 1) ::
             List.remove_assoc name state.keeper_waiting_versions) names;
-        names in
+        names
+    | Waiting_unattributed -> [] in
   state.keeper_waiting_unverified <-
     List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
   state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read
@@ -12895,17 +12875,17 @@ let server_authority_ready state =
       && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
 
-(* The key the Terminal tab's stream follows: the Keeper under the cursor, while
-   the tab is on screen for a workspace this terminal confirmed. [None] means no
-   stream should run. *)
-let keeper_terminal_stream_key state =
+(* The key the Execute output stream follows: the Keeper under the cursor, while
+   the logs view or the Terminal tab is on screen for a workspace this terminal
+   confirmed. [None] means no stream should run. *)
+let keeper_execute_stream_key state =
   match state.workspace_identity with
-  | Workspace_identity_match when server_authority_ready state && keeper_terminal_on_screen state ->
-    Option.map (keeper_log_key state ~limit:keeper_terminal_window) (keeper_execute_target state)
+  | Workspace_identity_match when server_authority_ready state ->
+    Option.map (keeper_log_key state ~limit:keeper_execute_window) (keeper_execute_target state)
   | Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
   | Workspace_identity_match_unconfirmed _ -> None
 
-(* What the Terminal tab's stream needs on this pass of the loop. A running
+(* What the Execute output stream needs on this pass of the loop. A running
    stream is the right one only if it was opened for this key under the
    workspace reading that is current: a stream opened before the workspace
    changed, or for another Keeper, is not. *)
@@ -12916,7 +12896,7 @@ type keeper_execute_stream_plan =
   | Stream_ends  (** None is wanted and one runs. *)
 
 let plan_keeper_execute_stream state =
-  match keeper_terminal_stream_key state, state.keeper_execute_stream with
+  match keeper_execute_stream_key state, state.keeper_execute_stream with
   | Some key, Some (stream, _)
     when stream.kxf_reading == state.workspace_read_authority
          && keeper_log_equal_key stream.kxf_key key -> Stream_stays
@@ -14459,6 +14439,17 @@ let suspend_workspace_readings state =
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
   state.board_list_owed <- Masc_tui_owed_read.settled;
+  state.asks_owed <- Masc_tui_owed_read.settled;
+  state.async_requests_owed <- Masc_tui_owed_read.settled;
+  state.pending_confirms_owed <- Masc_tui_owed_read.settled;
+  state.schedules_owed <- Masc_tui_owed_read.settled;
+  state.keeper_schedules_owed <- None;
+  state.chat_native_tasks_owed <- None;
+  state.chat_child_content_owed <- None;
+  (* Resumed authority reads the Gate again. *)
+  state.gate_snapshot_owed <- Masc_tui_owed_read.settled;
+  state.held_calls_owed <- Masc_tui_owed_read.settled;
+  state.tool_modes_owed <- Masc_tui_owed_read.settled;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
   state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
@@ -14502,6 +14493,9 @@ let suspend_workspace_readings state =
   retire_asks_read state;
   retire_ask_followup_read state;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
+  state.keeper_row_read <- Snapshot_read.invalidate state.keeper_row_read;
+  (* A resumed authority reads the whole roster again. *)
+  state.keeper_roster_owed <- Masc_tui_roster_owed.settled;
   invalidate_local_source_read state Local_work;
   invalidate_local_source_read state Local_keepers;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
@@ -14533,6 +14527,7 @@ let suspend_workspace_readings state =
   state.harness_inflight <- false;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
+  state.verification_owed <- Masc_tui_owed_read.settled;
   state.fusion_detail_inflight <- None;
   state.fusion_detail_reread_pending <- false;
   state.fusion_detail_awaiting_observer <- false;
@@ -14544,6 +14539,9 @@ let suspend_workspace_readings state =
   state.schedule_wake_history_inflight <- None;
   state.keeper_waiting_read <- Keeper_waiting_read.suspend state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
+  state.keeper_turns_owed <- Masc_tui_owed_read.settled;
+  state.keeper_previews_unread <- [];
+  state.keeper_waiting_owed <- Masc_tui_owed_read.settled;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
   state.keeper_calls_refresh_pending <- false;
@@ -16671,6 +16669,10 @@ let finish_keeper_chat_control state keeper_name ~generation =
   else begin
     let next = advance_keeper_chat_control state keeper_name in
     state.keeper_chat_control_pending <- List.remove_assoc keeper_name state.keeper_chat_control_pending;
+    (* A turns read keeps the old row of a Keeper whose control is pending,
+       and no later write may announce the Keeper again, so the end of the
+       control owes the turns one read. *)
+    state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed;
     state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
       let intervention = match intervention with
         | Awaiting_control held when name = keeper_name && held.generation = generation ->
@@ -16880,9 +16882,19 @@ let selected_item_account state =
   | Some keeper, Some (name, (_, account)) when String.equal keeper.k_name name -> Some account
   | (Some _ | None), (Some _ | None) -> None
 
+(* The selected Keeper's balance at this moment, from the roster's Candle
+   basis; the Items account's own balance stands still after it is read. *)
+let selected_item_balance_now state =
+  match state.item_account with
+  | Some (keeper_name, _) ->
+      Masc_tui_candle.balance_milli ~now:(Unix.gettimeofday ()) state.candle_observation
+        ~keeper:keeper_name
+  | None -> None
+
 let item_browser_items state =
   Masc_tui_keeper_items.items ~filter:state.item_filter
     ~account:(selected_item_account state)
+    ~balance_milli:(selected_item_balance_now state)
 
 let selected_browser_item state =
   let items = item_browser_items state in
@@ -19412,6 +19424,8 @@ let create_state
   keeper_roster = Masc_tui_keeper_control.unobserved_roster;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
+  keeper_row_read = Snapshot_read.idle;
+  keeper_roster_owed = Masc_tui_roster_owed.settled;
   local_workspace_read_order = Local_read_order.idle;
   local_work_observation = None;
   local_keeper_observation = None;
@@ -19496,12 +19510,20 @@ let create_state
   keeper_calls_owed = None;
   board_post_owed = None;
   board_list_owed = Masc_tui_owed_read.settled;
+  asks_owed = Masc_tui_owed_read.settled;
+  async_requests_owed = Masc_tui_owed_read.settled;
+  pending_confirms_owed = Masc_tui_owed_read.settled;
+  schedules_owed = Masc_tui_owed_read.settled;
+  keeper_schedules_owed = None;
+  chat_native_tasks_owed = None;
+  chat_child_content_owed = None;
+  gate_snapshot_owed = Masc_tui_owed_read.settled;
+  held_calls_owed = Masc_tui_owed_read.settled;
+  tool_modes_owed = Masc_tui_owed_read.settled;
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   keeper_logs = Masc_tui_fetched.initial;
   keeper_execute_output = Masc_tui_fetched.initial;
-  keeper_execute_read = None;
-  keeper_execute_cancel = None;
   keeper_execute_stream = None;
   keeper_terminal = Masc_tui_execute_terminal.Following;
   keeper_log_read = None;
@@ -19553,6 +19575,9 @@ let create_state
   keeper_waiting_versions = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_turns_owed = Masc_tui_owed_read.settled;
+  keeper_previews_unread = [];
+  keeper_waiting_owed = Masc_tui_owed_read.settled;
   keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
@@ -19931,6 +19956,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_owed = Masc_tui_owed_read.settled;
   verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;

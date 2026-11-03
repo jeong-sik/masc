@@ -3042,6 +3042,15 @@
 (include stanzas/test_tui_keeper_calls_signal.inc)
 (include stanzas/test_tui_board_post_signal.inc)
 (include stanzas/test_tui_board_list_signal.inc)
+(include stanzas/test_tui_gate_snapshot_signal.inc)
+(include stanzas/test_tui_held_calls_and_modes_signal.inc)
+(include stanzas/test_tui_keeper_logs_execute_stream.inc)
+(include stanzas/test_tui_asks_signal.inc)
+(include stanzas/test_tui_async_requests_signal.inc)
+(include stanzas/test_tui_pending_confirms_signal.inc)
+(include stanzas/test_tui_schedules_signal.inc)
+(include stanzas/test_tui_keeper_schedules_signal.inc)
+(include stanzas/test_tui_chat_journals_signal.inc)
 (include stanzas/test_tui_waiting_event.inc)
 (include stanzas/test_tui_observer_epoch.inc)
 (include stanzas/test_tui_task_event.inc)
@@ -3279,6 +3288,16 @@
 
 (include stanzas/test_keeper_approval_queue_rules.inc)
 (include stanzas/test_gate_rules_announce.inc)
+(include stanzas/test_keeper_tool_approval_announces.inc)
+(include stanzas/test_operator_asks_announce.inc)
+(include stanzas/test_keeper_async_requests_announce.inc)
+(include stanzas/test_pending_confirms_announce.inc)
+(include stanzas/test_schedules_announce.inc)
+(include stanzas/test_runtime_assignment_announce.inc)
+(include stanzas/test_candle_ledger_announce.inc)
+(include stanzas/test_provider_rest_announce.inc)
+(include stanzas/test_turn_preview_announce.inc)
+(include stanzas/test_verification_request_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 
@@ -4040,6 +4059,16 @@
  (libraries alcotest masc_tui_owed_read))
 
 (test
+ (name test_tui_roster_owed)
+ (modules test_tui_roster_owed)
+ (libraries alcotest masc_tui_roster_owed))
+
+(test
+ (name test_tui_candle)
+ (modules test_tui_candle)
+ (libraries alcotest masc masc.masc_candle masc_tui_candle ptime))
+
+(test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
  (libraries
@@ -4440,6 +4469,7 @@
   masc.string_util
   masc_tui_credential
   masc_tui_keeper_control
+  masc.masc_workspace
   yojson))
 
 (test

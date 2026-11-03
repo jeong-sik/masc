@@ -8,6 +8,11 @@ type keeper_quiet_reason =
   | Starting_up
   | Never_started
 
+val agent_staleness_threshold_s : float
+(** How long after creation a Keeper with no recorded turn still reads as
+    [Starting_up] rather than [Never_started]. The TUI reads a starting
+    Keeper's roster row again at that age (RFC-0481 §3.6). *)
+
 val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
 (** Wire form of the keeper diagnostic's [quiet_reason]. The dashboard's
     [KeeperQuietReason] union must list exactly these strings; an unlisted one

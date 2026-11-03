@@ -361,6 +361,10 @@ let observe t ~attempt decision =
   let outcome = match prepare t ~attempt decision with
     | Error error -> {result=Error error;cleanup_failure=[]}
     | Ok publication -> append publication in
+  (match t.context, outcome.result with
+   | Ok (_, keeper_name), Ok (Appended _) ->
+       Keeper_runtime_journal_broadcast.child_content_appended ~keeper_name
+   | Ok _, (Ok (Replayed _) | Error _) | Error _, (Ok (Appended _ | Replayed _) | Error _) -> ());
   let error = match outcome.result with Ok _ -> None | Error error -> Some error in
   (match error,outcome.cleanup_failure with
    | None,[] -> ()

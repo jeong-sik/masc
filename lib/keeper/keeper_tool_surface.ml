@@ -23,9 +23,31 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
          | _ -> Error "fresh must be one boolean value")
     | _ -> Ok false
   in
-  match fresh with
-  | Error detail -> tool_result_error ~class_:Tool_result.Policy_rejection detail
-  | Ok fresh ->
+  (* [name] narrows the listed names to one Keeper, so a reader told that one
+     Keeper changed rereads only that row (RFC-0481 §3.1). The roster's
+     [limit] window does not hide it: a Keeper sorted past the window still
+     answers its row. *)
+  let named =
+    match args with
+    | `Assoc fields ->
+        (match List.filter (fun (key, _) -> String.equal key "name") fields with
+         | [] -> Ok None
+         | [ (_, `String raw) ] ->
+             Result.map Option.some
+               (Keeper_id.Keeper_name.of_string (String.trim raw))
+         | _ -> Error "name must be one keeper name")
+    | _ -> Ok None
+  in
+  match fresh, named with
+  | Error detail, _ | Ok _, Error detail ->
+      tool_result_error ~class_:Tool_result.Policy_rejection detail
+  | Ok fresh, Ok named ->
+  (* A narrowed answer is read for a change that just happened, so it never
+     comes from the list cache and never replaces it. *)
+  let cache_bypassed = match fresh, named with
+    | false, None -> false
+    | true, (None | Some _) | false, Some _ -> true
+  in
   (* Read before consulting the projection cache: a previously readable
      roster cannot certify a directory that has since become unreadable.
      The census also raises when the roster path cannot even be ensured
@@ -49,12 +71,19 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
-        let all_names =
+        let listed_names =
           registry_names
           @ persisted_names
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
+        in
+        let all_names = match named with
+          | None -> listed_names
+          | Some named ->
+              List.filter
+                (String.equal (Keeper_id.Keeper_name.to_string named))
+                listed_names
         in
         (* [total] is measured before [limit] is applied, so a caller can tell
            a short answer from a complete one. Without it [count] reports the
@@ -63,7 +92,10 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
            operational keepers, sorting after ~90 benchmark ones, all fell off
            the end. *)
         let total = List.length all_names in
-        let names = take limit all_names in
+        let names = match named with
+          | None -> take limit all_names
+          | Some _ -> all_names
+        in
         let truncated = List.length names < total in
         let rows =
           names
@@ -80,6 +112,10 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
             ("limit", `Int limit);
             ("truncated", `Bool truncated);
           ]
+          @ match named with
+            | None -> []
+            | Some named ->
+                [ ("name", `String (Keeper_id.Keeper_name.to_string named)) ]
         in
         let json =
           if not detailed then
@@ -101,7 +137,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
         json
   in
   let data =
-    if fresh then compute ()
+    if cache_bypassed then compute ()
     else cached_json_by_key keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) compute
   in
@@ -125,7 +161,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           match value with `List rows -> key, `List (List.map row rows) | value -> key, value
         else key, value) fields)
     | json -> json in
-  let data = match fresh, data with
+  let data = match cache_bypassed, data with
     | true, `Assoc fields ->
         `Assoc (("projection_cache_bypassed", `Bool true) :: fields)
     | false, _ | true, _ -> data in

@@ -388,7 +388,7 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () =
     let owner = Keeper_interrupt_token.fresh () in
     let original = Ids.Turn_ref.make ~trace_id:"shared-input-owner" ~absolute_turn:5 in
     let preview = Keeper_turn_preview_owner.with_owner ~interrupt_token:owner ~observation:(Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
-      Keeper_turn_preview.reset ~keeper_name:"researcher" ~execution_scope:None ~turn_ref:(Some original)
+      Keeper_turn_preview.reset ~base_path:config.base_path ~keeper_name:"researcher" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Keeper_secret_redaction.empty) in
     check bool "pool-backed input preparation preserves the original source products" true
       (read ~preview () = reference);

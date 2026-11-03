@@ -5,6 +5,9 @@ module Log = Masc_tui_keeper_chat_log
 module Live = Masc_tui_keeper_chat_live
 module Transcript = Masc_tui_keeper_chat_transcript
 module Preview = Keeper_turn_preview
+
+(* No server runs here, so nothing is sent for this workspace. *)
+let preview_base_path = "tui-preview-test"
 module Observation = Keeper_preparation_runtime_observation
 
 let ok = function Ok value -> value | Error detail -> fail detail
@@ -41,7 +44,7 @@ let with_source f =
     let turn_ref = Ids.Turn_ref.make ~trace_id:"original#trace" ~absolute_turn:7 in
     let execution_id = "batch-execution" in
     let operation = Keeper_operation_id.of_string execution_id |> ok in
-    let preview = Preview.reset ~keeper_name ~turn_ref:(Some turn_ref)
+    let preview = Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:(Some turn_ref)
         ~execution_scope:(Some (Keeper_execution_scope_id.direct_operation operation))
         ~now:0. ~redaction:Keeper_secret_redaction.empty in
     ignore (Observation.with_turn ~config ~keeper_name ~preview (fun () ->
@@ -49,7 +52,7 @@ let with_source f =
         ~phase:Preview.World_preparation (fun () ->
           Preview.with_preparation_result ~writer:(Some preview) ~turn_ref:(Some turn_ref)
             ~phase:Preview.Workspace_memory_preparation (fun () -> Error "source unavailable"))));
-    ignore (Preview.reset ~keeper_name ~turn_ref:None ~execution_scope:None ~now:3.
+    ignore (Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:None ~execution_scope:None ~now:3.
       ~redaction:Keeper_secret_redaction.empty);
     let log = journal ~keeper_name ~source:(Log.Operation "batch-member") ~execution_id ~turn_ref in
     let selected = target log in
@@ -78,7 +81,7 @@ let actual_source_to_selected_read () = with_source (fun config keeper_name turn
   check bool "a missing direct turn link is not guessed" true
     (Result.is_error (Details.target ~journal:unlinked ~execution_id:"failed-without-reply-link" ~reply_turn_ref:None));
   let autonomous_ref = Ids.Turn_ref.make ~trace_id:(Ids.Turn_ref.trace_id turn_ref) ~absolute_turn:8 in
-  let preview = Preview.reset ~keeper_name ~turn_ref:(Some autonomous_ref) ~execution_scope:None
+  let preview = Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:(Some autonomous_ref) ~execution_scope:None
       ~now:4. ~redaction:Keeper_secret_redaction.empty in
   let entered, enter = Eio.Promise.create () in
   let never, _ = Eio.Promise.create () in
@@ -103,7 +106,7 @@ let workspace_admission_preserves_selected_preparation () =
     let foreign_base = Filename.concat config.base_path "other-workspace" in
     Unix.mkdir foreign_base 0o700;
     let foreign = Workspace.default_config foreign_base in
-    let preview = Preview.reset ~keeper_name ~turn_ref:(Some turn_ref)
+    let preview = Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:(Some turn_ref)
         ~execution_scope:original_report.execution_scope ~now:10.
         ~redaction:Keeper_secret_redaction.empty in
     ignore (Observation.with_turn ~config:foreign ~keeper_name ~preview (fun () ->
@@ -370,11 +373,11 @@ let failed_owner_to_saved_preparation () =
           detail="failure before an original turn exists"; outcome_ref=None}
       | Returned_failure | Raised_failure | Cancelled_failure ->
         Keeper_turn_preview_owner.note_turn_ref original;
-        let preview = Preview.reset ~keeper_name ~turn_ref:(Some original)
+        let preview = Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:(Some original)
             ~execution_scope:(Some (Keeper_execution_scope_id.direct_operation operation.Keeper_chat_operation.operation_id))
             ~now:3. ~redaction:Keeper_secret_redaction.empty in
         (* A newer displayed writer cannot replace the invocation's actual identity. *)
-        ignore (Preview.reset ~keeper_name ~turn_ref:(Some (Ids.Turn_ref.make
+        ignore (Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:(Some (Ids.Turn_ref.make
           ~trace_id:"unrelated-display" ~absolute_turn:1)) ~execution_scope:None
           ~now:4. ~redaction:Keeper_secret_redaction.empty);
         ignore (Observation.with_turn ~config ~keeper_name ~preview (fun () ->

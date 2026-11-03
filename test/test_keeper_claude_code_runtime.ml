@@ -3857,6 +3857,67 @@ let test_child_journal_received_after_closed_root () =
         (Keeper_autonomous_stream.current ~base_path ~keeper_name=None)))
 ;;
 
+(* Calls [f] with a list that gains the Keeper name of each [event] heard. *)
+let hearing_journal_appends ~event f =
+  let id = Printf.sprintf "runtime-journal-announce-%d" (Unix.getpid ()) in
+  let heard = ref [] in
+  Sse.subscribe_external ~id
+    ~callback:(fun (ev : Sse.external_event) ->
+      match Sse.data_payload_of_frame ev.Sse.ext_frame with
+      | Error Sse.Missing_data_payload -> ()
+      | Ok payload ->
+        (match Yojson.Safe.from_string payload with
+         | `Assoc fields ->
+           (match List.assoc_opt "type" fields, List.assoc_opt "name" fields with
+            | Some (`String kind), Some (`String name) when String.equal kind event ->
+              heard := name :: !heard
+            | _ -> ())
+         | _ -> ()
+         | exception Yojson.Json_error _ -> ()))
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () -> f heard)
+;;
+
+let test_native_task_journal_announces_each_append () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let journal = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "native-announce") ~redact_text:Fun.id in
+    let observe_all () =
+      List.iter (fun (attempt, bound) ->
+        ignore (Task_journal.observe journal ~attempt bound : Task_journal.commit Task_journal.outcome))
+        observations
+    in
+    hearing_journal_appends ~event:Keeper_runtime_journal_broadcast.native_tasks_appended_event
+      (fun heard ->
+        observe_all ();
+        check (list string) "each appended record is announced for its Keeper"
+          (List.map (fun _ -> keeper_name) observations) !heard;
+        heard := [];
+        observe_all ();
+        check (list string) "a replayed record is not announced" [] !heard))
+;;
+
+let test_child_content_journal_announces_each_append () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let journal = Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-announce") ~redact_text:Fun.id in
+    let observe_all () =
+      List.iter (fun (attempt, observation) ->
+        ignore (Child_journal.observe journal ~attempt observation : Child_journal.commit Child_journal.outcome))
+        observations
+    in
+    hearing_journal_appends ~event:Keeper_runtime_journal_broadcast.child_content_appended_event
+      (fun heard ->
+        observe_all ();
+        check (list string) "each appended record is announced for its Keeper"
+          (List.map (fun _ -> keeper_name) observations) !heard;
+        heard := [];
+        observe_all ();
+        check (list string) "a replayed record is not announced" [] !heard))
+;;
+
 let test_child_journal_failure_preserves_root () =
   let failures=ref [] in
   with_child_journal_observations
@@ -6887,6 +6948,10 @@ let () =
             test_child_journal_received_after_closed_root
         ; test_case "child persistence failure cannot mutate root answer" `Quick
             test_child_journal_failure_preserves_root
+        ; test_case "native task journal announces each append" `Quick
+            test_native_task_journal_announces_each_append
+        ; test_case "child content journal announces each append" `Quick
+            test_child_content_journal_announces_each_append
         ; test_case "native task journal retains authority and exact replay" `Quick
             test_native_task_journal_commit_replay_and_scope
         ; test_case "native task journal serializes writers and distinguishes corruption" `Quick

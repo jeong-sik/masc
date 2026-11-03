@@ -211,6 +211,10 @@ val missing_required_sandbox_image_error :
     created on an image nobody named (#37523). *)
 
 val runtime_id_of_meta : keeper_meta -> string
+
+val runtime_route_of_keeper_name : string -> string option
+(** The route {!runtime_id_of_meta} answers for a Keeper of that name, or
+    [None] while no runtime is loaded, where {!runtime_id_of_meta} fails. *)
 (** The route a turn of this Keeper enters on: the Keeper's assignment in the
     runtime file ([runtime.assignments]) when it has one, otherwise the
     default route ([runtime.default]). Either may name a lane rather than a

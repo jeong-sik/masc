@@ -20,6 +20,7 @@ let observed state target = match Masc_tui_fetched.view_for ~equal:Detail.equal_
 let begin_read state ~force = begin_tools_async_detail state ~force |> Option.get
 
 let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let before_submit = Unix.gettimeofday () in
   let entered,resolve_entered=Eio.Promise.create () and release,resolve_release=Eio.Promise.create () in
   let terminal,resolve_terminal=Eio.Promise.create () in
   let effect_path=Filename.concat base_path "original-effect" in
@@ -42,6 +43,13 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
   state.tools_async_observation <- Some (Server_async_request_observability.project ~base_path
     |> Masc.Tui_decode.decode_async_request_observation |> value);
   sync_tools_async_selection state;
+  (* The row carries when the request was submitted, not an age taken at the
+     read, so the screen's age keeps moving between reads. *)
+  (match state.tools_async_observation with
+   | Some (Masc.Tui_decode.Async_ready { requests = [ row ]; _ }) ->
+     check bool "the submission time is the request's own" true
+       (row.ar_submitted_at >= before_submit && row.ar_submitted_at <= Unix.gettimeofday ())
+   | Some _ | None -> fail "expected the one active request");
   check bool "selection keeps original submitter and different target" true
     (Option.equal Detail.equal_target (Some target) state.tools_async_selection);
   state.tools_async_detail_open <- true;

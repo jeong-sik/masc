@@ -1,0 +1,402 @@
+{
+ "container_version": "container CLI version 1.6.1 (build: release, commit: unspeci)",
+ "measured_at": "2026-11-03T17:58:44+0900",
+ "image_home": {
+  "masc-sandbox:general": [
+   "HOME=/home/keeper"
+  ],
+  "masc-sandbox-ocaml:20260928T0216Z-c48e1e05": [
+   "HOME=/home/opam"
+  ]
+ },
+ "cases": [
+  {
+   "image": "masc-sandbox:general",
+   "shape": "agent",
+   "argv": [
+    "container",
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    "masc-verify-agent-masc-sandbox-1793696324",
+    "--user",
+    "0:0",
+    "--cap-drop",
+    "ALL",
+    "--cap-add",
+    "CAP_SETUID",
+    "--cap-add",
+    "CAP_SETGID",
+    "--cap-add",
+    "CAP_SYS_ADMIN",
+    "--tmpfs",
+    "/tmp",
+    "--env",
+    "HOME=/tmp",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--network",
+    "none",
+    "--entrypoint",
+    "sleep",
+    "masc-sandbox:general",
+    "infinity"
+   ],
+   "run_rc": 0,
+   "inspect_home_entries": [
+    "HOME=/tmp"
+   ],
+   "inspect_duplicate_names": [],
+   "exec_502:20": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=502:20",
+     "CapInh: 0000000000000000",
+     "CapPrm: 0000000000000000",
+     "CapEff: 0000000000000000",
+     "CapBnd: 00000000002000c0",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "exec_0:0": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=0:0",
+     "CapInh: 0000000000000000",
+     "CapPrm: 00000000002000c0",
+     "CapEff: 00000000002000c0",
+     "CapBnd: 00000000002000c0",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "escalation_as_keeper": {
+    "rc": 0,
+    "lines": [
+     "passwd_entry_rc=2",
+     "sudo_n_rc=127",
+     "su_rc=1"
+    ],
+    "stderr": ""
+   },
+   "root_facts": {
+    "rc": 0,
+    "lines": [
+     "root_password_first_char=*"
+    ],
+    "stderr": ""
+   },
+   "setuid_files": [
+    "/usr/bin/chfn",
+    "/usr/bin/chsh",
+    "/usr/bin/gpasswd",
+    "/usr/bin/mount",
+    "/usr/bin/newgrp",
+    "/usr/bin/passwd",
+    "/usr/bin/su",
+    "/usr/bin/umount"
+   ],
+   "stop_rc": 0
+  },
+  {
+   "image": "masc-sandbox:general",
+   "shape": "exec",
+   "argv": [
+    "container",
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    "masc-verify-exec-masc-sandbox-1793696334",
+    "--user",
+    "502:20",
+    "--read-only",
+    "--cap-drop",
+    "ALL",
+    "--tmpfs",
+    "/tmp",
+    "--env",
+    "HOME=/tmp",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--network",
+    "none",
+    "--entrypoint",
+    "sleep",
+    "masc-sandbox:general",
+    "infinity"
+   ],
+   "run_rc": 0,
+   "inspect_home_entries": [
+    "HOME=/tmp"
+   ],
+   "inspect_duplicate_names": [],
+   "exec_502:20": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=502:20",
+     "CapInh: 0000000000000000",
+     "CapPrm: 0000000000000000",
+     "CapEff: 0000000000000000",
+     "CapBnd: 0000000000000000",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "exec_0:0": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=0:0",
+     "CapInh: 0000000000000000",
+     "CapPrm: 0000000000000000",
+     "CapEff: 0000000000000000",
+     "CapBnd: 0000000000000000",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "escalation_as_keeper": {
+    "rc": 0,
+    "lines": [
+     "passwd_entry_rc=2",
+     "sudo_n_rc=127",
+     "su_rc=1"
+    ],
+    "stderr": ""
+   },
+   "root_facts": {
+    "rc": 0,
+    "lines": [
+     "root_password_first_char=*"
+    ],
+    "stderr": ""
+   },
+   "setuid_files": [
+    "/usr/bin/chfn",
+    "/usr/bin/chsh",
+    "/usr/bin/gpasswd",
+    "/usr/bin/mount",
+    "/usr/bin/newgrp",
+    "/usr/bin/passwd",
+    "/usr/bin/su",
+    "/usr/bin/umount"
+   ],
+   "stop_rc": 0
+  },
+  {
+   "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+   "shape": "agent",
+   "argv": [
+    "container",
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    "masc-verify-agent-masc-sandbox-ocaml-1793696344",
+    "--user",
+    "0:0",
+    "--cap-drop",
+    "ALL",
+    "--cap-add",
+    "CAP_SETUID",
+    "--cap-add",
+    "CAP_SETGID",
+    "--cap-add",
+    "CAP_SYS_ADMIN",
+    "--tmpfs",
+    "/tmp",
+    "--env",
+    "HOME=/tmp",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--network",
+    "none",
+    "--entrypoint",
+    "sleep",
+    "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+    "infinity"
+   ],
+   "run_rc": 0,
+   "inspect_home_entries": [
+    "HOME=/tmp"
+   ],
+   "inspect_duplicate_names": [],
+   "exec_502:20": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=502:20",
+     "CapInh: 0000000000000000",
+     "CapPrm: 0000000000000000",
+     "CapEff: 0000000000000000",
+     "CapBnd: 00000000002000c0",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "exec_0:0": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=0:0",
+     "CapInh: 0000000000000000",
+     "CapPrm: 00000000002000c0",
+     "CapEff: 00000000002000c0",
+     "CapBnd: 00000000002000c0",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "escalation_as_keeper": {
+    "rc": 0,
+    "lines": [
+     "passwd_entry_rc=2",
+     "sudo_n_rc=1",
+     "su_rc=1"
+    ],
+    "stderr": ""
+   },
+   "root_facts": {
+    "rc": 0,
+    "lines": [
+     "root_password_first_char=*",
+     "sudoers: root\tALL=(ALL:ALL) ALL",
+     "sudoers: %admin ALL=(ALL) ALL",
+     "sudoers: %sudo\tALL=(ALL:ALL) ALL",
+     "sudoers: @includedir /etc/sudoers.d",
+     "sudoers: opam ALL=(ALL:ALL) NOPASSWD:ALL"
+    ],
+    "stderr": ""
+   },
+   "setuid_files": [
+    "/usr/bin/chfn",
+    "/usr/bin/chsh",
+    "/usr/bin/gpasswd",
+    "/usr/bin/mount",
+    "/usr/bin/newgrp",
+    "/usr/bin/passwd",
+    "/usr/bin/su",
+    "/usr/bin/sudo",
+    "/usr/bin/umount",
+    "/usr/lib/openssh/ssh-keysign"
+   ],
+   "stop_rc": 0
+  },
+  {
+   "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+   "shape": "exec",
+   "argv": [
+    "container",
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    "masc-verify-exec-masc-sandbox-ocaml-1793696366",
+    "--user",
+    "502:20",
+    "--read-only",
+    "--cap-drop",
+    "ALL",
+    "--tmpfs",
+    "/tmp",
+    "--env",
+    "HOME=/tmp",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--network",
+    "none",
+    "--entrypoint",
+    "sleep",
+    "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+    "infinity"
+   ],
+   "run_rc": 0,
+   "inspect_home_entries": [
+    "HOME=/tmp"
+   ],
+   "inspect_duplicate_names": [],
+   "exec_502:20": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=502:20",
+     "CapInh: 0000000000000000",
+     "CapPrm: 0000000000000000",
+     "CapEff: 0000000000000000",
+     "CapBnd: 0000000000000000",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "exec_0:0": {
+    "rc": 0,
+    "lines": [
+     "HOME=/tmp",
+     "id=0:0",
+     "CapInh: 0000000000000000",
+     "CapPrm: 0000000000000000",
+     "CapEff: 0000000000000000",
+     "CapBnd: 0000000000000000",
+     "CapAmb: 0000000000000000",
+     "NoNewPrivs: 0"
+    ],
+    "stderr": ""
+   },
+   "escalation_as_keeper": {
+    "rc": 0,
+    "lines": [
+     "passwd_entry_rc=2",
+     "sudo_n_rc=1",
+     "su_rc=1"
+    ],
+    "stderr": ""
+   },
+   "root_facts": {
+    "rc": 0,
+    "lines": [
+     "root_password_first_char=*",
+     "sudoers: root\tALL=(ALL:ALL) ALL",
+     "sudoers: %admin ALL=(ALL) ALL",
+     "sudoers: %sudo\tALL=(ALL:ALL) ALL",
+     "sudoers: @includedir /etc/sudoers.d",
+     "sudoers: opam ALL=(ALL:ALL) NOPASSWD:ALL"
+    ],
+    "stderr": ""
+   },
+   "setuid_files": [
+    "/usr/bin/chfn",
+    "/usr/bin/chsh",
+    "/usr/bin/gpasswd",
+    "/usr/bin/mount",
+    "/usr/bin/newgrp",
+    "/usr/bin/passwd",
+    "/usr/bin/su",
+    "/usr/bin/sudo",
+    "/usr/bin/umount",
+    "/usr/lib/openssh/ssh-keysign"
+   ],
+   "stop_rc": 0
+  }
+ ]
+}

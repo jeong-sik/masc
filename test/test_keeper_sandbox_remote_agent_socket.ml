@@ -418,6 +418,69 @@ let test_a_route_names_the_agent_socket_and_owner () =
   check bool "another owner is another route" false
     (String.equal (route "/guest-a.sock") (route ~expected:other_owner "/guest-a.sock"))
 
+(* ── what an attach reads before it adopts an agent guest (RFC 3.6) ──── *)
+
+module Agent = Keeper_microvm_agent_socket
+
+let host_socket_of session =
+  match Remote.carrier session.endpoint with
+  | Remote.Guest_agent { host_socket; _ } -> host_socket
+  | Remote.Local_process _ -> fail "an agent session has an agent socket"
+
+let ask_agent host_socket =
+  Agent.check_agent ~host_socket ~expected
+    ~connect_budget_sec:(float_of_int connect_timeout_sec) ~budget_sec:timeout_sec
+
+let describe_check = function
+  | Agent.Agent_answered -> "answered"
+  | Agent.Agent_unusable reason -> "unusable: " ^ reason
+  | Agent.Check_unavailable detail -> "unavailable: " ^ detail
+
+let test_an_agent_that_answers_is_adopted () =
+  with_proxy (fun session ->
+    match ask_agent (host_socket_of session) with
+    | Agent.Agent_answered -> ()
+    | other -> fail (describe_check other))
+
+(* The real agent runs as this test's ids, which the Keeper's are not. *)
+let test_an_agent_whose_hello_is_refused_is_replaced () =
+  let { socket; _ } = the_agent () in
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    match ask_agent socket with
+    | Agent.Agent_unusable reason ->
+      check bool "the reason says the hello was refused" true (contains ~needle:"refused" reason)
+    | other -> fail (describe_check other))
+
+let test_a_socket_with_no_agent_is_replaced () =
+  with_temp_dir
+  @@ fun dir ->
+  with_eio
+  @@ fun ~sw:_ ~net:_ ~clock:_ ->
+  match
+    Agent.check_agent ~host_socket:(Filename.concat dir "absent.sock") ~expected
+      ~connect_budget_sec:1.0 ~budget_sec:timeout_sec
+  with
+  | Agent.Agent_unusable reason ->
+    check bool "the reason says no hello came" true (contains ~needle:"no hello" reason)
+  | other -> fail (describe_check other)
+
+(* Neither case says anything about the guest, so neither replaces it. *)
+let test_a_check_that_could_not_ask_replaces_nothing () =
+  let { socket; _ } = the_agent () in
+  (match ask_agent socket with
+   | Agent.Check_unavailable detail ->
+     check bool "outside Eio the reason names Eio" true (contains ~needle:"Eio fiber" detail)
+   | other -> fail (describe_check other));
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    match
+      Agent.check_agent ~host_socket:socket ~expected ~connect_budget_sec:Float.nan
+        ~budget_sec:timeout_sec
+    with
+    | Agent.Check_unavailable detail ->
+      check bool "a budget that is not a number is the caller's" true
+        (contains ~needle:"budget" detail)
+    | other -> fail (describe_check other))
+
 let () =
   if Array.length Sys.argv <> 2 then failwith "expected the masc-exec-shim binary path";
   shim_binary := Unix.realpath Sys.argv.(1);
@@ -456,5 +519,15 @@ let () =
             test_an_agent_socket_guest_is_carried_by_its_agent
         ; test_case "a route names the agent socket and owner" `Quick
             test_a_route_names_the_agent_socket_and_owner
+        ] )
+    ; ( "attach check"
+      , [ test_case "an agent that answers is adopted" `Quick
+            test_an_agent_that_answers_is_adopted
+        ; test_case "an agent whose hello is refused is replaced" `Quick
+            test_an_agent_whose_hello_is_refused_is_replaced
+        ; test_case "a socket with no agent is replaced" `Quick
+            test_a_socket_with_no_agent_is_replaced
+        ; test_case "a check that could not ask replaces nothing" `Quick
+            test_a_check_that_could_not_ask_replaces_nothing
         ] )
     ]

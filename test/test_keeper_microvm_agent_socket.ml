@@ -131,6 +131,33 @@ let test_the_rest_is_the_exec_plan () =
     check bool "the rendered boot publishes the socket" true
       (List.mem (host_socket ^ ":" ^ Agent.guest_path) argv)
 
+(* ── how a running guest is reached ──────────────────────────────────── *)
+
+let facts_publishing published_sockets : Plan.facts =
+  { plan_label = None; image = "fixture:image"
+  ; image_identity =
+      ({ descriptor_digest = "sha256:fixture"
+       ; platform = { architecture = "arm64"; os = "linux"; variant = None } }
+       : Masc.Keeper_microvm_image_command.identity)
+  ; cpus = 4; memory_bytes = 2_147_483_648L; user = "0:0"
+  ; working_directory = Sandbox.work_volume_guest_root; command = agent_plan.command
+  ; mounts = []; read_only = false; cap_drop = ["ALL"]
+  ; cap_add = List.map Plan.capability_to_string agent_plan.capabilities_added
+  ; published_sockets; use_init = false; networks = []; environment = []; labels = [] }
+
+let test_a_guest_is_reached_the_way_it_publishes () =
+  let base_path = "/Users/keeper/me" and guest_name = "masc-keeper-vm-fixture" in
+  let delivery published =
+    Keeper_types_profile_sandbox.microvm_delivery_to_string
+      (Agent.delivery_of_facts ~base_path ~guest_name (facts_publishing published)) in
+  let own = {Plan.host_path = Agent.host_path ~base_path ~guest_name; guest_path = Agent.guest_path} in
+  check string "the agent socket at its own host path" "agent_socket" (delivery [own]);
+  check string "nothing published" "exec_per_request" (delivery []);
+  check string "another guest's host path" "exec_per_request"
+    (delivery [{own with host_path = Agent.host_path ~base_path ~guest_name:"masc-keeper-vm-other"}]);
+  check string "another guest-side path" "exec_per_request"
+    (delivery [{own with guest_path = "/run/other.sock"}])
+
 (* ── the host path before boot ───────────────────────────────────────── *)
 
 let with_base f =
@@ -238,6 +265,9 @@ let () =
       ; test_case "carries what an exec request sets" `Quick test_the_agent_carries_what_an_exec_request_sets
       ; test_case "the relay version is part of the plan" `Quick test_the_relay_version_is_part_of_the_plan
       ; test_case "the rest is the exec plan" `Quick test_the_rest_is_the_exec_plan ]
+    ; "reached",
+      [ test_case "a guest is reached the way it publishes" `Quick
+          test_a_guest_is_reached_the_way_it_publishes ]
     ; "before boot",
       [ test_case "a missing directory is made private" `Quick test_a_missing_directory_is_made_private
       ; test_case "an open directory is closed" `Quick test_an_open_directory_is_closed

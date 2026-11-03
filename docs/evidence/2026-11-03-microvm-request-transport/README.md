@@ -137,6 +137,24 @@ msb 쪽은 누수를 일부러 일으키는 대조군이 없어요.
 그래서 호스트는 hello 를 기한 안에 받지 못하면 그 연결을 닫고 새로 연결해야 해요. hello 전에는 아무것도 보내지 않으므로, 다시 연결해도 요청이 두 번 돌지 않아요.
 `bin/pipeleak.py` 는 10-28 부터 쓴 호스트 pipe 측정 스크립트예요(`once` 가 표를 찍어요). PIPE fd 만 세므로 소켓이나 vsock 누수는 못 봐요. 그래서 위 측정은 runtime 의 전체 fd 수도 같이 셌어요.
 
+### `container exec` 로 들어간 프로세스 (`bin/exec_caps.py`, 결과 `exec-caps-results.json`)
+
+masc 가 직접 `container exec` 하는 명령은 agent 를 거치지 않아요. 그 프로세스가 가진 권한을 agent 모양과 exec 모양 게스트에서 쟀어요.
+첫 프로세스는 `sleep infinity` 이고 `-i` 는 쓰지 않았어요. container 1.6.1, 이미지는 `masc-sandbox:general` 과 `masc-sandbox-ocaml:20260928T0216Z-c48e1e05` 예요. 두 이미지 결과가 같았어요.
+
+| 확인 | agent 모양 | exec 모양 |
+|---|---|---|
+| Keeper uid(502:20) 의 CapEff·CapPrm | 0 | 0 |
+| Keeper uid 의 CapBnd | `0x2000c0`(SETGID·SETUID·SYS_ADMIN) | 0 |
+| root(0:0) 의 CapEff·CapPrm | `0x2000c0` | 0 |
+| NoNewPrivs | 0 | 0 |
+| HOME (이미지 `ENV` 는 `/home/keeper`·`/home/opam`) | inspect 에 `HOME=/tmp` 하나, 프로세스도 `/tmp` | 같음 |
+
+- setuid root 파일은 두 이미지 모두 `su`·`mount`·`umount`·`passwd`·`chfn`·`chsh`·`gpasswd`·`newgrp` 이고, ocaml 이미지에는 `sudo`·`ssh-keysign` 이 더 있어요.
+- uid 502 가 root 가 되는 길은 없었어요. passwd 항목이 없고(`getent` 2), `sudo -n` 은 general 에 없고(127) ocaml 에서는 거절됐어요(1). root 계정이 잠겨 있어(`*`) `su` 도 실패했어요(1).
+- ocaml 이미지의 sudoers 에는 `opam ALL=(ALL:ALL) NOPASSWD:ALL` 이 있고, opam 은 uid 1000 이에요. 호스트 uid 가 1000 이면 그 Keeper 의 exec 프로세스는 비밀번호 없이 root 가 돼요. agent 모양에서는 그 root 가 SYS_ADMIN 을 가져요.
+- agent 가 띄운 요청은 NoNewPrivs 1 이라(위 표) setuid 파일로 권한을 얻지 못해요. 그래서 agent 모양 게스트에서 Keeper 명령은 agent 로만 보내요(L5b-2). masc 가 직접 하는 exec 7곳(그중 root 4곳)은 RFC 6절 1번에 남겨요.
+
 ### agent 실행 옵션 (`bin/agent_boot_flags.py`, 결과 `agent-boot-flags-results.json`)
 
 masc 가 그리는 모양 그대로 첫 프로세스를 `--entrypoint <shim>` 과 인자 `--serve /run/masc-agent/agent.sock 502:20` 으로 두었어요.
@@ -213,5 +231,6 @@ boot plan 코드가 실제 게스트를 자기 plan 으로 읽는지 확인했�
   모두 시험 컨테이너를 만들고 끝나면 지워요.
 - `socket_relay.py`, `agent_shape.py`, `relay_flags.py` 의 `SOCK_DIR` 은 소켓 경로 제한 때문에 짧은 로컬 경로로 고쳐 써야 해요.
 - `python3 -I bin/agent_shape.py`, `python3 -I bin/relay_flags.py` 도 같은 방식이에요. 4·5번 측정은 위에 적은 대로 `KEEPER_FLAGS`·`CASES` 를 바꿔 실행했어요.
+- `python3 -I bin/exec_caps.py <결과 json>`. VM 넷을 차례로 띄우고 멈춰요.
 - `python3 -I bin/agent_boot_flags.py <stage> <소켓 디렉터리> <결과 json>`. `<stage>/out` 에는 `agent_l3.py` 가 만든 shim 과 설정 파일이 있어야 해요. 소켓 디렉터리는 짧은 로컬 경로여야 해요.
 - `bin/agent_plan_harness.sh <저장소> <빌드 디렉터리>` 로 하네스를 만든 다음 `python3 -I bin/agent_plan_boot.py <빌드 디렉터리>/harness <stage> <소켓 디렉터리> <결과 디렉터리>` 예요. `bin/agent_paths_as_given.py` 는 `agent_boot_flags.py` 와 같은 인자를 받아요.

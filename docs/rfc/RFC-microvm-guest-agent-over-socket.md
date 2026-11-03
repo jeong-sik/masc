@@ -94,6 +94,8 @@ agent 는 PID 1 이라 고아 프로세스를 거둬야 해요. `--init` 은 쓰
 - `Keeper_microvm_boot_plan` 의 사실에 `publishedSockets`, `useInit`, relay 형식 버전을 더해요. `container inspect` 는 `--init` 을 명령 줄이 아닌 `useInit` 필드로 보여 줘요(4.2). 그래서 지금의 명령 줄 비교는 그대로 둬요.
   - relay 형식 버전은 agent plan 의 안정 라벨(`masc.mcp.agent_relay`)로 digest 에 들어가요. 다른 버전을 말하는 서버는 게스트를 붙이지 않고 교체해요.
 - plan 이 달라지면 `assess` 가 교체를 허용해요. 서버 재시작 뒤 붙이는 경로(attach)는 `assess` 를 거치지 않아요. 그래서 붙일 때 hello 를 읽고, agent 가 없거나 형식 버전이 다르면 타입이 있는 오류로 교체를 요청해요.
+  - 턴 시작 판정이 `Matches_plan` 이어도 plan 은 agent 를 보지 못해요. agent guest 는 붙이기 전에 agent 에 probe 를 한 번 보내요. hello 가 없거나 거절되거나 probe 가 0 으로 끝나지 않으면 붙이지 않고 교체해요. 물어보지도 못했으면(Eio 밖, 잘못된 예산) 교체하지 않고 오류로 멈춰요.
+  - 턴 없이 붙는 쪽(읽기, 상태)은 게스트 inspect 의 `publishedSockets` 로 전달 방식을 정해요. TOML 을 바꿨는데 아직 교체 전인 게스트도 부팅된 방식대로 읽어요. 게스트를 읽지 않는 snapshot 경로만 TOML 의 선택을 따라요.
 - 첫 프로세스는 `--user 0:0` 으로 띄워요. `--user` 를 빼면 이미지의 기본 사용자로 뜨는데, 그 값에 기대지 않으려는 거예요. inspect 의 `userString` 은 `"0:0"` 이라 plan 과 그대로 비교돼요(4.5).
 - 호스트 소켓 경로는 base path 와 게스트 이름에서 정해요. 붙이기(attach)가 이름만으로 endpoint 를 다시 만들기 때문이에요. TMPDIR 같은 프로세스 환경에는 기대지 않아요.
   - 경로는 `<base>/.masc/microvm/agent/<게스트 이름 SHA-256 앞 16자>.sock` 이에요. 게스트 이름은 63자까지라, 이름을 그대로 쓰면 `/Users/<사용자>/me` 아래에서도 105바이트가 돼요.
@@ -195,7 +197,11 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
 
 ## 6. 남은 질문
 
-1. **`--cap-add` 를 쓴 VM 에서 root 로 도는 masc 명령.** build 디렉터리 생성처럼 masc 가 uid 0 으로 `container exec` 하는 명령은 더한 capability 를 가져요. payload 는 `container exec` 를 부를 수 없어요. 그래도 그 명령 범위를 다시 확인해요.
+1. **`--cap-add` 를 쓴 VM 에서 masc 가 직접 하는 `container exec`.** 이 프로세스는 agent 를 거치지 않아서 NoNewPrivs 가 0 이에요. root 로 돌면 CapEff 가 `0x2000c0` 이고, Keeper uid 로 돌아도 bounding set 에 그 셋이 남아요(측정 기록의 `exec-caps-results.json`).
+   - 두 이미지에 `su`·`mount` 같은 setuid root 파일이 있어요. 이번 측정에서 uid 502 가 root 가 되는 길은 없었어요.
+   - ocaml 이미지의 `opam`(uid 1000)은 비밀번호 없는 sudo 를 가져요. 호스트 uid 가 1000 이면 그 Keeper 의 exec 프로세스가 root 가 되고, agent 모양에서는 SYS_ADMIN 도 가져요.
+   - 그래서 agent 모양 게스트에서 Keeper 명령은 agent 로만 보내요. payload 는 `container exec` 를 부를 수 없어요.
+   - masc 가 직접 하는 exec 는 일곱 곳이에요(빌드 스캔·링크·디렉터리, 작업 볼륨 권한, 작업 디렉터리 생성·마운트 확인·쓰기 확인). 그중 넷이 root 예요. 이 명령들이 Keeper 가 만든 파일에 휘둘리지 않는지는 6층에서 다시 봐요.
 2. **장시간 relay.** 이번 측정은 VM 하나에 몇 분이에요. 하루 부하에서 runtime 의 fd 가 늘지 않는지는 canary 에서 재요.
 3. **runtime 이 멈출 때.** #46602 처럼 게스트 runtime 이 멈추면 relay 도 멈출 수 있어요. 요청이 apiserver 전역 락을 지나지 않으니 다른 게스트로 번지지 않을 것으로 보지만, 재 보지 않았어요.
 4. **lane add-on.** `lane_addon_engine.ml` 도 Apple 컨테이너를 `--interactive` 로 만들고 `start --attach --interactive` 로 띄워요. 같은 누수 경로인지는 따로 재요.

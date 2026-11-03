@@ -44,6 +44,47 @@ let plan ~uid ~gid ~host_socket (exec_plan : Plan.t) : Plan.t =
   }
 ;;
 
+let delivery_of_facts ~base_path ~guest_name (facts : Plan.facts) =
+  let agent = { Plan.host_path = host_path ~base_path ~guest_name; guest_path } in
+  if List.mem agent facts.published_sockets
+  then Keeper_types_profile_sandbox.Agent_socket
+  else Keeper_types_profile_sandbox.Exec_per_request
+;;
+
+type agent_check =
+  | Agent_answered
+  | Agent_unusable of string
+  | Check_unavailable of string
+
+let check_agent ~host_socket ~expected ~connect_budget_sec ~budget_sec =
+  match Fs_compat.execution_context (), Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+  | Fs_compat.Non_eio, (Some _ | None), (Some _ | None) ->
+    Check_unavailable "a guest agent is reached only from an Eio fiber"
+  | Fs_compat.Eio_fiber, None, (Some _ | None) | Fs_compat.Eio_fiber, Some _, None ->
+    Check_unavailable "this process has no Eio network or clock to reach the guest agent with"
+  | Fs_compat.Eio_fiber, Some net, Some clock ->
+    (match
+       Keeper_guest_socket.run ~net ~clock ~accept:(Keeper_guest_socket.refusal ~expected)
+         ~socket:host_socket ~connect_budget_sec ~budget_sec Keeper_guest_socket.Probe
+     with
+     | Keeper_guest_socket.Exited { code = 0; _ } -> Agent_answered
+     | Keeper_guest_socket.Exited { code; _ } ->
+       Agent_unusable (Printf.sprintf "the shim's probe exited %d" code)
+     | Keeper_guest_socket.Not_sent (Keeper_guest_socket.Unreachable { attempts; last }) ->
+       Agent_unusable
+         (Printf.sprintf "no hello over %d connections: %s" attempts last)
+     | Keeper_guest_socket.Not_sent (Keeper_guest_socket.Refused refusal) ->
+       Agent_unusable ("its hello was refused: " ^ Keeper_guest_socket.refusal_to_string refusal)
+     | Keeper_guest_socket.Not_sent (Keeper_guest_socket.Incompatible detail) ->
+       Agent_unusable ("it answered in a way this host cannot read: " ^ detail)
+     | Keeper_guest_socket.Not_sent (Keeper_guest_socket.Bad_budget { connect_budget_sec; budget_sec }) ->
+       Check_unavailable
+         (Printf.sprintf "the check's budget is not finite and positive (connect %g, whole %g)"
+            connect_budget_sec budget_sec)
+     | Keeper_guest_socket.Timed_out _ -> Agent_unusable "the probe ran out of time"
+     | Keeper_guest_socket.Broken { reason; _ } -> Agent_unusable reason)
+;;
+
 type preparation_error =
   | Directory_unusable of
       { path : string

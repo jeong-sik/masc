@@ -10382,6 +10382,7 @@ type state = {
   mutable schedules_agenda_error: string option;
   mutable schedules_agenda_read: Snapshot_read.t;
   mutable schedules_agenda_event_pending: bool;
+  mutable schedules_agenda_freshness: Masc_tui_agenda.schedule_freshness;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
@@ -14449,6 +14450,10 @@ let suspend_workspace_readings state =
   state.schedules_navigation <- None;
   state.keeper_schedules_pending <- None;
   state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
+  (* The Observer is stopped above, so the retained agenda can no longer
+     claim to have followed changes until the workspace is confirmed again. *)
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
+  state.schedules_agenda_event_pending <- true;
   state.keeper_sandbox_logs_inflight <- None;
   (* A reread queued behind the retired read is satisfied by the replacement
      read that reconfirmation launches; keep only its demand. *)
@@ -16896,6 +16901,24 @@ let keeper_detail_target_matches state keeper_name =
   | Some keeper -> String.equal keeper.k_name keeper_name
   | None -> false
 
+(* This establishes only a live, workspace-bound transport. It does not
+   prove that every schedule writer emits an event or that no event was lost
+   before reaching the stream; cadence must remain until those are covered. *)
+let schedule_observer_is_scoped state =
+  let live = match state.observer with
+    | Observer_live _ -> true
+    | Observer_off | Observer_opening | Observer_closed_before_answer _
+    | Observer_closed_after_live _ -> false in
+  let replay_instance = match state.observer_replay with
+    | Observer_replay_scoped handshake -> Some handshake.Sse_wire.instance_id
+    | Observer_replay_unobserved | Observer_replay_unavailable _
+    | Observer_replay_rejected _ -> None in
+  let bound_instance = match state.observer_scope_binding with
+    | Observer_scope_bound instance -> Some instance
+    | Observer_scope_unbound | Observer_scope_retired -> None in
+  live && Option.is_some replay_instance
+  && Option.equal String.equal replay_instance bound_instance
+
 let apply_schedule_agenda_read state ticket result =
   match Snapshot_read.settle state.schedules_agenda_read ticket with
   | None -> ()
@@ -16907,8 +16930,13 @@ let apply_schedule_agenda_read state ticket result =
         (match result with
          | Ok snapshot ->
              state.schedules_agenda <- Some snapshot;
-             state.schedules_agenda_error <- None
-         | Error error -> state.schedules_agenda_error <- Some error)
+             state.schedules_agenda_error <- None;
+             state.schedules_agenda_freshness <-
+               (if schedule_observer_is_scoped state then Masc_tui_agenda.Last_read
+                else Masc_tui_agenda.Refresh_needed)
+         | Error error ->
+             state.schedules_agenda_error <- Some error;
+             state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed)
 
 let selected_schedule_id state =
   Option.bind state.schedules (fun snapshot ->
@@ -19557,6 +19585,7 @@ let create_state
   schedules_agenda_error = None;
   schedules_agenda_read = Snapshot_read.idle;
   schedules_agenda_event_pending = false;
+  schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed;
   schedule_cursor = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;
@@ -21506,7 +21535,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, Some error -> Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting ~asking
+  Masc_tui_agenda.project ~scheduled
+    ~scheduled_freshness:state.schedules_agenda_freshness ~awaiting ~asking
     ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
 ;;
 

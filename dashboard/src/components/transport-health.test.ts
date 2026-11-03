@@ -71,6 +71,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       relay_retry_broadcast: 0,
       relay_drop_total: 0,
       relay_drop_queue: 0,
+      relay_drop_prepare: 0,
       relay_drop_append: 0,
       relay_drop_broadcast: 0,
       hot_sessions: [],
@@ -289,8 +290,9 @@ describe('TransportHealthPanel', () => {
           relay_retry_total: 4,
           relay_retry_append: 1,
           relay_retry_broadcast: 3,
-          relay_drop_total: 2,
+          relay_drop_total: 4,
           relay_drop_queue: 1,
+          relay_drop_prepare: 2,
           relay_drop_append: 1,
           relay_drop_broadcast: 0,
           hot_sessions: [],
@@ -316,7 +318,7 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('릴레이 드롭')
     expect(container.textContent).toContain('라이프사이클 거부')
     expect(container.textContent).toContain('append 1 · broadcast 3')
-    expect(container.textContent).toContain('queue 1 · append 1 · broadcast 0')
+    expect(container.textContent).toContain('queue 1 · prepare 2 · append 1 · broadcast 0')
   })
 
   it('renders gRPC events_dropped row and flags buffer saturation when non-zero', async () => {

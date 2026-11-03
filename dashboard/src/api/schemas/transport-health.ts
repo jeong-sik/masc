@@ -41,6 +41,7 @@ const SseOuterSchema = Schema.Struct({
   relay_retry_broadcast: NonNegativeIntegerSchema,
   relay_drop_total: NonNegativeIntegerSchema,
   relay_drop_queue: NonNegativeIntegerSchema,
+  relay_drop_prepare: NonNegativeIntegerSchema,
   relay_drop_append: NonNegativeIntegerSchema,
   relay_drop_broadcast: NonNegativeIntegerSchema,
   hot_sessions: Schema.Array(HotSessionSchema),

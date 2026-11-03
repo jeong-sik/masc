@@ -431,6 +431,8 @@ let test_transport_health_json () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
   Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
+    ~labels:[ ("stage", "prepare") ] ~delta:2.0 ();
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
   Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "turn_started") ] ~delta:2.0 ();
@@ -505,6 +507,7 @@ let test_transport_health_json () =
     ; "relay_retry_broadcast"
     ; "relay_drop_total"
     ; "relay_drop_queue"
+    ; "relay_drop_prepare"
     ; "relay_drop_append"
     ; "relay_drop_broadcast"
     ; "hot_sessions"
@@ -558,7 +561,9 @@ let test_transport_health_json () =
     (sse_json |> U.member "relay_queue_depth" |> U.to_int);
   check int "relay retries total" 3
     (sse_json |> U.member "relay_retry_total" |> U.to_int);
-  check int "relay drops total" 4
+  check int "relay preparation drops" 2
+    (sse_json |> U.member "relay_drop_prepare" |> U.to_int);
+  check int "relay drops total" 6
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check string "presence stream endpoint" "/events/presence"
     (streamable_json |> U.member "presence_stream" |> U.to_string);
@@ -581,14 +586,14 @@ let test_transport_health_json () =
     (http2_json |> U.member "multiplex_ready" |> U.to_bool);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
-  (* The fixture queues 4 events and records 4 lifetime relay drops. Nothing is
+  (* The fixture queues 4 events and records 6 lifetime relay drops. Nothing is
      backing up -- 4 is under the watch threshold -- so the reading is steady.
      It used to be "high" because a lifetime drop counter fed this field, and
      that counter never decrements, so one drop held the reading there until
      the process restarted (#27652). The drops are still reported, as totals. *)
   check string "queue pressure reads the current depth" "steady"
     (summary_json |> U.member "queue_pressure" |> U.to_string);
-  check int "the lifetime relay drops are still reported" 4
+  check int "the lifetime relay drops are still reported" 6
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check int "agent lifecycle dispatch rejections surfaced" 2
     (agent_health_json

@@ -456,7 +456,7 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
                 <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />
                 <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
                 <${MetricRow} label="릴레이 재시도" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
-                <${MetricRow} label="릴레이 드롭" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
+                <${MetricRow} label="릴레이 드롭" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · prepare ${data.sse.relay_drop_prepare} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
                 <${MetricRow} label="브로드캐스트 평균" value=${formatLatencyFromSeconds(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count}개 이벤트`} />
               </div>
             <//>

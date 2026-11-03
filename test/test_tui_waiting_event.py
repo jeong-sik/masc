@@ -32,6 +32,8 @@ class WaitingServer(FixtureServer):
         super().__init__(base)
         self.RequestHandlerClass = WaitingHandler
         self.observer_ready = threading.Event()
+        self.observer_closed = threading.Event()
+        self.release_observer_recovery = threading.Event()
         self.held_read_started = threading.Event()
         self.release_held_read = threading.Event()
         self.followup_started = threading.Event()
@@ -42,6 +44,7 @@ class WaitingServer(FixtureServer):
         self.release_agenda_followup = threading.Event()
         self.events: queue.Queue[tuple[int, str] | None] = queue.Queue()
         self.valid_admission = True
+        self.invalid_schedule_query: dict[str, list[str]] | None = None
 
 
 class WaitingHandler(FixtureHandler):
@@ -62,7 +65,9 @@ class WaitingHandler(FixtureHandler):
         server = cast(WaitingServer, self.server)
         request = urllib.parse.urlsplit(self.path)
         if request.path == "/mcp":
-            server.record("/mcp")
+            phase = server.record("/mcp")
+            if phase == "authority-recovery":
+                server.release_observer_recovery.wait()
             if urllib.parse.parse_qs(request.query).get("sse_kind") != ["observer"]:
                 self.respond(400, {"error": "observer stream required"})
                 return
@@ -95,17 +100,19 @@ class WaitingHandler(FixtureHandler):
             self.end_headers()
             self.wfile.flush()
             server.observer_ready.set()
+            if phase == "authority-recovery":
+                server.record("observer-recovery-open")
             while (event := server.events.get()) is not None:
                 cursor, keeper = event
                 payload: dict[str, object]
-                if keeper == "__loss__":
+                if keeper in ("__loss__", "__loss2__"):
                     payload = {
                         "type": "agent_core:relay_subscription_loss",
                         "event_type": "relay_subscription_loss",
                         "ts_unix": 1.0,
                         "payload": {
                             "source_id": "fixture",
-                            "sequence": 1,
+                            "sequence": 2 if keeper == "__loss2__" else 1,
                             "dropped_count": 1,
                         },
                     }
@@ -130,14 +137,32 @@ class WaitingHandler(FixtureHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     break
             self.close_connection = True
+            server.observer_closed.set()
         elif request.path == SCHEDULE_PATH:
             phase = server.record(SCHEDULE_PATH)
             expected = urllib.parse.parse_qs(request.query)
+            if "payload_target" in expected:
+                server.record("schedule-target")
+            if "schedule_id" in expected:
+                server.record("schedule-detail")
             if expected.get("expected_base_path") != [server.base] or expected.get(
                 "expected_masc_root"
             ) != [server.base + "/.masc"]:
                 server.valid_admission = False
-                self.respond(409, {"error": "workspace precondition failed"})
+                server.invalid_schedule_query = expected
+                if self.respond(409, {"error": "workspace precondition failed"}):
+                    if "payload_target" in expected:
+                        server.responded(phase, "schedule-target")
+                    if "schedule_id" in expected:
+                        server.responded(phase, "schedule-detail")
+                return
+            if "schedule_id" in expected:
+                if self.respond(
+                    200,
+                    {"status": "found", "schedule_id": expected["schedule_id"][0], "wakes": []},
+                    workspace_receipt=True,
+                ):
+                    server.responded(phase, "schedule-detail")
                 return
             if phase == "agenda-held":
                 server.agenda_held_started.set()
@@ -148,6 +173,7 @@ class WaitingHandler(FixtureHandler):
             body = {
                 "generated_at": "2026-11-02T00:00:00Z",
                 "status": "ok",
+                "payload_target_selector": expected.get("payload_target", [None])[0],
                 "request_count": 0,
                 "truncated": False,
                 "fsm": {"next_due_at": None},
@@ -155,8 +181,34 @@ class WaitingHandler(FixtureHandler):
                 "requests": [],
                 "schedule_runner": {"status": "ok"},
             }
+            if phase == "detail-open" and "payload_target" not in expected:
+                actor = {"id": "fixture", "kind": "system"}
+                body["request_count"] = 1
+                body["requests"] = [
+                    {
+                        "schedule_instance_id": "fixture-instance",
+                        "schedule_id": "fixture-schedule",
+                        "status": "scheduled",
+                        "source": "fixture",
+                        "requested_by": actor,
+                        "scheduled_by": actor,
+                        "requested_at_iso": "2026-11-02T00:00:00Z",
+                        "due_at_iso": "2026-11-03T00:00:00Z",
+                        "recurrence_summary": "once",
+                        "recurrence": {},
+                        "payload_digest": "fixture",
+                        "payload": {},
+                        "payload_support": "supported",
+                        "payload_target": "keeper:analyst",
+                        "payload_keeper_name": "analyst",
+                        "payload_summary": "fixture detail",
+                        "runner_hold": None,
+                    }
+                ]
             if self.respond(200, body, workspace_receipt=True):
                 server.responded(phase, SCHEDULE_PATH)
+                if "payload_target" in expected:
+                    server.responded(phase, "schedule-target")
         elif request.path == TURNS_PATH:
             phase = server.record(TURNS_PATH)
             expected = urllib.parse.parse_qs(request.query)
@@ -555,8 +607,13 @@ class WaitingEventTest(unittest.TestCase):
                 self.assertNotIn(b"obsolete-schedule", output[schedule_race_start:])
                 self.assertEqual(server.count("schedule-after", TURNS_PATH), 0)
                 server.set_phase("agenda-held")
+                agenda_output_start = len(output)
                 server.events.put((9, "__schedule__"))
                 wait_until(server.agenda_held_started.is_set, "agenda read did not start")
+                wait_until(
+                    lambda: "일정 정보가 오래됐을 수 있음".encode() in output[agenda_output_start:],
+                    "a held agenda read did not mark the empty snapshot as uncertain",
+                )
                 server.set_phase("agenda-queued")
                 server.events.put((10, "__schedule__"))
                 wait_until(
@@ -591,6 +648,31 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 drain_for(0.5)
                 self.assertEqual(server.count("confirm", SCHEDULE_PATH), 0)
+                # Keep the general refresh in flight: a loss signal must still
+                # start its own schedule read before that refresh completes.
+                server.set_phase("recovery")
+                os.write(master, b"r")
+                wait_until(
+                    lambda: server.count("recovery", "/health") >= 1,
+                    "general refresh was not held in flight",
+                )
+                wait_until(
+                    lambda: server.response_count("recovery", SCHEDULE_PATH) >= 1,
+                    "the general refresh's schedule read did not finish",
+                )
+                server.set_phase("loss-inflight")
+                server.events.put((12, "__loss2__"))
+                wait_until(
+                    lambda: server.response_count("loss-inflight", SCHEDULE_PATH) == 1,
+                    "source loss did not independently revalidate the agenda",
+                )
+                self.assertEqual(server.response_count("recovery", "/health"), 0)
+                server.release_recovery_health.set()
+                wait_until(
+                    lambda: server.response_count("recovery", "/health") >= 1,
+                    "held general refresh did not finish",
+                )
+                drain_for(0.5)
                 server.set_phase("reconnect")
                 reconnect_output_start = len(output)
                 server.events.put(None)
@@ -616,6 +698,59 @@ class WaitingEventTest(unittest.TestCase):
                     ),
                     "reconnected observer did not refresh the waiting row",
                 )
+                # A failed identity check suspends the stream and its reads.
+                # Keep the next stream closed so authority recovery must start
+                # the agenda read independently of Observer_opened or a tick.
+                server.set_phase("unconfirmed")
+                unconfirmed_output_start = len(output)
+                os.write(master, b"r")
+                wait_until(
+                    lambda: server.response_count("unconfirmed", "/health") >= 1,
+                    "workspace identity did not become unconfirmed",
+                )
+                wait_until(
+                    lambda: "일정 정보가 오래됐을 수 있음".encode()
+                    in output[unconfirmed_output_start:],
+                    "suspending the observer did not mark the agenda uncertain",
+                )
+                server.observer_closed.clear()
+                server.events.put(None)
+                wait_until(server.observer_closed.is_set, "old observer did not close")
+                server.set_phase("authority-recovery")
+                os.write(master, b"r")
+                wait_until(
+                    lambda: server.response_count("authority-recovery", SCHEDULE_PATH) >= 1,
+                    "authority recovery did not re-read the agenda",
+                )
+                self.assertEqual(server.count("authority-recovery", "observer-recovery-open"), 0)
+                server.release_observer_recovery.set()
+                wait_until(
+                    lambda: server.count("authority-recovery", "observer-recovery-open") == 1,
+                    "observer did not reopen after authority recovery",
+                )
+                server.set_phase("target-open")
+                os.write(master, b"c")
+                wait_until(
+                    lambda: server.response_count("target-open", "schedule-target") >= 1,
+                    "Keeper chat did not request its schedule page",
+                )
+                self.assertIsNone(server.invalid_schedule_query)
+                server.set_phase("detail-open")
+                os.write(master, b"\x1b")
+                drain_for(0.3)
+                os.write(master, b":")
+                drain_for(0.3)
+                os.write(master, b"schedules\r")
+                wait_until(
+                    lambda: b"fixture-schedule" in output,
+                    "schedule fixture row was not displayed",
+                )
+                os.write(master, b"\r")
+                wait_until(
+                    lambda: server.response_count("detail-open", "schedule-detail") >= 1,
+                    "opening a schedule did not request its wake history",
+                )
+                self.assertIsNone(server.invalid_schedule_query)
                 self.assertTrue(server.valid_admission)
                 self.assertIsNone(process.poll())
             finally:
@@ -623,6 +758,7 @@ class WaitingEventTest(unittest.TestCase):
                 server.release_followup.set()
                 server.release_agenda_held.set()
                 server.release_agenda_followup.set()
+                server.release_observer_recovery.set()
                 server.events.put(None)
                 server.release_recovery.set()
                 server.release_recovery_health.set()

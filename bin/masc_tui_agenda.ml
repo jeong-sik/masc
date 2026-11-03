@@ -60,8 +60,11 @@ type 'row reading =
   | Read_failed of string
   | Read of 'row list
 
+type schedule_freshness = Last_read | Refresh_needed
+
 type t =
   { coming : scheduled reading  (** earliest first *)
+  ; scheduled_freshness : schedule_freshness
   ; blocked : awaiting reading
   ; asking : open_question reading  (** in the order the server sent them *)
   ; confirming : goal_to_confirm reading
@@ -84,11 +87,12 @@ let is_coming row = match row.standing with
    somebody else's sort is a strip that changes when their sort does. *)
 let by_time left right = String.compare left.at_iso right.at_iso
 
-let project ~scheduled ~awaiting ~asking ~confirming ~stalled =
+let project ~scheduled ~scheduled_freshness ~awaiting ~asking ~confirming ~stalled =
   { coming =
       (match scheduled with
        | Read rows -> Read (rows |> List.filter is_coming |> List.sort by_time)
        | (Not_read | Read_failed _) as unread -> unread)
+  ; scheduled_freshness
   ; blocked = awaiting
   ; asking
   ; confirming
@@ -114,7 +118,11 @@ let waiting t =
    same row or neither exists. A section that was never read has no row to
    name, so the row stays down for it the same way; the overlay is where the
    difference is said. *)
-let rows_taken t = if rows_of t.coming = [] then 0 else 1
+let rows_taken t =
+  match t.coming, t.scheduled_freshness with
+  | Read _, Refresh_needed -> 1
+  | (Not_read | Read_failed _ | Read _), (Last_read | Refresh_needed) ->
+      if rows_of t.coming = [] then 0 else 1
 
 let same_day (a : Unix.tm) (b : Unix.tm) =
   a.Unix.tm_year = b.Unix.tm_year && a.Unix.tm_yday = b.Unix.tm_yday
@@ -189,10 +197,15 @@ let waiting_label ?(ko = false) ~cells t =
 ;;
 
 (* The row above the composer: the next wake, or nothing. *)
-let strip ~now ~localtime ~cols t =
-  match next t with
-  | None -> None
-  | Some row -> Some (clock_half ~now ~localtime ~cells:cols row)
+let strip ?(ko = false) ~now ~localtime ~cols t =
+  match t.coming, t.scheduled_freshness with
+  | Read _, Refresh_needed ->
+      Some (Masc_tui_message_layout.fit_middle cols
+        (if ko then "일정 정보가 오래됐을 수 있음" else "Schedule may be out of date"))
+  | (Not_read | Read_failed _ | Read _), (Last_read | Refresh_needed) ->
+      (match next t with
+       | None -> None
+       | Some row -> Some (clock_half ~now ~localtime ~cells:cols row))
 ;;
 
 type tone =
@@ -288,7 +301,7 @@ let updated ~now since_iso =
       else Printf.sprintf "updated %dm ago" (whole / 60))
 ;;
 
-let overlay ~now ~localtime ~cols t =
+let overlay ?(ko = false) ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in
   (* Why it failed, not only that it did. The reason is beside the flag in the
      state -- "schedule load failed: HTTP 503" -- and this panel dropped it,
@@ -310,9 +323,13 @@ let overlay ~now ~localtime ~cols t =
     match t.coming with
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
+    | Read [] when t.scheduled_freshness = Refresh_needed ->
+      [ quiet (if ko then "일정 정보가 오래됐을 수 있음" else "Schedule may be out of date") ]
     | Read [] -> [ quiet "nothing is scheduled" ]
     | Read rows ->
-      List.map
+      (if t.scheduled_freshness = Refresh_needed then
+         [ quiet (if ko then "일정 정보가 오래됐을 수 있음" else "Schedule may be out of date") ]
+       else []) @ List.map
         (fun row ->
            { tone = Wake
            ; goes_to = Nowhere

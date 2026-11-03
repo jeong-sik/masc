@@ -700,11 +700,11 @@ let report_subscription_loss = function
 
 let prepare_pending_events events = List.filter_map prepare_pending_event events
 
-let rec process_pending ?store_ref ~loss_target acc = function
+let rec process_pending ?store_ref ~loss_target ~next_loss acc = function
   | [] -> List.rev acc
   | pending :: rest ->
     (match deliver_pending ?store_ref ~loss_target pending with
-     | Delivered -> process_pending ?store_ref ~loss_target acc rest
+     | Delivered -> process_pending ?store_ref ~loss_target ~next_loss acc rest
      | Retryable_failure (pending, stage, exn) ->
        let attempt = if pending.attempts = max_int then max_int else pending.attempts + 1 in
        Keeper_fd_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
@@ -722,7 +722,7 @@ let rec process_pending ?store_ref ~loss_target acc = function
            Otel_metric_store.metric_agent_core_sse_relay_drops
            ~labels:[ "stage", relay_stage_to_string stage ] ();
          emit_relay_drop_log ~pending ~stage_label:(relay_stage_to_string stage) ~attempts:attempt;
-         process_pending ?store_ref ~loss_target acc rest)
+         process_pending ?store_ref ~loss_target ~next_loss acc rest)
        else if attempt >= relay_max_attempts
        then (
          Otel_metric_store.inc_counter
@@ -737,14 +737,27 @@ let rec process_pending ?store_ref ~loss_target acc = function
            ~pending
            ~stage_label:(relay_stage_to_string stage)
            ~attempts:attempt;
-         process_pending ?store_ref ~loss_target acc rest)
+         (* The diagnostic marker is best effort and is not the observer's
+            continuity contract. Queue the scoped loss notice ahead of later
+            source events; it retries until SSE has committed it. *)
+         process_pending ?store_ref ~loss_target ~next_loss acc
+           (next_loss 1 :: rest))
        else (
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_agent_core_sse_relay_retries
            ~labels:[ "stage", relay_stage_to_string stage ]
            ();
          emit_relay_retry_log ~pending ~stage ~attempt exn;
-         process_pending ?store_ref ~loss_target ({ pending with attempts = attempt } :: acc) rest))
+         let retry = { pending with attempts = attempt } in
+         (match pending.relay_class with
+          | Source_event ->
+            (* Later events in this batch cannot pass the failed source:
+               if it exhausts retries, observers must see the loss first. *)
+            List.rev_append acc (retry :: rest)
+          | Subscription_loss ->
+            (* The notice already reached observers; a failing debug-store
+               append may be retried without holding up later events. *)
+            process_pending ?store_ref ~loss_target ~next_loss (retry :: acc) rest)))
 ;;
 
 let agent_core_event_store ~config =
@@ -756,13 +769,21 @@ let agent_core_event_store ~config =
   location, Dated_jsonl.open_store location
 ;;
 
-let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
+let start_impl ~before_prepare ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (agent_core_event_store ~config) in
   let loss_target =
     Sse.Runtime_observers (Sse.runtime_authority_exn ~base_path:config.base_path)
   in
   let loss_source_id = ref (Random_id.uuid_v7 ()) in
   let loss_sequence = ref 0 in
+  let next_loss count =
+    if !loss_sequence = max_int then (
+      loss_source_id := Random_id.uuid_v7 ();
+      loss_sequence := 0);
+    incr loss_sequence;
+    subscription_loss_notice ~source_id:!loss_source_id
+      ~sequence:!loss_sequence count
+  in
   let sub =
     Runtime_event_bus.subscribe
       ~capacity:256
@@ -779,7 +800,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
       let retry_iteration = ref false in
       let continue =
         try
-         pending := process_pending ~store_ref:store ~loss_target [] !pending;
+         pending := process_pending ~store_ref:store ~loss_target ~next_loss [] !pending;
          update_relay_queue_depth !pending;
          if should_drain_subscription !pending
          then (
@@ -791,14 +812,11 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
               failures. It is published before later events. *)
            pending := (match overflow_loss with
              | Runtime_event_bus.Nothing_dropped -> []
-             | Runtime_event_bus.Dropped count ->
-               if !loss_sequence = max_int then (
-                 loss_source_id := Random_id.uuid_v7 ();
-                 loss_sequence := 0);
-               incr loss_sequence;
-               [ subscription_loss_notice ~source_id:!loss_source_id
-                   ~sequence:!loss_sequence count ]);
+             | Runtime_event_bus.Dropped count -> [ next_loss count ]);
+           let prepared =
+           try
            report_subscription_loss overflow_loss;
+           before_prepare ();
            (* A wake is optional, coalesced metadata. It never moves source
               bodies into this relay or waits for an Add-on to observe them. *)
            let compare_activity (a : Lane_addon_sources.activity) (b : Lane_addon_sources.activity) =
@@ -834,8 +852,29 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
              | Agent_core.Event_bus.ToolApprovalCompleted _
              | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq compare_activity in
            List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
-           pending := !pending @ prepare_pending_events events;
-           pending := process_pending ~store_ref:store ~loss_target [] !pending;
+           prepare_pending_events events
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             (* The subscription has already handed this batch to us. If
+                conversion or an activity wake fails, none of the prepared
+                list was installed. Record the loss before diagnostics, which
+                must not be able to make the batch disappear a second time. *)
+             (match events with
+              | [] -> ()
+              | _ ->
+                let count = List.length events in
+                pending := !pending @ [ next_loss count ];
+                Otel_metric_store.inc_counter
+                  Otel_metric_store.metric_agent_core_sse_relay_drops
+                  ~labels:[ "stage", "prepare" ] ~delta:(float_of_int count) ());
+             Keeper_fd_pressure.note_exception ~site:"keeper_event_bridge.prepare" exn;
+             Keeper_disk_pressure.note_exception ~site:"keeper_event_bridge.prepare" exn;
+             Log.Misc.warn "keeper_event_bridge: failed to prepare event batch";
+             []
+           in
+           pending := !pending @ prepared;
+           pending := process_pending ~store_ref:store ~loss_target ~next_loss [] !pending;
            update_relay_queue_depth !pending;
            true)
          else (
@@ -859,10 +898,13 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
 
 (** Background fiber: drain events and relay to SSE. *)
 let start ~sw ~clock ~(config : Workspace.config) ~bus =
-  start_impl ~interval_s:(retry_interval_s ()) ~sw ~clock ~config ~bus
+  start_impl ~before_prepare:(fun () -> ())
+    ~interval_s:(retry_interval_s ()) ~sw ~clock ~config ~bus
 ;;
 
 module For_testing = struct
   let emit_native_event_log = emit_native_event_log
-  let start_with_retry_interval = start_impl
+  let start_with_retry_interval ~interval_s ~sw ~clock ~config ~bus =
+    start_impl ~before_prepare:(fun () -> ()) ~interval_s ~sw ~clock ~config ~bus
+  let start_with_preparation_hook = start_impl
 end

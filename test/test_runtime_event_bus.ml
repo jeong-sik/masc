@@ -156,15 +156,15 @@ let event_type (event : Masc.Sse.external_event) =
   | `Assoc fields -> List.assoc_opt "event_type" fields
   | _ -> None
 
-let run_bridge ?(retry_interval = 60.0) ~env ~bus ~config run =
+let run_bridge ?(retry_interval = 60.0) ?(before_prepare = fun () -> ()) ~env ~bus ~config run =
   let ready, mark_ready = Eio.Promise.create () in
   let never, _ = Eio.Promise.create () in
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15.0 (fun () ->
     Eio.Fiber.first
       (fun () ->
         Eio.Switch.run (fun sw ->
-          Masc.Keeper_event_bridge.For_testing.start_with_retry_interval
-            ~interval_s:retry_interval ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Masc.Keeper_event_bridge.For_testing.start_with_preparation_hook
+            ~before_prepare ~interval_s:retry_interval ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
           Eio.Promise.resolve mark_ready ();
           Eio.Promise.await never))
       (fun () -> Eio.Promise.await ready; run ()))
@@ -276,7 +276,7 @@ let test_loss_notice_does_not_block_on_store_failure () =
     let release, release_resolver = Eio.Promise.create () in
     let survivor, survivor_resolver = Eio.Promise.create () in
     let notice_seen, notice_resolver = Eio.Promise.create () in
-    let notices = ref 0 and fail_appends = ref false and seen_survivor = ref false in
+    let notices = ref [] and fail_appends = ref false and seen_survivor = ref false in
     let append_drops () =
       Masc.Otel_metric_store.get_metric_value
         Masc.Otel_metric_store.metric_agent_core_sse_relay_drops
@@ -292,8 +292,13 @@ let test_loss_notice_does_not_block_on_store_failure () =
             Eio.Promise.await release
         | Some (`String name)
           when String.equal name Masc.Keeper_event_bridge.subscription_loss_event_type ->
-            incr notices;
-            if !notices = 1 then Eio.Promise.resolve notice_resolver ()
+            let open Yojson.Safe.Util in
+            let payload = event.ext_payload |> member "payload" in
+            let key = (payload |> member "source_id" |> to_string),
+                      (payload |> member "sequence" |> to_int) in
+            let first = !notices = [] in
+            notices := key :: !notices;
+            if first then Eio.Promise.resolve notice_resolver ()
         | Some (`String "after-store") when not !seen_survivor ->
             seen_survivor := true;
             Eio.Promise.resolve survivor_resolver ()
@@ -319,7 +324,16 @@ let test_loss_notice_does_not_block_on_store_failure () =
           fail_appends := false;
           I.publish bus (mk_custom_event "after-store");
           Eio.Promise.await survivor;
-          check int "the already broadcast notice is not repeated" 1 !notices;
+          (* A later source event may itself exhaust retries while the store
+             is down. That is a new loss, not a repeat of the first notice. *)
+          let notices = List.rev !notices in
+          let first = match notices with
+            | first :: _ -> first
+            | [] -> fail "the overflow notice was not delivered" in
+          check int "the already broadcast notice is not repeated" 1
+            (List.length (List.filter (( = ) first) notices));
+          check int "each delivered notice has a distinct source sequence"
+            (List.length notices) (List.length (List.sort_uniq compare notices));
           check bool "an append exhausts its retry budget while the store fails" true
             (append_drops () > before))))
 
@@ -377,11 +391,18 @@ let test_bridge_retries_then_drains_queued_events () =
         let release, mark_release = Eio.Promise.create () in
         let received_second, mark_second = Eio.Promise.create () in
         let attempts = ref 0 and received = ref [] in
-        Masc.Sse.subscribe_external ~id:subscriber_id
+        let loss_attempts = ref 0 in
+        let before_id = Masc.Sse.current_id () in
+        let authority = Masc.Sse.runtime_authority_exn ~base_path:config.base_path in
+        Masc.Sse.subscribe_external ~runtime_authority:authority ~id:subscriber_id
           ~callback:(fun event ->
             match event_type event with
             | Some (`String name) ->
               received := name :: !received;
+              if failures = 3 && String.equal name "relay_dropped" then
+                Atomic.set Masc.Sse.buffer_commit_test_hook (Some (fun () ->
+                  incr loss_attempts;
+                  if !loss_attempts <= 4 then failwith "injected loss notice failure"));
               if String.equal name "retry-second" then Eio.Promise.resolve mark_second ()
             | _ -> ()) ();
         Dated_jsonl.set_append_guard (fun append ->
@@ -392,7 +413,9 @@ let test_bridge_retries_then_drains_queued_events () =
           if !attempts <= failures then failwith "injected append failure";
           append ());
         Fun.protect
-          ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ()))
+          ~finally:(fun () ->
+            Atomic.set Masc.Sse.buffer_commit_test_hook None;
+            Dated_jsonl.set_append_guard (fun append -> append ()))
           (fun () ->
             run_bridge ~retry_interval:0.05 ~env ~bus ~config (fun () ->
               I.publish bus (mk_custom_event "retry-first");
@@ -402,13 +425,117 @@ let test_bridge_retries_then_drains_queued_events () =
               Eio.Promise.await received_second);
             let expected =
               if failures = 1 then [ "retry-first"; "retry-second" ]
-              else [ "relay_dropped"; "retry-second" ]
+              else [ "relay_dropped"; Masc.Keeper_event_bridge.subscription_loss_event_type;
+                     "retry-second" ]
             in
-            check (list string) "retained event or drop marker before queued event"
+            check (list string) "retained event or loss notice before queued event"
               expected (List.rev !received);
             check int "failed attempts followed by next batch"
-              (if failures = 1 then 3 else 4) !attempts)))
+              (if failures = 1 then 3 else 5) !attempts;
+            if failures = 3 then begin
+              check bool "loss notice retries past the ordinary limit" true (!loss_attempts >= 5);
+              let replayed = Masc.Sse.get_events_after_for_test before_id
+                |> List.filter (fun (delivery : Masc.Sse.delivery) ->
+                  match delivery.payload with
+                  | `Assoc fields -> List.assoc_opt "event_type" fields
+                      = Some (`String Masc.Keeper_event_bridge.subscription_loss_event_type)
+                  | _ -> false) in
+              check int "the loss notice is replayable" 1 (List.length replayed)
+            end)))
     [ 1; 3 ]
+
+let test_bridge_reports_loss_before_later_event_in_same_batch () =
+  with_bridge (fun ~env ~bus ~config ~subscriber_id ->
+    let entered, mark_entered = Eio.Promise.create () in
+    let release, mark_release = Eio.Promise.create () in
+    let received_second, mark_second = Eio.Promise.create () in
+    let armed = ref false and attempts = ref 0 and loss_attempts = ref 0 in
+    let received = ref [] in
+    Masc.Sse.subscribe_external
+      ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path:config.base_path)
+      ~id:subscriber_id ~callback:(fun event ->
+        match event_type event with
+        | Some (`String "batch-hold") ->
+            Eio.Promise.resolve mark_entered ();
+            Eio.Promise.await release
+        | Some (`String name) ->
+            received := name :: !received;
+            if String.equal name "relay_dropped" then
+              Atomic.set Masc.Sse.buffer_commit_test_hook (Some (fun () ->
+                incr loss_attempts;
+                if !loss_attempts <= 4 then failwith "injected loss notice failure"));
+            if String.equal name "batch-second" then Eio.Promise.resolve mark_second ()
+        | _ -> ()) ();
+    Dated_jsonl.set_append_guard (fun append ->
+      if !armed then begin
+        incr attempts;
+        if !attempts <= 3 then failwith "injected first-event append failure"
+      end;
+      append ());
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Masc.Sse.buffer_commit_test_hook None;
+        Dated_jsonl.set_append_guard (fun append -> append ()))
+      (fun () ->
+        run_bridge ~retry_interval:0.02 ~env ~bus ~config (fun () ->
+          I.publish bus (mk_custom_event "batch-hold");
+          Eio.Promise.await entered;
+          (* Both events are waiting when the bridge resumes, so the second
+             belongs to the same subscriber batch as the failing first. *)
+          I.publish bus (mk_custom_event "batch-first");
+          I.publish bus (mk_custom_event "batch-second");
+          armed := true;
+          Eio.Promise.resolve mark_release ();
+          Eio.Promise.await received_second);
+        check (list string) "loss notice precedes later event from the same batch"
+          [ "relay_dropped"; Masc.Keeper_event_bridge.subscription_loss_event_type;
+            "batch-second" ] (List.rev !received);
+        check bool "the notice survives repeated delivery failures" true (!loss_attempts >= 5)))
+
+let test_bridge_reports_a_batch_that_cannot_be_prepared () =
+  with_bridge (fun ~env ~bus ~config ~subscriber_id ->
+    let entered, mark_entered = Eio.Promise.create () in
+    let release, mark_release = Eio.Promise.create () in
+    let received_after, mark_after = Eio.Promise.create () in
+    let fail_next = ref false and dropped = ref None and received = ref [] in
+    let preparation_drops () =
+      Masc.Otel_metric_store.get_metric_value
+        Masc.Otel_metric_store.metric_agent_core_sse_relay_drops
+        ~labels:[ "stage", "prepare" ] ()
+      |> Option.value ~default:0.0 in
+    let before = preparation_drops () in
+    let before_prepare () =
+      if !fail_next then (fail_next := false; failwith "injected preparation failure") in
+    Masc.Sse.subscribe_external
+      ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path:config.base_path)
+      ~id:subscriber_id ~callback:(fun event ->
+        match event_type event with
+        | Some (`String "prepare-hold") ->
+            Eio.Promise.resolve mark_entered ();
+            Eio.Promise.await release
+        | Some (`String name) ->
+            received := name :: !received;
+            if String.equal name Masc.Keeper_event_bridge.subscription_loss_event_type then begin
+              let open Yojson.Safe.Util in
+              dropped := Some (event.ext_payload |> member "payload" |> member "dropped_count" |> to_int);
+              I.publish bus (mk_custom_event "prepare-after")
+            end;
+            if String.equal name "prepare-after" then Eio.Promise.resolve mark_after ()
+        | _ -> ()) ();
+    run_bridge ~retry_interval:0.02 ~before_prepare ~env ~bus ~config (fun () ->
+      I.publish bus (mk_custom_event "prepare-hold");
+      Eio.Promise.await entered;
+      I.publish bus (mk_custom_event "prepare-lost-one");
+      I.publish bus (mk_custom_event "prepare-lost-two");
+      fail_next := true;
+      Eio.Promise.resolve mark_release ();
+      Eio.Promise.await received_after);
+    check (option int) "the notice counts the drained batch" (Some 2) !dropped;
+    check (float 0.0) "preparation losses appear in transport metrics" 2.0
+      (preparation_drops () -. before);
+    check (list string) "batch loss is reported before the next event"
+      [ Masc.Keeper_event_bridge.subscription_loss_event_type; "prepare-after" ]
+      (List.rev !received))
 
 let () =
   run "runtime_event_bus" [
@@ -435,5 +562,9 @@ let () =
         test_loss_notice_survives_postcommit_external_failure;
       test_case "bridge retries then drains queued events" `Quick
         test_bridge_retries_then_drains_queued_events;
+      test_case "loss precedes later event in the same batch" `Quick
+        test_bridge_reports_loss_before_later_event_in_same_batch;
+      test_case "unprepared batch produces a loss notice" `Quick
+        test_bridge_reports_a_batch_that_cannot_be_prepared;
     ])
   ]

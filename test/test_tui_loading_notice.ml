@@ -318,26 +318,51 @@ let test_schedule_responses_follow_keeper_and_generation () =
   state.schedules_agenda_read <- read;
   let ticket = function Some ticket -> ticket | None -> fail "agenda request was not started" in
   state.schedules <- Some (snapshot 25);
+  state.observer <- Types.Observer_live { session_id = "test"; since = 0.; events = 0 };
+  state.observer_replay <- Types.Observer_replay_scoped
+    Sse_wire.{ instance_id = "test-instance"; replay = Fresh };
+  state.observer_scope_binding <- Types.Observer_scope_bound "test-instance";
   Types.apply_schedule_agenda_read state (ticket new_agenda) (Ok (snapshot 3));
   Types.apply_schedule_agenda_read state (ticket old_agenda) (Ok (snapshot 1));
   check (option int) "agenda keeps its own newest first-page observation" (Some 3)
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check (option int) "agenda refresh does not replace the browsed page" (Some 25)
     (Option.bind state.schedules (fun page -> page.scs_request_count));
+  check bool "a completed read while observing is marked as last read" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Last_read);
   let read, before_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
   state.schedules_agenda_event_pending <- true;
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   Types.apply_schedule_agenda_read state (ticket before_change) (Ok (snapshot 99));
   check (option int) "a read overtaken by a schedule change cannot replace the agenda" (Some 3)
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check bool "the overtaken read is retired for its successor" false
     (Types.Snapshot_read.in_flight state.schedules_agenda_read);
+  check bool "an overtaken reply leaves freshness pending" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
   state.schedules_agenda_event_pending <- false;
   let read, after_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
   Types.apply_schedule_agenda_read state (ticket after_change) (Ok (snapshot 4));
   check (option int) "the successor can publish the newer agenda" (Some 4)
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
+  check bool "the successor completes freshness under a live observer" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Last_read);
+  state.observer <- Types.Observer_closed_after_live
+    { reason = "disconnected"; at = 1.; events = 0 };
+  let read, disconnected = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  Types.apply_schedule_agenda_read state (ticket disconnected) (Ok (snapshot 5));
+  check bool "a read while disconnected remains uncertain" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
+  state.observer <- Types.Observer_live { session_id = "test"; since = 0.; events = 0 };
+  state.observer_replay <- Types.Observer_replay_unavailable "unscoped peer";
+  let read, unscoped = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  Types.apply_schedule_agenda_read state (ticket unscoped) (Ok (snapshot 6));
+  check bool "a live unscoped observer does not claim freshness" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
   check bool "A's identity action cannot mutate B's view" false
     (Types.keeper_detail_target_matches state "alpha");
   check bool "B's identity action can refresh its own view" true
@@ -427,11 +452,28 @@ let test_schedule_responses_follow_keeper_and_generation () =
   check (option string) "uninterrupted page navigation applies its destination" (Some "next")
     state.schedules_page.sp_cursor
 
+let test_schedule_agenda_suspends_with_workspace_authority () =
+  let state = fresh () in
+  state.observer <- Types.Observer_live { session_id = "test"; since = 0.; events = 0 };
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Last_read;
+  let read, ticket =
+    Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  let ticket = match ticket with Some ticket -> ticket | None -> fail "agenda read did not start" in
+  Types.suspend_workspace_readings state;
+  check bool "the retained agenda is uncertain when its observer stops" true
+    (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
+  check bool "authority recovery owes an agenda read" true state.schedules_agenda_event_pending;
+  check bool "the retired response cannot fill the next read" false
+    (Types.Snapshot_read.is_current state.schedules_agenda_read ticket)
+
 let () =
   run "tui loading notice"
     [ ( "a read in flight"
       , [ test_case "schedule responses follow target and generation" `Quick
             test_schedule_responses_follow_keeper_and_generation
+        ; test_case "schedule agenda suspends with workspace authority" `Quick
+            test_schedule_agenda_suspends_with_workspace_authority
         ; test_case "offscreen completion and late polls preserve a fresh wait" `Quick
             test_offscreen_completion_and_late_poll_do_not_age_a_new_wait
         ; test_case "logs keep repainting after status arrives" `Quick

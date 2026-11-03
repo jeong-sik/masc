@@ -105,8 +105,12 @@ type proxy_mode =
   | Relay_all  (* the forged hello, then every byte both ways *)
   | Drop_answers  (* the request reaches the agent; no answer reaches the host *)
   | Close_after_request  (* no agent: the connection closes once the request starts *)
-  | Late_hello of { silent_connections : int }
-      (* the first connections get no word at all; the next is [Relay_all] *)
+  | Late_hello of
+      { answered_first : int
+      ; silent_connections : int
+      }
+      (* the first [answered_first] connections are [Relay_all], the next
+         [silent_connections] get no word at all, the rest are [Relay_all] *)
 
 let send_forged_hello client =
   Eio.Flow.copy_string (Relay.encode (Relay.Hello (forged_hello ()))) client
@@ -142,8 +146,8 @@ let serve ~net ~agent_socket mode index client =
   | Close_after_request ->
     send_forged_hello client;
     quietly (fun () -> ignore (read_exact client 1 : string))
-  | Late_hello { silent_connections } ->
-    if index < silent_connections
+  | Late_hello { answered_first; silent_connections } ->
+    if answered_first <= index && index < answered_first + silent_connections
     then drain client
     else relay ~net ~agent_socket ~answers:relay_answers client
 
@@ -279,18 +283,24 @@ let test_the_payload_budget_is_the_shims () =
     , _ ) -> ()
   | outcome, _ -> fail (describe outcome)
 
-(* Four connections get no hello, so the hello comes about 4.4 s into the
-   5 s connect budget. The request still has its own budget and the shim's
+(* The probe answers first on connection 0, so the runner reads the shim's
+   major from it and does not probe again. The request's next four
+   connections get no hello, so its hello comes about 4.4 s into its 5 s
+   connect budget. The request still has its own budget and the shim's
    margin after it, so the shim, not the host, stops the payload. *)
 let test_a_late_hello_leaves_the_request_its_budget () =
-  with_proxy ~mode:(Late_hello { silent_connections = 4 })
+  with_proxy ~mode:(Late_hello { answered_first = 1; silent_connections = 4 })
   @@ fun session ->
+  (match Remote.For_testing.run_probe session.endpoint with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
   (match run_request ~timeout_sec:1.0 session.endpoint [ "sleep"; "30" ] with
    | ( Masc_exec.Sandbox_target.Transport_failed
          { failure = Masc_exec.Sandbox_target.Payload_timed_out; _ }
      , _ ) -> ()
    | outcome, _ -> fail (describe outcome));
-  check int "the hello came on the fifth connection" 5 (session.connections ())
+  check int "the probe's connection, four silent ones, then the request's" 6
+    (session.connections ())
 
 (* No answer reaches the host, so its own budget (connect + T + 4 s) ends the
    request: a stalled lane, not a payload timeout. *)

@@ -857,9 +857,7 @@ let run_probe_locked t =
        | Ok (Keeper_guest_socket.Not_sent not_sent) ->
          unreachable (agent_not_sent_to_string not_sent)
        | Ok (Keeper_guest_socket.Timed_out _) -> unreachable "the probe ran out of time"
-       | Ok (Keeper_guest_socket.Broken { reason; _ }) -> unreachable reason
-       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | exception exn -> unreachable (Printexc.to_string exn))
+       | Ok (Keeper_guest_socket.Broken { reason; _ }) -> unreachable reason)
   in
   match response with
   | Error detail ->

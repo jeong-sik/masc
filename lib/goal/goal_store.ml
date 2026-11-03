@@ -961,18 +961,6 @@ let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_
                         "a non-blank title is required for a new goal \
                          (a goal without a name states no success condition \
                          to hold it to)") in
-                let* () =
-                  match due_date with
-                  | None -> Ok ()
-                  | Some raw ->
-                      (match Ptime.of_float_s (Time_compat.now ()) with
-                       | None -> Ok ()
-                       | Some now ->
-                           if Goal_due.is_overdue ~now (Goal_due.read (Some raw)) then
-                             Error (Rejected (Printf.sprintf
-                               "due_date %S is already past: a goal born \
-                                overdue is unreachable" raw))
-                           else Ok ()) in
                 if blank_opt metric || blank_opt target_value then
                   Error (Rejected
                     "metric and target_value are required for a new goal \

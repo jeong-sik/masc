@@ -90,13 +90,6 @@ module For_testing : sig
     Workspace_types.context -> goal_id:string -> Tool_result.result
   (** Enter the initial request path as if an earlier read observed Executing.
       The current Goal and proof are still read through the production path. *)
-
-  val cancel_dropped_goal_todos :
-    ?before_transition:(task_id:string -> unit) ->
-    Workspace_types.context -> goal_id:string -> reason:string -> Masc_domain.task list ->
-    string list * (string * string) list
-  (** Inject a change after the fresh Task read and before the conditional
-      transition. Production calls do not supply the hook. *)
 end
 
 type verifier_decision =

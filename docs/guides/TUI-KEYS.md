@@ -59,7 +59,7 @@ The command palette is `:`.
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `c` | in Goal detail, request completion or recovery; press again to submit |
 | `a` | in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation |
-| `x` | in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop |
+| `x` | in Goal detail, enter a reason and press Enter |
 | `o` | in Goal detail, press twice to request reopening |
 | `z` | open the selected Goal's Candle payout from the list, or read it again in detail |
 | `Y` | copy the selected goal reference |

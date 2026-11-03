@@ -12,8 +12,6 @@ type reply =
   | Palette of Masc_tui_terminal_palette.slot * Masc_tui_terminal_palette.rgb option
       (** OSC 4 / 10 / 11 answer. [None] when the slot was named but its colour
           did not parse. *)
-  | Theme_mode of Masc_tui_terminal_palette.theme_mode
-      (** [CSI ? 997 ; n n]: the answer to the query, or a later unasked notice. *)
   | Cell_pixels of int * int  (** [CSI 6 ; h ; w t], as (width, height). *)
   | Graphics of string
       (** The raw body after [ESC _ G], up to [ESC \\]. Never truncated: a body

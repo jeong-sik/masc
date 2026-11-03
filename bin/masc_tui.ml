@@ -27219,8 +27219,6 @@ let main
   let apply_terminal_observation (observation : Masc_tui_terminal_probe.observation) =
     withdraw_resource_diagram_pending state;
     Masc_tui_terminal_palette.set_current observation.palette;
-    Option.iter (fun mode -> Masc_tui_terminal_palette.set_theme_mode (Some mode))
-      observation.theme_mode;
     let proto = match observation.graphics with
       | Some Masc_tui_graphics.Supported -> Masc_tui_graphics.Kitty_protocol
       | Some (Masc_tui_graphics.Refused _) | None -> fallback_graphics_protocol in

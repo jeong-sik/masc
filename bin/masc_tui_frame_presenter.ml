@@ -187,11 +187,7 @@ let cleanup presenter ~write ~flush =
        ^ reset_style ^ show_cursor ^ enable_autowrap
        (* Before leaving the alternate screen, so the shell that comes back is
           already wearing its own colours rather than masc's. *)
-       ^ reset_scheme_colors ^ leave_alternate_screen
-       (* Started at probe time so a theme switch would be reported. Left on,
-          the terminal keeps reporting to whatever runs next, which receives
-          [CSI ? 997 ; n n] as typed input it never asked for. *)
-       ^ Masc_tui_terminal_palette.theme_mode_unsubscribe);
+       ^ reset_scheme_colors ^ leave_alternate_screen);
     flush ()
   with _ -> ()
 

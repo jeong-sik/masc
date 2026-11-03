@@ -60,8 +60,6 @@ let reason_name = function
   | Byte_cap_reached -> "byte_cap_reached"
 let replies_json (replies : Masc_tui_terminal_probe.observation) = `Assoc [
   "palette_known",`Bool (Option.is_some replies.palette);
-  "theme_mode",(match replies.theme_mode with None -> `Null
-    | Some Masc_tui_terminal_palette.Dark -> `String "dark" | Some Light -> `String "light");
   "graphics",(match replies.graphics with None -> `String "unknown"
     | Some Masc_tui_graphics.Supported -> `String "supported" | Some (Refused _) -> `String "refused");
   "cell_pixels",optional (fun (width,height) -> `Assoc ["width",`Int width;"height",`Int height]) replies.cell_pixels]

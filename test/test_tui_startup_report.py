@@ -16,7 +16,7 @@ SPEC.loader.exec_module(REPORT)
 
 CONDITIONS = {key: "a" * 64 for key in
               ("fixture_sha256", "workspace_sha256", "terminal_sha256", "input_reply_sha256")}
-UNKNOWN = {"palette_known": False, "theme_mode": None, "graphics": "unknown", "cell_pixels": None}
+UNKNOWN = {"palette_known": False, "graphics": "unknown", "cell_pixels": None}
 
 
 def complete(pid, base, delivery=0):

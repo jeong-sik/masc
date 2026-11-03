@@ -9,8 +9,6 @@ let decode text = feed_all (D.create ()) text
 let show_reply = function
   | D.Palette (_, Some _) -> "palette"
   | D.Palette (_, None) -> "palette-unparsed"
-  | D.Theme_mode Masc_tui_terminal_palette.Dark -> "theme-dark"
-  | D.Theme_mode Masc_tui_terminal_palette.Light -> "theme-light"
   | D.Cell_pixels (width, height) -> Printf.sprintf "cell %dx%d" width height
   | D.Graphics body -> "graphics " ^ body
 
@@ -104,18 +102,12 @@ let test_paste_normalizes_line_breaks () =
     (decode "\x1b[200~a\r\nb\x1b[201~")
 
 let test_replies () =
-  let theme =
-    match Masc_tui_terminal_palette.parse_theme_mode_parameters "?997;1" with
-    | Some Masc_tui_terminal_palette.Dark -> "reply theme-dark"
-    | Some Masc_tui_terminal_palette.Light -> "reply theme-light"
-    | None -> fail "fixture: ?997;1 must parse"
-  in
-  check_events "OSC BEL, OSC ST, theme, cell size, graphics"
-    [ "reply palette"; "reply palette"; theme; "reply cell 15x34";
+  check_events "OSC BEL, OSC ST, cell size, graphics"
+    [ "reply palette"; "reply palette"; "reply cell 15x34";
       "reply graphics i=31;OK" ]
     (decode
        ("\x1b]10;rgb:12/ab/00\x07" ^ "\x1b]11;rgb:ffff/8080/0000\x1b\\"
-      ^ "\x1b[?997;1n" ^ "\x1b[6;34;15t" ^ "\x1b_Gi=31;OK\x1b\\"))
+      ^ "\x1b[6;34;15t" ^ "\x1b_Gi=31;OK\x1b\\"))
 
 let test_not_a_reply_is_a_key () =
   check_events "wrong report code falls to the key table" [ csi_name "8;34;15" 't' ]

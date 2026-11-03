@@ -68,6 +68,16 @@ let observation_matches_preparation (Observed state) ~after ~through ~atom ~offi
     && same M.durable_range_id_to_json atom pending.atom
     && same M.official_range_id_to_json official pending.official
 
+let observation_matches_floor_preparation (Observed state) ~after ~through ~atom ~official =
+  let without_atom_holes (range : M.durable_range_id) = {range with unread_messages=[]} in
+  let without_official_holes (range : M.official_range_id) = {range with unread_messages=[]} in
+  match state.pending with
+  | None -> false
+  | Some pending ->
+    state.after = after && pending.through = through && through > after
+    && Option.map without_atom_holes atom = Option.map without_atom_holes pending.atom
+    && Option.map without_official_holes official = Option.map without_official_holes pending.official
+
 let save ~runtime_keepers_dir ~keeper_name state =
   let file = path ~runtime_keepers_dir ~keeper_name in
   try
@@ -102,28 +112,46 @@ let read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name =
        && matches M.official_range_id_to_json p.official official then
       let* () = acknowledge ~runtime_keepers_dir ~keeper_name in Ok (Offset p.through)
     else Ok (Offset state.after)
+
+let require_uncommitted ~memory_keepers_dir ~keeper_name ~atom ~official =
+  let* prior_atom = match atom with
+    | None -> Ok None
+    | Some (range : M.durable_range_id) -> M.committed_durable_coverage
+        ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope in
+  let* prior_official = match official with
+    | None -> Ok None
+    | Some (range : M.official_range_id) -> M.committed_official_coverage
+        ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope in
+  let same encode requested committed = match requested,committed with
+    | Some left,Some right -> encode left = encode right
+    | None,_ | Some _,None -> false in
+  if same M.durable_range_id_to_json atom prior_atom
+     || same M.official_range_id_to_json official prior_official then
+    Error "a committed Memory range cannot acknowledge a new external snapshot"
+  else Ok ()
+
 let prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (Offset after) ~through ~atom ~official =
+  let* () =
+    if through < after then Error "external attention log shrank behind its read cursor"
+    else if through > after && atom=None && official=None then
+      Error "external read has no Memory commit identity"
+    else Ok () in
+  let* state = load ~runtime_keepers_dir ~keeper_name in
+  (* A committed range cannot name a new advancing snapshot. When another
+     preparation is pending, reject an observed committed range before [read]
+     can recover its ACK. The second check can catch a later Memory commit
+     before saving a new preparation, but cannot undo an ACK by [read]. The
+     caller still serializes this Keeper's cursor. *)
+  let* () = match state.pending with
+    | Some _ when through > after ->
+      require_uncommitted ~memory_keepers_dir ~keeper_name ~atom ~official
+    | None | Some _ -> Ok () in
   let* current = read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name in
   if offset current <> after then Error "external admission cursor changed before preparation"
-  else if through < after then Error "external attention log shrank behind its read cursor"
   else if through = after then save ~runtime_keepers_dir ~keeper_name {after;pending=None}
-  else if atom=None && official=None then Error "external read has no Memory commit identity"
   else
-    let* prior_atom = match atom with
-      | None -> Ok None
-      | Some (range : M.durable_range_id) -> M.committed_durable_coverage
-          ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope in
-    let* prior_official = match official with
-      | None -> Ok None
-      | Some (range : M.official_range_id) -> M.committed_official_coverage
-          ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope in
-    let same encode requested committed = match requested,committed with
-      | Some left,Some right -> encode left = encode right
-      | None,_ | Some _,None -> false in
-    if same M.durable_range_id_to_json atom prior_atom
-       || same M.official_range_id_to_json official prior_official then
-      Error "a committed Memory range cannot acknowledge a new external snapshot"
-    else save ~runtime_keepers_dir ~keeper_name
+    let* () = require_uncommitted ~memory_keepers_dir ~keeper_name ~atom ~official in
+    save ~runtime_keepers_dir ~keeper_name
       {after;pending=Some {through;atom;official}}
 
 let inspect ~keepers_dir ~keeper_id =

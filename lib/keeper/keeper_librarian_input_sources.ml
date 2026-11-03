@@ -37,16 +37,20 @@ let selected_chat ~after ~before (message : Chat.chat_message) =
   | Chat.Role.Assistant, _ | Chat.Role.Request_failure, _
   | Chat.Role.System, _ | Chat.Role.Tool, _ -> false
 
-let selected_external (snapshot : counterpart_snapshot) =
+let selected_external_with_offsets (snapshot : counterpart_snapshot) =
   match snapshot.external_after with
   | None ->
-    List.filter (fun (item : Attention.item) ->
-      in_interval ~after:snapshot.after ~before:snapshot.before item.received_at) snapshot.external_log
-    |> List.stable_sort (fun (left : Attention.item) (right : Attention.item) ->
+    List.mapi (fun offset item -> offset,item) snapshot.external_log
+    |> List.filter (fun (_, (item : Attention.item)) ->
+      in_interval ~after:snapshot.after ~before:snapshot.before item.received_at)
+    |> List.stable_sort (fun (_, (left : Attention.item)) (_, (right : Attention.item)) ->
       Float.compare left.received_at right.received_at)
   | Some cursor ->
     List.drop cursor snapshot.external_log
     |> List.take_while (fun (item : Attention.item) -> item.received_at <= snapshot.before)
+    |> List.mapi (fun index item -> cursor + index,item)
+
+let selected_external snapshot = List.map snd (selected_external_with_offsets snapshot)
 
 let external_through (snapshot : counterpart_snapshot) =
   match snapshot.external_after with
@@ -56,24 +60,91 @@ let external_through (snapshot : counterpart_snapshot) =
 let counterpart_snapshot_matches_selection (snapshot : counterpart_snapshot) ~external_after ~after ~before =
   snapshot.external_after = Some external_after && snapshot.after = after && snapshot.before = before
 
-let counterpart_observations (snapshot : counterpart_snapshot) =
+(* Keep each selected observation paired with the source that produced it.
+   The raw sources are retained only for local comparison; prompt rendering
+   continues to expose the same observation projection as before. *)
+type counterpart_source =
+  | External_event of int * Attention.item
+  | Chat_row of Chat.captured_row
+
+module Overlap_key = struct
+  type t =
+    | Chat_id of string
+    | External_offset of int
+    | External_id of string
+    | Delivery_id of string * string
+  let compare = Stdlib.compare
+end
+module Overlap_keys = Set.Make (Overlap_key)
+module Delivery_keys = Set.Make (struct
+  type t = string * string
+  let compare = Stdlib.compare
+end)
+
+type counterpart_selection = {
+  selection_keeper : string;
+  selected : (counterpart_source * Keeper_counterpart_observation.t) list;
+  overlap_keys : Overlap_keys.t Lazy.Mutexed.t;
+}
+
+let overlap_keys selected =
+  List.fold_left (fun keys (source, _) ->
+    match source with
+    | Chat_row row ->
+      let message = Chat.captured_row_message row in
+      let keys = Overlap_keys.add (Overlap_key.Chat_id message.id) keys in
+      (match message.conversation_id, message.external_message_id with
+       | Some conversation, Some id -> Overlap_keys.add (Overlap_key.Delivery_id (conversation,id)) keys
+       | None, _ | _, None -> keys)
+    | External_event (offset, item) ->
+      let keys = keys |> Overlap_keys.add (Overlap_key.External_offset offset)
+        |> Overlap_keys.add (Overlap_key.External_id item.event_id) in
+      (match item.external_message with
+       | None -> keys
+       | Some message -> Overlap_keys.add
+           (Overlap_key.Delivery_id (item.conversation.conversation_id,message.message_id)) keys))
+    Overlap_keys.empty selected
+
+let select_counterparts (snapshot : counterpart_snapshot) =
   (* The complete original log supplies dedup identities, even outside this
-     interval/frontier: a delivery and its chat projection can straddle it. *)
-  let delivery_keys = List.filter_map (fun (item : Attention.item) ->
+     interval/frontier: a delivery and its chat projection can straddle it.
+     The membership check uses additional space proportional to the smaller
+     input. This does not reduce the full log read or the durable snapshot. *)
+  let chat_key row =
+    let message = Chat.captured_row_message row in
+    match message.conversation_id, message.external_message_id with
+    | Some conversation, Some id -> Some (conversation,id)
+    | None, _ | _, None -> None in
+  let external_key (item : Attention.item) =
     Option.map (fun (message : Attention.external_message_ref) ->
-      item.conversation.conversation_id, message.message_id) item.external_message) snapshot.external_log in
+      item.conversation.conversation_id, message.message_id) item.external_message in
+  let add_key f set value = match f value with
+    | None -> set | Some key -> Delivery_keys.add key set in
+  let rec no_longer left right = match left,right with
+    | [], _ -> true | _ :: _, [] -> false
+    | _ :: left, _ :: right -> no_longer left right in
+  let delivery_keys = match snapshot.chat_rows, snapshot.external_log with
+    | [], _ | _, [] -> Delivery_keys.empty
+    | chats, externals ->
+      if no_longer chats externals then
+        let wanted = List.fold_left (add_key chat_key) Delivery_keys.empty chats in
+        if Delivery_keys.is_empty wanted then Delivery_keys.empty else
+        List.fold_left (fun found item -> match external_key item with
+          | Some key when Delivery_keys.mem key wanted -> Delivery_keys.add key found
+          | None | Some _ -> found) Delivery_keys.empty externals
+      else List.fold_left (add_key external_key) Delivery_keys.empty externals in
   let is_duplicate (message : Chat.chat_message) =
     match message.conversation_id, message.external_message_id with
     | Some conversation_id, Some message_id ->
-      List.exists (fun (conversation, id) ->
-        String.equal conversation_id conversation && String.equal message_id id) delivery_keys
+      Delivery_keys.mem (conversation_id,message_id) delivery_keys
     | None, _ | _, None -> false in
-  let externals = selected_external snapshot |> List.map (fun (item : Attention.item) ->
-    item.received_at, Keeper_counterpart_observation.of_external_attention item) in
-  let chats = snapshot.chat_rows |> List.map Chat.captured_row_message
-    |> List.filter (fun message -> not (is_duplicate message))
-    |> List.filter_map (fun (message : Chat.chat_message) ->
-      Option.map (fun observation -> message.ts, observation)
+  let externals = selected_external_with_offsets snapshot |> List.map (fun (offset, (item : Attention.item)) ->
+    item.received_at, (External_event (offset,item), Keeper_counterpart_observation.of_external_attention item)) in
+  let chats = snapshot.chat_rows
+    |> List.filter_map (fun row ->
+      let message = Chat.captured_row_message row in
+      if is_duplicate message then None else
+      Option.map (fun observation -> message.ts, (Chat_row row, observation))
         (Keeper_counterpart_observation.of_chat_message message))
     |> List.stable_sort (fun (left, _) (right, _) -> Float.compare left right) in
   let rec interleave acc externals chats = match externals, chats with
@@ -83,7 +154,44 @@ let counterpart_observations (snapshot : counterpart_snapshot) =
       if Float.compare chat_ts external_ts < 0
       then interleave (chat :: acc) externals chat_rest
       else interleave (external_row :: acc) external_rest chats in
-  interleave [] externals chats |> List.map snd
+  let selected = interleave [] externals chats |> List.map snd in
+  {selection_keeper=snapshot.keeper_name;selected;
+   overlap_keys=Lazy.Mutexed.from_fun (fun () -> overlap_keys selected)}
+
+let counterpart_observations snapshot =
+  List.map snd (select_counterparts snapshot).selected
+
+(* A successful input covers an earlier one only if the same selected source
+   rows, with the same delivered projections, occur in the same order. A chat
+   row that a later capture deduplicated is not present in that later input. *)
+let counterpart_selection_covers ~original ~witness =
+  let same (left_source, left_observation) (right_source, right_observation) =
+    left_observation = right_observation &&
+    match left_source, right_source with
+    | External_event (left_offset,left), External_event (right_offset,right) ->
+      left_offset=right_offset && String.equal left.event_id right.event_id && left = right
+    | Chat_row left, Chat_row right ->
+      String.equal (Chat.captured_row_message left).id (Chat.captured_row_message right).id
+      && Chat.captured_row_same_source left right
+    | External_event _, Chat_row _ | Chat_row _, External_event _ -> false
+  in
+  let rec contains original witness = match original, witness with
+    | [], _ -> true
+    | _ :: _, [] -> false
+    | first :: rest, next :: tail ->
+      if same first next then contains rest tail else contains original tail
+  in
+  original.selection_keeper = witness.selection_keeper
+  && contains original.selected witness.selected
+
+let counterpart_selection_may_overlap ~original ~candidate =
+  original.selection_keeper = candidate.selection_keeper
+  && let left = Lazy.Mutexed.force original.overlap_keys in
+     let right = Lazy.Mutexed.force candidate.overlap_keys in
+     Overlap_keys.exists (fun key -> Overlap_keys.mem key right) left
+
+let counterpart_observations_digest (snapshot : counterpart_snapshot) =
+  Keeper_counterpart_observation.digest (counterpart_observations snapshot)
 
 let capture_counterparts_read ?external_after ~base_dir ~keeper_name ~after ~before () =
   let* () = if Float.is_finite before && Option.fold ~none:true ~some:Float.is_finite after
@@ -153,10 +261,7 @@ let counterpart_snapshot_of_json value =
   else Ok snapshot
 
 let capture_counterparts ~external_after ~base_dir ~keeper_name ~after ~before =
-  let* snapshot = capture_counterparts_read ~external_after ~base_dir ~keeper_name ~after ~before () in
-  let* _ = counterpart_snapshot_of_json (counterpart_snapshot_to_json snapshot)
-    |> Result.map_error (fun detail -> External_cursor_failed detail) in
-  Ok snapshot
+  capture_counterparts_read ~external_after ~base_dir ~keeper_name ~after ~before ()
 
 let snapshot_extends ~(original : counterpart_snapshot) ~(current : counterpart_snapshot) =
   let rec prefix same original current = match original, current with
@@ -178,6 +283,40 @@ let validate_original_selection (original : counterpart_snapshot) ~base_dir ~kee
     let* current = capture_counterparts_read ?external_after:original.external_after
       ~base_dir ~keeper_name ~after:original.after ~before:original.before () in
     snapshot_extends ~original ~current |> Result.map_error (fun detail -> External_cursor_failed detail)
+
+let counterparts_covered_at_frontier
+      (original : counterpart_snapshot)
+      ~counterpart_digest
+      ~base_dir
+      ~keeper_name
+      ~acked_external_offset
+  =
+  if original.keeper_name <> keeper_name
+  then Error (External_cursor_failed "Original counterpart Keeper differs")
+  else if not (String.equal (counterpart_observations_digest original) counterpart_digest)
+  then Error (External_cursor_failed "Original counterpart digest differs from its snapshot")
+  else if acked_external_offset < external_through original
+  then Ok false
+  else
+    let* current =
+      capture_counterparts_read
+        ?external_after:original.external_after
+        ~base_dir
+        ~keeper_name
+        ~after:original.after
+        ~before:original.before
+        ()
+    in
+    let* () =
+      snapshot_extends ~original ~current
+      |> Result.map_error (fun detail -> External_cursor_failed detail)
+    in
+    if acked_external_offset > List.length current.external_log
+    then Error (External_cursor_failed "external log shrank behind its admission cursor")
+    else (
+      let unacknowledged_external = List.drop acked_external_offset current.external_log in
+      let effective = { original with external_log = original.external_log @ unacknowledged_external } in
+      Ok (String.equal (counterpart_observations_digest effective) counterpart_digest))
 
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   capture_counterparts_read ~base_dir ~keeper_name ~after ~before ()

@@ -217,6 +217,12 @@ let first_messages=[message "The already-read first turn"]
 let selected_messages=first_messages @ [message "Original question to retain";
   Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original completed answer"]]
 type history_kind = Atoms | Official | Mixed
+let official_empty_turn config ~turn ~time =
+  let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
+  Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+    {Boundary.recorded_at=time;event=Boundary.Turn_ended {turn_ref;task_context=Keeper_turn_task_context.No_task;
+      history_at_start=Boundary.Continued_history;position=Boundary.No_atom_history}}
+  |> Result.map_error Boundary.append_error_to_string |> get
 let official_turn config ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session=Keeper_context_core.create_session ~session_id:trace_id ~base_dir:(Keeper_fs.session_store_path config) in
@@ -225,10 +231,7 @@ let official_turn config ~turn ~time =
   Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant" session
     (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original official-client answer"]);
   Keeper_context_core_history.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file" ~outcome:Tool_result.Ok;
-  Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-    {Boundary.recorded_at=time;event=Boundary.Turn_ended {turn_ref;task_context=Keeper_turn_task_context.No_task;
-      history_at_start=Boundary.Continued_history;position=Boundary.No_atom_history}}
-  |> Result.map_error Boundary.append_error_to_string |> get
+  official_empty_turn config ~turn ~time
 let prepare_history config kind =
   let now=Time_compat.now () in
   (match kind with
@@ -1000,6 +1003,287 @@ let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind
   check (list string) "actual official source judgment publishes Memory" ["Knowledge from original completed history"]
     (io (fun () -> claims fixture.keepers_dir));
   check int "official or mixed source uses one original host HTTP request" 1 (F.post_count fixture.server))
+
+(* Preserve the upstream narrowed-range regression for ordinary invalid-request
+   refusals. The capacity-only path now retains a durable stop; an independent
+   failure still narrows without losing counterpart identities or ACK ordering. *)
+let test_counterpart_non_capacity_refusal_preserves_narrowed_sources () =
+  with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+    let content = "begin counterpart\n" ^ String.make 65536 'x' ^ "\nend counterpart" in
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content ~speaker ();
+    io (fun () ->
+      official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let before=official () in
+    let external_observation : Keeper_counterpart_observation.t =
+      {origin=Connector_attention;channel="agent";workspace_id=None;
+       user_id=Some "original-agent";user_name=Some "Original agent";
+       authority=External;content="Original admitted external evidence"} in
+    let chat_observation : Keeper_counterpart_observation.t =
+      {origin=Durable_chat;channel="direct";workspace_id=None;
+       user_id=Some "external";user_name=Some "External";
+       authority=External;content} in
+    let observations capture =
+      let input=Capture.source capture |> Source.input in
+      List.length input.messages, List.length input.tool_observations, input.counterpart_observations in
+    let check_complete capture =
+      check bool "the provider request retains both complete counterpart identities and bytes" true
+        (observations capture = (0,0,[external_observation;chat_observation])) in
+    let initial_requests = ref [] in
+    fixture.set_response (fun capture ->
+      initial_requests := !initial_requests @ [observations capture];
+      `Bad_request,
+        {|{"error":{"message":"fixture invalid request","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    check bool "the refused request retains both complete counterpart identities and bytes" true
+      (!initial_requests = [0,0,[external_observation;chat_observation]]);
+    (match run_worker fixture with
+     | Ok (Consumer.Memory_not_committed [report]) ->
+       let official_range=Source.official_range_id (Capture.source (snd (only_original fixture))) in
+       check bool "ordinary invalid-request refusal invents no capacity evidence" true
+         (report.provider_input_refusals=[] && not report.input_capacity_only);
+       check bool "the operator can locate both original official rows" true
+         (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1;2])
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "ordinary counterpart refusal did not return its actual report");
+    check bool "the refusal does not advance official history" true (official ()=before);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check bool "the refusal does not acknowledge the external row" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:0 ~through:1 ~atom:None
+        ~official:(Source.official_range_id (Capture.source (snd (only_original fixture)))));
+    no_memory fixture;
+    let rejected,original=only_original fixture in
+    check_complete original;
+    let source_json=Source.to_json (Capture.source original) in
+    let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
+    check json "the whole refused original survives strict restoration" source_json (Source.to_json restored);
+    check int "only one actual provider request was refused" 1 (F.post_count fixture.server);
+    let narrowed_refusal = ref [] in
+    fixture.set_response (fun capture ->
+      narrowed_refusal := !narrowed_refusal @ [observations capture];
+      `Bad_request,
+        {|{"error":{"message":"fixture invalid request","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    (match run_worker fixture with
+     | Ok (Consumer.Memory_not_committed [report]) ->
+       let official_range=Source.official_range_id (Capture.source (snd (only_original fixture))) in
+       check bool "the narrowed invalid-request refusal invents no capacity evidence" true
+         (report.provider_input_refusals=[] && not report.input_capacity_only);
+       check bool "the narrowed refusal names only the first boundary" true
+         (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1])
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "ordinary narrowed refusal did not return its actual report");
+    let narrowed,narrowed_capture=only_original fixture in
+    check bool "the narrowed refusal uses a distinct original" true
+      (narrowed.Owner.request_id<>rejected.request_id);
+    check bool "the narrowed request preserved the complete external identity and bytes" true
+      (!narrowed_refusal = [0,0,[external_observation]] && observations narrowed_capture = (0,0,[external_observation]));
+    check bool "a second refusal leaves the official cursor unread" true (official ()=before);
+    check bool "a second refusal still has not acknowledged the external row" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:0 ~through:1 ~atom:None
+        ~official:(Source.official_range_id (Capture.source narrowed_capture)));
+    no_memory fixture;
+    check int "both refused requests reached the provider" 2 (F.post_count fixture.server);
+    (* The refused original covered both official boundaries. A failed wide
+       pass narrows to the oldest boundary on its next wake: the external row
+       precedes that boundary, while the chat was appended after it. Observe
+       both successful requests before checking their payloads so a failing
+       test assertion does not get swallowed inside the HTTP fixture fiber. *)
+    let recovered = ref [] in
+    fixture.set_response (fun capture ->
+      recovered := !recovered @ [observations capture];
+      `OK,F.openai_response (answer capture));
+    drive_advanced fixture;
+    let fresh,fresh_capture=only_original fixture in
+    check bool "fresh reprocessing uses a new original, not replaying the refused request" true
+      (fresh.Owner.request_id<>narrowed.request_id && fresh.request_id<>rejected.request_id);
+    check bool "the first successful request holds only the complete older external row" true
+      (!recovered = [0,0,[external_observation]]);
+    check (option int) "the first successful commit advances only the first official boundary"
+      (Some 1) (Option.map (fun (cursor:Keeper_librarian_official_progress.t) -> cursor.boundary_line) (official ()));
+    let check_coverage expected_line capture =
+      let range=Source.official_range_id (Capture.source capture) |> Option.get in
+      check (list int) "the original names its own official boundary" [expected_line] (List.map fst range.turns);
+      check bool "Memory records the exact successful original's official coverage" true
+        (io (fun () -> Current.committed_official_coverage ~keepers_dir:fixture.keepers_dir
+          ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope |> get) = Some range) in
+    check_coverage 1 fresh_capture;
+    check bool "external evidence is acknowledged only after its successful commit" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:1 ~through:1 ~atom:None ~official:None);
+    drive_advanced fixture;
+    let final,final_capture=only_original fixture in
+    check bool "the later boundary has its own original request" true
+      (final.Owner.request_id<>fresh.request_id && final.request_id<>narrowed.request_id
+       && final.request_id<>rejected.request_id);
+    check bool "both successful requests preserve counterpart origins and bytes in order" true
+      (!recovered = [0,0,[external_observation]; 0,0,[chat_observation]]);
+    check (option int) "the second successful commit advances the remaining official boundary"
+      (Some 2) (Option.map (fun (cursor:Keeper_librarian_official_progress.t) -> cursor.boundary_line) (official ()));
+    check_coverage 2 final_capture;
+    check bool "the later chat does not change the settled external acknowledgment" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:1 ~through:1 ~atom:None ~official:None);
+    check int "two refused and two successful requests reached the provider" 4 (F.post_count fixture.server);
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "successfully consumed counterpart input remained unread");
+    check int "the settled input is not sent again" 4 (F.post_count fixture.server))
+
+let test_counterpart_prompt_omission_preserves_fresh_source () =
+  with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+    let previous=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+    Fun.protect ~finally:(fun () -> match previous with
+      | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+      | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+      let speaker : Keeper_chat_store.speaker =
+        {speaker_id=Some "external";speaker_name=Some "External";
+         speaker_authority=Keeper_chat_store.External} in
+      Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+        ~content:"Independent speaker evidence" ~speaker ();
+      io (fun () ->
+        official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+        let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+        let path file=Keeper_turn_fragments.path ~session_dir file in
+        write (path Keeper_turn_fragments.Main)
+          ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+        write (path Keeper_turn_fragments.Internal) "");
+      let official ()=io (fun () -> Keeper_librarian_official_progress.read
+        ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+        |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+      let before=official () in
+      Prompt_registry.set_override Prompt_names.librarian "Summarize the available history" |> get;
+      (match run_worker fixture with
+       | Error (Consumer.Original_publication_blocked detail) ->
+         check bool "failure names the missing substitution" true
+           (Astring.String.is_infix ~affix:"counterpart_observations" detail)
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "a fresh original with the missing counterpart substitution was accepted");
+      check int "no incomplete original was retained" 0 (List.length (observed_originals fixture));
+      check int "no request reached the provider" 0 (F.post_count fixture.server);
+      check bool "official position remains unread" true (official ()=before);
+      let cursor=io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+      check int "external input was not acknowledged" 0 (Keeper_external_read_cursor.observation_offset cursor);
+      check bool "the existing cursor preparation can remain pending" true
+        (member "pending" (Keeper_external_read_cursor.observation_to_json cursor) <> `Null);
+      no_memory fixture;
+      Prompt_registry.clear_prompt_override Prompt_names.librarian;
+      let observed=ref [] in
+      fixture.set_response (fun capture ->
+        observed := (Capture.source capture |> Source.input).counterpart_observations;
+        `OK,F.openai_response (answer capture));
+      drive_advanced fixture;
+      check (list string) "restoring the prompt retries the preserved counterpart source"
+        ["Independent speaker evidence";"Original admitted external evidence"]
+        (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content) !observed |> List.sort String.compare);
+      let record,capture=only_original fixture in
+      let source=Capture.source capture in
+      let expected=Source.official_range_id source |> Option.get in
+      check bool "Memory receipt names the corrected original's official range" true
+        (io (fun () -> Current.committed_official_coverage ~keepers_dir:fixture.keepers_dir
+          ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope |> get)=Some expected);
+      check (list string) "the corrected provider result is committed to Memory"
+        ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+      let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+      check int "the corrected original reads the external admission" 1 through;
+      let settled_cursor=io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+      check bool "the external admission is acknowledged through its original frontier" true
+        (Keeper_external_read_cursor.observation_matches_preparation settled_cursor
+          ~after:through ~through ~atom:None ~official:None);
+      check bool "the original is finished after its receipt and ACK" true
+        (match Progress.phase record.Owner.progress with Finished _ -> true
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+      check bool "successful recovery advances the official position" true (official ()<>before);
+      check int "only the corrected prompt reached the provider" 1 (F.post_count fixture.server)))
+
+let test_untagged_official_counterparts_reach_memory_once () =
+  with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content:"Independent speaker evidence" ~speaker ();
+    let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+    io (fun () ->
+      (* The second boundary ends after the appended chat. The pre-existing
+         external fixture is also before it, and neither turn has a fragment
+         that names its turn. *)
+      official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let before=official () in
+    let provider_calls=ref 0 in
+    fixture.set_response (fun capture ->
+      incr provider_calls;
+      let input=Capture.source capture |> Source.input in
+      check int "the provider original has no tagged messages" 0 (List.length input.messages);
+      check int "the provider original has no tagged tool observations" 0 (List.length input.tool_observations);
+      check (list string) "the provider original holds both independent observations"
+        ["Independent speaker evidence";"Original admitted external evidence"]
+        (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content)
+           input.counterpart_observations |> List.sort String.compare);
+      `OK,F.openai_response (answer capture));
+    drive_advanced fixture;
+    let record,capture=only_original fixture in
+    let source=Capture.source capture in
+    let expected=Source.official_range_id source |> Option.get in
+    check bool "the official receipt covers the original untagged turns" true
+      (io (fun () -> Current.committed_official_coverage ~keepers_dir:fixture.keepers_dir
+        ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope |> get)=Some expected);
+    check bool "the original has no atom receipt" true (Option.is_none (Source.range_id source));
+    check bool "official position advances after the receipt" true (official ()<>before);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+    check int "one external admission was read" 1 through;
+    check bool "the external admission was acknowledged" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:through ~through ~atom:None ~official:None);
+    check bool "the actual original is finished" true
+      (match Progress.phase record.Owner.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check (list string) "the provider result was published to Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+    check int "one actual provider request held the counterparts" 1 !provider_calls;
+    let official_after=official () in
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a settled counterpart-only turn was read again");
+    check bool "the next call leaves the official position" true (official ()=official_after);
+    check bool "the next call leaves the external acknowledgement" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:through ~through ~atom:None ~official:None);
+    check int "the next call makes no duplicate provider request" 1 (F.post_count fixture.server))
+
 let test_production_queue_pending_retains_all_sources () = with_fixture (fun ~sw:_ fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
@@ -1178,7 +1462,7 @@ let test_source_replacement_cannot_publish_retained_answer change () = with_fixt
   check string "source failure retains the original request ID" record.request_id restored_record.Owner.request_id;
   check json "source failure retains full original evidence" original (Capture.to_json restored);
   check int "source replacement starts no substitute provider" posts (F.post_count fixture.server))
-let restart_actual_worker fixture ~sw =
+let restart_actual_worker ?(while_off=fun () -> ()) fixture ~sw =
   let old=(runtime_export fixture).Runtime.instance_id in
   let changed=Eio.Condition.create () in
   let stop=Runtime.subscribe_owner_events ~config:fixture.config ~package_id:Capture.package_id
@@ -1188,7 +1472,7 @@ let restart_actual_worker fixture ~sw =
     (* The actual maintenance owner's cleanup nudge schedules a new attach
        after the retiring entry is removed. No guessed poll/yield loop. *)
     Runtime.start_configuration_service ~config:fixture.config ~sw ~clock:fixture.clock;
-    set_enabled fixture false;set_enabled fixture true;
+    set_enabled fixture false;while_off ();set_enabled fixture true;
     let attached=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
       Eio.Condition.loop_no_mutex changed (fun () ->
         let snapshot=Runtime.tool_export_snapshot ~config:fixture.config ~reserved:[]
@@ -1202,6 +1486,451 @@ let restart_actual_worker fixture ~sw =
       (List.exists (fun instance -> member "runtime_presence" instance=`String "live"
         && member "instance_id" instance=`String old) instances);
     check bool "actual replacement worker exports a different usable incarnation" true (attached.instance_id<>old))
+let replace_actual_worker_configuration fixture ~sw source =
+  let old=(runtime_export fixture).Runtime.instance_id in
+  let changed=Eio.Condition.create () in
+  let stop=Runtime.subscribe_owner_events ~config:fixture.config ~package_id:Capture.package_id
+    (fun (Configuration_observed | Export_inventory_changed | Exact_result_delivered _) ->
+      Eio.Condition.broadcast changed) in
+  Fun.protect ~finally:stop (fun () ->
+    Runtime.start_configuration_service ~config:fixture.config ~sw ~clock:fixture.clock;
+    io (fun () -> write fixture.source source);reconcile fixture;
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      Eio.Condition.loop_no_mutex changed (fun () ->
+        let snapshot=Runtime.tool_export_snapshot ~config:fixture.config ~reserved:[]
+          ~access:Lane_addon_sources.Operator_configuration in
+        List.find_opt (fun (export:Runtime.tool_export) -> export.tool.name=Capture.tool && export.instance_id<>old)
+          snapshot.exports)) |> ignore;
+    reconcile fixture)
+(* An official turn can have no turn-tagged fragments while its independent
+   counterpart sources still have unread evidence. Exercise the configured
+   Addon path, including the actual receipt and both source acknowledgements. *)
+let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
+  with_fixture ~history_kind:Official (fun ~sw fixture ->
+    let content = "begin counterpart\n" ^ String.make 65536 'x' ^ "\nend counterpart" in
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~conversation_id:"agent:original-chat" ~external_message_id:"original-chat-message"
+      ~content ~speaker ();
+    io (fun () ->
+      official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let before=official () in
+    let external_observation : Keeper_counterpart_observation.t =
+      {origin=Connector_attention;channel="agent";workspace_id=None;
+       user_id=Some "original-agent";user_name=Some "Original agent";
+       authority=External;content="Original admitted external evidence"} in
+    let chat_observation : Keeper_counterpart_observation.t =
+      {origin=Durable_chat;channel="direct";workspace_id=None;
+       user_id=Some "external";user_name=Some "External";
+       authority=External;content} in
+    let expected=[external_observation;chat_observation] in
+    let observations capture =
+      let input=Capture.source capture |> Source.input in
+      List.map (fun (message : Agent_core.Types.message) ->
+        message.role,Agent_core.Types.text_of_message message) input.messages,input.tool_observations,
+        List.sort Stdlib.compare input.counterpart_observations in
+    let check_complete ?(expected=expected) ~messages ~tools capture =
+      let actual_messages,actual_tools,actual_counterparts=observations capture in
+      check bool "the original retains all expected messages and roles" true (actual_messages=messages);
+      check bool "the original retains all expected tool observations" true (actual_tools=tools);
+      check bool "the original retains complete counterpart identities and bytes" true
+        (actual_counterparts=List.sort Stdlib.compare expected) in
+    let provider_inputs=ref [] in
+    fixture.set_response (fun capture ->
+      provider_inputs:= !provider_inputs @ [observations capture];
+      `Request_entity_too_large,
+        {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    check bool "the refused HTTP input retains both original counterparts" true
+      (!provider_inputs=[[],[],List.sort Stdlib.compare expected]);
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused {official_range;counterpart_digest;reports=[report];_} as refusal) ->
+       check bool "capacity refusal suspends later Memory phases of the wake" true
+         (Consumer.publication_unfinished refusal);
+       check string "the refusal binds the exact counterpart digest"
+         (Keeper_counterpart_observation.digest (Source.input (Capture.source (snd (only_original fixture)))).counterpart_observations)
+         counterpart_digest;
+       check bool "the host receipt names its actual provider input refusal" true
+         (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
+       check bool "the operator can locate both original official rows" true
+         (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1;2])
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a retained counterpart-only capacity refusal was not explicit");
+    check bool "the refusal does not advance official history" true (official ()=before);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check bool "the refusal does not acknowledge the external row" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:0 ~through:1 ~atom:None
+        ~official:(Source.official_range_id (Capture.source (snd (only_original fixture)))));
+    no_memory fixture;
+    let rejected,original=only_original fixture in
+    check_complete ~messages:[] ~tools:[] original;
+    let source_json=Source.to_json (Capture.source original) in
+    let request_json=Capture.to_json original and rejected_progress=Progress.to_json rejected.progress in
+    let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
+    check json "the whole refused original survives strict restoration" source_json (Source.to_json restored);
+    check int "only one actual provider request was refused" 1 (F.post_count fixture.server);
+    let check_held () =
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
+         check bool "every wake reports the same located refusal" true
+           (official_range=Source.official_range_id (Capture.source original)
+            && report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused])
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "a settled capacity refusal reminted fresh work");
+      let held_record,held=only_original fixture in
+      check string "the held original keeps its durable ID" rejected.request_id held_record.Owner.request_id;
+      check json "no new observer/dispatch events appear" rejected_progress (Progress.to_json held_record.progress);
+      check json "restart reloads the exact complete original" request_json (Capture.to_json held);
+      check bool "every held wake preserves official progress" true (official ()=before);
+      check json "every held wake preserves the external preparation without ACK"
+        (Keeper_external_read_cursor.observation_to_json (Source.external_prepared (Capture.source original)))
+        (Keeper_external_read_cursor.observation_to_json (cursor ()));
+      check int "held wake sends no substitute model request" 1 (F.post_count fixture.server);
+      no_memory fixture in
+    check_held ();check_held ();
+    Consumer.For_testing.reset_process_state ();
+    restart_actual_worker ~while_off:check_held fixture ~sw;
+    check_held ();
+    let appended="Counterpart appended after the refusal" in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content:appended ~speaker ();
+    io (fun () -> official_turn fixture.config ~turn:3 ~time:(Time_compat.now () +. 20.));
+    check_held ();
+    let expected={chat_observation with content=appended}::expected in
+    fixture.set_response (fun capture ->
+      provider_inputs:= !provider_inputs @ [observations capture];
+      `OK,F.openai_response (answer capture));
+    (* Changed provider declarations alone carry no comparable original plan
+       identity. An improved response and another admitted slot do not retry. *)
+    publish_routes fixture.base_path [fixture.server.base_url;fixture.server.base_url];
+    check_held ();
+    let configured_b=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-capacity-retry\"" | line -> line)
+      |> String.concat "\n" in
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    (* Observe B, then return to A before selection. A's original must still
+       survive: archiving it on the first configuration observation is unsafe. *)
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    check_held ();
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    drive_advanced fixture;
+    let fresh,fresh_capture=observed_originals fixture
+      |> List.filter (fun ((record:Owner.retained),_) -> record.request_id<>rejected.request_id)
+      |> function [original] -> original | _ -> fail "one new configured original must own the successful request" in
+    let messages=[Agent_core.Types.User,"Original official-client question";
+      Agent_core.Types.Assistant,"Original official-client answer"] in
+    let tools : Keeper_librarian.tool_observation list = [{tool_name="read_file";outcome=Succeeded}] in
+    check_complete ~expected ~messages ~tools fresh_capture;
+    check bool "the configured recovery HTTP input retains the new turn and all counterparts" true
+      (List.nth_opt !provider_inputs 1=Some (messages,tools,List.sort Stdlib.compare expected));
+    let exact=Capture.request fresh_capture |> get in
+    let sent=Option.to_list exact.Exact.system
+      @ List.map (fun (item : Exact.message) -> item.text) exact.messages in
+    List.iter (fun (label,phrase) ->
+      check bool label true (List.exists (Astring.String.is_infix ~affix:phrase) sent))
+      ["the sent request includes the later user message","Original official-client question";
+       "the sent request includes the later assistant message","Original official-client answer";
+       "the sent request includes the later tool observation",{|{"tool_name":"read_file","outcome":"succeeded"}|};
+       "the sent request includes the original external evidence","Original admitted external evidence";
+       "the sent request includes the complete oversized counterpart body",String.make 65536 'x';
+       "the sent request includes the appended counterpart",appended];
+    check bool "fresh reprocessing uses a new original, not replaying the refused request" true
+      (fresh.Owner.request_id<>rejected.request_id);
+    check bool "official history advances only after a real complete-input commit" true (official ()<>before);
+    check bool "external evidence is acknowledged only after that commit" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:1 ~through:1 ~atom:None ~official:None);
+    check int "one refused and one successful complete-input request" 2 (F.post_count fixture.server);
+    let fresh_gates=gate_records fixture fresh_capture |> List.filter (fun gate ->
+      Gate.parent_execution_id gate |> get |> String.equal fresh.request_id) in
+    check bool "the completed original has its own Gate evidence" true (fresh_gates<>[]);
+    let original_before =
+      Keeper_librarian_input_sources.counterpart_snapshot_to_json (Source.counterparts (Capture.source original))
+      |> member "before" |> Yojson.Safe.Util.to_float in
+    let duplicate_at = original_before +. 1. in
+    let surface=Keeper_external_attention.Agent in
+    let item : Keeper_external_attention.item = {
+      event_id=Keeper_external_attention.event_id_of_dedupe_key "late-original-chat";
+      dedupe_key="late-original-chat";keeper_name;
+      conversation={conversation_id="agent:original-chat";surface};
+      external_message=Some {surface;message_id="original-chat-message";reply_to_message_id=None};
+      source_label="agent";
+      actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+      urgency=Keeper_external_attention.Ambient;content_preview="later delivery";
+      content_ref=None;received_at=duplicate_at;metadata=[]} in
+    (match Keeper_external_attention.For_testing.record_with_clock
+       ~now:(fun () -> duplicate_at) ~base_path:fixture.base_path item with
+     | `Recorded -> () | `Duplicate _ -> fail "the later delivery was not recorded"
+     | `Error detail -> fail detail);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    let held_cursor=Keeper_external_read_cursor.observation_to_json (cursor ()) in
+    let check_held_with_witness () =
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "the unacknowledged later delivery must retain the refusal");
+      let originals=observed_originals fixture in
+      check bool "the refusal remains live" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id) originals);
+      check bool "the finished full-input witness remains live" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=fresh.request_id
+          && match Progress.phase record.progress with Finished _ -> true
+             | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+             | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false) originals);
+      check bool "the witness keeps every original Gate" true
+        (List.for_all (fun (gate:Owner.retained) ->
+          List.exists (fun (current:Owner.retained) -> current.request_id=gate.request_id)
+            (gate_records fixture fresh_capture)) fresh_gates);
+      check json "checking the refusal does not acknowledge the later delivery" held_cursor
+        (Keeper_external_read_cursor.observation_to_json (cursor ())) in
+    check_held_with_witness ();
+    Consumer.For_testing.reset_process_state ();
+    restart_actual_worker ~while_off:check_held_with_witness fixture ~sw;
+    check_held_with_witness ();
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    io (fun () -> official_turn fixture.config ~turn:4 ~time:(duplicate_at +. 20.));
+    drive_advanced fixture;
+    check bool "the later commit replaces the witness's current range receipt" false
+      (io (fun () -> Keeper_librarian_durable_commit.receipt_state fresh_capture |> get));
+    check int "the later delivery is acknowledged only by its completed input" 2
+      (Keeper_external_read_cursor.observation_offset (cursor ()));
+    let current_originals=observed_originals fixture in
+    let later=current_originals |> List.filter (fun ((record:Owner.retained),_) ->
+      record.request_id<>rejected.request_id && record.request_id<>fresh.request_id)
+      |> function [original] -> original | _ -> fail "one later original must own the new commit" in
+    let incomplete_stop=memory_action fixture (fun () ->
+      let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store
+        ~owner:(Capture.physical_owner original)) |> get in
+      io (fun () -> List.iter (fun (record,request) ->
+        match Keeper_librarian_durable_commit.validate_inventory ~inventory ~store:fixture.store ~request ~record |> get with
+        | Settled -> () | Unfinished -> fail "the complete inventory must be settled") current_originals);
+      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store
+        ~completed:(io (fun () -> Keeper_librarian_durable_refusal.inventory [(rejected,original);later]) |> get)
+        ~record:rejected ~request:original |> get) in
+    check bool "the later incomplete input cannot replace the full-input witness" true
+      (Option.is_some incomplete_stop);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Ok _ -> fail "the consumed larger range should leave no fresh source"
+     | Error error -> fail (Consumer.error_to_string error));
+    let settled,retained=archived fixture ~date:(day_of rejected.request_id) rejected in
+    check json "old refusal and complete source remain in the ordinary archive" (canonical request_json) retained;
+    check json "settlement never rewrites the original rejection" rejected_progress (Progress.to_json settled);
+    check bool "the witness remains live until the refusal has left" true
+      (List.exists (fun ((record:Owner.retained),_) -> record.request_id=fresh.request_id)
+        (observed_originals fixture));
+    Consumer.For_testing.reset_process_state ();
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Ok _ -> fail "the completed witness should settle on the next pass"
+     | Error error -> fail (Consumer.error_to_string error));
+    check bool "the witness is archived after the refusal" true
+      (settled_on fixture ~date:(day_of fresh.request_id) fresh);
+    check bool "the witness Gates are archived with it" true
+      (List.for_all (settled_on fixture ~date:(day_of fresh.request_id)) fresh_gates);
+    io (fun () -> official_empty_turn fixture.config ~turn:5 ~time:(duplicate_at +. 30.));
+    (match run_worker fixture with
+     | Ok (Consumer.Official_advanced _) -> ()
+     | Ok _ -> fail "a future empty official range should advance under the restored configuration"
+     | Error error -> fail (Consumer.error_to_string error));
+    check int "past refused configuration does not block or redispatch a future range" 3 (F.post_count fixture.server))
+
+(* The same projected chat observation can come from a different source row.
+   The later delivery suppresses the refused row in the successful question's
+   deduplication, while another chat row supplies the same displayed content. *)
+let test_refusal_does_not_accept_a_different_equal_chat_row () =
+  with_fixture ~history_kind:Official (fun ~sw fixture ->
+    let module Sources = Keeper_librarian_input_sources in
+    let content = "identical projected counterpart content" in
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~conversation_id:"agent:source-identity" ~external_message_id:"original-message"
+      ~content ~speaker ();
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content:"shared original counterpart" ~speaker ();
+    io (fun () ->
+      official_empty_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    fixture.set_response (fun _ ->
+      `Request_entity_too_large,
+      {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "expected the original counterpart capacity refusal");
+    let rejected,original=only_original fixture in
+    let original_source=Capture.source original in
+    let original_snapshot=Source.counterparts original_source in
+    let before=Sources.counterpart_snapshot_to_json original_snapshot
+      |> member "before" |> Yojson.Safe.Util.to_float in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content ~speaker ();
+    let delivery_time=before +. 1. in
+    let surface=Keeper_external_attention.Agent in
+    let delivery : Keeper_external_attention.item = {
+      event_id=Keeper_external_attention.event_id_of_dedupe_key "different-source-delivery";
+      dedupe_key="different-source-delivery";keeper_name;
+      conversation={conversation_id="agent:source-identity";surface};
+      external_message=Some {surface;message_id="original-message";reply_to_message_id=None};
+      source_label="agent";
+      actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+      urgency=Keeper_external_attention.Ambient;content_preview="separate delivery preview";
+      content_ref=None;received_at=delivery_time;metadata=[]} in
+    (match Keeper_external_attention.For_testing.record_with_clock
+       ~now:(fun () -> delivery_time) ~base_path:fixture.base_path delivery with
+     | `Recorded -> () | `Duplicate _ -> fail "the later delivery was not recorded"
+     | `Error detail -> fail detail);
+    io (fun () -> official_turn fixture.config ~turn:3 ~time:(delivery_time +. 10.));
+    let sent_observations=ref None in
+    fixture.set_response (fun capture ->
+      sent_observations:=Some (Source.input (Capture.source capture)).counterpart_observations;
+      `OK,F.openai_response (answer capture));
+    let configured_b=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-capacity-retry\"" | line -> line)
+      |> String.concat "\n" in
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    drive_advanced fixture;
+    let witness,witness_capture=observed_originals fixture
+      |> List.filter (fun ((record:Owner.retained),_) -> record.request_id<>rejected.request_id)
+      |> function [original] -> original | _ -> fail "expected one completed witness" in
+    check bool "the later original really finished" true
+      (match Progress.phase witness.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    let witness_source=Capture.source witness_capture in
+    let witness_snapshot=Source.counterparts witness_source in
+    let witness_gates=gate_records fixture witness_capture |> List.filter (fun gate ->
+      Gate.parent_execution_id gate |> get |> String.equal witness.request_id) in
+    check bool "the partly overlapping completion has Gate evidence" true (witness_gates<>[]);
+    let original_input=(Source.input original_source).counterpart_observations in
+    let witness_input=(Source.input witness_source).counterpart_observations in
+    let shared_rows snapshot =
+      Sources.counterpart_snapshot_to_json snapshot |> member "chat_rows" |> Yojson.Safe.Util.to_list
+      |> List.filter (fun row -> row |> member "raw_line" |> Yojson.Safe.Util.to_string
+        |> Astring.String.is_infix ~affix:"shared original counterpart") in
+    let shared_original,shared_witness = match shared_rows original_snapshot,shared_rows witness_snapshot with
+      | [old],[newer] -> old,newer
+      | _ -> fail "both captures must retain exactly one shared chat source" in
+    check json "the partial completion captures the same shared chat source" shared_original shared_witness;
+    check bool "both actual inputs include the shared source projection" true
+      (List.for_all (fun input -> List.exists (fun (observation:Keeper_counterpart_observation.t) ->
+        observation.content="shared original counterpart") input) [original_input;witness_input]);
+    check bool "every old projected value occurs in the later input" true
+      (List.for_all (fun observation -> List.mem observation witness_input) original_input);
+    check bool "the same value does not establish the selected original row" false
+      (Sources.counterpart_selection_covers ~original:(Sources.select_counterparts original_snapshot)
+        ~witness:(Sources.select_counterparts witness_snapshot));
+    check bool "the provider received the later selected projections" true
+      (!sent_observations=Some witness_input);
+    let exact=Capture.request witness_capture |> get in
+    let rendered=Keeper_counterpart_observation.render_for_prompt witness_input in
+    check bool "the exact question includes those selected projections" true
+      (List.exists (fun (message:Exact.message) -> Astring.String.is_infix ~affix:rendered message.text)
+        exact.messages);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check int "the successful input acknowledged its later delivery" 2
+      (Keeper_external_read_cursor.observation_offset (cursor ()));
+    check bool "the original source frontier is otherwise past" true
+      (io (fun () -> Keeper_librarian_refusal_frontier.past_original original |> get));
+    let stopped=memory_action fixture (fun () ->
+      let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store
+        ~owner:(Capture.physical_owner original)) |> get in
+      io (fun () -> List.iter (fun (record,request) ->
+        match Keeper_librarian_durable_commit.validate_inventory ~inventory ~store:fixture.store ~request ~record |> get with
+        | Settled -> () | Unfinished -> fail "the test originals must be settled")
+          [rejected,original;witness,witness_capture]);
+      let module Refusal = Keeper_librarian_durable_refusal in
+      check bool "a record cannot be paired with another request" true
+        (Result.is_error (io (fun () -> Refusal.inventory [rejected,witness_capture])));
+      check bool "a duplicate request ID makes the inventory invalid" true
+        (Result.is_error (io (fun () -> Refusal.inventory [rejected,original;rejected,original])));
+      let changed,changed_request=io (fun () ->
+        let destination=Capture.destination original in
+        let destination={destination with source_revision=destination.source_revision ^ "-alternate"} in
+        let changed_request=Capture.create ~request_id:(Capture.request_id original)
+          ~owner:(Capture.physical_owner original) ~destination ~source:(Capture.source original)
+          ~preparation:(Capture.preparation original) () |> get in
+        let alternate=Store.create ~root:(Filename.concat fixture.base_path "alternate-owner-store") in
+        Owner.retain ~store:alternate ~scope:rejected.scope ~request_id:rejected.request_id
+          ~installation_id:rejected.installation_id ~package_id:rejected.package_id
+          ~tool:rejected.tool ~summary:rejected.summary ~request:(Capture.to_json changed_request) |> owned;
+        match Owner.load ~store:alternate ~scope:rejected.scope ~request_id:rejected.request_id |> owned with
+        | Some record -> record,changed_request | None -> fail "alternate original was not retained") in
+      check bool "the alternate record has the same ID and another digest" true
+        (changed.request_id=rejected.request_id && changed.request_digest<>rejected.request_digest);
+      check bool "the alternate record binds its own valid request" true
+        (Result.is_ok (io (fun () -> Refusal.inventory [changed,changed_request])));
+      check bool "the same ID with another request digest cannot bind the original" true
+        (Result.is_error (io (fun () -> Refusal.inventory [changed,original])));
+      check bool "different digests do not make duplicate IDs admissible" true
+        (Result.is_error (io (fun () -> Refusal.inventory [rejected,original;changed,changed_request])));
+      let only_original=io (fun () -> Refusal.inventory [rejected,original]) |> get in
+      check bool "another record with the same ID is not an inventory member" true
+        (Result.is_error (Refusal.retained_stop ~store:fixture.store ~completed:only_original
+          ~record:changed ~request:original));
+      check bool "an unbound same-ID record is preserved" true
+        (Refusal.preserves_completed ~settled:only_original ~record:changed ~request:original);
+      let only_witness=io (fun () -> Refusal.inventory [witness,witness_capture]) |> get in
+      check bool "a missing refused original cannot be released" true
+        (Result.is_error (Refusal.retained_stop ~store:fixture.store ~completed:only_witness
+          ~record:rejected ~request:original));
+      check bool "an unbound finished original must be preserved" true
+        (Refusal.preserves_completed ~settled:only_witness ~record:witness ~request:original);
+      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store
+        ~completed:(io (fun () -> Keeper_librarian_durable_refusal.inventory
+          [rejected,original;witness,witness_capture]) |> get)
+        ~record:rejected ~request:original |> get) in
+    check bool "the different source row does not release the original refusal" true (Option.is_some stopped);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    let before_cursor=Keeper_external_read_cursor.observation_to_json (cursor ()) in
+    let calls=F.post_count fixture.server in
+    let check_held () =
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "returning to the refused destination must stay blocked");
+      check json "holding the refusal does not acknowledge another delivery" before_cursor
+        (Keeper_external_read_cursor.observation_to_json (cursor ()));
+      check int "holding the refusal does not dispatch again" calls (F.post_count fixture.server);
+      let originals=observed_originals fixture in
+      check bool "the rejected original remains retained" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id) originals);
+      check bool "the partial completion remains retained" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=witness.request_id) originals);
+      check bool "the partial completion retains its Gate evidence" true
+        (List.for_all (fun (gate:Owner.retained) ->
+          List.exists (fun (current:Owner.retained) -> current.request_id=gate.request_id)
+            (gate_records fixture witness_capture)) witness_gates) in
+    check_held ();
+    Consumer.For_testing.reset_process_state ();
+    restart_actual_worker ~while_off:check_held fixture ~sw;
+    check_held ())
+
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
   with_fixture ~history_kind (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
@@ -1910,6 +2639,83 @@ let test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_positio
   consumer_tail fixture;
   check bool "the consumer moved the position" true (progress fixture<>position);
   check bool "and the published range is no candidate" true (Option.is_none (candidate_of fixture)))
+
+let test_published_floor_with_valid_prompts_recovers_its_pending_ack () =
+  with_fixture (fun ~sw:_ fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate, request = candidate_and_request fixture in
+    fixture.set_step_response (answering_steps ["Original question to retain"; "Original completed answer"]);
+    let fin = finished (descend fixture candidate) in
+    published (publish fixture candidate fin);
+    let source = Capture.source request in
+    let runtime_keepers_dir = Workspace.keepers_runtime_dir fixture.config in
+    let cursor () = io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir ~keeper_name |> get) in
+    let after = Keeper_external_read_cursor.observation_offset (Source.external_before source) in
+    let through = Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+    check bool "the published floor has a pending external acknowledgement" true
+      (Keeper_external_read_cursor.observation_matches_floor_preparation (cursor ()) ~after ~through
+         ~atom:(Source.range_id source) ~official:(Source.official_range_id source));
+    let posts = F.post_count fixture.server in
+    check bool "a valid committed floor recovers the source position" true (advanced (run_worker fixture));
+    check int "recovery does not ask the model again" posts (F.post_count fixture.server);
+    check int "the external acknowledgement advances after recovery" through
+      (Keeper_external_read_cursor.observation_offset (cursor ())))
+
+let test_published_floor_with_omitted_observations_keeps_pending_ack () =
+  with_fixture (fun ~sw:_ fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate, request = candidate_and_request fixture in
+    fixture.set_step_response (answering_steps ["Original question to retain"; "Original completed answer"]);
+    let fin = finished (descend fixture candidate) in
+    published (publish fixture candidate fin);
+    let module Step = Keeper_librarian_floor_step_request in
+    let module R = Keeper_librarian_runtime in
+    let owner = Capture.physical_owner request in
+    let record, _ = List.find (fun (_, (header : Step.header)) -> header.position = 0)
+      (steps_of fixture request) in
+    let step = io (fun () -> Step.restore ~owner record |> get) in
+    let valid = Step.step step in
+    let input = valid.preparation.source_input in
+    check bool "the original step carried external observations" true (input.counterpart_observations <> []);
+    let previous = (Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+    Fun.protect ~finally:(fun () -> match previous with
+      | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+      | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+      Prompt_registry.set_override Prompt_names.librarian "Old floor question without counterpart substitution" |> get;
+      let seed = R.prepare_durable_step ~now:(Time_compat.now ()) ~context:valid.context
+        {input with counterpart_observations=[]} |> get in
+      let preparation = seed.preparation in
+      let omitted = R.restore_durable_step_preparation ~context:valid.context ~source_input:input
+        ~parsing_now:preparation.parsing_now ~policy:preparation.policy
+        ~rule_prompt:preparation.rule_prompt ~prompt:preparation.prompt
+        ~output_schema:preparation.output_schema |> get in
+      let request_id = Step.fresh_request_id owner in
+      let payload = match Step.to_json step with
+        | `Assoc fields -> `Assoc (List.map (function
+            | "request_id", _ -> "request_id", `String request_id
+            | "preparation", _ -> "preparation", Keeper_librarian_durable_question.to_json omitted.preparation
+            | field -> field) fields)
+        | _ -> fail "floor step must encode as an object" in
+      let destination = Step.destination step in
+      io (fun () -> Owner.retain ~store:fixture.store ~scope:(Step.scope owner) ~request_id
+        ~installation_id:destination.installation_id ~package_id:destination.package_id
+        ~tool:destination.tool ~summary:`Null ~request:payload) |> owned;
+      let legacy = io (fun () -> Owner.load ~store:fixture.store ~scope:(Step.scope owner) ~request_id)
+        |> owned |> Option.get in
+      ignore (io (fun () -> Step.restore ~owner legacy |> get));
+      let runtime_keepers_dir = Workspace.keepers_runtime_dir fixture.config in
+      let cursor () = io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir ~keeper_name |> get) |> Keeper_external_read_cursor.observation_to_json in
+      let before = cursor () and posts = F.post_count fixture.server in
+      (match run_worker fixture with
+       | Error error -> check bool "the omitted input is visible in the refusal" true
+           (contains (Consumer.error_to_string error) "counterpart_observations")
+       | Ok _ -> fail "an omitted floor question must not authorize an ACK");
+      check json "the pending external cursor is unchanged" before (cursor ());
+      check int "recovery does not repeat the model request" posts (F.post_count fixture.server);
+      check bool "the omitted step remains retained" true
+        (List.exists (fun ((held : Owner.retained), _) -> held.request_id=request_id) (steps_of fixture request))))
 let test_a_hole_travels_in_the_receipt_and_in_the_external_cursor () = with_fixture (fun ~sw:_ fixture ->
   let huge=message (filler "huge-message" oversized_turn_bytes) in
   add_unread_turn ~external_admission:true fixture [huge;reply "Oversized answer"];
@@ -2396,6 +3202,146 @@ let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~s
    | Ok moved -> failf "%d records settled for a position no step holds" moved);
   check (list int) "and no step moved" [0;1] (sorted_positions fixture request))
 
+(* Reconstruct a pre-policy question from its captured parts. This deliberately
+   uses structural restoration, not the fresh preparation API that now refuses
+   it. The source, original store, worker and host receipts remain real. *)
+let with_legacy_omitted_original fixture f =
+  let previous=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+  Fun.protect ~finally:(fun () -> match previous with
+    | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+    | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+    let captured=ref None in
+    assert_pending (memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+      ~commit:(fun source -> captured:=Some source;Consumer.Memory_pending)));
+    let source=Option.get !captured in
+    let input=Source.input source in
+    check bool "legacy original has observations the old question could omit" true
+      (input.counterpart_observations<>[]);
+    Prompt_registry.set_override Prompt_names.librarian "Legacy history question without observation substitution" |> get;
+    let module R=Keeper_librarian_runtime in
+    let seed=R.prepare_durable ~now:(Time_compat.now ()) {input with counterpart_observations=[]} |> get in
+    let preparation=R.restore_durable_preparation ~source_input:input ~parsing_now:seed.parsing_now
+      ~policy:seed.policy ~rule_prompt:seed.rule_prompt ~prompt:seed.prompt ~output_schema:seed.output_schema |> get in
+    R.validate_durable_preparation preparation |> get;
+    let original,request=memory_action fixture (fun () ->
+      let owner=io (fun () ->
+        (* Normal durable capture obtains the program anchor before observing
+           the physical owner, creating the empty Memory epoch if needed. *)
+        let _=Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get in
+        Capture.observe_owner ~base_path:fixture.base_path
+          ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name) |> get in
+      Keeper_librarian_durable_edge.with_destination ~config:fixture.config ~reserved:[] (fun destination ->
+        let request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+          ~owner ~destination ~source ~preparation ()) |> get in
+        let original=Durable_owner.retain ~store:fixture.store request
+          |> Result.map_error Durable_owner.error_to_string |> get in
+        Ok (original,request)) |> get) in
+    f original request)
+let assert_omitted_original_blocked = function
+  | Error error ->
+    check bool "the original remains a blocked publication" true (Consumer.publication_unfinished error);
+    check bool "blocked reason names the frozen omitted input" true
+      (Astring.String.is_infix ~affix:"counterpart_observations" (Consumer.error_to_string error))
+  | Ok _ -> fail "an unsafe retained question reached a fresh effect"
+let advance_legacy fixture original event =
+  io (fun () -> match Owner.advance ~store:fixture.store ~expected:original ~event with
+    | Ok (Owner.Stored record | Already_stored record) -> record
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error))
+let test_legacy_omitted_original_refuses_admission_but_observes_pending () =
+  with_fixture (fun ~sw:_ fixture -> with_legacy_omitted_original fixture (fun original request ->
+    let source_json=Capture.to_json request and events=Progress.to_json original.Owner.progress in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get)
+      |> Keeper_external_read_cursor.observation_to_json in
+    let cursor_before=cursor () and position_before=progress fixture in
+    assert_omitted_original_blocked (run_worker fixture);
+    let held,restored=only_original fixture in
+    check json "rejected admission leaves the original progress unchanged" events (Progress.to_json held.progress);
+    check json "rejected admission retains the exact old question" source_json (Capture.to_json restored);
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    let authorization=Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path
+      ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request request |> get)
+      |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail) |> get in
+    (match authorization.before_dispatch () with
+     | Error detail -> check bool "actual host dispatch names the omitted input" true
+         (Astring.String.is_infix ~affix:"counterpart_observations" detail)
+     | Ok () -> fail "actual host dispatch admitted an omitted retained question");
+    Prompt_registry.clear_prompt_override Prompt_names.librarian;
+    assert_omitted_original_blocked (run_worker fixture);
+    let dispatched=advance_legacy fixture held Progress.Dispatch_intended in
+    assert_pending (run_worker fixture);
+    let pending,restored=only_original fixture in
+    check string "unknown delivery keeps the old ID" dispatched.request_id pending.Owner.request_id;
+    check json "pending observation never rerenders the question" source_json (Capture.to_json restored);
+    check json "no external preparation is ACKed" cursor_before (cursor ());
+    check bool "no read position advances" true (progress fixture=position_before);
+    check int "admission, provider guard and pending wakes dispatch no model" 0 (F.post_count fixture.server);
+    no_memory fixture))
+(* Seed one actual host answer using the pre-policy authority boundary. This
+   test-only dispatcher removes the new guard only while modeling that earlier
+   HTTP call; original binding/schema/domain validation and receipts stay real. *)
+let seed_legacy_original_answer fixture original request =
+  let current_authorize=Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path in
+  let runner=Server_lane_addon_exact.runner ~base_path:fixture.base_path in
+  let old_authorize ~store ~declaration_id ~package request =
+    Result.map (fun (authority:Exact.request_authorization) ->
+      {authority with before_dispatch=(fun () -> Ok ())})
+      (current_authorize ~store ~declaration_id ~package request) in
+  Fun.protect ~finally:(fun () -> Runtime.register_exact_runner ~authorize_request:current_authorize runner) (fun () ->
+    Runtime.register_exact_runner ~authorize_request:old_authorize runner;
+    let original=advance_legacy fixture original Progress.Dispatch_intended in
+    let destination=Capture.destination request in
+    let before= !(fixture.deliveries) in
+    Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
+      ~access:Lane_addon_sources.Operator_configuration ~installation_id:destination.installation_id
+      ~package_id:destination.package_id ~tool:destination.tool ~configuration_revision:destination.configuration_revision
+      ~original ~arguments:(`Assoc ["kind",`String "submit";"request",Exact.request_to_json (Capture.request request |> get)])
+      |> Result.map_error (fun _ -> "legacy fixture submit was refused before its modeled old effect") |> get |> ignore;
+    await_delivery fixture ~after:before)
+let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
+  with_fixture (fun ~sw:_ fixture -> with_legacy_omitted_original fixture (fun original request ->
+    let source_json=Capture.to_json request in
+    seed_legacy_original_answer fixture original request;
+    check int "the fixture retained one real pre-policy host request" 1 (F.post_count fixture.server);
+    assert_omitted_original_blocked (run_worker fixture);
+    let judged,restored=only_original fixture in
+    check bool "actual host answer remains a judged original" true
+      (match Progress.phase judged.Owner.progress with Judged _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _ | Finished _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check json "new publication refuses without rewriting the actual old question" source_json (Capture.to_json restored);
+    let proposal=Capture.validate_proposal request (answer request)
+      |> get in
+    let direct=memory_action fixture (fun () -> Keeper_librarian_durable_commit.publish ~store:fixture.store
+      ~config:fixture.config ~request ~original:judged ~proposal
+      ~fresh_authority:(fun () -> fail "omitted original must stop before a new Gate effect")) in
+    (match direct with
+     | Error detail -> check bool "direct publication names its omitted input" true
+         (Astring.String.is_infix ~affix:"counterpart_observations" detail)
+     | Ok _ -> fail "direct publication admitted an omitted retained question");
+    check int "no new Gate original is created" 0 (List.length (gate_records fixture request));
+    let check_owner_phase original =
+      let result=memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
+        ~reserved:[] ~original ~request ~wake:(fun () -> fail "unsafe publication cannot wake completion")
+        ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:[])
+        ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "unsafe original cannot enter a publication callback")) in
+      (match result with
+       | Error error -> check bool "commit phase remains explicitly blocked" true
+           (Astring.String.is_infix ~affix:"counterpart_observations" (Durable_owner.error_to_string error))
+       | Ok _ -> fail "an unsafe retained commit phase reached an effect") in
+    (* These legal journal transitions test the owner's effect boundary. They
+       do not fabricate a Gate/Memory receipt or claim a completed commit. *)
+    let committing=advance_legacy fixture judged (Progress.Commit_intended {before=`String "before";after=`String "after"}) in
+    check_owner_phase committing;
+    let unknown=advance_legacy fixture committing (Progress.Commit_uncertain (`Assoc ["detail",`String "legacy interrupted effect"])) in
+    check_owner_phase unknown;
+    check json "every blocked phase preserves the original source/question" source_json
+      (Capture.to_json (snd (only_original fixture)));
+    check int "publication never replays the original provider request" 1 (F.post_count fixture.server);
+    no_memory fixture))
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "proved original survives invalid working context on resume" `Quick
     test_retained_answer_with_invalid_working_context_recovers;
@@ -2423,6 +3369,20 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_gate_request_names_its_parent_by_digest;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
+  test_case "counterpart-only capacity refusal preserves source and ACK" `Quick
+    test_counterpart_only_provider_capacity_refusal_is_source_preserving;
+  test_case "a different equal chat row cannot release the original refusal" `Quick
+    test_refusal_does_not_accept_a_different_equal_chat_row;
+  test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
+    test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
+  test_case "legacy omitted original blocks admission but observes pending" `Quick
+    test_legacy_omitted_original_refuses_admission_but_observes_pending;
+  test_case "legacy omitted answer blocks Judged and commit publication" `Quick
+    test_legacy_omitted_answer_blocks_judged_and_commit_publication;
+  test_case "missing counterpart substitution preserves fresh source until corrected" `Quick
+    test_counterpart_prompt_omission_preserves_fresh_source;
+  test_case "untagged official counterparts reach Memory once" `Quick
+    test_untagged_official_counterparts_reach_memory_once;
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;
   test_case "actual host result bridge resumes production queue" `Quick test_actual_result_bridge_uses_production_queue;
   test_case "host answer without original gate waits while Off" `Quick test_host_answer_without_gate_waits_while_off;
@@ -2470,6 +3430,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_the_descent_reads_on_while_the_external_cursor_moves;
   test_case "a finished chain commits its program and the consumer moves the position" `Quick
     test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_position;
+  test_case "a published floor with valid prompts recovers its pending ACK" `Quick
+    test_published_floor_with_valid_prompts_recovers_its_pending_ack;
+  test_case "a published floor with omitted observations retains its pending ACK" `Quick
+    test_published_floor_with_omitted_observations_keeps_pending_ack;
   test_case "a hole travels in the receipt and in the external cursor" `Quick
     test_a_hole_travels_in_the_receipt_and_in_the_external_cursor;
   test_case "a memory that changed since the chain began supersedes the program" `Quick

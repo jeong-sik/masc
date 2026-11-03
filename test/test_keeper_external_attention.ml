@@ -469,16 +469,35 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
       ~history_start_boundary_line:range.history_start_boundary_line ~atom:0 ~message_in_atom:0
       ~messages ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> get in
     {range with unread_messages=[hole]} in
+  let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
+  let official : Current.official_range_id =
+    {receipt_scope=runtime_keepers_dir;after_boundary_line=0;
+     turns=[1,Ids.Turn_ref.make ~trace_id:"cursor-official" ~absolute_turn:1];unread_messages=[]} in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2
     ~atom:(Some range) ~official:None |> get;
   Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
-  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range
+  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range ~official_range_id:official
     ~absorbed:[] ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~now:1.
     ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
   (* No acknowledge call: simulate interruption after the real Memory WAL
      committed but before the external cursor and ordinary progress wrote. *)
   let pending_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
   let pending_bytes = Fs_compat.load_file pending_path in
+  List.iter (fun (label,through,atom,official,expected_error) ->
+    (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial
+       ~through ~atom ~official with
+     | Error detail -> Alcotest.(check string) (label ^ " refuses for its actual reason") expected_error detail
+     | Ok () -> Alcotest.fail (label ^ " preparation was accepted"));
+    Alcotest.(check string) (label ^ " leaves the pending cursor unchanged") pending_bytes
+      (Fs_compat.load_file pending_path))
+    ["backwards", -1, Some range, None, "external attention log shrank behind its read cursor";
+     "missing identity", 3, None, None, "external read has no Memory commit identity";
+     "already committed atom", 3, Some range, None,
+       "a committed Memory range cannot acknowledge a new external snapshot";
+     "already committed official", 3, None, Some official,
+       "a committed Memory range cannot acknowledge a new external snapshot";
+     "new atom with already committed official", 3, Some next, Some official,
+       "a committed Memory range cannot acknowledge a new external snapshot"];
   let observed = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
   Alcotest.(check int) "observation does not recover a committed Memory receipt" 0
     (Cursor.observation_offset observed);
@@ -498,6 +517,17 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
     match previous_ledger with
     | Some bytes -> Fs_compat.save_file ledger_path bytes
     | None -> Sys.remove ledger_path);
+  if not with_unread then (
+    (* A valid new preparation still recovers an older committed pending read.
+       Its old token must be rejected, and the caller can retry at the new offset. *)
+    (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial
+       ~through:3 ~atom:(Some next) ~official:None with
+     | Error detail -> Alcotest.(check string) "recovery reports the stale token"
+         "external admission cursor changed before preparation" detail
+     | Ok () -> Alcotest.fail "preparation used a token from before recovery");
+    let recovered = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+    Alcotest.(check int) "valid preparation recovers the old committed cursor" 2
+      (Cursor.observation_offset recovered));
   Alcotest.(check int) "continuity-scoped Memory receipt recovers exact cursor" 2
     (Cursor.offset (read ()));
   if with_unread then (
@@ -513,7 +543,6 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
    | Error _ -> ()
    | Ok () -> Alcotest.fail "old committed range admitted a new external snapshot");
   Alcotest.(check int) "reused receipt did not consume new rows" 2 (Cursor.offset (read ()));
-  let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ()) ~through:3
     ~atom:(Some next) ~official:None |> get;
   Alcotest.(check int) "older receipt cannot acknowledge newer source" 2 (Cursor.offset (read ()));
@@ -575,13 +604,37 @@ let test_counterpart_capture_retains_original_rows_and_dedup_frontier () =
   (match record ~base_path (item ~keeper_name ~dedupe_key:"capture-append" ~preview:"new tail" ~received_at:40. ()) with
    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected appended duplicate"
    | `Error detail -> Alcotest.fail detail);
-  let tail = row ~id:"appended-chat" ~content:"new chat tail" ~ts:14. [] in
+  let tail = row ~id:"appended-chat" ~content:"new chat tail" ~ts:14.
+      ["conversation_id",`String future.conversation.conversation_id;
+       "external_message_id",`String "tail-future-message"] in
   write_file chat_path (duplicate ^ "\n" ^ direct ^ "\n" ^ tail ^ "\n");
   let fresh = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
       ~after:None ~before:20. |> Result.map_error Sources.read_error_to_string |> get in
   Sources.snapshot_extends ~original:snapshot ~current:fresh |> get;
   Sources.validate_original_selection snapshot ~base_dir:base_path ~keeper_name
     |> Result.map_error Sources.read_error_to_string |> get;
+  let expected_digest = Sources.counterpart_observations_digest snapshot in
+  Alcotest.(check bool) "unacknowledged external cursor does not cover the original frontier" false
+    (Sources.counterparts_covered_at_frontier snapshot ~counterpart_digest:expected_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:0
+     |> Result.map_error Sources.read_error_to_string |> get);
+  Alcotest.(check bool) "acknowledged external cursor covers the intact original counterparts" true
+    (Sources.counterparts_covered_at_frontier snapshot ~counterpart_digest:expected_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:1
+     |> Result.map_error Sources.read_error_to_string |> get);
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"capture-tail-dup" ~preview:"tail dup"
+           ~external_message:(external_message "tail-future-message") ~received_at:50. ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected tail duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let fresh_digest = Sources.counterpart_observations_digest fresh in
+  Alcotest.(check bool) "unacknowledged future delivery that suppresses a selected chat row blocks frontier coverage" false
+    (Sources.counterparts_covered_at_frontier fresh ~counterpart_digest:fresh_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:1
+     |> Result.map_error Sources.read_error_to_string |> get);
+  Alcotest.(check bool) "acknowledging the suppressing future delivery restores frontier coverage" true
+    (Sources.counterparts_covered_at_frontier fresh ~counterpart_digest:fresh_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:5
+     |> Result.map_error Sources.read_error_to_string |> get);
   Alcotest.(check int) "accepted source tails never extend the original frontier" 1
     (Sources.external_through snapshot);
   write_file chat_path (row ~id:"replacement" ~content:"changed source" ~ts:13. [] ^ "\n");
@@ -602,6 +655,204 @@ let test_counterpart_capture_retains_original_rows_and_dedup_frontier () =
      refused (`Assoc (List.map (fun (key,value) -> key, if key="chat_rows" then
        `List [`Assoc ["raw_line",`String duplicate;"projected_line",`String direct]] else value) fields))
    | _ -> Alcotest.fail "capture envelope missing")
+;;
+
+let test_counterpart_witness_requires_selected_source_identity () =
+  with_temp_base "keeper-counterpart-witness" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let module Chat = Masc.Keeper_chat_store in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let covers ~original ~witness = Sources.counterpart_selection_covers
+      ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let may_overlap ~original ~candidate = Sources.counterpart_selection_may_overlap
+      ~original:(Sources.select_counterparts original) ~candidate:(Sources.select_counterparts candidate) in
+  let keeper_name = "witness-owner" in
+  let row ~id ~ts extra =
+    `Assoc (["id",`String id;"role",`String "user";"content",`String "same content";
+      "ts",`Float ts;"speaker_id",`String "speaker";"speaker_name",`String "Speaker";
+      "speaker_authority",`String "external"] @ extra) |> Yojson.Safe.to_string in
+  let original_row = row ~id:"original-row" ~ts:10.
+      ["conversation_id",`String "discord:guild-1:chan-1";
+       "external_message_id",`String "original-message"] in
+  let other_row = row ~id:"another-row" ~ts:30. [] in
+  let chat_path = Chat.chat_path ~base_dir:base_path ~keeper_name in
+  let capture before =
+    Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
+      ~after:None ~before |> Result.map_error Sources.read_error_to_string |> get in
+  write_file chat_path (original_row ^ "\n");
+  let original = capture 15. in
+  let changed_projection = match Sources.counterpart_snapshot_to_json original with
+    | `Assoc fields ->
+      let rows = match List.assoc "chat_rows" fields with
+        | `List [`Assoc row] ->
+          let projected = match List.assoc "projected_line" row with
+            | `String line -> (match Yojson.Safe.from_string line with
+              | `Assoc values -> `Assoc (List.map (fun (key,value) ->
+                  key, if key="content" then `String "another projection" else value) values)
+                  |> Yojson.Safe.to_string
+              | _ -> Alcotest.fail "projected chat row must be an object")
+            | _ -> Alcotest.fail "projected chat row must be a string" in
+          `List [`Assoc (List.map (fun (key,value) ->
+            key, if key="projected_line" then `String projected else value) row)]
+        | _ -> Alcotest.fail "fixture must retain one chat row" in
+      `Assoc (List.map (fun (key,value) -> key, if key="chat_rows" then rows else value) fields)
+      |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  Alcotest.(check bool) "the same raw chat row with a different delivered projection is not a witness" false
+    (covers ~original ~witness:changed_projection);
+  Alcotest.(check bool) "a different projection still retains the matching source" true
+    (may_overlap ~original ~candidate:changed_projection);
+  write_file chat_path (other_row ^ "\n");
+  let plain_chat = capture 40. in
+  Alcotest.(check bool) "the same chat ID overlaps without a delivery identity" true
+    (may_overlap ~original:plain_chat ~candidate:plain_chat);
+  let same_delivery_row = row ~id:"different-chat-id" ~ts:10.
+      ["conversation_id",`String "discord:guild-1:chan-1";
+       "external_message_id",`String "original-message"] in
+  write_file chat_path (same_delivery_row ^ "\n");
+  let same_delivery_chat = capture 15. in
+  Alcotest.(check bool) "a different chat row is not a complete witness" false
+    (covers ~original ~witness:same_delivery_chat);
+  Alcotest.(check bool) "chat rows with the same delivery identity may overlap" true
+    (may_overlap ~original ~candidate:same_delivery_chat);
+  write_file chat_path (original_row ^ "\n");
+  let delivery = item ~keeper_name ~dedupe_key:"witness-delivery" ~received_at:20.
+      ~preview:"different delivery preview" ~external_message:(external_message "original-message") () in
+  (match record ~base_path delivery with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected delivery duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let other_conversation = row ~id:"other-conversation" ~ts:30.
+      ["conversation_id",`String "discord:guild-1:other";
+       "external_message_id",`String "original-message"] in
+  write_file chat_path (original_row ^ "\n" ^ other_row ^ "\n" ^ other_conversation ^ "\n");
+  let witness = capture 40. in
+  let original_input = Sources.counterpart_observations original in
+  let witness_input = Sources.counterpart_observations witness in
+  Alcotest.(check int) "the original question contained one chat observation" 1 (List.length original_input);
+  Alcotest.(check bool) "a different row supplies the same projected value" true
+    (List.for_all (fun observation -> List.mem observation witness_input) original_input);
+  Alcotest.(check int) "matching message ID in another conversation is not deduplicated" 2
+    (List.length (List.filter (fun (observation:Masc.Keeper_counterpart_observation.t) ->
+      observation.content="same content") witness_input));
+  Alcotest.(check bool) "the deduplicated original is not selected by the witness" false
+    (covers ~original ~witness);
+  Alcotest.(check bool) "the later delivery may overlap the original chat source" true
+    (may_overlap ~original ~candidate:witness);
+  let unrelated = Sources.capture_counterparts ~external_after:1 ~base_dir:base_path ~keeper_name
+      ~after:(Some 25.) ~before:40. |> Result.map_error Sources.read_error_to_string |> get in
+  Alcotest.(check bool) "an unrelated selected chat does not hold this source" false
+    (may_overlap ~original ~candidate:unrelated);
+  let current_original_window = capture 15. in
+  Sources.snapshot_extends ~original ~current:current_original_window |> get;
+  Alcotest.(check bool) "the old frontier can already be acknowledged" true
+    (Sources.counterparts_covered_at_frontier original
+       ~counterpart_digest:(Sources.counterpart_observations_digest original)
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:1
+     |> Result.map_error Sources.read_error_to_string |> get)
+;;
+
+let test_counterpart_witness_requires_order_and_multiplicity () =
+  with_temp_base "keeper-counterpart-witness-order" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let covers ~original ~witness = Sources.counterpart_selection_covers
+      ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let keeper_name = "ordered-witness" in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected delivery duplicate"
+    | `Error detail -> Alcotest.fail detail)
+    [item ~keeper_name ~dedupe_key:"first" ~preview:"same" ~received_at:1. ();
+     item ~keeper_name ~dedupe_key:"second" ~preview:"same" ~received_at:2. ();
+     item ~keeper_name ~dedupe_key:"later" ~preview:"later" ~received_at:3. ()];
+  let capture before = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path
+      ~keeper_name ~after:None ~before |> Result.map_error Sources.read_error_to_string |> get in
+  let original = capture 2. and extended = capture 3. in
+  Alcotest.(check bool) "later selected events preserve a real ordered witness" true
+    (covers ~original ~witness:extended);
+  let reordered = match Sources.counterpart_snapshot_to_json extended with
+    | `Assoc fields ->
+      let entries = match List.assoc "external_log" fields with
+        | `List [first;second;later] -> `List [second;first;later]
+        | _ -> Alcotest.fail "fixture must retain three external rows" in
+      `Assoc (List.map (fun (key,value) -> key, if key="external_log" then entries else value) fields)
+      |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  Alcotest.(check bool) "the two reordered event projections are identical" true
+    (Sources.counterpart_observations extended = Sources.counterpart_observations reordered);
+  Alcotest.(check bool) "equal projected values cannot hide reversed source order" false
+    (covers ~original ~witness:reordered);
+  let only_second = Sources.capture_counterparts ~external_after:1 ~base_dir:base_path
+      ~keeper_name ~after:None ~before:3. |> Result.map_error Sources.read_error_to_string |> get in
+  Alcotest.(check bool) "one equal event cannot stand in for two originals" false
+    (covers ~original ~witness:only_second)
+;;
+
+let test_counterpart_witness_distinguishes_external_occurrences () =
+  with_temp_base "keeper-counterpart-witness-offset" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let covers ~original ~witness = Sources.counterpart_selection_covers
+      ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let keeper_name = "offset-witness" in
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"same-event"
+     ~external_message:(external_message "same-message") ~received_at:1. ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected initial duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let first = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
+      ~after:None ~before:2. |> Result.map_error Sources.read_error_to_string |> get in
+  let with_events ~after events = match Sources.counterpart_snapshot_to_json first with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key,value) -> key,
+        if key="external_log" then `List (List.map A.item_to_json events)
+        else if key="external_after" then `Int after
+        else if key="external_through" then `Int (List.length events)
+        else value) fields) |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  let other_at_same_offset = with_events ~after:0
+      [item ~keeper_name ~dedupe_key:"other-offset-event" ~received_at:1. ()] in
+  Alcotest.(check bool) "a different event at the same offset is not a complete witness" false
+    (covers ~original:first ~witness:other_at_same_offset);
+  Alcotest.(check bool) "the same external offset alone may overlap" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts other_at_same_offset));
+  let same_id_at_other_offset = with_events ~after:1
+      [item ~keeper_name ~dedupe_key:"first-placeholder" ~received_at:1. ();
+       item ~keeper_name ~dedupe_key:"same-event" ~received_at:1. ()] in
+  Alcotest.(check bool) "the same event ID at another offset may overlap" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts same_id_at_other_offset));
+  let repeated ~after = match Sources.counterpart_snapshot_to_json first with
+    | `Assoc fields ->
+      let log = match List.assoc "external_log" fields with
+        | `List [event] -> `List [event;event]
+        | _ -> Alcotest.fail "fixture must retain one external event" in
+      `Assoc (List.map (fun (key,value) -> key,
+        if key="external_log" then log
+        else if key="external_after" then `Int after
+        else if key="external_through" then `Int 2
+        else value) fields) |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  let both = repeated ~after:0 and second = repeated ~after:1 in
+  Alcotest.(check bool) "identical event items have identical delivered projections" true
+    (Sources.counterpart_observations first=Sources.counterpart_observations second);
+  Alcotest.(check bool) "the same first append remains a valid witness" true
+    (covers ~original:first ~witness:both);
+  Alcotest.(check bool) "a later identical append cannot stand in for the first" false
+    (covers ~original:first ~witness:second);
+  Alcotest.(check bool) "the repeated event still retains possible partial evidence" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts second));
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"other-event"
+     ~external_message:(external_message "same-message") ~received_at:1.5 ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected second delivery duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let other_delivery = Sources.capture_counterparts ~external_after:1 ~base_dir:base_path ~keeper_name
+      ~after:None ~before:2. |> Result.map_error Sources.read_error_to_string |> get in
+  Alcotest.(check bool) "a different external event is not a complete witness" false
+    (covers ~original:first ~witness:other_delivery);
+  Alcotest.(check bool) "external events with the same delivery identity may overlap" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts other_delivery))
 ;;
 
 let test_cursor_observation_preserves_complete_preparation () =
@@ -661,6 +912,12 @@ let () =
         [
           Alcotest.test_case "counterpart capture preserves original rows and out-of-range dedup identities" `Quick
             test_counterpart_capture_retains_original_rows_and_dedup_frontier;
+          Alcotest.test_case "counterpart witness requires the selected source" `Quick
+            test_counterpart_witness_requires_selected_source_identity;
+          Alcotest.test_case "counterpart witness requires source order and multiplicity" `Quick
+            test_counterpart_witness_requires_order_and_multiplicity;
+          Alcotest.test_case "counterpart witness distinguishes repeated external occurrences" `Quick
+            test_counterpart_witness_distinguishes_external_occurrences;
           Alcotest.test_case "read-only cursor capture preserves complete original preparation" `Quick
             test_cursor_observation_preserves_complete_preparation;
           Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick

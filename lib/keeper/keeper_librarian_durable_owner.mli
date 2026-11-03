@@ -52,7 +52,11 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     [Outcome_unknown] returns [Pending (Worker_unknown, original)] after its
     immutable refusal is verified and retained. It never grants a fresh source
     selection or submission, including after restart or while Off. Only shared
-    submit-once pre-admission/Not_sent rules retry.
+    submit-once pre-admission/Not_sent rules retry. New admission and every
+    unfinished publication require the frozen prompt to cover its counterpart
+    input. A receipt alone cannot authorize a new ACK of observations an old
+    question omitted. Pending/unknown observation and structural restoration
+    remain available without rewriting that question.
     Linked work cannot dispatch before its predecessor confirms publication of
     this exact full child request. Missing or changed parent intent refuses.
     Existing Finished is strictly restored but not republished against today's

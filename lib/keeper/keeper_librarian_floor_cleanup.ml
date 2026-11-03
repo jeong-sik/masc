@@ -3,6 +3,11 @@ module Step_owner = Keeper_librarian_floor_step_owner
 module Gate = Keeper_librarian_floor_step_gate
 module Descent = Keeper_librarian_floor_descent
 module Retained = Lane_addon_tool_request_owner
+module Request = Keeper_librarian_durable_request
+module Capture = Keeper_librarian_durable_capture
+module Commit = Keeper_librarian_durable_commit
+module Cursor = Keeper_external_read_cursor
+module Memory_runtime = Keeper_librarian_runtime
 let ( let* ) = Result.bind
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 
@@ -66,10 +71,39 @@ let settle_orphan_gates ~store ~owner ~steps =
     let* gates = settle_gates ~store ~inventory ~date ~execution_id in
     Ok (moved + gates)) (Ok 0) (Gate.Inventory.executions inventory)
 
-let cleanup ~store ~owner ~candidates =
+(* A floor receipt can exist before its external ACK. Do not archive its
+   frozen questions before checking that their prompts included the source
+   observations: cursor recovery would otherwise ACK on the range alone. *)
+let check_pending_floor ~owner ~settled steps =
+  let associated = List.filter_map (fun ((_, (header : Step.header)) as step) ->
+    List.find_opt (fun ((record : Retained.retained), _) ->
+      String.equal record.request_id header.range.request_id
+      && String.equal record.request_digest header.range.request_digest) settled
+    |> Option.map (fun (_, request) -> step, request)) steps in
+  match associated with
+  | [] -> Ok ()
+  | _ :: _ -> io (fun () ->
+    let* cursor = Cursor.observe ~runtime_keepers_dir:(Request.runtime_keepers_dir owner)
+      ~keeper_name:(Request.keeper_id owner) in
+    List.fold_left (fun checked (((record : Retained.retained), _), request) ->
+      let* () = checked in
+      let source = Request.source request in
+      let after = Cursor.observation_offset (Capture.external_before source) in
+      let through = Keeper_librarian_input_sources.external_through (Capture.counterparts source) in
+      if not (Cursor.observation_matches_floor_preparation cursor ~after ~through
+        ~atom:(Capture.range_id source) ~official:(Capture.official_range_id source))
+      then Ok () else
+      let* committed = Commit.receipt_state request in
+      if not committed then Ok () else
+      let* step = Step.restore ~owner record in
+      Memory_runtime.require_counterpart_template (Step.step step).preparation)
+      (Ok ()) associated)
+
+let cleanup ~store ~owner ~candidates ~settled =
   let* steps = discover ~store ~owner in
   let unowned = List.filter (fun (_, header) ->
     not (List.exists (fun candidate -> owns candidate header) candidates)) steps in
+  let* () = check_pending_floor ~owner ~settled unowned in
   let* settled = settle_steps ~store ~owner unowned in
   let* orphans = settle_orphan_gates ~store ~owner ~steps in
   Ok (settled + orphans)

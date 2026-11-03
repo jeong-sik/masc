@@ -57,6 +57,7 @@ let publish_with ~(apply : apply) ~candidate ~(finished : Machine.finished) =
      this check and the commit. *)
   let* proved = receipt () in
   if proved then Ok Published else
+  let* () = Keeper_librarian_runtime.require_counterpart_template (Request.preparation request) in
   let outcome = io (fun () ->
     Lock.with_original_snapshot ~request (fun ~messages ->
       let* anchor = Current.capture_program_anchor ~keepers_dir ~keeper_id in

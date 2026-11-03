@@ -22,6 +22,8 @@ val judge : store:Lane_addon_store.t -> step:Keeper_librarian_floor_step_request
     evaluations the host retained: a restart never asks the model again and never
     judges again with the Memory of the moment. [fresh_authority] checks the
     owner and the configured destination before anything is created or sent.
+    The frozen step's counterpart-template policy is checked before either a
+    new gate effect or replay into the chain's Memory program.
 
     [inventory] is the owner's gate scope read once for the whole pass. A step
     whose journal it shows complete and successful is judged from it, without

@@ -44,3 +44,6 @@ val to_yojson : t -> Yojson.Safe.t
 val render_for_prompt : t list -> string
 (** Render a JSON array.  JSON quoting keeps speaker content inside the
     [content] field even when it contains prompt-like markers or newlines. *)
+
+val digest : t list -> string
+(** Deterministic SHA-256 hex digest of {!render_for_prompt}. *)

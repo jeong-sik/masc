@@ -437,6 +437,16 @@ let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt 
   let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;prompt;
     variables;rendered_prompt;output_schema} in
   let+ ()=validate_durable_preparation preparation in preparation
+(* This is an admission check, not a restoration rule: old captures must keep
+   their original prompt and remain decodable even if it omitted the input. *)
+let require_counterpart_source ~(source_input : Keeper_librarian.input) ~prompt =
+  if source_input.counterpart_observations = []
+    || Prompt_registry.resolution_references_variable prompt
+         ~variable:"counterpart_observations"
+  then Ok ()
+  else Error "Librarian prompt must include {{counterpart_observations}} while counterpart input is pending"
+let require_counterpart_template (preparation : durable_preparation) =
+  require_counterpart_source ~source_input:preparation.source_input ~prompt:preparation.prompt
 let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let open Result.Syntax in
   let policy : durable_policy = {
@@ -456,6 +466,7 @@ let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;prompt;
     variables;rendered_prompt;output_schema} in
   let* ()=check_durable_preparation ?continuity ~expected_schema:output_schema preparation in
+  let* ()=require_counterpart_template preparation in
   Ok preparation
 let prepare_durable ~now source_input =
   prepare_durable_with
@@ -760,6 +771,7 @@ let message_descent_of_failure (evidence : Failure_evidence.t) =
    log, and independent evidence about reading a smaller input. *)
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
+  ; input_capacity_only : bool
   ; message_descent : message_descent
   ; provider_input_refusals : Keeper_librarian_input_refusal.t list
   ; detail : string
@@ -790,6 +802,7 @@ let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   ; walk_shows_size = Failure_evidence.shows_range_size evidence
   ; message_descent = message_descent_of_failure evidence
   ; input_capacity_evidence = input_capacity_of_failure evidence
+  ; input_capacity_only = Failure_evidence.input_capacity_only evidence
   ; provider_input_refusals = evidence.provider_input_refusals
   ; smaller_range_meets_same_failure = evidence.size_independent_execution_failure
   }
@@ -962,6 +975,8 @@ let validate_durable_step_proposal (step : durable_step_preparation) output =
    Memory plan and program take it unchanged. A failed judgment is no decision. *)
 let durable_memory_step ~run_id (step : durable_step_preparation) (proposal : durable_step_proposal)
     ~absorb_gate =
+  let open Result.Syntax in
+  let* ()=require_counterpart_template step.preparation in
   let selection=proposal.proposal.accepted.selection in
   if String.trim run_id="" then Error "Original history floor step needs a run identity"
   else match Keeper_librarian_absorb_gate.failure_detail ~absorbed:selection.absorbed absorb_gate with
@@ -1581,7 +1596,7 @@ let run_pass
       ~has_official_range_id:(Option.is_some official_range_id) in
   if not admission_mode_valid then
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
-                      walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false}
+                      walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false}
   else
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
@@ -1594,7 +1609,7 @@ let run_pass
         (match acquired with
          | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
            let detail = "Librarian is off; pending input remains unconsumed" in
-           on_not_committed {detail; walk_shows_size=false; message_descent=No_descent_evidence; input_capacity_evidence=No_input_capacity_refusal; provider_input_refusals=[]; smaller_range_meets_same_failure = false};
+           on_not_committed {detail; walk_shows_size=false; message_descent=No_descent_evidence; input_capacity_evidence=No_input_capacity_refusal; input_capacity_only=false; provider_input_refusals=[]; smaller_range_meets_same_failure = false};
            Log.Keeper.info ~keeper_name:keeper_id "%s" detail
          | Ok _ | Error (Prompt_render_failed _)
          | Error
@@ -1640,7 +1655,17 @@ let run_pass
         let prompt_variables, prompt_material = match admission with
           | None ->
             (match durable_preparation with
-             | None -> resolve_librarian_prompt pass prompt_input
+             | None ->
+               let variables, material = resolve_librarian_prompt pass prompt_input in
+               let material = match pass with
+                 | Memory_pass (Some _) | Volatile_memory_pass _ ->
+                   Result.bind material (fun (material : librarian_prompt_material) ->
+                     Result.map (fun () -> material)
+                       (require_counterpart_source ~source_input:prompt_input
+                          ~prompt:material.resolution))
+                 | Memory_pass None | Continuity_state_pass _ | Volatile_state_pass _
+                 | Working_context_pass -> material in
+               variables, material
              | Some (Ok prepared) -> prepared.variables,
                Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
              | Some (Error detail) -> [],Error detail)
@@ -2012,14 +2037,14 @@ let run_pass
                    (* A snapshot that did not commit -- a CAS the history moved
                       under, a disk error -- is not the range's size, so the
                       caller keeps the width and logs this cause. *)
-                   on_not_committed { detail = reason; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
+                   on_not_committed { detail = reason; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false};
                    Log.Keeper.warn ~keeper_name:keeper_id "%s" reason;
                    Continuity_not_committed reason)
              in
              match answer with
              | Admission_deferred_answer ->
                let detail = "explicit admission remains pending: Librarian deferred every candidate" in
-               on_not_committed {detail; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
+               on_not_committed {detail; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false};
                Ok (`Admission_deferred (exact_output, selected_slot))
              | Volatile_state_answer working_state ->
                Ok (`Volatile_state (working_state, exact_output, served_slot))
@@ -2410,7 +2435,7 @@ let run_pass
         in
         (* No request was composed, so nothing here says the range's size
            stopped the pass. *)
-        on_not_committed { detail; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
+        on_not_committed { detail; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false};
         record_pass_failure
           ~keepers_dir
           ~keeper_id
@@ -2430,7 +2455,7 @@ let run_pass
         { detail = "librarian raised: " ^ Printexc.to_string exn
         ; walk_shows_size = false
         ; message_descent = No_descent_evidence
-        ; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false
+        ; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false
         };
       record_pass_failure
         ~keepers_dir

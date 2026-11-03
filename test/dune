@@ -7160,3 +7160,5 @@
 (include stanzas/test_authz_high_water.inc)
 
 (include stanzas/test_server_memory_recall_standing.inc)
+
+(include stanzas/test_tui_machine_pty_3a.inc)

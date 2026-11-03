@@ -231,7 +231,7 @@ let test_physical_skill_turn_evidence () =
     let canonical = match Ledger.of_projection_yojson fixture with
       | Ok ledger -> ledger | Error error -> fail (Ledger.decode_error_code error) in
     let origin = Ledger.session_id canonical in
-    let origin_dir = Masc.Keeper_fs.keeper_session_dir config (Masc.Keeper_id.Trace_id.to_string origin) in
+    let origin_dir = Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string origin) in
     Unix.mkdir origin_dir 0o700;
     let activations = Ledger.activations canonical in
     List.iter (fun activation -> match Ledger.record ~config ~trace_id:origin activation with

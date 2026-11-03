@@ -41,4 +41,5 @@ val project_partition :
   t -> workspace_memory_access:Keeper_request_tool_access.t option -> Keeper_context_layers.rendered
 (** The same bytes as [project], with the captured Goal snapshot attributed to
     [Active_goals] and the real turn's unknown admission observation to
-    [Admitted_scheduled_input], so request assembly retains both through tools. *)
+    [Admitted_scheduled_input]. Request assembly keeps the Goal snapshot
+    through tools and carries the admission on the first round only. *)

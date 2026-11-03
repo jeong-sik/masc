@@ -265,6 +265,20 @@ let test_the_recall_blocks_sit_around_the_dynamic_context () =
   before Block_id.Recalled_memory_status Block_id.Temporal_summary
 ;;
 
+(* The turn-entry admission names its turn, as the recall status line does,
+   so it comes after the context that changes on nearly every turn. *)
+let test_the_admission_sits_behind_the_dynamic_context () =
+  let before a b =
+    Alcotest.(check bool)
+      (Printf.sprintf "%s is assembled before %s" (Block_id.to_string a) (Block_id.to_string b))
+      true
+      (Block_id.cache_rank a < Block_id.cache_rank b)
+  in
+  before Block_id.Dynamic_context Block_id.Admitted_scheduled_input;
+  before Block_id.Recalled_memory_status Block_id.Admitted_scheduled_input;
+  before Block_id.Admitted_scheduled_input Block_id.Temporal_summary
+;;
+
 (* [Operator_note] is someone speaking mid-turn. It follows the retained Goal
    snapshot and every other block, so it stays last in the assembly. *)
 let test_the_operator_note_stays_last () =
@@ -311,6 +325,8 @@ let () =
             test_rarely_changing_blocks_come_first
         ; Alcotest.test_case "the recall blocks sit around the dynamic context" `Quick
             test_the_recall_blocks_sit_around_the_dynamic_context
+        ; Alcotest.test_case "the admission sits behind the dynamic context" `Quick
+            test_the_admission_sits_behind_the_dynamic_context
         ; Alcotest.test_case "the operator note stays last" `Quick
             test_the_operator_note_stays_last
         ] )

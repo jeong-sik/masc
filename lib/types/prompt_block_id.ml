@@ -78,7 +78,6 @@ let cache_rank = function
   | Librarian_working_context -> 3
   | Active_goals -> 4
   | Completion_authority -> 5
-  | Admitted_scheduled_input -> 6
   (* The two recall blocks are placed before their first measurement (RFC
      keeper-recall-reaches-the-turn, section 4.4). The body changes only when
      the set of carried memories does, so it is in front of the context that
@@ -88,10 +87,13 @@ let cache_rank = function
   | Recalled_memory -> 7
   | Dynamic_context -> 8
   | Recalled_memory_status -> 9
-  | Temporal_summary -> 10
+  (* The admission names its turn, as the status line does; consecutive
+     turns carried different admissions in 65-91% of pairs (#47788). *)
+  | Admitted_scheduled_input -> 10
+  | Temporal_summary -> 11
   (* An operator speaking mid-turn is the newest thing in the assembly and the
      newest instruction in a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 11
+  | Operator_note -> 12
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -101,8 +103,8 @@ let cache_rank = function
    inheriting either class silently. *)
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
-  | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
-  | Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Operator_note -> true
+  | Recalled_memory | Recalled_memory_status | Skill_compositions | Admitted_scheduled_input -> false
+  | Keeper_instructions | Active_goals | Completion_authority | Operator_note -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly

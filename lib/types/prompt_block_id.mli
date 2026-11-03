@@ -11,7 +11,8 @@
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
     [Admitted_scheduled_input] is an exact turn-entry admission observation,
-    including known-empty or unknown source data. It is not a permission grant.
+    including known-empty or unknown source data, carried in the first
+    round's trailing context. It is not a permission grant.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
@@ -80,7 +81,10 @@ val cache_rank : t -> int
     the body is placed in front of [dynamic_context] because it changes only
     when the carried set does, and the status line behind it because it names
     its turn and so changes on every turn. The canary measures both and the
-    ranks follow.
+    ranks follow. [admitted_scheduled_input] also names its turn: across
+    2026-11-01..03 Keeper turns, consecutive turns carried different
+    admissions in 65-91% of pairs per runtime family (#47788), so it sits right
+    behind the status line and in front of the clock.
 
     Equal ranks keep their assembly order, so this decides only what the
     measurement decided. A new constructor must choose a rank here; the
@@ -105,6 +109,12 @@ val injected_on_post_tool_round : t -> bool
 
     [Recalled_memory] and [Recalled_memory_status] are first-round blocks as
     well: the judgment is made once, before the turn's first request.
+
+    [Admitted_scheduled_input] is a first-round block too. It names its own
+    turn and so differs on most turns, and the System carrier precedes the
+    history: there it would leave every turn's first request without a
+    reusable history prefix (#47788). It rides the first round's trailing
+    context, and a round that follows tool results does not repeat it.
 
     [Temporal_summary] is one of those first-round blocks for the same
     reason, so the clock a Keeper reads is the one rendered for its turn's

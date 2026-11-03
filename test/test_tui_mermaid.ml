@@ -710,6 +710,24 @@ let test_label_break_source_decisions () =
     ; "stateDiagram-v2\nA --> B: first second"
     ]
 
+(* Drawn sequence constructs must render: a whole-line undrawn span on a line
+   that also carries enrolled labels can never be placed before/after all
+   labels, so emitting one fails the whole diagram (#47769). *)
+let test_sequence_drawn_constructs_render () =
+  List.iter (fun source ->
+    (match Mermaid.render ~cols:120 source with
+     | Ok rows -> Alcotest.(check bool) ("draws: " ^ source) true (rows <> [])
+     | Error _ -> Alcotest.fail ("should render: " ^ source));
+    (match Mermaid.render_with_source_labels ~cols:120 source with
+     | Ok traced ->
+         Alcotest.(check bool) ("traced draws: " ^ source) true (traced.rendered_rows <> [])
+     | Error _ -> Alcotest.fail ("traced should render: " ^ source)))
+    [ "sequenceDiagram\nactor A as Alice\nA->>B: hello"
+    ; "sequenceDiagram\nA->>B: hi\nnote left of B: aside\nnote right of A: other"
+    ; "sequenceDiagram\npar p\nA->>B: one\nand q\nB->>A: two\nend"
+    ; "sequenceDiagram\nA->>+B: hi\nB-->>-A: bye"
+    ]
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -725,6 +743,8 @@ let () =
             test_sequence_reads_declarations_and_skips_styling
         ; Alcotest.test_case "refuses a line that is not a message" `Quick
             test_sequence_refuses_a_line_that_is_not_a_message
+        ; Alcotest.test_case "drawn constructs render" `Quick
+            test_sequence_drawn_constructs_render
         ] )
     ; ( "shape"
       , [] )

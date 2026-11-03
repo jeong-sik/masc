@@ -682,15 +682,15 @@ let parse_note ~source_start ~event_index rest roster =
   in
   let body =
     match after "over " with
-    | Some body -> Some (false, body)
+    | Some body -> Some body
     | None -> (
         match after "left of " with
-        | Some body -> Some (true, body)
-        | None -> Option.map (fun body -> (true, body)) (after "right of "))
+        | Some body -> Some body
+        | None -> after "right of ")
   in
   match body with
   | None -> Error "a note is over, left of or right of a participant"
-  | Some (undrawn_placement, (body_start, body)) -> (
+  | Some (body_start, body) -> (
       match String.index_opt body ':' with
       | None -> Error "a note needs a colon before its text"
       | Some colon ->
@@ -710,7 +710,7 @@ let parse_note ~source_start ~event_index rest roster =
             Option.iter (fun emit -> emit (Event_label event_index)
               (Some (text_at (body_start + colon + 1)
                 (String.sub body (colon + 1) (String.length body - colon - 1))))) roster.on_participant;
-            Ok (Note { n_over = List.map snd names; n_text = replace_breaks ?on_break:roster.on_break (rest_after_colon body) }, undrawn_placement)
+            Ok (Note { n_over = List.map snd names; n_text = replace_breaks ?on_break:roster.on_break (rest_after_colon body) })
           end)
 
 let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster =
@@ -734,12 +734,12 @@ let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster 
             (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
           else literal_at rest_start pid) roster.on_participant in
         enrol ?source roster pid ~alias ~explicit:true;
-        if word = "actor" then undrawn ();
+        (* The participant is drawn; a whole-line undrawn span would overlap
+           its enrolled label and fail source placement for the whole diagram. *)
         Ok None
       end
   | "note" ->
-      let* note, undrawn_placement = parse_note ~source_start:rest_start ~event_index rest roster in
-      if undrawn_placement then undrawn ();
+      let* note = parse_note ~source_start:rest_start ~event_index rest roster in
       Ok (Some note)
   | "loop" | "alt" | "opt" | "par" | "critical" | "break" | "rect" | "box" ->
       if word = "box" then undrawn ();
@@ -748,7 +748,7 @@ let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster 
         emit (Event_label event_index) (Some (literal_at rest_start rest))) roster.on_participant;
       Ok (Some (Block_open { b_kind = word; b_label = rest }))
   | "else" | "and" | "option" ->
-      if word <> "else" then undrawn ();
+      (* Drawn as an else separator; see the participant arm above. *)
       Option.iter (fun emit ->
         emit (Event_kind event_index) (Some (if word = "else" then literal_at source_start word
           else {label_text="else";
@@ -761,8 +761,9 @@ let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster 
       undrawn ();
       Ok None
   | _ ->
-      let* message, activation = parse_message ~source_start ~event_index line roster in
-      if activation then undrawn ();
+      let* message, _activation = parse_message ~source_start ~event_index line roster in
+      (* The message is drawn; activation bars are a renderer limitation, not an
+         undrawn line. Marking the line undrawn fails the whole diagram. *)
       Ok (Some message)
 
 let parse_sequence ?on_label ?on_undrawn lines =

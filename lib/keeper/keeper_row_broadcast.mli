@@ -10,7 +10,8 @@
 
     {!Keeper_registry_setup} sends it when a committed registry swap adds or
     removes the Keeper's entry, or changes its phase or its failure (reason or
-    time).
+    time). {!Keeper_execution_receipt.append} sends it after each receipt
+    append.
 
     {!Keeper_owner} sends it after each metadata write it commits, once the
     Owner's projection is updated. It also sends it after a write that raised,

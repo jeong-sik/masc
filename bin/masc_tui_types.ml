@@ -1250,6 +1250,19 @@ type keeper_chat_page = {
   kcp_older_error : string option;
 }
 
+(** The open chat's history read that the TUI owes (RFC-0480 §3.1): the
+    server announced a change, events were lost, or a read failed. It belongs
+    to one Keeper under one workspace reading; any other drops it. [kho_audit]
+    has the owed read recheck child content and native tasks as well, because
+    events were lost rather than announced. *)
+type keeper_history_owed = {
+  kho_keeper : string;
+  kho_authority : workspace_authority;
+  kho_reading : unit ref;
+  kho_read : Masc_tui_owed_read.t;
+  kho_audit : bool;
+}
+
 (* Each requested source owns a result slot. Workers publish before returning;
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
@@ -1280,6 +1293,8 @@ module Keeper_history_read : sig
   (** A later explicit paging request withdraws initial-page application.
       This is not a claim that the first-page worker stopped. *)
   val page_pending : t -> bool
+  val sources_pending : t -> bool
+  (** Whether the History or Memory answer of this request is not applied yet. *)
   val pending : t -> bool
 end = struct
   type source = History | Memory
@@ -1330,6 +1345,7 @@ end = struct
     | Settled -> false
     | Waiting | Ready _ | Offered -> true
   let page_pending request = unsettled request.page
+  let sources_pending request = unsettled request.history || unsettled request.memory
   let pending request =
     unsettled request.history || unsettled request.memory || unsettled request.page
 end
@@ -10930,7 +10946,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
-  mutable msg_history_loss_followup: (string * workspace_authority * unit ref) option;
+  mutable msg_history_owed: keeper_history_owed option;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -14458,7 +14474,7 @@ let suspend_workspace_readings state =
     | Some request -> Keeper_history_read.page_pending request
     | None -> false in
   state.msg_history_inflight <- None;
-  state.msg_history_loss_followup <- None;
+  state.msg_history_owed <- None;
   (* A cold page is refresh preparation, not an explicit older-page demand.
      Normal eligible history dispatch can request it again. A scrolled view
      retains its cached source and uses explicit refresh/paging instead. *)
@@ -19844,7 +19860,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
-  msg_history_loss_followup = None;
+  msg_history_owed = None;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -20184,7 +20200,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
-  state.msg_history_loss_followup <- None;
+  state.msg_history_owed <- None;
   state.msg_older_loading <- false;
   match List.assoc_opt keeper_name state.msg_loaded_pages with
   | Some page ->

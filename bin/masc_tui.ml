@@ -796,7 +796,7 @@ let clear_keeper_history_projection state =
   state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
-  state.msg_history_loss_followup <- None;
+  state.msg_history_owed <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
     (* These readings belong to one conversation. Clear them at the shared
        target boundary before its replacement request can finish. *)
@@ -890,7 +890,7 @@ let leave_keeper_message state ~drain_queue =
   state.keeper_navigation_open <- false;
   save_message_draft state;
   state.msg_history_inflight <- None;
-  state.msg_history_loss_followup <- None;
+  state.msg_history_owed <- None;
   let target_registered =
     match state.msg_target_keeper_name with
     | Some keeper_name -> keeper_available_for_new_message state keeper_name
@@ -8161,6 +8161,37 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
           result))
   end
 
+(* Owed reads wait on this clock, so a wall-clock step cannot stretch a
+   retry. *)
+let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
+
+(* The owed history read of [keeper_name] under the current workspace
+   reading, when the record is theirs. *)
+let current_history_owed state ~keeper_name =
+  match state.msg_history_owed with
+  | Some owed
+    when String.equal owed.kho_keeper keeper_name
+         && owed.kho_authority = state.workspace_authority
+         && owed.kho_reading == state.workspace_read_authority ->
+      Some owed
+  | Some _ | None -> None
+
+(* Move the owed history read of [keeper_name]. A record of another Keeper or
+   reading is replaced. [audit] is kept until a forced read starts. *)
+let update_history_owed ?(audit = false) state ~keeper_name transition =
+  let owed =
+    match current_history_owed state ~keeper_name with
+    | Some owed -> owed
+    | None ->
+        { kho_keeper = keeper_name
+        ; kho_authority = state.workspace_authority
+        ; kho_reading = state.workspace_read_authority
+        ; kho_read = Masc_tui_owed_read.settled
+        ; kho_audit = false }
+  in
+  state.msg_history_owed <-
+    Some { owed with kho_read = transition owed.kho_read; kho_audit = owed.kho_audit || audit }
+
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
   let other_page_pending = match state.keeper_schedules_pending with
@@ -8189,12 +8220,15 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   in
   if already_inflight && not force then ()
   else begin
-    (match state.msg_history_loss_followup with
-     | Some (name, pending_authority, reading)
-       when String.equal name keeper_name && pending_authority = authority
-            && reading == state.workspace_read_authority ->
-         state.msg_history_loss_followup <- None
-     | Some _ | None -> ());
+    (* An unforced read cannot settle an owed audit: the audit stays owed and
+       runs once this read lands. *)
+    (match current_history_owed state ~keeper_name with
+     | Some owed when owed.kho_audit && not force -> ()
+     | Some _ | None ->
+         update_history_owed state ~keeper_name Masc_tui_owed_read.started;
+         Option.iter
+           (fun owed -> state.msg_history_owed <- Some { owed with kho_audit = false })
+           state.msg_history_owed);
     let host = server_peer_host in
     let port = state.port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -8270,19 +8304,26 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   end
   end
 
-let launch_pending_loss_history state ~mailbox =
-  match state.msg_history_loss_followup with
+(* Read the open chat's owed history once the pane can take it: the chat is
+   on screen at its newest row and no history read is in flight. Runs on
+   every loop iteration; it reads only when {!Masc_tui_owed_read.due} says so. *)
+let launch_owed_history state ~mailbox =
+  match state.msg_history_owed with
   | None -> ()
-  | Some (keeper_name, authority, reading) ->
-      if authority <> state.workspace_authority || reading != state.workspace_read_authority
-         || state.msg_target_keeper_name <> Some keeper_name then
-        state.msg_history_loss_followup <- None
-      else if state.view = Keepers Keeper_message && state.msg_scroll = 0
-              && server_authority_ready state && keeper_available_for_new_message state keeper_name
-              && Option.is_none state.msg_history_inflight then begin
-        state.msg_history_loss_followup <- None;
-        launch_keeper_history_load ~load_file_changes:false ~force:true state ~mailbox ~keeper_name
-      end
+  | Some owed ->
+      if owed.kho_authority <> state.workspace_authority
+         || owed.kho_reading != state.workspace_read_authority
+         || state.msg_target_keeper_name <> Some owed.kho_keeper
+      then state.msg_history_owed <- None
+      else if
+        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.kho_read
+        && state.view = Keepers Keeper_message && state.msg_scroll = 0
+        && server_authority_ready state
+        && keeper_available_for_new_message state owed.kho_keeper
+        && Option.is_none state.msg_history_inflight
+      then
+        launch_keeper_history_load ~load_file_changes:false ~force:owed.kho_audit state
+          ~mailbox ~keeper_name:owed.kho_keeper
 
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
@@ -17708,6 +17749,14 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     open_observer_if_due state ~retry_closed:false
       ~host:server_peer_host ~port:state.port ~mailbox;
     open_fleet_stream_if_due state ~host:server_peer_host ~port:state.port ~mailbox;
+    (* Withdrawal dropped the chat's owed read with its old authority, and a
+       change while the reading was withdrawn reached nobody. The kept chat
+       owes one read under the new authority (RFC-0480 §3.1). *)
+    Option.iter
+      (fun keeper_name ->
+        update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
+        launch_owed_history state ~mailbox)
+      state.msg_target_keeper_name;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21350,8 +21399,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  -> ());
               (match Masc_tui_observer.chat_appended_keeper event with
                | Some appended_keeper
-                 when state.view = Keepers Keeper_message
-                      && state.msg_target_keeper_name = Some appended_keeper ->
+                 when state.msg_target_keeper_name = Some appended_keeper ->
+                   (* Owed whatever the view: the chat reads it when it is
+                      next on screen at its newest row. *)
                    open_chat_gained_turn := true
                | Some _ | None -> ());
               (match event with
@@ -21473,14 +21523,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
              state.acting_pane_changes_loss_followup <- None;
              state.acting_pane_changes_at <- None);
-        (if state.view = Keepers Keeper_message then
-           match state.msg_target_keeper_name with
-           | Some keeper_name ->
-               state.msg_history_loss_followup <-
-                 Some (keeper_name, state.workspace_authority, state.workspace_read_authority);
-               launch_pending_loss_history state ~mailbox;
+        (* The chat owes an audited read whatever the view; it reads when it
+           is next on screen at its newest row. *)
+        (match state.msg_target_keeper_name with
+         | Some keeper_name ->
+             update_history_owed ~audit:true state ~keeper_name Masc_tui_owed_read.changed;
+             launch_owed_history state ~mailbox;
+             if state.view = Keepers Keeper_message then
                launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name
-           | None -> ());
+         | None -> ());
         (if state.view = Keepers Keeper_calls then
            match selected_keeper state with
            | Some keeper -> launch_keeper_calls_load ~force:true state ~mailbox keeper.k_name
@@ -21512,19 +21563,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* The pane otherwise reloads only on open and on its own sends — a
          turn appended from anywhere else (API chat, another operator, a
          connector) stayed invisible until the operator left and re-entered.
-         Same guard the cadence reload used: an operator scrolled into the
-         past keeps their place. *)
-      (if !open_chat_gained_turn && state.msg_scroll = 0 then
+         The read is owed rather than started here: one in flight, or a pane
+         scrolled into the past (which keeps its place), takes the change once
+         it can (RFC-0480 §3.1). *)
+      (* A loss in this batch already owes the chat an audited read that
+         starts after these turns were appended. *)
+      (if !open_chat_gained_turn && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
          | Some keeper_name ->
-             launch_keeper_history_load ~load_file_changes:false state ~mailbox
-               ~keeper_name;
+             update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
+             launch_owed_history state ~mailbox;
              (* A results or full view joins the fresh activities against the
                 call snapshot; without a refresh the appended turns sit at
                 "no call-log row" until the operator cycles the view. The
                 loader is inflight-guarded and a mid-flight load turns force
                 into one queued follow-up, so a burst of turns collapses. *)
-             if state.msg_tool_visibility <> Tools_compact then
+             (* The calls slot is shared with the Keeper_calls surface, so only
+                the chat on screen reads it. *)
+             if state.view = Keepers Keeper_message
+                && state.msg_tool_visibility <> Tools_compact then
                launch_keeper_calls_load ~force:true state ~mailbox keeper_name
          | None -> ());
       (* A frame of a turn this pane did not open: its journal grew, so read
@@ -24778,7 +24835,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Error detail ->
                    state.msg_memory_error <- Some detail;
                    prior_sources.kcs_memory in
-             set_keeper_chat_sources state {prior_sources with kcs_memory=memory_entries})
+             set_keeper_chat_sources state {prior_sources with kcs_memory=memory_entries});
+          (* Once both answers of this read are applied, the owed record
+             moves: a failure of either is retried with the streams'
+             reconnect backoff, since nothing else reads this pane again
+             (RFC-0480 §3.1). *)
+          if not (Keeper_history_read.sources_pending request) then
+            update_history_owed state ~keeper_name
+              (match state.msg_loaded_error, state.msg_memory_error with
+               | None, None -> Masc_tui_owed_read.succeeded
+               | Some _, (Some _ | None) | None, Some _ ->
+                   Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+                     ~max_retry_s:keeper_execute_stream_max_reconnect_s
+                     ~now:(monotonic_now_s ()))
         end
       end
   | Keeper_chat_first_page_loaded (request, result) ->
@@ -30593,7 +30662,7 @@ Use relative paths for resources already held in the package. -->
        last_loop_at_ns := now_ns);
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
-      launch_pending_loss_history state ~mailbox:async_messages;
+      launch_owed_history state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration

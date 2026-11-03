@@ -3017,6 +3017,7 @@
 (include stanzas/test_tui_observer_session_log.inc)
 (include stanzas/test_tui_approval_readability.inc)
 (include stanzas/test_tui_observer_reopen_revalidate.inc)
+(include stanzas/test_tui_chat_owed_history.inc)
 (include stanzas/test_tui_waiting_event.inc)
 (include stanzas/test_tui_task_event.inc)
 
@@ -4005,6 +4006,11 @@
  (name test_tui_fetched)
  (modules test_tui_fetched)
  (libraries alcotest masc_tui_fetched))
+
+(test
+ (name test_tui_owed_read)
+ (modules test_tui_owed_read)
+ (libraries alcotest masc_tui_owed_read))
 
 (test
  (name test_tui_preset_text)

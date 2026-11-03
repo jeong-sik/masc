@@ -2435,6 +2435,33 @@ let test_a_restatement_read_as_not_written_is_not_checked () =
       (List.map fst selection.cited)
 ;;
 
+(* A claim that writes a current memory again and absorbs another one names
+   that current memory as [into], and is cited under the same identity: every
+   absorbing claim the gate reads has a citation entry, a restatement too. *)
+let test_every_absorbing_claim_is_cited_under_its_into () =
+  List.iter
+    (fun (label, claims, expected_into) ->
+       match parse (selection_json ~dropped:[] ~new_claims:claims ()) with
+       | Error error -> failf "%s: rejected: %s" label (Librarian.parse_error_to_string error)
+       | Ok selection ->
+         let intos =
+           List.map (fun (statement : Memory.absorbed_statement) -> statement.into)
+             selection.absorbed
+         in
+         check (list string) (label ^ ": the absorptions go into the claim") expected_into intos;
+         check bool (label ^ ": every absorbing claim has a citation entry") true
+           (List.for_all (fun into -> List.mem_assoc into selection.cited) intos))
+    [ ( "a restatement that absorbs"
+      , [ citing_claim ~claim:"keep A" ~absorbs:(`List [ `String "m2" ])
+            (evidence_json ~conversation:[ 0 ] ()) () ]
+      , [ current_a_id ] )
+    ; ( "a new claim that absorbs beside a plain restatement"
+      , [ citing_claim ~absorbs:(`List [ `String "m2" ]) (evidence_json ()) ()
+        ; citing_claim ~claim:"keep A" ~absorbs:(`List []) (evidence_json ()) () ]
+      , [ Memory.memory_id (fact ~claim:"A and B, together") ] )
+    ]
+;;
+
 let memory_only_accepted ?(admission_support = []) ?(admission_recall_bindings = []) selection =
   { Runtime.selection
   ; continuity_answer = Runtime.Memory_only
@@ -2573,6 +2600,8 @@ let () =
             test_same_text_claims_cite_what_either_cites
         ; test_case "a restatement read as not written is not checked" `Quick
             test_a_restatement_read_as_not_written_is_not_checked
+        ; test_case "every absorbing claim is cited under its into" `Quick
+            test_every_absorbing_claim_is_cited_under_its_into
         ; test_case "admission candidates follow the claim their judgment names" `Quick
             test_admission_candidates_follow_the_claim_their_judgment_names
         ; test_case "a counterpart citation reaches its claim's pairs" `Quick

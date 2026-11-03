@@ -86,11 +86,14 @@ val patch_sync :
 val delete_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
+  ?body:string ->
   url:string ->
   headers:(string * string) list ->
   unit ->
   ((int * string), string) result
-(** [delete_sync ?clock ?timeout_sec ~url ~headers ()] performs a [DELETE url]. *)
+(** [delete_sync ?clock ?timeout_sec ?body ~url ~headers ()] performs
+    a [DELETE url], optionally with a request body for routes whose deletion
+    contract is a JSON document. *)
 
 val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

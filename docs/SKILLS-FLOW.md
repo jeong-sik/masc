@@ -225,7 +225,10 @@ Tools 화면에서 `J/K`로 published Skill을 고르고 `e`를 누르면 `$EDIT
 package가 이미 있으면 덮어쓰지 않고 `package_already_exists`로 거절한다. 대시보드는
 Skills › Skill Studio의 **+ New Skill**이 같은 경로를 쓴다. `Enter`는 선택한 revision의
 activation 기록과 마지막으로 끝난 합성 실행을 `/api/v1/skills/evidence`로 불러온다.
-삭제는 `DELETE /api/v1/skills/editor`만 있고 TUI·대시보드 조작은 없다.
+삭제는 Tools 화면에서 Skill 을 고르고 `d` 를 같은 행에 두 번 누른다. 두 번째
+누름이 서버의 `DELETE /api/v1/skills/editor`(exact reference + `confirmed`) 호출이고,
+삭제본은 소스 루트의 `.masc-skill-delete-recovery/` 에 quarantine 로 남는다. 웹
+대시보드에는 삭제 조작이 없다.
 
 ## 3. 실행과 관측
 

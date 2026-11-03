@@ -10498,6 +10498,11 @@ type state = {
   mutable tools_skill_cursor: int;
   mutable tools_skill_source_picker: skill_source_picker option;
   mutable tools_skill_create_drafts: skill_create_draft list;
+  (* The Skills list's delete waits for a second press of its key, exactly as
+     the Config presets pane arms its own deletion. The armed value is the
+     selected Skill identity: pressing d on a different row re-arms that row
+     instead of deleting the one first pressed. *)
+  mutable tools_skill_delete_armed: Skill_reference.identity option;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_evidence_request: unit ref option;
   mutable tools_evidence_reference: Skill_reference.t option;
@@ -19673,6 +19678,7 @@ let create_state
   tools_skill_cursor = 0;
   tools_skill_source_picker = None;
   tools_skill_create_drafts = [];
+  tools_skill_delete_armed = None;
   tools_skill_evidence = None;
   tools_evidence_request = None;
   tools_evidence_reference = None;

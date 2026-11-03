@@ -1176,6 +1176,9 @@ let for_surface = function
                  instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
+      ; b Act "d" "delete Skill"
+          ~help:"remove the selected published package; press d again on the \
+                 same row to confirm"
       ; b Act "Esc" "system"
           ~help:"return from original Task to request, then request to list; \
                  otherwise back to the System surface it hangs off"

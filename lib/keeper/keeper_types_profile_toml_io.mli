@@ -96,10 +96,6 @@ val parsed_field_key_names : string list
 val canonical_keeper_toml_key_names : string list
 val detect_unknown_keeper_toml_keys :
   Keeper_toml_loader.toml_doc -> string list
-val merge_string_list : base:'a list -> 'a list -> 'a list
-val merge_keeper_profile_defaults :
-  base:keeper_profile_defaults ->
-  overlay:keeper_profile_defaults -> keeper_profile_defaults
 
 type keeper_toml_error_kind =
   | Read_error

@@ -727,16 +727,10 @@ let test_skill_names_preserve_absent_empty_and_exact_values () =
     (option (list string))
     "exact values are deduplicated without case normalization"
     (Some [ "guide"; "Guide" ])
-    exact.KTP.skill_names;
-  let merged =
-    KTP.merge_keeper_profile_defaults
-      ~base:{ KTP.empty_keeper_profile_defaults with skill_names = Some [ "guide" ] }
-      ~overlay:{ KTP.empty_keeper_profile_defaults with skill_names = Some [] }
-  in
-  check (option (list string)) "explicit empty overrides inherited names" (Some []) merged.skill_names
+    exact.KTP.skill_names
 ;;
 
-let test_board_interests_default_off_and_clear_inherited_values () =
+let test_board_interests_default_off_and_canonical () =
   let parse input =
     match TL.parse_toml input with
     | Error error -> fail error
@@ -753,17 +747,7 @@ let test_board_interests_default_off_and_clear_inherited_values () =
       "[keeper]\nboard_interests = [\" Memory \", \"Board\", \"Memory\"]\n"
   in
   check (list string) "interests are canonical" [ "Board"; "Memory" ]
-    exact.KTP.board_interests;
-  let merged =
-    KTP.merge_keeper_profile_defaults
-      ~base:
-        { KTP.empty_keeper_profile_defaults with
-          board_interests = [ "inherited" ]
-        }
-      ~overlay:KTP.empty_keeper_profile_defaults
-  in
-  check (list string) "an omitted Keeper-local field clears inherited interests"
-    [] merged.board_interests
+    exact.KTP.board_interests
 ;;
 
 let test_tool_deny_parses_absent_empty_and_exact_values () =
@@ -787,30 +771,7 @@ let test_tool_deny_parses_absent_empty_and_exact_values () =
     (list string)
     "values are deduplicated in order"
     [ "keeper_spawn"; "masc_keeper_delegate" ]
-    exact.KTP.tool_deny;
-  let merged =
-    KTP.merge_keeper_profile_defaults
-      ~base:{ KTP.empty_keeper_profile_defaults with
-              tool_deny = [ "keeper_spawn" ] }
-      ~overlay:{ KTP.empty_keeper_profile_defaults with
-                 tool_deny = [ "masc_keeper_delegate" ] }
-  in
-  check
-    (list string)
-    "a non-empty overlay replaces the inherited deny"
-    [ "masc_keeper_delegate" ]
-    merged.tool_deny;
-  let inherited =
-    KTP.merge_keeper_profile_defaults
-      ~base:{ KTP.empty_keeper_profile_defaults with
-              tool_deny = [ "keeper_spawn" ] }
-      ~overlay:KTP.empty_keeper_profile_defaults
-  in
-  check
-    (list string)
-    "an empty overlay keeps the inherited deny"
-    [ "keeper_spawn" ]
-    inherited.tool_deny
+    exact.KTP.tool_deny
 ;;
 
 let test_input_policies () =
@@ -827,7 +788,7 @@ let test_input_policies () =
     | Error _ -> () | Ok _ -> fail "invalid TOML input policy accepted")
     ["\"automatic\""; "true"; "42"];
   match parse "" with
-  | Ok defaults -> check bool "absence leaves profile inheritance open" true (defaults.input_policy = None)
+  | Ok defaults -> check bool "absence leaves the choice to the default policy" true (defaults.input_policy = None)
   | Error error -> fail error
 ;;
 
@@ -2560,9 +2521,9 @@ let () =
             test_each_keeper_field_kind_rejects_a_wrong_typed_value;
           test_case "Skill names preserve three-state selection" `Quick
             test_skill_names_preserve_absent_empty_and_exact_values;
-          test_case "Board interests default off and do not inherit" `Quick
-            test_board_interests_default_off_and_clear_inherited_values;
-          test_case "tool deny parses and merges" `Quick
+          test_case "Board interests default off and are canonical" `Quick
+            test_board_interests_default_off_and_canonical;
+          test_case "tool deny parses absent, empty and exact values" `Quick
             test_tool_deny_parses_absent_empty_and_exact_values;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;

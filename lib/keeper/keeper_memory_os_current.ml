@@ -1077,6 +1077,7 @@ let append_journal_line_strict ~keepers_dir ~keeper_id json =
     (match observation with
      | None -> publish_recall_cache path None
      | Some observation -> observe_recall_append path observation json);
+    Keeper_memory_journal_broadcast.appended ~keeper_name:keeper_id;
     Ok ()
   | Error error ->
     Error

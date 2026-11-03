@@ -97,6 +97,8 @@ let test_invisible_and_combining_characters () =
     [ "/tmp/\xd8\xa7\xd8\xb3\xda\xa9\xd8\xb1\xdb\x8c\xd9\x86\xe2\x80\x8c\xd8\xb4\xd8\xa7\xd8\xaa.png"
     ; "/tmp/화\xe2\x80\x8e면.png"
     ; "/tmp/screen\xc2\xadshot.png"
+    ; "/tmp/pre\xe2\x80\x8cpost.png"
+    ; "1\xef\xb8\x8f/tmp/a.png"
     ; "see \xe2\x9a\xa0\xef\xb8\x8f.png"
     ; "a.png\xcc\x81"
     ];
@@ -105,6 +107,8 @@ let test_invisible_and_combining_characters () =
     [ ("\xe2\x9a\xa0\xef\xb8\x8fa.png", [ "a.png" ])
     ; ("\xe2\x9a\xa0\xef\xb8\x8f/tmp/a.png", [ "/tmp/a.png" ])
     ; ("/tmp/a.png 와 \xe2\x9a\xa0\xef\xb8\x8f.png", [ "/tmp/a.png" ])
+    ; ("1\xef\xb8\x8f\xe2\x83\xa3/tmp/a.png", [ "/tmp/a.png" ])
+    ; ("2\xef\xb8\x8f\xe2\x83\xa3a.png", [ "a.png" ])
     ]
 
 (* Korean puts a particle right after the word, and CJK text closes a

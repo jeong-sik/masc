@@ -34,18 +34,18 @@ type left_edge =
    separators: they draw nothing and sit inside words (ZWNJ in Persian, a
    soft hyphen), so "/tmp/pre<ESC>post.png" names one file and "post.png"
    would be another. A scalar this table cannot classify is not guessed at
-   either. *)
+   either. An enclosing mark turns the scalar before it into a symbol --
+   "1" + U+FE0F + U+20E3 is the keycap emoji -- so it ends the name like one. *)
 let left_edge scalar =
   let code = Uchar.to_int scalar in
   if code < 0x80 && is_path_char (Char.chr code) then Name_part
   else
     match Uucp.Gc.general_category scalar with
     | `Cc -> if Uucp.White.is_white_space scalar then Boundary else Refused
-    | `Ll | `Lm | `Lo | `Lt | `Lu | `Mc | `Me | `Mn | `Nd | `Nl | `No ->
-        Name_part
+    | `Ll | `Lm | `Lo | `Lt | `Lu | `Mc | `Mn | `Nd | `Nl | `No -> Name_part
     | `Cf | `Cn | `Co | `Cs -> Refused
-    | `Pc | `Pd | `Pe | `Pf | `Pi | `Po | `Ps | `Sc | `Sk | `Sm | `So | `Zl
-    | `Zp | `Zs ->
+    | `Me | `Pc | `Pd | `Pe | `Pf | `Pi | `Po | `Ps | `Sc | `Sk | `Sm | `So
+    | `Zl | `Zp | `Zs ->
         Boundary
 
 let is_mark scalar =
@@ -91,9 +91,12 @@ type preceding =
 (* Korean, Japanese, Chinese and Thai prose glues words onto a name with no
    space: "결과는/tmp/a.png", "画像はscreenshot.png",
    "/tmp/a.svgを/tmp/a.png". The text cannot say where the word ends, so a
-   run of non-ASCII letters is read as a name only where nothing can be
-   glued onto it -- right after a [/]. The one other place is an accent on
-   an ASCII letter or digit ("cafe" + U+0301). *)
+   run of non-ASCII letters is read only right after a [/], where a
+   directory or file name starts. The one other place is an accent on an
+   ASCII letter or digit ("cafe" + U+0301); a variation selector is not an
+   accent. A word glued onto a directory's own slash is not caught:
+   "/tmp/out/から/tmp/a.png" reads exactly like "/tmp/화면/report.png" and
+   comes back whole. *)
 let unicode_runs_open_segments text ~start ~stop =
   let rec loop index preceding =
     if index >= stop then true
@@ -111,7 +114,9 @@ let unicode_runs_open_segments text ~start ~stop =
       else
         match preceding with
         | Slash | Unicode_run -> loop next Unicode_run
-        | (Ascii_letter_or_digit | Accent) when is_mark scalar -> loop next Accent
+        | (Ascii_letter_or_digit | Accent)
+          when is_mark scalar && not (Uucp.Gen.is_variation_selector scalar) ->
+            loop next Accent
         | Name_start | Ascii_letter_or_digit | Accent | Other_ascii -> false
   in
   loop start Name_start

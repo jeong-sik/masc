@@ -13,7 +13,9 @@ val paths : string -> string list
     non-ASCII letters is read only right after a [/] ("/tmp/화면.png"),
     because elsewhere a word of unspaced prose can be glued onto it
     ("画像はscreenshot.png"); such a shape, a control or format character,
-    or invalid UTF-8 gives no path rather than a joined or shorter one. A
+    or invalid UTF-8 gives no path rather than a joined or shorter one.
+    Right after a [/] a glued word cannot be told from a directory name, so
+    "/tmp/out/から/tmp/a.png" comes back whole. A
     space inside a name is not read as part of it, so such a name comes back
     from its last space.
     A URL is not a path and does not come back: it has no bytes on this disk.

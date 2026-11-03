@@ -10921,6 +10921,9 @@ type state = {
   (* A verdict can commit while an older queue read is still in flight. Its
      answer is stale even if it arrives later; discard it and read again. *)
   mutable verification_refresh_after_inflight: bool;
+  (* The read the Verification queue owes after a server change, a
+     revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
+  mutable verification_owed: Masc_tui_owed_read.t;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -14498,6 +14501,7 @@ let suspend_workspace_readings state =
   state.harness_inflight <- false;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
+  state.verification_owed <- Masc_tui_owed_read.settled;
   state.fusion_detail_inflight <- None;
   state.fusion_detail_reread_pending <- false;
   state.fusion_detail_awaiting_observer <- false;
@@ -19895,6 +19899,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_owed = Masc_tui_owed_read.settled;
   verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;

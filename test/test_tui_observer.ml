@@ -136,6 +136,7 @@ let summary = function
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
   | Observer.Event Observer.Schedules_changed -> "schedules"
   | Observer.Event (Observer.Approval_change change) ->
       Printf.sprintf "approval(%s)"
@@ -790,6 +791,28 @@ let test_a_turns_push_names_its_keeper () =
          String.starts_with ~prefix:"keeper_turn_preview_changed" reason
      | _ -> false)
 
+let verification_frames =
+  [ {|data: {"type":"verification_requests_changed","ts_unix":100.0}
+
+|}
+  ; {|data: {"type":"internal_agent_runs_changed","ts_unix":100.0}
+
+|}
+  ]
+
+let test_a_verification_or_run_push_reads_the_requests () =
+  check (list string) "both decode without a payload" [ "verification_requests"; "internal_runs" ]
+    (List.map summary (decode_all verification_frames));
+  let count frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> Observer.verification_requests_changed event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "both owe the verification requests a read" 2 (count verification_frames);
+  check int "no roster or turns push does" 0 (count (turn_frame :: roster_frames))
+
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"
     [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
@@ -1231,6 +1254,8 @@ let () =
             test_a_roster_push_names_the_row_or_every_row
         ; test_case "a turns or preview push names its Keeper" `Quick
             test_a_turns_push_names_its_keeper
+        ; test_case "a verification or run push reads the requests" `Quick
+            test_a_verification_or_run_push_reads_the_requests
         ; test_case "only a confirmation change reads the confirmations" `Quick
             test_only_a_confirmation_change_reads_the_confirmations
         ; test_case "only a schedule change reads the schedules" `Quick

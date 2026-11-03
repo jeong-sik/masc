@@ -7195,6 +7195,7 @@ let launch_verification_load state ~mailbox =
   if state.verification_inflight then ()
   else begin
     state.verification_inflight <- true;
+    state.verification_owed <- Masc_tui_owed_read.started state.verification_owed;
     let host = server_peer_host in
     let port = state.port in
     (* Read once, here, rather than inside the fiber: the operator can press
@@ -7904,6 +7905,12 @@ let preview_on_screen state ~keeper_name =
   | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs ->
       false
+
+(* The Verification queue reads when the server says its request store, a
+   run registry or the backlog changed, on a revalidation, and again after a
+   failed read (RFC-0480 §3.4). *)
+let owe_verification_read state =
+  state.verification_owed <- Masc_tui_owed_read.changed state.verification_owed
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -8691,6 +8698,30 @@ let launch_owed_held_calls state ~mailbox =
       state.held_calls_owed <- Masc_tui_owed_read.started read;
       launch_keeper_tool_approvals_load state ~mailbox
     end
+  end
+
+let verification_on_screen state =
+  match state.view with
+  | Verification -> true
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+  | Config | Resources | Tools | System_logs | Keepers _ ->
+      false
+
+(* Runs on every loop iteration. Off screen nothing is owed: arriving on the
+   surface reads it. A read already in flight is let finish first. *)
+let launch_owed_verification state ~mailbox =
+  if not (verification_on_screen state) then
+    state.verification_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = state.verification_inflight in
+    let read =
+      if reading then state.verification_owed
+      else Masc_tui_owed_read.abandoned state.verification_owed
+    in
+    state.verification_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_verification_load state ~mailbox
   end
 
 (* Runs on every loop iteration. A turns read already in flight, whoever
@@ -16078,6 +16109,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_evidence_request <- None;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
+  state.verification_owed <- Masc_tui_owed_read.settled;
   state.verification_offset <- 0;
   (* Tools callbacks use their own generation, independent of Keeper reads.
      Retire that owner before any same-named Keeper can appear on another root. *)
@@ -16240,6 +16272,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_error <- None;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
+  state.verification_owed <- Masc_tui_owed_read.settled;
   state.verification_cursor <- 0;
   state.verification_scroll <- 0;
   state.verification_offset <- 0;
@@ -18156,6 +18189,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_held_calls_read state;
        owe_tool_modes_read state;
        owe_keeper_turns_read state;
+       owe_verification_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -22211,6 +22245,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
+      let verification_changed = ref false in
       let previews_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -22273,6 +22308,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
+              if Masc_tui_observer.verification_requests_changed event then
+                verification_changed := true;
               (match Masc_tui_observer.turn_change event with
                | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
                | Some (keeper, Masc_tui_observer.Turn_preview) ->
@@ -22303,7 +22340,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22358,7 +22395,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22460,6 +22497,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
+      (if (!verification_changed || !execution_snapshot_seen) && not !observer_source_loss_seen then
+         owe_verification_read state);
       state.keeper_previews_unread <-
         List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a
@@ -26724,6 +26763,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_verification_load state ~mailbox
       end else (match result with
       | Ok snapshot ->
+          state.verification_owed <- Masc_tui_owed_read.succeeded state.verification_owed;
           state.verification <- Some snapshot;
           state.verification_error <- None;
           let requests = snapshot.Masc.Tui_decode.vs_requests in
@@ -26760,6 +26800,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
+          state.verification_owed <- failed_read state.verification_owed;
           state.verification_error <- Some detail)
   | Local_workspace_read (request, result) ->
       (match observe_local_source state ~source:Local_work request result with
@@ -31658,6 +31699,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_gate_snapshot state ~mailbox:async_messages;
       launch_owed_held_calls state ~mailbox:async_messages;
       launch_owed_keeper_turns state ~mailbox:async_messages;
+      launch_owed_verification state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -40201,12 +40243,10 @@ Use relative paths for resources already held in the package. -->
          (* The open post re-reads on [notifications/board] and retries a
             failed read ([launch_owed_board_post]). *)
          | Board -> ()
-         | Verification ->
-             (* The queue moves while an operator watches it -- a task settles,
-                another arrives. Planning reads this list on entry and on an
-                explicit refresh for its child badge, but does not poll a
-                hidden 200-row queue on every cadence tick. *)
-             launch_verification_load state ~mailbox:async_messages
+         (* Verification re-reads on [verification_requests_changed], a run
+            registry change and the backlog's execution snapshot, and retries
+            a failed read ([launch_owed_verification]). *)
+         | Verification -> ()
              | Lanes -> launch_lanes_load state ~mailbox:async_messages
              | Clients -> launch_clients_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages

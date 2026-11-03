@@ -272,6 +272,9 @@ type event =
       (** An internal agent run registry -- verification, goal verification,
           exact lanes -- changed. A server push with no payload, named by
           {!Masc.Internal_agent_runs_event}. *)
+  | Verification_requests_changed
+      (** The workspace's verification request store was written. A server
+          push with no payload, named by {!Masc.Verification_request_broadcast}. *)
   | Schedules_changed
       (** The workspace's schedules changed. A server push with no payload,
           named by {!Masc.Schedules_changed_event}: the reader re-fetches
@@ -341,6 +344,11 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val verification_requests_changed : event -> bool
+(** The verification request store, or a run registry a request row reads
+    its review from, changed. A backlog commit arrives as the execution
+    {!Snapshot}. *)
 
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)

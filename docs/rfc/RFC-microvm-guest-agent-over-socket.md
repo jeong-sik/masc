@@ -175,6 +175,8 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
 - 호스트 경로에 소켓 파일이 남아 있으면 `container run` 이 `already exists and may be in use` 로 실패해요. 일반 파일은 덮어쓰고, 없는 부모 디렉터리는 만들어요.
 - VM 이 끝나면 성공한 네 경우 모두 소켓 파일이 지워졌어요.
 - 112바이트 호스트 경로는 `container run` 이 받았다가 부팅 단계에서 `too long for a Unix Domain Socket path` 로 실패했어요.
+- masc 의 렌더러가 agent plan 으로 그린 실행 옵션을 그대로 넘겨 띄운 게스트를, masc 의 inspect 파서와 판정이 `Matches_plan` 으로 읽었어요(차이 0, plan 라벨 일치). 그 inspect 는 테스트 fixture 로 남겼어요.
+- 호스트 소켓과 마운트 경로를 심볼릭 링크 디렉터리를 거쳐 줘도, inspect 는 링크를 풀지 않고 받은 문자열 그대로 보고했어요.
 
 ## 5. 검토한 대안
 

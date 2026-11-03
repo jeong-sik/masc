@@ -159,6 +159,31 @@ masc 가 그리는 모양 그대로 첫 프로세스를 `--entrypoint <shim>` �
 - VM 이 사라지면 성공한 네 경우 모두 runtime 이 호스트 소켓 파일을 지웠어요. 그래서 남은 소켓 파일은 VM 이 정상적으로 끝나지 못했을 때만 생겨요.
 - 지금 도는 Keeper VM(`--publish-socket` 없음, `--user 502:20`, `--read-only`)의 inspect 도 `publishedSockets: []`, `useInit: false`, `capAdd: []` 를 담고 있었어요.
 
+### agent plan 으로 띄운 게스트 (`bin/agent_plan_harness.sh`, `bin/agent_plan_boot.py`, 결과 `agent-plan-boot-results.json`)
+
+boot plan 코드가 실제 게스트를 자기 plan 으로 읽는지 확인했어요.
+
+- `agent_plan_harness.sh` 는 저장소의 boot plan·렌더러·inspect 파서·판정 코드를 정의 단위로 그대로 잘라 작은 프로그램으로 묶어요. 정의는 첫 줄로 찾고, 그 첫 줄이 없거나 두 번 나오면 멈춰요. 손으로 옮겨 적은 코드는 없어요. agent 경로가 닿지 않는 세 값(scratch 경로 상수, Kata shim 이름, 정책 proxy 환경)만 stub 이에요.
+- 이 프로그램이 agent plan 의 실행 옵션을 그리고, `agent_plan_boot.py` 가 그 58개 토큰을 그대로 `container run` 에 넘겨요.
+- plan 은 `requested_apple_plan` 의 마운트 넷(identity·work·build·shim)에 agent 몫을 더했어요. `--user 0:0`, `Read_only_rootfs` 없음, capability 셋, 소켓 하나, 첫 프로세스 `masc-exec-shim --serve` 예요.
+- shim 은 `agent_l3.py` 가 만든 빌드를 다시 썼어요. 그 빌드의 소스 해시(`ebf5a676…d287`)가 이 커밋의 shim 소스와 같아요.
+
+| 확인 | 결과 |
+|---|---|
+| `container run` | 성공 |
+| hello | 첫 연결에서 받음. relay_version 1, root_read_only true, uid 502, gid 20, no_new_privs true |
+| probe | `3.0.0+l3check`, 종료 0 |
+| 요청 `echo id=$(id -u):$(id -g); exit 5` | `id=502:20`, trailer exit 5 |
+| masc 파서·판정, 실제 경로 | differences 없음, plan 라벨이 digest 와 같음, `Matches_plan` |
+| 중립 경로 사본(테스트 fixture) | 같은 판정, `Matches_plan` |
+| VM 이 끝난 뒤 호스트 소켓 파일 | 없음 |
+
+- 중립 사본은 호스트 경로 세 개, 그 경로로 계산한 plan 라벨, runtime 이 정한 볼륨 이미지 경로만 바꿨어요. 그 사본이 `test/fixtures/apple-container-1.6.1-agent-guest-inspect.json` 이에요. `test_keeper_microvm_boot_plan` 의 "a guest booted from an agent plan matches it" 이 실제 라이브러리로 같은 판정을 해요.
+- 이미지 메타데이터(`container image inspect`, 29 KB)는 fixture 에 넣지 않았어요. 테스트는 같은 descriptor digest 를 가진 합성 이미지 기록을 써요.
+- 부팅은 L5a head `791552a4ad9` 의 코드로 했어요. 스택이 병합된 뒤 main `3c4d764b76d` 에서 다시 자른 코드는 빈 줄 말고 같았고, 같은 argv 두 개를 그리고 두 inspect 를 모두 `Matches_plan` 으로 판정했어요.
+
+`bin/agent_paths_as_given.py`(결과 `agent-paths-as-given-results.json`)는 같은 순서의 실행 옵션을 Python 으로 만들어요. 호스트 소켓과 identity 마운트를 심볼릭 링크 디렉터리를 거쳐 줬더니, runtime 은 두 경로를 링크를 풀지 않고 받은 그대로 보고했어요. VM 이 끝나자 소켓 파일도 지웠어요. 그래서 masc 는 경로를 풀어 쓸 필요 없이, 같은 경로 문자열을 매번 그리면 돼요.
+
 ## 로그 집계 (`<base-path>/.masc/logs/system_log_<날짜>.jsonl`)
 
 날짜는 UTC 예요. 명령은 `rg -c '<문구>' system_log_<날짜>.jsonl` 이에요.
@@ -189,3 +214,4 @@ masc 가 그리는 모양 그대로 첫 프로세스를 `--entrypoint <shim>` �
 - `socket_relay.py`, `agent_shape.py`, `relay_flags.py` 의 `SOCK_DIR` 은 소켓 경로 제한 때문에 짧은 로컬 경로로 고쳐 써야 해요.
 - `python3 -I bin/agent_shape.py`, `python3 -I bin/relay_flags.py` 도 같은 방식이에요. 4·5번 측정은 위에 적은 대로 `KEEPER_FLAGS`·`CASES` 를 바꿔 실행했어요.
 - `python3 -I bin/agent_boot_flags.py <stage> <소켓 디렉터리> <결과 json>`. `<stage>/out` 에는 `agent_l3.py` 가 만든 shim 과 설정 파일이 있어야 해요. 소켓 디렉터리는 짧은 로컬 경로여야 해요.
+- `bin/agent_plan_harness.sh <저장소> <빌드 디렉터리>` 로 하네스를 만든 다음 `python3 -I bin/agent_plan_boot.py <빌드 디렉터리>/harness <stage> <소켓 디렉터리> <결과 디렉터리>` 예요. `bin/agent_paths_as_given.py` 는 `agent_boot_flags.py` 와 같은 인자를 받아요.

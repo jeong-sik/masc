@@ -1,0 +1,386 @@
+{
+ "container_version": "container CLI version 1.6.1 (build: release, commit: unspeci)",
+ "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+ "cases": [
+  {
+   "case": "renderer",
+   "name": "masc-verify-renderer-1793690642",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/real/agent.sock",
+   "argv": [
+    "container",
+    "run",
+    "-d",
+    "--name",
+    "masc-verify-renderer-1793690642",
+    "--label",
+    "verify.keeper=l5a-agent",
+    "--label",
+    "masc.mcp.microvm_backend=apple_container",
+    "--label",
+    "verify.owner_pid=72352",
+    "--label",
+    "verify.started_at=1793690644",
+    "--label",
+    "masc.mcp.boot_plan=0000000000000000000000000000000000000000000000000000000000000000",
+    "--user",
+    "0:0",
+    "--cap-drop",
+    "ALL",
+    "--rm",
+    "--tmpfs",
+    "/tmp",
+    "--cap-add",
+    "CAP_SETUID",
+    "--cap-add",
+    "CAP_SETGID",
+    "--cap-add",
+    "CAP_SYS_ADMIN",
+    "--publish-socket",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/real/agent.sock:/run/masc-agent/agent.sock",
+    "--memory",
+    "1024m",
+    "--cpus",
+    "1",
+    "--env",
+    "HOME=/tmp",
+    "--env",
+    "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf",
+    "--env",
+    "GH_CONFIG_DIR=/masc-identity",
+    "-v",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/real/identity:/masc-identity:ro",
+    "--volume",
+    "masc-verify-work-1793690642:/masc-work",
+    "--volume",
+    "masc-verify-build-1793690642:/masc-build",
+    "-v",
+    "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/agent-l3-stage/out:/opt/masc-exec-shim:ro",
+    "--workdir",
+    "/masc-work",
+    "--network",
+    "none",
+    "--entrypoint",
+    "/opt/masc-exec-shim/masc-exec-shim",
+    "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+    "--serve",
+    "/run/masc-agent/agent.sock",
+    "502:20"
+   ],
+   "run_rc": 0,
+   "run_seconds": 2.115,
+   "hello": {
+    "relay_version": 1,
+    "root_read_only": true,
+    "uid": 502,
+    "gid": 20,
+    "no_new_privs": true
+   },
+   "hello_attempts": 1,
+   "probe": {
+    "version": "3.0.0+l3check",
+    "capabilities": [
+     "observe",
+     "user_notif",
+     "request_acceptance_frame"
+    ],
+    "exits": [
+     {
+      "exited": 0
+     }
+    ]
+   },
+   "request": {
+    "cwd": "/masc-work",
+    "stdout": [
+     "id=502:20 home=/tmp",
+     "CapEff: 0000000000000000",
+     "NoNewPrivs: 1",
+     "rootfs_write_rc=1"
+    ],
+    "exits": [
+     {
+      "exited": 0
+     }
+    ],
+    "stderr": "\u001e{\"masc_request_accepted\":{\"v\":3}}\u001e\u001e{\"masc_exec_result\":{\"v\":3,\"exit\":3,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}\u001e",
+    "trailer": {
+     "v": 3,
+     "exit": 3,
+     "signal": null,
+     "timed_out": false,
+     "shim_error": null,
+     "execution_receipt": {
+      "mode": "effect",
+      "plan": "unrestricted",
+      "boundary": "sandbox_applied"
+     }
+    }
+   },
+   "facts": {
+    "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+    "descriptor_digest": "sha256:5f289f8d70f7a0867865e23c146f726b670edec956ad20aa982956aa378957a4",
+    "platform": [
+     "arm64",
+     "linux",
+     null
+    ],
+    "cpus": 1,
+    "memory_bytes": 1073741824,
+    "user": "0:0",
+    "working_directory": "/masc-work",
+    "command": [
+     "/opt/masc-exec-shim/masc-exec-shim",
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ],
+    "mounts": [
+     [
+      "tmpfs",
+      null,
+      "/tmp",
+      false
+     ],
+     [
+      "host_dir",
+      "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/real/identity",
+      "/masc-identity",
+      true
+     ],
+     [
+      "volume",
+      "masc-verify-work-1793690642",
+      "/masc-work",
+      false
+     ],
+     [
+      "volume",
+      "masc-verify-build-1793690642",
+      "/masc-build",
+      false
+     ],
+     [
+      "host_dir",
+      "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/agent-l3-stage/out",
+      "/opt/masc-exec-shim",
+      true
+     ]
+    ],
+    "read_only": false,
+    "cap_drop": [
+     "ALL"
+    ],
+    "cap_add": [
+     "CAP_SETUID",
+     "CAP_SETGID",
+     "CAP_SYS_ADMIN"
+    ],
+    "published_sockets": [
+     [
+      "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/real/agent.sock",
+      "/run/masc-agent/agent.sock"
+     ]
+    ],
+    "use_init": false,
+    "networks": []
+   },
+   "facts_plan_label": "0000000000000000000000000000000000000000000000000000000000000000",
+   "differences": [],
+   "stop_rc": 0,
+   "socket_after_stop": false,
+   "resolved_socket_after_stop": false
+  },
+  {
+   "case": "symlinked",
+   "name": "masc-verify-symlinked-1793690642",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/link/agent2.sock",
+   "argv": [
+    "container",
+    "run",
+    "-d",
+    "--name",
+    "masc-verify-symlinked-1793690642",
+    "--label",
+    "verify.keeper=l5a-agent",
+    "--label",
+    "masc.mcp.microvm_backend=apple_container",
+    "--label",
+    "verify.owner_pid=72352",
+    "--label",
+    "verify.started_at=1793690652",
+    "--label",
+    "masc.mcp.boot_plan=0000000000000000000000000000000000000000000000000000000000000000",
+    "--user",
+    "0:0",
+    "--cap-drop",
+    "ALL",
+    "--rm",
+    "--tmpfs",
+    "/tmp",
+    "--cap-add",
+    "CAP_SETUID",
+    "--cap-add",
+    "CAP_SETGID",
+    "--cap-add",
+    "CAP_SYS_ADMIN",
+    "--publish-socket",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/link/agent2.sock:/run/masc-agent/agent.sock",
+    "--memory",
+    "1024m",
+    "--cpus",
+    "1",
+    "--env",
+    "HOME=/tmp",
+    "--env",
+    "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf",
+    "--env",
+    "GH_CONFIG_DIR=/masc-identity",
+    "-v",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/link/identity:/masc-identity:ro",
+    "--volume",
+    "masc-verify-work-1793690642:/masc-work",
+    "--volume",
+    "masc-verify-build-1793690642:/masc-build",
+    "-v",
+    "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/agent-l3-stage/out:/opt/masc-exec-shim:ro",
+    "--workdir",
+    "/masc-work",
+    "--network",
+    "none",
+    "--entrypoint",
+    "/opt/masc-exec-shim/masc-exec-shim",
+    "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+    "--serve",
+    "/run/masc-agent/agent.sock",
+    "502:20"
+   ],
+   "run_rc": 0,
+   "run_seconds": 2.215,
+   "hello": {
+    "relay_version": 1,
+    "root_read_only": true,
+    "uid": 502,
+    "gid": 20,
+    "no_new_privs": true
+   },
+   "hello_attempts": 1,
+   "probe": {
+    "version": "3.0.0+l3check",
+    "capabilities": [
+     "observe",
+     "user_notif",
+     "request_acceptance_frame"
+    ],
+    "exits": [
+     {
+      "exited": 0
+     }
+    ]
+   },
+   "request": {
+    "cwd": "/masc-work",
+    "stdout": [
+     "id=502:20 home=/tmp",
+     "CapEff: 0000000000000000",
+     "NoNewPrivs: 1",
+     "rootfs_write_rc=1"
+    ],
+    "exits": [
+     {
+      "exited": 0
+     }
+    ],
+    "stderr": "\u001e{\"masc_request_accepted\":{\"v\":3}}\u001e\u001e{\"masc_exec_result\":{\"v\":3,\"exit\":3,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}\u001e",
+    "trailer": {
+     "v": 3,
+     "exit": 3,
+     "signal": null,
+     "timed_out": false,
+     "shim_error": null,
+     "execution_receipt": {
+      "mode": "effect",
+      "plan": "unrestricted",
+      "boundary": "sandbox_applied"
+     }
+    }
+   },
+   "facts": {
+    "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+    "descriptor_digest": "sha256:5f289f8d70f7a0867865e23c146f726b670edec956ad20aa982956aa378957a4",
+    "platform": [
+     "arm64",
+     "linux",
+     null
+    ],
+    "cpus": 1,
+    "memory_bytes": 1073741824,
+    "user": "0:0",
+    "working_directory": "/masc-work",
+    "command": [
+     "/opt/masc-exec-shim/masc-exec-shim",
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ],
+    "mounts": [
+     [
+      "tmpfs",
+      null,
+      "/tmp",
+      false
+     ],
+     [
+      "host_dir",
+      "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/link/identity",
+      "/masc-identity",
+      true
+     ],
+     [
+      "volume",
+      "masc-verify-work-1793690642",
+      "/masc-work",
+      false
+     ],
+     [
+      "volume",
+      "masc-verify-build-1793690642",
+      "/masc-build",
+      false
+     ],
+     [
+      "host_dir",
+      "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/agent-l3-stage/out",
+      "/opt/masc-exec-shim",
+      true
+     ]
+    ],
+    "read_only": false,
+    "cap_drop": [
+     "ALL"
+    ],
+    "cap_add": [
+     "CAP_SETUID",
+     "CAP_SETGID",
+     "CAP_SYS_ADMIN"
+    ],
+    "published_sockets": [
+     [
+      "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/v5/link/agent2.sock",
+      "/run/masc-agent/agent.sock"
+     ]
+    ],
+    "use_init": false,
+    "networks": []
+   },
+   "facts_plan_label": "0000000000000000000000000000000000000000000000000000000000000000",
+   "differences": [],
+   "stop_rc": 0,
+   "socket_after_stop": false,
+   "resolved_socket_after_stop": false
+  }
+ ],
+ "volume_delete_rc": [
+  0,
+  0
+ ]
+}

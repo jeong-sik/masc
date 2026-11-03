@@ -78,19 +78,21 @@ let facts () = match reading (inspect ()) with
   | Plan.Facts facts -> facts
   | Plan.Unreadable detail -> fail detail
 
-let image_command_for entrypoint =
+(* An arm64/linux image inspection of [reference] whose descriptor is
+   [descriptor_digest]. *)
+let image_command_for ?(reference = plan.image) ?(descriptor_digest = "sha256:fixture-image") entrypoint =
   let identity : Image_command.identity =
-    {descriptor_digest="sha256:fixture-image"; platform={architecture="arm64"; os="linux"; variant=None}} in
+    {descriptor_digest; platform={architecture="arm64"; os="linux"; variant=None}} in
   let config = `Assoc ["Entrypoint", `List (List.map (fun v -> `String v) entrypoint);
     "Cmd", `List [`String "/bin/bash"]] in
   let raw = Yojson.Safe.to_string (`List [`Assoc [
     "id", `String "fixture-image";
-    "configuration", `Assoc ["name", `String plan.image;
+    "configuration", `Assoc ["name", `String reference;
       "descriptor", `Assoc ["digest", `String identity.descriptor_digest]];
     "variants", `List [`Assoc [
       "platform", `Assoc ["architecture", `String "arm64"; "os", `String "linux"];
       "config", `Assoc ["architecture", `String "arm64"; "os", `String "linux"; "config", config]]]]]) in
-  match Image_command.of_apple_inspect ~reference:plan.image ~identity raw with
+  match Image_command.of_apple_inspect ~reference ~identity raw with
   | Ok value -> value | Error error -> fail (Image_command.error_message error)
 
 let image_command = image_command_for []
@@ -238,6 +240,46 @@ let test_the_parser_reads_published_sockets_and_init () =
     [ inspect ~published_sockets:None ()
     ; inspect ~use_init:None ()
     ; inspect ~published_sockets:(Some (`List [`Assoc ["containerPath", `String "/run/a.sock"]])) () ]
+
+(* Apple container 1.6.1 booted a guest from [Sandbox.apple_turn_start_argv]
+   of this plan, and the fixture is its [container inspect] while the agent
+   answered (docs/evidence/2026-11-03-microvm-request-transport/
+   agent-plan-boot-results.json). The runtime reported every host path as it
+   was given, so the fixture carries this plan's host paths and the plan
+   label that covers them. The volume image paths are the runtime's own; the
+   parser reads a volume by its name. *)
+let booted_agent_plan : Plan.t =
+  { image = "masc-sandbox-ocaml:20260928T0216Z-c48e1e05"
+  ; guest_size = {Size.memory = value (Size.memory_of_string "1g"); cpus = value (Size.cpus_of_int 1)}
+  ; user = "0:0"; working_directory = "/masc-work"
+  ; command = ["/opt/masc-exec-shim/masc-exec-shim"; "--serve"; "/run/masc-agent/agent.sock"; "502:20"]
+  ; mounts =
+      [ Plan.Host_dir {source = "/host/masc/identity/fixture-agent"; destination = "/masc-identity"; read_only = true}
+      ; Plan.Named_volume {name = "fixture-agent-work"; destination = "/masc-work"}
+      ; Plan.Named_volume {name = "fixture-agent-build"; destination = "/masc-build"}
+      ; Plan.Host_dir {source = "/host/masc/shim"; destination = "/opt/masc-exec-shim"; read_only = true} ]
+  ; isolation = [Backend.Drop_all_capabilities; Backend.Remove_on_exit; Backend.Scratch_tmpfs]
+  ; capabilities_added = [Plan.Cap_setuid; Plan.Cap_setgid; Plan.Cap_sys_admin]
+  ; published_sockets =
+      [{Plan.host_path = "/host/masc/agents/fixture-agent.sock"; guest_path = "/run/masc-agent/agent.sock"}]
+  ; network = Plan.Network_none
+  ; environment = ["HOME", "/tmp"; "MASC_EXEC_SHIM_CONFIG", "/opt/masc-exec-shim/masc-exec-shim.conf";
+                   "GH_CONFIG_DIR", "/masc-identity"]
+  ; labels = ["masc.mcp.keeper", "fixture-agent"; Sandbox.microvm_backend_label_key, "apple_container"]
+  }
+
+let test_a_booted_agent_guest_matches_its_plan () =
+  let raw = In_channel.with_open_bin "fixtures/apple-container-1.6.1-agent-guest-inspect.json"
+      In_channel.input_all in
+  let image_command = image_command_for ~reference:booted_agent_plan.image
+      ~descriptor_digest:"sha256:5f289f8d70f7a0867865e23c146f726b670edec956ad20aa982956aa378957a4" [] in
+  match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable
+      ~plan:booted_agent_plan ~policy_environment:[]
+      (Sandbox.apple_guest_facts ~container_name:"fixture-agent" raw) with
+  | Plan.Matches_plan -> ()
+  | Plan.Replace differences ->
+    fail ("replaced: " ^ Plan.refusal_message (Plan.Runtime_reports_other_than_asked differences))
+  | Plan.Refuse refusal -> fail (Plan.refusal_message refusal)
 
 let test_command_refusal_reports_fields_without_values () =
   let requested_secret = "requested-private-credential" in
@@ -467,6 +509,7 @@ let () = run "Keeper Apple boot plan"
                  ; test_case "an agent guest is compared on its grants" `Quick test_an_agent_guest_is_compared_on_its_grants
                  ; test_case "an exec plan keeps its digest" `Quick test_an_exec_plan_keeps_its_digest
                  ; test_case "the parser reads published sockets and init" `Quick test_the_parser_reads_published_sockets_and_init
+                 ; test_case "a guest booted from an agent plan matches it" `Quick test_a_booted_agent_guest_matches_its_plan
                  ; test_case "command refusal names fields without credentials" `Quick test_command_refusal_reports_fields_without_values
                  ; test_case "image command refusal preserves its diagnostic" `Quick test_image_command_refusal_preserves_diagnostic]
   ; "boot", [test_case "actual Apple argv projects its labelled plan" `Quick test_boot_projects_the_labelled_plan

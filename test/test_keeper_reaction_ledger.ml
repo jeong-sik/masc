@@ -138,9 +138,10 @@ let read_recent_rows ~base_path ~keeper_name ~limit =
 ;;
 
 let with_state_change_observer observer f =
-  Keeper_reaction_ledger.install_state_change_observer observer;
+  Keeper_reaction_ledger.install_state_change_observer
+    (fun ~base_path:_ ~keeper_name:_ -> observer ());
   Fun.protect
-    ~finally:(fun () -> Keeper_reaction_ledger.install_state_change_observer ignore)
+    ~finally:(fun () -> Keeper_reaction_ledger.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> ()))
     f
 ;;
 

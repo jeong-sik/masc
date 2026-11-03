@@ -2,11 +2,14 @@ module Owner_lock = Keeper_event_queue_owner_lock
 module State = Keeper_event_queue_state
 module Quarantine = Keeper_event_queue_quarantine
 
-let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let state_change_observer : (base_path:string -> keeper_name:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ ~keeper_name:_ -> ())
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
-let notify_state_change_observer ~keeper_name =
-  try (Atomic.get state_change_observer) () with
+let notify_state_change_observer owner =
+  let base_path = Owner_lock.base_path owner in
+  let keeper_name = Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string in
+  try (Atomic.get state_change_observer) ~base_path ~keeper_name with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
@@ -383,7 +386,7 @@ let save_state_unlocked_with ~save_snapshot owner state =
     (* The atomic writer does not return the written descriptor identity.
        Re-read once before caching; a post-write stat could name a replacement. *)
     forget_snapshot path;
-    notify_state_change_observer ~keeper_name;
+    notify_state_change_observer owner;
     Ok ()
   | Error message ->
     (* The file may be half-written, gone, or untouched -- unknown is not a
@@ -1634,7 +1637,7 @@ let commit_transition_unlocked_with
                    , pending )))
        in
        let continue_after_wal_commit () =
-         notify_state_change_observer ~keeper_name:(keeper_name_of_owner owner);
+         notify_state_change_observer owner;
          continue_after_commit ()
        in
        before_wal_write ();

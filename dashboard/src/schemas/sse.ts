@@ -134,6 +134,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // A workspace's repository catalog was written
   // (lib/repository_catalog_broadcast.ml). A repository reader re-reads on it.
   'repositories_changed',
+  // One Keeper's event queue or reaction record was written
+  // (lib/server/server_keeper_event_queue_broadcast.ml). [keeper] names it.
+  'keeper_event_queue_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

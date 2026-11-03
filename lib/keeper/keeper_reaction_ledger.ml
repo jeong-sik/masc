@@ -2,17 +2,18 @@ include Keeper_reaction_ledger_wire
 
 module Event_id_set = Set.Make (String)
 
-let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let state_change_observer : (base_path:string -> keeper_name:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ ~keeper_name:_ -> ())
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
-let notify_state_change_observer ~keeper_name =
+let notify_state_change_observer ~base_path ~keeper_name =
   Cancel_safe.observe
     ~on_exn:(fun exn ->
       Log.Keeper.warn
         "reaction ledger state-change observer failed keeper=%s: %s"
         keeper_name
         (Printexc.to_string exn))
-    (fun () -> (Atomic.get state_change_observer) ())
+    (fun () -> (Atomic.get state_change_observer) ~base_path ~keeper_name)
 ;;
 
 let board_stimulus_id ~post_id = "board:" ^ post_id
@@ -370,7 +371,7 @@ let record_event_queue_stimulus ~base_path ~keeper_name stimulus =
   Dated_jsonl.append
     (store_for_base_path ~base_path ~keeper_name)
     (stimulus_json ~keeper_name stimulus);
-  notify_state_change_observer ~keeper_name
+  notify_state_change_observer ~base_path ~keeper_name
 ;;
 
 let event_queue_turn_started_json ~keeper_name stimulus =
@@ -418,7 +419,7 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
   Dated_jsonl.append
     (store_for_base_path ~base_path ~keeper_name)
     (event_queue_turn_started_json ~keeper_name stimulus);
-  notify_state_change_observer ~keeper_name
+  notify_state_change_observer ~base_path ~keeper_name
 ;;
 
 (* The other end of the turn the stimulus opened. Without it a schedule's
@@ -430,7 +431,7 @@ let record_event_queue_turn_finished ~base_path ~keeper_name ~disposition stimul
   Dated_jsonl.append
     (store_for_base_path ~base_path ~keeper_name)
     (event_queue_turn_finished_json ~keeper_name ~disposition stimulus);
-  notify_state_change_observer ~keeper_name
+  notify_state_change_observer ~base_path ~keeper_name
 ;;
 
 let reaction_kind_of_transition = function

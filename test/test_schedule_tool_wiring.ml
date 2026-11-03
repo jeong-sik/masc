@@ -2739,13 +2739,13 @@ let test_cancel_partial_withdrawal_does_not_claim_rollback () =
   ignore (f1_seed config "a-first-owner" schedule_id "first" : Keeper_event_queue.stimulus);
   ignore (f1_seed config "z-last-owner" schedule_id "last" : Keeper_event_queue.stimulus);
   let injected = ref false in
-  Keeper_event_queue_persistence.install_state_change_observer (fun () ->
+  Keeper_event_queue_persistence.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ ->
     if not !injected then (
       injected := true;
       Out_channel.with_open_bin (f1_snapshot config "z-last-owner")
         (fun channel -> output_string channel "injected read failure after first withdrawal")));
   Fun.protect
-    ~finally:(fun () -> Keeper_event_queue_persistence.install_state_change_observer ignore)
+    ~finally:(fun () -> Keeper_event_queue_persistence.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> ()))
     (fun () ->
        check bool "partial withdrawal returns failure" false
          (Tool_result.is_success (f1_cancel config schedule_id)));

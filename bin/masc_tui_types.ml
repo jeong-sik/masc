@@ -16639,6 +16639,10 @@ let finish_keeper_chat_control state keeper_name ~generation =
   else begin
     let next = advance_keeper_chat_control state keeper_name in
     state.keeper_chat_control_pending <- List.remove_assoc keeper_name state.keeper_chat_control_pending;
+    (* A turns read keeps the old row of a Keeper whose control is pending,
+       and no later write may announce the Keeper again, so the end of the
+       control owes the turns one read. *)
+    state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed;
     state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
       let intervention = match intervention with
         | Awaiting_control held when name = keeper_name && held.generation = generation ->

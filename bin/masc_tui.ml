@@ -18226,9 +18226,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
       (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level in
     log_http_surface_read_started state ~full_refresh_running:true surface_context;
-    (* The side reads -- the keeper turns behind the footer's answering item,
-       the schedules behind the agenda strip's next wake, the open chat's
-       history -- start after workspace admission, either the cold
+    (* The side reads -- the ask follow-up and the identity logins this TUI
+       is waiting on -- start after workspace admission, either the cold
        initial-probe acknowledgement or the terminal refresh. The open
        questions the agenda strip counts are not among them: they ride this
        bundle ([ask_request] above) whatever the surface. *)
@@ -25280,6 +25279,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              let complete = unverified = [] &&
                keeper_turns_projection_complete ~current:waiting_current result in
              state.keeper_waiting_read <- Keeper_waiting_read.settle_poll state.keeper_waiting_read ~success:complete;
+             (* A waiting list the turns answer could not complete is not a
+                write, so nothing announces when it becomes readable. It is
+                read again after a wait, unless a waiting read is running. *)
+             if not complete && not (Keeper_waiting_read.in_flight state.keeper_waiting_read) then
+               state.keeper_waiting_owed <- failed_read state.keeper_waiting_owed;
              state.keeper_waiting_unverified <- unverified;
              state.keeper_waiting_error <- None
            end;

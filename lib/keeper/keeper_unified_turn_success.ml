@@ -392,13 +392,11 @@ let emit_resolved_cost_event
       ~config
       ~meta
       ~keeper_turn_id
-      ~result
+      ~agent_core_turn_ordinal
+      ~(result : Keeper_agent_run.run_result)
       ~(usage_resolution : Keeper_usage_resolution.t)
       ~usage_trust
   =
-  match result.Keeper_agent_run.final_agent_core_turn_ordinal with
-  | None -> Ok ()
-  | Some agent_core_turn_ordinal ->
   let usage, usage_missing =
     match usage_resolution.delta with
     | Some usage -> usage, false
@@ -781,9 +779,13 @@ let handle
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd.known_cost_usd;
   (* The spend rows follow the commit that moved the cursor. Written before
      it, a failed commit left rows whose spend the next turn resolved again
-     from the old cursor. A row that is not in the file -- its append failed,
-     or the projection raised -- keeps the turn's start, so the next
-     execution reads the ledger and settles what the raw rows still hold. *)
+     from the old cursor.
+
+     The turn's start goes back only when every reading the turn holds has a
+     resolved row in the file. Otherwise the next execution reads the ledger.
+     That read settles raw rows only above the Keeper's newest resolved row,
+     so a reading whose row failed beside one that landed stays unsettled
+     (#47973). *)
   let row_written write =
     let written = ref false in
     run_projection KTP.Usage_metrics (fun () ->
@@ -792,17 +794,25 @@ let handle
       | Error (_ : Keeper_hooks_agent_core.append_failure) -> ());
     !written
   in
-  let turn_row_written =
-    row_written (fun () ->
-      emit_resolved_cost_event
-        ~config
-        ~meta
-        ~keeper_turn_id
-        ~result
-        ~usage_resolution
-        ~usage_trust)
+  let turn_reading_recorded =
+    match result.final_agent_core_turn_ordinal, turn_spend.turn_reading with
+    | Some agent_core_turn_ordinal, (_ : Keeper_turn_spend.resolved option) ->
+      row_written (fun () ->
+        emit_resolved_cost_event
+          ~config
+          ~meta
+          ~keeper_turn_id
+          ~agent_core_turn_ordinal
+          ~result
+          ~usage_resolution
+          ~usage_trust)
+    (* No provider turn ended the run, so no turn row is written. A turn that
+       read nothing leaves nothing to settle. A reading with no row is held
+       only by its raw row, which the next execution's read settles. *)
+    | None, None -> true
+    | None, Some (_ : Keeper_turn_spend.resolved) -> false
   in
-  let other_rows_written =
+  let other_readings_recorded =
     row_written (fun () ->
       Keeper_turn_spend_ledger.write
         ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
@@ -813,7 +823,7 @@ let handle
         turn_spend.other_readings)
   in
   (match settled_start with
-   | Some start when turn_row_written && other_rows_written ->
+   | Some start when turn_reading_recorded && other_readings_recorded ->
      Keeper_unsettled_spend.record_committed start
    | Some _ | None -> ());
   (* Single source of truth for success-path terminal FSM transitions.

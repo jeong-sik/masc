@@ -54,7 +54,7 @@ val handle
   -> settled_start:Keeper_unsettled_spend.settled_start option
      (* From the same settlement. Handed to
         [Keeper_unsettled_spend.record_committed] when the Owner commit holds
-        and every resolved row is in the file. *)
+        and every reading the turn holds has a resolved row in the file. *)
   -> Keeper_execution_outcome.t
   -> handle_result
 (** Common success terminal pipeline for both direct chat and autonomous

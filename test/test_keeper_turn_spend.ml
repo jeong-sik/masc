@@ -609,18 +609,21 @@ let test_an_ended_turn_counts_itself_and_its_spend () =
         (List.map row_turn (spend_rows config)))
 ;;
 
+(* A Keeper the Owner registry does not hold. *)
+let unowned_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "unowned-keeper"; "trace_id", `String "trace-unowned" ])
+  with
+  | Ok meta -> meta
+  | Error err -> failf "meta fixture: %s" err
+;;
+
 (* A commit the Owner refuses leaves the cursor where it was, so the rows
    stay unwritten: the next turn resolves the same readings again. *)
 let test_a_refused_commit_writes_no_rows () =
   with_owned_keeper (fun config _meta ->
-    let unowned =
-      match
-        Masc_test_deps.meta_of_json_fixture
-          (`Assoc [ "name", `String "unowned-keeper"; "trace_id", `String "trace-unowned" ])
-      with
-      | Ok meta -> meta
-      | Error err -> failf "meta fixture: %s" err
-    in
+    let unowned = unowned_meta () in
     let t = observe started (report (counted ~input:100 ~output:10)) in
     (match
        Keeper_turn_spend_commit.commit
@@ -732,6 +735,31 @@ let test_a_commit_whose_rows_are_not_written_keeps_the_start () =
     check int "no resolved row landed" 0 (List.length (resolved_rows config));
     leave_raw_row config meta;
     ignore (start_execution config meta : Keeper_unsettled_spend.settled_start option);
+    check int "the next execution settled the raw row" 1 (List.length (resolved_rows config)))
+;;
+
+(* A commit the Owner refuses writes no row, so it keeps the start and the
+   next execution reads the ledger. *)
+let test_a_refused_commit_keeps_the_start () =
+  with_owned_keeper (fun config _meta ->
+    let unowned = unowned_meta () in
+    let settled_start = start_execution config unowned in
+    let t = observe started (report (counted ~input:100 ~output:10)) in
+    (match
+       Keeper_turn_spend_commit.commit
+         ~config
+         ~keeper_turn_id:1
+         ~before:unowned
+         ~attempt_spend:(Keeper_turn_spend.attempts t)
+         ~settled_start
+         (Keeper_turn_spend_commit.count_turn unowned)
+     with
+     | Error (Keeper_turn_spend_commit.Commit_rejected _) -> ()
+     | Ok _
+     | Error (Keeper_turn_spend_commit.Cost_observation_rejected _ | Keeper_turn_spend_commit.Keeper_removed) ->
+       fail "a Keeper without an Owner was not refused");
+    leave_raw_row config unowned;
+    ignore (start_execution config unowned : Keeper_unsettled_spend.settled_start option);
     check int "the next execution settled the raw row" 1 (List.length (resolved_rows config)))
 ;;
 
@@ -857,6 +885,8 @@ let () =
             test_a_commit_that_writes_every_row_hands_the_start_back
         ; test_case "a commit whose rows are not written keeps the start" `Quick
             test_a_commit_whose_rows_are_not_written_keeps_the_start
+        ; test_case "a commit the Owner refuses keeps the start" `Quick
+            test_a_refused_commit_keeps_the_start
         ] )
     ]
 ;;

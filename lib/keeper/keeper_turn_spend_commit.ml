@@ -67,8 +67,10 @@ let commit
         ~keeper_turn_id
         resolved
     in
-    (* A row not in the file keeps the start: the next execution reads the
-       ledger and settles what its raw rows still hold. *)
+    (* The start goes back only when every resolved row is in the file.
+       Otherwise the next execution reads the ledger. That read settles raw
+       rows only above the Keeper's newest resolved row, so a reading whose
+       row failed beside one that landed stays unsettled (#47973). *)
     (match written, settled_start with
      | Ok (), Some start -> Keeper_unsettled_spend.record_committed start
      | Ok (), None | Error (_ : Keeper_hooks_agent_core.append_failure), _ -> ());

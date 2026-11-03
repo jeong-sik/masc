@@ -77,7 +77,7 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 
 읽는 시각으로 바뀌는 값이 둘 더 있다.
 
-- Candle 잔액은 반감기에 따라 줄어든다. `Candle_decay.remaining ~half_life ~since ~at ~amount_milli` 는 시계도 파일도 쓰지 않는 순수 함수다.
+- Candle 잔액은 반감기에 따라 줄어들고, 줄어든 만큼 workspace 의 `burned` 가 늘고 `circulating` 이 준다(§1.6). `Candle_decay.remaining ~half_life ~since ~at ~amount_milli` 는 시계도 파일도 쓰지 않는 순수 함수다.
 - provider 쉼은 두 가지다. `Rest_until_answered` 는 provider 가 다시 응답해야(쉼 기록이 바뀌어야) 끝나고, 읽을 때마다 끝나는 시각이 `now` 뒤로 밀린다. `Rest_dated` 는 기록된 시각에 쓰기 없이 끝난다. 행은 끝나는 시각을 싣지 않는다(`keeper_tool_surface_ops.ml:307~316`).
 
 ### 1.5 미리보기
@@ -89,7 +89,11 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 
 ### 1.6 Candle
 
-잔액은 Info 탭이 그리고(`bin/masc_tui_render_keepers.ml:1404`, `info_lines` 안), 계정 revision 은 Items 탭이 쓴다(`bin/masc_tui.ml:5253`, `:5377`). roster 응답의 workspace 단위 Candle 값(`state.candle_observation`, `bin/masc_tui.ml:14628`)은 Home, Usage, 도움말이 그린다. 잔액은 읽는 시각으로 줄어든다(decay). 둘 다 요청 토큰이 CanAdmin 일 때만 붙는다(`channel_gate.ml:518~523`).
+잔액은 Info 탭이 그리고(`bin/masc_tui_render_keepers.ml:1404`, `info_lines` 안), Items 탭은 잔액과 계정 revision 으로 바뀜을 알아본다(`bin/masc_tui.ml:5342`). roster 응답의 workspace 단위 Candle 값(`candle`: issued, burned, circulating. `state.candle_observation`)은 Home, Usage, 도움말이 그린다. TUI 는 이 값들을 milli 단위까지 그린다(`bin/masc_tui_candle.ml`).
+
+둘 다 요청 토큰이 CanAdmin 일 때만 붙는다. roster 경로가 `Dashboard_projection_cache.with_current_gate_keeper_observations` 로 붙이고, 이 함수는 웹 대시보드의 실행·브리핑 화면과 같은 투영(`with_current_keeper_observations_using`)을 쓴다.
+
+서버는 읽을 때마다 원장 전체를 `Candle_balance.of_events ~at:now` 로 접는다. 접기의 끝(`advance_all`)에서 키퍼마다 마지막 잔액 이벤트 시각부터 읽는 시각까지 잔액을 줄이고, 줄어든 만큼을 `burned` 에 더한다. 그래서 키퍼 잔액, `burned`, `circulating` 이 모두 읽는 시각에 따라 바뀐다. `issued` 와 장비(portrait)는 원장 이벤트로만 바뀐다. 장비는 고른 아이템으로 정해지고 잔액과 상관없다.
 
 ### 1.7 인증
 
@@ -166,7 +170,12 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 
 ### 3.7 읽는 시각으로 바뀌는 다른 값
 
-- Candle 잔액: 행에 잔액을 계산한 시각과 반감기를 같이 싣는다. TUI 는 그릴 때 같은 `Candle_decay.remaining` 으로 그 시각의 잔액을 계산한다. 서버 타이머도, 다시 읽기도 없다.
+- Candle 잔액과 공급량: roster 응답은 CanAdmin 일 때 `candle` 옆에 접기의 기준 `candle_decay` 를 싣는다. 반감기, 읽는 시각까지 줄이기 전의 `burned`, 잔액 기록이 있는 키퍼마다 마지막 잔액 이벤트 시각(`since`)과 그 직후 잔액(`amount_milli`)이다. TUI 는 그릴 때 지금 시각으로 계산한다.
+  - 키퍼 잔액 = `Candle_decay.remaining ~half_life ~since ~at ~amount_milli`
+  - `burned` = 기준 `burned` + 키퍼마다 (`amount_milli` − 잔액)
+  - `circulating` = `issued` − `burned`
+
+  서버가 같은 시각에 접는 것과 같은 함수에 같은 입력이라 값이 같다. 한 번 줄인 값을 다시 줄이면 내림이 겹쳐 서버 값과 1 milli 쯤 달라질 수 있어서, 읽는 시각의 값이 아니라 줄이기 전 기준을 싣는다. TUI 는 행의 `candle_balance_milli` 를 읽지 않는다. 그 필드는 웹 대시보드가 쓰므로 투영에 남는다. Items 탭은 잔액 대신 그 키퍼의 기준(`since`, `amount_milli`)으로 바뀜을 알아본다. 서버 타이머도, 다시 읽기도 없다.
 - provider 쉼: §3.2 의 서버 fiber 가 `Rest_dated` 중 가장 이른 끝나는 시각에 한 번 깨어 다시 계산한다. 키퍼마다 타이머를 두지 않고, fiber 하나가 다음 시각 하나만 기다린다. 행에는 끝나는 시각을 싣지 않고, TUI 에도 타이머가 없다. `Rest_until_answered` 는 시각으로 끝나지 않으므로 쓰기 신호로만 맞춘다.
 
 ## 4. 규모
@@ -185,13 +194,13 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 | L1 | roster 경로의 `name=` 키퍼 하나 읽기 | 같은 키퍼의 행이 전체 읽기의 행과 같은지, 오류 행, 인증 |
 | L2a~ | §3.2 의 신호. 쓰기 하나가 층 하나다 | 쓰기마다 신호가 한 번 나가는지 |
 | L2f | provider 쉼 신호: 여섯 쓰기 함수의 hook, 서버 fiber 의 다시 계산과 비교, 가장 이른 `Rest_dated` 시각에 깨기(§3.2, §3.7) | 쓰기·시각마다 값이 바뀐 키퍼에게만 신호, 바뀌지 않으면 없음 |
-| L3 | TUI roster: 키퍼별 빚 읽기, 목록 변화 전체 읽기, 2초 roster 읽기 삭제 | 신호 하나 → 요청 하나, 실패 재시도 |
+| L3 | TUI roster: 키퍼 하나 읽기(L3a), 키퍼별 빚 읽기와 목록 변화 전체 읽기(L3b), 2초 roster 읽기 삭제(L3c, L6·L6b 뒤) | 신호 하나 → 요청 하나, 실패 재시도 |
 | L4 | 대기 목록 빈 곳 알림(일정, 확인 대기, fusion), TUI turns 의 2초 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
 | L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |
 | L6 | `next_action` 시각 읽기 | 120초 뒤 읽기 하나 |
-| L6b | Candle 잔액을 TUI 가 계산(§3.7), Candle 원장·설정 신호 | 원장 이벤트 하나 → 닿은 키퍼마다 신호, 그린 잔액 = 서버가 같은 시각에 계산한 잔액 |
+| L6b | roster 응답의 `candle_decay`(서버), TUI 가 그릴 때 잔액·`burned`·`circulating` 계산(§3.7) | 같은 원장에서 기준으로 계산한 값 = 같은 시각의 `of_events` 값 |
 
-L2 가 다 들어가기 전에는 L3 을 넣지 않는다. 신호가 빠진 필드는 L3 뒤에 멈추기 때문이다.
+L2 가 다 들어가기 전에는 L3 을 넣지 않는다. 신호가 빠진 필드는 L3 뒤에 멈추기 때문이다. 같은 까닭으로 2초 roster 읽기(L3c)는 시각으로 바뀌는 값(L6, L6b)이 들어간 뒤에 지운다.
 
 ## 6. 트레이드오프와 한계
 
@@ -199,6 +208,7 @@ L2 가 다 들어가기 전에는 L3 을 넣지 않는다. 신호가 빠진 필�
 - 디스크에서 키퍼 파일을 직접 고치면 신호가 없다. Revalidate(관찰자 피드가 다시 열릴 때)나 `r` 까지 행이 바뀌지 않는다.
 - Owner commit 과 영수증 쓰기는 값이 같아도 신호를 낸다. registry 와 runtime 배정은 행이 읽는 값이 바뀔 때만 낸다. 앞의 둘 때문에 받는 쪽 읽기가 늘 수 있다(§4). registry 의 비교(`row_fields_changed`)는 행이 registry 에서 읽는 값과 손으로 맞춘 목록이라, 행이 registry 값을 더 읽게 되면 함께 고쳐야 한다.
 - 미리보기는 간격 사이의 중간 값을 그리지 않는다.
+- TUI 시계가 서버 시계와 다르면 Candle 값은 그만큼 다른 시각의 값으로 그려지고, `next_action` 다시 읽기는 그만큼 이르거나 늦다.
 
 ## 7. 결정이 필요한 것
 

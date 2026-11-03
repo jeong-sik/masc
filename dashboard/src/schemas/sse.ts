@@ -117,6 +117,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // One Keeper's roster row may have changed (lib/keeper/keeper_row_broadcast.ml).
   // A roster reader re-reads that Keeper's row on it.
   'keeper_row_changed',
+  // A Keeper entered or left the registry (lib/keeper/keeper_row_broadcast.ml).
+  // A roster reader re-reads the whole roster on it.
+  'keeper_roster_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

@@ -2196,6 +2196,7 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       [ (* Arrows first: the digits only reach the first nine rows and the
            list is a declaration directory that can hold more. *)
         b Navigate "arrows+enter" "connect"
+      ; b Navigate "PgUp/PgDn" "page" ~help:"move the cursor a page; Home/End go to the first and last service"
       ; b Navigate "v" "view" ~help:"cycle all / attached only / not attached only"
       ; b Navigate "o" "order" ~help:"cycle attached first / declared order"
       ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"

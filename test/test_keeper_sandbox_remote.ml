@@ -318,11 +318,11 @@ let test_transport_and_probe_argv () =
    | Error detail -> fail ("the declaring runtime refused its own prefix: " ^ detail)
    | Ok built ->
      check (list string) "the fixture is what the production builder emits" built prefix);
-  check (list string) "exec argv delivers the frame to the shim"
-    (prefix @ [ shim_path ])
+  check (option (list string)) "exec argv delivers the frame to the shim"
+    (Some (prefix @ [ shim_path ]))
     (Keeper_sandbox_remote.transport_argv state);
-  check (list string) "probe is its own argv element"
-    (prefix @ [ shim_path; "--probe" ])
+  check (option (list string)) "probe is its own argv element"
+    (Some (prefix @ [ shim_path; "--probe" ]))
     (Keeper_sandbox_remote.probe_argv state);
   check string "endpoint name is the guest" guest_name (Keeper_sandbox_remote.name state);
   check string "keeper root on the volume" "/masc-work/keeper-a"
@@ -342,11 +342,11 @@ let test_container_exec_probe_argv_prefers_probe_prefix () =
       ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
       ~connect_timeout_sec:1 ~max_concurrent_sessions:2 custom_guest
   in
-  check (list string) "transport argv uses prefix"
-    (prefix @ [ shim_path ])
+  check (option (list string)) "transport argv uses prefix"
+    (Some (prefix @ [ shim_path ]))
     (Keeper_sandbox_remote.transport_argv state);
-  check (list string) "probe argv uses probe_prefix without -i"
-    (probe_prefix @ [ shim_path; "--probe" ])
+  check (option (list string)) "probe argv uses probe_prefix without -i"
+    (Some (probe_prefix @ [ shim_path; "--probe" ]))
     (Keeper_sandbox_remote.probe_argv state)
 ;;
 
@@ -370,9 +370,9 @@ let test_openssh_probe_stays_one_word () =
       (Keeper_sandbox_remote.workspace_root state);
     check string "Keeper control root" "/srv/masc/playground/keeper-a"
       (Keeper_sandbox_remote.keeper_control_root state);
-    (match List.rev (Keeper_sandbox_remote.probe_argv state) with
-     | last :: _ -> check string "probe word" "masc-exec-shim --probe" last
-     | [] -> fail "empty probe argv");
+    (match Option.map List.rev (Keeper_sandbox_remote.probe_argv state) with
+     | Some (last :: _) -> check string "probe word" "masc-exec-shim --probe" last
+     | Some [] | None -> fail "empty probe argv");
     check string "lane prefix" "remote_ssh"
       (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport state))
 ;;
@@ -446,7 +446,9 @@ let test_frame_exit_and_injected_env () =
   check string "stdout" "guest-out" stdout;
   check string "stderr trailer stripped" "guest-err" stderr;
   check (list string) "spawned argv is the transport argv minus the CLI"
-    (List.tl (Keeper_sandbox_remote.transport_argv state))
+    (match Keeper_sandbox_remote.transport_argv state with
+     | Some argv -> List.tl argv
+     | None -> fail "a container exec guest has an exec argv")
     (String.split_on_char '\n' (read_file (frame_path ^ ".argv")));
   match Exec_ssh_protocol.decode_request (read_file frame_path) with
   | Error error -> fail error

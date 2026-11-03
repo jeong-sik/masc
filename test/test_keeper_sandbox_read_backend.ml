@@ -600,7 +600,7 @@ let test_attached_guest_endpoint_names_the_derived_guest ~fs () =
          ~network_mode:microvm.network_mode)
       (Keeper_sandbox_remote.name endpoint);
     (match Keeper_sandbox_remote.transport endpoint with
-     | Keeper_sandbox_remote.Container_exec _ -> ()
+     | Keeper_sandbox_remote.Microvm _ -> ()
      | Keeper_sandbox_remote.Openssh _ | Keeper_sandbox_remote.Docker_exec _ ->
        Alcotest.fail "a microvm attach produced another transport");
     Alcotest.(check string)

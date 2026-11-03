@@ -20,9 +20,25 @@ type container_exec =
   ; shim_path : string
   }
 
+type microvm_delivery =
+  | Exec_per_request of
+      { prefix : string list
+      ; probe_prefix : string list option
+      }
+  | Agent_socket of
+      { host_socket : string
+      ; expected : Keeper_guest_socket.expected
+      }
+
+type microvm =
+  { container_name : string
+  ; shim_path : string
+  ; delivery : microvm_delivery
+  }
+
 type transport =
   | Openssh of openssh
-  | Container_exec of container_exec
+  | Microvm of microvm
   | Docker_exec of container_exec
 
 (* The remote command is always this literal. Request data travels only in
@@ -32,7 +48,7 @@ let probe_flag = "--probe"
 
 let lane_prefix = function
   | Openssh _ -> "remote_ssh"
-  | Container_exec _ -> "microvm_remote"
+  | Microvm _ -> "microvm_remote"
   | Docker_exec _ -> "docker_observe"
 ;;
 
@@ -230,7 +246,7 @@ let gh_config_dir t = t.gh_config_dir
 let workspace_root t =
   match t.transport with
   | Docker_exec _ -> t.remote_root
-  | Openssh _ | Container_exec _ -> per_keeper_workspace_root t
+  | Openssh _ | Microvm _ -> per_keeper_workspace_root t
 ;;
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
@@ -250,6 +266,36 @@ let of_openssh ~base_path ~keeper_name (o : openssh) =
   }
 ;;
 
+let of_microvm
+      ~base_path
+      ~keeper_name
+      ~remote_root
+      ~gh_config_dir
+      ~injected_env
+      ~env_allowlist
+      ~connect_timeout_sec
+      ~max_concurrent_sessions
+      (m : microvm)
+  =
+  let transport = Microvm m in
+  let identity : endpoint_identity =
+    base_path, transport, remote_root, env_allowlist,
+    connect_timeout_sec, max_concurrent_sessions
+  in
+  { name = m.container_name
+  ; transport
+  ; remote_root
+  ; env_allowlist
+  ; connect_timeout_sec
+  ; gh_config_dir
+  ; injected_env
+  ; base_path
+  ; keeper_name
+  ; identity
+  ; shared = shared_state identity
+  }
+;;
+
 let of_container_exec
       ~base_path
       ~keeper_name
@@ -261,22 +307,31 @@ let of_container_exec
       ~max_concurrent_sessions
       (c : container_exec)
   =
-  let identity : endpoint_identity =
-    base_path, Container_exec c, remote_root, env_allowlist,
-    connect_timeout_sec, max_concurrent_sessions
-  in
-  { name = c.container_name
-  ; transport = Container_exec c
-  ; remote_root
-  ; env_allowlist
-  ; connect_timeout_sec
-  ; gh_config_dir
-  ; injected_env
-  ; base_path
-  ; keeper_name
-  ; identity
-  ; shared = shared_state identity
-  }
+  of_microvm ~base_path ~keeper_name ~remote_root ~gh_config_dir ~injected_env
+    ~env_allowlist ~connect_timeout_sec ~max_concurrent_sessions
+    { container_name = c.container_name
+    ; shim_path = c.shim_path
+    ; delivery = Exec_per_request { prefix = c.prefix; probe_prefix = c.probe_prefix }
+    }
+;;
+
+let of_agent_socket
+      ~base_path
+      ~keeper_name
+      ~remote_root
+      ~gh_config_dir
+      ~injected_env
+      ~env_allowlist
+      ~connect_timeout_sec
+      ~max_concurrent_sessions
+      ~container_name
+      ~shim_path
+      ~host_socket
+      ~expected
+  =
+  of_microvm ~base_path ~keeper_name ~remote_root ~gh_config_dir ~injected_env
+    ~env_allowlist ~connect_timeout_sec ~max_concurrent_sessions
+    { container_name; shim_path; delivery = Agent_socket { host_socket; expected } }
 ;;
 
 let of_docker_exec
@@ -363,26 +418,51 @@ let openssh_prefix (o : openssh) =
    config root -- and the one environment entry the shim reads for itself
    ([Exec_ssh_protocol.shim_config_env_var]). Payload env never travels this
    way on either transport. *)
-let transport_argv t =
+(* What carries one request to the shim: a local process whose stdin takes
+   the frame, or a connection to a guest agent. *)
+type delivery =
+  | Local_process of string list
+  | Guest_agent of
+      { host_socket : string
+      ; expected : Keeper_guest_socket.expected
+      }
+
+let delivery t =
   match t.transport with
-  | Openssh o -> openssh_prefix o @ [ shim_command ]
-  | Container_exec c | Docker_exec c -> c.prefix @ [ c.shim_path ]
+  | Openssh o -> Local_process (openssh_prefix o @ [ shim_command ])
+  | Docker_exec c -> Local_process (c.prefix @ [ c.shim_path ])
+  | Microvm { shim_path; delivery = Exec_per_request { prefix; _ }; _ } ->
+    Local_process (prefix @ [ shim_path ])
+  | Microvm { delivery = Agent_socket { host_socket; expected }; _ } ->
+    Guest_agent { host_socket; expected }
 ;;
 
 (* OpenSSH hands the remote command to a shell, so the probe is one word; a
    guest exec takes an argv, so the flag is its own element. *)
-let probe_argv t =
+let probe_delivery t =
   match t.transport with
-  | Openssh o -> openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ]
-  | Container_exec c | Docker_exec c ->
-    let prefix = Option.value c.probe_prefix ~default:c.prefix in
-    prefix @ [ c.shim_path; probe_flag ]
+  | Openssh o -> Local_process (openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ])
+  | Docker_exec c ->
+    Local_process (Option.value c.probe_prefix ~default:c.prefix @ [ c.shim_path; probe_flag ])
+  | Microvm { shim_path; delivery = Exec_per_request { prefix; probe_prefix }; _ } ->
+    Local_process (Option.value probe_prefix ~default:prefix @ [ shim_path; probe_flag ])
+  | Microvm { delivery = Agent_socket { host_socket; expected }; _ } ->
+    Guest_agent { host_socket; expected }
 ;;
+
+let process_argv = function
+  | Local_process argv -> Some argv
+  | Guest_agent _ -> None
+;;
+
+let transport_argv t = process_argv (delivery t)
+let probe_argv t = process_argv (probe_delivery t)
 
 let host_label t =
   match t.transport with
   | Openssh o -> o.endpoint.host
-  | Container_exec c | Docker_exec c -> c.container_name
+  | Microvm m -> m.container_name
+  | Docker_exec c -> c.container_name
 ;;
 
 (* ── Error codes ─────────────────────────────────────────────────────── *)
@@ -583,7 +663,7 @@ let remote_cwd t cwd =
      Keeper_remote_path.normalize_remote). *)
   let normalized = Keeper_remote_path.normalize_remote cwd in
   let endpoint_root = Keeper_remote_path.normalize_remote t.remote_root in
-  if (match t.transport with Docker_exec _ -> true | Openssh _ | Container_exec _ -> false)
+  if (match t.transport with Docker_exec _ -> true | Openssh _ | Microvm _ -> false)
   then
     if Filename.is_relative cwd
     then Error "docker_observe_cwd_requires_guest_absolute_path"
@@ -603,9 +683,9 @@ let remote_cwd t cwd =
 let transport_failure t status =
   match t.transport, status with
   | Openssh _, Unix.WEXITED 255 -> Some "ssh client exited 255"
-  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WEXITED _)
-  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WSIGNALED _)
-  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WSTOPPED _) -> None
+  | ((Openssh _ | Microvm _ | Docker_exec _), Unix.WEXITED _)
+  | ((Openssh _ | Microvm _ | Docker_exec _), Unix.WSIGNALED _)
+  | ((Openssh _ | Microvm _ | Docker_exec _), Unix.WSTOPPED _) -> None
 ;;
 
 let log_first_dispatch t =
@@ -614,10 +694,14 @@ let log_first_dispatch t =
     Log.Keeper.info
       "remote SSH dispatch enabled endpoint=%s host=%s port=%d"
       t.name o.endpoint.host o.endpoint.port
-  | Container_exec c ->
+  | Microvm { container_name; shim_path; delivery = Exec_per_request _ } ->
     Log.Keeper.info
       "remote microvm dispatch enabled container=%s shim=%s"
-      c.container_name c.shim_path
+      container_name shim_path
+  | Microvm { container_name; delivery = Agent_socket { host_socket; _ }; _ } ->
+    Log.Keeper.info
+      "remote microvm dispatch enabled container=%s agent_socket=%s"
+      container_name host_socket
   | Docker_exec c ->
     Log.Keeper.info
       "Docker Observe dispatch enabled container=%s shim=%s"
@@ -643,11 +727,11 @@ let outdated_shim_repair t =
     Printf.sprintf
       "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <%s>"
       t.name asset
-  | Container_exec c ->
+  | Microvm m ->
     let host_shim =
       Filename.concat
         (Config_dir_resolver.microvm_shim_dir ~base_path:t.base_path)
-        (Filename.basename c.shim_path)
+        (Filename.basename m.shim_path)
     in
     Printf.sprintf
       "on this host, replace %s with %s and the .sha256 beside it with that \
@@ -716,16 +800,66 @@ let record_probe_failure shared ~at ~detail =
   Lockfree_atomic.update shared.probe_observations (fun previous ->
     { previous with latest = Probe_failed { at; detail } })
 
+(* A guest agent is reached from an Eio fiber with this process's network
+   and clock; a caller outside Eio has neither to give. *)
+let agent_socket_context () =
+  match Fs_compat.execution_context (), Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+  | Fs_compat.Eio_fiber, Some net, Some clock -> Ok (net, clock)
+  | Fs_compat.Non_eio, (Some _ | None), (Some _ | None) ->
+    Error "a guest agent is reached only from an Eio fiber"
+  | Fs_compat.Eio_fiber, None, (Some _ | None) | Fs_compat.Eio_fiber, Some _, None ->
+    Error "this process has no Eio network or clock to reach the guest agent with"
+;;
+
+let agent_not_sent_to_string = function
+  | Keeper_guest_socket.Unreachable { attempts; last } ->
+    Printf.sprintf "the guest agent gave no hello over %d connections: %s" attempts last
+  | Keeper_guest_socket.Refused refusal ->
+    "the guest agent was refused: " ^ Keeper_guest_socket.refusal_to_string refusal
+  | Keeper_guest_socket.Incompatible detail ->
+    "the guest agent answered in a way this host cannot use: " ^ detail
+;;
+
+(* One request to an [Agent_socket] guest. [connect_timeout_sec] bounds the
+   wait for the agent's hello and [budget_sec] the whole call. *)
+let run_agent_socket t ?on_stdout_chunk ?on_stderr_chunk ~budget_sec ~host_socket ~expected
+      request =
+  match agent_socket_context () with
+  | Error detail -> Error detail
+  | Ok (net, clock) ->
+    Ok
+      (Keeper_guest_socket.run ~net ~clock ?on_stdout_chunk ?on_stderr_chunk
+         ~accept:(Keeper_guest_socket.refusal ~expected) ~socket:host_socket
+         ~connect_budget_sec:(float_of_int t.connect_timeout_sec) ~budget_sec request)
+;;
+
 let run_probe_locked t =
+  let unreachable detail =
+    Error
+      (Printf.sprintf "%s: endpoint %s: %s" (code t "endpoint_unreachable") t.name detail)
+  in
   let response =
-    try Ok (Process_eio.run_argv_with_stdin_and_status_split
-      ~timeout_sec:(preflight_timeout_sec t)
-      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-      ~stdin_content:""
-      (probe_argv t)) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printf.sprintf "%s: endpoint %s: %s"
-        (code t "endpoint_unreachable") t.name (Printexc.to_string exn))
+    match probe_delivery t with
+    | Local_process argv ->
+      (try Ok (Process_eio.run_argv_with_stdin_and_status_split
+         ~timeout_sec:(preflight_timeout_sec t)
+         ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+         ~stdin_content:""
+         argv) with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> unreachable (Printexc.to_string exn))
+    | Guest_agent { host_socket; expected } ->
+      (match
+         run_agent_socket t ~budget_sec:(preflight_timeout_sec t) ~host_socket ~expected
+           Keeper_guest_socket.Probe
+       with
+       | Error detail -> unreachable detail
+       | Ok (Keeper_guest_socket.Exited { code; stdout; stderr }) ->
+         Ok (Unix.WEXITED code, stdout, stderr)
+       | Ok (Keeper_guest_socket.Not_sent not_sent) ->
+         unreachable (agent_not_sent_to_string not_sent)
+       | Ok (Keeper_guest_socket.Timed_out _) -> unreachable "the probe ran out of time"
+       | Ok (Keeper_guest_socket.Broken { reason; _ }) -> unreachable reason)
   in
   match response with
   | Error detail ->
@@ -952,6 +1086,22 @@ let completed_execution_observation record raw_stderr =
 
 type stdout_mode = Text_paths | Binary_bytes
 
+(* How one request came back. [Wire_status] is the transport process's
+   status, or the guest agent's exit chunk (a spent budget reads as
+   [Process_eio.timed_out_status] either way). [Wire_broken] is an agent
+   connection that ended or broke before its exit chunk. *)
+type wire_end =
+  | Wire_status of Unix.process_status
+  | Wire_broken of string
+
+type wire =
+  | Wire_not_sent of string  (* nothing reached the shim *)
+  | Wire_answered of
+      { ended : wire_end
+      ; stdout : string
+      ; raw_stderr : string
+      }
+
 let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect)
       ?on_receipt ~request_root ~timeout_sec t =
   (* A real remote exit/signal is [Ran]; a transport that failed before or
@@ -994,10 +1144,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
     match (match t.transport, mode with
       | Docker_exec _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Guest_local) ->
         Error "docker_observe_mode_required: Docker host mounts require the filesystem and network Observe box"
-      | Container_exec _, Exec_ssh_protocol.Guest_local ->
+      | Microvm _, Exec_ssh_protocol.Guest_local ->
         Error microvm_guest_local_unavailable_reason
       | Docker_exec _, Exec_ssh_protocol.Observe
-      | Container_exec _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe)
+      | Microvm _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe)
       | Openssh _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe | Exec_ssh_protocol.Guest_local) ->
         wire_env t env) with
     | Error error -> transport_failed ~failure:Transport_failed error
@@ -1047,7 +1197,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            let path_stream emit =
              match t.transport with
              | Docker_exec _ | Openssh _ -> emit, (fun () -> ())
-             | Container_exec _ ->
+             | Microvm _ ->
                let stream = Keeper_remote_path.stream ~base_path:t.base_path
                  ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name
                  ~emit in
@@ -1076,7 +1226,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            let rewrite text =
              match t.transport with
              | Docker_exec _ | Openssh _ -> text
-             | Container_exec _ ->
+             | Microvm _ ->
                Keeper_remote_path.rewrite_output ~base_path:t.base_path
                  ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name text
            in
@@ -1085,16 +1235,53 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              Execution_unavailable
                (Transport_unavailable
                   (if acceptance_frame then Acceptance_not_read else Acceptance_not_asked));
-           let status, stdout, raw_stderr =
-             Process_eio.run_argv_with_stdin_held_open_and_status_split
-               ~timeout_sec:budget
-               ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-               ?on_stdout_chunk:
-                 (Option.map fst stdout_path_stream)
-               ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
-               ~stdin_content:frame
-               (transport_argv t)
+           let wire =
+             match delivery t with
+             | Local_process argv ->
+               let status, stdout, raw_stderr =
+                 Process_eio.run_argv_with_stdin_held_open_and_status_split
+                   ~timeout_sec:budget
+                   ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                   ?on_stdout_chunk:
+                     (Option.map fst stdout_path_stream)
+                   ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
+                   ~stdin_content:frame
+                   argv
+               in
+               Wire_answered { ended = Wire_status status; stdout; raw_stderr }
+             | Guest_agent { host_socket; expected } ->
+               (match
+                  run_agent_socket t
+                    ?on_stdout_chunk:(Option.map fst stdout_path_stream)
+                    ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
+                    ~budget_sec:budget ~host_socket ~expected
+                    (Keeper_guest_socket.Run { frame })
+                with
+                | Error detail -> Wire_not_sent detail
+                | Ok (Keeper_guest_socket.Not_sent not_sent) ->
+                  Wire_not_sent (agent_not_sent_to_string not_sent)
+                | Ok (Keeper_guest_socket.Exited { code; stdout; stderr }) ->
+                  Wire_answered
+                    { ended = Wire_status (Unix.WEXITED code); stdout; raw_stderr = stderr }
+                | Ok (Keeper_guest_socket.Timed_out { stdout; stderr }) ->
+                  Wire_answered
+                    { ended = Wire_status Process_eio.timed_out_status
+                    ; stdout
+                    ; raw_stderr = stderr
+                    }
+                | Ok (Keeper_guest_socket.Broken { reason; stdout; stderr }) ->
+                  Wire_answered { ended = Wire_broken reason; stdout; raw_stderr = stderr })
            in
+           match wire with
+           | Wire_not_sent detail ->
+             (* No byte of the request was written, so it cannot have run. *)
+             observation := Execution_unavailable Request_not_sent;
+             let error = transport_error t detail in
+             record_dispatch t.shared ~keeper_name:t.keeper_name
+               (Dispatch_failed
+                  { at = Unix.gettimeofday (); failure = Transport_failed; detail = error });
+             transport_failed ~failure:Transport_failed error
+           | Wire_answered { ended; stdout; raw_stderr } ->
            Option.iter (fun (_, finish) -> finish ()) stdout_path_stream;
            settle_stderr_head stderr_stream;
            (* The frame the stream took off the front is not payload here
@@ -1111,7 +1298,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                | Exec_ssh_protocol.Head_payload -> raw_stderr
            in
            let local_timed_out =
-             Process_eio.exit_reason_of_status status = Process_eio.Timed_out
+             match ended with
+             | Wire_status status ->
+               Process_eio.exit_reason_of_status status = Process_eio.Timed_out
+             | Wire_broken _ -> false
            in
            let settle record triple =
              Option.iter (fun value -> observation := value)
@@ -1135,7 +1325,12 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              let failure, error =
                if local_timed_out
                then Local_timeout, local_timeout_error t budget
-               else Transport_failed, transport_error t detail
+               else
+                 Transport_failed,
+                 transport_error t
+                   (match ended with
+                    | Wire_broken reason -> reason
+                    | Wire_status _ -> detail)
              in
              settle (failed failure error)
                (transport_failed ~failure ~stdout:(rewrite stdout)
@@ -1150,16 +1345,21 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let stdout = match binary_output with Some buffer -> Buffer.contents buffer | None -> rewrite stdout in
              let payload_stderr = rewrite payload_stderr in
-             (match local_timed_out, transport_failure t status with
-              | true, _ ->
+             let broken detail =
+               let error = transport_error t detail in
+               settle (failed Transport_failed error)
+                 (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+             in
+             (match local_timed_out, ended with
+              | true, (Wire_status _ | Wire_broken _) ->
                 let error = local_timeout_error t budget in
                 settle (failed Local_timeout error)
                   (transport_failed ~failure:Local_timeout ~stdout ~prefix_stderr:payload_stderr error)
-              | false, Some detail ->
-                let error = transport_error t detail in
-                settle (failed Transport_failed error)
-                  (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
-              | false, None ->
+              | false, Wire_broken detail -> broken detail
+              | false, Wire_status status ->
+                match transport_failure t status with
+                | Some detail -> broken detail
+                | None ->
                 (match Exec_ssh_protocol.parse_trailer trailer_bytes with
                  | Error error ->
                    let error = transport_error t error in
@@ -1202,7 +1402,7 @@ let bootstrap_keeper_control_root ~timeout_sec t =
     run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
       ~argv:[ "mkdir"; "-p"; keeper_control_root t ] ~env:[||]
       ~cwd:(Some t.remote_root)
-  | Container_exec _ | Docker_exec _ ->
+  | Microvm _ | Docker_exec _ ->
     let reason =
       Printf.sprintf
         "%s_keeper_control_root_bootstrap_unsupported: endpoint %s is not remote SSH"

@@ -16827,9 +16827,19 @@ let selected_item_account state =
   | Some keeper, Some (name, (_, account)) when String.equal keeper.k_name name -> Some account
   | (Some _ | None), (Some _ | None) -> None
 
+(* The selected Keeper's balance at this moment, from the roster's Candle
+   basis; the Items account's own balance stands still after it is read. *)
+let selected_item_balance_now state =
+  match state.item_account with
+  | Some (keeper_name, _) ->
+      Masc_tui_candle.balance_milli ~now:(Unix.gettimeofday ()) state.candle_observation
+        ~keeper:keeper_name
+  | None -> None
+
 let item_browser_items state =
   Masc_tui_keeper_items.items ~filter:state.item_filter
     ~account:(selected_item_account state)
+    ~balance_milli:(selected_item_balance_now state)
 
 let selected_browser_item state =
   let items = item_browser_items state in

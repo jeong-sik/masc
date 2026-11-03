@@ -8944,7 +8944,8 @@ let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
 let prepare_item_request state ~mailbox ~drain_queue =
   match selected_keeper state, selected_browser_item state with
   | Some keeper, Some item ->
-    (match Masc_tui_keeper_items.request ~account:(selected_item_account state) item with
+    (match Masc_tui_keeper_items.request ~account:(selected_item_account state)
+             ~balance_milli:(selected_item_balance_now state) item with
      | Error reason -> report_action state "error" reason
      | Ok request ->
        if Option.is_some (recall_edit_for_keeper state keeper.k_name) then

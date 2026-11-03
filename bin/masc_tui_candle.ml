@@ -53,6 +53,10 @@ let balance_text ~now reading ~keeper = match reading with
       | Ok milli -> amount_text (string_of_int milli) ^ " Candle"
       | Error detail -> "unavailable: " ^ detail)
 
+let balance_milli ~now reading ~keeper = match reading with
+  | Some (Ok (Decode.Candle_ready basis)) -> Result.to_option (balance ~now basis ~keeper)
+  | Some (Ok (Decode.Candle_off | Decode.Candle_disabled _)) | Some (Error _) | None -> None
+
 let keeper_basis reading ~keeper = match reading with
   | Some (Ok (Decode.Candle_ready { Candle_decay_basis.decay = Decaying { keepers; _ }; _ })) ->
     List.assoc_opt keeper keepers

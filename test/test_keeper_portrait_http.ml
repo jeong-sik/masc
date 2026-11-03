@@ -1005,27 +1005,31 @@ beanie = %d
        let observed = Some (Browser.Ready account) in
        let untouched = ledger_bytes () in
        check int "starting outfit does not become owned inventory" 0
-         (List.length (Browser.items ~filter:Browser.Owned ~account:observed));
+         (List.length (Browser.items ~filter:Browser.Owned ~account:observed ~balance_milli:None));
        check bool "funded unowned item is offered in can-buy view" true
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed));
-       let heads = Browser.items ~filter:(Browser.In_slot Keeper_portrait_item.Head) ~account:observed in
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:None));
+       let heads = Browser.items ~filter:(Browser.In_slot Keeper_portrait_item.Head) ~account:observed ~balance_milli:None in
        check bool "slot navigation excludes other slots" true
          (List.for_all (fun item -> Keeper_portrait_item.slot item = Keeper_portrait_item.Head) heads);
        check int "page navigation stays within filtered items" (List.length heads - 1)
          (Browser.move ~items:heads ~cursor:0 ~delta:18);
-       (match require_ok Fun.id (Browser.request ~account:observed item) with
+       (match require_ok Fun.id (Browser.request ~account:observed ~balance_milli:None item) with
         | Browser.Buy_and_equip request ->
           check bool "request keeps the selected item" true (request.item = item);
           check int "request caps purchase at the observed price" 200 request.expected_price_milli
         | Browser.Equip _ -> fail "unowned item was treated as owned");
        let empty_wallet = Some (Browser.Ready {account with balance_milli=0}) in
        check bool "unaffordable item is not offered" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:empty_wallet));
-       (match Browser.request ~account:empty_wallet item with
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:empty_wallet ~balance_milli:None));
+       (match Browser.request ~account:empty_wallet ~balance_milli:None item with
         | Error _ -> () | Ok _ -> fail "prepared an unaffordable purchase");
+       check bool "a balance that fell below the price no longer offers the item" false
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:(Some 0)));
+       (match Browser.request ~account:observed ~balance_milli:(Some 0) item with
+        | Error _ -> () | Ok _ -> fail "prepared a purchase the balance now cannot cover");
        check int "unread account does not fabricate inventory" 0
-         (List.length (Browser.items ~filter:Browser.Owned ~account:None));
-       (match Browser.request ~account:None item with
+         (List.length (Browser.items ~filter:Browser.Owned ~account:None ~balance_milli:None));
+       (match Browser.request ~account:None ~balance_milli:None item with
         | Error _ -> () | Ok _ -> fail "unobserved account prepared a purchase");
        check string "browsing and preparing a request do not transact" untouched (ledger_bytes ())
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
@@ -1053,10 +1057,10 @@ beanie = %d
        let module Browser = Masc_tui_keeper_items in
        let observed = Some (Browser.Ready account) in
        check bool "purchased item appears in owned inventory" true
-         (List.mem item (Browser.items ~filter:Browser.Owned ~account:observed));
+         (List.mem item (Browser.items ~filter:Browser.Owned ~account:observed ~balance_milli:None));
        check bool "purchased item is excluded from shopping" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed));
-       (match require_ok Fun.id (Browser.request ~account:observed item) with
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:None));
+       (match require_ok Fun.id (Browser.request ~account:observed ~balance_milli:None item) with
         | Browser.Equip owned -> check bool "owned request only equips" true (owned = item)
         | Browser.Buy_and_equip _ -> fail "owned request would buy twice")
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->

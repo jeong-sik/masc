@@ -15,6 +15,10 @@ val compact_status : (Masc.Tui_decode.candle_reading, string) result option -> s
 val balance_text :
   now:float -> (Masc.Tui_decode.candle_reading, string) result option -> keeper:string -> string option
 
+val balance_milli :
+  now:float -> (Masc.Tui_decode.candle_reading, string) result option -> keeper:string -> int option
+(** The Keeper's balance at [now] when the roster's Candle is ready. *)
+
 val keeper_basis :
   (Masc.Tui_decode.candle_reading, string) result option -> keeper:string -> Candle_decay_basis.keeper option
 (** The Keeper's last balance event and amount. It changes only when the

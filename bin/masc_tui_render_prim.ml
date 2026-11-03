@@ -2235,10 +2235,9 @@ let lexed_span (text, kind) =
     if String.equal style "" then text else style ^ text ^ Ansi.reset
 
 
-(* Compact "how long" text three surfaces share: the Attention panel's item
-   age, the Lanes table's idle column, and the Keeper operations preview --
-   which kept a byte-for-byte copy of this under its own name, 3,600 lines
-   below, until the two were counted. *)
+(* Compact "how long" text the Lanes table's idle column and the Keeper
+   operations preview share -- the preview kept a byte-for-byte copy of this
+   under its own name, 3,600 lines below, until the two were counted. *)
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
   if seconds < 60 then Printf.sprintf "%ds" seconds
@@ -2788,36 +2787,6 @@ let planning_rollup_rows ~cols (rollup : planning_rollup) =
     let max_cells = max 1 (framed_inner_width cols - 2) in
     Message_layout.pack_clauses ~max_cells (head :: counters)
     |> List.map (fun row -> "  " ^ row)
-
-(* The transport's own readings are on Usage. The Dashboard keeps one item
-   while the outbound queue is under pressure, since that delays what every
-   other row there reports; a steady queue, or no reading, says nothing. *)
-let transport_attention_item (transport : Tui_decode.transport_health option) =
-  let item severity word : Masc_tui_types.attention_item =
-    { ai_kind = "transport_queue_pressure"
-    ; ai_severity = severity
-    ; ai_summary =
-        Printf.sprintf "transport queue pressure %s (m: Usage)" word
-    ; ai_target =
-        Masc_tui_types.Attention_other
-          { target_type = "transport"; target_id = None }
-    ; ai_blocker_summary = None
-    ; ai_evidence_ts = None
-    }
-  in
-  match transport with
-  | None -> None
-  | Some transport -> (
-      let word =
-        Masc.Transport_metrics.queue_pressure_kind_to_string
-          transport.th_queue_pressure
-      in
-      match transport.th_queue_pressure with
-      | Masc.Transport_metrics.Steady -> None
-      | Masc.Transport_metrics.Watch ->
-          Some (item Masc_tui_types.Attention_warning word)
-      | Masc.Transport_metrics.High ->
-          Some (item Masc_tui_types.Attention_bad word))
 
 (* The Backlog counts, each with the mark its Task rows wear. Claimed had no
    mark here while a claimed Task row draws the half circle, so the one count a

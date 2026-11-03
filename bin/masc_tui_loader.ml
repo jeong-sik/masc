@@ -707,19 +707,6 @@ let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
     list, not that a malformed payload was silently dropped. *)
 let ( let* ) = Result.bind
 
-let decode_attention_severity raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "critical" -> Ok Attention_critical
-  | "bad" -> Ok Attention_bad
-  | "warn" | "warning" -> Ok Attention_warning
-  | "info" -> Ok Attention_info
-  | other ->
-      Error
-        (Printf.sprintf
-           "unknown attention severity %S (normalized %S)"
-           raw
-           other)
-
 let decode_workspace_health raw =
   match String.lowercase_ascii (String.trim raw) with
   | "critical" -> Ok Workspace_health_critical
@@ -736,60 +723,6 @@ let decode_workspace_health raw =
            "unknown workspace health %S (normalized %S)"
            raw
            other)
-
-let decode_attention_item json =
-  let* ai_kind = Masc.Tui_decode_fields.required_string_field json "kind" in
-  let* raw_severity = Masc.Tui_decode_fields.required_string_field json "severity" in
-  let* ai_severity = decode_attention_severity raw_severity in
-  let* ai_summary = Masc.Tui_decode_fields.required_string_field json "summary" in
-  let* target_type = Masc.Tui_decode_fields.required_string_field json "target_type" in
-  let* target_id = Masc.Tui_decode_fields.optional_string_field json "target_id" in
-  (* The producers write ["keeper"] with the Keeper's name as the id
-     (lib/dashboard/dashboard_execution.ml, the keeper status bridge). A
-     keeper item without a name names nobody to join on, so it stays with the
-     other targets. *)
-  let ai_target =
-    match (target_type, target_id) with
-    | "keeper", Some name -> Attention_keeper name
-    | _, _ -> Attention_other { target_type; target_id }
-  in
-  (* Evidence is free-shaped on the wire (each producer writes its own
-     object); the one thing this surface reads out of it is the tool-host
-     failure timestamp. An absent or non-object evidence, or one without a
-     readable [log_ts], means "no age to show" -- not a broken item, so the
-     row survives without it. *)
-  let* evidence_log_ts =
-    match Yojson.Safe.Util.member "evidence" json with
-    | `Assoc _ as nested -> Masc.Tui_decode_fields.optional_string_field nested "log_ts"
-    | _ -> Ok None
-  in
-  (* The keeper status bridge puts the blocker's own sentence under
-     [evidence.runtime_blocker]; the summary repeats it inside the Keeper
-     name and class word, which on a narrow row pushes the cause off the
-     end. Absent on every other producer's evidence. *)
-  let* ai_blocker_summary =
-    match Yojson.Safe.Util.member "evidence" json with
-    | `Assoc _ as evidence -> (
-        match Yojson.Safe.Util.member "runtime_blocker" evidence with
-        | `Assoc _ as blocker ->
-            Masc.Tui_decode_fields.optional_string_field blocker "runtime_blocker_summary"
-        | _ -> Ok None)
-    | _ -> Ok None
-  in
-  let ai_evidence_ts =
-    Option.bind evidence_log_ts Masc_domain.parse_iso8601_opt
-  in
-  Ok
-    { ai_kind
-    ; ai_severity
-    ; ai_summary
-    ; ai_target
-    ; ai_blocker_summary
-    ; ai_evidence_ts
-    }
-
-let decode_attention_items json_list =
-  Masc.Tui_decode_fields.decode_list "attention_items" decode_attention_item json_list
 
 let decode_board_post ?(require_body = false) json =
   let* bp_id = Masc.Tui_decode_fields.required_string_field json "id" in
@@ -1400,15 +1333,6 @@ let load_overview ~(host : string) ~(port : int) :
   | Ok json ->
       decode_offloaded memo_overview ~name:"overview.decode_wait" (fun json ->
         let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
-        let* incidents =
-          let* items = Masc.Tui_decode_fields.optional_list_field json "incidents" in
-          decode_attention_items items
-        in
-        let* attention_queue =
-          let* items = Masc.Tui_decode_fields.optional_list_field json "attention_queue" in
-          decode_attention_items items
-        in
-        let* agent_briefs = Masc.Tui_decode_fields.optional_list_field json "agent_briefs" in
         let* keeper_briefs = Masc.Tui_decode_fields.optional_list_field json "keeper_briefs" in
         (* Keepers the server listed but could not build a row for. They are
            not in [keeper_briefs]; before #38090 they were in neither, and the
@@ -1425,45 +1349,15 @@ let load_overview ~(host : string) ~(port : int) :
           let* workspace_health = Masc.Tui_decode_fields.required_string_field summary "workspace_health" in
           decode_workspace_health workspace_health
         in
-        (* Counted from the lists the briefing carries. The summary object
-           holds workspace_health and project and nothing else --
-           [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
-           a count read from there was a default dressed as a reading. *)
         (* An unread Keeper is still a Keeper -- the server listed its name --
-           so it is in the count and among the unreadable, the same as a brief
-           whose liveness word this build cannot name. The count stays exact:
-           what is missing is the Keeper's state, not the Keeper. *)
-        let n_unread = List.length keepers_unread in
-        let ov_keepers = List.length keeper_briefs + n_unread in
+           so it is among the unreadable, the same as a brief whose liveness
+           word this build cannot name. What is missing is the Keeper's state,
+           not the Keeper. *)
         let ov_keeper_liveness =
           let counts = keeper_liveness_of_briefs keeper_briefs in
-          { counts with klc_unreadable = counts.klc_unreadable + n_unread }
+          { counts with klc_unreadable = counts.klc_unreadable + List.length keepers_unread }
         in
-        let ov_mcp_agents = List.length agent_briefs in
-        let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
-        Ok
-          {
-            ov_workspace_health;
-            ov_keepers;
-            ov_keeper_listing;
-            ov_keeper_liveness;
-            ov_mcp_agents;
-            (* The briefing projects one fact onto two lists: an incident is
-               also queued for operator attention, as the same JSON row. On the
-               live runtime all three incidents came back on both lists and the
-               panel drew each twice. One fact, one row: a later item
-               structurally equal to an earlier one is the same projection
-               again, not a second fact. Items that differ in any field keep
-               both rows. *)
-            ov_attention_items =
-              (incidents @ attention_queue
-              |> List.fold_left
-                   (fun kept item ->
-                     if List.mem item kept then kept else item :: kept)
-                   []
-              |> List.rev);
-            ov_generated_at;
-          })
+        Ok { ov_workspace_health; ov_keeper_listing; ov_keeper_liveness })
         json
 
 let memo_system_logs = json_memo ()

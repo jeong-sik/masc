@@ -2516,37 +2516,6 @@ let msg_entries_after_anchor entries anchor =
 
 
 
-(** Attention item for the Overview surface *)
-type attention_severity =
-  | Attention_critical
-  | Attention_bad
-  | Attention_warning
-  | Attention_info
-
-(** What an attention item is about. Parsed once at the decode boundary so a
-    reader that joins items to Keepers matches a constructor instead of
-    comparing the wire word. A target the TUI does not join on keeps its wire
-    words as they came. *)
-type attention_target =
-  | Attention_keeper of string
-  | Attention_other of { target_type: string; target_id: string option }
-
-type attention_item = {
-  ai_kind: string;
-  ai_severity: attention_severity;
-  ai_summary: string;
-  ai_target: attention_target;
-  ai_blocker_summary: string option;
-      (** [evidence.runtime_blocker.runtime_blocker_summary] on a Keeper
-          runtime-blocker item: the cause alone, without the Keeper name and
-          class word [ai_summary] wraps it in. [None] on every other item. *)
-  ai_evidence_ts: float option;
-      (** Epoch seconds of the evidence's [log_ts], when the producer stamped
-          one (tool-host failures do). The row's age is drawn from it; items
-          whose producers stamp no time (a paused keeper, a waiting
-          confirmation) carry [None] and show no age. *)
-}
-
 (** Who put a post on the board. Mirrors [Board_types.post_kind]: the wire
     strings are ["direct"], ["automation"] and ["system"].
 
@@ -3940,15 +3909,11 @@ type provider_history_reading =
 
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
-  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
       (** The briefing's [keepers_listing]. [Unreadable] means the server
-          could not list the Keeper directory, so [ov_keepers] counts nothing
-          it read rather than an empty fleet (#38120). *)
+          could not list the Keeper directory, so the liveness counts hold
+          nothing it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
-  ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
-  ov_attention_items: attention_item list;
-  ov_generated_at: string;
 }
 
 (** Planning projections from [Tui_decode], which owns the current wire

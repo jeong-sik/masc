@@ -510,13 +510,6 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
-val transport_attention_item :
-  Masc.Tui_decode.transport_health option ->
-  Masc_tui_types.attention_item option
-(** The one Overview Attention item about the transport: a warning while the
-    outbound queue's pressure is [Watch], bad while it is [High], and nothing
-    when it is [Steady] or unread. The readings themselves are on Metrics. *)
-
 val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per
     phase. *)

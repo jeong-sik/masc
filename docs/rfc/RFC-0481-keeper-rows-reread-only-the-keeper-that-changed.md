@@ -140,7 +140,6 @@ roster 경로에 `name=<키퍼>` 를 더한다. 그 키퍼의 행 하나(또는 
 | 실행 영수증 쓰기 | 그 키퍼 |
 | `Candle_ledger.update`, Candle 설정 변경 | 원장 쓰기가 닿는 키퍼마다. 설정은 모든 행(`keeper_roster_changed`). 원장 라이브러리는 키퍼도 SSE 도 모르므로, 서버가 append 를 받는 hook 으로 이벤트에서 키퍼를 찾는다 |
 | provider 쉼과 걷는 순서의 기록. 쓰는 곳은 `Runtime_candidate_backpressure` 의 `note_rate_limit`·`note_failed_attempt`·`note_candidate_success` 와 `Runtime_quota_window` 의 `note_exhausted`·`note_observed_exhausted`·`note_succeeded` 여섯 함수뿐이다. 실패한 시도와 성공도 걷는 순서를 바꿔 행의 serving runtime 을 바꾼다 | 행에 보이는 값(`runtime_path_rest`)이 바뀐 키퍼마다. 쓰기마다 서버 fiber 하나가 깨어 모든 키퍼의 이 값을 다시 계산하고 앞 값과 비교한다. 바뀐 키퍼가 없으면 보내지 않는다 |
-| `Keeper_autonomous_stream.create`·`finish` | 그 키퍼 |
 
 Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owner.ml:20~24`). 신호는 `Sse.broadcast` 한 번이라 이 조건을 지킨다. 다시 계산은 신호를 받은 쪽(TUI)이 읽기로 한다.
 
@@ -153,9 +152,22 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 
 ### 3.4 turns
 
-- 턴 자리(`publish_turn_in_flight`)와 chat control token 회전(`Pause_and_interrupt`)은 meta 를 쓰지 않아서 Owner commit 신호가 덮지 못한다. 이 둘을 바꾸는 곳에서 그 키퍼 신호를 낸다(L4). turns 는 지금처럼 전체를 읽는다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다.
-- 대기 목록은 `keeper_waiting_inventory_changed` 로 읽는다. 일정, 확인 대기, fusion 대기에 같은 알림을 더한다.
-- 2초 turns 읽기에 기대던 일(§1.8)은 turns 읽기 결과를 다루는 곳에서 돈다. 읽기가 신호로 일어나도 그대로 돈다. 층마다 이 일들이 신호 뒤에도 일어나는지 시험한다.
+turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_routes_http_keeper_stream.ml:465~550`)의 키퍼 항목은 턴 자리, turn ref, 미리보기, chat control token, Owner 를 쓸 수 있는지, 대기 목록을 읽는다. 대기 목록 말고는 meta 에 쓰지 않아서 Owner commit 신호가 덮지 못한다.
+
+- 새 SSE `keeper_turn_changed { name }` 를 둔다. 아래 쓰기가 끝난 뒤 그 키퍼 이름으로 낸다. 미리보기는 §3.5 다.
+
+| 쓰기 | 위치 |
+|---|---|
+| 턴 자리 | `Keeper_owner.publish_turn_in_flight`(채팅 시작, 자율·정비 턴 시작, 끝) |
+| turn ref | `Keeper_autonomous_stream.create`·`finish`, current 표를 바꾼 뒤 |
+| chat control token | `Pause_and_interrupt` 회전, Owner 생성 |
+| shutdown operation id | `Keeper_owner.publish_shutdown_operation_id` |
+| Owner 를 쓸 수 있는지 | Owner pool 이 Owner 를 열거나 열지 못함(`keeper_owner_registry.ml`) |
+
+- `keeper_turn_stream_event` 는 턴 자리와 turn ref 가 바뀌기 전에 나갈 수 있다. 그래서 turns 읽기의 신호로 쓰지 않는다.
+- TUI 는 `keeper_turn_changed` 를 받으면 turns 전체를 읽을 빚을 남긴다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다. 다시 읽기, 권한 회복, turns 를 그리는 화면에 들어올 때도 빚을 남긴다. 실패하면 늘어나는 간격으로 다시 읽는다. 2초 turns 읽기는 지운다.
+- 대기 목록은 `keeper_waiting_inventory_changed` 로 읽는다. 일정(`schedules_changed`), 확인 대기(`pending_confirms_changed`), fusion(`fusion_run_status`) 알림도 대기 목록을 읽을 빚을 남긴다. 셋 다 이미 나가는 알림이라 서버는 바꾸지 않는다. 대기 목록 읽기는 대기 상태만 바꾸고, turns 행·토큰·끝난 턴 표시는 turns 읽기가 바꾼다.
+- turns 읽기 결과를 다루는 곳(§1.8: 대기 영수증, control generation, 끝난 턴 표시, `launch_waiting_keeper_input`, 기록·준비 단계 읽기, Metrics)은 읽기가 신호로 일어나도 그대로 돈다. 끝난 턴 표시는 두 읽기 사이의 running→idle 로 정해진다. 시작 신호의 읽기가 끝나기 전에 턴이 끝나면 표시되지 않는 것은 2초 읽기와 같다.
 - 웹 대시보드는 turns 응답 모양이 그대로라 바뀌지 않는다.
 
 ### 3.5 미리보기
@@ -195,7 +207,8 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 | L2a~ | §3.2 의 신호. 쓰기 하나가 층 하나다 | 쓰기마다 신호가 한 번 나가는지 |
 | L2f | provider 쉼 신호: 여섯 쓰기 함수의 hook, 서버 fiber 의 다시 계산과 비교, 가장 이른 `Rest_dated` 시각에 깨기(§3.2, §3.7) | 쓰기·시각마다 값이 바뀐 키퍼에게만 신호, 바뀌지 않으면 없음 |
 | L3 | TUI roster: 키퍼 하나 읽기(L3a), 키퍼별 빚 읽기와 목록 변화 전체 읽기(L3b), 2초 roster 읽기 삭제(L3c, L6·L6b 뒤) | 신호 하나 → 요청 하나, 실패 재시도 |
-| L4 | 대기 목록 빈 곳 알림(일정, 확인 대기, fusion), TUI turns 의 2초 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
+| L4a | `keeper_turn_changed`: 턴 자리, turn ref, chat control token, shutdown id, Owner 사용 가능 여부의 쓰기 뒤 신호(§3.4) | 쓰기마다 신호가 한 번, 값이 바뀐 뒤에 나가는지 |
+| L4b | TUI turns 빚 읽기(신호, 다시 읽기, 권한 회복, 화면 진입, 실패 재시도), 일정·확인 대기·fusion 알림의 대기 목록 빚, 2초 turns 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
 | L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |
 | L6 | `next_action` 시각 읽기 | 120초 뒤 읽기 하나 |
 | L6b | roster 응답의 `candle_decay`(서버), TUI 가 그릴 때 잔액·`burned`·`circulating` 계산(§3.7) | 같은 원장에서 기준으로 계산한 값 = 같은 시각의 `of_events` 값 |

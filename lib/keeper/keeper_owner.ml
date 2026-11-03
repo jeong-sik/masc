@@ -611,6 +611,7 @@ let publish_turn_in_flight t next =
   if not (turn_in_flight_equal previous next)
   then (
     Atomic.set t.turn_in_flight next;
+    Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
@@ -619,6 +620,7 @@ let publish_shutdown_operation_id t next =
   if not (shutdown_operation_id_equal previous next)
   then (
     Atomic.set t.shutdown_operation_id next;
+    Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
@@ -939,9 +941,12 @@ let apply_transition t store old_state transition =
   | Ok state ->
     let before = (Keeper_owner_reducer.projection old_state).meta in
     let pause_identity = Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused, meta.latched_reason) in
-    if pause_identity before <> pause_identity transition.projection.meta then
+    let token_rotated = pause_identity before <> pause_identity transition.projection.meta in
+    if token_rotated then
       Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
     Atomic.set t.projection transition.projection;
+    if token_rotated then
+      Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
     (match transition.persistence with
      | Keeper_owner_reducer.No_persistence -> ()
      | Keeper_owner_reducer.Replace_snapshot _ | Keeper_owner_reducer.Remove_snapshot _ ->
@@ -2529,6 +2534,7 @@ let start
                  as interrupt
                , _ ) ->
              Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
+             Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
              let result = match interrupt with
                | Interrupt_not_current -> Pending_admission_paused
                | Interrupt_settling -> Interrupt_result Operation_settling

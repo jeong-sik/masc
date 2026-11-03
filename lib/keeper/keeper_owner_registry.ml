@@ -260,6 +260,8 @@ let ensure_in_pool pool meta =
            Hashtbl.add pool.owners meta.name owner;
            install_owner_projection pool meta.name owner;
            refresh_owner_handles pool;
+           Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+             ~keeper_name:meta.name;
            Ok owner))
 ;;
 
@@ -282,6 +284,8 @@ let ensure_empty_in_pool pool keeper_name =
               Hashtbl.add pool.owners keeper_name owner;
               install_owner_projection pool keeper_name owner;
               refresh_owner_handles pool;
+              Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+                ~keeper_name;
               Ok owner)))
 ;;
 
@@ -331,6 +335,8 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
                meta.name
                detail;
              Hashtbl.replace pool.unavailable meta.name detail;
+             Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+               ~keeper_name:meta.name;
              start_all count rest
            | Error Inventory_stopping ->
              Error

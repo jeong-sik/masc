@@ -1629,6 +1629,42 @@ let start_owner_in ~sw ~base_path ~store (meta : Keeper_meta_contract.keeper_met
   |> owner_ok
 ;;
 
+(* RFC-0481 §3.4: a chat control token rotation tells the turns readers to
+   read again, after the new token is in place. *)
+let test_a_token_rotation_announces_the_keeper_turns () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let accepting = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+  let meta = make_meta "turn-announce" in
+  let owner = start_owner_in ~sw ~base_path ~store:accepting meta in
+  let before = Owner.chat_control_token owner in
+  let tokens_when_heard = ref [] in
+  let id = Printf.sprintf "keeper-owner-turn-changed-%d" (Unix.getpid ()) in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match
+        Json_util.assoc_string_opt "type" event.ext_payload,
+        Json_util.assoc_string_opt "name" event.ext_payload
+      with
+      | Some kind, Some name
+        when String.equal kind Keeper_turn_broadcast.changed_event && String.equal name meta.name ->
+        tokens_when_heard := Owner.chat_control_token owner :: !tokens_when_heard
+      | (Some _ | None), (Some _ | None) -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "turn-pause")));
+    (match !tokens_when_heard with
+     | [ heard ] ->
+       check bool "the announcement follows the new token" true
+         (not (String.equal heard before) && String.equal heard (Owner.chat_control_token owner))
+     | heard -> failf "a pause announced %d turn changes" (List.length heard));
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "turn-pause-again")));
+    check int "a write that keeps the pause keeps the token and announces nothing" 1
+      (List.length !tokens_when_heard)))
+;;
+
 let test_metadata_writes_announce_the_keeper_row () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let other_path = Filename.concat base_path "other-workspace" in
@@ -7094,6 +7130,10 @@ let () =
             "metadata writes announce the Keeper row"
             `Quick
             test_metadata_writes_announce_the_keeper_row
+        ; test_case
+            "a token rotation announces the Keeper turns"
+            `Quick
+            test_a_token_rotation_announces_the_keeper_turns
         ; test_case
             "a raised metadata write announces the Keeper row"
             `Quick

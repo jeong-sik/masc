@@ -173,6 +173,15 @@ val broadcast_to_with_commit
 val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
 (** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
     so the value is not encoded again under the fan-out lock. *)
+
+val broadcast_encoded_to_with_receipts :
+  broadcast_target -> on_fanout:(int -> unit) -> on_committed:(int -> unit) ->
+  Sse_wire.encoded_json -> unit
+(** Send pre-encoded replayable data. [on_fanout] runs after replay insertion
+    and queue attempts, before failed sessions are unregistered. [on_committed]
+    has the stronger receipt documented by {!broadcast_to_with_commit}. Both
+    callbacks receive the event ID and must not yield. *)
+
 val broadcast_presence : Yojson.Safe.t -> unit
 val broadcast_presence_to_runtime : runtime_authority -> Yojson.Safe.t -> unit
 (** Deliver an ephemeral presence event only to sessions in this runtime.

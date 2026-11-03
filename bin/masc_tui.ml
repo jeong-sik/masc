@@ -22483,7 +22483,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Schedule_store_invalidated ->
                    waiting_sources_invalidated := true;
-                   schedule_store_invalidated := true
+                   schedule_store_invalidated := true;
+                   (* The two-second Schedules tick is gone (#47935) and the
+                      owed read it left behind stands on [schedules_changed],
+                      a name the server no longer sends once this stack's
+                      server layer lands (#47959, Server_schedule_broadcast
+                      deleted). Main's store invalidation must reach that
+                      owed read too: it reads the page on screen, while the
+                      agenda alone does not move a paged list. *)
+                   schedules_changed := true
                | Masc_tui_observer.Pending_confirm_invalidated ->
                    waiting_sources_invalidated := true
                | Masc_tui_observer.Keeper_roster_change change ->

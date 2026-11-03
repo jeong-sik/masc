@@ -354,7 +354,7 @@ let test_claim_next_empty_backlog () =
 let test_claim_next_all_claimed () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Only Task" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
     let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "no unclaimed tasks" true (str_contains result "No unclaimed"))
 ;;
@@ -364,7 +364,7 @@ let test_claim_next_skips_done_and_cancelled () =
     let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
     let _ = Workspace.add_task config ~title:"Todo Task" ~priority:3 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
     let _ =
       transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
     in
@@ -401,7 +401,7 @@ let test_claim_next_terminal_only_backlog () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
     let _ =
       transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
     in
@@ -446,7 +446,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
       | _ -> Alcotest.fail "expected exactly one bound agent"
     in
     let _ = Workspace.add_task config ~title:"Cancelled already" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r
          config
@@ -501,7 +501,7 @@ let test_status_hides_stale_agent_current_task_without_writing () =
       let _ =
         Workspace.add_task config ~title:"Awaiting verifier" ~priority:1 ~description:""
       in
-      let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
+      let _ = Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () in
       (match
          Workspace.transition_task_r
            config
@@ -661,7 +661,7 @@ let test_release_hard_stop_todo_stays_claimable () =
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
     let handoff_context : Masc_domain.task_handoff_context =
       { summary = "PR #6561 belongs to a completed upstream scope"
       ; reason = Some "phantom artifact"
@@ -722,7 +722,7 @@ let test_release_hard_stop_allows_direct_todo_reclaim () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
     let handoff_context : Masc_domain.task_handoff_context =
       { summary = "PR #6561 belongs to a completed upstream scope"
       ; reason = Some "phantom artifact"
@@ -1200,7 +1200,7 @@ config
 let test_cancel_task_claimed_by_self () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let result =
       Workspace.transition_task_r
 config
@@ -1233,7 +1233,7 @@ config
 let test_cancel_task_claimed_by_other () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
     let result =
       Workspace.transition_task_r
 config
@@ -1267,7 +1267,7 @@ config
 let test_cancel_done_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     let result =
       Workspace.transition_task_r
@@ -1310,7 +1310,7 @@ let test_transition_claim () =
 let test_transition_start () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let result =
       Workspace.transition_task_r
         config
@@ -1441,7 +1441,7 @@ let test_operator_task_recovery_requires_exact_owner_and_version () =
 let test_transition_release_rejects_name_shape_aliases () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     List.iter
       (fun alias ->
          match
@@ -1529,7 +1529,7 @@ let test_transition_submit_for_verification_requires_notes () =
   (
     with_test_env (fun config ->
       let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-      let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+      let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
       let result =
         Workspace.transition_task_r
           config
@@ -1569,7 +1569,7 @@ let test_transition_version_mismatch () =
 let test_transition_done_idempotent () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let _ =
       transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:""
     in
@@ -1969,8 +1969,8 @@ let test_transition_done_from_claimed_emits_observability () =
     let _ =
       Workspace.add_task config ~title:"Claimed Done Task" ~priority:1 ~description:""
     in
-    let claim_result = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    Alcotest.(check bool) "claim succeeds" true (contains_check claim_result);
+    let claim_result = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
+    Alcotest.(check bool) "claim succeeds" true (Result.is_ok claim_result);
     let done_result =
       transition_done
         config
@@ -2374,7 +2374,7 @@ let test_is_agent_session_bound () =
 let test_transition_done_r_success () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let result =
       transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"Done!"
     in
@@ -2464,7 +2464,7 @@ let test_claim_task_r_done_allow_reclaim_is_terminal () =
 let test_claim_task_r_already_claimed () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
     let result = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _)) -> ()
@@ -3536,7 +3536,7 @@ let test_predecessor_terminal_accepted_and_persisted () =
     (* Todo -> Done is not a legal transition even under System authority;
        walk the task to InProgress first (this test was added by #23668
        during a compile-red main, so the invalid setup never ran). *)
-    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r
          config

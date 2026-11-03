@@ -1,4 +1,4 @@
-(** Workspace_task_claim — claim_task, claim_task_r, release/reclaim helpers.
+(** Workspace_task_claim — claim_task_r, release/reclaim helpers.
 
     This module is [include]d by {!Workspace_task}; all bindings are part of
     the public Workspace interface.  Re-exports {!Workspace_utils} and
@@ -33,9 +33,6 @@ val active_ownership_conflict_for_claim :
     different active task and tries to claim [requested_task_id]. *)
 
 (** {1 Task claiming} *)
-
-val claim_task :
-  config -> agent_name:string -> task_id:string -> string
 
 val claim_task_with_details_r :
   config ->

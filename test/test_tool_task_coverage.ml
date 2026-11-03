@@ -1425,7 +1425,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
               ] );
         ])
   in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () in
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
@@ -1534,7 +1534,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
                 ] );
           ])
     in
-    let _ = Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" () in
     (* A strict submit must carry evidence (#23719/#23740 strict precheck) or
        the task never reaches AwaitingVerification and this test would assert
        against the precheck error instead (main red #23901, family A). *)
@@ -1577,7 +1577,7 @@ let () = test "agent verdict verbs remain refused after terminal completion" (fu
   let ctx = make_test_ctx_with_agent "worker" in
   let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
   let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.config ~agent_name:"worker" ~task_id:"task-001" () in
   let _ =
     Workspace.transition_task_r
       ctx.config
@@ -1633,7 +1633,7 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
         (`Assoc [ ("title", `String "Verifier may approve") ])
     in
     let _ =
-      Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
+      Workspace.claim_task_r worker_ctx.config ~agent_name:"worker" ~task_id:"task-001" ()
     in
     let submit_result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
@@ -1723,7 +1723,7 @@ let resubmit_fixture () =
       ctx
       (`Assoc [ "title", `String "Resubmittable deliverable" ])
   in
-  let _ = Workspace.claim_task ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" () in
   let first =
     submit_for_verification
       ctx
@@ -1784,7 +1784,7 @@ let held_task_ctx ~started =
       ctx
       (`Assoc [ "title", `String "Held by worker" ])
   in
-  let _ = Workspace.claim_task ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" () in
   if started
   then
     ignore
@@ -1932,10 +1932,10 @@ let () =
          ~goal_id
          ~title:"Complete through verification";
        ignore
-         (Workspace.claim_task
+         (Workspace.claim_task_r
             worker_ctx.config
             ~agent_name:"worker"
-            ~task_id:"task-001");
+            ~task_id:"task-001" ());
        let submit_result =
          Task.Tool.handle_transition
            ~tool_name:"test_tool"
@@ -2728,7 +2728,7 @@ let () = test "transition_done_todo_rejection_is_tool-neutral" (fun () ->
 let () = test "transition_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () in
   let _ =
     Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
       ~task_id:"task-001" ~action:Masc_domain.Start ()

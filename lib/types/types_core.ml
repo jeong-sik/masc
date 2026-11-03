@@ -565,45 +565,24 @@ type task = {
   skills: Skill_reference.t list; [@default []]
 } [@@deriving show, eq]
 
-(* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
-   Todo producer; this change removes the Done producer, so nothing can be
-   blocked-by-reclaim at claim time anymore. Claim blocks now describe the
-   task-status fact that prevents an agent claim. [reclaim_policy] survives as
-   release/cancel data plumbing only (its full retirement is a recorded
-   follow-up decision, RFC-0323 Radius Map). *)
-
-type task_claim_readiness =
-  | Claim_ready
-
 type task_claim_block =
   | Claim_block_pending_verdict of { verification_id : string }
   | Claim_block_not_todo of task_status
 
 type task_claim_decision =
-  | Claim_available of task_claim_readiness
+  | Claim_available
   | Claim_unavailable of task_claim_block
-
-let task_claim_readiness (_task : task) = Claim_ready
-;;
 
 let task_claim_decision_for_status task_status =
   match task_status with
-  | Todo ->
-    (* Todo tasks are always claimable regardless of reclaim_policy.
-       reclaim_policy only gates Done -> re-claim, not Todo -> first claim.
-       task-1869: 6 TaskError fingerprints show coordination-role tasks
-       with Block_reclaim policy were blocked from claiming. *)
-    Claim_available Claim_ready
+  | Todo -> Claim_available
   | AwaitingVerification { verification_id; _ } ->
     (* A pending obligation belongs to the completion-authority lane. No
        Keeper claim can grant verifier authority or inspect it as agent work. *)
     Claim_unavailable (Claim_block_pending_verdict { verification_id })
   | Done _
-  (* RFC-0323: a verified Done is terminal for every actor, regardless of
-     reclaim_policy — re-running completed work creates a NEW task linked via
-     predecessor_task_id. Retires the #23632 Done-reclaim mechanism (which
-     was production-unreachable: creation defaults the policy to None and
-     claiming wipes it). *)
+  (* A verified Done is terminal for every actor: re-running completed work
+     creates a new task linked via predecessor_task_id. *)
   | Claimed _
   | InProgress _
   | Cancelled _ ->
@@ -611,31 +590,13 @@ let task_claim_decision_for_status task_status =
 ;;
 
 let task_claim_decision (task : task) =
-  match task_claim_decision_for_status task.task_status with
-  | Claim_available Claim_ready -> Claim_available (task_claim_readiness task)
-  | Claim_unavailable block -> Claim_unavailable block
-;;
-
-let task_claim_decision_is_available task =
-  match task_claim_decision task with
-  | Claim_available _ -> true
-  | Claim_unavailable _ -> false
-;;
-
-type task_claim_next_action =
-  | Claim_now
-  | Skip_claim of task_claim_block
-
-let task_claim_next_action task =
-  match task_claim_decision task with
-  | Claim_available Claim_ready -> Claim_now
-  | Claim_unavailable block -> Skip_claim block
+  task_claim_decision_for_status task.task_status
 ;;
 
 let task_claim_next_action_is_claimable task =
-  match task_claim_next_action task with
-  | Claim_now -> true
-  | Skip_claim _ -> false
+  match task_claim_decision task with
+  | Claim_available -> true
+  | Claim_unavailable _ -> false
 ;;
 
 (** When the Task last changed state, read from the timestamp its own status

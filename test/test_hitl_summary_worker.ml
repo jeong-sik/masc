@@ -738,10 +738,10 @@ let test_host_context_reports_a_missing_durable_task_link () =
             ~priority:1
             ~description:"");
        ignore
-         (Masc.Workspace.claim_task
+         (Masc.Workspace.claim_task_r
             config
             ~agent_name:"fixture-keeper"
-            ~task_id:"task-001");
+            ~task_id:"task-001" ());
        let entry = pending_entry ~base_path ~keeper_name:"fixture-keeper" () in
        let open Yojson.Safe.Util in
        let task_link =

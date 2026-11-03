@@ -22,7 +22,10 @@ screen, so it is not repeated here.
 | **App first** | Slack, GitHub, Figma, Google's eight, Zendesk, and others | one app per service (`A` or `a` key to configure) |
 
 What separates them: the first group lets masc register a client when it
-needs one. The second does not offer that. Google does not do it at all, and
+needs one. masc registers a fresh one on every login, naming the callback the
+server answers at right then, so changing the server's base URL never leaves
+an older registration pointing at the old address. The second group does not
+offer registration. Google does not do it at all, and
 Figma's endpoint answers 403 to anyone who asks. Pressing Enter displays the
 error notice, and pressing `A` or `a` opens the app configuration form directly
 in the TUI (Client ID, Client Secret, Scopes).
@@ -196,7 +199,8 @@ The message names the cause.
 |---|---|
 | access token / expiry | environment entries in that Keeper's secrets (the declaration names them) |
 | refresh token | a file entry in that Keeper's secrets |
-| client id / secret | `.masc/identity/<client_group>/` -- shared by the whole masc |
+| app you made (id / secret / scopes) | `.masc/identity/apps/<client_group>.json` -- shared by the whole masc |
+| client a login used | `.masc/identity/clients/<keeper>/<service>.json` -- renewal and detach use this one, because a refresh token belongs to the client it was issued to |
 | tool catalog | `.masc/identity/catalogs/<keeper>/<service>.json` |
 | detach receipt | `.masc/identity/disconnects/<keeper>/<service>.json` |
 

@@ -40,8 +40,7 @@ type started = {
   authorize_url : string;
   state : string;
   attempt_id : string;
-  credentials : Keeper_oauth_client_store.credentials;
-  registered_now : bool;
+  client : Store.login_client;
 }
 
 open Result.Syntax
@@ -50,7 +49,7 @@ let start
       ~discover
       ~register
       ~(provider : Provider.t)
-      ~configured
+      ~app
       ~client_name
       ~redirect_uri
       ~keeper
@@ -73,61 +72,49 @@ let start
   if not discovered.Discovery.supports_pkce_s256
   then Error (No_pkce_s256 discovered.Discovery.issuer)
   else
-    let* credentials, registered_now =
-      match configured with
-      (* An operator who made their own app keeps using it. Registering
-         anyway would leave a second client behind for no reason.
-
-         A lapsed secret is the exception. The authorization server has
-         forgotten that pair, so presenting it reaches the token endpoint
-         with an id nobody recognises and the login ends in the server's own
-         wording for it. Registering again is the only way back, and the
-         second client record it leaves behind is the price of a login that
-         works. *)
-      | Some ({ Store.client_id; _ } as credentials)
-        when String.trim client_id <> ""
-             && not (Store.secret_expired credentials ~now) ->
-        Ok (credentials, false)
-      | Some _ | None ->
+    let* client =
+      match app with
+      (* An operator who made their own app keeps using it. *)
+      | Some app -> Ok (Store.Operator_app app)
+      (* Otherwise a client for this login alone, naming the callback this
+         server answers at now. A client an earlier login registered names
+         the callback of its own moment, and the provider checks the
+         redirect URI against the one it registered. *)
+      | None ->
         (match discovered.Discovery.registration_url with
          | None -> Error (No_registration discovered.Discovery.issuer)
          | Some registration_url ->
            Result.map
              (fun (r : Registration.registered) ->
-               ( { Store.client_id = r.Registration.client_id
+               Store.Registered
+                 { Store.Registered.client_id = r.Registration.client_id
                  ; client_secret = r.Registration.client_secret
                  ; secret_expires_at = r.Registration.secret_expires_at
-                   (* Nothing recorded: a client this install registered can
-                      be granted whatever the resource publishes. *)
-                 ; scopes = []
-                 }
-               , true ))
+                 })
              (Result.map_error
                 (fun err -> Registration_failed err)
                 (register ~registration_url ~client_name ~redirect_uri)))
     in
-    let client_id = credentials.Store.client_id in
+    let scopes =
+      match client with
+      | Store.Operator_app app -> app.Store.App.scopes
+      | Store.Registered _ -> []
+    in
     let flow_pending =
-      Flow.begin_authorization ~provider ~discovered ~client_id
-        ~scopes:credentials.Store.scopes ~redirect_uri
-        ~keeper
+      Flow.begin_authorization ~provider ~discovered
+        ~client_id:(Store.login_client_id client) ~scopes ~redirect_uri ~keeper
     in
     let* attempt_id =
       Result.map_error
         (fun Pending.Newer_start_admitted -> Superseded_by_newer_start)
         (Pending.remember pending admission ~now ~ttl_sec
-           { Pending.pending = flow_pending
-           ; discovered
-           ; client_id
-           ; client_secret = credentials.Store.client_secret
-           })
+           { Pending.pending = flow_pending; discovered; client })
     in
     Ok
       { authorize_url = flow_pending.Flow.authorize_url
       ; attempt_id
       ; state = flow_pending.Flow.state
-      ; credentials
-      ; registered_now
+      ; client
       }
 
 type finish_error =
@@ -167,6 +154,7 @@ type finished = {
   provider_id : string;
   access_token : string;
   expiry : expiry;
+  client : Store.login_client;
 }
 
 let finish ~post ~pending ~state ~code ~now () =
@@ -178,8 +166,9 @@ let finish ~post ~pending ~state ~code ~now () =
       Result.map_error
         (fun err -> ignore (Pending.finish pending ~state (Error ())); Exchange_failed err)
         (match Flow.complete ~post ~discovered:in_flight.Pending.discovered
-           ~client_id:in_flight.Pending.client_id
-           ?client_secret:in_flight.Pending.client_secret ~pending:flow_pending
+           ~client_id:(Store.login_client_id in_flight.Pending.client)
+           ?client_secret:(Store.login_client_secret in_flight.Pending.client)
+           ~pending:flow_pending
            ~code ~state ~now () with
          | result -> result
          | exception exn ->
@@ -202,4 +191,5 @@ let finish ~post ~pending ~state ~code ~now () =
       ; provider_id = flow_pending.Flow.provider_id
       ; access_token = tokens.Flow.access_token
       ; expiry
+      ; client = in_flight.Pending.client
       }

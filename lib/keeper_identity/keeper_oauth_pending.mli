@@ -24,12 +24,11 @@ type in_flight = {
           endpoint the authorize call was built from, and a server that
           moved between the two would otherwise be redeemed at the new one
           with a code minted by the old. *)
-  client_id : string;
-  client_secret : string option;
+  client : Keeper_oauth_client_store.login_client;
       (** Held with the exchange rather than looked up again at the
-          callback: what redeems this code is what registered for it. *)
-      (** Which client asked. Kept for the same reason -- the redemption has
-          to name the client the code was issued to. *)
+          callback: the redemption has to name the client the code was
+          issued to, and a registered client exists nowhere else until the
+          callback records it. *)
 }
 
 type t
@@ -115,7 +114,7 @@ val waiting : t -> now:float -> int
 
 (** A non-secret handle, generated independently from callback state. *)
 type completion = Tools_discovered of int | Credentials_published_discovery_failed
-type credential_write = Refresh_token | Access_token | Expiry
+type credential_write = Refresh_token | Client | Access_token | Expiry
 type credential_publication = private {
   completed_writes : credential_write list;
   interrupted_write : credential_write;
@@ -135,7 +134,7 @@ val publish_credentials :
   t -> state:string ->
   write:(credential_write -> (unit, string) result) ->
   attachment publication
-(** Run refresh-token, access-token and expiry writes in order, only for an
+(** Run refresh-token, client, access-token and expiry writes in order, only for an
     admitted callback. The table remains locked through the writes and failure
     recording; a newer start cannot interleave its publication. An error records
     [Credential_publication_incomplete] before returning it. An exception records

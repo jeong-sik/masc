@@ -65,7 +65,10 @@ let register
      | exception Yojson.Json_error detail -> Error (Malformed detail)
      | `Assoc pairs ->
        (match List.assoc_opt "client_id" pairs with
-        | Some (`String client_id) when String.trim client_id <> "" ->
+        | Some (`String raw_client_id) when String.trim raw_client_id <> "" ->
+          (* Trimmed once, here, so the code exchange and every later renewal
+             present the same string the client record holds. *)
+          let client_id = String.trim raw_client_id in
           let issued_at =
             match List.assoc_opt "client_id_issued_at" pairs with
             | Some (`Int seconds) -> float_of_int seconds
@@ -78,15 +81,15 @@ let register
              both register a public client. *)
           let client_secret =
             match List.assoc_opt "client_secret" pairs with
-            | Some (`String value) when String.trim value <> "" -> Some value
+            | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
             | Some _ | None -> None
           in
           (* RFC 7591 section 3.2.1 requires this beside an issued secret and
              gives 0 the meaning "will not expire". Reading it is what lets a
-             later login notice that the pair on disk has lapsed instead of
-             presenting an id the server has since forgotten. A server that
-             issues a secret and omits the field leaves the deadline unknown,
-             which the store records as [None] and treats as lapsed. *)
+             renewal stop before presenting a secret the server has said it
+             will forget. A server that issues a secret and omits the field
+             has stated no deadline; that is recorded as [None] and the
+             server's own answer decides. *)
           let secret_expires_at =
             match client_secret, List.assoc_opt "client_secret_expires_at" pairs with
             | None, _ -> None

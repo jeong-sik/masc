@@ -2,7 +2,8 @@
     back.
 
     Two halves with a browser in the middle. {!start} asks the server where
-    its authorization lives, registers a client if nobody configured one,
+    its authorization lives, registers a client when no operator app is on
+    file,
     builds the URL the operator opens, and holds what the second half will
     need. {!finish} is what the callback calls.
 
@@ -21,8 +22,8 @@ type start_error =
           back on. Carries the issuer, because that is what an operator
           would go look at. *)
   | No_registration of string
-      (** Nobody configured a client id and the server offers no way to get
-          one. Carries the issuer for the same reason. *)
+      (** No operator app is on file and the server offers no registration
+          endpoint. Carries the issuer for the same reason. *)
   | Superseded_by_newer_start
       (** A later start for the same Keeper and provider was admitted while
           this one was still discovering or registering, and is already
@@ -37,16 +38,11 @@ type started = {
       (** Callback authority echoed by the provider; not a completion handle. *)
   attempt_id : string;
       (** Independently generated non-secret handle for authenticated status reads. *)
-  credentials : Keeper_oauth_client_store.credentials;
-      (** What the exchange will be redeemed with. A secret is here when the
-          server answered registration with one, which is how a confidential
-          client is recognised -- the metadata cannot be read for it: Vercel
-          and Hugging Face both omit "none" from the methods they publish and
-          both register a public client. *)
-  registered_now : bool;
-      (** True when this call had to register the client. The caller should
-          persist [credentials] when so; otherwise every login registers
-          again and leaves a client record behind each time. *)
+  client : Keeper_oauth_client_store.login_client;
+      (** The client this login is using. When it is [Registered], it was
+          registered by this call, for this login's redirect URI, and is not
+          stored anywhere yet: the callback writes it beside the Keeper's
+          tokens once the exchange completes. *)
 }
 
 val start :
@@ -61,10 +57,12 @@ val start :
      redirect_uri:string ->
      (Keeper_oauth_registration.registered, Keeper_oauth_registration.error) result) ->
   provider:Keeper_oauth_provider.t ->
-  configured:Keeper_oauth_client_store.credentials option ->
-      (** What this install already registered, if anything. Reused rather
-          than registering again, which would leave a second client behind on
-          a server nobody here administers. *)
+  app:Keeper_oauth_client_store.App.t option ->
+      (** The app an operator made at this provider, if one is on file. Used
+          as it is. Without one, the login registers a fresh client naming
+          [redirect_uri]; a client registered by an earlier login is never
+          reused, because it names the redirect URI of the moment it was
+          made. *)
   client_name:string ->
   redirect_uri:string ->
   keeper:string ->
@@ -117,6 +115,9 @@ type finished = {
   provider_id : string;
   access_token : string;
   expiry : expiry;
+  client : Keeper_oauth_client_store.login_client;
+      (** The client that redeemed the code. Its tokens are bound to it, so
+          the caller records it beside them. *)
 }
 
 val finish :

@@ -24,9 +24,8 @@ let register_with ~clock ~registration_url ~client_name ~redirect_uri =
 let login_window_sec = 600.
 
 (* What the provider's consent screen calls this client. Registration names
-   the software, not the install: one masc has one client, and the Keeper it
-   is being attached to is a masc-side fact that the provider has no use
-   for. *)
+   the software, not the install or the login: the Keeper being attached is a
+   masc-side fact that the provider has no use for. *)
 let client_name = "masc"
 
 (* Callbacks, tool discovery and renewal share the process-local owner. *)
@@ -55,42 +54,31 @@ let provider_of_id provider_id =
     Error (Printf.sprintf "the %S declaration cannot be read: %s" provider_id problem)
 ;;
 
-(* Where this install keeps what it registered. Beside the workspace rather
-   than inside a Keeper: the client is the same whichever Keeper logs in. *)
-let identity_dir ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
+let identity_dir = Keeper_identity_tools.identity_dir
+
+(* Whether an operator app is on file for a provider. Three states, because
+   an unreadable app is not an absent one: an operator invited to type an app
+   over an unreadable file would replace credentials that may still be good. *)
+type app_state =
+  | App_on_file
+  | App_none
+  | App_problem of string
+
+let app_state ~base_path ~provider =
+  match Store.load_app ~identity_dir:(identity_dir ~base_path) ~provider with
+  | Ok (Some _) -> App_on_file
+  | Ok None -> App_none
+  | Error problem -> App_problem problem
 ;;
 
-(* What this install knows about the client a login would use, and never which
-   client it is. These states must stay distinct: a lapsed registration is
-   renewed automatically by the next login, while [none] means there is no
-   app to reuse, and an unreadable store must not invite an operator to write
-   over credentials that may still be there. An app the operator typed in is
-   written with an expiry of zero, so it remains [on_file]. *)
-type client_state =
-  | Client_on_file
-  | Client_lapsed
-  | Client_none
-  | Client_problem of string
-
-let client_state ~base_path ~provider ~now =
-  match Store.load ~dir:(identity_dir ~base_path) ~provider with
-  | Ok (Some credentials) when Store.secret_expired credentials ~now ->
-    Client_lapsed
-  | Ok (Some _) -> Client_on_file
-  | Ok None -> Client_none
-  | Error problem -> Client_problem problem
-;;
-
-let client_state_to_json = function
-  | Client_on_file -> `Assoc [ "kind", `String "on_file" ]
-  | Client_lapsed -> `Assoc [ "kind", `String "lapsed" ]
-  | Client_none -> `Assoc [ "kind", `String "none" ]
-  | Client_problem problem ->
+let app_state_to_json = function
+  | App_on_file -> `Assoc [ "kind", `String "on_file" ]
+  | App_none -> `Assoc [ "kind", `String "none" ]
+  | App_problem problem ->
     `Assoc [ "kind", `String "problem"; "problem", `String problem ]
 ;;
 
-let declarations_json ~base_path ~now =
+let declarations_json ~base_path =
   `List
     (List.map
        (function
@@ -98,18 +86,16 @@ let declarations_json ~base_path ~now =
            `Assoc
              [ "id", `String provider.Provider.id
              ; "label", `String provider.Provider.label
-             ; ( "client_state"
-               , client_state ~base_path ~provider ~now |> client_state_to_json )
+             ; "app_state", app_state ~base_path ~provider |> app_state_to_json
              ]
          | Declarations.Unreadable { id; problem } ->
            `Assoc [ "id", `String id; "problem", `String problem ])
        (Declarations.all ()))
 ;;
 
-(* An app an operator made themselves, for a provider that registers none.
-   Kept where a registered one is kept, because it is the same thing arriving
-   by a different road: one per provider for this install, not one per
-   Keeper. A secret is optional -- some providers issue an app without one --
+(* An app an operator made themselves, for a provider that registers none or
+   whose granted scopes the operator wants to decide. One per client group for
+   this install, not one per Keeper. A secret is optional -- some providers issue an app without one --
    and clearing it is saying "this app has none" rather than "leave what is
    there", so an absent field and an empty one mean the same. *)
 let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
@@ -129,18 +115,8 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
         (String.split_on_char ' ' (String.trim scopes))
     in
     let* () =
-      Store.save ~dir:(identity_dir ~base_path) ~provider
-        { Store.client_id = trimmed
-        ; client_secret
-          (* An app the operator made and typed in here. There is no
-             registration answer to read a deadline from, and the operator is
-             the one who renews it, so this records what RFC 7591 spells "0":
-             nothing on this side expires it. Leaving it unrecorded would let
-             {!Store.secret_expired} read the operator's own app as lapsed and
-             register over it. *)
-        ; secret_expires_at = Some 0.
-        ; scopes
-        }
+      Store.save_app ~identity_dir:(identity_dir ~base_path) ~provider
+        { Store.App.client_id = trimmed; client_secret; scopes }
     in
     Ok
       (`Assoc
@@ -198,18 +174,12 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
            ]))
   | Provider.Oauth_exchange ->
     let* redirect_uri = redirect_uri () in
-    let dir = identity_dir ~base_path in
-    let* configured = Store.load ~dir ~provider in
+    let* app = Store.load_app ~identity_dir:(identity_dir ~base_path) ~provider in
     let* started =
       Result.map_error Session.start_error_to_string
         (Session.start ~discover:transports.Keeper_identity_tools.discover
-           ~register:(register_with ~clock) ~provider ~configured ~client_name
+           ~register:(register_with ~clock) ~provider ~app ~client_name
            ~redirect_uri ~keeper ~pending:(pending_for_base_path base_path) ~now ~ttl_sec:login_window_sec ())
-    in
-    let* () =
-      if started.Session.registered_now
-      then Store.save ~dir ~provider started.Session.credentials
-      else Ok ()
     in
     Ok
       (`Assoc
@@ -218,7 +188,6 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
         ; "provider_label", `String provider.Provider.label
         ; "authorize_url", `String started.Session.authorize_url
         ; "attempt_id", `String started.Session.attempt_id
-        ; "registered_now", `Bool started.Session.registered_now
         ; "expires_at", `Float (now +. login_window_sec)
         ])
 ;;
@@ -323,13 +292,25 @@ type attached = {
   tool_discovery : (int, string) result;
 }
 
-let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
-  let base_path = config.Workspace.base_path in
-  (* Which provider is the exchange's own answer, not the URL's: the
-     declaration that named where these tokens go is the one that started
-     this login. *)
-  let* provider = provider_of_id finished.Session.provider_id in
+(* One credential write of a finished login, by stage. The order is
+   {!Keeper_oauth_pending.publish_credentials}'s: refresh token, client, access
+   token, expiry.
+
+   The refresh token first. Every other write can be repeated by logging in
+   again; losing this one means the Keeper works until the access token
+   expires and then stops with nothing on disk to say why. The record of the
+   client an earlier login used is removed in the same step, before the new
+   token lands: a publication interrupted between the token and the client
+   then leaves no client record, which renewal reports as "attach again",
+   rather than the new token beside the old login's client, which a provider
+   refuses with its own wording. *)
+let write_finished_credential ~base_path ~(provider : Provider.t)
+    ~(finished : Session.finished) stage =
   let keeper_name = finished.Session.keeper in
+  let binding_path =
+    Keeper_identity_tools.client_binding_path ~base_path ~keeper_name
+      ~provider_id:provider.Provider.id
+  in
   let set_env ~name ~value =
     Keeper_secret_projection.set_env_entry ~base_path ~keeper_name
       ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
@@ -340,37 +321,50 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
     | Session.Renewable { expires_at; refresh_token } -> Some refresh_token, expires_at
     | Session.Expiring_without_renewal expires_at -> None, Some expires_at
   in
-  (* The refresh token first. Every other write can be repeated by logging in
-     again; losing this one means the Keeper works until the access token
-     expires and then stops with nothing on disk to say why.
+  match stage with
+  | Keeper_oauth_pending.Refresh_token ->
+    let* () = Store.delete_binding ~path:binding_path in
+    (match refresh_token with
+     | None ->
+       Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
+         ~scope:Keeper_secret_projection.Keeper_secret
+         ~container_path:provider.Provider.refresh_token_file
+     | Some value ->
+       Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+         ~scope:Keeper_secret_projection.Keeper_secret
+         ~container_path:provider.Provider.refresh_token_file ~value)
+  | Keeper_oauth_pending.Client ->
+    Store.save_binding ~path:binding_path
+      (Store.binding_of_login_client finished.Session.client)
+  | Keeper_oauth_pending.Access_token ->
+    set_env ~name:provider.Provider.access_token_env ~value:finished.Session.access_token
+  | Keeper_oauth_pending.Expiry ->
+    (* Clear a previous login's expiry even when this token never expires. *)
+    set_env ~name:provider.Provider.expires_at_env
+      ~value:(match expires_at with
+        | None -> ""
+        | Some expires_at -> Printf.sprintf "%.0f" expires_at)
+;;
 
-     All credential writes run inside [publish_credentials]: a newer start for this
+let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
+  let base_path = config.Workspace.base_path in
+  (* Which provider is the exchange's own answer, not the URL's: the
+     declaration that named where these tokens go is the one that started
+     this login. *)
+  let* provider = provider_of_id finished.Session.provider_id in
+  let keeper_name = finished.Session.keeper in
+  let expires_at =
+    match finished.Session.expiry with
+    | Session.Never | Session.Renewable { expires_at = None; _ } -> None
+    | Session.Renewable { expires_at = Some at; _ } | Session.Expiring_without_renewal at -> Some at
+  in
+  (* All credential writes run inside [publish_credentials]: a newer start for this
      Keeper and provider supersedes the admitted callback only between two
      publications, never in the middle of one, and a publication that was
      superseded before its first write writes nothing. Superseding the table
      entry alone would only make the final [finish] a no-op after the older
      exchange had already overwritten the newer attempt's tokens. *)
-  let write = function
-    | Keeper_oauth_pending.Refresh_token ->
-        (match refresh_token with
-         | None ->
-             Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
-               ~scope:Keeper_secret_projection.Keeper_secret
-               ~container_path:provider.Provider.refresh_token_file
-         | Some value ->
-             Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
-               ~scope:Keeper_secret_projection.Keeper_secret
-               ~container_path:provider.Provider.refresh_token_file ~value)
-    | Keeper_oauth_pending.Access_token ->
-        set_env ~name:provider.Provider.access_token_env
-          ~value:finished.Session.access_token
-    | Keeper_oauth_pending.Expiry ->
-        (* Clear a previous login's expiry even when this token never expires. *)
-        set_env ~name:provider.Provider.expires_at_env
-          ~value:(match expires_at with
-            | None -> ""
-            | Some expires_at -> Printf.sprintf "%.0f" expires_at)
-  in
+  let write = write_finished_credential ~base_path ~provider ~finished in
   let* attachment =
     match
       Keeper_oauth_pending.publish_credentials (pending_for_base_path base_path)
@@ -455,6 +449,7 @@ let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
     | Some (Credential_publication_incomplete progress) ->
         let name = function
           | Keeper_oauth_pending.Refresh_token -> "refresh_token"
+          | Keeper_oauth_pending.Client -> "client"
           | Keeper_oauth_pending.Access_token -> "access_token"
           | Keeper_oauth_pending.Expiry -> "expiry" in
         ["kind", `String "credential_publication_incomplete";
@@ -484,14 +479,36 @@ type revocation =
       (** the provider publishes no revocation endpoint, or there was no
           token of ours to revoke (a GitHub CLI provider's credential belongs
           to [gh]) *)
+  | Revoke_not_sent of string
+      (** the client the token was issued to could not be named, so no
+          request was sent *)
   | Revoke_revoked  (** the endpoint answered a success *)
   | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
 
 let revocation_to_json = function
   | Revoke_not_published -> `Assoc [ "kind", `String "not_published" ]
+  | Revoke_not_sent detail ->
+    `Assoc [ "kind", `String "not_sent"; "detail", `String detail ]
   | Revoke_revoked -> `Assoc [ "kind", `String "revoked" ]
   | Revoke_failed detail ->
     `Assoc [ "kind", `String "failed"; "detail", `String detail ]
+;;
+
+(* Why a disconnect could not name the client its token was issued to. The
+   store's own wording ends in "attach it again", which is advice for a
+   renewal, not for a Keeper being disconnected. *)
+let unnamed_client_reason : Store.redeem_error -> string = function
+  | Store.Not_bound -> "no record of the client this keeper's login used"
+  | Store.Binding_unreadable problem ->
+    Printf.sprintf "the record of the login's client cannot be read: %s" problem
+  | Store.App_unreadable problem ->
+    Printf.sprintf "the app on file cannot be read: %s" problem
+  | Store.App_gone { client_id } ->
+    Printf.sprintf "the login's app %s is no longer on file" client_id
+  | Store.App_replaced { bound; current } ->
+    Printf.sprintf "the login used app %s and the app on file is now %s" bound current
+  | Store.Registration_lapsed { client_id } ->
+    Printf.sprintf "the login's client %s has an expired secret" client_id
 ;;
 
 let disconnect_receipt_path ~base_path ~keeper_name ~provider_id =
@@ -573,31 +590,33 @@ let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider
          (match discovered.Keeper_oauth_discovery.revocation_endpoint with
           | None -> Revoke_not_published
           | Some url ->
-            (* A client id the provider does not recognise would be answered
-               as a refusal; sending none is the same act for a public
-               client. An unreadable store is read as none for the same
-               reason the deletion does not depend on it. *)
-            let configured =
-              match Store.load ~dir:(identity_dir ~base_path) ~provider with
-              | Ok configured -> configured
-              | Error _ -> None
+            (* RFC 7009 has the client identify itself, and the token
+               belongs to the client this Keeper's login used. When that
+               client cannot be named, a request with an empty client_id
+               would only come back as the provider's refusal and hide the
+               reason, so none is sent and the receipt says why. The
+               deletion above never depended on this. *)
+            let client =
+              match detached.Keeper_identity_tools.client with
+              | Ok None -> Error Store.Not_bound
+              | Error problem -> Error (Store.Binding_unreadable problem)
+              | Ok (Some binding) ->
+                Store.redeeming_client ~identity_dir:(identity_dir ~base_path)
+                  ~provider ~binding ~now
             in
-            let client_id, client_secret =
-              match configured with
-              | Some credentials ->
-                credentials.Store.client_id, credentials.Store.client_secret
-              | None -> "", None
-            in
-            (match
-               Keeper_oauth_flow.revoke
-                 ~post:transports.Keeper_identity_tools.token_post
-                 ?client_secret ~url ~client_id
-                 ~token:(Option.value refresh_token ~default:"")
-                 ~token_type_hint:"refresh_token" ()
-             with
-             | Ok () -> Revoke_revoked
-             | Error error ->
-               Revoke_failed (Keeper_oauth_flow.revoke_error_to_string error))))
+            (match client with
+             | Error reason -> Revoke_not_sent (unnamed_client_reason reason)
+             | Ok (client_id, client_secret) ->
+               (match
+                  Keeper_oauth_flow.revoke
+                    ~post:transports.Keeper_identity_tools.token_post
+                    ?client_secret ~url ~client_id
+                    ~token:(Option.value refresh_token ~default:"")
+                    ~token_type_hint:"refresh_token" ()
+                with
+                | Ok () -> Revoke_revoked
+                | Error error ->
+                  Revoke_failed (Keeper_oauth_flow.revoke_error_to_string error)))))
   in
   let receipt =
     `Assoc

@@ -16,11 +16,12 @@ val callback_path : string
     them: which login a callback belongs to is the state it echoes, and a
     state is unguessable and redeemable once. *)
 
-val declarations_json : base_path:string -> now:float -> Yojson.Safe.t
+val declarations_json : base_path:string -> Yojson.Safe.t
 (** Every provider declared under [config/identity/], as a screen could list
-    them. A readable declaration carries a tagged [client_state] object whose
-    [kind] is ["on_file"], ["lapsed"], ["none"], or ["problem"]. The last
-    also carries the client-store [problem]. A declaration nobody can read is
+    them. A readable declaration carries a tagged [app_state] object whose
+    [kind] says whether an operator app is on file: ["on_file"], ["none"], or
+    ["problem"]. The last also carries the store's [problem]. A declaration
+    nobody can read is
     itself [{id, problem}],
     because the alternative is a shorter list with no reason the provider is
     missing. No client id or secret is returned. *)
@@ -42,10 +43,10 @@ val set_client :
     For a provider whose authorization server offers no registration
     endpoint there is no other way in: Slack, GitHub and Figma all publish
     one client per app and expect the operator to have made it. {!start}
-    already prefers what is on file over registering, so this is the road in.
+    uses an app on file instead of registering, so this is the road in.
 
-    One per provider for this install rather than one per Keeper, matching
-    where a registered client is kept.
+    One per client group for this install rather than one per Keeper: the app
+    belongs to the install, and every Keeper's login uses it.
 
     The answer says whether a secret is on file and never what it is. It does
     say the scopes, which are not a credential and are the thing an operator
@@ -59,12 +60,27 @@ val start :
   now:float ->
   (Yojson.Safe.t, string) result
 (** Begin a login. Finds the declaration, asks the provider's server where
-    its authorization lives, registers a client if this install has none, and
-    returns the URL to open along with a non-secret [attempt_id] for authenticated
-    completion observation. Callback state is kept inside the browser URL only.
+    its authorization lives, uses the operator's app or registers a fresh client
+    for this login's callback, and returns the URL to open along with a
+    non-secret [attempt_id] for authenticated completion observation. Callback
+    state is kept inside the browser URL only.
 
-    Nothing is written to the Keeper yet -- an operator who closes the browser
-    leaves no trace beyond a registered client, and that is reused. *)
+    Nothing is written here yet -- an operator who closes the browser leaves no
+    trace on this side. A client registered for that login stays registered at
+    the provider: this install keeps no registration management credentials
+    (RFC 7592), so it cannot delete one. *)
+
+val write_finished_credential :
+  base_path:string ->
+  provider:Keeper_oauth_provider.t ->
+  finished:Keeper_oauth_session.finished ->
+  Keeper_oauth_pending.credential_write ->
+  (unit, string) result
+(** One stage of storing a finished login, as the callback runs it inside
+    {!Keeper_oauth_pending.publish_credentials}. The refresh-token stage also
+    removes the record of the client an earlier login used, so an interrupted
+    publication never leaves a new token beside an old client. The client
+    stage records the client that redeemed this login's code. *)
 
 type attached = {
   keeper : string;
@@ -137,6 +153,11 @@ type revocation =
       (** the provider publishes no revocation endpoint, or there was no token
           of ours to revoke (a GitHub CLI provider's credential belongs to
           [gh], which masc never wrote) *)
+  | Revoke_not_sent of string
+      (** there is a token and an endpoint, but the client the token was
+          issued to could not be named -- no record of the login's client, or
+          one that cannot be read or used -- so no request was sent; the
+          string says which *)
   | Revoke_revoked  (** the endpoint answered a success *)
   | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
 

@@ -43,15 +43,24 @@ let http_transports ~clock =
           ~mcp_url ());
   }
 
-let catalog_path ~base_path ~keeper_name ~provider_id =
-  let identity_dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
-  in
+let identity_dir ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
+;;
+
+let keeper_file ~base_path ~keeper_name ~provider_id ~under =
   Filename.concat
     (Filename.concat
-       (Filename.concat identity_dir "catalogs")
+       (Filename.concat (identity_dir ~base_path) under)
        (Workspace_utils.safe_filename keeper_name))
     (provider_id ^ ".json")
+;;
+
+let catalog_path ~base_path ~keeper_name ~provider_id =
+  keeper_file ~base_path ~keeper_name ~provider_id ~under:"catalogs"
+;;
+
+let client_binding_path ~base_path ~keeper_name ~provider_id =
+  keeper_file ~base_path ~keeper_name ~provider_id ~under:"clients"
 ;;
 
 (* Which Keepers have a catalog for this provider.
@@ -208,6 +217,7 @@ let save ~publication catalog =
 
 type local_detachment = {
   refresh_token : string option;
+  client : (Keeper_oauth_client_store.binding option, string) result;
   tools_removed : bool;
 }
 
@@ -231,10 +241,15 @@ let detach_local ~base_path ~keeper_name ~(provider : Provider.t) =
         Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
           ~name:provider.expires_at_env
       in
+      let binding_path =
+        client_binding_path ~base_path ~keeper_name ~provider_id:provider.id
+      in
+      let client = Keeper_oauth_client_store.load_binding ~path:binding_path in
+      let* () = Keeper_oauth_client_store.delete_binding ~path:binding_path in
       let* tools_removed =
         forget_catalog_file ~base_path ~keeper_name ~provider_id:provider.id
       in
-      Ok {refresh_token; tools_removed})
+      Ok {refresh_token; client; tools_removed})
 ;;
 
 let attachment_matches attachment ~base_path ~keeper_name ~(provider : Provider.t) =
@@ -601,34 +616,29 @@ let force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name
          | Keeper_oauth_discovery.No_authorization_server _ ) as err) ->
       Error (Renew_permanent (Keeper_oauth_discovery.error_to_string err))
   in
-  let* configured_client_id =
+  (* The client this Keeper's login used. The refresh token was issued to that
+     client and no other; presenting a different one is refused. *)
+  let* client_id, client_secret =
+    let redeem_error error =
+      Renew_permanent (Keeper_oauth_client_store.redeem_error_to_string error)
+    in
     match
-      Keeper_oauth_client_store.load
-        ~dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity")
-        ~provider
+      Keeper_oauth_client_store.load_binding
+        ~path:(client_binding_path ~base_path ~keeper_name ~provider_id:provider.id)
     with
-    | Error message -> Error (Renew_permanent message)
-    (* A lapsed secret cannot be redeemed, and sending it anyway returns the
-       authorization server's own wording for an id it has forgotten --
-       which says nothing about what to do. Answer with the sentence that
-       does: a fresh login registers a new client. *)
-    | Ok (Some credentials)
-      when Keeper_oauth_client_store.secret_expired credentials ~now ->
-      Error
-        (Renew_permanent
-           "this install's registered client has expired; attach a keeper to \
-            the provider again to register a new one")
-    | Ok (Some credentials) -> Ok credentials
-    | Ok None ->
-      Error (Renew_permanent "this install has no registered client; attach a keeper first")
+    | Error problem ->
+      Error (redeem_error (Keeper_oauth_client_store.Binding_unreadable problem))
+    | Ok None -> Error (redeem_error Keeper_oauth_client_store.Not_bound)
+    | Ok (Some binding) ->
+      Result.map_error redeem_error
+        (Keeper_oauth_client_store.redeeming_client ~identity_dir:(identity_dir ~base_path)
+           ~provider ~binding ~now)
   in
   let* () = if current () then Ok () else Error (Renew_permanent superseded_operation) in
   let* tokens =
     match
-      Keeper_oauth_flow.refresh ~post:token_post ~discovered
-        ~client_id:configured_client_id.Keeper_oauth_client_store.client_id
-        ?client_secret:configured_client_id.Keeper_oauth_client_store.client_secret
-        ~refresh_token ~now ()
+      Keeper_oauth_flow.refresh ~post:token_post ~discovered ~client_id
+        ?client_secret ~refresh_token ~now ()
     with
     | Ok tokens -> Ok tokens
     | Error (Keeper_oauth_flow.Transport _ as err) ->

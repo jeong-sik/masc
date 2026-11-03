@@ -14,7 +14,7 @@ type identity_provider =
             operator to consent again for no reason. *)
       ; idp_also_on : string list
         (** Which other Keepers hold this one. A Keeper attaches on its own
-            account -- the client is shared, the token is not -- so this is
+            account -- the token is its own -- so this is
             the one question a single Keeper's tab cannot answer for itself,
             and answering it by opening each Keeper in turn is how an
             operator loses track of which account went where. *)
@@ -445,15 +445,20 @@ let disconnect_receipt_text ~provider_id json =
   let revoke =
     match field "revocation" with
     | Some (`Assoc fields) ->
+      let detail =
+        match List.assoc_opt "detail" fields with
+        | Some (`String detail) -> " (" ^ detail ^ ")"
+        | _ -> ""
+      in
+      (* A kind this build does not know is said as such, not read as the
+         quietest outcome. *)
       (match List.assoc_opt "kind" fields with
        | Some (`String "revoked") -> "provider revoke: taken"
-       | Some (`String "failed") ->
-         "provider revoke: failed"
-         ^ (match List.assoc_opt "detail" fields with
-            | Some (`String detail) -> " (" ^ detail ^ ")"
-            | _ -> "")
-       | Some (`String "not_published") | Some _ | None -> "provider revoke: not offered")
-    | _ -> "provider revoke: not offered"
+       | Some (`String "failed") -> "provider revoke: failed" ^ detail
+       | Some (`String "not_sent") -> "provider revoke: not sent" ^ detail
+       | Some (`String "not_published") -> "provider revoke: not offered"
+       | Some _ | None -> "provider revoke: unreadable")
+    | _ -> "provider revoke: unreadable"
   in
   let removed =
     if deleted = [] then "nothing was still there to delete"

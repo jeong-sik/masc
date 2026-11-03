@@ -621,8 +621,12 @@ let test_renewal_window_opens_before_expiry () =
 let in_flight_for ?(keeper="oauth-fixture") provider : Keeper_oauth_pending.in_flight =
   { pending = begin_for ~keeper provider
   ; discovered = discovered_atlassian ()
-  ; client_id = "client-abc"
-  ; client_secret = None
+  ; client =
+      Keeper_oauth_client_store.Registered
+        { Keeper_oauth_client_store.Registered.client_id = "client-abc"
+        ; client_secret = None
+        ; secret_expires_at = None
+        }
   }
 
 let admit_scope table provider =
@@ -806,7 +810,7 @@ let test_a_superseded_publication_writes_nothing () =
   check Alcotest.bool "a superseded publication runs no write" true
     (Keeper_oauth_pending.publish_credentials table ~state ~write:(fun _ -> incr writes; Ok ())
      = Keeper_oauth_pending.Publication_superseded);
-  Alcotest.(check int) "only the admitted publication wrote its three entries" 3 !writes
+  Alcotest.(check int) "only the admitted publication wrote its four entries" 4 !writes
 
 let test_incomplete_publication_preserves_progress () =
   let provider = load_or_fail atlassian_toml in
@@ -838,8 +842,9 @@ let test_incomplete_publication_preserves_progress () =
       (Keeper_oauth_pending.publish_credentials table ~state
         ~write:(fun _ -> Alcotest.fail "a replay reached storage")
        = Keeper_oauth_pending.Publication_superseded))
-    Keeper_oauth_pending.[Refresh_token, []; Access_token, [Refresh_token];
-      Expiry, [Refresh_token; Access_token]]
+    Keeper_oauth_pending.[Refresh_token, []; Client, [Refresh_token];
+      Access_token, [Refresh_token; Client];
+      Expiry, [Refresh_token; Client; Access_token]]
 
 let test_publication_exception_preserves_progress_and_unlocks () =
   let provider = load_or_fail atlassian_toml in
@@ -851,7 +856,7 @@ let test_publication_exception_preserves_progress_and_unlocks () =
   let interrupted = ref false in
   (try ignore (Keeper_oauth_pending.publish_credentials table ~state
       ~write:(function
-        | Refresh_token -> Ok ()
+        | Refresh_token | Client -> Ok ()
         | Access_token -> raise Exit
         | Expiry -> Alcotest.fail "expiry ran after interrupted access write"))
    with Exit -> interrupted := true);
@@ -860,7 +865,8 @@ let test_publication_exception_preserves_progress_and_unlocks () =
     (match Keeper_oauth_pending.status table ~now:2. ~attempt_id
        ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id with
      | Some (Credential_publication_incomplete progress) ->
-         progress.completed_writes=[Refresh_token] && progress.interrupted_write=Access_token
+         progress.completed_writes=[Refresh_token; Client]
+         && progress.interrupted_write=Access_token
      | None | Some (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
        | Expired | Superseded) -> false)
 
@@ -1510,35 +1516,38 @@ let stub_discover
       }
 
 let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
-  Alcotest.fail "registered a client when one was already configured"
+  Alcotest.fail "registered a client when an operator app was on file"
 
-let credentials ?secret ?secret_expires_at ?(scopes = []) client_id =
-  { Keeper_oauth_client_store.client_id
-  ; client_secret = secret
-  ; secret_expires_at
-  ; scopes
-  }
+let operator_app ?secret ?(scopes = []) client_id =
+  { Keeper_oauth_client_store.App.client_id; client_secret = secret; scopes }
 
-let start_login ?(configured = None) ?(now = 0.0) ~discover ~register provider table =
-  Keeper_oauth_session.start ~discover ~register ~provider ~configured
+let start_login ?(app = None) ?(now = 0.0) ?(redirect_uri = redirect_uri) ~discover
+    ~register provider table =
+  Keeper_oauth_session.start ~discover ~register ~provider ~app
     ~client_name:"masc" ~redirect_uri ~keeper:"oauth-fixture" ~pending:table
     ~now ~ttl_sec:600.0 ()
+
+let started_client_id = function
+  | Ok (started : Keeper_oauth_session.started) ->
+    Keeper_oauth_client_store.login_client_id started.Keeper_oauth_session.client
+  | Error err ->
+    Alcotest.failf "start failed: %s" (Keeper_oauth_session.start_error_to_string err)
 
 let test_a_restart_during_discovery_keeps_the_restarts_consent () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
-  let configured = Some (credentials "operators-own-app") in
+  let app = Some (operator_app "operators-own-app") in
   let restart = ref None in
   (* The operator restarts while the first start is still discovering, and
      the restart's discovery answers first. *)
   let slow_discover ~mcp_url =
     restart :=
-      Some (start_login ~configured ~discover:(stub_discover ())
+      Some (start_login ~app ~discover:(stub_discover ())
               ~register:never_register provider table);
     stub_discover () ~mcp_url
   in
   (match
-     start_login ~configured ~discover:slow_discover ~register:never_register
+     start_login ~app ~discover:slow_discover ~register:never_register
        provider table
    with
    | Error Keeper_oauth_session.Superseded_by_newer_start -> ()
@@ -1564,29 +1573,29 @@ let test_start_uses_a_configured_client_rather_than_registering () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
-    start_login ~configured:(Some (credentials "operators-own-app")) ~discover:(stub_discover ())
+    start_login ~app:(Some (operator_app "operators-own-app")) ~discover:(stub_discover ())
       ~register:never_register provider table
   with
   | Error err ->
       Alcotest.failf "start failed: %s"
         (Keeper_oauth_session.start_error_to_string err)
   | Ok started ->
-      check str "the operator's client id is used" "operators-own-app"
-        started.Keeper_oauth_session.credentials
-          .Keeper_oauth_client_store.client_id;
-      Alcotest.(check Alcotest.bool)
-        "and nothing was registered" false
-        started.Keeper_oauth_session.registered_now;
+      check Alcotest.bool "the operator's app is the login's client" true
+        (match started.Keeper_oauth_session.client with
+         | Keeper_oauth_client_store.Operator_app app ->
+           String.equal app.Keeper_oauth_client_store.App.client_id "operators-own-app"
+         | Keeper_oauth_client_store.Registered _ -> false);
       Alcotest.(check int) "the login is waiting" 1
         (Keeper_oauth_pending.waiting table ~now:1.0)
 
 let test_start_registers_when_nobody_configured_one () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
-  let register ~registration_url ~client_name ~redirect_uri:_ =
+  let register ~registration_url ~client_name ~redirect_uri:registered_for =
     check str "registers where discovery said" "https://auth.example.com/dcr"
       registration_url;
     check str "under our own name" "masc" client_name;
+    check str "for the callback this login names" redirect_uri registered_for;
     Ok
       { Keeper_oauth_registration.client_id = "freshly-registered"
       ; client_secret = None
@@ -1599,19 +1608,18 @@ let test_start_registers_when_nobody_configured_one () =
       Alcotest.failf "start failed: %s"
         (Keeper_oauth_session.start_error_to_string err)
   | Ok started ->
-      check str "the new client id comes back" "freshly-registered"
-        started.Keeper_oauth_session.credentials
-          .Keeper_oauth_client_store.client_id;
-      (* The caller has to persist it, or the next login registers again and
-         leaves another client record behind. *)
-      Alcotest.(check Alcotest.bool)
-        "and says it is new" true started.Keeper_oauth_session.registered_now
+      check Alcotest.bool "the login carries the registered client" true
+        (match started.Keeper_oauth_session.client with
+         | Keeper_oauth_client_store.Registered registered ->
+           String.equal registered.Keeper_oauth_client_store.Registered.client_id
+             "freshly-registered"
+         | Keeper_oauth_client_store.Operator_app _ -> false)
 
 let test_start_refuses_a_server_without_pkce () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
-    start_login ~configured:(Some (credentials "id")) ~discover:(stub_discover ~supports_pkce:false ())
+    start_login ~app:(Some (operator_app "id")) ~discover:(stub_discover ~supports_pkce:false ())
       ~register:never_register provider table
   with
   | Error (Keeper_oauth_session.No_pkce_s256 _) ->
@@ -1675,25 +1683,23 @@ let test_a_registration_with_no_secret_is_a_public_client () =
   with
   | Ok started ->
       check str "registered despite the metadata" "public-anyway"
-        started.Keeper_oauth_session.credentials
-          .Keeper_oauth_client_store.client_id
+        (Keeper_oauth_client_store.login_client_id started.Keeper_oauth_session.client)
   | Error err ->
       Alcotest.failf "a login was refused on metadata alone: %s"
         (Keeper_oauth_session.start_error_to_string err)
 
-(* RFC 7591 section 3.2.1 requires client_secret_expires_at beside an issued
-   secret, and the four cases below are the whole of what this install can
-   read off a stored pair. Each says which way a login goes, so a change that
-   collapses them has to answer here.
-
-   The observation that drove them: Supabase issued a confidential client,
-   the deadline went unread, and months later every login reached the token
-   endpoint with an id the server answered as "Unrecognized client_id". *)
-
-let registers_as ~client_id =
-  let fired = ref false in
-  let register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
-    fired := true;
+(* A client a login registered names the callback of that moment. Measured
+   2026-11-02: 27 of 48 clients this install had kept refused the public
+   callback once the server moved off 127.0.0.1. So a login without an operator
+   app registers for itself, every time, and the authorize call names the client
+   and the callback that registration was for. *)
+let test_each_login_registers_for_the_callback_it_names () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
+  let registrations = ref [] in
+  let register ~registration_url:_ ~client_name:_ ~redirect_uri =
+    let client_id = Printf.sprintf "client-%d" (List.length !registrations + 1) in
+    registrations := (client_id, redirect_uri) :: !registrations;
     Ok
       { Keeper_oauth_registration.client_id
       ; client_secret = None
@@ -1701,61 +1707,37 @@ let registers_as ~client_id =
       ; issued_at = 1.0
       }
   in
-  (fired, register)
-
-let started_client_id = function
-  | Ok started ->
-    started.Keeper_oauth_session.credentials.Keeper_oauth_client_store.client_id
-  | Error err ->
-    Alcotest.failf "start failed: %s" (Keeper_oauth_session.start_error_to_string err)
-
-let test_a_lapsed_registration_is_replaced () =
-  let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
-  let fired, register = registers_as ~client_id:"replacement" in
-  let configured =
-    Some (credentials ~secret:"s3cret" ~secret_expires_at:100.0 "lapsed")
+  let loopback = "http://127.0.0.1:8935/api/v1/keepers/oauth/callback" in
+  let public = "https://masc.example.org/api/v1/keepers/oauth/callback" in
+  let first =
+    start_login ~redirect_uri:loopback ~discover:(stub_discover ()) ~register provider table
   in
-  let got = start_login ~configured ~now:101.0 ~discover:(stub_discover ()) ~register provider table in
-  check str "the login carries the new id" "replacement" (started_client_id got);
-  Alcotest.(check Alcotest.bool) "a deadline behind us registers again" true !fired
-
-let test_a_registration_that_never_expires_is_kept () =
-  (* Zero is the server saying the secret does not lapse. Reading it as a
-     date in 1970 would register over a client that is still good. *)
-  let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
-  let configured =
-    Some (credentials ~secret:"s3cret" ~secret_expires_at:0.0 "evergreen")
+  let second =
+    start_login ~redirect_uri:public ~now:5.0 ~discover:(stub_discover ()) ~register
+      provider table
   in
-  let got =
-    start_login ~configured ~now:1.7e9 ~discover:(stub_discover ())
-      ~register:never_register provider table
+  check
+    Alcotest.(list (pair string string))
+    "one registration per login, each for its own callback"
+    [ "client-1", loopback; "client-2", public ]
+    (List.rev !registrations);
+  check str "the second login uses its own client" "client-2" (started_client_id second);
+  let authorize_query = function
+    | Ok (started : Keeper_oauth_session.started) ->
+      Uri.query (Uri.of_string started.Keeper_oauth_session.authorize_url)
+    | Error err ->
+      Alcotest.failf "start failed: %s" (Keeper_oauth_session.start_error_to_string err)
   in
-  check str "the stored client is reused" "evergreen" (started_client_id got)
-
-let test_a_secret_with_no_recorded_deadline_is_replaced () =
-  (* The Supabase case. A secret was issued, so a deadline came with it and
-     this install did not write it down. Its real value is unknown and may be
-     behind us, and the only way to find out is the login that fails. *)
-  let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
-  let fired, register = registers_as ~client_id:"replacement" in
-  let configured = Some (credentials ~secret:"s3cret" "undated") in
-  let got = start_login ~configured ~now:1.7e9 ~discover:(stub_discover ()) ~register provider table in
-  check str "the login carries the new id" "replacement" (started_client_id got);
-  Alcotest.(check Alcotest.bool) "an unknown deadline registers again" true !fired
-
-let test_a_public_client_outlives_any_deadline () =
-  (* No secret, nothing to lapse. This is why an install that registered a
-     public client keeps working while a confidential one stops. *)
-  let provider = load_or_fail atlassian_toml in
-  let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
-  let got =
-    start_login ~configured:(Some (credentials "public")) ~now:1.7e9
-      ~discover:(stub_discover ()) ~register:never_register provider table
+  let param name query =
+    match List.assoc_opt name query with
+    | Some [ value ] -> value
+    | Some _ | None -> Alcotest.failf "the authorize call has no single %s" name
   in
-  check str "the stored client is reused" "public" (started_client_id got)
+  let q1 = authorize_query first and q2 = authorize_query second in
+  check str "first authorize names the loopback callback" loopback (param "redirect_uri" q1);
+  check str "with the client registered for it" "client-1" (param "client_id" q1);
+  check str "second authorize names the public callback" public (param "redirect_uri" q2);
+  check str "with the client registered for it" "client-2" (param "client_id" q2)
 
 let test_a_secret_from_registration_is_kept () =
   (* monday.com answers a request for a public client with a secret, which is
@@ -1775,9 +1757,8 @@ let test_a_secret_from_registration_is_kept () =
   | Ok started ->
       check
         (Alcotest.option Alcotest.string)
-        "the caller is handed it to persist" (Some "s3cret")
-        started.Keeper_oauth_session.credentials
-          .Keeper_oauth_client_store.client_secret
+        "the login carries it to the redemption" (Some "s3cret")
+        (Keeper_oauth_client_store.login_client_secret started.Keeper_oauth_session.client)
   | Error err ->
       Alcotest.failf "start failed: %s"
         (Keeper_oauth_session.start_error_to_string err)
@@ -1786,7 +1767,7 @@ let test_the_callback_finishes_the_login_it_started () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
-    start_login ~configured:(Some (credentials "client-abc")) ~discover:(stub_discover ())
+    start_login ~app:(Some (operator_app "client-abc")) ~discover:(stub_discover ())
       ~register:never_register provider table
   with
   | Error err ->
@@ -1816,6 +1797,8 @@ let test_the_callback_finishes_the_login_it_started () =
             finished.Keeper_oauth_session.provider_id;
           check str "access token" "at-1"
             finished.Keeper_oauth_session.access_token;
+          check str "redeemed by the client the login started with" "client-abc"
+            (Keeper_oauth_client_store.login_client_id finished.Keeper_oauth_session.client);
           (match finished.Keeper_oauth_session.expiry with
           | Keeper_oauth_session.Renewable { refresh_token; expires_at } ->
               check str "refresh token" "rt-1" refresh_token;
@@ -1836,7 +1819,7 @@ let finish_answering answer =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
   match
-    start_login ~configured:(Some (credentials "client-abc")) ~discover:(stub_discover ())
+    start_login ~app:(Some (operator_app "client-abc")) ~discover:(stub_discover ())
       ~register:never_register provider table
   with
   | Error err ->
@@ -1899,7 +1882,7 @@ let test_a_callback_nobody_is_waiting_on_says_so () =
         (Keeper_oauth_session.finish_error_to_string other)
   | Ok _ -> Alcotest.fail "a code was redeemed against no login"
 
-(* ── the client this install registered ──────────────────────────────── *)
+(* ── which client redeems a Keeper's tokens ─────────────────────────── *)
 
 let temp_dir () =
   let path =
@@ -1910,77 +1893,116 @@ let temp_dir () =
   Unix.mkdir path 0o700;
   path
 
-let test_no_client_until_one_is_registered () =
-  let dir = temp_dir () in
+module Store = Keeper_oauth_client_store
+
+let test_no_app_until_one_is_entered () =
+  let identity_dir = temp_dir () in
   let provider = load_or_fail atlassian_toml in
-  match Keeper_oauth_client_store.load ~dir ~provider with
+  match Store.load_app ~identity_dir ~provider with
   | Ok None -> ()
   | Ok (Some found) ->
-      Alcotest.failf "found a client nobody registered: %s"
-        found.Keeper_oauth_client_store.client_id
+      Alcotest.failf "found an app nobody entered: %s" found.Store.App.client_id
   | Error message -> Alcotest.failf "reading an empty directory failed: %s" message
 
-let test_a_registered_client_comes_back () =
-  let dir = temp_dir () in
+let test_an_app_comes_back_and_stays_private () =
+  let identity_dir = temp_dir () in
   let provider = load_or_fail atlassian_toml in
   (match
-     Keeper_oauth_client_store.save ~dir ~provider
-       (credentials "client-from-registration")
+     Store.save_app ~identity_dir ~provider
+       (operator_app ~secret:"s3cret" ~scopes:[ "read"; "write" ] "operators-app")
    with
   | Ok () -> ()
   | Error message -> Alcotest.failf "saving failed: %s" message);
-  match Keeper_oauth_client_store.load ~dir ~provider with
+  (match Store.load_app ~identity_dir ~provider with
   | Ok (Some found) ->
-      check str "the id that was saved" "client-from-registration"
-        found.Keeper_oauth_client_store.client_id;
-      check
-        (Alcotest.option Alcotest.string)
-        "and no secret was invented" None
-        found.Keeper_oauth_client_store.client_secret
-  | Ok None -> Alcotest.fail "the saved client id did not come back"
-  | Error message -> Alcotest.failf "reading back failed: %s" message
-
-let test_a_secret_saved_beside_the_id_comes_back () =
-  let dir = temp_dir () in
-  let provider = load_or_fail atlassian_toml in
-  (match
-     Keeper_oauth_client_store.save ~dir ~provider
-       (credentials ~secret:"s3cret" "confidential")
-   with
-  | Ok () -> ()
-  | Error message -> Alcotest.failf "saving failed: %s" message);
-  (match Keeper_oauth_client_store.load ~dir ~provider with
-  | Ok (Some found) ->
-      check
-        (Alcotest.option Alcotest.string)
-        "the secret that was saved" (Some "s3cret")
-        found.Keeper_oauth_client_store.client_secret
-  | Ok None -> Alcotest.fail "the saved client did not come back"
+      check str "the id that was saved" "operators-app" found.Store.App.client_id;
+      check (Alcotest.option Alcotest.string) "the secret" (Some "s3cret")
+        found.Store.App.client_secret;
+      check Alcotest.(list string) "the scopes" [ "read"; "write" ] found.Store.App.scopes
+  | Ok None -> Alcotest.fail "the saved app did not come back"
   | Error message -> Alcotest.failf "reading back failed: %s" message);
-  (* Beside the id rather than inside it, and readable only by this user. *)
-  let mode =
-    (Unix.stat
-       (Filename.concat (Filename.concat dir "atlassian") "client_secret"))
-      .Unix.st_perm
-  in
-  check Alcotest.int "0600" 0o600 mode
+  check Alcotest.int "readable only by this user" 0o600
+    (Unix.stat (Store.app_path ~identity_dir ~provider)).Unix.st_perm
 
-let test_an_empty_client_file_is_not_a_client () =
-  (* A write that did not finish. Reading it as "no client" would register a
-     second one over it and leave the first stranded on a server this install
-     does not administer. *)
-  let dir = temp_dir () in
+let test_an_unreadable_app_is_not_no_app () =
+  (* Reading a damaged file as "no app" would invite the operator to type a
+     new one over credentials that may still be good. *)
+  let identity_dir = temp_dir () in
   let provider = load_or_fail atlassian_toml in
-  Unix.mkdir (Filename.concat dir "atlassian") 0o700;
-  Out_channel.with_open_bin
-    (Filename.concat (Filename.concat dir "atlassian") "client_id")
-    (fun oc -> Out_channel.output_string oc "   ");
-  match Keeper_oauth_client_store.load ~dir ~provider with
+  let path = Store.app_path ~identity_dir ~provider in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|{"client_id":"  "}|});
+  match Store.load_app ~identity_dir ~provider with
   | Error _ -> ()
-  | Ok None -> Alcotest.fail "an unfinished write read as having no client"
-  | Ok (Some found) ->
-      Alcotest.failf "read whitespace as a client id: %S"
-        found.Keeper_oauth_client_store.client_id
+  | Ok None -> Alcotest.fail "a damaged app file read as no app"
+  | Ok (Some found) -> Alcotest.failf "read a blank id as an app: %S" found.Store.App.client_id
+
+let registered ?secret ?secret_expires_at client_id =
+  { Store.Registered.client_id; client_secret = secret; secret_expires_at }
+
+let test_a_binding_comes_back_as_written () =
+  let dir = temp_dir () in
+  List.iter
+    (fun binding ->
+      let path = Filename.concat (Filename.concat dir "keeper") "atlassian.json" in
+      (match Store.save_binding ~path binding with
+       | Ok () -> ()
+       | Error message -> Alcotest.failf "saving failed: %s" message);
+      check Alcotest.bool "the same binding comes back" true
+        (Store.load_binding ~path = Ok (Some binding)))
+    [ Store.Bound_to_app { client_id = "operators-app" }
+    ; Store.Bound_to_registered
+        (registered ~secret:"s3cret" ~secret_expires_at:1.7e9 "per-login")
+    ; Store.Bound_to_registered (registered "public-per-login")
+    ]
+
+let test_a_binding_that_says_something_else_is_refused () =
+  (* Each of these, read leniently, would become a different client: a
+     public one where a secret was meant, or a kind nobody wrote. *)
+  let dir = temp_dir () in
+  List.iter
+    (fun contents ->
+      let path = Filename.concat dir "binding.json" in
+      Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc contents);
+      check Alcotest.bool (contents ^ " is refused") true
+        (match Store.load_binding ~path with Error _ -> true | Ok _ -> false))
+    [ {|{"kind":"shared","client_id":"x"}|}
+    ; {|{"kind":"registered","client_id":"x","client_secret":null}|}
+    ; {|{"kind":"registered","client_id":"x","clientSecret":"s"}|}
+    ; {|{"kind":"registered","client_id":"  "}|}
+    ]
+
+(* A refresh token is bound to the client it was issued to. Renewal follows
+   the login's own record, whatever the install's app is now. *)
+let test_renewal_redeems_with_the_logins_own_client () =
+  let identity_dir = temp_dir () in
+  let provider = load_or_fail atlassian_toml in
+  let redeem binding ~now = Store.redeeming_client ~identity_dir ~provider ~binding ~now in
+  check Alcotest.bool "an app gone from file is named, not guessed" true
+    (redeem (Store.Bound_to_app { client_id = "app-1" }) ~now:0.
+     = Error (Store.App_gone { client_id = "app-1" }));
+  ignore (Store.save_app ~identity_dir ~provider (operator_app ~secret:"rotated" "app-1"));
+  check Alcotest.bool "the app the login used, with its current secret" true
+    (redeem (Store.Bound_to_app { client_id = "app-1" }) ~now:0.
+     = Ok ("app-1", Some "rotated"));
+  ignore (Store.save_app ~identity_dir ~provider (operator_app "app-2"));
+  check Alcotest.bool "a replaced app is refused by name" true
+    (redeem (Store.Bound_to_app { client_id = "app-1" }) ~now:0.
+     = Error (Store.App_replaced { bound = "app-1"; current = "app-2" }));
+  check Alcotest.bool "a registered login ignores the install's app" true
+    (redeem (Store.Bound_to_registered (registered ~secret:"s" ~secret_expires_at:0. "per-login"))
+       ~now:1.7e9
+     = Ok ("per-login", Some "s"));
+  check Alcotest.bool "a lapsed registration is named" true
+    (redeem (Store.Bound_to_registered (registered ~secret:"s" ~secret_expires_at:100. "old"))
+       ~now:101.
+     = Error (Store.Registration_lapsed { client_id = "old" }));
+  check Alcotest.bool "a secret with no stated deadline is left to the provider" true
+    (redeem (Store.Bound_to_registered (registered ~secret:"s" "undated")) ~now:1.7e9
+     = Ok ("undated", Some "s"));
+  check Alcotest.bool "a public client never lapses" true
+    (redeem (Store.Bound_to_registered (registered "public")) ~now:1.7e9
+     = Ok ("public", None))
 
 let test_the_id_has_to_be_one_path_component () =
   (* [t] is private and the client store joins the id onto a directory
@@ -2148,9 +2170,9 @@ let () =
             test_registration_keeps_the_servers_reason;
         ] );
       ( "login",
-        [ Alcotest.test_case "uses a configured client rather than registering"
+        [ Alcotest.test_case "uses the operator's app rather than registering"
             `Quick test_start_uses_a_configured_client_rather_than_registering;
-          Alcotest.test_case "registers when nobody configured one" `Quick
+          Alcotest.test_case "registers when no app is on file" `Quick
             test_start_registers_when_nobody_configured_one;
           Alcotest.test_case "refuses a server without PKCE" `Quick
             test_start_refuses_a_server_without_pkce;
@@ -2162,14 +2184,8 @@ let () =
             test_a_registration_with_no_secret_is_a_public_client;
           Alcotest.test_case "a secret from registration is kept" `Quick
             test_a_secret_from_registration_is_kept;
-          Alcotest.test_case "a lapsed registration is replaced" `Quick
-            test_a_lapsed_registration_is_replaced;
-          Alcotest.test_case "expiry zero means the client is kept" `Quick
-            test_a_registration_that_never_expires_is_kept;
-          Alcotest.test_case "a secret with no recorded deadline is replaced" `Quick
-            test_a_secret_with_no_recorded_deadline_is_replaced;
-          Alcotest.test_case "a public client outlives any deadline" `Quick
-            test_a_public_client_outlives_any_deadline;
+          Alcotest.test_case "each login registers for the callback it names" `Quick
+            test_each_login_registers_for_the_callback_it_names;
           Alcotest.test_case "a secret rides along on the redemption" `Quick
             test_a_secret_rides_along_on_the_redemption;
           Alcotest.test_case "no secret means no parameter" `Quick
@@ -2183,15 +2199,19 @@ let () =
           Alcotest.test_case "a callback nobody is waiting on says so" `Quick
             test_a_callback_nobody_is_waiting_on_says_so;
         ] );
-      ( "the registered client",
-        [ Alcotest.test_case "none until one is registered" `Quick
-            test_no_client_until_one_is_registered;
-          Alcotest.test_case "a registered client comes back" `Quick
-            test_a_registered_client_comes_back;
-          Alcotest.test_case "a secret saved beside the id comes back" `Quick
-            test_a_secret_saved_beside_the_id_comes_back;
-          Alcotest.test_case "an unfinished write is not a client" `Quick
-            test_an_empty_client_file_is_not_a_client;
+      ( "which client redeems",
+        [ Alcotest.test_case "no app until one is entered" `Quick
+            test_no_app_until_one_is_entered;
+          Alcotest.test_case "an app comes back and stays private" `Quick
+            test_an_app_comes_back_and_stays_private;
+          Alcotest.test_case "an unreadable app is not no app" `Quick
+            test_an_unreadable_app_is_not_no_app;
+          Alcotest.test_case "a binding comes back as written" `Quick
+            test_a_binding_comes_back_as_written;
+          Alcotest.test_case "a binding that says something else is refused" `Quick
+            test_a_binding_that_says_something_else_is_refused;
+          Alcotest.test_case "renewal redeems with the login's own client" `Quick
+            test_renewal_redeems_with_the_logins_own_client;
           Alcotest.test_case "the id has to be one path component" `Quick
             test_the_id_has_to_be_one_path_component;
         ] );

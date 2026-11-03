@@ -96,12 +96,18 @@ let test_turn_boundary_is_not_completion () =
 let test_durable_results_and_projection () =
   stage (Observation.Failed (Some "producer evidence")) (terminal "failed" (pending ()));
   stage (Observation.Cancelled (Some "producer evidence")) (terminal "cancelled" (pending ()));
-  stage Observation.Settling
+  stage (Observation.Settling "reviewer")
     (pending () |> terminal "completed" |> nested "keeper_queue_evidence"
        (replace "projection_status" (`String "terminal_projection_pending")));
-  stage Observation.Transferring
-    (pending () |> nested "keeper_queue_evidence"
-       (replace "projection_status" (`String "transfer_projection_pending")))
+  let transferring = pending () |> nested "keeper_queue_evidence"
+      (replace "projection_status" (`String "transfer_projection_pending")) in
+  stage (Observation.Transferring { owner = "reviewer"; target = "analyst" })
+    (transferring |> nested "keeper_queue_evidence"
+       (replace "transfer_target" (`String "analyst")));
+  (* The server names both ends; a transfer without its target is refused. *)
+  (match Observation.decode transferring with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a transfer without its target was admitted")
 
 let test_another_occurrence_cannot_supply_progress () =
   let row = pending () |> terminal "completed" in
@@ -122,7 +128,7 @@ let test_unavailable_is_not_a_negative () =
     | Observation.Unknown _ -> ()
     | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
     | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
-    | Settling | Transferring -> Alcotest.fail "unavailable evidence became confirmed progress" in
+    | Settling _ | Transferring _ -> Alcotest.fail "unavailable evidence became confirmed progress" in
   unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "read_error")));
   unknown (pending () |> nested "keeper_reaction_evidence" (replace "projection_status" (`String "quarantined")));
   unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "future_value")));
@@ -139,7 +145,7 @@ let test_terminal_contradiction_cannot_become_completed () =
      | Observation.Unknown _ -> true
      | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
      | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
-     | Settling | Transferring -> false)
+     | Settling _ | Transferring _ -> false)
 
 let test_cross_source_terminal_disagreement () =
   let cancelled_reaction = pending () |> nested "keeper_reaction_evidence"
@@ -152,7 +158,7 @@ let test_cross_source_terminal_disagreement () =
       (match result.stage with
        | Observation.Unknown _ -> true
        | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started
-       | Turn_ended | Consumed | Completed | Failed _ | Cancelled _ | Settling | Transferring -> false))
+       | Turn_ended | Consumed | Completed | Failed _ | Cancelled _ | Settling _ | Transferring _ -> false))
     ["completed"; "failed"];
   let consumed = pending () |> nested "keeper_reaction_evidence"
     (replace "event_queue_ack_seen" (`Bool true)) in
@@ -201,7 +207,7 @@ let test_missing_stimulus_receipt_is_unconfirmed () =
     | Observation.Unknown _ -> ()
     | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
     | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
-    | Settling | Transferring -> Alcotest.fail "missing identity became confirmed progress" in
+    | Settling _ | Transferring _ -> Alcotest.fail "missing identity became confirmed progress" in
   unknown row;
   unknown (row |> nested "last_wake" (nested "detail"
     (function `Assoc fields -> `Assoc (List.remove_assoc "stimulus_id" fields)

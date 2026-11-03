@@ -11,8 +11,8 @@ type stage =
   | Completed
   | Failed of string option
   | Cancelled of string option
-  | Settling
-  | Transferring
+  | Settling of string
+  | Transferring of { owner : string; target : string }
   | Unknown of string
 
 type t = { stage : stage; due_at_iso : string option }
@@ -205,17 +205,17 @@ let decode row_json =
                                (match result with
                                 | Completed | Failed _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended | Consumed | Cancelled _ | Settling
-                                | Transferring | Unknown _ -> false)
+                                | Turn_started | Turn_ended | Consumed | Cancelled _ | Settling _
+                                | Transferring _ | Unknown _ -> false)
                            | Observed Consumed ->
                                (match result with
                                 | Cancelled _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
                                 | Turn_started | Turn_ended | Consumed | Completed | Failed _
-                                | Settling | Transferring | Unknown _ -> false)
+                                | Settling _ | Transferring _ | Unknown _ -> false)
                            | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                      | Turn_started | Turn_ended | Completed | Failed _ | Settling
-                                      | Transferring | Unknown _) -> false in
+                                      | Turn_started | Turn_ended | Completed | Failed _ | Settling _
+                                      | Transferring _ | Unknown _) -> false in
                          matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
                        match reaction_observation with
                        | Terminal_conflict -> Ok (Unknown "예약 소비 증거 충돌")
@@ -230,18 +230,23 @@ let decode row_json =
                                | Unobserved -> matched Queued
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
                                | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
-                                          | Missing | Queued_at _ | Settling | Transferring) -> matched (Unknown "예약 반응 재확인 필요"))
+                                          | Missing | Queued_at _ | Settling _ | Transferring _) -> matched (Unknown "예약 반응 재확인 필요"))
                           | "matched_terminal_completed" -> terminal "completed" (fun _ -> Completed)
                           | "matched_terminal_failed" -> terminal "failed" (fun reason -> Failed reason)
                           | "matched_terminal_cancelled" -> terminal "cancelled" (fun reason -> Cancelled reason)
-                          | "terminal_projection_pending" -> matched Settling
-                          | "transfer_projection_pending" -> matched Transferring
+                          | "terminal_projection_pending" ->
+                              let* owner = text "resolved_owner" queue in
+                              matched (Settling owner)
+                          | "transfer_projection_pending" ->
+                              let* owner = text "resolved_owner" queue in
+                              let* target = text "transfer_target" queue in
+                              matched (Transferring { owner; target })
                           | "not_found" ->
                               (match reaction_observation with
                                | Unobserved | Observed Queued -> matched Missing
                                | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
                                           | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Cancelled _
-                                          | Settling | Transferring | Unknown _) as stage) -> matched stage
+                                          | Settling _ | Transferring _ | Unknown _) as stage) -> matched stage
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
                           | "withdrawn_at_cancel" -> matched (Cancelled None)
                           | "read_error" | "evidence_invalid" | "unrecognized_receipt" ->
@@ -252,5 +257,5 @@ let decode row_json =
 
 let needs_attention = function
   | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended
-  | Consumed | Failed _ | Settling | Transferring | Unknown _ -> true
+  | Consumed | Failed _ | Settling _ | Transferring _ | Unknown _ -> true
   | No_occurrence | Completed | Cancelled _ -> false

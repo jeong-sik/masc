@@ -1711,7 +1711,7 @@ let release_input t ~generation =
     (match List.assoc_opt "spaceId" fields,List.assoc_opt "ownership" fields with
      | Some (`Int id),Some (`String owner) when id=t.space.id && String.equal owner agent_ownership ->
        let released_result outcome = obj ["action",str "release_input";"spaceId",`Int t.space.id;
-         "outcome",str outcome;"generation",str generation;"inputLock",Input.lock_report t.input] in
+         "outcome",str outcome;"generation",str generation;"inputLock",Input.lock_report t.input ~owner:(Some agent_ownership)] in
        (match Input.reset t.input ~authority:Input.Keeper ~generation ~now:(t.now ()) with
         | Input.Reset_applied -> Ok (released_result "released")
         | Input.Reset_already_applied -> Ok (released_result "already_released")
@@ -1741,7 +1741,7 @@ let space_status t =
   match presence.state,observation with
   | Present,Some observation ->
     (match Observation.to_json observation with
-     | `Assoc fields -> Ok (obj (("action",str "space_status")::fields @ ["inputLock",Input.lock_report t.input]))
+     | `Assoc fields -> Ok (obj (("action",str "space_status")::fields @ ["inputLock",Input.lock_report t.input ~owner:(Some observation.ownership)]))
      | _ -> Error (Live.Before_effect "invalid encoded Space observation"))
   | Missing,None -> Error (Live.Before_effect "the original bound Space is missing from the native inventory; no replacement was opened")
   | Unknown (Transport_unavailable detail|Invalid_inventory detail),None -> Error (Live.Before_effect ("Space presence is unknown: " ^ detail))

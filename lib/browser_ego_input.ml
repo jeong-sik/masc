@@ -196,7 +196,7 @@ let provenance t = match t.state with
   | Available (Operator_reset_asserted _) -> "operator_asserted"
   | Available (Keeper_released _) -> "keeper_asserted"
   | Pending _ -> "release_uncertain"
-let lock_report t =
+let lock_report t ~owner =
   let time = function Some at -> `Float at | None -> `Null in
   let pending_fields (p:pending) = ["generation",`String p.generation;"commandId",`String p.command_id;
     "tabId",`Int p.tab_id;"pageLabel",`String p.page_label;"operation",`String p.operation;
@@ -212,8 +212,13 @@ let lock_report t =
       "blockedBy",(match blocked_by with Some reason -> `String reason | None -> `Null)] in
   let lock = match t.state with
     | Pending {pending;_} ->
+      (* Only an agent-owned Space can be released by the agent. *)
+      let callable,blocked_by=match owner with
+        | Some "agent" -> true,None
+        | Some other -> false,Some (Printf.sprintf "the Space is not agent-owned (ownership=%s); the holder must release it" other)
+        | None -> false,Some "the Space owner is unknown; read space_status again" in
       ["state",`String "release_uncertain";"pending",`Assoc (pending_fields pending);
-       "releasePath",release_path ~callable:true ~blocked_by:None]
+       "releasePath",release_path ~callable ~blocked_by]
     | Available (Operator_reset_asserted {pending;at}) ->
       ["state",`String "operator_asserted";"pending",`Assoc (pending_fields pending);"assertedAt",`Float at;
        "releasePath",release_path ~callable:false ~blocked_by:(Some "already released")]

@@ -93,7 +93,8 @@ val assert_reset : t -> generation:string -> now:float -> (unit, string) result
 val provenance : t -> string
 (** [command_settled], [operator_asserted], [keeper_asserted] or [release_uncertain]. *)
 
-val lock_report : t -> Yojson.Safe.t
+val lock_report : t -> owner:string option -> Yojson.Safe.t
 (** Who and what holds (or held) the input lock, when it was taken, whether the
     Keeper may release it now and with which action, and the last rejected
-    release. Read-only. *)
+    release. [owner] is the Space's native ownership; [keeperCallable] is true
+    only when it is [agent]. Read-only. *)

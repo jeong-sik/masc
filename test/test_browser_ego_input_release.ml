@@ -47,7 +47,7 @@ let overtaken_generation_is_visible () =
      check bool "reason names the current generation" true (contains ~sub:second.generation reason);
      check bool "reason says it was not applied" true (contains ~sub:"not applied" reason));
   check string "still locked" "release_uncertain" (Input.provenance input);
-  let lock = Input.lock_report input in
+  let lock = Input.lock_report input ~owner:(Some "agent") in
   let rejection = member "lastRejection" lock in
   check string "report keeps the requested generation" first.generation (string_of (member "requestedGeneration" rejection));
   check string "report keeps the current generation" second.generation (string_of (member "currentGeneration" rejection));
@@ -58,7 +58,21 @@ let overtaken_generation_is_visible () =
   let outcome = ok (Input.within_command input ~command_id:"release"
     (fun () -> Input.reset input ~authority:Input.Keeper ~generation:second.generation ~now:170.)) in
   check bool "the current generation releases" true (outcome = Input.Reset_applied);
-  check bool "a successful release clears the rejection" true (member "lastRejection" (Input.lock_report input) = `Null)
+  check bool "a successful release clears the rejection" true (member "lastRejection" (Input.lock_report input ~owner:(Some "agent")) = `Null)
+
+(* Whether the Keeper may release depends on who owns the Space, not only on
+   the pending lock. *)
+let release_path_follows_ownership () =
+  let input = Input.create () in
+  let _ = hold input ~command_id:"original" ~now:100. in
+  let path owner = member "releasePath" (Input.lock_report input ~owner) in
+  check bool "an agent-owned Space can be released by the agent" true
+    (member "keeperCallable" (path (Some "agent")) = `Bool true);
+  List.iter (fun owner ->
+    let released = path owner in
+    check bool "any other owner cannot be released by the agent" true (member "keeperCallable" released = `Bool false);
+    check bool "and the report says why" true (member "blockedBy" released <> `Null))
+    [Some "agentDelegatedToUser"; Some "user"; None]
 
 let guards_hold () =
   let input = Input.create () in
@@ -116,7 +130,7 @@ let memory_persistence () =
    | Input.Uncertain pending -> check bool "a record without heldAt loads with an unknown lock time" true (pending.held_at = None)
    | Input.Ready _ -> fail "legacy pending record must stay locked");
   check bool "report shows the unknown lock time as null" true
-    (member "heldAt" (member "pending" (Input.lock_report reopened)) = `Null)
+    (member "heldAt" (member "pending" (Input.lock_report reopened ~owner:(Some "agent"))) = `Null)
 
 
 (* The operator form used to turn every refusal into the same "not applied"
@@ -152,6 +166,7 @@ let operator_view_keeps_the_reason () =
 let () = run "Ego input keeper release" ["release",[
   test_case "keeper release unblocks the same peer" `Quick keeper_release_unblocks;
   test_case "overtaken generation is visible and recoverable" `Quick overtaken_generation_is_visible;
+  test_case "release path follows Space ownership" `Quick release_path_follows_ownership;
   test_case "operator and command-scope guards hold" `Quick guards_hold;
   test_case "released state and legacy records persist" `Quick memory_persistence;
   test_case "operator view keeps the refusal reason" `Quick operator_view_keeps_the_reason]]

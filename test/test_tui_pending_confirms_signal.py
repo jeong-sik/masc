@@ -76,8 +76,8 @@ class ConfirmsServer(owed.ChatServer):
         self.health_reads = 0
 
 
-def pending_confirms_changed() -> dict[str, object]:
-    return {"type": "pending_confirms_changed"}
+def pending_confirm_invalidated() -> dict[str, object]:
+    return {"type": "operator_pending_confirm_invalidated"}
 
 
 def held_call_changed() -> dict[str, object]:
@@ -116,7 +116,7 @@ class PendingConfirmsSignalTest(unittest.TestCase):
             step("drain", 1.5)
             self.assertEqual(server.count("other", OPERATOR_PATH), 0)
             server.set_phase("changed")
-            server.events.put(pending_confirms_changed())
+            server.events.put(pending_confirm_invalidated())
             step(
                 "wait",
                 lambda: server.response_count("changed", OPERATOR_PATH) == 1,
@@ -145,7 +145,7 @@ class PendingConfirmsSignalTest(unittest.TestCase):
             with server.condition:
                 server.failures_left = 2
                 server.read_times.clear()
-            server.events.put(pending_confirms_changed())
+            server.events.put(pending_confirm_invalidated())
             step(
                 "wait",
                 lambda: len(server.read_times) >= 3,

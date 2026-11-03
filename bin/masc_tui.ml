@@ -22371,8 +22371,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let observer_source_loss_seen = ref false in
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
-      let waiting_sources_invalidated = ref false in
-      let schedule_store_invalidated = ref false in
       let turns_changed = ref false in
       let verification_changed = ref false in
       let repositories_changed = ref false in
@@ -22473,7 +22471,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ ->
                    ());
@@ -22486,11 +22484,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
-               | Masc_tui_observer.Schedule_store_invalidated ->
-                   waiting_sources_invalidated := true;
-                   schedule_store_invalidated := true
-               | Masc_tui_observer.Pending_confirm_invalidated ->
-                   waiting_sources_invalidated := true
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change
                | Masc_tui_observer.Execution_snapshot -> execution_snapshot_seen := true
@@ -22531,7 +22524,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22566,7 +22559,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            type. Work reads its own local source; it does not trust either
            payload. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-      if !schedule_store_invalidated || !observer_source_loss_seen then
+      if !observer_source_loss_seen then
         request_schedule_agenda_revalidation state ~mailbox;
       if !observer_source_loss_seen then begin
         revalidate_visible_fusion state ~mailbox;
@@ -22626,14 +22619,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          announce through their own events and name no Keeper (RFC-0481
          §3.4). They owe the list a read without marking every Keeper
          unverified, which would blank the whole waiting column for a read
-         on each of them; a held schedule announces every runner tick. *)
+         on each of them; a held schedule announces every runner tick. A
+         read already in flight is still not taken as current. *)
       let waiting_keepers = List.sort_uniq String.compare !waiting_inventory_changed in
       let waiting_unattributed = !pending_confirms_changed || !schedules_changed in
-      if !waiting_sources_invalidated then note_keeper_waiting_change state Waiting_all
-      else if waiting_keepers <> [] then
+      if waiting_keepers <> [] then
         note_keeper_waiting_change state (Waiting_keepers waiting_keepers);
       if waiting_unattributed then note_keeper_waiting_change state Waiting_unattributed;
-      if !waiting_sources_invalidated || waiting_keepers <> [] || waiting_unattributed then
+      if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (if (!verification_changed || !execution_snapshot_seen) && not !observer_source_loss_seen then
@@ -22673,6 +22666,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !pending_confirms_changed && not !observer_source_loss_seen then
          owe_pending_confirms_read state);
       (if !schedules_changed && not !observer_source_loss_seen then begin
+         (* The agenda strip says its list may be behind until the owed read
+            answers. *)
+         state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
          owe_schedules_read state;
          owe_keeper_schedules_read state
        end);
@@ -24572,7 +24568,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           report_action state "system" ("Schedule: " ^ message);
           (* The row shown still carries the old status until a read lands; a
              cancelled row that reads "scheduled" invites a second cancel. The
-             server announces [schedules_changed] for this write too, so the
+             server announces [schedule_store_invalidated] for this write too, so the
              read is owed and both land on the one the loop launches. *)
           owe_schedules_read state
       | Error err ->
@@ -29911,7 +29907,7 @@ Use relative paths for resources already held in the package. -->
                   report_action state "system" (action ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
-                  (* Owed, as after a cancel: the [schedules_changed] this
+                  (* Owed, as after a cancel: the [schedule_store_invalidated] this
                      write announces folds into the same read. *)
                   owe_schedules_read state))
           | _ ->
@@ -40635,7 +40631,7 @@ Use relative paths for resources already held in the package. -->
                 an MCP session every two seconds for an inventory that moves
                 at human speed. *)
              ()
-         (* The schedule list re-reads on [schedules_changed] (a row's own
+         (* The schedule list re-reads on [schedule_store_invalidated] (a row's own
             change, a runner tick or its staleness), on
             [keeper_event_queue_changed] for a Keeper a drawn row reads, and
             retries a failed read ([launch_owed_schedules]). *)

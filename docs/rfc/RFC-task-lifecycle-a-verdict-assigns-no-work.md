@@ -197,7 +197,7 @@ gate `evaluator_unavailable` 로 끝냈다: "The admitted verifier slot cannot c
 | 같은 것 | 부르는 이름 | 이 RFC 가 하는 일 |
 |---|---|---|
 | 제출한 에이전트 | 판정 쪽 코드의 `producer`, 상태의 `assignee`, verification 레코드의 `worker`(`lib/verification.ml:40-47`) | 상태의 칸을 `producer` 로 맞춘다. 새 이름을 만들지 않는다 |
-| Task 를 만든 에이전트 | 필드 `created_by`, 코드의 `self_authored`, 프롬프트의 "authored by you" 와 "Tasks You Created" | 건드리지 않는다. 이 문서는 `created_by` 하나로 부른다 |
+| Task 를 만든 에이전트 | 필드 `created_by`, 프롬프트의 "Tasks You Created" | 건드리지 않는다. 이 문서는 `created_by` 하나로 부른다 |
 | 에이전트가 지금 하는 Task | 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current task(`tool_task_handlers.ml:81-108`) | 건드리지 않는다. 셋 다 backlog 에서 다시 계산되는 표시다 |
 | 맡고 있는 상태 | `Claimed` 와 `InProgress` | §7 D6 |
 | handoff 의 글 | `summary` 와 `reason`. 반려는 둘에 같은 문장을 쓴다 | 반려가 `reason` 에만 쓰게 한다(§3.3) |

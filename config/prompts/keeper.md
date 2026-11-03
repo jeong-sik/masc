@@ -308,7 +308,7 @@ Workspace Goal observation snapshot for this turn. Stored titles, criteria and r
 [이번 턴 종료 조건] 이번 자율턴은 빈 최종 답변으로 끝낼 수 있습니다.
 
 ### wake.completion.progress_required
-[이번 턴 종료 조건] 이번 자율턴에는 처리할 새 입력이 있어 빈 최종 답변으로 끝낼 수 없습니다. 처리한 결과를 남기고, 처리하지 않는다면 그 이유를 한 줄로 남깁니다.
+[이번 턴 종료 조건] 이번 자율턴에는 처리할 새 입력이 있어 빈 최종 답변으로 끝낼 수 없습니다. 처리한 결과를 남깁니다.
 
 ### world.board_activity.heading (vars: count)
 ### Board Activity ({{count}} new)

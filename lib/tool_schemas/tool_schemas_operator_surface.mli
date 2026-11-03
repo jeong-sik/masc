@@ -22,6 +22,7 @@ val broadcast : Masc_domain.tool_schema
 val config : Masc_domain.tool_schema
 val dashboard : Masc_domain.tool_schema
 val gc : Masc_domain.tool_schema
+val sandbox_volume_gc : Masc_domain.tool_schema
 val keeper_waiting_inventory : Masc_domain.tool_schema
 val messages : Masc_domain.tool_schema
 val plan_clear_task : Masc_domain.tool_schema

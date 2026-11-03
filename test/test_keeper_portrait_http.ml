@@ -540,6 +540,50 @@ let test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace () =
           (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
         [ "fresh=tru"; "fresh="; "fresh=true&fresh=false"; "fresh" ]))
 
+(* RFC-0481 §3.1: [name] narrows the Gate roster to one Keeper through the
+   same route, so its authentication and Candle projection stay the roster's. *)
+let test_gate_named_roster_reads_one_keeper_with_auth () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") @@ fun () ->
+  with_router (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for config ~agent_name:"named-roster-operator" Masc_domain.Admin in
+    let worker = token_for config ~agent_name:"named-roster-worker" Masc_domain.Worker in
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    Fun.protect ~finally:Keeper_tool_surface.For_testing.reset_keeper_list_cache (fun () ->
+      let url name =
+        "/api/v1/gate/keepers?detailed=true&name="
+        ^ Uri.pct_encode ~component:`Query_value name in
+      let one_row ~token name =
+        let response = get ~router ~token (url name) in
+        check int "authorized named read succeeds" 200 response.status;
+        match Yojson.Safe.Util.(Yojson.Safe.from_string response.body |> member "keepers" |> to_list) with
+        | [ row ] -> row
+        | rows -> failf "expected one row for %s, got %d" name (List.length rows) in
+      check int "the whole roster is read and cached" 200
+        (get ~router ~token:worker "/api/v1/gate/keepers?detailed=true").status;
+      let added = "named-roster-new-keeper" in
+      let meta = require_ok Fun.id
+        (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String added ])) in
+      require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin (Filename.concat keepers_dir (added ^ ".toml")) (fun oc ->
+        output_string oc "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+      let shared = one_row ~token:worker added in
+      check string "the named read answers the Keeper the cached roster predates" added
+        Yojson.Safe.Util.(shared |> member "name" |> to_string);
+      check bool "a shared named read carries no account revision" true
+        (Json_util.assoc_member_opt "candle_account_revision" shared = None);
+      check bool "an operator named read carries the account revision" true
+        (Json_util.assoc_member_opt "candle_account_revision" (one_row ~token:operator added) <> None);
+      check int "a named read still requires a read token" 401 (get ~router (url added)).status;
+      List.iter (fun suffix ->
+        check int ("a malformed name is refused: " ^ suffix) 400
+          (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
+        [ "name="; "name"; "name=%20"; "name=a&name=b"; "name=a,b" ]))
+
 (* Once HTTP auth is strict the portrait is a read like any other: no token is
    a 401, a token that may read state is a 200, a token that may only play a
    shared machine is refused. *)
@@ -1165,6 +1209,8 @@ let () =
       ; test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
+      ; test_case "a named Gate roster read keeps auth and Candle projection" `Quick
+          test_gate_named_roster_reads_one_keeper_with_auth
       ; test_case "fresh Gate roster keeps cache, auth and workspace boundaries" `Quick
           test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token

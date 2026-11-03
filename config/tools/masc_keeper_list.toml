@@ -26,3 +26,11 @@ description = """
 Recompute the roster without using or updating the short-lived list cache. \
 Successful responses carry projection_cache_bypassed=true. Use after receiving \
 a change notification; inputs are not one atomic snapshot."""
+
+[[params]]
+name = "name"
+type = "string"
+description = """
+Return only this keeper's row (or its error row), or no row when it is not \
+listed. total counts the matched names. The answer is never served from the \
+list cache and carries projection_cache_bypassed=true."""

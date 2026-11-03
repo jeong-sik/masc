@@ -85,14 +85,12 @@ val payload_media_type : string
     identifies bytes whether they are this, before placing -- after placing
     there is nobody to ask. *)
 
-val place_rgb
-  :  data:string
-  -> pixel_width:int
-  -> pixel_height:int
-  -> rows:int
-  -> string
-(** Bytes that put a raw RGB frame -- three bytes per pixel, row-major, no
-    container -- on the terminal at the cursor, scaled into the cell box.
+val replace_rgb : image_id:int -> placement_id:int -> data:string
+  -> pixel_width:int -> pixel_height:int -> rows:int -> string
+(** Bytes that transmit a raw RGB frame -- three bytes per pixel, row-major,
+    no container -- and display it under a stable image and placement ID,
+    scaled into the cell box. The caller owns both IDs and must retire the
+    image when leaving its surface.
 
     For a caller holding a frame rather than a file: no encoder stands between
     the pixels and the wire. [pixel_width] and [pixel_height] are what the
@@ -104,11 +102,6 @@ val place_rgb
     makes of it.
 
     Chunked and silent for the same reasons as {!place}. *)
-
-val replace_rgb : image_id:int -> placement_id:int -> data:string
-  -> pixel_width:int -> pixel_height:int -> rows:int -> string
-(** Transmit and display a replacement under a stable image and placement ID.
-    The caller owns both IDs and must retire the image when leaving its surface. *)
 
 val replace_rgba : image_id:int -> placement_id:int -> data:string
   -> pixel_width:int -> pixel_height:int -> rows:int -> string

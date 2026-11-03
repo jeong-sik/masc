@@ -1366,51 +1366,11 @@ let test_roster_decode_rejects_present_unknown_health_on_error_row () =
   | Ok _ -> Alcotest.fail "a present unknown health must not decode"
   | Error _ -> ()
 
-(* The roster header's tally and the status column are the same reading drawn
-   twice. They disagreed once already, when the tally folded a status the
-   column spelled out. These pin the tally to whichever function labels the
-   column - now [health_label], since the column shows health. *)
 let present ?(health = health "healthy") ?(paused = false) name =
   { Control.name
   ; paused
   ; liveness = Control.Present (runtime ~health name)
   }
-
-let test_tally_uses_the_column_word () =
-  let readings =
-    [ present ~health:(health "healthy") "a"
-    ; present ~health:(health "idle") "b"
-    ; present ~health:(health "idle") "c"
-    ]
-  in
-  Alcotest.(check (list (pair string int)))
-    "idle is counted as idle, not folded into a healthier word"
-    [ ("healthy", 1); ("idle", 2) ]
-    (Control.health_tally readings)
-
-let test_tally_never_names_a_word_the_column_hides () =
-  let readings =
-    [ present ~health:(health "healthy") "a"
-    ; present ~health:(health "idle") "b"
-    ; present ~health:(health "offline") "c"
-    ; present ~health:(health "healthy") ~paused:true "d"
-    ; { Control.name = "e"; paused = true; liveness = Control.Absent }
-    ; reading "f"
-    ]
-  in
-  let tallied = List.map fst (Control.health_tally readings) in
-  let shown = List.map Control.health_label readings in
-  List.iter
-    (fun word ->
-      Alcotest.(check bool)
-        (Printf.sprintf "the column shows %S somewhere" word)
-        true
-        (List.mem word shown))
-    tallied;
-  Alcotest.(check int)
-    "every reading is counted exactly once"
-    (List.length readings)
-    (List.fold_left (fun sum (_, n) -> sum + n) 0 (Control.health_tally readings))
 
 (* Pausing is a person's decision and health is an observation. Folding one
    into the other is what [status_label] does, and it would make a paused
@@ -1452,10 +1412,9 @@ let test_roster_decode_keeps_the_axes_apart () =
       Alcotest.failf "expected one row, got %d" (List.length rows)
 
 (* A keeper in the Failing phase publishes health "failing". The roster reads
-   it as its own reading rather than rejecting the row, the column and the
-   tally both say failing, and the action the server derived for it is
-   probe. Its keepalive still runs, so it offers what a running keeper
-   offers. *)
+   it as its own reading rather than rejecting the row, the column says
+   failing, and the action the server derived for it is probe. Its keepalive
+   still runs, so it offers what a running keeper offers. *)
 let test_roster_decode_reads_a_failing_keeper () =
   let json =
     Yojson.Safe.from_string
@@ -1477,10 +1436,6 @@ let test_roster_decode_reads_a_failing_keeper () =
       in
       Alcotest.(check string) "the column says failing" "failing"
         (Control.health_label r);
-      Alcotest.(check (list (pair string int)))
-        "the tally counts it under the same word"
-        [ ("failing", 1) ]
-        (Control.health_tally [ r ]);
       check_actions "a running keeper's actions"
         [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete ]
         (Control.available r)
@@ -1581,12 +1536,8 @@ let test_configuration_error_identity_must_match_the_row () =
 
 let () =
   Alcotest.run "tui-keeper-control"
-    [ ( "health_tally"
-      , [ Alcotest.test_case "idle is not folded into a healthier word" `Quick
-            test_tally_uses_the_column_word
-        ; Alcotest.test_case "every counted word appears in the column" `Quick
-            test_tally_never_names_a_word_the_column_hides
-        ; Alcotest.test_case "pause does not hide health" `Quick
+    [ ( "health"
+      , [ Alcotest.test_case "pause does not hide health" `Quick
             test_pause_does_not_hide_health
         ] )
     ; ( "reading"

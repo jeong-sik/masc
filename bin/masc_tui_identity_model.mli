@@ -196,11 +196,6 @@ val identity_provider_declared
 val identity_provider_attached
   : providers:identity_provider list -> provider_id:string -> bool
 
-val identity_login_landed
-  :  providers:identity_provider list
-  -> login:identity_login_started
-  -> bool
-
 val decode_identity_login
   : provider_id:string -> label:string -> now:float -> Yojson.Safe.t
   -> identity_login_result

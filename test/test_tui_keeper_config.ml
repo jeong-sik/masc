@@ -55,7 +55,10 @@ let test_editor_starts_from_observed_values () =
     (projected |> Yojson.Safe.Util.member "skills" |> Yojson.Safe.to_string);
   Alcotest.(check string) "stem round-trips observed projection"
     (Yojson.Safe.to_string projected)
-    (editor_stem observed |> Yojson.Safe.from_string |> Yojson.Safe.to_string)
+    ((match editor_document ~format:Json observed with
+      | Ok text -> text
+      | Error detail -> Alcotest.fail detail)
+     |> Yojson.Safe.from_string |> Yojson.Safe.to_string)
 
 let replace_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)

@@ -1,0 +1,170 @@
+[
+ {
+  "configuration": {
+   "capAdd": [
+    "CAP_SETUID",
+    "CAP_SETGID",
+    "CAP_SYS_ADMIN"
+   ],
+   "capDrop": [
+    "ALL"
+   ],
+   "creationDate": "2026-11-03T07:34:28Z",
+   "dns": {
+    "nameservers": [],
+    "options": [],
+    "searchDomains": []
+   },
+   "id": "fixture-agent",
+   "image": {
+    "descriptor": {
+     "annotations": {
+      "com.apple.containerization.image.name": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+      "io.containerd.image.name": "docker.io/library/masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+      "org.opencontainers.image.created": "2026-09-28T02:23:09Z",
+      "org.opencontainers.image.ref.name": "20260928T0216Z-c48e1e05"
+     },
+     "digest": "sha256:5f289f8d70f7a0867865e23c146f726b670edec956ad20aa982956aa378957a4",
+     "mediaType": "application/vnd.oci.image.index.v1+json",
+     "size": 376
+    },
+    "reference": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05"
+   },
+   "initProcess": {
+    "arguments": [
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ],
+    "environment": [
+     "OPAMROOT=/home/opam/.opam",
+     "OPAMCONFIRMLEVEL=unsafe-yes",
+     "OPAMERRLOGLEN=0",
+     "PATH=/home/opam/.opam/5.5/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+     "DEBIAN_FRONTEND=noninteractive",
+     "OCAML_TOPLEVEL_PATH=/home/opam/.opam/5.5/lib/toplevel",
+     "GH_CONFIG_DIR=/masc-identity",
+     "HOME=/tmp",
+     "OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5",
+     "OCAMLTOP_INCLUDE_PATH=/home/opam/.opam/5.5/lib/toplevel",
+     "CAML_LD_LIBRARY_PATH=/home/opam/.opam/5.5/lib/stublibs:/home/opam/.opam/5.5/lib/ocaml/stublibs:/home/opam/.opam/5.5/lib/ocaml",
+     "OPAMYES=1",
+     "OPAMPRECISETRACKING=1",
+     "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
+    ],
+    "executable": "/opt/masc-exec-shim/masc-exec-shim",
+    "rlimits": [],
+    "supplementalGroups": [],
+    "terminal": false,
+    "user": {
+     "raw": {
+      "userString": "0:0"
+     }
+    },
+    "workingDirectory": "/masc-work"
+   },
+   "labels": {
+    "masc.mcp.boot_plan": "a0119f51fa3dc31b5d99e777b45337d7b0a284fb48cf0bd823a819b859509cb1",
+    "masc.mcp.keeper": "fixture-agent",
+    "masc.mcp.microvm_backend": "apple_container",
+    "masc.mcp.owner_pid": "4242",
+    "masc.mcp.started_at": "1793690000"
+   },
+   "mounts": [
+    {
+     "destination": "/tmp",
+     "options": [],
+     "source": "tmpfs",
+     "type": {
+      "tmpfs": {}
+     }
+    },
+    {
+     "destination": "/masc-identity",
+     "options": [
+      "ro"
+     ],
+     "source": "/host/masc/identity/fixture-agent",
+     "type": {
+      "virtiofs": {}
+     }
+    },
+    {
+     "destination": "/masc-work",
+     "options": [],
+     "source": "/runtime/volumes/fixture-agent-work/volume.img",
+     "type": {
+      "volume": {
+       "cache": {
+        "on": {}
+       },
+       "format": "ext4",
+       "name": "fixture-agent-work",
+       "sync": {
+        "fsync": {}
+       }
+      }
+     }
+    },
+    {
+     "destination": "/masc-build",
+     "options": [],
+     "source": "/runtime/volumes/fixture-agent-build/volume.img",
+     "type": {
+      "volume": {
+       "cache": {
+        "on": {}
+       },
+       "format": "ext4",
+       "name": "fixture-agent-build",
+       "sync": {
+        "fsync": {}
+       }
+      }
+     }
+    },
+    {
+     "destination": "/opt/masc-exec-shim",
+     "options": [
+      "ro"
+     ],
+     "source": "/host/masc/shim",
+     "type": {
+      "virtiofs": {}
+     }
+    }
+   ],
+   "networks": [],
+   "platform": {
+    "architecture": "arm64",
+    "os": "linux"
+   },
+   "publishedPorts": [],
+   "publishedSockets": [
+    {
+     "containerPath": "/run/masc-agent/agent.sock",
+     "hostPath": "/host/masc/agents/fixture-agent.sock"
+    }
+   ],
+   "readOnly": false,
+   "resources": {
+    "cpuOverhead": 1,
+    "cpus": 1,
+    "memoryInBytes": 1073741824
+   },
+   "rosetta": false,
+   "runtimeHandler": "container-runtime-linux",
+   "ssh": false,
+   "stopSignal": "SIGTERM",
+   "sysctls": {},
+   "useInit": false,
+   "virtualization": false
+  },
+  "id": "fixture-agent",
+  "status": {
+   "networks": [],
+   "startedDate": "2026-11-03T07:34:32Z",
+   "state": "running"
+  }
+ }
+]

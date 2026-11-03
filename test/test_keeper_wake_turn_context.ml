@@ -1702,12 +1702,15 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
   let issued_b = assemble second.world_partition in
-  let observation_text assembly = match assembly.Assembly.system_prompt with
-    | Some {observations; _} -> List.find_map (function
-        | Assembly.Admitted_scheduled_input text -> Some text
-        | Active_goals _ | Completion_authority _ -> None) observations |> Option.get
-    | None -> fail "entry observation was not issued" in
-  let b_text = observation_text issued_b in
+  let carrier_entry_text assembly =
+    List.find_map (fun (id, text) ->
+        if Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input then Some text else None)
+      assembly.Assembly.blocks
+    |> function Some text -> text | None -> fail "entry block was not issued to the carrier" in
+  let system_text assembly = match assembly.Assembly.system_prompt with
+    | Some issued -> issued.text
+    | None -> fail "system issuer missing" in
+  let b_text = carrier_entry_text issued_b in
   List.iter (fun expected -> check bool "exact selected source identity is present" true
       (contains ~needle:expected b_text))
     [Ids.Turn_ref.to_string (turn 2); Yojson.Safe.to_string (`String "schedule-B\"한글");
@@ -1720,7 +1723,7 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
         items = [{ schedule_id = "standing-unselected"; action = "keeper_wake"; status = "due";
           payload_kind = None; recurrence_summary = "once"; due_at = 1. }] } } in
   let multiple = assemble (parts 2 (Fields.Known [b; a]) superset).world_partition in
-  (match String.split_on_char '\n' (observation_text multiple) |> List.filter ((<>) "") with
+  (match String.split_on_char '\n' (carrier_entry_text multiple) |> List.filter ((<>) "") with
    | _summary :: b_row :: a_row :: [] ->
      check bool "first admitted occurrence stays first" true
        (contains ~needle:(Yojson.Safe.to_string (`String "occurrence-schedule-B\"한글")) b_row);
@@ -1728,11 +1731,18 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
        (contains ~needle:"occurrence-schedule-A" a_row)
    | _ -> fail "every exact admitted selection must retain its own row");
   check bool "standing schedule superset never becomes admitted input" false
-    (contains ~needle:"standing-unselected" (observation_text multiple));
+    (contains ~needle:"standing-unselected" (carrier_entry_text multiple));
+  let same_entry_other_turn = assemble (parts 1 (Fields.Known [b]) (observation b)).world_partition in
+  check string "system prefix is byte-identical across turns sharing world state"
+    (system_text same_entry_other_turn) (system_text issued_b);
+  check bool "the two turns still admit distinct entry identities" false
+    (String.equal (carrier_entry_text same_entry_other_turn) b_text);
   let later = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:(Some issued_b) ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[] in
-  check string "post-tool round retains exact entry bytes" b_text (observation_text later);
+  check bool "post-tool round drops the entry block; tool feedback stays newest" false
+    (List.exists (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input)
+       later.Assembly.blocks);
   let missing = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:None ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[] in
@@ -1768,20 +1778,28 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   let open Yojson.Safe.Util in
   check string "Start User observation keeps its exact issuer/write-slot binding" "matched_completed_slot"
     (binding start |> member "status" |> to_string);
-  let stale = Masc.Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user
-      ~block:Prompt_block_id.Admitted_scheduled_input ~assembly:(Some (assemble first.world_partition))
-      (Agent_core.Types.user_msg b_text) in
-  check string "B cannot borrow A's observation receipt" "unavailable"
+  let b_carrier : Agent_core.Types.message =
+    { origin = Agent_core.Types.System_context; role = Agent_core.Types.System
+    ; content = [ Agent_core.Types.Text b_text ]; name = None; tool_call_id = None; metadata = [] } in
+  let stale = Masc.Keeper_context_submission_link.encoded_carrier
+      ~assembly:(Some (assemble first.world_partition))
+      ~selected_blocks:(Some [Prompt_block_id.Admitted_scheduled_input])
+      b_carrier in
+  check string "B cannot borrow A's carrier receipt" "unavailable"
     (binding stale |> member "issuer_attribution" |> member "status" |> to_string);
-  check bool "Start User carries B entry" true
-    (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) (Masc.Keeper_context_submission_link.text start));
+  let carriers = List.filter (fun (message : Agent_core.Types.message) ->
+      message.origin = Agent_core.Types.System_context) prepared_b.messages in
+  check bool "Start history carries B entry in its carrier" true
+    (List.exists (fun message -> contains ~needle:(Ids.Turn_ref.to_string (turn 2))
+       (Host.encode_history_message message)) carriers);
   let held = { Masc.Keeper_official_client_session_store.context = Context_block Prompt_block_id.Admitted_scheduled_input;
                sha256 = Agent_core_sha256.(digest_string b_text |> to_hex) }
       :: Host.start_held_context ~composed_context:issued_b prepared_b.messages in
   let resume assembly held =
     let prepared = prepare assembly in
     Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
-  let repeated = resume later held in
+  (* Resume composes from the turn's first-round assembly, which always carries the entry. *)
+  let repeated = resume issued_b held in
   check bool "even held entry bytes reach Resume User" true
     (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) repeated.prompt);
   let rebound = assemble (parts 3 (Fields.Known [a]) (observation a)).world_partition in

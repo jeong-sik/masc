@@ -128,7 +128,8 @@ let history_role_label = function
 
 (* A vendor may keep its first System for the whole session. Keep Goal's
    existing Start/held policy, but deliver a current Completion Authority event
-   or identified historical admission fact in User only. Select the closed observation from the exact issuer; never
+   in User only; the turn-entry admission identity rides the carrier blocks
+   and is resent from there. Select the closed observation from the exact issuer; never
    search the selected text or borrow a receipt from another composition. *)
 let project_start_system ~system_prompt ~composed_context =
   match Option.bind composed_context (fun assembly ->
@@ -137,13 +138,13 @@ let project_start_system ~system_prompt ~composed_context =
   | Some (assembly, issued) when String.equal issued.text system_prompt ->
     let standing = List.filter (function
       | Keeper_context_assembly.Active_goals _ -> true
-      | Completion_authority _ | Admitted_scheduled_input _ -> false) issued.observations in
+      | Completion_authority _ -> false) issued.observations in
     let system_prompt = Keeper_context_assembly.with_system_observations
         ~base_text:issued.base_text ~observations:standing assembly
       |> Keeper_context_assembly.effective_system_prompt ~base_text:issued.base_text in
     let observations = List.filter_map (function
       | Keeper_context_assembly.Active_goals _ -> None
-      | (Completion_authority text | Admitted_scheduled_input text) as observation ->
+      | Completion_authority text as observation ->
         let block, _ = Keeper_context_assembly.observation_block observation in
         let message = user_message text in
         Some (Keeper_context_submission_link.concat ~separator:""

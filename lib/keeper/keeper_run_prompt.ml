@@ -38,6 +38,19 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
 
 let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
+  (* The admission identity names the turn, so it changes on every turn. It
+     rides the tail carrier as its own first-round block instead of the
+     System suffix, where any changed byte would invalidate the provider's
+     cached prefix over the whole history. Post-tool rounds carry no
+     admission block: like every other world-state block it is entry
+     context, and tool feedback stays the newest message. Resume composes
+     from the turn's first-round assembly, which always carries it. A
+     hook-recorded block wins when one is already present. *)
+  let with_admission text blocks =
+    if List.exists (fun (id, _) ->
+        Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input) blocks
+    then blocks
+    else blocks @ [Prompt_block_id.Admitted_scheduled_input, text] in
   let observations, blocks, dynamic_context_partition =
     if post_tool_round then
       let observations = match Option.bind previous_assembly (fun previous ->
@@ -61,9 +74,12 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
             (match Keeper_context_layers.text goals with
              | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)])
             @ (match Keeper_context_layers.text authority with
-               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)])
-            @ (match Keeper_context_layers.text admission with
-               | "" -> [] | text -> [Keeper_context_assembly.Admitted_scheduled_input (Inference_utils.sanitize_text_utf8 text)]) in
+               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)]) in
+          (* Partitioned out of the dynamic context so it renders once. *)
+          let blocks =
+            match Keeper_context_layers.text admission with
+            | "" -> blocks
+            | text -> with_admission (Inference_utils.sanitize_text_utf8 text) blocks in
           observations, List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining

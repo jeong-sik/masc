@@ -333,7 +333,7 @@ let test_schedule_responses_follow_keeper_and_generation () =
   let read, before_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
   (* A schedule change announced while this read runs. *)
-  state.schedules_owed <-
+  state.schedules_agenda_owed <-
     Masc_tui_owed_read.changed (Masc_tui_owed_read.started Masc_tui_owed_read.settled);
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   Types.apply_schedule_agenda_read state (ticket before_change) (Ok (snapshot 99));
@@ -343,7 +343,7 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (Types.Snapshot_read.in_flight state.schedules_agenda_read);
   check bool "an overtaken reply leaves freshness pending" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
-  state.schedules_owed <- Masc_tui_owed_read.started Masc_tui_owed_read.settled;
+  state.schedules_agenda_owed <- Masc_tui_owed_read.started Masc_tui_owed_read.settled;
   let read, after_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
   Types.apply_schedule_agenda_read state (ticket after_change) (Ok (snapshot 4));
@@ -354,13 +354,13 @@ let test_schedule_responses_follow_keeper_and_generation () =
   let read, before_owed_read = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Refresh state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
   (* A change no read has answered yet: the owed read has not started. *)
-  state.schedules_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
+  state.schedules_agenda_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
   Types.apply_schedule_agenda_read state (ticket before_owed_read) (Ok (snapshot 7));
   check (option int) "a read that is not overtaken publishes" (Some 7)
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check bool "while a change is owed the published agenda is uncertain" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
-  state.schedules_owed <- Masc_tui_owed_read.settled;
+  state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
   state.observer <- Types.Observer_closed_after_live
     { reason = "disconnected"; at = 1.; events = 0 };
   let read, disconnected = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in

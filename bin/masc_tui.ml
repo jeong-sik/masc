@@ -16295,7 +16295,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_tool_approvals <- [];
   state.keeper_tool_approvals_error <- None;
   state.keeper_tool_approvals_observed <- false;
-  state.gate_receipt_refresh_pending <- false;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.gate_pending <- [];
   state.gate_modes <- None;
@@ -18723,8 +18722,6 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     if state.runtime_catalog_resume then launch_runtime_catalog_load state ~mailbox;
     launch_surface_reads state ~mailbox state.view;
     refresh_acting_pane_changes state ~mailbox;
-    if state.gate_receipt_refresh_pending then
-      launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
     (* Retained nested readers own their selection independently of the list
        underneath. Reissue their observations without resetting navigation. *)
     (match state.view with
@@ -25538,7 +25535,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        if state.workspace_identity = Workspace_identity_match
           && Option.exists (same_server_workspace expected_workspace) state.server_identity then
        begin
-       state.gate_receipt_refresh_pending <- false;
        match result with
        | Ok snapshot ->
            state.gate_snapshot_owed <- Masc_tui_owed_read.succeeded state.gate_snapshot_owed;
@@ -25578,7 +25574,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
-           state.gate_receipt_refresh_pending <- true;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
        | Error detail ->
@@ -25594,7 +25589,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Ok () when retains_receipt_workspace state expected_workspace ->
            report_action state "system"
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
-           state.gate_receipt_refresh_pending <- true;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
        | Error detail ->

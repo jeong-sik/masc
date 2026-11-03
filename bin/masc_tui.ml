@@ -8175,6 +8175,10 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
           result))
   end
 
+let stream_reconnect_s = 2.0
+let keeper_execute_stream_reconnect_s = 2.0
+let keeper_execute_stream_max_reconnect_s = 30.0
+
 (* Owed reads wait on this clock, so a wall-clock step cannot stretch a
    retry. *)
 let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
@@ -8535,6 +8539,27 @@ let owe_board_post_read state ~mailbox ~post_id =
   state.board_post_owed <-
     Some { owed with bpo_read = Masc_tui_owed_read.changed owed.bpo_read };
   launch_owed_board_post state ~mailbox
+
+(* The Board list and hearth census read again when [notifications/board]
+   arrives while the Board is on screen, and after a failed read
+   (RFC-0480 §3.1). The read on entering the Board and a revalidation ride the
+   surface refresh. *)
+let owe_board_list_read state =
+  state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed
+
+(* A failed list read leaves the list owed and waiting whoever started it, so
+   the read on entering the Board retries like an announced one. *)
+let fail_board_list_read state =
+  state.board_list_owed <-
+    Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      (Masc_tui_owed_read.started (Masc_tui_owed_read.changed state.board_list_owed))
+
+let apply_board_hearths_load state result =
+  Masc_tui_types.apply_board_census_load state result;
+  match result with
+  | Ok _ -> ()
+  | Error _ -> fail_board_list_read state
 
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
@@ -14464,8 +14489,9 @@ let apply_board_list_load state receipt =
   let previous=state.board_list_reported_error in
   let application=apply_board_posts_load state receipt in
   (match receipt.bpr_result with
-   | Ok _ -> ()
+   | Ok _ -> state.board_list_owed <- Masc_tui_owed_read.succeeded state.board_list_owed
    | Error detail ->
+       fail_board_list_read state;
        state.board_list_reported_error <- Some detail;
        if not (Option.equal String.equal previous (Some detail)) then
          add_event state "error" (Printf.sprintf "board list data unreliable: %s" detail));
@@ -15300,7 +15326,7 @@ let apply_http_scoped_data state ~datasets results =
     record Surface_read_order.Board_posts (board_posts_application_outcome application)
       ["board_posts", board_posts_application_to_yojson application]
   end;
-  apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_types.apply_board_census_load state) results.http_board_hearths;
+  apply Surface_read_order.Board_hearths ~received:Result.is_ok (apply_board_hearths_load state) results.http_board_hearths;
   apply Surface_read_order.Planning_data ~received:Result.is_ok (apply_planning_load state) results.http_planning;
     apply Surface_read_order.Overview_goals_data ~received:Result.is_ok (apply_overview_goals_load state) results.http_overview_goals
   end;
@@ -15321,7 +15347,7 @@ let apply_http_scoped_data state ~datasets results =
 let apply_http_dataset state = function
   | Dataset_transport result -> apply_transport_load state result; None
   | Dataset_board_posts board -> Some (apply_board_list_load state board)
-  | Dataset_board_hearths hearths -> Masc_tui_types.apply_board_census_load state hearths; None
+  | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
   | Dataset_planning result -> apply_planning_load state result; None
   | Dataset_system_logs result -> apply_system_logs_load state result; None
   | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
@@ -16594,8 +16620,6 @@ let launch_keeper_execute_read state ~mailbox ~intent keeper =
    job owns the connection and the reader, and posts the reader's view to the
    mailbox; the render fiber owns all state. Retriable failures back off; a
    permanent refusal stops until the tab is reopened. *)
-let keeper_execute_stream_reconnect_s = 2.0
-let keeper_execute_stream_max_reconnect_s = 30.0
 
 (* The reader is posted at most this often. A command that prints faster draws
    every row all the same; they arrive together. *)
@@ -17276,8 +17300,6 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
       | Some _ -> keeper_list_select_name state name)
 ;;
 
-let stream_reconnect_s = 2.0
-
 (* A failed Fusion read is retried with the streams' reconnect backoff; a
    change re-reads on [fusion_run_status] (RFC-0480 L2b). *)
 let settle_fusion_retry state reading result =
@@ -17674,8 +17696,14 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
       (* This newer bundle supersedes an inflight scoped read, so it must
-         replace every dataset currently drawn rather than omit that read. *)
-      current_surface_needs state
+         replace every dataset currently drawn rather than omit that read.
+         The cadence leaves the Board out: it re-reads on
+         [notifications/board] ([launch_owed_board_list]), and a scoped
+         Board read in flight keeps its datasets. *)
+      let current = current_surface_needs state in
+      match intent with
+      | Revalidate -> current
+      | Cadence -> { current with needs_board = false }
     in
     let roster_request = if needs.needs_keeper_roster
       then Masc_tui_types.begin_keeper_roster_read state else None in
@@ -18333,6 +18361,31 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
                    ~before
              | Ok _ | Error _ -> ());
         log_http_surface_read_finished state surface_context
+  end
+
+(* Runs on every loop iteration. A Board read already in flight is let finish
+   first; one that will not deliver leaves the list owed again. *)
+let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  if state.view <> Board then state.board_list_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading =
+      Surface_read_order.pending_dataset state.http_surface_reads Surface_read_order.Board_posts
+    in
+    let read =
+      if reading then state.board_list_owed
+      else Masc_tui_owed_read.abandoned state.board_list_owed
+    in
+    state.board_list_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+       && server_authority_ready state
+       && not reading
+    then begin
+      state.board_list_owed <- Masc_tui_owed_read.started read;
+      start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
+        ~needs:{ Masc_tui_types.nothing with needs_board = true }
+    end
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -21602,6 +21655,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let selected_composite_changed = ref false in
       let selected_tool_called = ref false in
       let open_board_post_changed = ref false in
+      let board_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21685,6 +21739,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Some _, (Some _ | None) | None, _ -> ());
               (* A Board event that names no post may still be about the open
                  one (a vote on one of its comments), so it reads too. *)
+              if Option.is_some (Masc_tui_observer.board_changed_post event) then
+                board_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
                    open_board_post_changed := true
@@ -21878,6 +21934,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          Option.iter
            (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
            (board_post_on_screen state));
+      (if !board_changed && not !observer_source_loss_seen && state.view = Board then
+         owe_board_list_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
@@ -31116,6 +31174,9 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_composite state ~mailbox:async_messages;
       launch_owed_keeper_calls state ~mailbox:async_messages;
       launch_owed_board_post state ~mailbox:async_messages;
+      launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
+        ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
+        ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration

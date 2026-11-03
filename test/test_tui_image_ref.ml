@@ -46,6 +46,8 @@ let test_what_is_not_a_path () =
   check_paths "another extension is not offered" []
     (paths "shot.jpg and diagram.svg")
 
+(* A run of non-ASCII letters is read where no word can be glued onto it:
+   right after a [/]. An accent right after an ASCII letter belongs to it. *)
 let test_unicode_paths_keep_the_original_bytes () =
   List.iter
     (fun path -> check_paths path [ path ] (paths ("see " ^ path ^ " please")))
@@ -53,20 +55,57 @@ let test_unicode_paths_keep_the_original_bytes () =
     ; "/tmp/화면/report.png"
     ; "./폴더/스크린샷.png"
     ; "docs/화면.png"
-    ; "화면.png"
-    ; "cafe\xcc\x81.png"
+    ; "/tmp/画像はscreenshot.png"
+    ; "/tmp/cafe\xcc\x81.png"
     ];
   (* The three inputs #47718 was reported with. *)
   List.iter
     (fun path -> check_paths path [ path ] (paths ("`" ^ path ^ "`")))
-    [ "/tmp/화면1.png"; "/tmp/화면.png"; "/tmp/화면/report.png" ]
+    [ "/tmp/화면1.png"; "/tmp/화면.png"; "/tmp/화면/report.png" ];
+  List.iter
+    (fun (text, path) -> check_paths text [ path ] (paths text))
+    [ ("(경로: /tmp/화면.png)", "/tmp/화면.png")
+    ; ("확인\xc2\xa0/tmp/화면.png", "/tmp/화면.png")
+    ; ("스크린샷은 /tmp/화면.png에 저장했어요", "/tmp/화면.png")
+    ]
 
-(* A word glued to an absolute path and a relative directory of that name
-   read the same, and a wrapper around them does not tell them apart. *)
-let test_a_unicode_word_before_the_first_slash_is_declined () =
+(* Korean, Japanese, Chinese and Thai prose glues words onto a name with no
+   space between them. Where the word ends and the name starts cannot be
+   read off the text, so these shapes give no path rather than a joined one
+   or a shortened one. *)
+let test_a_word_glued_onto_a_name_gives_no_path () =
   List.iter
     (fun text -> check_paths text [] (paths text))
-    [ "결과는/tmp/a.png"; "(결과는/tmp/a.png)"; "`폴더/화면.png`" ]
+    [ "결과는/tmp/a.png"
+    ; "(결과는/tmp/a.png)"
+    ; "`폴더/화면.png`"
+    ; "see 화면.png"
+    ; "画像はscreenshot.pngです"
+    ; "(결과는a.png)"
+    ; "확장자는.png로 바꿨어요"
+    ; "a.txtㆍb.png"
+    ; "/tmp/a.svgを/tmp/a.pngに変換しました"
+    ; "/tmp/outの/tmp/a.png"
+    ]
+
+(* Format characters and combining marks draw nothing of their own. Cutting
+   a name at one gives a shorter name; a mark that belongs to the symbol
+   before it does not start a name. *)
+let test_invisible_and_combining_characters () =
+  List.iter
+    (fun text -> check_paths text [] (paths text))
+    [ "/tmp/\xd8\xa7\xd8\xb3\xda\xa9\xd8\xb1\xdb\x8c\xd9\x86\xe2\x80\x8c\xd8\xb4\xd8\xa7\xd8\xaa.png"
+    ; "/tmp/화\xe2\x80\x8e면.png"
+    ; "/tmp/screen\xc2\xadshot.png"
+    ; "see \xe2\x9a\xa0\xef\xb8\x8f.png"
+    ; "a.png\xcc\x81"
+    ];
+  List.iter
+    (fun (text, expected) -> check_paths text expected (paths text))
+    [ ("\xe2\x9a\xa0\xef\xb8\x8fa.png", [ "a.png" ])
+    ; ("\xe2\x9a\xa0\xef\xb8\x8f/tmp/a.png", [ "/tmp/a.png" ])
+    ; ("/tmp/a.png 와 \xe2\x9a\xa0\xef\xb8\x8f.png", [ "/tmp/a.png" ])
+    ]
 
 (* Korean puts a particle right after the word, and CJK text closes a
    sentence or a quote with its own punctuation. None of it is the name. *)
@@ -74,7 +113,6 @@ let test_what_follows_the_extension_in_korean_text () =
   List.iter
     (fun (text, expected) -> check_paths text expected (paths text))
     [ ("/tmp/a.png를 열어 보세요", [ "/tmp/a.png" ])
-    ; ("스크린샷은 /tmp/화면.png에 저장했어요", [ "/tmp/화면.png" ])
     ; ("확인 /tmp/화면.png。다음", [ "/tmp/화면.png" ])
     ; ("「/tmp/a.png」를 열어", [ "/tmp/a.png" ])
     ; ("“/tmp/a.png”.", [ "/tmp/a.png" ])
@@ -82,8 +120,8 @@ let test_what_follows_the_extension_in_korean_text () =
     ]
 
 (* Joining two names, or a name and the words before it, offers a file
-   nobody named. Each case below gave the right path before Unicode was read,
-   and has to keep giving it. *)
+   nobody named. Each case below gives the right path on main as well, and
+   has to keep giving it. *)
 let test_neighbours_are_not_joined_into_the_path () =
   List.iter
     (fun (text, expected) -> check_paths text expected (paths text))
@@ -95,13 +133,11 @@ let test_neighbours_are_not_joined_into_the_path () =
     ; ("(a.txt,b.png)", [ "b.png" ])
     ; ("(foo.txt,/tmp/a.png)", [ "/tmp/a.png" ])
     ; ("(see docs/a.png)", [ "docs/a.png" ])
-    ; ("(경로: /tmp/화면.png)", [ "/tmp/화면.png" ])
     ; ("`open /tmp/a.png`", [ "/tmp/a.png" ])
     ; ("`/usr/bin/open /tmp/a.png`", [ "/tmp/a.png" ])
     ; ("`/tmp/notes.txt /tmp/a.png`", [ "/tmp/a.png" ])
     ; ("`--output=/tmp/a.png`", [ "/tmp/a.png" ])
     ; ("\"saved to /tmp/a.png\"", [ "/tmp/a.png" ])
-    ; ("확인\xc2\xa0/tmp/화면.png", [ "/tmp/화면.png" ])
     ];
   (* With no separator between them, the second name could start anywhere
      inside the first. *)
@@ -143,8 +179,10 @@ let () =
         ; test_case "what is not a path" `Quick test_what_is_not_a_path
         ; test_case "Unicode paths keep their original bytes" `Quick
             test_unicode_paths_keep_the_original_bytes
-        ; test_case "a Unicode word before the first slash is declined" `Quick
-            test_a_unicode_word_before_the_first_slash_is_declined
+        ; test_case "a word glued onto a name gives no path" `Quick
+            test_a_word_glued_onto_a_name_gives_no_path
+        ; test_case "invisible and combining characters" `Quick
+            test_invisible_and_combining_characters
         ; test_case "what follows the extension in Korean text" `Quick
             test_what_follows_the_extension_in_korean_text
         ; test_case "neighbours are not joined into the path" `Quick

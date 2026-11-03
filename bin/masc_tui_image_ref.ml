@@ -30,9 +30,11 @@ type left_edge =
 (* Outside ASCII a letter, a mark or a number belongs to the name, so
    "/tmp/화면1.png" is read whole, with the bytes it was written in.
    Punctuation, symbols and spaces end the name, as ASCII punctuation does,
-   so "a.png、b.png" is two names. A control is not a separator:
-   "/tmp/pre<ESC>post.png" names one file and "post.png" would be another.
-   A scalar this table cannot classify is not guessed at either. *)
+   so "a.png、b.png" is two names. Controls and format characters are not
+   separators: they draw nothing and sit inside words (ZWNJ in Persian, a
+   soft hyphen), so "/tmp/pre<ESC>post.png" names one file and "post.png"
+   would be another. A scalar this table cannot classify is not guessed at
+   either. *)
 let left_edge scalar =
   let code = Uchar.to_int scalar in
   if code < 0x80 && is_path_char (Char.chr code) then Name_part
@@ -41,10 +43,18 @@ let left_edge scalar =
     | `Cc -> if Uucp.White.is_white_space scalar then Boundary else Refused
     | `Ll | `Lm | `Lo | `Lt | `Lu | `Mc | `Me | `Mn | `Nd | `Nl | `No ->
         Name_part
-    | `Cn | `Co | `Cs -> Refused
-    | `Cf | `Pc | `Pd | `Pe | `Pf | `Pi | `Po | `Ps | `Sc | `Sk | `Sm | `So
-    | `Zl | `Zp | `Zs ->
+    | `Cf | `Cn | `Co | `Cs -> Refused
+    | `Pc | `Pd | `Pe | `Pf | `Pi | `Po | `Ps | `Sc | `Sk | `Sm | `So | `Zl
+    | `Zp | `Zs ->
         Boundary
+
+let is_mark scalar =
+  match Uucp.Gc.general_category scalar with
+  | `Mc | `Me | `Mn -> true
+  | `Cc | `Cf | `Cn | `Co | `Cs | `Ll | `Lm | `Lo | `Lt | `Lu | `Nd | `Nl
+  | `No | `Pc | `Pd | `Pe | `Pf | `Pi | `Po | `Ps | `Sc | `Sk | `Sm | `So
+  | `Zl | `Zp | `Zs ->
+      false
 
 let scalar_at text index =
   let decoded = String.get_utf_8_uchar text index in
@@ -60,24 +70,51 @@ let scalar_before text index =
   let scalar, _ = scalar_at text !start in
   (!start, scalar)
 
-(* "결과는/tmp/a.png" is a word glued to an absolute path, or a relative
-   directory named 결과는 -- both read the same, so neither is offered.
-   A relative path that starts in ASCII ("docs/화면.png") or at a root
-   ("./폴더/화면.png") does not have this second reading. *)
-let unicode_before_first_slash text ~start ~at =
-  let rec first_slash index =
-    if index >= at then None
-    else if Char.equal text.[index] '/' then Some index
-    else first_slash (index + 1)
+(* A mark belongs to the scalar before it. When that scalar ended the name
+   ("⚠️a.png": U+FE0F after the sign), its marks are not where a name
+   starts either. *)
+let rec skip_marks text index stop =
+  if index >= stop then index
+  else
+    let scalar, next = scalar_at text index in
+    if is_mark scalar then skip_marks text next stop else index
+
+(* What came just before a scalar inside a candidate. *)
+type preceding =
+  | Name_start  (* the candidate's first scalar *)
+  | Slash
+  | Unicode_run
+  | Ascii_letter_or_digit
+  | Accent  (* a mark on an ASCII letter or digit *)
+  | Other_ascii
+
+(* Korean, Japanese, Chinese and Thai prose glues words onto a name with no
+   space: "결과는/tmp/a.png", "画像はscreenshot.png",
+   "/tmp/a.svgを/tmp/a.png". The text cannot say where the word ends, so a
+   run of non-ASCII letters is read as a name only where nothing can be
+   glued onto it -- right after a [/]. The one other place is an accent on
+   an ASCII letter or digit ("cafe" + U+0301). *)
+let unicode_runs_open_segments text ~start ~stop =
+  let rec loop index preceding =
+    if index >= stop then true
+    else
+      let scalar, next = scalar_at text index in
+      let code = Uchar.to_int scalar in
+      if code < 0x80 then
+        let preceding =
+          match Char.chr code with
+          | '/' -> Slash
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> Ascii_letter_or_digit
+          | _ -> Other_ascii
+        in
+        loop next preceding
+      else
+        match preceding with
+        | Slash | Unicode_run -> loop next Unicode_run
+        | (Ascii_letter_or_digit | Accent) when is_mark scalar -> loop next Accent
+        | Name_start | Ascii_letter_or_digit | Accent | Other_ascii -> false
   in
-  match first_slash start with
-  | None -> false
-  | Some slash ->
-      let rec has_non_ascii index =
-        index < slash
-        && (Char.code text.[index] >= 0x80 || has_non_ascii (index + 1))
-      in
-      has_non_ascii start
+  loop start Name_start
 
 let find_from haystack needle start =
   let hl = String.length haystack and nl = String.length needle in
@@ -132,22 +169,30 @@ let paths text =
           let after = at + ext_length in
           (* A full stop closes a sentence and a full stop opens an extension,
              and both are path characters. They are told apart by what comes
-             next: "docs/a.png." ends there, "backup.png.bak" does not. A byte
-             outside ASCII ends it too: Korean puts its particle right after
-             the word, so "/tmp/a.png를" names /tmp/a.png. *)
+             next: "docs/a.png." ends there, "backup.png.bak" does not. A
+             scalar outside ASCII ends it too: Korean puts its particle right
+             after the word, so "/tmp/a.png를" names /tmp/a.png. A mark does
+             not: it is an accent on the "g", and the extension is not
+             ".png". *)
           let ends_the_path =
-            after >= limit
-            || (not (is_path_char text.[after]))
-            || Char.equal text.[after] '.'
-               && (after + 1 >= limit || not (is_path_char text.[after + 1]))
+            if after >= limit then true
+            else
+              let scalar, next = scalar_at text after in
+              if Uchar.to_int scalar >= 0x80 then not (is_mark scalar)
+              else if Char.equal text.[after] '.' then
+                next >= limit || not (is_path_char text.[next])
+              else not (is_path_char text.[after])
           in
           let found =
             if (not ends_the_path) || has_url then found
             else
-              match expand_left ~floor at with
+              match
+                Option.map (fun start -> skip_marks text start at)
+                  (expand_left ~floor at)
+              with
               | Some start
                 when start < at
-                     && (not (unicode_before_first_slash text ~start ~at))
+                     && unicode_runs_open_segments text ~start ~stop:at
                      (* [//host/file.png] is what a URL leaves behind once
                         the expansion stops at its colon. It reads as an
                         absolute path and is not one. *)

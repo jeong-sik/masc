@@ -395,7 +395,7 @@ let decode_schedule_wake json =
    be read" are the two readings this pane exists to keep apart. *)
 let wake_history_of_json json =
   let* status = Masc.Tui_decode_fields.required_string_field json "status" in
-  let* swh_schedule_id = Masc.Tui_decode_fields.required_string_field json "schedule_id" in
+  let* schedule_id = Masc.Tui_decode_fields.required_string_field json "schedule_id" in
   match status with
   | "found" ->
       let* wake_jsons = Masc.Tui_decode_fields.required_list_field json "wakes" in
@@ -405,9 +405,9 @@ let wake_history_of_json json =
       let* swh_retention_per_schedule =
         Masc.Tui_decode_fields.required_int_field json "wake_retention_per_schedule"
       in
-      Ok { swh_schedule_id; swh_wakes; swh_retention_per_schedule }
+      Ok { swh_wakes; swh_retention_per_schedule }
   | "not_found" ->
-      Error (Printf.sprintf "schedule %s is no longer in the store" swh_schedule_id)
+      Error (Printf.sprintf "schedule %s is no longer in the store" schedule_id)
   | "invalid_id" -> Error "the schedule lookup was asked for an empty id"
   | "unavailable" ->
       let reason =

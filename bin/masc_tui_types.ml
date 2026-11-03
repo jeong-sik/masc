@@ -3174,9 +3174,9 @@ type schedule_wake = {
 
 (** The exact-lookup wake history for one schedule instance, newest first.
     [swh_retention_per_schedule] is the store's own ceiling on terminal wakes,
-    which is what stops [swh_count] from reading as a complete history. *)
+    which is what stops the count of [swh_wakes] from reading as a complete
+    history. *)
 type schedule_wake_history = {
-  swh_schedule_id: string;
   swh_wakes: schedule_wake list;
   swh_retention_per_schedule: int;
 }
@@ -8873,13 +8873,6 @@ type voice_capture_phase =
   | Voice_recording
   | Voice_processing
   | Voice_stopping
-
-type message_draft = {
-  draft_text : string;
-  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
-  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
-  draft_attachments_since : image_observation option;
-}
 
 
 type agenda_navigation = Agenda_follow_selection | Agenda_read_rows

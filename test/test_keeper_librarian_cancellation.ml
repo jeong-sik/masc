@@ -86,7 +86,12 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
   let before_bytes = Fs_compat.load_file current_path in
   let claim text token =
     `Assoc [ "claim", `String text; "category", `String "fact"
-           ; "absorbs", `List [ `String token ]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] in
+           ; "absorbs", `List [ `String token ]
+           (* Each claim cites both messages, the tool run and, when the input
+              has them, the historical task ranges, so every judgment request
+              carries all of them. *)
+           ; "evidence", `Assoc [ "conversation", `List [ `Int 0; `Int 1 ]; "tools", `List [ `Int 0 ]
+                                ; "counterpart", `Bool false; "task_contexts", `Bool observer_checks ] ] in
   let answer = `Assoc
     [ "new_claims", `List
         [ claim "Tuesday is the alpha service's deployment day." "m1"

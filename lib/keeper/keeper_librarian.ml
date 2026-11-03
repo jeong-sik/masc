@@ -281,32 +281,69 @@ let format_tool_observations_for_prompt observations =
   |> Yojson.Safe.to_string
 ;;
 
-let observations_for_absorption (inp : input) =
+type evidence_citation =
+  | Cited_conversation of int
+  | Cited_tool of int
+  | Cited_counterpart
+  | Cited_task_contexts
+
+let evidence_citation_to_string = function
+  | Cited_conversation position -> Printf.sprintf "conversation %d" position
+  | Cited_tool position -> Printf.sprintf "tools %d" position
+  | Cited_counterpart -> "counterpart"
+  | Cited_task_contexts -> "task_contexts"
+;;
+
+(* Every observation of the input, each beside the citation that names it and
+   rendered only when asked: a claim cites a few of them, and a pass can carry
+   thousands. *)
+let observation_entries (inp : input) =
   let observation ~kind ~position fields =
     `Assoc ([ "kind", `String kind
             ; "batch_turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
             ; "local_position", `Int position ] @ fields)
   in
   let messages = List.mapi (fun position message ->
-    observation ~kind:"conversation" ~position
-      ["text", `String (message_to_text ~position_label:"local_position" ~position message)]) inp.messages in
+    Cited_conversation position, fun () ->
+      observation ~kind:"conversation" ~position
+        ["text", `String (message_to_text ~position_label:"local_position" ~position message)])
+    inp.messages in
   let tools = List.mapi (fun position (tool : tool_observation) ->
-    observation ~kind:"tool_execution" ~position
-      [ "tool_name", `String tool.tool_name
-      ; "outcome", `String (tool_observation_outcome_to_string tool.outcome) ])
-      inp.tool_observations in
+    Cited_tool position, fun () ->
+      observation ~kind:"tool_execution" ~position
+        [ "tool_name", `String tool.tool_name
+        ; "outcome", `String (tool_observation_outcome_to_string tool.outcome) ])
+    inp.tool_observations in
   let counterparts = match inp.counterpart_observations with
     | [] -> []
     | observations ->
-      [ observation ~kind:"counterpart" ~position:0
-          [ "text", `String
-              (Keeper_counterpart_observation.render_for_prompt observations) ] ] in
+      [ Cited_counterpart, fun () ->
+          observation ~kind:"counterpart" ~position:0
+            [ "text", `String
+                (Keeper_counterpart_observation.render_for_prompt observations) ] ] in
   let historical_contexts = match inp.historical_task_contexts with
     | [] -> []
     | contexts ->
-      [ observation ~kind:"historical_task_contexts" ~position:0
-          ["ranges", Keeper_librarian_task_context.to_json contexts] ] in
+      [ Cited_task_contexts, fun () ->
+          observation ~kind:"historical_task_contexts" ~position:0
+            ["ranges", Keeper_librarian_task_context.to_json contexts] ] in
   messages @ tools @ counterparts @ historical_contexts
+;;
+
+let observations_for_absorption (inp : input) =
+  List.map (fun (_, render) -> render ()) (observation_entries inp)
+;;
+
+let observations_cited (inp : input) (evidence : Keeper_memory_os_types.evidence) =
+  let cites = function
+    | Cited_conversation position -> List.mem position evidence.conversation
+    | Cited_tool position -> List.mem position evidence.tools
+    | Cited_counterpart -> evidence.counterpart
+    | Cited_task_contexts -> evidence.task_contexts
+  in
+  List.filter_map
+    (fun (citation, render) -> if cites citation then Some (render ()) else None)
+    (observation_entries inp)
 ;;
 
 let goal_context_to_json = function
@@ -433,19 +470,6 @@ let first_object_field_error ~allowed fields =
       else loop (String_set.add field seen) rest
   in
   loop String_set.empty fields
-;;
-
-type evidence_citation =
-  | Cited_conversation of int
-  | Cited_tool of int
-  | Cited_counterpart
-  | Cited_task_contexts
-
-let evidence_citation_to_string = function
-  | Cited_conversation position -> Printf.sprintf "conversation %d" position
-  | Cited_tool position -> Printf.sprintf "tools %d" position
-  | Cited_counterpart -> "counterpart"
-  | Cited_task_contexts -> "task_contexts"
 ;;
 
 type parse_error =

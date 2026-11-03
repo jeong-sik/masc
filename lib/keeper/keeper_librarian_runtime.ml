@@ -88,11 +88,6 @@ type extraction_error =
   | Absorb_judgment_failed of
       { reason : string
       ; selected_slot : string
-      ; failure_kind : Keeper_librarian_absorb_gate.failure_kind option
-            (** The gate's own kind. [Input_capacity_exceeded] is its refusal
-                before any request because the pass's source observations and
-                Memory do not fit one; a smaller admission range carries fewer
-                observations. *)
       }
   | Memory_snapshot_write_failed of
       { detail : string
@@ -178,7 +173,7 @@ let rec extraction_error_to_string = function
     "lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
     "domain output invalid: " ^ detail
-  | Absorb_judgment_failed { reason; selected_slot = _; failure_kind = _ } ->
+  | Absorb_judgment_failed { reason; selected_slot = _ } ->
     "absorb judgment failed; current memory unchanged: " ^ reason
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
     "current snapshot write failed: " ^ detail
@@ -744,12 +739,7 @@ let rec extraction_failure_evidence = function
         Failure_evidence.without_measured_cli_capacity
           (extraction_failure_evidence error))
       prior_error
-  | Absorb_judgment_failed { failure_kind; _ } ->
-    (match failure_kind with
-     | Some Keeper_librarian_absorb_gate.Input_capacity_exceeded ->
-       Failure_evidence.input_capacity_refusal
-     | Some Keeper_librarian_absorb_gate.Evaluation_failed | None ->
-       Failure_evidence.empty)
+  | Absorb_judgment_failed _
   | Prompt_render_failed _ | Exact_setup_failed _ | No_transport_declared
   | Memory_snapshot_write_failed _ -> Failure_evidence.empty
 ;;
@@ -932,7 +922,7 @@ let validate_selection ?now ?continuity selected_input output =
 ;;
 
 type durable_absorption = {
-  observations : Yojson.Safe.t list;
+  cited_observations : Keeper_librarian_absorb_gate.cited_observations;
   facts : Keeper_memory_os_types.fact list;
   new_claims : Keeper_memory_os_types.fact list;
   superseding : string list;
@@ -942,9 +932,29 @@ type durable_proposal = {accepted : accepted;absorption : durable_absorption}
 type durable_proposal_error =
   | Preparation_invalid of string
   | Proposal_invalid of Keeper_librarian.parse_error
-let absorption_input (input : Keeper_librarian.input) (selection : Keeper_librarian.selection)
+(* What each claim the answer applies cites, as observations: the input
+   entries its [evidence] names, then the pending explicit-write candidates
+   that support the change and whose judgment names that claim. *)
+let cited_observations (input : Keeper_librarian.input) (accepted : accepted) =
+  let candidates =
+    List.filter_map (fun (binding : Keeper_memory_os_current.admission_recall_binding) ->
+      if List.mem binding.candidate_id.request_id accepted.admission_support
+      then Some (binding.target_memory_id,
+        `Assoc ["observation_kind", `String "pending_explicit_memory_candidate";
+                "request_id", `String binding.candidate_id.request_id;
+                "sequence", `Int binding.candidate_id.sequence;
+                "proposal", Keeper_memory_os_types.fact_to_json binding.source_fact])
+      else None) accepted.admission_recall_bindings in
+  List.map (fun (identity, evidence) ->
+    identity,
+    Keeper_librarian.observations_cited input evidence
+    @ List.filter_map (fun (target, row) ->
+        if String.equal target identity then Some row else None) candidates)
+    accepted.selection.cited
+let absorption_input (input : Keeper_librarian.input) (accepted : accepted)
     : durable_absorption =
-  {observations=Keeper_librarian.observations_for_absorption input;
+  let selection = accepted.selection in
+  {cited_observations=cited_observations input accepted;
    facts=(match input.current with None -> [] | Some current -> current.facts);
    new_claims=selection.new_claims;
    superseding=List.map (fun (revision : Keeper_librarian.revision) -> revision.superseded_by)
@@ -953,7 +963,7 @@ let absorption_input (input : Keeper_librarian.input) (selection : Keeper_librar
 let parse_durable_proposal (preparation : durable_preparation) output =
   let open Result.Syntax in
   let+ accepted=validate_selection ~now:preparation.parsing_now preparation.source_input output in
-  {accepted;absorption=absorption_input preparation.source_input accepted.selection}
+  {accepted;absorption=absorption_input preparation.source_input accepted}
 let validate_durable_proposal preparation output =
   let open Result.Syntax in
   let* ()=validate_durable_preparation preparation |> Result.map_error (fun detail -> Preparation_invalid detail) in
@@ -967,7 +977,7 @@ let validate_durable_step_proposal (step : durable_step_preparation) output =
   let* ()=validate_durable_step_preparation step |> Result.map_error (fun detail -> Preparation_invalid detail) in
   let* accepted=validate_selection ~now:step.preparation.parsing_now input output |> Result.map_error invalid in
   let+ working_state=Keeper_librarian.continuity_working_state_of_json_result output |> Result.map_error invalid in
-  {proposal={accepted;absorption=absorption_input input accepted.selection};working_state}
+  {proposal={accepted;absorption=absorption_input input accepted};working_state}
 
 (* The gated decision a durable floor step stands for, built from what the
    host retained: the validated answer and the gate's judgment of it. This is
@@ -2057,8 +2067,9 @@ let run_pass
                   Ok (`Context_organized (exact_output, selected_slot))
                 | Continuity_not_committed reason ->
                   Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
-             | Memory_answer ({ selection; continuity_answer; required_memory_ids;
-                                explicit_candidate_ids; admission_support; admission_recall_bindings }, memory_target) ->
+             | Memory_answer (({ selection; continuity_answer; required_memory_ids;
+                                explicit_candidate_ids; admission_support = _; admission_recall_bindings }
+                               as accepted), memory_target) ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
                 answer left out or got wrong is skipped for this pass and
@@ -2116,19 +2127,10 @@ let run_pass
                 On a completed judgment, a new claim that absorbed nothing
                 and only repeats its current sources is a copy and is not
                 applied (RFC-0463 section 2.8). *)
-             let absorption=absorption_input prompt_input selection in
+             let absorption=absorption_input prompt_input accepted in
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
-                 ~new_observations:(absorption.observations
-                   @ (match admission with
-                      | None -> []
-                      | Some batch -> List.map (fun (row : Keeper_memory_admission_queue.candidate) ->
-                          `Assoc ["observation_kind", `String "pending_explicit_memory_candidate";
-                                  "request_id", `String row.request_id; "sequence", `Int row.sequence;
-                                  "proposal", Keeper_memory_os_types.fact_to_json row.fact])
-                          (Keeper_memory_admission_queue.candidates batch
-                            |> List.filter (fun (row : Keeper_memory_admission_queue.candidate) ->
-                              List.mem row.request_id admission_support))))
+                 ~cited_observations:absorption.cited_observations
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
                  ~before_evaluate:register_absorb_evaluation
                  ~after_evaluate:complete_absorb_evaluation
@@ -2150,8 +2152,7 @@ let run_pass
                    ~absorbed:selection.absorbed
                    absorb_gate
                with
-               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot;
-                   failure_kind = Keeper_librarian_absorb_gate.failure_kind absorb_gate })
+               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot })
                | None -> Ok ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in

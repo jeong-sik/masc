@@ -45,7 +45,7 @@ let settled ~inventory ~step ~record ~absorbed =
     (match Journal.Inventory.validate_root_preparation chain, Journal.Inventory.root chain,
            Journal.Inventory.latest chain with
      | Ok (), Some root, Ok (Some latest) ->
-       (match Journal.Inventory.restore_size_evidence chain ~gate_request_id:latest.Owner.request_id with
+       (match Journal.Inventory.restore_latest_result chain ~gate_request_id:latest.Owner.request_id with
         | Ok gate when Option.is_none (Gate.failure_detail ~absorbed gate) -> Some (root, gate)
         | Ok _ | Error _ -> None)
      | Ok (), None, _ | Ok (), Some _, (Ok None | Error _) | Error _, _, _ -> None)
@@ -96,7 +96,7 @@ let judge_by_fresh_reads ~store ~step ~(record : Owner.retained)
       | Error _ -> None in
     let* prior_complete = match Progress.phase latest.progress with
       | Progress.Judged _ | Rejected {stage=Progress.Execution;_} ->
-        let* gate = io (fun () -> Journal.restore_size_evidence ~store ~owner ~parent_execution:step
+        let* gate = io (fun () -> Journal.restore_latest_result ~store ~owner ~parent_execution:step
           ~gate_request_id:latest.request_id) in
         Ok (Some gate)
       | Captured | Dispatch_pending _ -> Ok None
@@ -105,13 +105,12 @@ let judge_by_fresh_reads ~store ~step ~(record : Owner.retained)
         Error "Original floor step gate has an unsupported runnable phase" in
     let* next = match prior_complete, live_authority with
       | Some gate, Some authority ->
-        (match Gate.failure_detail ~absorbed gate, Gate.failure_kind gate with
-         | Some _, (Some Gate.Evaluation_failed | None) ->
+        (match Gate.failure_detail ~absorbed gate with
+         | Some _ ->
            let* () = fresh_authority () in
            io (fun () -> Journal.retain ~store ~owner ~capture:step ~parent:current ~proposal:raw
              ~request_id:(Random_id.uuid_v7 ()) ~authority ~predecessor:(Some latest.request_id))
-         | Some _, Some Input_capacity_exceeded | None, (Some Input_capacity_exceeded | Some Evaluation_failed | None) ->
-           Ok latest)
+         | None -> Ok latest)
       | None, (None | Some _) | Some _, None -> Ok latest in
     let* result = Journal.resume ~request_clock:Eio_context.get_clock
       ~store ~owner ~capture:step ~record:next ~live_authority

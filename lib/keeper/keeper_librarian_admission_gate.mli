@@ -91,12 +91,12 @@ val root : store:Lane_addon_store.t -> owner:Keeper_librarian_admission_capture.
     the unique runnable leaf. Both strictly validate the complete same-owner
     chain; an actually empty matching chain alone returns None. Historical
     [validate] remains independent of latest status. *)
-val restore_size_evidence : store:Lane_addon_store.t ->
+val restore_latest_result : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner ->
   parent_execution:Keeper_librarian_admission_capture.t -> gate_request_id:string ->
   (Keeper_librarian_absorb_gate.run_result, string) Stdlib.result
 (** Strict actual owner/input/parent/transcript/terminal restore. The requested
     ID must be the unique latest original attempt from [latest]; an earlier
-    capacity result cannot bypass a pending/unknown successor. Only a complete
-    result is returned; the caller separately checks Input_capacity_exceeded.
+    result cannot bypass a pending/unknown successor. Only a complete
+    result is returned.
     Blocking Store scope; offload the complete operation in Eio. *)

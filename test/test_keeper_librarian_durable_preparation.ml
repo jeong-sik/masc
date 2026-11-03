@@ -64,7 +64,9 @@ let test_original_preparation () = with_prompts (fun () ->
 let answer = `Assoc [
   "new_claims",`List [`Assoc ["claim",`String "Original source plus completed observation";
     "category",`String "fact";"board_post_id",`Null;"board_comment_id",`Null;
-    "supersedes",`Null;"absorbs",`List [`String "m1"]]];
+    "supersedes",`Null;"absorbs",`List [`String "m1"];
+    "evidence",`Assoc ["conversation",`List [`Int 1];"tools",`List [`Int 0];
+      "counterpart",`Bool false;"task_contexts",`Bool false]]];
   "dropped",`List [];"working_state",`Null;"working_contexts",`List []]
 
 let test_original_validation_and_absorption () = with_prompts (fun () ->
@@ -78,8 +80,17 @@ let test_original_validation_and_absorption () = with_prompts (fun () ->
     (judged.accepted.continuity_answer=R.Memory_only
      && judged.accepted.required_memory_ids=[] && judged.accepted.explicit_candidate_ids=[]
      && judged.accepted.admission_support=[] && judged.accepted.admission_recall_bindings=[]);
-  check bool "the same normal absorption inputs retain original observations and current facts" true
-    (judged.absorption.observations=L.observations_for_absorption prepared.source_input
+  (* The claim cites turn=1 and tool index 0: only those two original entries
+     go beside its pair. *)
+  let cited observation =
+    match Yojson.Safe.Util.member "kind" observation,
+          Yojson.Safe.Util.member "local_position" observation with
+    | `String "conversation", `Int 1 | `String "tool_execution", `Int 0 -> true
+    | _ -> false in
+  let into=(List.hd expected.absorbed).Keeper_memory_os_types.into in
+  check bool "the same normal absorption inputs retain the cited original observations and current facts" true
+    (judged.absorption.cited_observations
+       =[into,List.filter cited (L.observations_for_absorption prepared.source_input)]
      && judged.absorption.facts=(match prepared.source_input.current with None -> [] | Some state -> state.facts)
      && judged.absorption.new_claims=expected.new_claims
      && judged.absorption.absorbed=expected.absorbed

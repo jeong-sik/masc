@@ -61,9 +61,8 @@ type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
 
 type original = {capture:Capture.t;record:Owner.retained}
 type inventory = {parts:Parts.inventory;executions:original list}
-let restore_gate ~store ~owner = Gate_journal.restore_size_evidence ~store ~owner
 let discover ~store ~owner =
-  let* parts=Parts.discover ~store ~owner ~restore_gate:(restore_gate ~store ~owner) in
+  let* parts=Parts.discover ~store ~owner in
   let* records=owned (Owner.load_scope ~store ~scope:(Capture.scope owner)) in
   let* executions=List.fold_left (fun result record ->
     let* originals=result in
@@ -160,7 +159,7 @@ let local_admit actual ~destination:expected ~publish =
 let partition ~store ~config ~reserved ~owner part evidence =
   let id ()=Capture.fresh_request_id owner in
   with_destination ~config ~reserved (fun actual ->
-    io (fun () -> Parts.partition ~store ~owner ~restore_gate:(restore_gate ~store ~owner)
+    io (fun () -> Parts.partition ~store ~owner
       ~parent:part ~evidence ~partition_id:(id ()) ~left_id:(id ()) ~right_id:(id ())
       ~admit:(local_admit actual)))
   |> Result.map (fun (left,right) -> Children (left,right))
@@ -201,17 +200,7 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
       (match settled with
        | Commit.Committed _ -> Ok (Terminal (source original part,true))
        | Pending detail -> Ok (Waiting detail))
-    | Some detail ->
-      (match Gate.failure_kind gate with
-       | Some Gate.Input_capacity_exceeded ->
-         let* evidence=io (fun () -> Parts.gate_size_evidence ~store ~owner ~inventory:inventory.parts
-           ~parent:part ~execution_id:original.record.request_id ~gate_request_id:record.Owner.request_id
-           ~restore_gate:(restore_gate ~store ~owner)) in
-         (match Queue.split (Parts.batch part) with
-          | None -> Ok (Terminal (Parts.Original_gate {part_id=Parts.part_id part;
-              execution_id=original.record.request_id;gate_request_id=record.request_id},false))
-          | Some _ -> partition ~store ~config ~reserved ~owner part evidence)
-       | Some Evaluation_failed | None -> Ok (Waiting detail)) in
+    | Some detail -> Ok (Waiting detail) in
   match completed with
   | Gate_journal.Pending _ -> Ok (Waiting "Original absorption evaluation remains pending")
   | Complete (gate,record) ->
@@ -230,10 +219,7 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
        match Gate.failure_detail ~absorbed:accepted.selection.absorbed gate with
        | None -> apply gate record
        | Some _ ->
-         match Gate.failure_kind gate with
-         | Some Gate.Input_capacity_exceeded -> apply gate record
-         | Some Evaluation_failed | None ->
-           match live with None -> apply gate record | Some authority -> retry authority)
+         match live with None -> apply gate record | Some authority -> retry authority)
 let answered ~store ~config ~reserved ~owner ~inventory part original =
   let* proposal=original_answer ~store original in
   let* parsed=Capture.validate_proposal original.capture proposal in
@@ -292,17 +278,7 @@ let frontier ~store ~owner inventory =
            let* parsed=Capture.validate_proposal original.capture proposal in
            (match parsed with
             | Keeper_librarian_runtime.Deferred -> continue (source original part)
-            | Accepted _ ->
-              let* gate=last_gate ~store ~owner original in
-              (match gate with
-               | None -> Ok None
-               | Some gate ->
-                 (match io (fun () -> Parts.gate_size_evidence ~store ~owner ~inventory:inventory.parts
-                   ~parent:part ~execution_id:original.record.request_id ~gate_request_id:gate.request_id
-                   ~restore_gate:(restore_gate ~store ~owner)),Queue.split (Parts.batch part) with
-                  | Ok _,None -> continue (Parts.Original_gate {part_id=Parts.part_id part;
-                      execution_id=original.record.request_id;gate_request_id=gate.request_id})
-                  | (Ok _ | Error _), (None | Some _) -> Ok None)))
+            | Accepted _ -> Ok None)
          | Rejected _ ->
            (match io (fun () -> Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
              ~parent:part ~execution_id:original.record.request_id),Queue.split (Parts.batch part) with
@@ -313,7 +289,7 @@ let frontier ~store ~owner inventory =
   all [] (Parts.runnable inventory.parts)
 let retain_root ~store ~config ~reserved ~owner ?supersession batch =
   with_destination ~config ~reserved (fun destination ->
-    io (fun () -> Parts.retain_root ~store ~owner ~restore_gate:(restore_gate ~store ~owner)
+    io (fun () -> Parts.retain_root ~store ~owner
       ?supersession ~part_id:(Capture.fresh_request_id owner) ~destination ~batch
       ~admit:(local_admit destination) ()))
 let run_queue ~base_path ~keeper_name =
@@ -328,7 +304,7 @@ let run_queue ~base_path ~keeper_name =
   let* initial=io (fun () -> discover ~store ~owner) in
   let* ()=io (fun () -> Queue.acknowledge_committed ~keepers_dir ~keeper_id:keeper_name) in
   let* pending=read () in
-  let* _recovered=io (fun () -> Parts.recover_partitions ~store ~owner ~restore_gate:(restore_gate ~store ~owner)) in
+  let* _recovered=io (fun () -> Parts.recover_partitions ~store ~owner) in
   let* ()=io (fun () -> List.fold_left (fun result original ->
     let* ()=result in
     match Progress.preparation original.record.progress with
@@ -353,7 +329,7 @@ let run_queue ~base_path ~keeper_name =
       (match frontier with
        | None -> Ok (Some (Parts.runnable inventory.parts))
        | Some frontier ->
-         let* supersession=io (fun () -> Parts.prove_supersession ~store ~owner ~restore_gate:(restore_gate ~store ~owner)
+         let* supersession=io (fun () -> Parts.prove_supersession ~store ~owner
            ~inventory:inventory.parts ~batch ~frontier) in
          match supersession with
          | None -> Ok (Some (Parts.runnable inventory.parts))

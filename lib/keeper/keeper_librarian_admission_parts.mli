@@ -10,21 +10,8 @@ type size_evidence
 type supersession_proof
 type terminal_source =
   | Original_execution of { part_id : string; execution_id : string }
-  | Original_gate of { part_id : string; execution_id : string; gate_request_id : string }
-(** References only, never caller grants. Every referenced execution/gate is
+(** References only, never caller grants. Every referenced execution is
     independently restored and checked against its complete original part. *)
-
-type gate_restore =
-  parent_execution:Keeper_librarian_admission_capture.t ->
-  gate_request_id:string ->
-  (Keeper_librarian_absorb_gate.run_result, string) result
-(** Trusted host port only: strictly restore the original gate journal and its
-    physical owner, original parent execution/proposal and complete before/
-    returned transcripts through Gate.restore. The complete same-owner gate
-    inventory must establish that the requested gate is the unique latest
-    original attempt for this execution; an earlier capacity result cannot
-    bypass a pending or unknown successor. Never accept observer JSON, worker
-    decisions, current configuration or perform a retry. *)
 
 type admit =
   destination:Keeper_librarian_admission_capture.destination ->
@@ -66,7 +53,7 @@ val load_parent_payload :
     insufficient authority for execution; runtime uses {!discover}. *)
 
 val discover : store:Lane_addon_store.t ->
-  owner:Keeper_librarian_admission_capture.owner -> restore_gate:gate_restore ->
+  owner:Keeper_librarian_admission_capture.owner ->
   (inventory, string) result
 (** Strict complete inventories: every part/partition, physical identity,
     original execution proof, exact Queue.split children, ancestry, cycles,
@@ -90,7 +77,7 @@ val load_parent : inventory -> request_id:string ->
     restore an execution. A pending child never grants dispatch authority. *)
 
 val prove_supersession : store:Lane_addon_store.t ->
-  owner:Keeper_librarian_admission_capture.owner -> restore_gate:gate_restore ->
+  owner:Keeper_librarian_admission_capture.owner ->
   inventory:inventory -> batch:Keeper_memory_admission_queue.batch ->
   frontier:terminal_source list -> (supersession_proof option, string) result
 (** Read actual complete pending input and current Memory revision/hash/facts.
@@ -106,7 +93,7 @@ val prove_supersession : store:Lane_addon_store.t ->
     means the complete original frontier is valid but unchanged, so no fresh
     root is authorized. Corrupt/unreadable/unknown/ordinary failure stays Error. *)
 val retain_root : store:Lane_addon_store.t ->
-  owner:Keeper_librarian_admission_capture.owner -> restore_gate:gate_restore ->
+  owner:Keeper_librarian_admission_capture.owner ->
   ?supersession:supersession_proof ->
   part_id:string -> destination:Keeper_librarian_admission_capture.destination ->
   batch:Keeper_memory_admission_queue.batch -> admit:admit -> unit -> (part, string) result
@@ -126,15 +113,8 @@ val execution_size_evidence : store:Lane_addon_store.t ->
     request/schema/ordinal binding and a named input-capacity terminal, without
     invalid-output or size-independent failure veto. Missing/unknown evidence
     is not size authority. *)
-val gate_size_evidence : store:Lane_addon_store.t ->
-  owner:Keeper_librarian_admission_capture.owner -> inventory:inventory ->
-  parent:part -> execution_id:string -> gate_request_id:string ->
-  restore_gate:gate_restore -> (size_evidence, string) result
-(** Actual original answered execution plus the trusted strict original gate
-    restoration port. Only Gate.Input_capacity_exceeded permits partition. *)
-
 val partition : store:Lane_addon_store.t ->
-  owner:Keeper_librarian_admission_capture.owner -> restore_gate:gate_restore ->
+  owner:Keeper_librarian_admission_capture.owner ->
   parent:part -> evidence:size_evidence -> partition_id:string ->
   left_id:string -> right_id:string -> admit:admit ->
   (part * part, string) result
@@ -144,7 +124,7 @@ val partition : store:Lane_addon_store.t ->
     strictly confirms each child, then acknowledges that exact intent. No
     speculative Memory/prompt capture is created for either child. *)
 val recover_partitions : store:Lane_addon_store.t ->
-  owner:Keeper_librarian_admission_capture.owner -> restore_gate:gate_restore ->
+  owner:Keeper_librarian_admission_capture.owner ->
   (inventory, string) result
 (** Resume only existing original transaction IDs/children, including while
     Off. Interruption after one child reuses that same ID. Acknowledged missing

@@ -785,13 +785,11 @@ let test_native_capacity_message_descent native () =
     [Ok "{}";Ok "not-json"]
 ;;
 
-(* The absorb gate refuses before any request when the pass's observations
-   and Memory do not fit one. The supporting candidates are among those
-   observations: four of them overflow a request and two fit, so the worker
-   splits the batch instead of sending it whole on every wake. The judgment
-   endpoint is closed, so the fitting half fails its sent request and the
-   pass stays pending. *)
-let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
+(* The supporting candidates are observations of the claim their judgment
+   names. Four of them do not fit a request beside the pair, so the gate asks
+   the pair alone; no size refusal splits the batch. The judgment endpoint is
+   closed, so that request fails and the whole batch stays pending. *)
+let test_oversized_supporting_candidates_do_not_split_the_admission_batch () =
   with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
   Fixture.with_official_client_runtimes @@ fun () ->
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
@@ -845,15 +843,13 @@ let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
     !outcome in
   (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
-   | Worker.Pending _ -> () | _ -> fail "the half whose judgment request failed must stay pending");
+   | Worker.Pending _ -> () | _ -> fail "a batch whose judgment request failed must stay pending");
   (match List.rev !reports with
    | (whole : Runtime.not_committed) :: _ ->
-     check bool "the whole batch met the gate's pre-request capacity refusal" true
-       whole.walk_shows_size;
-     check bool "that refusal is admission input capacity evidence" true
-       (whole.input_capacity_evidence = Runtime.Input_capacity_refused)
-   | [] -> fail "the gate refusal produced no report");
-  check (list int) "the gate's capacity refusal splits the batch" [4;2] (List.rev !sizes)
+     check bool "the failed judgment request is not admission input capacity evidence" true
+       (whole.input_capacity_evidence = Runtime.No_input_capacity_refusal)
+   | [] -> fail "the failed judgment produced no report");
+  check (list int) "the batch is judged whole, not split" [4] (List.rev !sizes)
 ;;
 
 let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
@@ -1896,8 +1892,8 @@ let () =
             (test_native_capacity_message_descent Native_codex)
         ; test_case "native Claude capacity permits message descent without unread authority" `Quick
             (test_native_capacity_message_descent Native_claude)
-        ; test_case "absorb gate capacity refusal splits the admission batch" `Quick
-            test_absorb_gate_capacity_refusal_splits_the_admission_batch
+        ; test_case "oversized supporting candidates do not split the admission batch" `Quick
+            test_oversized_supporting_candidates_do_not_split_the_admission_batch
         ; test_case "settled explicit candidates commit through exact lane and receipt" `Quick
             (test_explicit_admission_envelope ~deferred:false)
         ; test_case "deferred explicit candidates leave Memory and queue intact" `Quick

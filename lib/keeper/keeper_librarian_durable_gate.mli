@@ -90,14 +90,14 @@ val root : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.ow
     the unique runnable leaf. Both strictly validate the complete same-owner
     chain; an actually empty matching chain alone returns None. Historical
     [validate] remains independent of latest status. *)
-val restore_size_evidence : store:Lane_addon_store.t ->
+val restore_latest_result : store:Lane_addon_store.t ->
   owner:Keeper_librarian_durable_request.owner ->
   parent_execution:Keeper_librarian_durable_request.t -> gate_request_id:string ->
   (Keeper_librarian_absorb_gate.run_result, string) Stdlib.result
 (** Strict actual owner/input/parent/transcript/terminal restore. The requested
     ID must be the unique latest original attempt from [latest]; an earlier
-    capacity result cannot bypass a pending/unknown successor. Only a complete
-    result is returned; the caller separately checks Input_capacity_exceeded.
+    result cannot bypass a pending/unknown successor. Only a complete
+    result is returned.
     Blocking Store scope; offload the complete operation in Eio. *)
 
   module Inventory : sig
@@ -124,6 +124,6 @@ val restore_size_evidence : store:Lane_addon_store.t ->
     val root : chain -> Lane_addon_tool_request_owner.retained option
     val latest : chain -> (Lane_addon_tool_request_owner.retained option, string) Stdlib.result
     val validate_root_preparation : chain -> (unit, string) Stdlib.result
-    val restore_size_evidence : chain -> gate_request_id:string ->
+    val restore_latest_result : chain -> gate_request_id:string ->
       (Keeper_librarian_absorb_gate.run_result, string) Stdlib.result
   end

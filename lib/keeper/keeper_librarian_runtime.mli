@@ -392,12 +392,17 @@ val restore_durable_preparation : source_input:Keeper_librarian.input -> parsing
     retained resolutions, then {!validate_durable_preparation}. No
     environment/prompt lookup. *)
 type durable_absorption = {
-  observations : Yojson.Safe.t list;
+  cited_observations : Keeper_librarian_absorb_gate.cited_observations;
   facts : Keeper_memory_os_types.fact list;
   new_claims : Keeper_memory_os_types.fact list;
   superseding : string list;
   absorbed : Keeper_memory_os_types.absorbed_statement list;
 }
+val absorption_input : Keeper_librarian.input -> accepted -> durable_absorption
+(** The absorb gate inputs of an answer accepted over [input]. Each claim the
+    answer applies cites the input entries its [evidence] names
+    ({!Keeper_librarian.observations_cited}), then the pending explicit-write
+    candidates that support the change and whose judgment names that claim. *)
 type durable_proposal = private {
   accepted : accepted;
   absorption : durable_absorption;

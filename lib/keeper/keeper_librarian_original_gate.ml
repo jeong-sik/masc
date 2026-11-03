@@ -159,7 +159,7 @@ let transcript_of_json json =
   Ok {evaluations;aborted}
 
 let restore_result guidance authority (input : inputs) evaluations =
-  Gate.restore ~guidance ~authority ~new_observations:input.observations ~facts:input.facts
+  Gate.restore ~guidance ~authority ~cited_observations:input.cited_observations ~facts:input.facts
     ~new_claims:input.new_claims ~superseding:input.superseding ~absorbed:input.absorbed ~evaluations
 let valid_prefix guidance authority input transcript =
   match restore_result guidance authority input transcript.evaluations with
@@ -188,15 +188,14 @@ type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance
 let guidance_for_input (input:inputs) authority =
   match input.absorbed with
   | [] -> Ok None
-  | _::_ -> Gate.guidance_of_authority ~new_observations:input.observations authority
+  | _::_ -> Gate.guidance_of_authority authority
 let captured_guidance ~(input:inputs) ~authority = function
   | `Null ->
     (match input.absorbed,authority with
      | [],_ | _::_,Gate.Gate_unavailable _ -> Ok None
      | _::_,Gate.Gate_available _ -> Error "Available absorption gate has no captured guidance")
   | json ->
-    let* guidance=Gate.guidance_of_yojson json in
-    let+ ()=Gate.validate_guidance_for_input ~new_observations:input.observations guidance in
+    let+ guidance=Gate.guidance_of_yojson json in
     Some guidance
 let gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor =
   `Assoc ["version",`Int request_version;"kind",`String Capture.gate_kind;"request_id",`String request_id;
@@ -480,7 +479,7 @@ let recover_retries ~store ~owner ~capture =
     | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> Ok ()) (Ok ()) matching in
   validate_chain ~store ~owner ~capture
 
-let restore_size_evidence ~store ~owner ~parent_execution ~gate_request_id =
+let restore_latest_result ~store ~owner ~parent_execution ~gate_request_id =
   let* record = latest ~store ~owner ~capture:parent_execution in
   let* record = Option.to_result ~none:"Original gate is absent" record in
   let* () = require (record.request_id=gate_request_id)
@@ -626,7 +625,7 @@ module Inventory = struct
   let root t = t.root
   let latest t = t.latest
   let validate_root_preparation t = t.preparation
-  let restore_size_evidence t ~gate_request_id =
+  let restore_latest_result t ~gate_request_id =
     let* record = t.latest in
     let* record = Option.to_result ~none:"Original gate is absent" record in
     let* () = require (record.request_id=gate_request_id)
@@ -766,7 +765,7 @@ let resume ~request_clock ~store ~owner ~capture ~record ~live_authority ~before
             ~keeper_id:(Capture.keeper_id owner) ~authority:restored.authority
           ~live_authority ~evaluations:restored.transcript.evaluations
           ~before_evaluate ~after_evaluate ~on_evaluation_aborted
-          ~new_observations:restored.input.observations ~facts:restored.input.facts
+          ~cited_observations:restored.input.cited_observations ~facts:restored.input.facts
           ~new_claims:restored.input.new_claims ~superseding:restored.input.superseding
           ~absorbed:restored.input.absorbed () with
         | Error (Gate.Missing_evaluation _ | Incomplete_evaluation _) -> Ok (Pending !current)

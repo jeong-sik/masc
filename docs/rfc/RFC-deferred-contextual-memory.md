@@ -114,12 +114,43 @@ count the exact selected question in their request capacity check. This preserve
 the empty-input behavior; it does not prove semantic model quality.
 
 Serialized observations count toward the existing provider request boundary. If
-an evidence-bearing pair cannot fit, the pass fails before dispatch and the entire
-Memory range stays pending, including new claims. A typed input-capacity failure
-is forwarded to the existing source-range narrowing path, allowing a smaller
-range to retry against the unchanged snapshot. It does not silently omit the
-evidence or append a candidate while leaving its originals unreviewed. Selecting
-or splitting large evidence ranges for forward review is still future work.
+an evidence-bearing pair cannot fit, the pass fails before dispatch and nothing
+from it is committed: no candidate, no retirement, no read-position move. This
+failure is a refusal of the selected range, not a wait. Asking the same range
+again builds the same request and fails the same way. So the typed
+input-capacity refusal goes to the existing source-range narrowing path, and the
+next pass reads a smaller range against the unchanged snapshot. It does not
+silently omit the evidence or append a candidate while leaving its originals
+unreviewed.
+
+Narrowing has a floor. When the narrowing path cannot select a smaller range and
+an evidence-bearing pair still cannot fit, only such a pair is asked the
+pair-only question, the same question and state used when a pass has no
+observations. Its evaluation record states that its observations were left out
+because they exceed the request boundary. Only `mergeable` retires the source;
+any other answer keeps it current beside the candidate, as for every judged
+pair. If the pair-only question does not fit either, the pair is unjudgeable and
+its original stays current, as in a pass without observations. The pass then
+commits and the read position moves. Pairs that fit keep their observations.
+Without this floor, a range whose single turn carries more observation than the
+boundary is asked again on every wake, and the Librarian never reads past it.
+
+The floor gives up the observations' help with same-event follow-up
+resolutions, which the pair-only question refuses more often (see Validation).
+Such a refusal retains the original, so the cost is a redundant current record,
+not lost knowledge. Selecting the observations each pair depends on is deferred
+work (item 5 below).
+
+Implementation state (2026-11-03, main `09c019bbc23`): neither step runs. The
+gate reports the capacity failure (`Keeper_librarian_absorb_gate.judge`). The
+durable commit then keeps the refused gate result as a publication wait
+(`Keeper_librarian_durable_commit`), and the consumer does not count a wait as a
+failed range (`Keeper_librarian_durable_consumer`). The next pass therefore
+reads every unread turn again instead of a smaller range. On 2026-11-02, 23
+Keepers had such a refusal. sangsu's Librarian has read no official turn since
+2026-10-26, its last two passes carried 4.36 MB and 5.11 MB of observations
+against a 32,000-byte request boundary, and its Keeper requests outgrew the
+model window (#42211, #47789).
 
 The closed choices are `mergeable`, `different_context`, `loses_knowledge`, and
 `uncertain`. Only `mergeable` permits that source to leave current memory.
@@ -134,9 +165,9 @@ source/candidate relationship; it does not independently verify the truth of
 new assertions against the world. Every request has its own durable evaluation
 record, including the new observations before provider dispatch. Invalid answers, incomplete dispatch and cancellation keep the existing
 failure semantics. A pair outside the provider request boundary is explicitly
-unjudgeable and its original remains current; with new observations this also
-fails the pass so the candidate is not committed. Large-pair decomposition is not
-implemented here.
+unjudgeable and its original remains current; with new observations this fails
+the pass for narrowing, and at the narrowing floor the pair is asked the
+pair-only question (above). Large-pair decomposition is not implemented here.
 
 The reverse copy question checks whether an unabsorbing new claim merely repeats
 its sources. Its semantic criterion is unchanged. If its request fails, the
@@ -193,6 +224,9 @@ historical retrieval boundary and are not removed by the change.
    The query implementation here is lexical and must not be described as that selector.
 4. A coherent representation of replacement and unresolved relationships across
    personal memory and the shared Curator view, preserving original evidence.
+5. Selecting the observations each forward-review pair depends on, so that an
+   evidence-bearing question carries that evidence rather than every observation
+   of the pass. This would make the narrowing floor rarer; it does not remove it.
 
 ## Validation and acceptance boundaries
 
@@ -203,8 +237,9 @@ policy but do not establish reliable temporal consolidation. That historical sou
 probe lacked independently identifiable follow-up evidence. Forward requests now
 include conversation, tool-outcome, counterpart and historical-range observations
 from the same selected Librarian input, retaining their distinct provenance. Empty
-input preserves the original pair-only request; oversized evidence leaves the
-whole range pending without truncation. This corrects the missing input path,
+input preserves the original pair-only request; oversized evidence narrows the
+range without truncation, and at the narrowing floor the pair is asked the
+pair-only question. This corrects the missing input path,
 not the semantic-quality measurement. The subsequent controlled experiment in
 `experiments/memory-transition-evidence` (PR #41922) motivates the source-observation
 path above: 15/18 pair-only, 12/18 instruction-only, 18/18 with evidence. These remain

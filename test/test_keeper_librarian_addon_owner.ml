@@ -548,7 +548,25 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     check bool "the right child reads Memory committed by the left child" true
       (List.mem ([3],["Durable A";"Durable B"]) chronological);
     check (list string) "sequential children preserve every prior and admitted fact" ["Durable A";"Durable B";"Durable C"]
-      (io (fun () -> claims fixture.keepers_dir)))
+      (io (fun () -> claims fixture.keepers_dir));
+    (* One owner now holds a root, two children, the split between them, three
+       executions and three gates, and each of those records names the same
+       forest of parts and partitions. The deploy preflight reads that forest
+       once for the scan. Before it kept the proof, every record read both
+       scopes again, and a workspace with dozens of records per owner took
+       minutes to scan. *)
+    let forest_reads=ref 0 and validated=ref 0 in
+    let counting ()=
+      let validate=Keeper_librarian_store_preflight.validator () in
+      fun ~read ~read_scope ~read_body record ->
+        incr validated;
+        validate ~read ~read_body record
+          ~read_scope:(fun ~scope -> incr forest_reads;read_scope ~scope) in
+    let report=io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
+      Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
+    check int "the preflight refuses none of the owner's real records" 0 (List.length report.refusals);
+    check bool "the scan validated several records of the one owner" true (!validated>2);
+    check int "the owner's parts and partitions are read once for the whole scan" 2 !forest_reads)
 
 let test_purge_cancels_waiting_memory_unit_without_consumption ()=with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in

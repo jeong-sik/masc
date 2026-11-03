@@ -276,7 +276,7 @@ let scan_native_claims root =
        empty
        names)
 
-let scan_with ?(validate_tool_request=(fun ~read:_ ~read_scope:_ ~read_body:_ _ -> Ok ())) ~after_read store ~base_path =
+let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ _ -> Ok ())) ~after_read store ~base_path =
   let root = store_root ~base_path in
   let report =
     match store with
@@ -292,6 +292,9 @@ let scan_with ?(validate_tool_request=(fun ~read:_ ~read_scope:_ ~read_body:_ _ 
         (fun ~group:_ ~name:_ ~path:_ json ->
            Lane_addon_exact.check_retained_record json |> decoded Exact_record)
     | Tool_request_owners ->
+      (* One validator serves the whole scan, so it can keep what it already
+         proved about an owner whose records it meets again. *)
+      let validate_tool_request = validate_tool_request () in
       (* A record is checked with the body it names: present, named by its
          digest, canonical JSON. Like records, the body is read by path; the
          owner, mode and link checks stay with the runtime reader. *)

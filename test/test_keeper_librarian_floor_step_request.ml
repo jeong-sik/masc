@@ -429,7 +429,7 @@ let test_preflight_checks_previous_step_links () =
   let store = fresh_store () in
   let first = retain ~store chain.first_step (Step.to_json chain.first_step) in
   let validate records record =
-    Masc.Keeper_librarian_store_preflight.validate record
+    Masc.Keeper_librarian_store_preflight.validator () record
       ~read:(fun ~scope ~request_id -> Ok (List.find_opt (fun (record:Owner.retained) ->
         record.scope=scope && record.request_id=request_id) records))
       ~read_scope:(fun ~scope:_ -> fail "floor preflight read an unrelated scope inventory")

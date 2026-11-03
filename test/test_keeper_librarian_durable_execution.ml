@@ -543,7 +543,7 @@ let test_retained_source_root_alias () = with_fixture ~history_kind:Official (fu
     let record=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store capture)
       |> Result.map_error Durable_owner.error_to_string |> get in
     let preflight ()=io (fun () -> Lane_addon_store_preflight.scan
-      ~validate_tool_request:Keeper_librarian_store_preflight.validate
+      ~validate_tool_request:Keeper_librarian_store_preflight.validator
       Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
     check int "the retained alias passes current payload preflight" 0 (List.length (preflight ()).refusals);
     let restored=io (fun () -> Capture.restore ~owner record) |> get in
@@ -818,7 +818,7 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
     | [gate] -> gate
     | [] | _::_::_ -> fail "expected the retained gate for the original answer" in
   let report=io (fun () -> Lane_addon_store_preflight.scan
-    ~validate_tool_request:Keeper_librarian_store_preflight.validate
+    ~validate_tool_request:Keeper_librarian_store_preflight.validator
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
   check bool "preflight examined the parent and gate" true (report.rows>=2);
   check int "preflight reads the host-shaped original parent and gate" 0 (List.length report.refusals);

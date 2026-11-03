@@ -206,12 +206,6 @@ type keeper_lane = {
   kl_conditions : keeper_lane_conditions option;
 }
 
-type keeper_lanes_snapshot = {
-  kls_generated_at : float;
-  kls_count : int;
-  kls_lanes : keeper_lane list;
-}
-
 type standalone_lane_status =
   | Standalone_off
   | Standalone_running
@@ -3390,13 +3384,6 @@ let decode_keeper_lane json =
     ; kl_conditions
     }
 
-let decode_keeper_lanes_snapshot json =
-  let* kls_generated_at = Json_util.require_float json "generated_at" in
-  let* kls_count = required_int_field json "count" in
-  let* items = required_list_field json "snapshots" in
-  let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
-  Ok { kls_generated_at; kls_count; kls_lanes }
-
 let standalone_lane_configuration_of_string = function
   | "off" -> Ok Lane_off
   | "ready" -> Ok Lane_ready
@@ -3871,21 +3858,6 @@ let decode_keeper_composite json =
       Ok (Some decoded)
   in
   Ok (lane, secret)
-
-let decode_keeper_secret_projections json =
-  let* items = required_list_field json "snapshots" in
-  List.fold_left
-    (fun acc snapshot ->
-      let* acc in
-      match Json_util.assoc_member_opt "secret_projection" snapshot with
-      | None | Some `Null -> Ok acc
-      | Some projection ->
-        let* keeper = required_string_field snapshot "keeper" in
-        let* decoded = decode_keeper_secret_projection ~keeper projection in
-        Ok (decoded :: acc))
-    (Ok [])
-    items
-  |> Result.map List.rev
 
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in

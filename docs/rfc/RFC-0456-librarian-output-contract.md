@@ -229,11 +229,13 @@ id 하나다. `translate_revisions` (`:448-466`) 도 1:1 로 매핑한다. 24개
 검사는 §4.2 에 있다.
 
 `evidence` 는 그 claim 이 기댄 이번 입력의 관측이다. `conversation` 은 프롬프트가 `turn=N` 으로
-보여 주는 대화 위치이고, `tools` 는 프롬프트가 번호를 붙여 보여 주는 도구 실행 위치다.
+보여 주는 대화 위치이고, `tools` 는 프롬프트가 도구 관측마다 붙인 `index` 다.
 `counterpart` 와 `task_contexts` 는 상대방 관측 묶음과 과거 작업 문맥을 썼는지다. 아무것도
-기대지 않은 claim 은 빈 목록과 `false` 를 적는다. 이번 입력에 없는 위치를 적거나 같은 위치를
-두 번 적으면 답 전체를 거부한다. 흡수 판정이 이 값을 쓴다. 판정자에게는 그 claim 이 인용한
-관측만 간다(RFC-deferred-contextual-memory, Jev forward review).
+기대지 않은 claim 은 빈 목록과 `false` 를 적는다. 이번 입력에 없는 위치나 없는 묶음을 적으면
+답 전체를 거부한다. 같은 위치를 두 번 적으면 한 번으로 읽는다. 더하는 것도 어긋나는 것도
+없어서다. 흡수에 밀려 쓰지 않는 claim 의 인용은 검사하지 않는다. 그 claim 의 `absorbs` 를
+검사하지 않는 것과 같다. 흡수 판정이 이 값을 쓴다. 판정자에게는 그 claim 이 인용한 관측만
+간다(RFC-deferred-contextual-memory, Jev forward review).
 
 ### 4.2 퇴장 경로를 가른다
 

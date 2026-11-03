@@ -115,13 +115,20 @@ the empty-input behavior; it does not prove semantic model quality.
 
 Each pair carries only the observations its candidate cites. The Librarian names
 them in the claim's `evidence` (RFC-0456 §4.1): the conversation positions it read
-as `turn=N`, the tool execution positions, and whether it used the counterpart
-block or the historical task contexts. The runtime takes those entries from the
-observations it built for the pass; it does not read the claim text to find them.
-A claim that cites nothing has no observation behind its absorptions, so its
-pairs are asked the pair-only question. That is the question for such a pair, not
-a fallback. An answer is read under the contract captured with its request
-(#46965), so an answer captured before `evidence` existed cites nothing.
+as `turn=N`, the tool executions by the `index` the prompt shows, and whether it
+used the counterpart block or the historical task contexts. The runtime takes
+those entries from the observations it built for the pass; it does not read the
+claim text to find them. A claim that cites nothing has no observation behind its
+absorptions, so its pairs are asked the pair-only question. That is the question
+for such a pair, not a fallback. An answer that omits `evidence`, or a field of
+it, cites nothing there, as an omitted `absorbs` absorbs nothing.
+
+Adding `evidence` changes the output schema every retained Librarian request
+captured, and a retained request is restored only when its captured schema
+equals the binary's (`Keeper_librarian_runtime.check_durable_preparation`).
+Fresh state: this binary reads no Librarian request record stored before it,
+the `keeper-librarian` scopes in `lane-addons/tool-request-owners`. Stop the
+server, delete those records, and install.
 
 Serialized observations count toward the existing provider request boundary,
 pair by pair. A request's size is set by what one candidate cites, not by how many
@@ -139,12 +146,6 @@ That case gives up the observations' help with same-event follow-up resolutions,
 which the pair-only question refuses more often (see Validation). Such a refusal
 retains the original, so the cost is a redundant current record, not lost
 knowledge.
-
-A gate result already recorded as a capacity refusal is asked once more with a new
-gate request, as an evaluation failure is today (`Keeper_librarian_durable_commit`,
-and the floor-step gate in `Keeper_librarian_floor_step_judgment`). The new request
-follows the rules above and cannot fail the pass for size, so a pass waiting on
-such a refusal commits.
 
 Implementation state (2026-11-03, main `09c019bbc23`): none of this runs. Every
 question carries all observations of the pass (`Keeper_librarian_absorb_gate`

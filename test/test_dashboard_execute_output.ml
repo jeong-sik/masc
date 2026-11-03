@@ -595,21 +595,6 @@ let test_snapshot_discloses_evicted_live_history () =
   check int "completed byte counter does not pretend to count live evictions" 0
     (snapshot |> member "bytes_dropped_stdout" |> to_int)
 
-let test_limited_snapshot_retains_active_command () =
-  EO.record_stream_start ~keeper_name:"alpha" ~stream_id:8 ~task_id:(Some "task-a") ~command:"echo work";
-  EO.append_stream_chunk ~keeper_name:"alpha" ~stream_id:8 ~stream:`Stdout
-    (numbered_lines ~count:12);
-  let open Yojson.Safe.Util in
-  let snapshot = EO.event_json_limited ~keeper_name:"alpha" ~line_limit:4 in
-  check int "only the requested rows travel" 4 (snapshot |> member "lines" |> to_list |> List.length);
-  check int "older retained rows are disclosed" 9 (snapshot |> member "lines_omitted" |> to_int);
-  check bool "full completed captures are not sent" true (snapshot |> member "stdout_since" = `Null);
-  match snapshot |> member "active_streams" |> to_list with
-  | [active] ->
-    check string "active command survives the projection" "echo work"
-      (active |> member "command" |> to_string)
-  | _ -> fail "expected the active command"
-
 let test_sse_frame () =
   let frame = EO.sse_frame (`Assoc [ "type", `String "snapshot" ]) in
   check bool "event header" true (String.starts_with ~prefix:"event: output\n" frame);
@@ -754,66 +739,7 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
             check bool "mismatched stream is refused" true
               (String_util.contains_substring wrong_stream " 409 ");
             check bool "mismatched stream does not reveal output" false
-              (String_util.contains_substring wrong_stream "before subscription");
-
-            (* The snapshot is the same retained observation and is bound to
-               the requesting workspace by the ordinary read precondition. *)
-            let snapshot_path = "/api/v1/dashboard/execute-output-snapshot/alpha" in
-            let wire_response ?origin target =
-              let response = Buffer.create 1024 in
-              let conn = Httpun.Server_connection.create dispatch in
-              let origin = match origin with None -> "" | Some origin -> "Origin: " ^ origin ^ "\r\n" in
-              let request = Printf.sprintf "GET %s HTTP/1.0\r\nHost: 127.0.0.1:8935\r\n%s\r\n" target origin in
-              let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
-              ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
-              let rec drain () = match Httpun.Server_connection.next_write_operation conn with
-                | `Write iovecs ->
-                  let count = List.fold_left (fun count (iov : Bigstringaf.t Httpun.IOVec.t) ->
-                    Buffer.add_string response
-                      (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
-                    count + iov.len) 0 iovecs in
-                  Httpun.Server_connection.report_write_result conn (`Ok count);
-                  drain ()
-                | `Yield ->
-                  let ready, resolve = Eio.Promise.create () in
-                  Httpun.Server_connection.yield_writer conn (fun () -> Eio.Promise.resolve resolve ());
-                  Eio.Promise.await ready;
-                  drain ()
-                | `Close _ -> Buffer.contents response in
-              drain ()
-            in
-            let query = "?expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in
-            let status response = match String.split_on_char ' ' response with
-              | _version :: code :: _ -> int_of_string code
-              | _ -> fail "malformed HTTP status" in
-            let matched = wire_response (snapshot_path ^ query) in
-            check int "snapshot request succeeds" 200 (status matched);
-            check bool "matched workspace is acknowledged" true
-              (String_util.contains_substring (String.lowercase_ascii matched)
-                 "x-masc-workspace-read: matched-v1");
-            check bool "snapshot contains retained output" true
-              (String_util.contains_substring matched "after subscription");
-            let snapshot_cross = String.lowercase_ascii (wire_response ~origin:"https://evil.example" snapshot_path) in
-            check bool "cross-origin snapshot does not grant browser read access" false
-              (String_util.contains_substring snapshot_cross "access-control-allow-origin:");
-            let snapshot_same = String.lowercase_ascii (wire_response ~origin:"http://127.0.0.1:8935" snapshot_path) in
-            check bool "same-origin snapshot is allowed" true
-              (String_util.contains_substring snapshot_same
-                 "access-control-allow-origin: http://127.0.0.1:8935");
-            let limited = wire_response (snapshot_path ^ "?limit=1&expected_base_path=" ^
-              encode base ^ "&expected_masc_root=" ^ encode root) in
-            check int "limited snapshot succeeds" 200 (status limited);
-            check bool "projection names omitted retained rows" true
-              (String_util.contains_substring limited "\"lines_omitted\":5");
-            let invalid_limit = wire_response (snapshot_path ^ "?limit=0") in
-            check int "invalid row limit is refused" 400 (status invalid_limit);
-            let wrong = wire_response (snapshot_path ^ "?expected_base_path=" ^
-              encode (base ^ "-other") ^ "&expected_masc_root=" ^ encode root) in
-            check int "wrong workspace is refused" 409 (status wrong);
-            check bool "wrong workspace does not leak output" false
-              (String_util.contains_substring wrong "after subscription");
-            let blank = wire_response "/api/v1/dashboard/execute-output-snapshot/%20" in
-            check int "blank keeper name is refused" 400 (status blank)))))
+              (String_util.contains_substring wrong_stream "before subscription")))))
 
 let test_dashboard_routes_match_keeper_path () =
   Eio_main.run (fun env ->
@@ -838,11 +764,7 @@ let test_dashboard_routes_match_keeper_path () =
       check_route
         "v1 route"
         "/api/v1/dashboard/execute-output/alpha"
-        "/api/v1/dashboard/execute-output/";
-      check_route
-        "snapshot route"
-        "/api/v1/dashboard/execute-output-snapshot/alpha"
-        "/api/v1/dashboard/execute-output-snapshot/"))
+        "/api/v1/dashboard/execute-output/"))
 
 let () =
   run
@@ -899,8 +821,6 @@ let () =
             (with_fresh test_overlapping_streams_keep_identity_and_open_state)
         ; test_case "snapshot discloses evicted live history" `Quick
             (with_fresh test_snapshot_discloses_evicted_live_history)
-        ; test_case "limited snapshot keeps the active command" `Quick
-            (with_fresh test_limited_snapshot_retains_active_command)
         ; test_case "sse frame" `Quick test_sse_frame
         ; test_case "HTTP stream delivers while open and stops on disconnect" `Quick
             (with_fresh test_route_delivers_open_stream_and_releases_on_disconnect)

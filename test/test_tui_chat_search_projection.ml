@@ -7,6 +7,9 @@ module Chat = Masc_tui_keeper_chat_projection
 module Render = Masc_tui_render_chat
 module Layout = Masc_tui_message_layout
 
+(* No server runs here, so nothing is sent for this workspace. *)
+let preview_base_path = "tui-chat-search-test"
+
 let row ?(keeper = "alpha") ~id ~request_id ~role ~text at : T.msg_entry =
   { me_keeper_name = keeper; me_role = role; me_identity = T.Persisted_row id;
     me_turn_phase = T.chat_turn_phase_of_role role; me_turn_sequence = None;
@@ -950,7 +953,7 @@ let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
 let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun origin ->
   let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
@@ -1340,7 +1343,7 @@ let test_no_match_survives_pending_arrival () = at_sizes (fun origin ->
 let test_held_polled_keeps_chronology () = at_sizes (fun origin ->
   let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
@@ -1402,7 +1405,7 @@ let test_retired_matcher_stops_before_next_candidate () =
 let test_first_scroll_holds_the_painted_preview () = at_sizes (fun origin ->
   let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in

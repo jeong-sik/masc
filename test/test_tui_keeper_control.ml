@@ -25,7 +25,6 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_identity = Ok { k_trace_id = "trace-" ^ name;
       k_created_at = "2026-09-30T00:00:00Z"; k_updated_at = "2026-09-30T00:00:00Z" }
   ; kr_portrait = Decode.Ready Keeper_portrait_look.bare
-  ; kr_candle_balance_milli = None
   ; kr_candle_account_revision = Ok None
   ; kr_health = health
   ; kr_paused = paused
@@ -126,6 +125,109 @@ let test_healthy_status_is_silent_and_unknown_failure_is_preserved () =
 
 let complete rows = Control.roster_of_reading
     ~errors:[] ~rows ~truncated:false ~total:(List.length rows)
+
+(* RFC-0481 §3.3: a signal names one Keeper, and its read replaces that row. *)
+let row_names rows = List.map (fun (row : Decode.keeper_runtime) -> row.kr_name) rows
+
+let spliced roster ~keeper_name reading =
+  match Control.replace_row roster ~keeper_name reading with
+  | Some roster -> Control.roster_view roster
+  | None -> Alcotest.failf "a complete roster refused the row for %s" keeper_name
+
+let test_one_row_takes_its_place_in_a_complete_roster () =
+  let roster = complete [ runtime "alpha"; runtime "gamma" ] in
+  (match spliced roster ~keeper_name:"beta" (Control.Row (runtime "beta")) with
+   | Control.Roster_complete rows ->
+     Alcotest.(check (list string)) "a new name joins in name order"
+       [ "alpha"; "beta"; "gamma" ] (row_names rows)
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_invalid _ ->
+     Alcotest.fail "an added row left the roster incomplete");
+  (match spliced roster ~keeper_name:"gamma" Control.No_row with
+   | Control.Roster_complete rows ->
+     Alcotest.(check (list string)) "no row removes the Keeper" [ "alpha" ] (row_names rows)
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_invalid _ ->
+     Alcotest.fail "a removed row left the roster incomplete");
+  let broken =
+    match Control.replace_row roster ~keeper_name:"alpha" (Control.Row_invalid "unreadable") with
+    | Some broken -> broken
+    | None -> Alcotest.fail "a complete roster refused an error row"
+  in
+  (match Control.roster_view broken with
+   | Control.Roster_invalid { observed; errors; complete } ->
+     Alcotest.(check (list string)) "the broken Keeper leaves the rows" [ "gamma" ] (row_names observed);
+     Alcotest.(check (list (pair string string))) "and joins the errors"
+       [ "alpha", "unreadable" ] errors;
+     Alcotest.(check bool) "the roster stays complete" true complete
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_complete _ ->
+     Alcotest.fail "an error row did not mark the roster invalid");
+  (match spliced broken ~keeper_name:"alpha" (Control.Row (runtime "alpha")) with
+   | Control.Roster_complete rows ->
+     Alcotest.(check (list string)) "a repaired row clears the error"
+       [ "alpha"; "gamma" ] (row_names rows)
+   | Control.Roster_unobserved | Control.Roster_partial _ | Control.Roster_invalid _ ->
+     Alcotest.fail "a repaired row left the roster invalid")
+;;
+
+let test_an_incomplete_roster_does_not_take_one_row () =
+  let clamped =
+    Control.roster_of_reading ~errors:[] ~rows:[ runtime "alpha" ] ~truncated:true ~total:2
+  in
+  Alcotest.(check bool) "an unread roster asks for a whole read" true
+    (Option.is_none
+       (Control.replace_row Control.unobserved_roster ~keeper_name:"alpha" Control.No_row));
+  Alcotest.(check bool) "a clamped roster asks for a whole read" true
+    (Option.is_none (Control.replace_row clamped ~keeper_name:"beta" (Control.Row (runtime "beta"))))
+;;
+
+let test_a_row_read_answers_only_its_keeper () =
+  let read ~rows ~errors = Control.row_reading_of_reading ~keeper_name:"alpha" ~rows ~errors in
+  (match read ~rows:[ runtime "alpha" ] ~errors:[] with
+   | Ok (Control.Row row) -> Alcotest.(check string) "its row" "alpha" row.kr_name
+   | Ok (Control.Row_invalid _ | Control.No_row) | Error _ -> Alcotest.fail "its row was not read");
+  (match read ~rows:[] ~errors:[ "alpha", "unreadable" ] with
+   | Ok (Control.Row_invalid detail) -> Alcotest.(check string) "its error" "unreadable" detail
+   | Ok (Control.Row _ | Control.No_row) | Error _ -> Alcotest.fail "its error row was not read");
+  (match read ~rows:[] ~errors:[] with
+   | Ok Control.No_row -> ()
+   | Ok (Control.Row _ | Control.Row_invalid _) | Error _ -> Alcotest.fail "no row was not read");
+  List.iter (fun (label, rows, errors) ->
+      match read ~rows ~errors with
+      | Error _ -> ()
+      | Ok (Control.Row _ | Control.Row_invalid _ | Control.No_row) -> Alcotest.fail label)
+    [ "another Keeper's row is refused", [ runtime "beta" ], []
+    ; "another Keeper's error is refused", [], [ "beta", "unreadable" ]
+    ; "two rows are refused", [ runtime "alpha"; runtime "alpha" ], [] ]
+;;
+
+(* The builder above creates every Keeper at this time. *)
+let created_at = "2026-09-30T00:00:00Z"
+
+let test_a_starting_keeper_is_read_when_probe_ends () =
+  let created =
+    match Workspace_resilience.Time.parse_iso8601_opt created_at with
+    | Some created -> created
+    | None -> Alcotest.fail "the builder's creation time does not parse"
+  in
+  let until ?health:(health_state = health "idle") ?(identity = true) next_action =
+    let row = runtime ~health:health_state ~next_action "alpha" in
+    let row =
+      if identity then row
+      else { row with kr_identity = Error "identity unreadable" }
+    in
+    Control.starting_up_until row
+  in
+  let at = Some (created +. Status.agent_staleness_threshold_s) in
+  Alcotest.(check (option (float 0.0))) "idle and probing" at (until (Some Status.Probe));
+  Alcotest.(check (option (float 0.0))) "healthy and probing" at
+    (until ~health:(health "healthy") (Some Status.Probe));
+  Alcotest.(check (option (float 0.0))) "a failing Keeper probes with no end" None
+    (until ~health:(health "failing") (Some Status.Probe));
+  Alcotest.(check (option (float 0.0))) "a Keeper past starting" None
+    (until (Some Status.Direct_message));
+  Alcotest.(check (option (float 0.0))) "no next action" None (until None);
+  Alcotest.(check (option (float 0.0))) "no creation time to count from" None
+    (until ~identity:false (Some Status.Probe))
+;;
 
 let reading ?(paused = false) ?(liveness = Control.Unobserved) name :
     Control.reading =
@@ -972,18 +1074,27 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
       (Result.is_error (decode (`Assoc (List.remove_assoc "portrait" fields))))
   | _ -> Alcotest.fail "bad row fixture"
 
+(* An empty fold: a ready Candle with no wallet yet. *)
+let empty_basis =
+  `Assoc ["issued_milli", `String "0"; "burned_milli", `String "0";
+    "half_life", `Null; "keepers", `List []]
+
+let candle_envelope ?decay candle rows =
+  let decay = match decay, Yojson.Safe.Util.member "status" candle with
+    | Some decay, _ -> decay
+    | None, `String "ready" -> empty_basis
+    | None, _ -> `Null in
+  `Assoc ["candle", candle; "candle_decay", decay; "keepers", `List rows;
+    "total", `Int (List.length rows); "truncated", `Bool false]
+
 let test_item_revision_hint_preserves_keeper_observation () =
   let row = Yojson.Safe.from_string (gate_row "analyst") in
-  let decode ~candle ~balance value =
+  let decode ~candle value =
     let row = match row with
       | `Assoc fields -> `Assoc (("candle_account_revision", value)
-          :: ("candle_balance_milli", balance)
-          :: List.remove_assoc "candle_account_revision"
-               (List.remove_assoc "candle_balance_milli" fields))
+          :: List.remove_assoc "candle_account_revision" fields)
       | _ -> Alcotest.fail "bad Keeper fixture" in
-    match Decode.decode_keeper_runtime_list (`Assoc [
-      "candle", candle; "keepers", `List [row];
-      "total", `Int 1; "truncated", `Bool false]) with
+    match Decode.decode_keeper_runtime_list (candle_envelope candle [row]) with
     | Ok ([runtime], [], false, 1, _) -> runtime
     | _ -> Alcotest.fail "Item revision reading hid the Keeper"
   in
@@ -992,13 +1103,13 @@ let test_item_revision_hint_preserves_keeper_observation () =
   let off = `Assoc ["status", `String "off"] in
   let digest = String.make 64 'a' in
   Alcotest.(check bool) "canonical ready revision decoded" true
-    ((decode ~candle:ready ~balance:(`String "0") (`String digest)).kr_candle_account_revision = Ok (Some digest));
+    ((decode ~candle:ready (`String digest)).kr_candle_account_revision = Ok (Some digest));
   let disabled = `Assoc ["status", `String "disabled";
     "reason", `String "fixture ledger unavailable"] in
-  Alcotest.(check bool) "disabled revision decoded without balance" true
-    ((decode ~candle:disabled ~balance:`Null (`String digest)).kr_candle_account_revision = Ok (Some digest));
+  Alcotest.(check bool) "disabled revision decoded" true
+    ((decode ~candle:disabled (`String digest)).kr_candle_account_revision = Ok (Some digest));
   Alcotest.(check bool) "null authorizes only observed Off" true
-    ((decode ~candle:off ~balance:`Null `Null).kr_candle_account_revision = Ok None);
+    ((decode ~candle:off `Null).kr_candle_account_revision = Ok None);
   List.iter (fun (runtime : Decode.keeper_runtime) ->
     Alcotest.(check bool) "invalid authority reported independently" true
       (Result.is_error runtime.kr_candle_account_revision);
@@ -1006,60 +1117,57 @@ let test_item_revision_hint_preserves_keeper_observation () =
     Alcotest.(check bool) "invalid authority retains lifecycle controls" true
       (List.mem Control.Shutdown
         (Control.available (reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst"))))
-    (decode ~candle:off ~balance:`Null (`String digest)
-     :: List.map (decode ~candle:ready ~balance:(`String "0"))
+    (decode ~candle:off (`String digest)
+     :: List.map (decode ~candle:ready)
           [`Null; `Int 1; `String "short"; `String (String.make 64 'A')])
 
-let test_roster_candle_amounts_and_status_agree () =
-  let amount = "18446744073709551614000" in
-  let ready = `Assoc ["status",`String "ready"; "issued_milli",`String amount;
-    "burned_milli",`String "1000"; "circulating_milli",`String "18446744073709551613000"] in
-  let row balance = match Yojson.Safe.from_string (gate_row "analyst") with
-    | `Assoc fields -> `Assoc (("candle_balance_milli",balance) :: List.remove_assoc "candle_balance_milli" fields)
-    | _ -> Alcotest.fail "bad Keeper fixture" in
-  let envelope candle balance =
-    let revision = match Yojson.Safe.Util.member "status" candle with
-      | `String "off" -> `Null | _ -> `String (String.make 64 'a') in
-    let row = match row balance with
-      | `Assoc fields -> `Assoc (("candle_account_revision",revision)::List.remove_assoc "candle_account_revision" fields)
-      | _ -> Alcotest.fail "bad Keeper fixture" in
-    `Assoc ["candle",candle;"keepers",`List [row];"total",`Int 1;"truncated",`Bool false] in
-  (match Decode.decode_keeper_runtime_list (envelope ready (`String "9007199254740993")) with
-   | Ok ([runtime],[],false,1,Ok (Candle_observation.Ready supply)) ->
-     Alcotest.(check (option string)) "wallet is not rounded through float" (Some "9007199254740993") runtime.kr_candle_balance_milli;
-     Alcotest.(check string) "supply exceeds machine integer without loss" amount supply.issued_milli;
-     Alcotest.(check bool) "roster keeps the exact account revision" true
-       (runtime.kr_candle_account_revision = Ok (Some (String.make 64 'a')))
-   | _ -> Alcotest.fail "exact Candle reading rejected");
-  let unavailable json = match Decode.decode_keeper_runtime_list json with
-    | Ok (rows, errors, truncated, total, Error detail) ->
-      Alcotest.(check bool) "currency failure is visible" true (String.length detail > 0);
-      let roster = Control.roster_of_reading ~rows ~errors ~truncated ~total in
-      let healthy = reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst" in
-      Alcotest.(check bool) "currency failure preserves live Keeper actions" true
-        (List.mem Control.Shutdown (Control.available healthy));
-      Alcotest.(check bool) "currency failure withdraws every wallet" true
-        (List.for_all (fun (row : Decode.keeper_runtime) -> row.kr_candle_balance_milli = None) rows)
-    | Ok (_,_,_,_,Ok _) -> Alcotest.fail "malformed currency became a valid observation"
-    | Error detail -> Alcotest.failf "currency failure hid the Keeper roster: %s" detail
-  in
-  List.iter (fun bad -> unavailable (envelope ready bad))
-    [`Null;`Int 0;`String "01";`String "-1";`String "1.2";`String "1e3"];
-  unavailable (envelope (`Assoc ["status",`String "off"]) (`String "0"));
+(* RFC-0481 §3.7: a ready Candle comes with the fold's basis and the other two
+   come without one. Any other pairing is a Candle failure that keeps the
+   Keeper rows and their lifecycle actions. *)
+let test_roster_candle_reading_pairs_status_and_basis () =
+  let ready = `Assoc ["status",`String "ready"; "issued_milli",`String "1000";
+    "burned_milli",`String "200"; "circulating_milli",`String "800"] in
   let disabled = `Assoc ["status",`String "disabled";"reason",`String "ledger unreadable"] in
-  unavailable (envelope disabled (`String "1"));
-  let without key = function
-    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
-    | _ -> Alcotest.fail "bad object fixture" in
-  unavailable (without "candle" (envelope ready (`String "1")));
-  unavailable (`Assoc ["candle",ready;
-    "keepers",`List [without "candle_balance_milli" (row (`String "1"))]]);
-  let error_row = `Assoc ["name",`String "broken";"status",`String "error";
-    "candle_balance_milli",`Null] in
-  unavailable (`Assoc ["candle",ready;"keepers",`List [row (`String "1");error_row]]);
-  match Decode.decode_keeper_runtime_list (envelope disabled `Null) with
-  | Ok ([_],[],_,_,Ok (Candle_observation.Disabled {reason})) -> Alcotest.(check string) "failure survives" "ledger unreadable" reason
-  | _ -> Alcotest.fail "disabled currency hid the Keeper"
+  let off = `Assoc ["status",`String "off"] in
+  let wallet = `Assoc ["issued_milli",`String "1000"; "burned_milli",`String "200";
+    "half_life",`Int 24; "keepers",`List [`Assoc ["name",`String "analyst";
+      "since",`String "2026-09-29T00:00:00Z"; "amount_milli",`String "800"]]] in
+  let row candle = match Yojson.Safe.from_string (gate_row "analyst") with
+    | `Assoc fields ->
+      let revision = match Yojson.Safe.Util.member "status" candle with
+        | `String "off" -> `Null | _ -> `String (String.make 64 'a') in
+      `Assoc (("candle_account_revision",revision)::List.remove_assoc "candle_account_revision" fields)
+    | _ -> Alcotest.fail "bad Keeper fixture" in
+  let decode ?decay candle = Decode.decode_keeper_runtime_list (candle_envelope ?decay candle [row candle]) in
+  (match decode ~decay:wallet ready with
+   | Ok ([_],[],false,1,Ok (Decode.Candle_ready basis)) ->
+     Alcotest.(check bool) "the basis holds the wallet" true
+       (match basis.Candle_decay_basis.decay with
+        | Candle_decay_basis.Decaying { keepers = [ ("analyst", held) ]; _ } ->
+          held.Candle_decay_basis.amount_milli = 800
+        | Candle_decay_basis.Decaying _ | Candle_decay_basis.No_decaying_balance -> false)
+   | _ -> Alcotest.fail "a ready Candle with its basis was rejected");
+  (match decode disabled with
+   | Ok ([_],[],_,_,Ok (Decode.Candle_disabled reason)) ->
+     Alcotest.(check string) "failure survives" "ledger unreadable" reason
+   | _ -> Alcotest.fail "disabled Candle hid the Keeper");
+  (match decode off with
+   | Ok ([_],[],_,_,Ok Decode.Candle_off) -> ()
+   | _ -> Alcotest.fail "Candle off was not read");
+  List.iter (fun (label, json) ->
+      match Decode.decode_keeper_runtime_list json with
+      | Ok (rows, errors, truncated, total, Error detail) ->
+        Alcotest.(check bool) (label ^ ": the failure says why") true (String.length detail > 0);
+        let roster = Control.roster_of_reading ~rows ~errors ~truncated ~total in
+        Alcotest.(check bool) (label ^ ": the Keeper keeps its actions") true
+          (List.mem Control.Shutdown
+             (Control.available (reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst")))
+      | Ok (_,_,_,_,Ok _) -> Alcotest.fail (label ^ ": became a valid Candle reading")
+      | Error detail -> Alcotest.failf "%s: hid the Keeper roster: %s" label detail)
+    [ "ready without its basis", candle_envelope ~decay:`Null ready [row ready]
+    ; "off with a basis", candle_envelope ~decay:wallet off [row off]
+    ; "a basis that is not an object", candle_envelope ~decay:(`String "basis") ready [row ready]
+    ; "a malformed basis", candle_envelope ~decay:(`Assoc ["issued_milli",`String "01"]) ready [row ready] ]
 
 let test_roster_decode_reads_the_sandbox_profile () =
   let json =
@@ -1598,13 +1706,21 @@ let () =
         ; Alcotest.test_case "the sandbox profile survives the decode" `Quick
             test_roster_decode_reads_the_sandbox_profile
         ; Alcotest.test_case "server equipment required; failures preserve Keeper" `Quick test_roster_equipment_is_required_and_failures_stay_per_keeper
-        ; Alcotest.test_case "Candle exact amounts and envelope status" `Quick test_roster_candle_amounts_and_status_agree
+        ; Alcotest.test_case "Candle reading pairs status and basis" `Quick test_roster_candle_reading_pairs_status_and_basis
         ; Alcotest.test_case "Item revision hints preserve lifecycle observations" `Quick
             test_item_revision_hint_preserves_keeper_observation
         ; Alcotest.test_case "paused stays apart from phase" `Quick
             test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick
             test_a_row_without_a_sandbox_profile_is_rejected
+        ; Alcotest.test_case "one row takes its place in a complete roster" `Quick
+            test_one_row_takes_its_place_in_a_complete_roster
+        ; Alcotest.test_case "an incomplete roster does not take one row" `Quick
+            test_an_incomplete_roster_does_not_take_one_row
+        ; Alcotest.test_case "a row read answers only its Keeper" `Quick
+            test_a_row_read_answers_only_its_keeper
+        ; Alcotest.test_case "a starting Keeper is read when its probe ends" `Quick
+            test_a_starting_keeper_is_read_when_probe_ends
         ; Alcotest.test_case "rows decode in order" `Quick
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown health is rejected" `Quick

@@ -62,6 +62,9 @@ type text_intake =
 
 module Tool_indexes = Map.Make (Int)
 
+(* The workspace and Keeper whose turns answer can show this writer. *)
+type shown_as = { base_path : string; keeper_name : string }
+
 type entry =
   { preview : t
   ; text_intake : text_intake
@@ -71,6 +74,7 @@ type entry =
   ; next_preparation_scope_id : int
   ; owner : Keeper_interrupt_token.t option
   ; original_turn_ref : Ids.Turn_ref.t option
+  ; shown_as : shown_as
   }
 type writer = entry ref
 
@@ -85,6 +89,22 @@ let mutex = Mutex.create ()
 let with_lock f =
   Mutex.lock mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+
+(* Under the lock: whether the turns answer can read [writer]. It reads the
+   installed writer only, and only for the Owner slot that owns it
+   ([current_for_turn]), so a writer installed without an owner shows
+   nothing. *)
+let displayed writer =
+  match Hashtbl.find_opt table (!writer).shown_as.keeper_name with
+  | Some shown -> shown == writer && Option.is_some (!writer).owner
+  | None -> false
+
+(* After the lock, for a write [displayed] saw. *)
+let announce = function
+  | Some { base_path; keeper_name } -> Keeper_turn_preview_signal.changed ~base_path ~keeper_name
+  | None -> ()
+
+let shown_after_write writer = if displayed writer then Some (!writer).shown_as else None
 
 let empty ~execution_scope now =
   { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now
@@ -107,11 +127,13 @@ let current_for_turn ~keeper_name ~interrupt_token =
    [updated_at] where it was. *)
 let change_entry ~writer ~now f =
   Option.iter (fun writer ->
-    with_lock (fun () ->
-      match f !writer with
-      | None -> ()
-      | Some entry ->
-        writer := { entry with preview = { entry.preview with updated_at = now } })) writer
+    announce
+      (with_lock (fun () ->
+         match f !writer with
+         | None -> None
+         | Some entry ->
+           writer := { entry with preview = { entry.preview with updated_at = now } };
+           shown_after_write writer))) writer
 
 let update ~writer ~now f =
   change_entry ~writer ~now (fun entry ->
@@ -129,7 +151,7 @@ let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
     let parent_binding = match Fs_compat.execution_context () with
       | Fs_compat.Non_eio -> None
       | Eio_fiber -> Eio.Fiber.get preparation_parent_key in
-    let span = with_lock (fun () ->
+    let span, shown = with_lock (fun () ->
       let entry = !owned_writer in
       let scope_id = entry.next_preparation_scope_id in
       let parent_scope_id = match parent_binding with
@@ -143,12 +165,13 @@ let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
         preview={entry.preview with preparation=Some preparation;activity=Preparing;
           updated_at=started_at;
           preparation_timeline=Preparation_scopes.add scope_id span entry.preview.preparation_timeline}};
-      span) in
+      span, shown_after_write owned_writer) in
+    announce shown;
     let finish outcome =
       let elapsed_ns = Mtime.Span.to_uint64_ns (Mtime.span started (Mtime_clock.now ())) in
       let finished_at = Time_compat.now () in
       let completed = {preparation with state=Preparation_finished {outcome;elapsed_ns;finished_at}} in
-      with_lock (fun () ->
+      announce @@ with_lock (fun () ->
         let entry = !owned_writer in
         let timeline = Preparation_scopes.add span.scope_id
             {span with preparation=completed} entry.preview.preparation_timeline in
@@ -157,13 +180,15 @@ let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
           (* Keep the completed span without reopening a superseded live phase
              or advancing provider/Tool activity's own observation clock. *)
           owned_writer := {entry with preview}
-        else
+        else begin
           let preparations = List.filter (fun (owner,_) -> owner != token) entry.preparations in
           let preparation = match preparations with
             | (_,parent)::_ -> parent.preparation
             | [] -> completed in
           owned_writer := {entry with preparations;
-            preview={preview with preparation=Some preparation;updated_at=finished_at}})
+            preview={preview with preparation=Some preparation;updated_at=finished_at}}
+        end;
+        shown_after_write owned_writer)
     in
     let run () = match Fs_compat.execution_context () with
       | Fs_compat.Non_eio -> operation ()
@@ -188,17 +213,20 @@ let with_preparation ~writer ~turn_ref ~phase operation =
 let redacting redaction =
   { redaction; stream = Keeper_stream_text_redaction.create redaction }
 
-let reset ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
+let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
+  let shown_as = { base_path; keeper_name } in
   let writer = ref { preview = empty ~execution_scope now; text_intake = redacting redaction;
     released_bytes = 0; tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
-    owner = Keeper_turn_preview_owner.current (); original_turn_ref = turn_ref } in
-  with_lock (fun () -> Hashtbl.replace table keeper_name writer);
+    owner = Keeper_turn_preview_owner.current (); original_turn_ref = turn_ref; shown_as } in
+  announce (with_lock (fun () ->
+    Hashtbl.replace table keeper_name writer;
+    shown_after_write writer));
   writer
 
 let original_turn_ref writer = with_lock (fun () -> (!writer).original_turn_ref)
 
 let note_attempt ~writer ~now ~runtime_id =
-  change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; next_preparation_scope_id; _ } ->
+  change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; next_preparation_scope_id; shown_as; _ } ->
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
@@ -211,6 +239,7 @@ let note_attempt ~writer ~now ~runtime_id =
       ; owner
       ; original_turn_ref
       ; next_preparation_scope_id
+      ; shown_as
       ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction

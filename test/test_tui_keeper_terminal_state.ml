@@ -44,7 +44,7 @@ let reading : Tui_types.keeper_execute_reading =
     ; kes_observed_at = 0.
     }
 
-let window = 500
+let window = Tui_types.keeper_execute_window
 
 (* The Terminal tab open on [analyst], with one reading of its output in hand. *)
 let state_with_reading () =
@@ -55,14 +55,9 @@ let state_with_reading () =
   state.keeper_cursor <- 0;
   state.view <- Tui_types.Keepers Keeper_detail;
   state.detail_tab <- Tui_types.Detail_terminal;
-  (match
-     Tui_types.begin_keeper_execute_read state ~intent:Tui_types.Snapshot_read.Poll ~limit:window
-       (keeper "analyst")
-   with
-   | None -> Alcotest.fail "the Terminal tab did not start a read"
-   | Some request ->
-     check Alcotest.bool "the reading was taken" true
-       (Tui_types.take_keeper_execute_read state request (Ok (reading, 1.))));
+  Tui_types.settle_keeper_execute state
+    ~key:(Tui_types.keeper_log_key state ~limit:window (keeper "analyst"))
+    (Ok (reading, 1.));
   state
 
 let following = Alcotest.testable (fun ppf hold ->

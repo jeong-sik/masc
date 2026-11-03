@@ -613,7 +613,7 @@ let run_keeper_invocation_turn_admitted_inner
                could not see its own in-progress work or handoff. Keep this
                as fresh per-turn context, exactly like the unified wake lane;
                it is deliberately not written to conversation history. *)
-            let preview = Keeper_turn_preview.reset ~keeper_name:meta.name
+            let preview = Keeper_turn_preview.reset ~base_path:ctx.config.base_path ~keeper_name:meta.name
               ~execution_scope:(Some (Keeper_repetition_scope.Execution.scope repetition_execution))
               ~turn_ref:(Some turn_ref)
               ~now:(Time_compat.now ())

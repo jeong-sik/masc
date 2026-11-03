@@ -257,7 +257,7 @@ let render_overview (state : state) home =
             @ List.map (fun line -> Theme.recede () ^ line ^ Ansi.reset)
                 (wrapped (String.trim work))
             @ List.concat_map wrapped
-                (Masc_tui_candle.summary_lines state.candle_observation)
+                (Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation)
           in
           Masc_tui_overview_cards.draw ~inner:(framed_inner_width cols)
             ~rows:(budget - warning_rows)
@@ -273,7 +273,7 @@ let render_overview (state : state) home =
         (* Action outcomes stay above the destinations they affect. Passive
            health/history context follows the destinations, using only spare
            rows, so opening Home starts with a decision or a place to resume. *)
-        let candle = Masc_tui_candle.summary_lines state.candle_observation
+        let candle = Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation
           |> List.concat_map (fun line ->
             Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
               (Terminal_text.single_line line))

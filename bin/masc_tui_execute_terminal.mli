@@ -3,7 +3,7 @@
     newest row until the reader scrolls up.
 
     The server keeps the rows and numbers them
-    ([GET /api/v1/dashboard/execute-output-snapshot/<keeper>]). This module
+    ([GET /api/v1/dashboard/execute-output/<keeper>]). This module
     decides what each row is, whether rows need a stream tag, and what a
     scroll does to the view. Drawing is the caller's.
 

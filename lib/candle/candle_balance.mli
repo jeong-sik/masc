@@ -138,6 +138,16 @@ val of_events : at:Candle_time.t -> Candle_event.t list -> (t, error) result
     and policy records, including equal-policy records, must not move the
     observation clock backwards, even before any wallet has been credited. *)
 
+val replay : Candle_event.t list -> (t, error) result
+(** The same fold through the last event, with no decay after it.
+    {!of_events} is [replay], then each balance decayed from its last balance
+    event to [at]. {!Candle_decay_basis} carries this state to readers. *)
+
+val decaying_balances : t -> (string * Candle_time.t * int) list
+(** Each Keeper with a balance event, in name order: its name, the time of
+    its last balance event, and its balance right after it. Read on a
+    {!replay} state, these are what {!of_events} decays. *)
+
 val selection : t -> keeper:string -> slot:Keeper_portrait_item.slot -> Candle_event.equipment_choice
 val equipment : t -> keeper:string -> Keeper_portrait_look.equipment
 val equip : t -> keeper:string -> slot:Keeper_portrait_item.slot -> choice:Candle_event.equipment_choice -> (t, error) result

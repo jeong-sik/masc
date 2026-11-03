@@ -29,7 +29,15 @@ let filter_name = function
   | Can_buy -> "Can buy"
   | In_slot slot -> String.capitalize_ascii (Item.slot_id slot)
 
-let items ~filter ~account =
+(* The balance a purchase must fit: the balance now when the roster's Candle
+   basis says it, else the account's balance when it was read, the latest
+   the TUI has (RFC-0481 §3.7). *)
+let spendable_milli (account : account) ~balance_milli =
+  match balance_milli with
+  | Some now -> now
+  | None -> account.balance_milli
+
+let items ~filter ~account ~balance_milli =
   List.filter (fun item -> match filter, account with
     | All, _ -> true
     | In_slot slot, _ -> Item.slot item = slot
@@ -37,7 +45,7 @@ let items ~filter ~account =
     | Can_buy, Some (Ready account) ->
       not (List.mem item account.owned_items)
       && List.exists (fun entry -> entry.item = item && match entry.price with
-        | Priced amount -> amount <= account.balance_milli
+        | Priced amount -> amount <= spendable_milli account ~balance_milli
         | Unpriced -> false) account.catalog
     | (Owned | Can_buy), (None | Some (Off | Disabled _)) -> false) Item.all
 
@@ -50,7 +58,7 @@ type request =
   | Equip of Item.t
   | Buy_and_equip of { item : Item.t; expected_price_milli : int }
 
-let request ~account item =
+let request ~account ~balance_milli item =
   match account with
   | None -> Error "Read this Keeper's Item account before preparing a request"
   | Some Off -> Error "Candle is off"
@@ -60,7 +68,7 @@ let request ~account item =
   | Some (Ready account) ->
     match List.find_opt (fun entry -> entry.item = item) account.catalog with
     | None | Some { price = Unpriced; _ } -> Error "This item has no configured price"
-    | Some { price = Priced amount; _ } when amount > account.balance_milli ->
+    | Some { price = Priced amount; _ } when amount > spendable_milli account ~balance_milli ->
       Error "The observed Candle balance cannot cover this item"
     | Some { price = Priced amount; _ } ->
       Ok (Buy_and_equip {item; expected_price_milli=amount})

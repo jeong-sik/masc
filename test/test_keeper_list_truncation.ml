@@ -251,6 +251,141 @@ let test_fresh_roster_reads_lifecycle_transition () =
     (fun json -> check bool "the registered keeper starts offline" false (running json))
 ;;
 
+(* A change signal names one Keeper (RFC-0481 §3.1). [name] narrows the roster
+   to that Keeper, so the reader replaces one row with the row a whole roster
+   read would carry. *)
+let named_args ?(detailed = true) name =
+  `Assoc [ "detailed", `Bool detailed; "name", `String name ]
+;;
+
+let rows json =
+  match Yojson.Safe.Util.member "keepers" json with
+  | `List rows -> rows
+  | other -> failf "expected a keepers list, got %s" (Yojson.Safe.to_string other)
+;;
+
+let row_names json =
+  List.map (fun row -> Yojson.Safe.Util.(row |> member "name" |> to_string)) (rows json)
+;;
+
+let roster_row name json =
+  match
+    List.find_opt
+      (fun row -> Yojson.Safe.Util.member "name" row = `String name)
+      (rows json)
+  with
+  | Some row -> row
+  | None -> failf "the roster has no row for %s" name
+;;
+
+let test_named_read_answers_the_roster_row () =
+  let whole = `Assoc [ "detailed", `Bool true; "fresh", `Bool true ] in
+  keeper_list ~names:[ "alpha"; "beta"; "gamma" ] ~args:whole
+    ~after_list_with_args:(fun _config read ->
+      let named = read (named_args "beta") in
+      check (list string) "the named row is the whole roster's row"
+        [ Yojson.Safe.to_string (roster_row "beta" (read whole)) ]
+        (List.map Yojson.Safe.to_string (rows named));
+      check int "total counts the matched name" 1 (int_field named "total");
+      check string "the narrowed answer names the Keeper it was asked for" "beta"
+        (string_field named "name");
+      check bool "a whole roster names no Keeper" true
+        (Json_util.assoc_member_opt "name" (read whole) = None);
+      check bool "a matched name is not truncated" false (bool_field named "truncated");
+      let compact = read (named_args ~detailed:false "beta") in
+      check (list string) "the compact shape names only that Keeper" [ "beta" ]
+        Yojson.Safe.Util.(compact |> member "keepers" |> to_list |> List.map to_string);
+      check int "the compact shape carries its row" 1 (list_length compact "items"))
+    (fun json -> check int "whole roster" 3 (int_field json "total"))
+;;
+
+let test_named_read_answers_an_error_row () =
+  let whole = `Assoc [ "detailed", `Bool true; "fresh", `Bool true ] in
+  keeper_list ~names:[ "alpha" ] ~args:whole
+    ~before_list:(fun config ->
+      (* A snapshot without its TOML has no effective meta. *)
+      match Keeper_meta_store.replace_snapshot config (make_meta "broken") with
+      | Ok () -> ()
+      | Error error -> failf "replace_snapshot broken failed: %s" error)
+    ~after_list_with_args:(fun _config read ->
+      let named = read (named_args "broken") in
+      let row = roster_row "broken" named in
+      check bool "the named read carries the error row" true
+        (Yojson.Safe.Util.member "effective_meta_error" row <> `Null);
+      check string "it is the whole roster's error row"
+        (Yojson.Safe.to_string (roster_row "broken" (read whole)))
+        (Yojson.Safe.to_string row))
+    (fun json -> check int "both names are listed" 2 (int_field json "total"))
+;;
+
+let test_named_read_of_an_unlisted_name_has_no_row () =
+  keeper_list ~names:[ "alpha" ] ~args:(named_args "nobody")
+    (fun json ->
+      check int "no row" 0 (list_length json "keepers");
+      check int "no matched name" 0 (int_field json "total");
+      check bool "nothing was cut" false (bool_field json "truncated"))
+;;
+
+let test_named_read_neither_uses_nor_replaces_the_cache () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  let cached = `Assoc [ "detailed", `Bool true ] in
+  keeper_list ~names:[ "alpha" ] ~args:cached
+    ~after_list_with_args:(fun config read ->
+      seed_keepers config [ "beta" ];
+      let named = read (named_args "beta") in
+      check (list string) "the named read answers the Keeper the cache predates"
+        [ "beta" ] (row_names named);
+      check bool "the named read certifies the bypass" true
+        (Json_util.assoc_member_opt "projection_cache_bypassed" named = Some (`Bool true));
+      check (list string) "the cached roster is still the earlier census"
+        [ "alpha" ] (row_names (read cached)))
+    (fun json -> check (list string) "initial census" [ "alpha" ] (row_names json))
+;;
+
+(* The named arguments build the same cache key as a whole detailed read, so
+   a named answer stored there would come back as a complete one-Keeper roster. *)
+let test_named_read_does_not_fill_the_cache () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  keeper_list ~names:[ "alpha"; "beta" ] ~args:(named_args "beta")
+    ~after_list_with_args:(fun _config read ->
+      let whole = read (`Assoc [ "detailed", `Bool true ]) in
+      check (list string) "the first whole read computes the roster"
+        [ "alpha"; "beta" ] (row_names whole);
+      check bool "the whole read came from the cache path" true
+        (Json_util.assoc_member_opt "projection_cache_bypassed" whole = None))
+    (fun json -> check (list string) "the named read" [ "beta" ] (row_names json))
+;;
+
+let test_named_read_is_not_cut_by_the_limit_window () =
+  let args =
+    `Assoc [ "detailed", `Bool true; "limit", `Int 2; "name", `String "k07" ]
+  in
+  keeper_list ~names:(List.init 10 (Printf.sprintf "k%02d")) ~args
+    ~after_list_with_args:(fun _config read ->
+      check (list string) "an empty window still answers the named row" [ "k07" ]
+        (row_names
+           (read (`Assoc [ "detailed", `Bool true; "limit", `Int 0; "name", `String "k07" ]))))
+    (fun json ->
+      check (list string) "a Keeper past the window answers its row" [ "k07" ]
+        (row_names json);
+      check bool "nothing was cut" false (bool_field json "truncated"))
+;;
+
+let test_invalid_name_tool_argument_is_rejected () =
+  keeper_list ~names:[ "alpha" ] ~args:(`Assoc [])
+    ~after_list_with_dispatch:(fun dispatch ->
+      List.iter (fun fields ->
+        match dispatch (`Assoc fields) with
+        | Tool_result.Failed _ -> ()
+        | Tool_result.Completed _ | Tool_result.Deferred _ ->
+            failf "invalid name argument was accepted: %s"
+              (Yojson.Safe.to_string (`Assoc fields)))
+        [ [ "name", `String "" ]; [ "name", `String "  " ]; [ "name", `Int 1 ]
+        ; [ "name", `String "a/b" ]; [ "name", `String ".." ]
+        ; [ "name", `Null ]; [ "name", `String "alpha"; "name", `String "beta" ] ])
+    (fun _ -> ())
+;;
+
 (* Ten names, sorted, so a limit of 4 keeps k00..k03 and drops the rest —
    the same "the tail disappears" shape the live workspace hit. *)
 let ten_names = List.init 10 (fun i -> Printf.sprintf "k%02d" i)
@@ -894,6 +1029,22 @@ let () =
             test_name_only_shape_carries_the_same_verdict
         ; test_case "default limit is reported" `Quick
             test_default_limit_is_reported_not_assumed
+        ] )
+    ; ( "one Keeper"
+      , [ test_case "a named read answers the roster's row" `Quick
+            test_named_read_answers_the_roster_row
+        ; test_case "a named read answers an error row" `Quick
+            test_named_read_answers_an_error_row
+        ; test_case "an unlisted name has no row" `Quick
+            test_named_read_of_an_unlisted_name_has_no_row
+        ; test_case "a named read neither uses nor replaces the cache" `Quick
+            test_named_read_neither_uses_nor_replaces_the_cache
+        ; test_case "a named read does not fill the cache" `Quick
+            test_named_read_does_not_fill_the_cache
+        ; test_case "a named read is not cut by the limit window" `Quick
+            test_named_read_is_not_cut_by_the_limit_window
+        ; test_case "invalid name arguments are refused" `Quick
+            test_invalid_name_tool_argument_is_rejected
         ] )
     ; ( "one axis per field"
       , [ test_case "row publishes phase, health and paused" `Quick

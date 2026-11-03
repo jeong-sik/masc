@@ -399,23 +399,6 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(mounted.textContent).toContain('Execute result unknown (stream 1, task task-a)')
   })
 
-  it('says history is incomplete when the snapshot omits retained lines', async () => {
-    const event = { type: 'snapshot', keeper: 'sangsu', task_id: 'task-b', closed: true,
-      active_count: 0, active_streams: [], lines_omitted: 3, status: { kind: 'exit', code: 0 },
-      lines: [{ stream: 'status', stream_id: 2, task_id: 'task-b', text: '{"kind":"exit","code":0}' }] }
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      `event: output\ndata: ${JSON.stringify(event)}\n\n`,
-      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
-    )))
-    mounted = document.createElement('div')
-    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
-
-    await waitFor(() => expect(mounted?.textContent).toContain('history incomplete'))
-    expect(mounted.textContent).toContain('3 earlier output lines omitted from this view')
-    expect(mounted.textContent).toContain('Execute exited with code 0 (stream 2, task task-b)')
-    expect(mounted.textContent).not.toContain('Execute result unknown')
-  })
-
   it('says history is incomplete when the server has evicted earlier events', async () => {
     const event = { type: 'snapshot', keeper: 'sangsu', task_id: 'task-b', closed: true,
       active_count: 0, active_streams: [], first_retained_seq: 9, status: { kind: 'exit', code: 0 },

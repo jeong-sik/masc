@@ -644,6 +644,45 @@ let contains haystack needle =
   go 0
 ;;
 
+(* RFC-0481 §3.2: the roster row reads the newest receipt, so each append
+   tells that workspace's roster readers to reread the Keeper. *)
+let test_receipt_append_announces_the_keeper_row () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "keeper_receipt_row_" "" in
+  let other_path = Filename.concat base_path "other-workspace" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    Unix.mkdir other_path 0o755;
+    let config = Workspace.default_config base_path in
+    let listen ~id ~path heard =
+      Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path:path) ~id
+        ~callback:(fun (event : Sse.external_event) ->
+          match
+            Json_util.assoc_string_opt "type" event.ext_payload,
+            Json_util.assoc_string_opt "name" event.ext_payload
+          with
+          | Some kind, Some name when String.equal kind Keeper_row_broadcast.row_changed_event ->
+            heard := name :: !heard
+          | (Some _ | None), (Some _ | None) -> ())
+        ()
+    in
+    let here = ref [] and elsewhere = ref [] in
+    listen ~id:"receipt-row-here" ~path:base_path here;
+    listen ~id:"receipt-row-elsewhere" ~path:other_path elsewhere;
+    Fun.protect
+      ~finally:(fun () ->
+        Sse.unsubscribe_external "receipt-row-here";
+        Sse.unsubscribe_external "receipt-row-elsewhere")
+      (fun () ->
+        Keeper_execution_receipt.append config
+          (receipt_row ~keeper_name:"receipt-row" ~outcome:`Error
+             ~terminal_reason_code:"api_error_rate_limited" ~error_message:None
+             ~ended_at:"2026-09-23T00:38:12Z");
+        Alcotest.(check (list string)) "an appended receipt announces its Keeper"
+          [ "receipt-row" ] !here;
+        Alcotest.(check (list string)) "another workspace hears nothing" [] !elsewhere))
+;;
+
 let test_turn_failures_summary_names_the_newest_failed_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -808,6 +847,10 @@ let () =
           "summary names the newest failed receipt"
           `Quick
           test_turn_failures_summary_names_the_newest_failed_receipt
+      ; Alcotest.test_case
+          "an appended receipt announces the Keeper row"
+          `Quick
+          test_receipt_append_announces_the_keeper_row
       ] );
     ( "fenced empty-turn marker"
     , [ Alcotest.test_case

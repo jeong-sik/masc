@@ -176,6 +176,12 @@ val assignment_walk_order :
     orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
+val assignment_next_dated_release : now:float -> string -> float option
+(** The earliest time after [now] at which a dated rest on the assignment's
+    fresh walk ends, if any. {!assignment_walk_rest} can change at that time
+    with no write. A rest that ends only when its provider answers has no
+    such time. *)
+
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
     A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.

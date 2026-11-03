@@ -622,17 +622,21 @@ let remove_duplicate_source_unlocked ~ops ~(entry : entry) path =
   let result =
     ops.remove_file_durable ~ownership_root:entry.base_path path
   in
-  match result with
-  | Ok () -> true
-  | Error error ->
-    observe_namespace_degradation
-      ~operation:"terminal_source_cleanup"
-      entry
-      (Printf.sprintf
-         "removed=%b %s"
-         error.removed
-         (Keeper_fs.durable_remove_error_to_string error));
-    error.removed
+  let removed =
+    match result with
+    | Ok () -> true
+    | Error error ->
+      observe_namespace_degradation
+        ~operation:"terminal_source_cleanup"
+        entry
+        (Printf.sprintf
+           "removed=%b %s"
+           error.removed
+           (Keeper_fs.durable_remove_error_to_string error));
+      error.removed
+  in
+  if removed then Keeper_msg_async_broadcast.requests_changed ~keeper_name:entry.keeper_name;
+  removed
 ;;
 
 type persist_integrity_error =
@@ -678,16 +682,25 @@ let persist_error_published = function
 
 let save_entry_durable ~ops path (entry : entry) =
   let temp_dir = atomic_staging_dir ~base_path:entry.base_path in
-  ops.save_json_durable
-    ~ownership_root:entry.base_path
-    ~temp_dir
-    path
-    (entry_record_to_json entry)
-  |> Result.map_error (fun error ->
-    Write_failed
-      (if error.Keeper_fs.renamed
-       then Published_uncertain error
-       else Not_published error))
+  let saved =
+    ops.save_json_durable
+      ~ownership_root:entry.base_path
+      ~temp_dir
+      path
+      (entry_record_to_json entry)
+    |> Result.map_error (fun error ->
+      Write_failed
+        (if error.Keeper_fs.renamed
+         then Published_uncertain error
+         else Not_published error))
+  in
+  (* A write whose rename may have landed can be read, so it is announced as a
+     write that landed. *)
+  (match saved with
+   | Ok () | Error (Write_failed (Published_uncertain _)) ->
+     Keeper_msg_async_broadcast.requests_changed ~keeper_name:entry.keeper_name
+   | Error (Write_failed (Not_published _) | Integrity_failed _) -> ());
+  saved
 ;;
 
 let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
@@ -967,8 +980,12 @@ let read_durable_active_inventory ~base_path =
                { path = dir; reason = Printexc.to_string exn })))
 ;;
 
-let rollback_rejected_record_file_unlocked ~ops ~ownership_root path =
+let rollback_rejected_record_file_unlocked ~ops ~ownership_root ~keeper_name path =
   let result = ops.remove_file_durable ~ownership_root path in
+  (match result with
+   | Ok () -> Keeper_msg_async_broadcast.requests_changed ~keeper_name
+   | Error error ->
+     if error.removed then Keeper_msg_async_broadcast.requests_changed ~keeper_name);
   match result with
   | Ok () -> Ok ()
   | Error error ->
@@ -1835,6 +1852,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                       rollback_rejected_record_file_unlocked
                         ~ops
                         ~ownership_root:base_path
+                        ~keeper_name:entry.keeper_name
                         path
                     with
                     | Ok () ->

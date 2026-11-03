@@ -12,7 +12,12 @@ type t = Off | Disabled of string | Ready of account
 type filter = All | Owned | Can_buy | In_slot of Keeper_portrait_item.slot
 val next_filter : filter -> filter
 val filter_name : filter -> string
-val items : filter:filter -> account:t option -> Keeper_portrait_item.t list
+val spendable_milli : account -> balance_milli:int option -> int
+(** [balance_milli] is the Keeper's balance now, computed from the roster's
+    Candle basis; [None] when the roster carries none, and then the account's
+    balance when it was read is the latest there is. *)
+
+val items : filter:filter -> account:t option -> balance_milli:int option -> Keeper_portrait_item.t list
 (** Account-dependent filters return no items until a ready account is read.
     Starting equipment does not imply ownership. Catalog order is retained. *)
 val cursor : items:Keeper_portrait_item.t list -> int -> int
@@ -23,7 +28,7 @@ val item_name : Keeper_portrait_item.t -> string
 type request =
   | Equip of Keeper_portrait_item.t
   | Buy_and_equip of { item : Keeper_portrait_item.t; expected_price_milli : int }
-val request : account:t option -> Keeper_portrait_item.t -> (request, string) result
+val request : account:t option -> balance_milli:int option -> Keeper_portrait_item.t -> (request, string) result
 (** An editable request for the selected Keeper's own tools, never a transaction.
     Buying is bounded by the observed price; owned items only request equip.
     Unavailable, unpriced and unaffordable selections return an explanation. *)

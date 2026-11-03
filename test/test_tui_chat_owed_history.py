@@ -41,7 +41,9 @@ class ChatServer(FixtureServer):
         self.release_history = threading.Event()
         self.failures_left = 0
         self.history_times: list[float] = []
-        self.events: queue.Queue[dict[str, object] | None] = queue.Queue()
+        # A dict is sent as an event, "close" ends this connection, None ends the test.
+        self.events: queue.Queue[dict[str, object] | str | None] = queue.Queue()
+        self.observer_connections = 0
 
 
 class ChatHandler(FixtureHandler):
@@ -59,10 +61,20 @@ class ChatHandler(FixtureHandler):
             pass
 
     def observe(self, server: ChatServer) -> None:
+        with server.condition:
+            server.observer_connections += 1
+        # A reconnect after the first stream names a restarted server, so the
+        # TUI cannot resume and reads the visible surfaces again.
+        resuming = self.headers.get("Last-Event-ID") is not None
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
-        self.send_header("x-masc-sse-instance-id", "chat-fixture-instance")
-        self.send_header("x-masc-sse-replay", "fresh")
+        self.send_header(
+            "x-masc-sse-instance-id",
+            "chat-fixture-successor" if resuming else "chat-fixture-instance",
+        )
+        self.send_header(
+            "x-masc-sse-replay", "reset-instance-changed" if resuming else "fresh"
+        )
         self.send_header("x-masc-workspace-read", "matched-v1")
         self.send_header("Connection", "close")
         self.end_headers()
@@ -72,6 +84,9 @@ class ChatHandler(FixtureHandler):
         while True:
             event = server.events.get()
             if event is None:
+                server.events.put(None)
+                break
+            if event == "close":
                 break
             cursor += 1
             try:
@@ -295,6 +310,31 @@ class ChatOwedHistoryTest(unittest.TestCase):
             second_wait = times[2] - times[1]
             self.assertGreater(first_wait, 1.0)
             self.assertGreater(second_wait, first_wait + 1.0)
+
+        self.run_chat(scenario)
+
+    def test_a_reopened_feed_reads_the_open_chat_again(self) -> None:
+        def scenario(server: ChatServer, step: Callable[..., None]) -> None:
+            server.set_phase("open")
+            step("keys", "c")
+            step(
+                "wait",
+                lambda: server.response_count("open", HISTORY_PATH) == 1,
+                "chat history did not load",
+            )
+            step("drain", 0.5)
+            server.set_phase("reopen")
+            server.events.put("close")
+            step(
+                "wait",
+                lambda: server.observer_connections >= 2,
+                "the observer feed did not reconnect",
+            )
+            step(
+                "wait",
+                lambda: server.response_count("reopen", HISTORY_PATH) >= 1,
+                "the reopened feed did not read the open chat again",
+            )
 
         self.run_chat(scenario)
 

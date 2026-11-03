@@ -822,18 +822,18 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Run_registry_already_installed `Exact_lane)));
-  let broadcast_internal_agent_runs_changed () =
-    Sse.broadcast (Internal_agent_runs_event.to_json ())
+  let broadcast_internal_agent_runs_changed registry () =
+    Sse.broadcast (Internal_agent_runs_event.to_json registry)
   in
   Atomic.set
     Verification_run_registry.change_observer_fn
-    broadcast_internal_agent_runs_changed;
+    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Verification);
   Atomic.set
     Goal_verification_run_registry.change_observer_fn
-    broadcast_internal_agent_runs_changed;
+    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Goal_verification);
   Atomic.set
     Exact_lane_run_registry.change_observer_fn
-    broadcast_internal_agent_runs_changed;
+    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Exact_lane);
   (* [main_eio] caches the normalized operator input before entering Eio.
      Replace that preflight value with the canonical owner identity before
      [Workspace.default_config_uncached] constructs its backend, otherwise the

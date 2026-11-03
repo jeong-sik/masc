@@ -324,6 +324,20 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check (option int) "agenda refresh does not replace the browsed page" (Some 25)
     (Option.bind state.schedules (fun page -> page.scs_request_count));
+  let read, before_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  state.schedules_agenda_event_pending <- true;
+  Types.apply_schedule_agenda_read state (ticket before_change) (Ok (snapshot 99));
+  check (option int) "a read overtaken by a schedule change cannot replace the agenda" (Some 3)
+    (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
+  check bool "the overtaken read is retired for its successor" false
+    (Types.Snapshot_read.in_flight state.schedules_agenda_read);
+  state.schedules_agenda_event_pending <- false;
+  let read, after_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  Types.apply_schedule_agenda_read state (ticket after_change) (Ok (snapshot 4));
+  check (option int) "the successor can publish the newer agenda" (Some 4)
+    (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check bool "A's identity action cannot mutate B's view" false
     (Types.keeper_detail_target_matches state "alpha");
   check bool "B's identity action can refresh its own view" true

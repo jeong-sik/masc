@@ -210,6 +210,24 @@ let app_data = "/api/v1/artifact-app-data"
 let drafts = "/api/v1/artifact-drafts"
 let checkpoints = "/api/v1/artifact-draft-checkpoints"
 
+let test_schedule_workspace_read_h1_h2 () =
+  with_gateway (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
+    let root = Filename.concat base_path ".masc" in
+    let endpoint = "/api/v1/dashboard/scheduled-automation" in
+    let query base root = "?expected_base_path=" ^ Uri.pct_encode base
+      ^ "&expected_masc_root=" ^ Uri.pct_encode root in
+    let matched = both gateway ~token:admin (endpoint ^ query base_path root) in
+    pair_status "matching schedule workspace" 200 matched;
+    List.iter (fun reply ->
+      check (option string) "schedule read attests its workspace"
+        (Some "matched-v1") (header "x-masc-workspace-read" reply))
+      [fst matched; snd matched];
+    pair_status "foreign schedule workspace" 409
+      (both gateway ~token:admin (endpoint ^ query "/foreign-workspace" root));
+    pair_status "partial schedule workspace" 400
+      (both gateway ~token:admin
+         (endpoint ^ "?expected_base_path=" ^ Uri.pct_encode base_path)))
+
 let test_goal_planning_workspace_read_h1_h2 () =
   with_gateway (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
     let config = Masc.Workspace.default_config base_path in
@@ -1117,6 +1135,7 @@ let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_s
   run ~argv "H2 artifact gateway"
     ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
        "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity;
+       "Schedule reads bind workspaces on H1 and H2", `Quick, test_schedule_workspace_read_h1_h2;
        "Goal planning binds workspace reads on H1 and H2", `Quick, test_goal_planning_workspace_read_h1_h2;
        "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read;
        "Goal confirmation shares H1 and H2 authority and completion", `Quick, test_goal_confirmation_h1_h2];

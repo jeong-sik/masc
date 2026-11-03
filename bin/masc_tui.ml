@@ -4083,7 +4083,8 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Schedules_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_schedules ~host ~port ~cursor:page.sp_cursor)
+    (capture_workspace_json_read state (fun () ->
+      Masc_tui_loader.load_schedules ~host ~port ~cursor:page.sp_cursor))
 
   end
 
@@ -4100,8 +4101,23 @@ let launch_schedule_agenda_load state ~mailbox =
         Masc_tui_async_read.launch
           ~deliver:(fun result ->
             enqueue_async mailbox (Schedules_loaded (Schedule_agenda_read ticket, result)))
-          (fun () -> Masc_tui_loader.load_schedules ~host ~port ~cursor:None)
+          (capture_workspace_json_read state (fun () ->
+            Masc_tui_loader.load_schedules ~host ~port ~cursor:None))
   end
+
+(* A change during an existing read needs one successor, since that read may
+   have observed the store before the change. Bursts share that successor. *)
+let launch_pending_schedule_agenda_load state ~mailbox =
+  if state.schedules_agenda_event_pending
+     && server_authority_ready state
+     && not (Snapshot_read.in_flight state.schedules_agenda_read) then begin
+    state.schedules_agenda_event_pending <- false;
+    launch_schedule_agenda_load state ~mailbox
+  end
+
+let request_schedule_agenda_revalidation state ~mailbox =
+  state.schedules_agenda_event_pending <- true;
+  launch_pending_schedule_agenda_load state ~mailbox
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
@@ -15498,6 +15514,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.schedules_agenda <- None;
   state.schedules_agenda_error <- None;
   state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
+  state.schedules_agenda_event_pending <- false;
   state.schedule_detail_id <- None;
   state.schedule_cancel_armed <- None;
   state.schedule_cancel_error <- None;
@@ -21355,6 +21372,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
       record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
       launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+      request_schedule_agenda_revalidation state ~mailbox;
       (* A change can land between the initial read and subscription, or
          during a disconnected interval. Read under the current authority. *)
       launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
@@ -21399,6 +21417,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let observer_source_loss_seen = ref false in
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
+      let waiting_sources_invalidated = ref false in
       let schedule_store_invalidated = ref false in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -21457,6 +21476,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed
                | Masc_tui_observer.Schedule_store_invalidated
+               | Masc_tui_observer.Pending_confirm_invalidated
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -21468,7 +21488,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Schedule_store_invalidated ->
+                   waiting_sources_invalidated := true;
                    schedule_store_invalidated := true
+               | Masc_tui_observer.Pending_confirm_invalidated ->
+                   waiting_sources_invalidated := true
                | Masc_tui_observer.Snapshot name
                  when String.equal name Masc.Dashboard_event_slices.execution_snapshot_type ->
                    execution_snapshot_seen := true
@@ -21598,6 +21621,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
       if !schedule_store_invalidated then
+        request_schedule_agenda_revalidation state ~mailbox;
+      if !waiting_sources_invalidated then
         launch_keeper_waiting_load ~change:Waiting_all state ~mailbox
       else if !waiting_inventory_changed <> [] then
         launch_keeper_waiting_load
@@ -23426,9 +23451,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Mtime_clock.elapsed_ns ()) (Result.is_ok result)
       end
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
-      apply_schedule_agenda_read state ticket result
+      let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
+      apply_schedule_agenda_read state ticket result;
+      if current then launch_pending_schedule_agenda_load state ~mailbox
   | Schedules_loaded (Schedule_page_read request, result) ->
-      apply_schedule_page_read state request result
+      let current_agenda =
+        Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
+          request.spr_agenda_ticket in
+      apply_schedule_page_read state request result;
+      if current_agenda then launch_pending_schedule_agenda_load state ~mailbox
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from

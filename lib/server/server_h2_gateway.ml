@@ -1276,12 +1276,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          the server over H2 must not see a different projection. *)
       | `GET, "/api/v1/dashboard/scheduled-automation" ->
           h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun admission ->
             let json =
               dashboard_scheduled_automation_query_http_json
-                ~config:(Mcp_server.workspace_config state)
-                httpun_request
+                ~config httpun_request
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:(admission @ cors)))
 
       (* The tool inventory had no H2 route at all: an H2 client got 404 where
          an HTTP/1 client got the inventory. Same selector as the HTTP/1 route,

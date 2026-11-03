@@ -24,6 +24,7 @@ from test_tui_fusion_recovery import FixtureHandler, FixtureServer
 
 
 TURNS_PATH = "/api/v1/keepers/turns"
+SCHEDULE_PATH = "/api/v1/dashboard/scheduled-automation"
 
 
 class WaitingServer(FixtureServer):
@@ -35,6 +36,10 @@ class WaitingServer(FixtureServer):
         self.release_held_read = threading.Event()
         self.followup_started = threading.Event()
         self.release_followup = threading.Event()
+        self.agenda_held_started = threading.Event()
+        self.release_agenda_held = threading.Event()
+        self.agenda_followup_started = threading.Event()
+        self.release_agenda_followup = threading.Event()
         self.events: queue.Queue[tuple[int, str] | None] = queue.Queue()
         self.valid_admission = True
 
@@ -106,6 +111,8 @@ class WaitingHandler(FixtureHandler):
                     }
                 elif keeper == "__schedule__":
                     payload = {"type": "schedule_store_invalidated"}
+                elif keeper == "__pending_confirm__":
+                    payload = {"type": "operator_pending_confirm_invalidated"}
                 else:
                     payload = {
                         "type": "keeper_waiting_inventory_changed",
@@ -123,6 +130,33 @@ class WaitingHandler(FixtureHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     break
             self.close_connection = True
+        elif request.path == SCHEDULE_PATH:
+            phase = server.record(SCHEDULE_PATH)
+            expected = urllib.parse.parse_qs(request.query)
+            if expected.get("expected_base_path") != [server.base] or expected.get(
+                "expected_masc_root"
+            ) != [server.base + "/.masc"]:
+                server.valid_admission = False
+                self.respond(409, {"error": "workspace precondition failed"})
+                return
+            if phase == "agenda-held":
+                server.agenda_held_started.set()
+                server.release_agenda_held.wait()
+            elif phase == "agenda-follow":
+                server.agenda_followup_started.set()
+                server.release_agenda_followup.wait()
+            body = {
+                "generated_at": "2026-11-02T00:00:00Z",
+                "status": "ok",
+                "request_count": 0,
+                "truncated": False,
+                "fsm": {"next_due_at": None},
+                "counts": None,
+                "requests": [],
+                "schedule_runner": {"status": "ok"},
+            }
+            if self.respond(200, body, workspace_receipt=True):
+                server.responded(phase, SCHEDULE_PATH)
         elif request.path == TURNS_PATH:
             phase = server.record(TURNS_PATH)
             expected = urllib.parse.parse_qs(request.query)
@@ -145,6 +179,7 @@ class WaitingHandler(FixtureHandler):
                 "collision-follow": "collision-recovered",
                 "collision-during": "collision-ignored",
                 "schedule": "schedule-refreshed",
+                "confirm": "confirm-refreshed",
                 "schedule-held": "obsolete-schedule",
                 "schedule-follow": "final-schedule",
                 "reconnect": "reconnected-waiting",
@@ -315,6 +350,7 @@ class WaitingEventTest(unittest.TestCase):
                         server.observer_ready.is_set()
                         and server.response_count("setup", "/health") >= 2
                         and server.response_count("setup", TURNS_PATH) >= 1
+                        and server.response_count("setup", SCHEDULE_PATH) >= 1
                     ),
                     "observer and initial turns read were not ready",
                 )
@@ -336,6 +372,7 @@ class WaitingEventTest(unittest.TestCase):
                 server.set_phase("quiet")
                 drain_for(1.0)
                 self.assertEqual(server.count("quiet", TURNS_PATH), 0)
+                self.assertEqual(server.count("quiet", SCHEDULE_PATH), 0)
                 server.set_phase("held")
                 event_output_start = len(output)
                 server.events.put((1, "analyst"))
@@ -477,6 +514,10 @@ class WaitingEventTest(unittest.TestCase):
                     "schedule invalidation did not re-read waiting inventory",
                 )
                 wait_until(
+                    lambda: server.response_count("schedule", SCHEDULE_PATH) == 1,
+                    "schedule invalidation did not refresh the agenda",
+                )
+                wait_until(
                     lambda: rendered_row_contains(
                         schedule_output_start, b"analyst", b"schedule-refreshed"
                     )
@@ -513,6 +554,43 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 self.assertNotIn(b"obsolete-schedule", output[schedule_race_start:])
                 self.assertEqual(server.count("schedule-after", TURNS_PATH), 0)
+                server.set_phase("agenda-held")
+                server.events.put((9, "__schedule__"))
+                wait_until(server.agenda_held_started.is_set, "agenda read did not start")
+                server.set_phase("agenda-queued")
+                server.events.put((10, "__schedule__"))
+                wait_until(
+                    lambda: server.count("agenda-queued", "observer-event-written") == 1,
+                    "second agenda invalidation was not delivered",
+                )
+                self.assertEqual(server.count("agenda-queued", SCHEDULE_PATH), 0)
+                server.set_phase("agenda-follow")
+                server.release_agenda_held.set()
+                wait_until(server.agenda_followup_started.is_set, "agenda follow-up did not start")
+                self.assertEqual(server.count("agenda-follow", SCHEDULE_PATH), 1)
+                server.set_phase("agenda-after")
+                server.release_agenda_followup.set()
+                wait_until(
+                    lambda: server.response_count("agenda-follow", SCHEDULE_PATH) == 1,
+                    "agenda follow-up did not finish",
+                )
+                drain_for(0.5)
+                self.assertEqual(server.count("agenda-after", SCHEDULE_PATH), 0)
+                server.set_phase("confirm")
+                confirm_output_start = len(output)
+                server.events.put((11, "__pending_confirm__"))
+                wait_until(
+                    lambda: server.response_count("confirm", TURNS_PATH) == 1,
+                    "pending confirmation invalidation did not re-read waiting inventory",
+                )
+                wait_until(
+                    lambda: rendered_row_contains(
+                        confirm_output_start, b"analyst", b"confirm-refreshed"
+                    ),
+                    "pending confirmation invalidation did not refresh the waiting row",
+                )
+                drain_for(0.5)
+                self.assertEqual(server.count("confirm", SCHEDULE_PATH), 0)
                 server.set_phase("reconnect")
                 reconnect_output_start = len(output)
                 server.events.put(None)
@@ -529,6 +607,10 @@ class WaitingEventTest(unittest.TestCase):
                     "reconnected observer did not revalidate waiting inventory",
                 )
                 wait_until(
+                    lambda: server.response_count("reconnect", SCHEDULE_PATH) == 1,
+                    "reconnected observer did not revalidate the agenda",
+                )
+                wait_until(
                     lambda: rendered_row_contains(
                         reconnect_output_start, b"analyst", b"reconnected-waiting"
                     ),
@@ -539,6 +621,8 @@ class WaitingEventTest(unittest.TestCase):
             finally:
                 server.release_held_read.set()
                 server.release_followup.set()
+                server.release_agenda_held.set()
+                server.release_agenda_followup.set()
                 server.events.put(None)
                 server.release_recovery.set()
                 server.release_recovery_health.set()

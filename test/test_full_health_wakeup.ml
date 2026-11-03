@@ -465,7 +465,7 @@ let test_schedule_publication_wakes_its_workspace () =
         Masc.Sse.subscribe_external ~runtime_authority:authority ~id:external_id
           ~callback:(fun _ -> incr external_calls) ();
         Eio.Switch.run (fun sw ->
-        Server_schedule_invalidation.start ~sw;
+        Server_schedule_invalidation.start ~sw ~mono_clock:(Eio.Stdenv.mono_clock env);
         reset ();
         let before_id = Masc.Sse.current_id () in
         let receive stream =
@@ -518,8 +518,9 @@ let test_schedule_publication_wakes_its_workspace () =
           (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream)))))
 ;;
 
-let test_schedule_worker_coalesces_and_preserves_successor () =
+let test_schedule_worker_coalesces_retries_and_preserves_successor () =
   let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-invalidation-workspace" in
   let previous_fs = Fs_compat.get_fs_opt () in
   Fun.protect
     ~finally:(fun () ->
@@ -527,13 +528,16 @@ let test_schedule_worker_coalesces_and_preserves_successor () =
       (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
+      Unix.mkdir other_path 0o755;
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
         let config = Workspace_core.default_config base_path in
+        let other = Workspace_core.default_config other_path in
         ignore (Workspace_core.init config ~agent_name:(Some "test"));
+        ignore (Workspace_core.init other ~agent_name:(Some "test"));
         let actor : Schedule_domain.actor =
           { id = "test"; kind = Schedule_domain.Human_operator; display_name = None } in
-        let insert schedule_id =
+        let insert config schedule_id =
           let request = match Schedule_domain.create_request ~schedule_id
             ~requested_by:actor ~scheduled_by:actor ~requested_at:100.0 ~due_at:200.0
             ~payload:(`Assoc [ "kind", `String "consumer.note"; "body", `Assoc [] ])
@@ -543,33 +547,44 @@ let test_schedule_worker_coalesces_and_preserves_successor () =
           match Schedule_store.insert_request config ~runner_tick_sec:1.0 request with
           | Ok _ -> ()
           | Error err -> fail (Schedule_store.store_error_to_string err) in
-        let started = Eio.Stream.create 4 in
+        let started = Eio.Stream.create 8 in
         let release, release_u = Eio.Promise.create () in
-        let publications = ref 0 and successor_calls = ref 0 in
+        let publications = ref 0 and current_publications = ref 0 in
+        let successor_calls = ref 0 in
         Eio.Switch.run (fun sw ->
           Server_schedule_invalidation.For_testing.start ~sw
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
             ~invalidate:(fun ~base_path:_ -> ())
-            ~publish:(fun ~base_path ->
+            ~publish:(fun ~base_path:source ->
               incr publications;
-              Eio.Stream.add started base_path;
-              if !publications = 1 then Eio.Promise.await release
-              else if !publications = 2 then raise (Eio.Cancel.Cancelled Exit));
+              Eio.Stream.add started source;
+              if String.equal source base_path then begin
+                incr current_publications;
+                if !current_publications = 1 then Eio.Promise.await release
+                else if !current_publications = 2 then raise (Eio.Cancel.Cancelled Exit)
+                else if !current_publications = 3 then
+                  failwith "workspace-invalidation-secret-do-not-log"
+              end);
           let receive () =
             Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0
               (fun () -> Eio.Stream.take started) in
-          insert "first";
+          insert config "first";
           check string "first publication starts" base_path (receive ());
-          insert "second";
-          insert "third";
-          check int "writes return while the publisher is held" 1 !publications;
+          insert config "second";
+          insert config "third";
+          check int "writes return while their publisher is held" 1 !publications;
+          insert other "other";
+          check string "another workspace publishes while first is held" other_path (receive ());
           Eio.Promise.resolve release_u ();
           check string "one follow-up covers both writes" base_path (receive ());
-          Eio.Fiber.yield ();
-          check int "duplicate workspace signals coalesce" 2 !publications;
-          insert "after-callback-cancellation";
-          check string "callback cancellation does not stop the worker" base_path (receive ());
+          check string "callback cancellation is retried without another write" base_path (receive ());
+          check string "ordinary callback failure is retried" base_path (receive ());
+          Eio.Time.sleep (Eio.Stdenv.clock env) 1.1;
+          check int "duplicate signals coalesce and idle does not retry" 5 !publications;
+          insert config "after-callback-cancellation";
+          check string "later changes still publish" base_path (receive ());
           Schedule_store.install_change_observer (fun ~base_path:_ -> incr successor_calls));
-        insert "after-stop";
+        insert config "after-stop";
         check int "worker shutdown leaves a successor installed" 1 !successor_calls))
 ;;
 
@@ -635,8 +650,8 @@ let () =
             test_approval_health_callback_preserves_scope_cancellation
         ; test_case "schedule publication wakes its workspace" `Quick
             test_schedule_publication_wakes_its_workspace
-        ; test_case "schedule worker coalesces and preserves its successor" `Quick
-            test_schedule_worker_coalesces_and_preserves_successor
+        ; test_case "schedule worker coalesces, retries and preserves its successor" `Quick
+            test_schedule_worker_coalesces_retries_and_preserves_successor
         ; test_case "pending confirm publication wakes its workspace" `Quick
             test_pending_confirm_publication_wakes_its_workspace
         ]

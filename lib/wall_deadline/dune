@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name wall_deadline)
+ (public_name masc.wall_deadline)
+ (libraries eio.unix unix)
+ (foreign_stubs (language c) (names wall_deadline_stubs)))

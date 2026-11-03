@@ -146,6 +146,27 @@ let test_failed_read_waits_for_publication () =
       check int "publication retries observation" 2 !reads;
       check int "publication and recovery invalidate health" 3 !invalidations))
 
+let test_unavailable_wall_timer_waits_for_publication () =
+  with_workspace (fun env state config ->
+    let clock = Eio.Stdenv.clock env in
+    let text, _ = future_time clock 20.0 in
+    let entries = ref [fixture ~token:"timer" ~expires_at:(Some text)] in
+    let reads = ref 0 and waits = ref 0 and invalidations = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Expiry.For_testing.start_with_sleep ~sw ~clock ~state
+        ~sleep_until:(fun _ -> incr waits; failwith "timer source unavailable")
+        ~read:(fun _ -> incr reads; Ok !entries)
+        ~invalidate:(fun ~base_path:_ -> incr invalidations);
+      wait_for clock (fun () -> !invalidations >= 1);
+      Eio.Time.sleep clock 0.2;
+      check int "failed timer is not retried on a cadence" 1 !waits;
+      check int "failed timer does not trigger repeated reads" 1 !reads;
+      entries := [];
+      Store.write_pending_confirms config [] |> Result.get_ok;
+      wait_for clock (fun () -> !reads >= 2);
+      check int "a later publication resumes observation" 2 !reads))
+;;
+
 let test_expired_at_start_wakes_once () =
   with_workspace (fun env state config ->
     let clock = Eio.Stdenv.clock env in
@@ -241,7 +262,7 @@ let test_persisted_deadline_wakes_full_health () =
           let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
           Domain_pool_ref.set pool;
           Eio.Switch.on_release sw Domain_pool_ref.clear_for_tests;
-          Expiry.start ~sw ~clock ~state;
+          Expiry.start ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~state;
           Eio.Fiber.yield ();
           check bool "persisted future entry does not wake early" false
             (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
@@ -250,6 +271,84 @@ let test_persisted_deadline_wakes_full_health () =
             Runtime.For_testing.take_full_health_wakeup ());
           check int "store cleanup drops the expired entry" 0
             (List.length (Store.read_pending_confirms_result config |> Result.get_ok)))))
+
+let test_store_and_deadline_publish_scoped_sse () =
+  with_workspace (fun env state config ->
+    let clock = Eio.Stdenv.clock env in
+    let base_path = config.Masc.Workspace.base_path in
+    let other_path = Filename.concat base_path "foreign-confirm-workspace" in
+    let current_session = "pending-confirm-invalidation-current" in
+    let other_session = "pending-confirm-invalidation-other" in
+    let external_id = "pending-confirm-invalidation-external" in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    let module Runtime = Server_routes_http_runtime in
+    Fun.protect ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external external_id;
+      Masc.Sse.unregister current_session;
+      Masc.Sse.unregister other_session;
+      ignore (Masc.Session.McpSessionStore.remove current_session);
+      ignore (Masc.Session.McpSessionStore.remove other_session);
+      Server_auth.For_testing.restore_server_state previous_state;
+      Runtime.For_testing.reset_full_health_snapshot ();
+      ignore (Runtime.For_testing.take_full_health_wakeup_nonblocking ()))
+      (fun () ->
+        Unix.mkdir other_path 0o755;
+        let other = Workspace_core.default_config other_path in
+        ignore (Workspace_core.init other ~agent_name:(Some "test"));
+        Fs_compat.mkdir_p (Store.operator_dir other);
+        Server_auth.For_testing.restore_server_state (Some state);
+        let register path session_id =
+          let auth = Masc_test_deps.make_sse_auth path "pending-confirm-test" in
+          ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
+          match Masc.Sse.register ~kind:Observer ~auth session_id ~last_event_id:0 with
+          | Ok (_, stream, _) -> stream
+          | Error error -> fail (Masc.Sse.registration_error_to_string error) in
+        let current_stream = register base_path current_session in
+        let other_stream = register other_path other_session in
+        let authority = Masc.Sse.runtime_authority_exn ~base_path in
+        let external_calls = ref 0 in
+        Masc.Sse.subscribe_external ~runtime_authority:authority ~id:external_id
+          ~callback:(fun _ -> incr external_calls) ();
+        let receive stream =
+          Eio.Time.with_timeout_exn clock 5.0 (fun () -> Masc.Sse.take_delivery stream) in
+        let before_id = Masc.Sse.current_id () in
+        Eio.Switch.run (fun sw ->
+          let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+          Domain_pool_ref.set pool;
+          Eio.Switch.on_release sw Domain_pool_ref.clear_for_tests;
+          Expiry.start ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~state;
+          Store.write_pending_confirms other [] |> Result.get_ok;
+          let foreign = receive other_stream in
+          check bool "foreign store event is scoped" true
+            (foreign.payload = Masc.Pending_confirm_invalidation_event.json);
+          check bool "foreign write does not reach current observer" true
+            (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream));
+          let text, at = future_time clock 3.5 in
+          Store.write_pending_confirms config
+            [fixture ~token:"not-for-sse" ~expires_at:(Some text)] |> Result.get_ok;
+          let written = receive current_stream in
+          check bool "write emits only the invalidation" true
+            (written.payload = Masc.Pending_confirm_invalidation_event.json);
+          check bool "current write does not reach foreign observer" true
+            (Option.is_none (Masc.Sse.take_delivery_nonblocking other_stream));
+          Eio.Time.sleep clock 0.15;
+          check bool "future deadline does not emit early" true
+            (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream));
+          Eio.Time.sleep_until clock (at +. 0.15);
+          let expired = receive current_stream in
+          check bool "deadline emits only the invalidation" true
+            (expired.payload = Masc.Pending_confirm_invalidation_event.json);
+          Eio.Time.sleep clock 0.15;
+          check bool "uncleared expiry does not emit twice" true
+            (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream));
+          check int "no external subscriber callback" 0 !external_calls;
+          let replay = Masc.Sse.replay_after_for_session ~runtime_authority:authority
+            ~session_id:current_session ~kind:Observer before_id in
+          check int "write and deadline are replayed only for this workspace" 2
+            (List.length replay.deliveries));
+        Store.write_pending_confirms config [] |> Result.get_ok;
+        check bool "stopped worker does not enqueue to its old stream" true
+          (Option.is_none (Masc.Sse.take_delivery_nonblocking current_stream))))
 
 let test_shutdown_preserves_successor_observer () =
   with_workspace (fun env state config ->
@@ -272,6 +371,8 @@ let () =
           test_replaced_workspace_discards_old_read
       ; test_case "failed source waits for publication" `Quick
           test_failed_read_waits_for_publication
+      ; test_case "unavailable wall timer waits for publication" `Quick
+          test_unavailable_wall_timer_waits_for_publication
       ; test_case "expired entry at startup wakes once" `Quick
           test_expired_at_start_wakes_once
       ; test_case "publication during read rearms deadline" `Quick
@@ -280,6 +381,8 @@ let () =
           test_non_eio_failed_attempt_wakes_worker
       ; test_case "persisted deadline wakes full health" `Quick
           test_persisted_deadline_wakes_full_health
+      ; test_case "store and deadline publish scoped SSE" `Quick
+          test_store_and_deadline_publish_scoped_sse
       ; test_case "shutdown preserves successor observer" `Quick
           test_shutdown_preserves_successor_observer
       ] ]

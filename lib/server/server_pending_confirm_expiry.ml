@@ -30,7 +30,7 @@ let expiry_plan ~now entries =
     { expired = Expiry_set.empty; next = None } entries
 ;;
 
-let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
+let start_with ~sw ~clock ~sleep_until ~(state : Mcp_server.server_state) ~read ~invalidate ~restore =
   let wake = Eio.Stream.create 1 in
   let wake_mu = Stdlib.Mutex.create () in
   let signal () =
@@ -48,7 +48,7 @@ let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
   Operator_pending_confirm.install_change_observer observer;
   Eio.Switch.on_release sw (fun () ->
     ignore (Operator_pending_confirm.replace_change_observer_if_current
-      ~current:observer ~replacement:invalidate));
+      ~current:observer ~replacement:restore));
   let is_current scope =
     Mcp_server.Workspace_scope_epoch.equal scope.Mcp_server.epoch
       (Mcp_server.workspace_scope state).epoch in
@@ -60,8 +60,21 @@ let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
         | None -> Eio.Stream.take wake; `Changed
         | Some at ->
             Eio.Fiber.first
-              (fun () -> Eio.Time.sleep_until clock at; `Deadline)
+              (fun () ->
+                match sleep_until at with
+                | () -> `Deadline
+                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                | exception _ -> `Timer_unavailable)
               (fun () -> Eio.Stream.take wake; `Changed)) in
+  let rec await_usable_next scope next =
+    match await_next scope next with
+    | `Timer_unavailable ->
+      (* The periodic fallback still owns recovery when the platform cannot
+         install a deadline. Do not spin or kill the server switch. *)
+      Log.Server.error "pending-confirm wall deadline unavailable";
+      invalidate ~base_path:scope.Mcp_server.config.base_path;
+      await_usable_next scope None
+    | (`Replaced | `Changed | `Deadline) as result -> result in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec scan scope notified source_failed =
       let result = Eio.Fiber.first
@@ -85,7 +98,7 @@ let start_with ~sw ~clock ~(state : Mcp_server.server_state) ~read ~invalidate =
                  not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) then
                 invalidate ~base_path:scope.config.base_path;
               plan.expired, plan.next, false in
-        match await_next scope next with
+        match await_usable_next scope next with
         | `Replaced -> follow_current ()
         | `Changed | `Deadline -> scan scope notified source_failed
     and follow_current () =
@@ -103,11 +116,24 @@ let read_storage config =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let start ~sw ~clock ~state =
-  start_with ~sw ~clock ~state ~read:read_storage
-    ~invalidate:Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace
+let start ~sw ~clock ~mono_clock ~state =
+  let publish ~base_path =
+    let authority = Sse.runtime_authority_exn ~base_path in
+    Sse.broadcast_to_sse_runtime_observers authority Pending_confirm_invalidation_event.json in
+  let enqueue = Server_workspace_invalidation.start ~sw ~mono_clock ~publish in
+  let restore = Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace in
+  let invalidate ~base_path =
+    enqueue ~base_path;
+    restore ~base_path in
+  start_with ~sw ~clock ~sleep_until:Wall_deadline.sleep_until ~state
+    ~read:read_storage ~invalidate ~restore
 ;;
 
 module For_testing = struct
-  let start = start_with
+  let start_with_sleep ~sleep_until ~sw ~clock ~state ~read ~invalidate =
+    start_with ~sw ~clock ~sleep_until ~state ~read ~invalidate ~restore:invalidate
+
+  let start ~sw ~clock ~state ~read ~invalidate =
+    start_with_sleep ~sleep_until:(Eio.Time.sleep_until clock)
+      ~sw ~clock ~state ~read ~invalidate
 end

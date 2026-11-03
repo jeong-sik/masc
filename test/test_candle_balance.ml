@@ -243,6 +243,76 @@ let test_wallet_decay_and_policy_observation () =
   check int "only keepers >= min_active_balance_milli count as active" 1
     summary_t3_filtered.active_keepers
 
+(* RFC-0481 §3.7: a reader holding the fold's basis draws what the server
+   would fold at the same instant, through policy boundaries and for Keepers
+   with and without a balance. *)
+let test_the_decay_basis_folds_to_the_same_values_later () =
+  let t1 = at "2026-09-29T01:00:00Z" and t2 = at "2026-09-29T02:00:00Z"
+  and t3 = at "2026-09-29T03:00:00Z" in
+  let item = match Keeper_portrait_item.of_id "glasses" with Some item -> item | None -> fail "item missing" in
+  let ledgers : (string * Candle_event.t list * string list) list =
+    [ ( "two wallets under one half-life"
+      , [ {at=now;body=Candle_event.Half_life_set (Candle_decay.Hours 1)}
+        ; {at=now;body=Candle_event.Paid (payment "quiet-wallet" 1000)}
+        ; {at=t1;body=Candle_event.Paid (payment ~keeper:"other" "active-wallet" 777)} ]
+      , [ "2026-09-29T01:00:00Z"; "2026-09-29T01:20:07Z"; "2026-09-29T02:00:00Z"
+        ; "2026-09-30T13:45:59Z" ] )
+    ; ( "half-life switched on and off"
+      , [ {at=now;body=Candle_event.Half_life_set Candle_decay.Off}
+        ; {at=now;body=Candle_event.Paid (payment "decay-funded" 1000)}
+        ; {at=t1;body=Candle_event.Half_life_set (Candle_decay.Hours 1)}
+        ; {at=t2;body=Candle_event.Purchased {keeper="keeper";item;amount_milli=400}}
+        ; {at=t3;body=Candle_event.Half_life_set Candle_decay.Off} ]
+      , [ "2026-09-29T03:00:00Z"; "2026-09-29T08:00:00Z" ] ) ] in
+  List.iter (fun (label, rows, instants) ->
+      let basis = match Candle_decay_basis.of_events rows with
+        | Ok basis -> basis | Error error -> fail (Candle_balance.error_to_string error) in
+      check bool (label ^ ": the basis reads back as written") true
+        (Candle_decay_basis.of_json (Candle_decay_basis.to_json basis) = Ok basis);
+      List.iter (fun text ->
+          let instant = at text in
+          let folded = match Candle_balance.of_events ~at:instant rows with
+            | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+          List.iter (fun keeper ->
+              match Candle_decay_basis.balance_at basis ~keeper ~at:instant with
+              | Ok balance ->
+                check int (String.concat " " [label; text; keeper])
+                  (Candle_balance.balance folded ~keeper) balance
+              | Error error -> fail (Candle_decay.error_to_string error))
+            [ "keeper"; "other"; "nobody" ];
+          match Candle_decay_basis.supply_at basis ~at:instant with
+          | Ok supply ->
+            let expected = Candle_balance.supply folded in
+            check string (String.concat " " [label; text; "issued"]) expected.issued_milli supply.issued_milli;
+            check string (String.concat " " [label; text; "burned"]) expected.burned_milli supply.burned_milli;
+            check string (String.concat " " [label; text; "circulating"])
+              expected.circulating_milli supply.circulating_milli
+          | Error error -> fail (Candle_decay.error_to_string error))
+        instants)
+    ledgers
+
+let test_the_decay_basis_refuses_what_the_fold_refuses () =
+  (match Candle_decay_basis.of_events [row (payment "goal" 1000)] with
+   | Error Candle_balance.Missing_half_life -> ()
+   | Ok _ | Error _ -> fail "a wallet without a half-life was given a basis");
+  let basis = match Candle_decay_basis.of_events [policy; row (payment "goal" 1000)] with
+    | Ok basis -> basis | Error error -> fail (Candle_balance.error_to_string error) in
+  (match Candle_decay_basis.balance_at basis ~keeper:"keeper" ~at:(at "2026-09-28T23:00:00Z") with
+   | Error Candle_decay.Reversed_interval -> ()
+   | Ok _ | Error _ -> fail "a time before the last balance event was answered");
+  let refused label json =
+    match Candle_decay_basis.of_json (Yojson.Safe.from_string json) with
+    | Error _ -> ()
+    | Ok _ -> fail label in
+  refused "a half-life without a wallet"
+    {|{"issued_milli":"0","burned_milli":"0","half_life":"off","keepers":[]}|};
+  refused "a wallet without a half-life"
+    {|{"issued_milli":"1","burned_milli":"0","half_life":null,"keepers":[{"name":"a","since":"2026-09-29T00:00:00Z","amount_milli":"1"}]}|};
+  refused "Keepers out of order"
+    {|{"issued_milli":"2","burned_milli":"0","half_life":"off","keepers":[{"name":"b","since":"2026-09-29T00:00:00Z","amount_milli":"1"},{"name":"a","since":"2026-09-29T00:00:00Z","amount_milli":"1"}]}|};
+  refused "an unknown field"
+    {|{"issued_milli":"0","burned_milli":"0","half_life":null,"keepers":[],"extra":1}|}
+
 let () = run "candle_balance"
   ["ledger credits", [test_case "serialized payments cannot overflow a balance" `Quick test_cumulative_credit_boundary;
     test_case "a Goal is credited once" `Quick test_one_credit_per_goal;
@@ -253,4 +323,6 @@ let () = run "candle_balance"
     test_case "observations and other activity do not alter wallet decay" `Quick test_observation_and_nonmoney_events_do_not_change_decay;
     test_case "money requires explicit policy and known time" `Quick test_money_requires_policy_and_known_time;
     test_case "policy chronology is enforced before the first wallet" `Quick test_policy_clock_before_first_wallet;
-    test_case "wallet decay and policy observation track cumulative decay and supply summary" `Quick test_wallet_decay_and_policy_observation]]
+    test_case "wallet decay and policy observation track cumulative decay and supply summary" `Quick test_wallet_decay_and_policy_observation;
+    test_case "the decay basis folds to the same values later" `Quick test_the_decay_basis_folds_to_the_same_values_later;
+    test_case "the decay basis refuses what the fold refuses" `Quick test_the_decay_basis_refuses_what_the_fold_refuses]]

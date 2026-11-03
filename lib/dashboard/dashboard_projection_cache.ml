@@ -110,11 +110,14 @@ let keeper_names_in_snapshot snapshot =
   in
   List.rev rev_acc
 
-let with_current_keeper_observations_using ~read ~(config : Workspace_utils.config) snapshot =
-  (* Execution and briefing read operator rows, not the Keeper HTTP roster.
-     Equipment, balances and supply share one fresh ledger view per response. *)
+(* Equipment, balances and supply share one fresh ledger view per response.
+   The ordering witness below is taken before that view is read. *)
+let read_candle_for_response ~read =
   let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
-  let candle = read () in
+  request_sequence, read ()
+
+let project_keeper_observations ~request_sequence ~candle ~(config : Workspace_utils.config)
+    snapshot =
   let equipment = Candle_observe.equipment candle in
   let account_revision = Candle_observe.account_revision_reader candle in
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
@@ -204,27 +207,46 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
      | _ -> `Assoc (set "candle" summary projected))
   | json -> json
 
+let with_current_keeper_observations_using ~read ~config snapshot =
+  (* Execution and briefing read operator rows, not the Keeper HTTP roster. *)
+  let request_sequence, candle = read_candle_for_response ~read in
+  project_keeper_observations ~request_sequence ~candle ~config snapshot
+
 let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
   with_current_keeper_observations_using
     ~read:(fun () -> Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path)
     ~config snapshot
 
-let with_current_gate_keeper_observations ~config snapshot =
+let with_current_gate_keeper_observations ~(config : Workspace_utils.config) snapshot =
+  let request_sequence, candle =
+    read_candle_for_response
+      ~read:(fun () -> Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path)
+  in
+  let project = project_keeper_observations ~request_sequence ~candle ~config in
+  (* The roster answer carries the fold's basis beside [candle], from the same
+     ledger view, so a reader computes the balances and the supply at a later
+     time without reading again (RFC-0481 §3.7). *)
+  let decay =
+    match Candle_observe.decay_basis candle with
+    | Some basis -> Candle_decay_basis.to_json basis
+    | None -> `Null
+  in
   (* Project only compact row objects; the independent [keepers] name list
      must remain untouched, including when the response also contains items. *)
   match snapshot with
   | `Assoc fields when List.mem_assoc "items" fields ->
       let items = List.assoc "items" fields in
-      let projected = with_current_keeper_observations ~config
-        (`Assoc ["keepers", items]) in
+      let projected = project (`Assoc ["keepers", items]) in
       let rows = Yojson.Safe.Util.member "keepers" projected in
-      let candle = Yojson.Safe.Util.member "candle" projected in
-      `Assoc (("candle", candle) ::
-        (List.remove_assoc "candle" fields |> List.map (fun (key, value) ->
-          key, if key = "items" then rows else value)))
+      let summary = Yojson.Safe.Util.member "candle" projected in
+      `Assoc (("candle", summary) :: ("candle_decay", decay) ::
+        (List.remove_assoc "candle_decay" (List.remove_assoc "candle" fields)
+         |> List.map (fun (key, value) -> key, if key = "items" then rows else value)))
   | _ ->
-      match with_current_keeper_observations ~config snapshot with
-      | `Assoc fields -> `Assoc (List.remove_assoc "candle_observation_sequence" fields)
+      match project snapshot with
+      | `Assoc fields ->
+          `Assoc (("candle_decay", decay)
+                  :: List.remove_assoc "candle_observation_sequence" fields)
       | json -> json
 
 module For_test = struct

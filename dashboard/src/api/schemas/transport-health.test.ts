@@ -44,6 +44,7 @@ const currentWire = {
     relay_retry_broadcast: 0,
     relay_drop_total: 0,
     relay_drop_queue: 0,
+    relay_drop_prepare: 0,
     relay_drop_append: 0,
     relay_drop_broadcast: 0,
     hot_sessions: [],

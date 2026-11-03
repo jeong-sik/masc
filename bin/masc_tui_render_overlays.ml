@@ -835,6 +835,7 @@ let render_help (state : state) =
 let agenda_lines (state : state) =
   let _terminal_rows, cols = get_terminal_size () in
   Agenda.overlay
+    ~ko:(state.ui_language = Lang_ko)
     ~now:(Unix.gettimeofday ())
     ~localtime:Unix.localtime
     ~cols:(framed_inner_width cols)

@@ -33,7 +33,7 @@ let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
 let sse_session_kinds = [ Observer; Agent_stream; Presence ]
 let relay_retry_stages = [ "append"; "broadcast" ]
-let relay_drop_stages = [ "queue"; "append"; "broadcast" ]
+let relay_drop_stages = [ "queue"; "prepare"; "append"; "broadcast" ]
 
 let () =
   List.iter
@@ -638,6 +638,9 @@ let transport_health_json () =
   let relay_drop_queue =
     int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "queue" ] ())
   in
+  let relay_drop_prepare =
+    int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "prepare" ] ())
+  in
   let relay_drop_append =
     int_of_float
       (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "append" ] ())
@@ -717,6 +720,7 @@ let transport_health_json () =
           ; "relay_retry_broadcast", `Int relay_retry_broadcast
           ; "relay_drop_total", `Int relay_drop_total
           ; "relay_drop_queue", `Int relay_drop_queue
+          ; "relay_drop_prepare", `Int relay_drop_prepare
           ; "relay_drop_append", `Int relay_drop_append
           ; "relay_drop_broadcast", `Int relay_drop_broadcast
           ; ( "hot_sessions"

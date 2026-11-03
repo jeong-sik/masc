@@ -104,10 +104,13 @@ type 'row reading =
           it to a terminal row; projecting and counting rows do not render it. *)
   | Read of 'row list
 
+type schedule_freshness = Last_read | Refresh_needed
+
 type t
 
 val project :
   scheduled:scheduled reading ->
+  scheduled_freshness:schedule_freshness ->
   awaiting:awaiting reading ->
   asking:open_question reading ->
   confirming:goal_to_confirm reading ->
@@ -117,9 +120,8 @@ val project :
     are not on the strip. [stalled] arrives oldest claim/start first. *)
 
 val rows_taken : t -> int
-(** [1] while a wake is coming, [0] otherwise. The surface gets the row back
-    when it is [0]. Work waiting on the operator does not take this row: it is
-    on the surface strip, which every frame has. *)
+(** [1] while a wake is coming or a previously read schedule may be stale,
+    [0] otherwise. Work waiting on the operator is on the surface strip. *)
 
 val waiting : t -> int
 (** Held calls, open questions and Goals to confirm. A Task route observation
@@ -139,7 +141,7 @@ val waiting_label : ?ko:bool -> cells:int -> t -> string
     English. *)
 
 val strip :
-  now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> string option
+  ?ko:bool -> now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> string option
 (** The row above the composer: the next wake, or [None] exactly when
     {!rows_taken} is [0].
 
@@ -181,7 +183,7 @@ type line =
   }
 
 val overlay :
-  now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
+  ?ko:bool -> now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
     operator, then the questions Keepers asked and nobody answered, then the
     Goals waiting for the operator's confirmation, then the tasks stuck on

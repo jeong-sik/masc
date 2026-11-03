@@ -3998,9 +3998,11 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
       state.schedule_wake_history_inflight <- Some schedule_id;
       let host = server_peer_host in
       let port = state.port in
+      let read = capture_workspace_json_read state (fun () ->
+        Masc_tui_loader.load_schedule_wake_history ~host ~port ~schedule_id) in
       let run () =
         let result =
-          try Masc_tui_loader.load_schedule_wake_history ~host ~port ~schedule_id with
+          try read () with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
@@ -4044,9 +4046,9 @@ let launch_keeper_schedules_load ?page state ~mailbox ~keeper_name =
     ~source:Masc_tui_async_read.Keeper_schedule
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_schedules_loaded (request, result)))
-    (fun () ->
+    (capture_workspace_json_read state (fun () ->
       Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target
-        ~cursor:page.sp_cursor)
+        ~cursor:page.sp_cursor))
 
 (* Chat shares the exact target read with Automation. Cadence and entry share
    an in-flight ticket instead of superseding a slow response every tick. *)
@@ -4116,6 +4118,7 @@ let launch_pending_schedule_agenda_load state ~mailbox =
   end
 
 let request_schedule_agenda_revalidation state ~mailbox =
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   state.schedules_agenda_event_pending <- true;
   launch_pending_schedule_agenda_load state ~mailbox
 
@@ -15515,6 +15518,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.schedules_agenda_error <- None;
   state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
   state.schedules_agenda_event_pending <- false;
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   state.schedule_detail_id <- None;
   state.schedule_cancel_armed <- None;
   state.schedule_cancel_error <- None;
@@ -17810,6 +17814,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
         update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
         launch_owed_history state ~mailbox)
       state.msg_target_keeper_name;
+    (* A suspended agenda needs its own read on authority recovery. Do not
+       leave that demand to the periodic side-read path. *)
+    launch_pending_schedule_agenda_load state ~mailbox;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21565,6 +21572,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            type. Work reads its own local source; it does not trust either
            payload. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+      if !schedule_store_invalidated || !observer_source_loss_seen then
+        request_schedule_agenda_revalidation state ~mailbox;
       if !observer_source_loss_seen then begin
         revalidate_visible_fusion state ~mailbox;
         (match acting_pane_changes_keeper state with
@@ -21620,8 +21629,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.acting_dropped <- state.acting_dropped + dropped
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
-      if !schedule_store_invalidated then
-        request_schedule_agenda_revalidation state ~mailbox;
       if !waiting_sources_invalidated then
         launch_keeper_waiting_load ~change:Waiting_all state ~mailbox
       else if !waiting_inventory_changed <> [] then
@@ -21725,6 +21732,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
   | Observer_closed (workspace, outcome) ->
+      state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
       let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with

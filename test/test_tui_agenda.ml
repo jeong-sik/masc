@@ -22,7 +22,7 @@ module Agenda = struct
      and a case about those sections calls {!Masc_tui_agenda.project}
      directly. *)
   let project ~scheduled ~awaiting =
-    Masc_tui_agenda.project ~scheduled ~awaiting
+    Masc_tui_agenda.project ~scheduled ~scheduled_freshness:Last_read ~awaiting
       ~asking:(Masc_tui_agenda.Read [])
       ~confirming:(Masc_tui_agenda.Read [])
       ~stalled:(Masc_tui_agenda.Read [])
@@ -124,6 +124,44 @@ let joined lines = String.concat "\n" (texts lines)
 
 let tones_of lines tone =
   List.filter (fun (l : Agenda.line) -> l.Agenda.tone = tone) lines
+;;
+
+let test_stale_schedule_is_not_presented_as_current () =
+  let project scheduled =
+    Masc_tui_agenda.project ~scheduled
+      ~scheduled_freshness:Agenda.Refresh_needed ~awaiting:(Agenda.Read [])
+      ~asking:(Agenda.Read []) ~confirming:(Agenda.Read []) ~stalled:(Agenda.Read [])
+  in
+  let empty = project (Agenda.Read []) in
+  check int "a stale empty read still takes a row" 1 (Agenda.rows_taken empty);
+  let english = Option.get (strip_of empty) in
+  check bool "the strip marks the empty reading as uncertain" true
+    (contains ~needle:"Schedule may be out of date" english);
+  let korean = Option.get (Agenda.strip ~ko:true ~now:at_2026_08_26_0300z
+      ~localtime:seoul ~cols:80 empty) in
+  check bool "Korean status is available" true
+    (contains ~needle:"일정 정보가 오래됐을 수 있음" korean);
+  let empty_panel = joined (overlay_of empty) in
+  check bool "the panel marks the stale reading" true
+    (contains ~needle:"Schedule may be out of date" empty_panel);
+  check bool "the stale empty reading is not called empty" false
+    (contains ~needle:"nothing is scheduled" empty_panel);
+  let old_wake = project (Agenda.Read [ edgar ]) in
+  let old_strip = Option.get (strip_of old_wake) in
+  check bool "an old wake is not presented on the strip" false
+    (contains ~needle:"edgar" old_strip);
+  let old_panel = joined (overlay_of old_wake) in
+  check bool "the panel labels retained rows" true
+    (contains ~needle:"Schedule may be out of date" old_panel);
+  check bool "the retained wake remains inspectable" true
+    (contains ~needle:"edgar" old_panel);
+  List.iter
+    (fun cols ->
+      let line = Option.get (Agenda.strip ~ko:true ~now:at_2026_08_26_0300z
+          ~localtime:seoul ~cols empty) in
+      check int "the row fits the available columns" cols
+        (Masc_tui_message_layout.display_width line))
+    [ 0; 1; 5; 20; 80 ]
 ;;
 
 (* The strip names one wake because it has one line. The panel was opened on
@@ -243,6 +281,7 @@ let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
 
 let with_stuck rows =
   Masc_tui_agenda.project
+    ~scheduled_freshness:Agenda.Last_read
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
     ~asking:(Agenda.Read [])
@@ -300,6 +339,7 @@ let goal ?(since_iso = "2026-08-25T00:00:00Z") ?(goal_id = "goal-1") title
 
 let with_goals goals =
   Masc_tui_agenda.project
+    ~scheduled_freshness:Agenda.Last_read
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
     ~asking:(Agenda.Read [])
@@ -567,6 +607,7 @@ let open_question ask_id : Agenda.open_question =
 
 let with_questions rows =
   Masc_tui_agenda.project
+    ~scheduled_freshness:Agenda.Last_read
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
     ~asking:(Agenda.Read rows)
@@ -575,6 +616,7 @@ let with_questions rows =
 
 let one_of_each =
   Masc_tui_agenda.project
+    ~scheduled_freshness:Agenda.Last_read
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
     ~asking:(Agenda.Read [ open_question "ask-1" ])
@@ -764,6 +806,8 @@ let () =
             test_rows_taken_agrees_with_what_is_drawn
         ; test_case "an empty agenda gives the row back" `Quick
             test_an_empty_agenda_gives_the_row_back
+        ; test_case "stale schedule is not presented as current" `Quick
+            test_stale_schedule_is_not_presented_as_current
         ] )
     ; ( "what reaches it"
       , [ test_case "wire status parsing" `Quick test_wire_status_parsing

@@ -32,9 +32,10 @@ val start :
 val public_custom_event_type : string -> string
 
 val subscription_loss_event_type : string
-(** The bridge's process-wide notice that its bounded subscriber discarded
-    events before the relay could observe them. The notice carries a positive
-    [payload.dropped_count] and is retried ahead of later relayed events. *)
+(** Scoped notice that the bridge's bounded subscriber discarded events, a
+    batch could not be prepared, or a source event exhausted relay retries.
+    It carries a positive [payload.dropped_count] and is retried ahead of
+    later relayed events. *)
 
 (** Serialize a single AGENT_CORE event to SSE JSON.
     Exposed for unit testing. *)
@@ -46,6 +47,15 @@ module For_testing : sig
       the payload owns the agent. Session-local ordinals are never substituted. *)
 
   val start_with_retry_interval :
+    interval_s:float ->
+    sw:Eio.Switch.t ->
+    clock:_ Eio.Time.clock ->
+    config:Workspace.config ->
+    bus:Agent_core.Event_bus.t ->
+    unit
+
+  val start_with_preparation_hook :
+    before_prepare:(unit -> unit) ->
     interval_s:float ->
     sw:Eio.Switch.t ->
     clock:_ Eio.Time.clock ->

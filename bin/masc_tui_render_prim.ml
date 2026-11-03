@@ -992,10 +992,11 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
    at the top carries it in red, on every surface. The row starts at the same
    column as the rows around it: the surface strip above and the composer
    below both leave the frame's margin. *)
-let agenda_line agenda ~cols =
+let agenda_line agenda ~ko ~cols =
   let margin = Masc_tui_ansi.framed_content_column in
   match
     Agenda.strip
+      ~ko
       ~now:(Unix.gettimeofday ())
       ~localtime:Unix.localtime
       ~cols:(cols - margin)
@@ -1377,7 +1378,8 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
   let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
-     match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
+     match agenda_line (Masc_tui_types.agenda state)
+       ~ko:(state.ui_language = Lang_ko) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
   let composer, cursor =

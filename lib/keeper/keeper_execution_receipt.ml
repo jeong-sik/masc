@@ -553,6 +553,10 @@ let append (config : Workspace.config) (receipt : t) =
       ~disposition_reason:reason
   in
   Dated_jsonl.append store receipt_json;
+  (* A roster row reads the newest receipt (its lane observation and the
+     blocker summary), so its readers reread that Keeper (RFC-0481 §3.2). An
+     append the fd guard skipped also sends it; the reread finds the same row. *)
+  Keeper_row_broadcast.changed ~base_path:config.base_path ~keeper_name:receipt.keeper_name;
   if needs_operator_broadcast disposition
   then (
     let disposition_label = operator_disposition_kind_to_string disposition in

@@ -509,6 +509,12 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Asks_reloaded of asks_observation
+      (** The questions read again on their own, after a change or a failure. *)
+  | Keeper_roster_reloaded of keeper_roster_observation
+      (** The whole roster read on its own, after a change or a failure. *)
+  | Keeper_row_reloaded of keeper_row_observation
+      (** One Keeper's row read on its own, after the server named it. *)
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
   | Sent_image_ready of {
@@ -599,7 +605,6 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
-  | Keeper_execute_loaded of keeper_execute_request * (keeper_execute_reading * float, string) result
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64

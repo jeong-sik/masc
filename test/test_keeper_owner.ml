@@ -1540,7 +1540,7 @@ let test_health_observer_wakes_after_persistence_exception () =
       ; remove = (fun _ -> fail "unexpected remove") }
     in
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name replace_store pause with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name replace_store pause with
      | _ -> fail "replace exception did not propagate"
      | exception exn when exn == cancelled -> ()
      | exception exn -> fail ("unexpected replace exception: " ^ Printexc.to_string exn));
@@ -1553,7 +1553,7 @@ let test_health_observer_wakes_after_persistence_exception () =
     in
     cancel_observer := true;
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name remove_store remove with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name remove_store remove with
      | _ -> fail "remove exception did not propagate"
      | exception exn when exn == remove_error -> ()
      | exception exn -> fail ("unexpected remove exception: " ^ Printexc.to_string exn));
@@ -1565,11 +1565,11 @@ let test_health_observer_wakes_after_persistence_exception () =
       ; remove = (fun _ -> fail "unexpected remove") }
     in
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name error_store pause with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name error_store pause with
      | Error (Owner.Store_unavailable _) -> ()
      | _ -> fail "returned error did not remain a store error");
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name error_store (Reducer.begin_stopping state) with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name error_store (Reducer.begin_stopping state) with
      | Ok _ -> ()
      | Error error -> fail (Owner.error_to_string error));
     check int "returned errors and no-persistence transitions do not notify here" 2
@@ -1586,12 +1586,167 @@ let test_health_observer_wakes_after_persistence_exception () =
              raise store_error)
          ; remove = (fun _ -> fail "unexpected remove") }
        in
-       Owner.For_testing.commit_metadata_transition ~keeper_name:initial.name store pause) with
+       Owner.For_testing.commit_metadata_transition ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name store pause) with
      | _ -> fail "persistence exception was lost during scope cancellation"
      | exception exn when exn == store_error -> ()
      | exception exn -> fail ("unexpected scope exception: " ^ Printexc.to_string exn));
     check bool "the observer ran before preserving the persistence exception" true
       (!observations = [ Some true; None; Some true ]))
+;;
+
+(* RFC-0481 §3.2: every metadata write the Owner attempts tells the roster
+   readers of its own workspace to reread that Keeper's row. *)
+let hearing_row_changes ~base_path ?(on_heard = fun _ -> ()) f =
+  let id = Printf.sprintf "keeper-owner-row-changed-%d-%s" (Unix.getpid ())
+    (Digest.to_hex (Digest.string base_path)) in
+  let heard = ref [] in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match
+        Json_util.assoc_string_opt "type" event.ext_payload,
+        Json_util.assoc_string_opt "name" event.ext_payload
+      with
+      | Some kind, Some name when String.equal kind Keeper_row_broadcast.row_changed_event ->
+        heard := name :: !heard;
+        on_heard name
+      | (Some _ | None), (Some _ | None) -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () -> f heard)
+;;
+
+let operator_pause updated_at =
+  Reducer.Pause
+    { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+    ; updated_at }
+;;
+
+let start_owner_in ~sw ~base_path ~store (meta : Keeper_meta_contract.keeper_meta) =
+  Owner.start ~sw ~base_path ~store
+    ~operation_store_path:(Filename.concat base_path (meta.name ^ ".sqlite3"))
+    ~session_root:(Filename.concat base_path "traces")
+    ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+    ~keeper_name:meta.name ~initial_meta:(Some meta)
+  |> owner_ok
+;;
+
+(* RFC-0481 §3.4: a chat control token rotation tells the turns readers to
+   read again, after the new token is in place. *)
+let test_a_token_rotation_announces_the_keeper_turns () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let accepting = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+  let meta = make_meta "turn-announce" in
+  let owner = start_owner_in ~sw ~base_path ~store:accepting meta in
+  let before = Owner.chat_control_token owner in
+  let tokens_when_heard = ref [] in
+  let id = Printf.sprintf "keeper-owner-turn-changed-%d" (Unix.getpid ()) in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match
+        Json_util.assoc_string_opt "type" event.ext_payload,
+        Json_util.assoc_string_opt "name" event.ext_payload
+      with
+      | Some kind, Some name
+        when String.equal kind Keeper_turn_broadcast.changed_event && String.equal name meta.name ->
+        tokens_when_heard := Owner.chat_control_token owner :: !tokens_when_heard
+      | (Some _ | None), (Some _ | None) -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "turn-pause")));
+    (match !tokens_when_heard with
+     | [ heard ] ->
+       check bool "the announcement follows the new token" true
+         (not (String.equal heard before) && String.equal heard (Owner.chat_control_token owner))
+     | heard -> failf "a pause announced %d turn changes" (List.length heard));
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "turn-pause-again")));
+    check int "a write that keeps the pause keeps the token and announces nothing" 1
+      (List.length !tokens_when_heard)))
+;;
+
+let test_metadata_writes_announce_the_keeper_row () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-workspace" in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Unix.mkdir other_path 0o755;
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let accepting = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+  let initial = make_meta "row-announce" in
+  let owner = start_owner_in ~sw ~base_path ~store:accepting initial in
+  let removed = make_meta "row-announce-removed" in
+  let removing = start_owner_in ~sw ~base_path ~store:accepting removed in
+  let failing = make_meta "row-announce-fenced" in
+  let fenced = start_owner_in ~sw ~base_path
+    ~store:{ replace = (fun _ -> Error "unconfirmed"); remove = (fun _ -> Ok ()) } failing in
+  let paused_when_heard = ref [] in
+  let on_heard name =
+    if String.equal name initial.name then
+      paused_when_heard :=
+        Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused)
+          (Owner.projection owner).meta
+        :: !paused_when_heard
+  in
+  hearing_row_changes ~base_path:other_path (fun elsewhere ->
+  hearing_row_changes ~base_path ~on_heard (fun heard ->
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "row-pause")));
+    check (list string) "a committed write announces its Keeper" [ initial.name ] !heard;
+    ignore (owner_ok (Owner.apply_meta owner (Reducer.Resume { updated_at = "row-resume" })));
+    check (list string) "each committed write announces" [ initial.name; initial.name ] !heard;
+    check (list (option bool)) "each announcement follows the Owner's projection"
+      [ Some true; Some false ] (List.rev !paused_when_heard);
+    owner_ok (Owner.begin_stopping owner);
+    check int "a transition that persists nothing announces nothing" 2 (List.length !heard);
+    heard := [];
+    let digest = Keeper_meta_json.Snapshot_digest.of_meta removed in
+    ignore (owner_ok (Owner.apply_meta removing (Reducer.Delete_if_snapshot digest)));
+    check (list string) "a removal announces its Keeper" [ removed.name ] !heard;
+    heard := [];
+    (match Owner.apply_meta fenced (operator_pause "row-fenced") with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "a refused write was accepted");
+    check (list string) "the failure that fences the store announces, since the file may have changed"
+      [ failing.name ] !heard;
+    (match Owner.apply_meta fenced (operator_pause "row-fenced-again") with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "a fenced store accepted a write");
+    check (list string) "a fenced store announces nothing more" [ failing.name ] !heard);
+  check (list string) "another workspace hears none of it" [] !elsewhere))
+;;
+
+let test_raised_metadata_write_announces_the_keeper_row () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Eio_main.run @@ fun _env ->
+  let initial = make_meta "row-announce-raised" in
+  let state = match Reducer.create ~keeper_name:initial.name (Some initial) with
+    | Ok state -> state | Error error -> fail (Reducer.error_to_string error) in
+  let pause = match Reducer.apply_meta state (operator_pause "row-raised") with
+    | Ok transition -> transition | Error error -> fail (Reducer.error_to_string error) in
+  let raised = Failure "write outcome unknown" in
+  let store : Owner.store =
+    { replace = (fun _ -> raise raised); remove = (fun _ -> fail "unexpected remove") } in
+  hearing_row_changes ~base_path (fun heard ->
+    (match Owner.For_testing.commit_metadata_transition ~base_path ~keeper_name:initial.name
+       store pause with
+     | _ -> fail "the write exception did not propagate"
+     | exception exn when exn == raised -> ());
+    check (list string) "a write that raised announces its Keeper" [ initial.name ] !heard;
+    (* The health observer re-raises a cancellation of the Owner's scope; the
+       row is still announced. *)
+    let scope_cancel = Failure "owner scope cancelled during persistence" in
+    with_state_change_observer (fun () -> raise (Eio.Cancel.Cancelled Exit)) (fun () ->
+      match Eio.Cancel.sub (fun context ->
+        let store : Owner.store =
+          { replace = (fun _ -> Eio.Cancel.cancel context scope_cancel; raise raised)
+          ; remove = (fun _ -> fail "unexpected remove") } in
+        Owner.For_testing.commit_metadata_transition ~base_path ~keeper_name:initial.name
+          store pause) with
+      | _ -> fail "the write exception was lost during scope cancellation"
+      | exception exn when exn == raised -> ());
+    check (list string) "a cancelled scope still announces the row"
+      [ initial.name; initial.name ] !heard))
 ;;
 
 let test_health_observer_callback_cancellation_is_isolated () =
@@ -6634,6 +6789,18 @@ let () =
             "health observer wakes after persistence exceptions"
             `Quick
             test_health_observer_wakes_after_persistence_exception
+        ; test_case
+            "metadata writes announce the Keeper row"
+            `Quick
+            test_metadata_writes_announce_the_keeper_row
+        ; test_case
+            "a token rotation announces the Keeper turns"
+            `Quick
+            test_a_token_rotation_announces_the_keeper_turns
+        ; test_case
+            "a raised metadata write announces the Keeper row"
+            `Quick
+            test_raised_metadata_write_announces_the_keeper_row
         ; test_case
             "health observer isolates callback cancellation"
             `Quick

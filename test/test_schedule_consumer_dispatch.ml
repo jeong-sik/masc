@@ -3944,7 +3944,7 @@ let test_a_runner_tick_refreshes_the_cached_schedule_list () =
   Schedule_runner_status.reset_for_test ();
   Fun.protect
     ~finally:(fun () ->
-      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
       Schedule_runner_status.reset_for_test ())
   @@ fun () ->
   let state =
@@ -4046,7 +4046,7 @@ let test_startup_recovery_retries_before_admitting_dispatch () =
   Unix.mkdir staging 0o755;
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:(fun () ->
-    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
     Schedule_runner_status.reset_for_test ()) @@ fun () ->
   ignore (recovery_cached_status config);
   let state = Server_bootstrap_maintenance.run_schedule_runner_tick
@@ -4102,7 +4102,7 @@ let test_recovery_success_survives_a_normal_tick_crash () =
   Unix.rmdir staging; Sys.remove snapshot;
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:(fun () ->
-    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
     Schedule_runner_status.reset_for_test ()) @@ fun () ->
   let at_normal_tick = ref true in
   let clock () =
@@ -4176,7 +4176,7 @@ let check_maintenance_retains_failed_settlement ~clock_failure =
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists staging && Sys.is_directory staging then Unix.rmdir staging;
-    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
     Schedule_runner_status.reset_for_test ()) @@ fun () ->
   let state = Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
       ~state:Server_bootstrap_maintenance.initial_schedule_runner_state in

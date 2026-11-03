@@ -200,6 +200,7 @@ let async_request_inventory_lines (state : state) =
           summary.ars_active summary.ars_runtime_owned
           summary.ars_ownership_unknown summary.ars_record_errors ]
     in
+    let now = Unix.gettimeofday () in
     let request_lines = List.map (fun request ->
       let tone, ownership = match request.ar_ownership with
         | Async_runtime_owned -> Theme.ok (), "runtime_owned"
@@ -212,7 +213,7 @@ let async_request_inventory_lines (state : state) =
       in
       let elapsed =
         match
-          Option.bind request.ar_elapsed_sec Masc_tui_message_layout.elapsed_text
+          Masc_tui_message_layout.elapsed_text (now -. request.ar_submitted_at)
         with
         | Some text -> text
         | None -> Masc_tui_theme.Glyph.no_value

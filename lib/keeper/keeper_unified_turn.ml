@@ -454,7 +454,7 @@ let run_keeper_cycle
                   that the keeper holds no task. *)
                let preparation_turn_ref = Ids.Turn_ref.make
                  ~trace_id:runtime_manifest_context.manifest_trace_id ~absolute_turn:keeper_turn_id in
-               let preview = Keeper_turn_preview.reset ~keeper_name:meta.name ~execution_scope:None
+               let preview = Keeper_turn_preview.reset ~base_path:config.base_path ~keeper_name:meta.name ~execution_scope:None
                  ~turn_ref:(Some preparation_turn_ref)
                  ~now:(Time_compat.now ())
                  ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path

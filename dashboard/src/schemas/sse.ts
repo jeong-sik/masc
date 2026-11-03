@@ -92,6 +92,45 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
   SSE_APPROVAL_RULES_CHANGED_EVENT,
+  // Held tool calls and tool approval modes changed
+  // (lib/keeper/keeper_tool_approval_broadcast.ml). The TUI re-reads on them;
+  // the dashboard follows held calls on the chat stream.
+  'keeper_tool_approval_waits_changed',
+  'keeper_tool_approval_mode_changed',
+  // A Keeper's or an installation's questions to the operator changed
+  // (lib/keeper/keeper_ask_broadcast.ml, lib/lane_addon/lane_addon_ask_broadcast.ml).
+  // The TUI re-reads on them; the dashboard reads asks when the surface opens.
+  'keeper_asks_changed',
+  'lane_addon_asks_changed',
+  // A Keeper's durable async message requests changed
+  // (lib/keeper/keeper_msg_async_broadcast.ml). The TUI re-reads on it.
+  'keeper_async_requests_changed',
+  // The confirmations waiting for an operator changed or one passed its
+  // deadline (lib/operator/operator_pending_confirm_broadcast.ml). The TUI
+  // re-reads on it.
+  'pending_confirms_changed',
+  // A workspace's schedules changed (lib/server/server_schedule_broadcast.ml).
+  // The TUI re-reads on it.
+  'schedules_changed',
+  // A Keeper's native task or child content journal took a record
+  // (lib/keeper/keeper_runtime_journal_broadcast.ml). The TUI re-reads on it.
+  'keeper_native_tasks_appended',
+  'keeper_child_content_appended',
+  // One Keeper's roster row may have changed (lib/keeper/keeper_row_broadcast.ml).
+  // A roster reader re-reads that Keeper's row on it.
+  'keeper_row_changed',
+  // Every roster row may have changed (lib/keeper/keeper_row_broadcast.ml).
+  // A roster reader re-reads the whole roster on it.
+  'keeper_roster_changed',
+  // What /api/v1/keepers/turns answers for one Keeper may have changed
+  // (lib/keeper/keeper_turn_broadcast.ml). A turns reader re-reads on it.
+  'keeper_turn_changed',
+  // A Keeper's running-turn preview was written
+  // (lib/server/server_turn_preview_broadcast.ml). A turns reader re-reads on it.
+  'keeper_turn_preview_changed',
+  // A workspace's verification request store was written
+  // (lib/verification_request_broadcast.ml). A request reader re-reads on it.
+  'verification_requests_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

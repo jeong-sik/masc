@@ -38,6 +38,47 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('reaction_changed')).toBe('reaction_changed')
   })
 
+  it('accepts held tool call and tool approval mode changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_tool_approval_waits_changed')).toBe('keeper_tool_approval_waits_changed')
+    expect(SSEEventTypeSchema.parse('keeper_tool_approval_mode_changed')).toBe('keeper_tool_approval_mode_changed')
+  })
+
+  it('accepts operator question changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_asks_changed')).toBe('keeper_asks_changed')
+    expect(SSEEventTypeSchema.parse('lane_addon_asks_changed')).toBe('lane_addon_asks_changed')
+  })
+
+  it('accepts async request changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_async_requests_changed')).toBe('keeper_async_requests_changed')
+  })
+
+  it('accepts pending confirmation changes', () => {
+    expect(SSEEventTypeSchema.parse('pending_confirms_changed')).toBe('pending_confirms_changed')
+  })
+
+  it('accepts schedule changes', () => {
+    expect(SSEEventTypeSchema.parse('schedules_changed')).toBe('schedules_changed')
+  })
+
+  it('accepts runtime journal appends', () => {
+    expect(SSEEventTypeSchema.parse('keeper_native_tasks_appended')).toBe('keeper_native_tasks_appended')
+    expect(SSEEventTypeSchema.parse('keeper_child_content_appended')).toBe('keeper_child_content_appended')
+  })
+
+  it('accepts keeper row changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_row_changed')).toBe('keeper_row_changed')
+    expect(SSEEventTypeSchema.parse('keeper_roster_changed')).toBe('keeper_roster_changed')
+  })
+
+  it('accepts keeper turn changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_turn_changed')).toBe('keeper_turn_changed')
+    expect(SSEEventTypeSchema.parse('keeper_turn_preview_changed')).toBe('keeper_turn_preview_changed')
+  })
+
+  it('accepts verification request changes', () => {
+    expect(SSEEventTypeSchema.parse('verification_requests_changed')).toBe('verification_requests_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

@@ -103,6 +103,7 @@ let await t ~clock ~on_registered ~keeper_name ~tool_call_id ~approval_id ~tool_
         t.waiters <- t.waiters @ [ { key; entry; resolve } ];
         displaced)
   in
+  Keeper_tool_approval_broadcast.waits_changed ~keeper_name;
   (* A second wait on the same id means the id is not naming one call. The
      first waiter is told so rather than left to time out, and never shares the
      new one's answer: that would approve a call its operator never saw. *)
@@ -116,8 +117,10 @@ let await t ~clock ~on_registered ~keeper_name ~tool_call_id ~approval_id ~tool_
   in
   (* A decision settled as the wait's timeout passed is the decision: the
      operator was told it applied, and the call must run under it rather
-     than be reported as timed out. *)
-  Fun.protect ~finally:remove_self (fun () ->
+     than be reported as timed out. An answer and a displacement announce
+     the change where they take the wait out; a timeout and a turn that ends
+     while waiting are announced once [remove_self] has run. *)
+  match Fun.protect ~finally:remove_self (fun () ->
       on_registered ();
       match
         Watched_work.run
@@ -132,6 +135,15 @@ let await t ~clock ~on_registered ~keeper_name ~tool_call_id ~approval_id ~tool_
         t.timed_out_total <- t.timed_out_total + 1;
         Timed_out
       | (Displaced | Answered _) as outcome -> outcome)
+  with
+  | Timed_out ->
+    Keeper_tool_approval_broadcast.waits_changed ~keeper_name;
+    Timed_out
+  | (Displaced | Answered _) as outcome -> outcome
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Keeper_tool_approval_broadcast.waits_changed ~keeper_name;
+    Printexc.raise_with_backtrace exn backtrace
 
 let settle t ~keeper_name ~tool_call_id ~approval_id decision =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
@@ -146,6 +158,7 @@ let settle t ~keeper_name ~tool_call_id ~approval_id decision =
        way. *)
     t.answered_total <- t.answered_total + 1;
     Eio.Promise.resolve waiter.resolve (Answered decision);
+    Keeper_tool_approval_broadcast.waits_changed ~keeper_name;
     true
 
 let pending t =

@@ -1633,7 +1633,7 @@ let test_observation_updates_preserve_selected_name () =
     ; ar_submitted_by = "test"
     ; ar_keeper_name = name
     ; ar_phase = Tui_decode.Async_running
-    ; ar_elapsed_sec = Some 1.
+    ; ar_submitted_at = 1.
     ; ar_ownership = Tui_decode.Async_runtime_owned
     }
   in

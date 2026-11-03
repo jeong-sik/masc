@@ -41,6 +41,42 @@ let failure_reason_changed (before : registry_entry) (after : registry_entry) =
   before.last_failure_reason <> after.last_failure_reason
 ;;
 
+(* What a roster row reads from an entry ([Keeper_tool_surface_ops.
+   keeper_list_row_json]): the phase, and the failure with its time. *)
+let row_fields_changed (before : registry_entry) (after : registry_entry) =
+  before.phase <> after.phase
+  || before.last_failure_reason <> after.last_failure_reason
+  || before.last_failure_at <> after.last_failure_at
+;;
+
+(* Every swap of [registry] goes through [swap_in] or [swap_out], so a
+   committed swap that changes what the roster shows announces that Keeper's
+   row (RFC-0481 §3.2): an added or removed entry always, a replaced one when
+   its phase or failure moved. Both run inside the lifecycle key lock, which
+   is why the announcement is one non-yielding broadcast that never raises. *)
+let swap_in ~current ~key (entry : registry_entry) =
+  let before = StringMap.find_opt key current in
+  if Atomic.compare_and_set registry current (StringMap.add key entry current)
+  then begin
+    (match before with
+     | None -> Keeper_row_broadcast.changed ~base_path:entry.base_path ~keeper_name:entry.name
+     | Some before ->
+       if row_fields_changed before entry
+       then Keeper_row_broadcast.changed ~base_path:entry.base_path ~keeper_name:entry.name);
+    true
+  end
+  else false
+;;
+
+let swap_out ~current ~key (entry : registry_entry) =
+  if Atomic.compare_and_set registry current (StringMap.remove key current)
+  then begin
+    Keeper_row_broadcast.changed ~base_path:entry.base_path ~keeper_name:entry.name;
+    true
+  end
+  else false
+;;
+
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
   | Lifecycle_transaction_reserved _ -> "lifecycle_transaction_reserved"
@@ -182,8 +218,7 @@ let put_entry_key_locked ?lifecycle_token ~base_path name entry =
        let key = registry_key ~base_path name in
        let rec loop () =
          let current = Atomic.get registry in
-         let updated = StringMap.add key entry current in
-         if Atomic.compare_and_set registry current updated then Ok () else loop ()
+         if swap_in ~current ~key entry then Ok () else loop ()
        in
        loop ())
 ;;
@@ -201,8 +236,7 @@ let unsafe_put_entry ~base_path name entry =
   let key = registry_key ~base_path name in
   let rec loop () =
     let current = Atomic.get registry in
-    let updated = StringMap.add key entry current in
-    if Atomic.compare_and_set registry current updated then () else loop ()
+    if swap_in ~current ~key entry then () else loop ()
   in
   loop ()
 ;;
@@ -262,8 +296,7 @@ let update_entry_internal ?lifecycle_token ~base_path name f =
          record_invalid_registry_entry ~operation:"update" ~name err;
          Error err
        | Ok () ->
-         let updated = StringMap.add key new_entry current in
-         if Atomic.compare_and_set registry current updated
+         if swap_in ~current ~key new_entry
          then (
            if failure_reason_changed entry new_entry then
              failure_reason_changed_after_commit := Some entry.base_path;
@@ -316,8 +349,7 @@ let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
          record_invalid_registry_entry ~operation:"update_exact" ~name err;
          Exact_update_invalid err
        | Ok () ->
-         let updated = StringMap.add key new_entry current in
-         if Atomic.compare_and_set registry current updated
+         if swap_in ~current ~key new_entry
          then (
            if failure_reason_changed entry new_entry then
              failure_reason_changed_after_commit := Some entry.base_path;
@@ -379,8 +411,7 @@ let install_entry_if_current_internal
        Entry_install_replaced
      | Some entry when entry != observed -> Entry_install_conflict
      | Some _ ->
-       let updated = StringMap.add key replacement current in
-       if Atomic.compare_and_set registry current updated
+       if swap_in ~current ~key replacement
        then Entry_installed
        else Entry_install_conflict))
 ;;
@@ -421,8 +452,7 @@ let update_entry_if_registered ~base_path name f =
           record_invalid_registry_entry ~operation:"update" ~name err;
           false
         | Ok () ->
-          let updated = StringMap.add key new_entry current in
-          if Atomic.compare_and_set registry current updated
+          if swap_in ~current ~key new_entry
           then (
             Orphan_drops.clear ~base_path name;
             true)
@@ -846,8 +876,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
   in
   let rec loop () =
     let current = Atomic.get registry in
-    let updated = StringMap.add key new_entry current in
-    if Atomic.compare_and_set registry current updated
+    if swap_in ~current ~key new_entry
     then Ok new_entry
     else loop ()
   in
@@ -954,8 +983,7 @@ let remove_entry
                    (Keeper_lane.id expected_entry.lane)) ->
          Entry_replaced
        | None | Some _ ->
-         let updated = StringMap.remove key current in
-         if Atomic.compare_and_set registry current updated
+         if swap_out ~current ~key entry
         then Entry_removed entry
          else loop ())
   in
@@ -1084,8 +1112,7 @@ let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
          match StringMap.find_opt key current with
          | Some occupied -> Entry_restore_occupied occupied
          | None ->
-           let updated = StringMap.add key entry current in
-           if Atomic.compare_and_set registry current updated
+           if swap_in ~current ~key entry
            then Entry_restored
            else loop ()
        in

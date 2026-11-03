@@ -164,9 +164,6 @@ export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): Ou
   if ((event.first_retained_seq ?? 1) > 1) {
     lines.unshift({ text: `earlier output events are no longer retained (before seq ${event.first_retained_seq})`, stream: 'meta' })
   }
-  if ((event.lines_omitted ?? 0) > 0) {
-    lines.unshift({ text: `${event.lines_omitted} earlier output lines omitted from this view`, stream: 'meta' })
-  }
   if (!usedStructuredLines) {
     for (const line of splitChunkLines(event.stdout_since ?? '')) {
       lines.push({ text: line, stream: 'stdout' })
@@ -422,7 +419,7 @@ export function ExecuteOutputDrawer({
           setHasUnconfirmedResult(true)
         }
         if (event.type === 'snapshot' && (
-          (event.first_retained_seq ?? 1) > 1 || (event.lines_omitted ?? 0) > 0
+          (event.first_retained_seq ?? 1) > 1
           || snapshotStatuses.some(status => status === null)
         )) {
           incompleteHistory = true

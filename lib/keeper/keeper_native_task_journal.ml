@@ -367,6 +367,10 @@ let observe t ~attempt bound =
     | Ok publication -> append publication,
         Some {receiver_generation=publication.reader.scope.receiver_generation;
               session_id=publication.reader.scope.session_id} in
+  (match t.context, outcome.result with
+   | Ok (_, keeper_name), Ok (Appended _) ->
+       Keeper_runtime_journal_broadcast.native_tasks_appended ~keeper_name
+   | Ok _, (Ok (Replayed _) | Error _) | Error _, (Ok (Appended _ | Replayed _) | Error _) -> ());
   let error = match outcome.result with Ok _ -> None | Error error -> Some error in
   (match error,outcome.cleanup_failure with
    | None,[] -> ()

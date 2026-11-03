@@ -578,6 +578,7 @@ let publish_turn_in_flight t next =
   if not (turn_in_flight_equal previous next)
   then (
     Atomic.set t.turn_in_flight next;
+    Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
@@ -586,6 +587,7 @@ let publish_shutdown_operation_id t next =
   if not (shutdown_operation_id_equal previous next)
   then (
     Atomic.set t.shutdown_operation_id next;
+    Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
@@ -826,6 +828,7 @@ let set_metadata_fault t detail =
       "keeper Owner metadata store fenced: %s" detail;
     (* A failed durable replace or remove can still have changed the file
        before its durability became uncertain. Revalidate that observation. *)
+    Keeper_row_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
     notify_state_change_observer ~keeper_name:t.keeper_name
 ;;
 
@@ -878,9 +881,18 @@ let health_metadata_equal before after =
     before after
 ;;
 
+(* A write that raised may have taken effect, so its readers are told as if
+   it had. The row is announced first: the observer may re-raise a
+   cancellation of this fiber, and the row's readers must still hear. *)
+let observe_uncertain_write ~base_path ~keeper_name () =
+  Keeper_row_broadcast.changed ~base_path ~keeper_name;
+  notify_state_change_observer ~keeper_name
+;;
+
 let apply_transition t store old_state transition =
-  match commit ~on_uncertain:(fun () ->
-    notify_state_change_observer ~keeper_name:t.keeper_name) store transition with
+  match commit
+    ~on_uncertain:(observe_uncertain_write ~base_path:t.base_path ~keeper_name:t.keeper_name)
+    store transition with
   | Error (Store_unavailable detail as error) ->
     set_metadata_fault t detail;
     Error (old_state, error)
@@ -890,9 +902,20 @@ let apply_transition t store old_state transition =
   | Ok state ->
     let before = (Keeper_owner_reducer.projection old_state).meta in
     let pause_identity = Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused, meta.latched_reason) in
-    if pause_identity before <> pause_identity transition.projection.meta then
+    (* Creating or deleting the meta moves the identity between [None] and
+       [Some], so those commits rotate the token too. The turns answer lists
+       the Keepers whose meta is stored, so the signal below also tells its
+       readers that a Keeper appeared or left. *)
+    let token_rotated = pause_identity before <> pause_identity transition.projection.meta in
+    if token_rotated then
       Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
     Atomic.set t.projection transition.projection;
+    if token_rotated then
+      Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
+    (match transition.persistence with
+     | Keeper_owner_reducer.No_persistence -> ()
+     | Keeper_owner_reducer.Replace_snapshot _ | Keeper_owner_reducer.Remove_snapshot _ ->
+       Keeper_row_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name);
     if not (health_metadata_equal before transition.projection.meta) then
       notify_state_change_observer ~keeper_name:t.keeper_name;
     Ok state
@@ -2443,6 +2466,7 @@ let start
                  as interrupt
                , _ ) ->
              Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
+             Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
              let result = match interrupt with
                | Interrupt_not_current -> Pending_admission_paused
                | Interrupt_settling -> Interrupt_result Operation_settling
@@ -3165,9 +3189,8 @@ let begin_stopping t = request t Begin_stopping
 module For_testing = struct
   let mailbox_depth t = Eio.Stream.length t.mailbox
   let enqueue_unless_closed = enqueue_unless_closed
-  let commit_metadata_transition ~keeper_name store transition =
-    commit ~on_uncertain:(fun () -> notify_state_change_observer ~keeper_name)
-      store transition
+  let commit_metadata_transition ~base_path ~keeper_name store transition =
+    commit ~on_uncertain:(observe_uncertain_write ~base_path ~keeper_name) store transition
 
   let observe_state_changes ~sw observer =
     let previous = Atomic.get state_change_observer in

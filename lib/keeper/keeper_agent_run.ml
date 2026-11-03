@@ -473,7 +473,7 @@ let run_turn
     | None -> shared_context in
   let preview = match preview with
     | Some _ as preview -> preview
-    | None -> Some (Keeper_turn_preview.reset ~keeper_name:meta.name
+    | None -> Some (Keeper_turn_preview.reset ~base_path:config.base_path ~keeper_name:meta.name
       ~execution_scope:(Option.map Keeper_repetition_scope.Execution.scope repetition_execution)
       ~turn_ref:None
       ~now:(Time_compat.now ())

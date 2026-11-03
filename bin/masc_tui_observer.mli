@@ -49,6 +49,9 @@ val session_id_of_headers : (string * string) list -> (string, string) result
     A run that ended carries how long it ran, and a failed one the error's
     code and text, read from the payload with {!Sse_event.Json}'s readers -- the
     contract the bridge writes it with. *)
+type runtime_journal = Native_tasks_journal | Child_content_journal
+(** The two journals a Keeper's runtime fills beside its chat. *)
+
 type agent_core_kind =
   | Tool_called
   | Tool_completed
@@ -164,6 +167,42 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
+(** What changed in the Gate, the held tool calls, the tool approval modes
+    or the questions put to the operator. Each is a server push with no
+    data: the reader re-fetches. *)
+type approval_change =
+  | Approval_queue_changed
+      (** [approval:pending], [approval:resolved], [approval:summary_updated] *)
+  | Approval_rules_changed  (** [approval_rules_changed] *)
+  | Gate_mode_changed  (** [gate_mode_changed], [gate_external_mode_changed] *)
+  | Gate_keeper_settings_changed of { keeper : string }
+      (** [gate_keeper_mode_changed], [keeper_exact_lane_preference_changed] *)
+  | Tool_approval_waits_changed of { keeper : string }
+      (** [keeper_tool_approval_waits_changed] *)
+  | Tool_approval_mode_changed of { keeper : string }
+      (** [keeper_tool_approval_mode_changed] *)
+  | Keeper_asks_changed of { keeper : string }  (** [keeper_asks_changed] *)
+  | Installation_asks_changed of { declaration_id : string }
+      (** [lane_addon_asks_changed] *)
+  | Pending_confirms_changed  (** [pending_confirms_changed] *)
+
+(** What a Keeper roster push says changed (RFC-0481 §3.2). *)
+type roster_change =
+  | Keeper_row_changed of { keeper : string }
+      (** [keeper_row_changed]: that Keeper's row may have changed,
+          appeared or gone. *)
+  | Every_row_changed
+      (** [keeper_roster_changed]: a value every row reads changed. *)
+
+(** What a Keeper turns push says changed (RFC-0481 §3.4, §3.5). Either one
+    reads the turns again. *)
+type turn_change =
+  | Turn_state
+      (** [keeper_turn_changed]: the turn slot, turn ref, chat control
+          token, shutdown operation or Owner availability. *)
+  | Turn_preview
+      (** [keeper_turn_preview_changed]: the running turn's preview. *)
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -175,6 +214,12 @@ type event =
   | Keeper_memory_journal_appended of { keeper : string; at : float }
       (** The keeper's memory journal gained a row. The chat pane shows that
           journal beside the transcript and reads it again. *)
+  | Keeper_runtime_journal_appended of
+      { keeper : string; journal : runtime_journal; at : float }
+      (** [keeper_native_tasks_appended] or [keeper_child_content_appended],
+          named by {!Masc.Keeper_runtime_journal_broadcast}: the Keeper's
+          journal took a record. A server push: a reader that shows the
+          records reads them again. *)
   | Keeper_chat_stream_frame of
       { keeper : string
       ; operation_id : string
@@ -206,6 +251,18 @@ type event =
       { keeper : string; queue_kind : string option; at : float }
       (** The keeper's waiting queue changed. Names the keeper in
           [keeper_name], not [name]. *)
+  | Keeper_async_requests_changed of { keeper : string }
+      (** [keeper_async_requests_changed]: the Keeper's durable async message
+          requests changed. A server push: the reader re-fetches
+          [/api/v1/async-requests]. *)
+  | Keeper_roster_change of roster_change
+      (** Named by {!Masc.Keeper_row_broadcast}. A server push: the roster
+          reads the named row, or the whole roster, again. *)
+  | Keeper_turn_changed of { keeper : string; change : turn_change }
+      (** Named by {!Masc.Keeper_turn_broadcast} and
+          {!Masc.Keeper_turn_preview_signal}. A server push: what
+          [/api/v1/keepers/turns] answers for that Keeper may have changed,
+          so the turns are read again. *)
   | Fusion_run_status of { keeper : string; run_id : string; status : string }
       (** A fusion deliberation changed stage or settled. A server push, not
           a keeper act: the Fusion surface re-fetches the run on it instead of
@@ -219,6 +276,13 @@ type event =
       (** A schedule ledger write was attempted in the subscribed workspace. *)
   | Pending_confirm_invalidated
       (** Pending confirmations may have changed in the subscribed workspace. *)
+  | Verification_requests_changed
+      (** The workspace's verification request store was written. A server
+          push with no payload, named by {!Masc.Verification_request_broadcast}. *)
+  | Schedules_changed
+      (** The workspace's schedules changed. A server push with no payload,
+          named by {!Masc.Schedules_changed_event}: the reader re-fetches
+          [/api/v1/dashboard/scheduled-automation]. *)
   | Board_changed of { post_id : string option }
       (** A Board write: a post, a comment, a vote, a reaction, or a change
           to an existing post. It arrives as the JSON-RPC
@@ -226,6 +290,8 @@ type event =
           push: the Board re-reads on it. [post_id] is the post its params
           name, and [None] when they name none -- a vote on a comment and a
           reaction carry a target instead. *)
+  | Approval_change of approval_change
+      (** A Gate, held tool call or tool approval mode change. *)
   | Lane_resource of lane_resource
       (** A Lane Add-on container was acquired, failed to start, was removed,
           or could not be shown removed. It arrives in the agent-core family
@@ -267,6 +333,46 @@ val tool_call_keeper : event -> string option
 (** The keeper a [keeper_tool_call] names — [Some] only for
     {!Keeper_tool_call}. The Keeper_calls surface reads that Keeper's calls
     again on this. *)
+
+val gate_snapshot_changed : event -> bool
+(** The Gate snapshot ([/api/v1/dashboard/gate]) may answer differently:
+    the approval queue, the standing rules, a Gate mode or a Keeper's Gate
+    settings changed. *)
+
+val held_calls_changed : event -> bool
+(** The tool calls a Keeper holds for an operator changed. *)
+
+val tool_modes_changed : event -> bool
+(** What [/api/v1/keepers/tool-approval-mode] and the Keeper Gate settings
+    answer changed: a tool approval mode or a Keeper's Gate setting. *)
+
+val async_requests_changed : event -> bool
+(** The durable async message requests changed. *)
+
+val verification_requests_changed : event -> bool
+(** The verification request store, or a run registry a request row reads
+    its review from, changed. A backlog commit arrives as the execution
+    {!Snapshot}. *)
+
+val roster_change : event -> roster_change option
+(** What a Keeper roster push owes the roster. *)
+
+val turn_change : event -> (string * turn_change) option
+(** The Keeper a turns push names, and what it says changed. *)
+
+val runtime_journal_appended : event -> (string * runtime_journal) option
+(** The Keeper and journal a runtime journal push names. *)
+
+val schedules_changed : event -> bool
+(** The workspace's schedules changed. *)
+
+val pending_confirms_changed : event -> bool
+(** The confirmations waiting for an operator changed or one passed its
+    deadline. *)
+
+val asks_changed : event -> bool
+(** The questions a Keeper or a Lane Add-on installation puts to the operator
+    changed. *)
 
 val board_changed_post : event -> string option option
 (** [Some post] for {!Board_changed}, where [post] is the post it names or

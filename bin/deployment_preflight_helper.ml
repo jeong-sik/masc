@@ -904,7 +904,7 @@ let validate_stores base_path =
          Printf.printf "  first refusal: %s\n%!" detail;
          Printf.printf "  on refusal: %s\n%!" on_refusal;
          Printf.printf
-           "  fresh state: docs/guides/DURABLE-STORE-HARD-CUT.md; preserve evidence and reconcile readers before setting files aside\n%!")
+           "  fresh state: stop the server, delete what this store's Fresh state required entry names, run this check again (docs/guides/DURABLE-STORE-HARD-CUT.md)\n%!")
   in
   let reports =
     List.filter_map

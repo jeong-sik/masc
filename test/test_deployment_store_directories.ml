@@ -274,8 +274,8 @@ let test_lane_addon_bindings () = with_lane_store (fun base root ->
   let refusals = unchanged root (fun () ->
     expect_refusals P.Store.Bindings ~base_path:base ~rows:3
       [path "september", P.Retained_binding]) in
-  check (list (list string)) "the binding alone goes aside" [[path "september"]]
-    (List.map (fun (r : P.refusal) -> r.aside) refusals))
+  check (list (list string)) "fresh state deletes the binding alone" [[path "september"]]
+    (List.map (fun (r : P.refusal) -> r.delete) refusals))
 
 let test_lane_addon_native_claims () = with_lane_store (fun base root ->
   let claims = Filename.concat root Lane_addon_runtime.native_claims_directory in
@@ -330,9 +330,9 @@ let test_lane_addon_native_claims () = with_lane_store (fun base root ->
   let refusals = unchanged root (fun () ->
     expect_refusals P.Store.Native_claims ~base_path:base ~rows:3
       [old_history, P.Cleanup_descriptor; unversioned, P.Native_lease]) in
-  check (list (list string)) "each slot goes aside with the binding of the instance it names"
+  check (list (list string)) "fresh state deletes each slot with the binding of the instance it names"
     (List.sort compare [[old_slot; old_binding]; [unversioned; tools_binding]])
-    (List.sort compare (List.map (fun (r : P.refusal) -> r.aside) refusals)))
+    (List.sort compare (List.map (fun (r : P.refusal) -> r.delete) refusals)))
 
 let receipt ~instance_id ~request_id ~executor =
   let action = `Assoc ["press", `String "start"] in
@@ -426,10 +426,18 @@ let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
   (* Discovery fails the whole scope on an entry it does not know. *)
   let stray = Filename.concat (Filename.dirname (path "current")) "notes.txt" in
   write stray "operator notes";
-  ignore (unchanged root (fun () ->
+  let refusals = unchanged root (fun () ->
     expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:6
       [path "without-body", P.Tool_request_owner; path "v2", P.Tool_request_owner;
-       path "v1", P.Tool_request_owner; path "v3", P.Tool_request_owner; stray, P.Tool_request_inventory])))
+       path "v1", P.Tool_request_owner; path "v3", P.Tool_request_owner; stray, P.Tool_request_inventory]) in
+  let scope = [Filename.dirname (path "current"); Filename.dirname body] in
+  check (list (list string)) "fresh state deletes the whole scope, records and bodies"
+    (List.map (fun _ -> scope) refusals)
+    (List.map (fun (r : P.refusal) -> r.delete) refusals);
+  check string "the fresh-state line names both scope directories"
+    (Printf.sprintf "stop the server, delete %s and %s, start the new build"
+       (Filename.dirname (path "current")) (Filename.dirname body))
+    (P.fresh_state_step (List.hd refusals)))
 
 
 (* The check runs beside a live server, which settles an original by moving

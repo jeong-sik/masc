@@ -12722,9 +12722,11 @@ type keeper_waiting_snapshot = {
 }
 
 (* [Waiting_unattributed] is a change the event names no Keeper for (a
-   schedule or a confirmation). A read already in flight may predate it, so
-   its rows are not taken as current; but no Keeper is marked unverified, so
-   the rows on screen stay until a read that began after it answers. *)
+   schedule or a confirmation). The change itself marks no Keeper unverified,
+   so with no read in flight the rows on screen stay until the next read
+   answers. A read already in flight may predate it, so its rows are not
+   taken as current: when it answers, its Keepers read as unverified until
+   the read that follows. *)
 type keeper_waiting_change =
   | Waiting_all
   | Waiting_keepers of string list

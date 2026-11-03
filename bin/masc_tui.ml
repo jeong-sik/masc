@@ -22620,7 +22620,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          §3.4). They owe the list a read without marking every Keeper
          unverified, which would blank the whole waiting column for a read
          on each of them; a held schedule announces every runner tick. A
-         read already in flight is still not taken as current. *)
+         read already in flight is still not taken as current, so its
+         Keepers read as unverified until the read that follows. *)
       let waiting_keepers = List.sort_uniq String.compare !waiting_inventory_changed in
       let waiting_unattributed = !pending_confirms_changed || !schedules_changed in
       if waiting_keepers <> [] then

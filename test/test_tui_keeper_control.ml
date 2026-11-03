@@ -200,6 +200,36 @@ let test_a_row_read_answers_only_its_keeper () =
     ; "two rows are refused", [ runtime "alpha"; runtime "alpha" ], [] ]
 ;;
 
+(* The builder above creates every Keeper at this time. *)
+let created_at = "2026-09-30T00:00:00Z"
+
+let test_a_starting_keeper_is_read_when_probe_ends () =
+  let created =
+    match Workspace_resilience.Time.parse_iso8601_opt created_at with
+    | Some created -> created
+    | None -> Alcotest.fail "the builder's creation time does not parse"
+  in
+  let until ?health:(health_state = health "idle") ?(identity = true) next_action =
+    let row = runtime ~health:health_state ~next_action "alpha" in
+    let row =
+      if identity then row
+      else { row with kr_identity = Error "identity unreadable" }
+    in
+    Control.starting_up_until row
+  in
+  let at = Some (created +. Status.agent_staleness_threshold_s) in
+  Alcotest.(check (option (float 0.0))) "idle and probing" at (until (Some Status.Probe));
+  Alcotest.(check (option (float 0.0))) "healthy and probing" at
+    (until ~health:(health "healthy") (Some Status.Probe));
+  Alcotest.(check (option (float 0.0))) "a failing Keeper probes with no end" None
+    (until ~health:(health "failing") (Some Status.Probe));
+  Alcotest.(check (option (float 0.0))) "a Keeper past starting" None
+    (until (Some Status.Direct_message));
+  Alcotest.(check (option (float 0.0))) "no next action" None (until None);
+  Alcotest.(check (option (float 0.0))) "no creation time to count from" None
+    (until ~identity:false (Some Status.Probe))
+;;
+
 let reading ?(paused = false) ?(liveness = Control.Unobserved) name :
     Control.reading =
   { name; paused; liveness }
@@ -1684,6 +1714,8 @@ let () =
             test_an_incomplete_roster_does_not_take_one_row
         ; Alcotest.test_case "a row read answers only its Keeper" `Quick
             test_a_row_read_answers_only_its_keeper
+        ; Alcotest.test_case "a starting Keeper is read when its probe ends" `Quick
+            test_a_starting_keeper_is_read_when_probe_ends
         ; Alcotest.test_case "rows decode in order" `Quick
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown health is rejected" `Quick

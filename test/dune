@@ -4444,6 +4444,7 @@
   masc.string_util
   masc_tui_credential
   masc_tui_keeper_control
+  masc.masc_workspace
   yojson))
 
 (test

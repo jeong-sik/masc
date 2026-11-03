@@ -89,6 +89,19 @@ let test_an_abandoned_read_is_owed_again () =
   check bool "not reading" false (R.reading t);
   check (option read) "owed again" (Some (R.Read_row "alpha")) (next ~now:0.0 t)
 
+let test_a_scheduled_row_is_read_once_its_time_comes () =
+  let t = R.schedule_rows [ ("alpha", 10.0) ] R.settled in
+  check (option read) "not before its time" None (next ~now:9.9 (R.release_scheduled ~now:9.9 t));
+  let t = R.release_scheduled ~now:10.0 t in
+  check (option read) "at its time" (Some (R.Read_row "alpha")) (next ~now:10.0 t);
+  let t = R.succeeded (R.Read_row "alpha") (R.started (R.Read_row "alpha") t) in
+  check (option read) "once" None (next ~now:20.0 (R.release_scheduled ~now:20.0 t))
+
+let test_a_new_schedule_replaces_the_old_one () =
+  let t = R.settled |> R.schedule_rows [ ("alpha", 10.0) ] |> R.schedule_rows [ ("beta", 10.0) ] in
+  check (option read) "only the row scheduled last" (Some (R.Read_row "beta"))
+    (next ~now:10.0 (R.release_scheduled ~now:10.0 t))
+
 let () =
   run "tui_roster_owed"
     [ ( "roster_owed"
@@ -112,5 +125,9 @@ let () =
             test_rows_wait_while_a_failed_roster_read_waits
         ; test_case "an abandoned read is owed again" `Quick
             test_an_abandoned_read_is_owed_again
+        ; test_case "a scheduled row is read once its time comes" `Quick
+            test_a_scheduled_row_is_read_once_its_time_comes
+        ; test_case "a new schedule replaces the old one" `Quick
+            test_a_new_schedule_replaces_the_old_one
         ] )
     ]

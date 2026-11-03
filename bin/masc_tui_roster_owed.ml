@@ -1,13 +1,15 @@
 module Owed = Masc_tui_owed_read
 module Names = Map.Make (String)
 
-type t = { roster : Owed.t; rows : Owed.t Names.t }
+(* [scheduled] holds the rows to read at a time on the caller's clock, for a
+   value that changes with time rather than with a write. *)
+type t = { roster : Owed.t; rows : Owed.t Names.t; scheduled : float Names.t }
 
 type read =
   | Read_row of string
   | Read_roster
 
-let settled = { roster = Owed.settled; rows = Names.empty }
+let settled = { roster = Owed.settled; rows = Names.empty; scheduled = Names.empty }
 
 let is_reading = function
   | Owed.Reading _ -> true
@@ -50,18 +52,31 @@ let next_read ~now t =
    it. *)
 let started read t =
   match read with
-  | Read_roster -> { roster = Owed.started t.roster; rows = Names.map Owed.started t.rows }
+  | Read_roster -> { t with roster = Owed.started t.roster; rows = Names.map Owed.started t.rows }
   | Read_row keeper_name -> with_row keeper_name (Owed.started (row keeper_name t)) t
 
 let succeeded read t =
   match read with
-  | Read_roster -> { roster = Owed.succeeded t.roster; rows = prune (Names.map Owed.succeeded t.rows) }
+  | Read_roster ->
+      { t with roster = Owed.succeeded t.roster; rows = prune (Names.map Owed.succeeded t.rows) }
   | Read_row keeper_name -> with_row keeper_name (Owed.succeeded (row keeper_name t)) t
 
 let failed ~retry_s ~max_retry_s ~now read t =
   let fail = Owed.failed ~retry_s ~max_retry_s ~now in
   match read with
-  | Read_roster -> { roster = fail t.roster; rows = Names.map fail t.rows }
+  | Read_roster -> { t with roster = fail t.roster; rows = Names.map fail t.rows }
   | Read_row keeper_name -> with_row keeper_name (fail (row keeper_name t)) t
 
-let abandoned t = { roster = Owed.abandoned t.roster; rows = Names.map Owed.abandoned t.rows }
+let abandoned t =
+  { t with roster = Owed.abandoned t.roster; rows = Names.map Owed.abandoned t.rows }
+
+let schedule_rows due t =
+  { t with
+    scheduled =
+      List.fold_left (fun scheduled (keeper_name, at) -> Names.add keeper_name at scheduled)
+        Names.empty due
+  }
+
+let release_scheduled ~now t =
+  let due, later = Names.partition (fun _ at -> at <= now) t.scheduled in
+  Names.fold (fun keeper_name _ t -> row_changed ~keeper_name t) due { t with scheduled = later }

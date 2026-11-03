@@ -142,6 +142,18 @@ let replace_row roster ~keeper_name reading =
   | Roster_invalid { observed; errors; complete = true } -> Some (splice observed errors)
   | Roster_unobserved | Roster_partial _ | Roster_invalid { complete = false; _ } -> None
 
+let starting_up_until (row : Decode.keeper_runtime) =
+  match row.kr_health, row.kr_next_action, row.kr_identity with
+  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), Some Status.Probe, Ok identity -> (
+      match Workspace_resilience.Time.parse_iso8601_opt identity.Decode.k_created_at with
+      | Some created when created > 0.0 -> Some (created +. Status.agent_staleness_threshold_s)
+      | Some _ | None -> None)
+  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), Some Status.Probe, Error _
+  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), Some (Status.Recover | Status.Direct_message), _
+  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), None, _
+  | (Keeper_types.KH_failing | Keeper_types.KH_offline), _, _ ->
+    None
+
 type roster_failure =
   | Roster_unauthorized of Masc_tui_credential.server_reason
   | Roster_unreachable of string

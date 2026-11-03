@@ -91,6 +91,15 @@ val replace_row : roster -> keeper_name:string -> row_reading -> roster option
     clamped): it does not say where the row belongs, so the reader reads the
     whole roster instead. *)
 
+val starting_up_until : Masc.Tui_decode.keeper_runtime -> float option
+(** When a starting Keeper's [next_action] stops being [Probe]
+    (RFC-0481 §3.6), as a Unix time: its creation time plus
+    {!Masc.Keeper_status_runtime.agent_staleness_threshold_s}. A Keeper is
+    starting when its health is healthy or idle and its [next_action] is
+    [Probe]; a failing Keeper probes too, and its value does not change with
+    time. [None] for any other row and for a creation time that does not
+    parse. *)
+
 (** Why the roster reading is missing.
 
     [Unauthorized] is separate because it is the operator's to fix and names

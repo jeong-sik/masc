@@ -15175,6 +15175,27 @@ let apply_remote_keeper_rows state =
       ~keepers ~error;
     clear_keeper_logs state
 
+(* A starting Keeper's [next_action] turns from Probe once it is
+   [agent_staleness_threshold_s] old (RFC-0481 §3.6), and no write says so:
+   its row is read again at that time. A time already past schedules
+   nothing. The server's clock decides the value, so a read that came early
+   finds it unchanged, and the next signal or revalidation reads it again. *)
+let starting_rows_due roster =
+  let rows =
+    match Keeper_control.roster_view roster with
+    | Keeper_control.Roster_unobserved -> []
+    | Keeper_control.Roster_complete observed
+    | Keeper_control.Roster_partial { observed; _ }
+    | Keeper_control.Roster_invalid { observed; _ } -> observed
+  in
+  let now_wall = Unix.gettimeofday () and now = monotonic_now_s () in
+  List.filter_map
+    (fun (row : Tui_decode.keeper_runtime) ->
+      match Keeper_control.starting_up_until row with
+      | Some until when until > now_wall -> Some (row.kr_name, now +. (until -. now_wall))
+      | Some _ | None -> None)
+    rows
+
 let apply_keeper_roster_load state result =
   (match result with
   | Ok (roster, candle) ->
@@ -15191,6 +15212,8 @@ let apply_keeper_roster_load state result =
            | Workspace_identity_match_unconfirmed _ ), _ -> None);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
+      state.keeper_roster_owed <-
+        Masc_tui_roster_owed.schedule_rows (starting_rows_due roster) state.keeper_roster_owed;
       (match state.item_account with
        | None -> ()
        | Some (keeper_name, _) ->
@@ -15204,6 +15227,7 @@ let apply_keeper_roster_load state result =
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
       state.keeper_roster <- Keeper_control.unobserved_roster;
+      state.keeper_roster_owed <- Masc_tui_roster_owed.schedule_rows [] state.keeper_roster_owed;
       withdraw_keeper_items state;
       state.item_account_error <- Some "Keeper roster authority is unavailable";
       state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
@@ -18016,10 +18040,12 @@ let launch_owed_keeper_roster state ~mailbox =
     in
     if not reading then
       state.keeper_roster_owed <- Masc_tui_roster_owed.abandoned state.keeper_roster_owed;
+    let now = monotonic_now_s () in
+    state.keeper_roster_owed <- Masc_tui_roster_owed.release_scheduled ~now state.keeper_roster_owed;
     match
       reading,
       state.server_identity,
-      Masc_tui_roster_owed.next_read ~now:(monotonic_now_s ()) state.keeper_roster_owed
+      Masc_tui_roster_owed.next_read ~now state.keeper_roster_owed
     with
     | false, Some expected_workspace, Some read when server_authority_ready state ->
         launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read

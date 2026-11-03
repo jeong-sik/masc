@@ -83,10 +83,14 @@ let facts () = match reading (inspect ()) with
 let image_command_for ?(reference = plan.image) ?(descriptor_digest = "sha256:fixture-image") entrypoint =
   let identity : Image_command.identity =
     {descriptor_digest; platform={architecture="arm64"; os="linux"; variant=None}} in
+  (* The image row's id is the descriptor digest's encoded half. *)
+  let id = match String.split_on_char ':' descriptor_digest with
+    | [_algorithm; encoded] -> encoded
+    | _ -> fail "a fixture descriptor digest is algorithm:encoded" in
   let config = `Assoc ["Entrypoint", `List (List.map (fun v -> `String v) entrypoint);
     "Cmd", `List [`String "/bin/bash"]] in
   let raw = Yojson.Safe.to_string (`List [`Assoc [
-    "id", `String "fixture-image";
+    "id", `String id;
     "configuration", `Assoc ["name", `String reference;
       "descriptor", `Assoc ["digest", `String identity.descriptor_digest]];
     "variants", `List [`Assoc [

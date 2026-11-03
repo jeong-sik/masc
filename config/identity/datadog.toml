@@ -14,6 +14,15 @@ id = "datadog"
 label = "Datadog"
 mcp_url = "https://mcp.datadoghq.com/v1/mcp"
 
+# Seen 2026-11-03: registration accepted a client that named this server's
+# public callback, and the authorize step then refused it after sign-in with
+# "invalid_request - Mismatching redirect URI". The two Datadog logins this
+# workspace already holds were made earlier through a client registered with
+# the loopback form, and they completed. So a login here names the loopback
+# callback, and the browser that consents has to reach this server on
+# 127.0.0.1.
+callback = "loopback"
+
 access_token_env = "DATADOG_ACCESS_TOKEN"
 expires_at_env = "DATADOG_ACCESS_TOKEN_EXPIRES_AT"
 refresh_token_file = "/home/keeper/.datadog/refresh_token"

@@ -2036,8 +2036,8 @@ let test_the_shipped_loopback_providers_declare_it () =
     (fun id ->
       check Alcotest.bool (id ^ " names the loopback callback") true
         (callback id = Keeper_oauth_provider.Loopback_callback))
-    [ "asana"; "canva"; "circleci"; "prismic"; "rudderstack"; "shortcut"; "square"
-    ; "storyblok"; "turso"; "vercel" ];
+    [ "asana"; "atlassian"; "canva"; "circleci"; "prismic"; "rudderstack"; "shortcut"
+    ; "square"; "storyblok"; "turso"; "vercel" ];
   check Alcotest.bool "linear keeps the server's callback" true
     (callback "linear" = Keeper_oauth_provider.Server_callback)
 

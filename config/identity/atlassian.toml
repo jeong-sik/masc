@@ -10,6 +10,17 @@ id = "atlassian"
 label = "Atlassian"
 mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
 
+# Seen 2026-11-03: an organization's Atlassian admin keeps the list of
+# redirect domains the MCP server accepts for OAuth 2.1 clients. The list
+# Atlassian ships includes http://127.0.0.1 and http://localhost but no host
+# of ours, so a login that named this server's public callback reached
+# consent and then ended on "Your admin has blocked this domain". The
+# loopback callback is on that list in every organization that keeps it,
+# so a login here names the loopback callback, and the browser that
+# consents has to reach this server on 127.0.0.1.
+# https://support.atlassian.com/security-and-access-policies/docs/available-atlassian-mcp-server-domains/
+callback = "loopback"
+
 # Where the two halves of the answer land in the Keeper's own secret
 # projection. The access token is an env entry because that is what a tool
 # call reads; the refresh token is a file entry because it outlives the

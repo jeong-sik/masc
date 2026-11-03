@@ -1129,6 +1129,12 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         let clock = Eio.Stdenv.clock env in
         let status, headers = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await response) in
         Alcotest.(check int) "MCP stream opens" 200 status;
+        Alcotest.(check (option string)) "observer deadline follows server keepalives"
+          (Some (string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms))
+          (List.find_map (fun (name, value) ->
+             if String.equal (String.lowercase_ascii name)
+                  Server_mcp_transport_http_headers.observer_idle_timeout_header
+             then Some value else None) headers);
         Alcotest.(check bool) "the admitted observer carries the workspace receipt" true
           (List.exists (fun (name, value) ->
              String.equal (String.lowercase_ascii name) receipt_name && String.equal value (snd receipt)) headers);

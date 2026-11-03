@@ -314,6 +314,8 @@
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
 
+(include stanzas/test_keeper_waiting_observer_scope.inc)
+
 (include stanzas/test_sse_queue_inventory.inc)
 
 (test

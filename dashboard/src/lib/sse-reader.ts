@@ -1,6 +1,10 @@
 // Fetch streams accept headers; EventSource would put private credentials in
 // URLs. Parse lines across arbitrary UTF-8 chunks, including split CRLF pairs.
-export async function readSse(body: ReadableStream<Uint8Array>, onEvent: (event: string, data: string) => void): Promise<void> {
+export async function readSse(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: string, data: string) => void,
+  options: { idleTimeoutMs?: number } = {},
+): Promise<void> {
   const reader = body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true })
   let line = '', event = '', data: string[] = [], afterCR = false
   const endLine = () => {
@@ -17,9 +21,23 @@ export async function readSse(body: ReadableStream<Uint8Array>, onEvent: (event:
     }
     line = ''
   }
+  const read = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    if (options.idleTimeoutMs === undefined) return reader.read()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('observer stream idle timeout')), options.idleTimeoutMs)
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
   try {
     while (true) {
-      const chunk = await reader.read()
+      const chunk = await read()
       const text = decoder.decode(chunk.value, { stream: !chunk.done })
       for (const char of text) {
         if (afterCR && char === '\n') { afterCR = false; continue }
@@ -29,5 +47,10 @@ export async function readSse(body: ReadableStream<Uint8Array>, onEvent: (event:
       }
       if (chunk.done) return
     }
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+  } finally {
+    // A stalled source must not keep the caller from reporting an idle or
+    // invalid stream while the underlying transport is being cancelled.
+    void reader.cancel().catch(() => {})
+    reader.releaseLock()
+  }
 }

@@ -185,6 +185,10 @@ val sse_ping_interval_s : float
     duplicated in {!Server_mcp_transport_http_agui} (the duplicate
     is intentional — see that module's contract). *)
 
+val observer_idle_timeout_header : string
+val observer_idle_timeout_ms : int
+(** Observer transport deadline, derived from the server keepalive interval. *)
+
 type last_event_id_error =
   | Malformed_last_event_id
   | Negative_last_event_id

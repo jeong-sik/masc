@@ -7,8 +7,12 @@ import type { KeeperWaitingInventoryChange } from '../../sse-store'
 
 const mocks = vi.hoisted(() => ({
   fetchKeeperWaitingInventory: vi.fn(),
-  refresh: null as ((change: KeeperWaitingInventoryChange) => void) | null,
-  unregisterPush: vi.fn(),
+  observer: null as null | {
+    ready: (instance: string) => void
+    change: (change: KeeperWaitingInventoryChange) => void
+    unavailable: () => void
+  },
+  stopObserver: vi.fn(),
 }))
 
 vi.mock('../../api', async importOriginal => {
@@ -18,17 +22,10 @@ vi.mock('../../api', async importOriginal => {
     fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
   }
 })
-vi.mock('../../sse-store', () => ({
-  registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (change: KeeperWaitingInventoryChange) => void) => {
-    mocks.refresh = refresh
-    return mocks.unregisterPush
-  }),
-}))
-vi.mock('../../dashboard-ws-state', () => ({
-  dashboardWsReady: { value: true, subscribe: vi.fn(() => vi.fn()) },
-  dashboardWsReconnectCount: {
-    value: 0,
-    subscribe: vi.fn(() => vi.fn()),
+vi.mock('../../keeper-waiting-observer-client', () => ({
+  startKeeperWaitingObserver: (callbacks: NonNullable<typeof mocks.observer>) => {
+    mocks.observer = callbacks
+    return { stop: mocks.stopObserver, invalidate: vi.fn() }
   },
 }))
 
@@ -58,27 +55,26 @@ function inventory(): DashboardKeeperWaitingInventory {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  mocks.refresh = null
+  mocks.observer = null
 })
 
 describe('KeeperLaneSection', () => {
-  it('re-reads only the visible keeper when its WS invalidation arrives', async () => {
+  it('re-reads the selected keeper on SSE and labels a lost observer', async () => {
     mocks.fetchKeeperWaitingInventory.mockResolvedValue(inventory())
     render(html`<${KeeperLaneSection} keeper=${{ name: 'exampleorg', agent_name: 'agent-exampleorg' }} />`)
 
-    // Wait on the two things this test is named for -- the push registration and
-    // the first read -- rather than on a caption. The previous wait was for the
-    // literal '처리 대기 중', which a copy sweep renamed to '대기 중'; the test
-    // then timed out on a component that was working.
-    await waitFor(() => {
-      expect(mocks.refresh).not.toBeNull()
-      expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
-    })
+    await waitFor(() => expect(mocks.observer).not.toBeNull())
+    expect(mocks.fetchKeeperWaitingInventory).not.toHaveBeenCalled()
+    mocks.observer?.ready('process.epoch')
+    await waitFor(() => expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1))
 
-    mocks.refresh?.({ scope: 'keeper', keeperName: 'rondo' })
+    mocks.observer?.change({ scope: 'keeper', keeperName: 'rondo' })
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
 
-    mocks.refresh?.({ scope: 'keeper', keeperName: 'exampleorg' })
+    mocks.observer?.change({ scope: 'keeper', keeperName: 'exampleorg' })
     await waitFor(() => expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(2))
+    mocks.observer?.unavailable()
+    await waitFor(() => expect(document.querySelector('[data-testid="keeper-waiting-stale"]')?.textContent)
+      .toContain('마지막으로 확인한 대기 상태'))
   })
 })

@@ -33,6 +33,12 @@ vi.mock('../../dashboard-ws-state', () => ({
     subscribe: vi.fn(() => vi.fn()),
   },
 }))
+vi.mock('../../keeper-waiting-observer-client', () => ({
+  startKeeperWaitingObserver: (callbacks: { ready: (instance: string) => void }) => {
+    queueMicrotask(() => callbacks.ready('test.observer'))
+    return { stop: vi.fn(), invalidate: vi.fn() }
+  },
+}))
 
 import {
   KeeperWaitQueueRail,
@@ -41,6 +47,7 @@ import {
   resetLaneQueueObservations,
 } from './lane-queue-panel'
 import { keepers } from '../../store'
+import { keeperWaitingInventoryStates } from '../../keeper-waiting-inventory-store'
 import { nowSecondsSignal } from '../../lib/now-signal'
 import type { Keeper } from '../../types'
 
@@ -153,6 +160,7 @@ afterEach(() => {
   vi.clearAllMocks()
   keepers.value = []
   resetLaneQueueObservations()
+  keeperWaitingInventoryStates.value = {}
 })
 
 describe('LaneQueuePanel', () => {
@@ -240,6 +248,19 @@ describe('LaneQueuePanel', () => {
     fireEvent.click(rows[0]!.querySelector('.wa-bar')!)
     expect(rows[0]?.querySelector('.wa-detail')).not.toBeNull()
     expect(getByTestId('lane-kpi-waiting').textContent).toBe('1')
+  })
+
+  it('marks retained waiting data as stale instead of counting it as current', async () => {
+    keepers.value = [keeperFixture('masc-improver')]
+    const { getByTestId, container } = render(html`
+      <${LaneQueuePanel} fetchFleet=${mocks.fetchFleet} fetchLifecycle=${mocks.fetchKeeperLifecycle} />
+    `)
+    await waitFor(() => expect(getByTestId('lane-kpi-waiting').textContent).toBe('1'))
+    keeperWaitingInventoryStates.value = {
+      'masc-improver': { ...keeperWaitingInventoryStates.value['masc-improver']!, observerCurrent: false },
+    }
+    await waitFor(() => expect(getByTestId('lane-kpi-waiting').textContent).toBe('확인 중'))
+    expect(container.textContent).toContain('마지막으로 확인한 대기 상태입니다.')
   })
 
   it('renders lifecycle events for the selected keeper', async () => {

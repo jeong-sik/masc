@@ -168,7 +168,8 @@ function DrainSection({ keeper }: { keeper: Keeper }): VNode | null {
   const phase = drainPhase(keeper)
   if (!phase) return null
   const owned = ownedTasks(keeper)
-  const inventory = keeperWaitingInventoryState(keeper.name).inventory
+  const waiting = keeperWaitingInventoryState(keeper.name)
+  const inventory = waiting.inventory
   const entry = inventory?.keepers.find(k => k.keeper_name === keeper.name) ?? null
   const stimuli = (entry?.waiting_on ?? []).filter(row => row.source === 'event_queue_pending')
   return html`
@@ -180,6 +181,7 @@ function DrainSection({ keeper }: { keeper: Keeper }): VNode | null {
           <span class="drain-gloss">작업을 비우고 정상 종료 중</span>
         </div>
         <div class="drain-count"><span class="mono">${owned.length}</span>건 비우는 중</div>
+        ${!waiting.observerCurrent ? html`<div>대기 자극 상태 미확인</div>` : null}
         ${owned.length > 0
           ? html`
               <div class="drain-list">

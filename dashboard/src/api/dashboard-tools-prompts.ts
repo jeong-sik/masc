@@ -2,10 +2,11 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { get, post, type AbortableRequestOptions } from './core'
+import { get, getWithResponse, post, type AbortableRequestOptions } from './core'
 import { nestedCompositionScopeIsValid, type NestedCompositionScope } from './skill-activation-scope'
 import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { parseStrictRfc3339 } from '../lib/rfc3339'
+import { isObserverInstance, OBSERVER_INSTANCE_HEADER, ObserverScopeError } from '../lib/observer-protocol'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { ensureDevToken } from './dev-token'
@@ -2023,14 +2024,25 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
 
 export async function fetchKeeperWaitingInventory(
   keeperName: string,
+  observerInstance: string,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardKeeperWaitingInventory> {
+  if (!isObserverInstance(observerInstance)) throw new Error('observer generation is unavailable')
   await ensureDevToken()
-  const raw = await get<DashboardKeeperWaitingInventory>(
+  const { data } = await getWithResponse<DashboardKeeperWaitingInventory>(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/waiting-inventory`,
-    { signal: opts?.signal },
+    {
+      signal: opts?.signal,
+      extraHeaders: { [OBSERVER_INSTANCE_HEADER]: observerInstance },
+      consumeWithinTimeout: true,
+      beforeResponseBody: response => {
+        if (response.ok && response.headers.get(OBSERVER_INSTANCE_HEADER) !== observerInstance) {
+          throw new ObserverScopeError()
+        }
+      },
+    },
   )
-  return normalizeKeeperWaitingInventory(raw)
+  return normalizeKeeperWaitingInventory(data)
 }
 
 // --- Prompts (override management) ---

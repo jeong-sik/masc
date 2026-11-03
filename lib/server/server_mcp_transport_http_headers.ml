@@ -294,6 +294,12 @@ let sse_comment_with_retry ~comment =
 
 let sse_ping_interval_s = 30.0
 
+(* Match the terminal fleet observer's allowance of three missed keepalives.
+   The response advertises the resulting deadline so browser clients do not
+   need their own copy of the server heartbeat interval. *)
+let observer_idle_timeout_header = "x-masc-sse-idle-timeout-ms"
+let observer_idle_timeout_ms = int_of_float (sse_ping_interval_s *. 3_000.0)
+
 type last_event_id_error =
   | Malformed_last_event_id
   | Negative_last_event_id

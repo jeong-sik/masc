@@ -17,7 +17,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import type { VNode } from 'preact'
+import { Fragment, type VNode } from 'preact'
 import type { Keeper } from '../../types'
 import {
   parseDashboardKeeperWaitingSource,
@@ -434,7 +434,7 @@ export function KeeperLaneStrip({
   `
 }
 
-/** Read this keeper's lane projection. Queue commits and reconnects
+/** Read this keeper's lane projection. Observer changes and reconnects
  * invalidate the shared keeper-scoped store; no periodic poll is mounted.
  * Event-queue operator actions mount only for an Admin session, the same
  * admission the `/events/operator` route enforces. */
@@ -447,13 +447,20 @@ export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
   const eventActions = useLaneEventQueueActions(keeper.name)
   const operatorAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   return html`
-    <${KeeperLaneStrip}
-      keeper=${keeper}
-      inventory=${current.inventory}
-      ready=${current.ready}
-      loading=${current.loading}
-      error=${current.error}
-      eventActions=${operatorAccess.allowed ? eventActions : null}
-    />
+    <${Fragment}>
+      ${!current.observerCurrent
+        ? html`<div class="text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-waiting-stale">
+            ${current.ready ? '마지막으로 확인한 대기 상태입니다.' : '대기 상태를 확인 중입니다.'}
+          </div>`
+        : null}
+      <${KeeperLaneStrip}
+        keeper=${keeper}
+        inventory=${current.inventory}
+        ready=${current.ready}
+        loading=${current.loading}
+        error=${current.error}
+        eventActions=${operatorAccess.allowed ? eventActions : null}
+      />
+    <//>
   `
 }

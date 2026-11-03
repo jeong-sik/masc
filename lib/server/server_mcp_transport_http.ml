@@ -856,9 +856,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                workspace replacement must still reset the previous cursor. *)
             let instance_id =
               match observer_scope with
-              | Some (_, scope) ->
-                Build_identity.runtime_instance_id ^ "."
-                ^ Mcp_server.Workspace_scope_epoch.to_string scope.epoch
+              | Some (_, scope) -> Server_observer_scope.instance_id scope
               | None -> Build_identity.runtime_instance_id
             in
             let handshake, cursor =
@@ -948,6 +946,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                     in
                     Sse_wire.observer_response_headers
                       (Sse_wire.observer_after_replay handshake ~missed_through)
+                    @ [ Server_mcp_transport_http_headers.observer_idle_timeout_header,
+                        string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms ]
               in
               (* This receipt is emitted only after the exact requested scope
                  matched, the scope was still current, and readiness was

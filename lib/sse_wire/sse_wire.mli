@@ -61,6 +61,9 @@ type observer_handshake = { instance_id : string; replay : observer_replay }
 type observer_identity = { version : string; binary_commit : string option }
 (** A ready server's build fields from the same scoped Observer response. *)
 
+val instance_header : string
+(** Header carrying the process and workspace generation of an observer. *)
+
 val observer_identity_headers : observer_identity -> (string * string) list
 (** Encode only valid header tokens. An invalid value advertises no identity. *)
 

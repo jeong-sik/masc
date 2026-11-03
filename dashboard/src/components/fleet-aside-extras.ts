@@ -117,11 +117,14 @@ export function FleetQueueSection({ keeper }: { keeper: Keeper }) {
   const heartbeatKnownOff = keeper.keepalive_running === false
   const hasHeartbeat = wakes || heartbeatKnownOff
 
-  if (rows.length === 0 && !hasHeartbeat) return null
+  if (rows.length === 0 && !hasHeartbeat && inventoryState.observerCurrent) return null
 
   return html`
     <div class="fl-as-sec" data-testid="fleet-queue-section">
       <h4>${draining ? '드레인 대기' : '들어온 이벤트'}</h4>
+      ${!inventoryState.observerCurrent
+        ? html`<div>${inventoryState.ready ? '마지막으로 확인한 대기 상태입니다.' : '대기 상태를 확인 중입니다.'}</div>`
+        : null}
       <div class="fl-q">
         ${rows.length > 0 ? html`
           <div class="fl-q-list">
@@ -141,9 +144,9 @@ export function FleetQueueSection({ keeper }: { keeper: Keeper }) {
           <div class="fl-q-hb" title="keepalive 주기 (keeper_keepalive_interval_s)">
             <span class="fl-q-hb-dot"></span>${interval}초마다 깨어남
           </div>
-        ` : html`
+        ` : heartbeatKnownOff ? html`
           <div class="fl-q-hb off">깨어나지 않음 · ${PHASE_LABEL_KO[keeperDisplayStatus(keeper)]}</div>
-        `}
+        ` : null}
       </div>
     </div>
   `

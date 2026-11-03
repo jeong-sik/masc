@@ -368,11 +368,13 @@ function BusyToolbar({
 
 function ServerOperationStatus({
   busy,
+  observerCurrent,
   onInspect,
   inspectAllowed,
   inspectReason,
 }: {
   busy: boolean
+  observerCurrent: boolean
   onInspect: () => void
   inspectAllowed: boolean
   inspectReason: string | null
@@ -390,7 +392,9 @@ function ServerOperationStatus({
         onClick=${onInspect}
         data-open-keeper-operation-control
       >${inspectAllowed ? '채팅 작업 상세/제어' : '채팅 작업 상세/제어 · Worker 권한 필요'}</button>
-      ${busy
+      ${!observerCurrent
+        ? html`<span>대기 상태 미확인</span>`
+        : busy
         ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">Running</span>`
         : null}
     </div>
@@ -630,7 +634,7 @@ export function KeeperConversationPanel({
   const [searchQuery, setSearchQuery] = useState('')
   const [queueControlOpen, setQueueControlOpen] = useState(false)
   // The conversation and Lane share one keeper-scoped projection. Typed queue
-  // invalidations, focus recovery, and WS reconnects refresh it without a timer.
+  // invalidations, focus recovery, and SSE reconnects refresh it without polling.
   useEffect(() => {
     const unsubscribeInventory = subscribeKeeperWaitingInventory(keeperName)
     return () => {
@@ -687,7 +691,7 @@ export function KeeperConversationPanel({
     [internalFilteredThread, showAutonomous],
   )
   const sending = keeperSending.value[keeperName] ?? false
-  const serverBusy = inventoryEntry?.state === 'busy'
+  const serverBusy = inventoryState.observerCurrent && inventoryEntry?.state === 'busy'
   const isKeeperBusy = Boolean(serverBusy && !sending)
   const visibleThread = useMemo(
     () =>
@@ -837,6 +841,7 @@ export function KeeperConversationPanel({
   const serverOperationStatus = html`
     <${ServerOperationStatus}
       busy=${serverBusy}
+      observerCurrent=${inventoryState.observerCurrent}
       onInspect=${() => setQueueControlOpen(true)}
       inspectAllowed=${queueControlAccess.allowed}
       inspectReason=${queueControlAccess.reason}

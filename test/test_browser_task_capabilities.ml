@@ -253,7 +253,7 @@ let test_ego_table () =
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"release_input";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints=_::_;_} -> ()
@@ -263,7 +263,7 @@ let test_ego_table () =
        a page; adopting or releasing a page manages an unmanaged tab the
        operator opened on purpose. *)
     (List.filter (fun operation -> not (List.mem operation
-      [Cap.List_tabs; Cap.Open_tab; Cap.Space_status; Cap.Finish_space; Cap.Wait_for_control;
+      [Cap.List_tabs; Cap.Open_tab; Cap.Space_status; Cap.Release_input; Cap.Finish_space; Cap.Wait_for_control;
        Cap.Adopt_tab; Cap.Release_tab])) reachable)
 
 (* ego's own accessibility snapshot, and acting on the targets it names, are

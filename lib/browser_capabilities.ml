@@ -9,7 +9,7 @@ type operation =
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
-  | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
+  | Hand_off | Take_over | Space_status | Release_input | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
   | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
@@ -350,6 +350,12 @@ let support backend operation = match backend with
            "The dated ownership value is metadata, not input admission, a reset assertion, visible UI or login proof."]
       | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
           Unsupported "Only an ego connection has native Space metadata.")
+    | Release_input -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"release_input" Act
+          ["Requires the exact observed clientId and an agent-owned Space. After space_status reports inputLock.state=release_uncertain and you inspected the same Space, pass the reported inputLock.pending.generation and confirmation=checked_and_released.";
+           "Records keeper_asserted input readiness for that exact generation; a stale generation is refused with both generations and the reason. It sends no browser input, never replays the original command and is not native release proof. A Space the operator holds is refused before any effect."]
+      | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
+          Unsupported "Only an ego connection keeps native input-release state.")
     | Finish_space -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"finish_space" Act
           ["Requires the exact observed clientId and agent-controlled Space. Complete a successful task exactly once, with optional keepPages: native all or permanent label array (default empty). All retains the Space even with no managed Pages.";
@@ -447,7 +453,7 @@ let operation_name = function
   | Scroll_at -> "scroll_at" | Fill -> "fill" | Type_text -> "type_text" | Press_key -> "press_key"
   | Key_chord -> "key_chord" | Select_option -> "select_option" | Read_frames -> "read_frames"
   | Frame_interaction -> "frame_interaction" | Read_dialog -> "read_dialog"
-  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over" | Space_status -> "space_status" | Finish_space -> "finish_space" | Wait_for_control -> "wait_for_control"
+  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over" | Space_status -> "space_status" | Release_input -> "release_input" | Finish_space -> "finish_space" | Wait_for_control -> "wait_for_control"
   | Adopt_tab -> "adopt_tab" | Release_tab -> "release_tab"
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"

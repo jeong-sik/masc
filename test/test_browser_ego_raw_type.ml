@@ -17,7 +17,7 @@ let storage () =
       if expected= !current then (current:=Some replacement;Ok ()) else Error "writer changed")} in
   persistence,current
 let begin_input input command = ok (ok (Input.within_command input ~command_id:command
-  (fun () -> Input.begin_holding input ~scope:Input.Page_scope ~tab_id:3
+  (fun () -> Input.begin_holding input ~now:100. ~scope:Input.Page_scope ~tab_id:3
     ~page_label:"p1" ~operation:"native_type")))
 let with_native_cases context consume =
   let directory=Filename.temp_dir ~perms:0o700 "masc-raw-type-" "" in

@@ -1103,7 +1103,7 @@ let test_target_dialog_preserves_original_input_until_operator_reset () =
     let reset=Peer.input_status peer in
     check bool "the operator assertion has distinct provenance" true
       (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true
-       | Ready Input.Command_settled | Uncertain _ -> false);
+       | Ready (Input.Command_settled | Input.Keeper_released _) | Uncertain _ -> false);
     List.iter (fun refused_reply ->
       reply:=refused_reply;
       check string "input that never starts is refused before an effect" "before effect"
@@ -1116,6 +1116,54 @@ let test_target_dialog_preserves_original_input_until_operator_reset () =
     check bool "the SDK clean receipt establishes command settlement" true
       (Peer.input_status peer=Input.Ready Input.Command_settled))
     [Lane.Click "#source"; Lane.Double_click_target (Lane.Target_ref 12)]
+
+let test_keeper_release_input_unblocks_owned_space () =
+  let module Input=Masc.Browser_ego_input in
+  let ownership=ref "agent" in
+  let dialog=ego_dialog "alert" "mousedown interrupted" in
+  let input_reply receipt = answered (obj ["urlBefore",str observed_url;
+    "tab",obj ["url",str observed_url;"title",str "Slack"];"receipt",receipt;"error",`Null]) in
+  let reply=ref (input_reply (obj ["dialog",dialog])) and asked=ref [] in
+  let peer=opened (fun sent ->
+    asked:=sent.step :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" -> !reply
+    | "space.release_input" -> answered (obj ["spaceId",`Int 51;"ownership",str !ownership])
+    | other -> failf "unexpected keeper release step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let gesture=interact_args (Lane.Click "#source") in
+  check string "the original gesture is a served observation" "served"
+    (failure_kind (Peer.dispatch ~command_id:"original-gesture" peer ~verb:Live.Page_interact gesture));
+  let pending=match Peer.input_status peer with
+    | Input.Uncertain pending -> pending
+    | Ready _ -> fail "the interrupted gesture lost its input ownership" in
+  check bool "the lock records when it was taken" true (Option.is_some pending.held_at);
+  let release generation = dispatch peer Live.Page_act (obj ["action",str "release_input";
+    "generation",str generation;"confirmation",str "checked_and_released"]) in
+  let calls=List.length !asked in
+  check string "input is refused while locked" "before effect" (failure_kind (dispatch peer Live.Page_interact gesture));
+  check int "the refusal sends no native call" calls (List.length !asked);
+  (match release "stale-generation" with
+   | Error (Live.Before_effect detail) ->
+     check bool "a stale release names the requested generation" true (contains detail "stale-generation");
+     check bool "a stale release names the current generation" true (contains detail pending.generation)
+   | Ok _ | Error _ -> fail "a stale generation must be refused before any effect");
+  check bool "a refused release leaves the exact pending generation" true (Peer.input_status peer=Input.Uncertain pending);
+  ownership:="agentDelegatedToUser";
+  check string "a Space the operator holds is not released" "before effect" (failure_kind (release pending.generation));
+  check bool "the operator-held refusal leaves the pending generation" true (Peer.input_status peer=Input.Uncertain pending);
+  ownership:="agent";
+  let released=match release pending.generation with Ok value -> value | Error _ -> fail "an owning agent could not release its own lock" in
+  check string "the release is reported" "released" (text (field "outcome" released));
+  check string "the release has its own provenance" "keeper_asserted" (text (field "inputReadiness" released));
+  check bool "the state is a Keeper assertion for that generation" true
+    (match Peer.input_status peer with
+     | Input.Ready (Input.Keeper_released {pending=released_pending;_}) -> released_pending.generation=pending.generation
+     | Ready (Input.Command_settled | Input.Operator_reset_asserted _) | Uncertain _ -> false);
+  reply:=input_reply (obj []);
+  check string "the same peer admits the next gesture" "served" (failure_kind (dispatch peer Live.Page_interact gesture));
+  check bool "the clean receipt then settles input" true (Peer.input_status peer=Input.Ready Input.Command_settled)
 
 let test_chooser_upload_respects_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
@@ -3355,7 +3403,7 @@ let test_a_workflow_that_never_held_input_keeps_the_previous_readiness () =
     (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation));
   let reset=Peer.input_status peer in
   check bool "the reset is the operator's" true
-    (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true | Ready Input.Command_settled | Uncertain _ -> false);
+    (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true | Ready (Input.Command_settled | Input.Keeper_released _) | Uncertain _ -> false);
   check string "a fill that fails before the click is unknown" "unknown"
     (failure_kind (call [obj ["method",str "fill";"selector",str "#editor";"text",str "x"];
       obj ["method",str "click";"selector",str "#send"]]));
@@ -3802,6 +3850,7 @@ let () =
       test_case "workflow raw context uses actual pending and safe public progress" `Quick test_workflow_raw_context_is_bound_to_its_actual_pending;
       test_case "target gestures settle only from their declared receipt" `Quick test_a_target_gesture_settles_only_from_the_receipt_it_returns;
       test_case "target dialog preserves original input until operator reset" `Quick test_target_dialog_preserves_original_input_until_operator_reset;
+      test_case "keeper release unblocks an owned Space" `Quick test_keeper_release_input_unblocks_owned_space;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

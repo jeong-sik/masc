@@ -639,3 +639,62 @@ prove login. Unknown fields or malformed backend observations keep the structure
 view unreadable while the original row remains available. Component and normal
 panel integration checks cover this display; real browser rendering remains
 unverified.
+
+## Releasing a pending input lock as the owning agent (experimental)
+
+**What.** When an Ego command might have left a native key or button down, the
+peer stays `inputReadiness: release_uncertain` and refuses `click`, `fill`,
+`scroll` and `hover` before any effect. The operator can confirm in the private
+Browser connections controls. An agent that owns the Space can now also release
+it itself with `BrowserAct action: "release_input"`. It records
+`inputReadiness: keeper_asserted`; like the operator assertion it is not native
+release proof and the original command is never replayed.
+
+**Read the lock first.** `BrowserAct action: "space_status"` (live lane, exact
+`clientId`) now carries `inputLock`:
+
+- `state`: `release_uncertain`, `operator_asserted`, `keeper_asserted` or
+  `command_settled`.
+- `pending`: `generation`, `commandId`, `operation`, `tabId`, `pageLabel`,
+  `scope` and `heldAt` (Unix seconds when the lock was taken; `null` for a
+  record written before it was kept).
+- `releasePath`: `keeperCallable` and, when false, `blockedBy`; plus the action
+  name and what it requires.
+- `lastRejection`: the last release that was not applied, with
+  `requestedGeneration`, `currentGeneration`, `heldAt`, `at` and `reason`.
+  A successful release clears it.
+
+**Release.** After you inspected the same Space (read its pages and, where
+needed, the keys and buttons it could hold):
+
+```json
+{"action":"release_input","lane":"live","clientId":"<exact clientId>",
+ "generation":"<inputLock.pending.generation>","confirmation":"checked_and_released"}
+```
+
+The result is `outcome: "released"` (or `"already_released"` when the same
+generation was already released; who asserted it is not rewritten) with the new
+`inputLock`. The next `click`, `fill` or `scroll` on that Space is admitted
+again.
+
+**When it refuses (nothing is released).**
+
+- The Space is not agent-owned, for example the operator holds it after
+  `hand_off`: refused before any effect. Use `take_over` after the operator says
+  they are done.
+- `generation` is not the pending one (a newer input lock replaced it, or none is
+  pending): the refusal text carries both generations; `lastRejection` in
+  `space_status` keeps them and `heldAt`. Read `space_status` again and use the
+  reported generation.
+- The worker's retained record was replaced by another writer: reconnect, then
+  read `space_status` again.
+
+The operator's `assert_input_reset` refusal now also states why it was not
+applied (stale generation, a command still running, client or Space mismatch)
+in the operator view's `reason` field instead of only saying it was not applied.
+
+**Turning it off / limits.** There is no setting: the action does nothing unless
+you call it, and the operator path is unchanged. Only an ego connection serves
+it; other lanes refuse it. There is no automatic lease expiry, because elapsed
+time alone does not show that a key was released. This feature is experimental
+until it has been exercised against a live Ego Space.

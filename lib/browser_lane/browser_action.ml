@@ -29,13 +29,14 @@ let keep_pages_to_json = function
 type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
+  | Release_input of { generation : string }
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 (* The one control a live lane answers without a client: reclaiming the ego
    task space whose task ended while the operator held it. *)
 let is_take_over = function
   | Control Take_over -> true
-  | Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _)
+  | Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _|Release_input _)
   | Open_tab _|Open_window _|On_tab _ -> false
 let reply_timeout_sec = function
   | Open_tab _ | Open_window _ | Control _ | On_tab _ -> 60.
@@ -199,6 +200,13 @@ let parse = function
      | "hand_off" -> let* () = exact [] in Ok (Control Hand_off)
      | "take_over" -> let* () = exact [] in Ok (Control Take_over)
      | "space_status" -> let* () = exact [] in Ok (Control Space_status)
+     | "release_input" ->
+       let* () = exact ["generation";"confirmation"] in
+       let* generation = string "generation" in
+       let* confirmation = string "confirmation" in
+       if confirmation <> "checked_and_released"
+       then Error "release_input requires confirmation=checked_and_released after inspecting the same Space"
+       else Ok (Control (Release_input {generation}))
      | "finish_space" ->
        let* ()=exact ["keepPages"] in
        let* keep=match List.assoc_opt "keepPages" fields with
@@ -265,6 +273,8 @@ let to_json = function
   | Control Hand_off -> `Assoc ["action",`String "hand_off"]
   | Control Take_over -> `Assoc ["action",`String "take_over"]
   | Control Space_status -> `Assoc ["action",`String "space_status"]
+  | Control (Release_input {generation}) -> `Assoc ["action",`String "release_input";"generation",`String generation;
+      "confirmation",`String "checked_and_released"]
   | Control (Finish_space keep) -> `Assoc ["action",`String "finish_space";"keepPages",keep_pages_to_json keep]
   | Control (Wait_for_control options) -> `Assoc ["action",`String "wait_for_control";
       "controlOptions",control_wait_to_json options]

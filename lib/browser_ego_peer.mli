@@ -237,7 +237,7 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     same peer. This remains [operator_asserted], not native release proof.
     Answering a dialog, handing off or taking over alone does not reset it.
     Every result that is a JSON object, and every partial-failure receipt that
-    is one, carries [inputReadiness]: [command_settled], [operator_asserted] or
+    is one, carries [inputReadiness]: [command_settled], [operator_asserted], [keeper_asserted] or
     [release_uncertain]. The tab list is a JSON array when every tab was read,
     and then carries nothing.
     Frames are read

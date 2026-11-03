@@ -12,7 +12,7 @@ let schema = `Assoc ["type",`String "object";"properties",`Assoc [
 let obj fields = `Assoc fields
 let text value = `String value
 type outcome = Observed | Asserted | Not_applied
-let view ?(outcome=Observed) connection =
+let view ?(outcome=Observed) ?reason connection =
   let message,actions=match connection with
     | None -> "현재 이 작업자가 관리하는 Ego 연결이 없습니다.",[]
     | Some connection ->
@@ -21,6 +21,7 @@ let view ?(outcome=Observed) connection =
       else match connection.recovery.status () with
         | Input.Ready Input.Command_settled -> where ^ "에 입력 확인 요청이 없습니다.",[]
         | Ready (Operator_reset_asserted _) -> where ^ "의 입력 상태를 운영자가 확인·초기화했다고 기록했습니다. 원래 동작은 재실행하지 않습니다.",[]
+        | Ready (Keeper_released _) -> where ^ "의 입력 상태를 Space를 소유한 에이전트가 확인·해제했다고 기록했습니다. 운영자 확인이 아니며 원래 동작은 재실행하지 않습니다.",[]
         | Uncertain pending ->
           let location=match pending.scope with
             | Input.Page_scope -> Printf.sprintf "%s의 원래 요청 Page %s (당시 탭 %d)" where pending.page_label pending.tab_id
@@ -40,10 +41,15 @@ let view ?(outcome=Observed) connection =
         | Some _ -> "현재 연결과 SDK Space 관측이 일치하지 않습니다." in
       message ^ "\n" ^ observation in
   let message=match outcome with Observed|Asserted -> message
-    | Not_applied -> "확인을 적용하지 않았습니다. 현재 요청을 다시 확인하세요.\n" ^ message in
+    | Not_applied ->
+      let why=match reason with Some reason -> "사유: " ^ reason ^ "\n" | None -> "" in
+      "확인을 적용하지 않았습니다. 현재 요청을 다시 확인하세요.\n" ^ why ^ message in
   obj ["title",text "Ego 입력 상태 확인";"message",text message;
     "actions",`List actions;"outcome",text (match outcome with
       | Observed -> "observed" | Asserted -> "operator_asserted" | Not_applied -> "not_applied")]
+  |> (fun (`Assoc fields) -> match reason with
+      | Some reason when outcome=Not_applied -> `Assoc (fields @ ["reason",text reason])
+      | Some _ | None -> `Assoc fields)
 let exact names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare names -> Ok fields
   | _ -> Error ()
@@ -64,13 +70,13 @@ let parse json =
     let* generation=value "generation" fields in Ok (Assert {client_id;space_id;generation})
   | _ -> Error ()
 let invoke connection json =
-  let rejected ()=view ~outcome:Not_applied connection in
+  let rejected ?reason ()=view ~outcome:Not_applied ?reason connection in
   match parse json,connection with
   | Ok View,_ -> view connection
   | Error (),_ | Ok (Assert _),None -> rejected ()
   | Ok (Assert request),Some current ->
     if request.client_id<>current.client_id || request.space_id<>string_of_int current.space.id
-    then rejected () else
+    then rejected ~reason:"the client or Space in this request is not the one this connection serves" () else
     match current.recovery.assert_reset ~generation:request.generation with
-    | Error _ -> rejected ()
+    | Error reason -> rejected ~reason ()
     | Ok () -> view ~outcome:Asserted connection

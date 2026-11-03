@@ -10,6 +10,11 @@
  (libraries masc alcotest yojson))
 
 (test
+ (name test_browser_ego_input_release)
+ (modules test_browser_ego_input_release)
+ (libraries masc alcotest yojson))
+
+(test
  (name test_browser_ego_input_store)
  (modules test_browser_ego_input_store)
  (libraries masc alcotest yojson unix))

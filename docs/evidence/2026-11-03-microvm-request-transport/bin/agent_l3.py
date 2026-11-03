@@ -240,8 +240,9 @@ touch /tmp/l3-probe 2>/dev/null; echo "tmpfs_write_rc=$?"
 touch /masc-work/l3-probe 2>/dev/null; echo "work_write_rc=$?"
 ls /run/masc-agent >/dev/null 2>&1; echo "socket_dir_rc=$?"
 ls /proc/1/fd >/dev/null 2>&1; echo "agent_fd_listing_rc=$?"
-grep -E '^(NoNewPrivs|CapEff|CapPrm|CapBnd):' /proc/self/status | tr '\t' ' '
-grep -E '^(Uid|Gid|NoNewPrivs|CapEff):' /proc/1/status | sed 's/^/agent_/' | tr '\t' ' '
+grep -E '^(NoNewPrivs|CapEff|CapPrm|CapBnd|CapInh|CapAmb):' /proc/self/status | tr '\t' ' '
+grep -E '^(Uid|Gid|Groups|NoNewPrivs|CapEff|CapPrm|CapInh|CapAmb):' /proc/1/status | sed 's/^/agent_/' | tr '\t' ' '
+ls -l /proc/$$/fd | sed 1d | awk '{print "payload_fd", $9, $10, $11}'
 python3 -c '
 import socket
 s = socket.socket(socket.AF_UNIX)
@@ -269,6 +270,9 @@ def measure(results: dict[str, Any]) -> None:
     early_at = time.time()
     conn, hello, quiet = connect_until_hello()
     conn.close()
+    # The agent's descriptors as root sees them, through one exec without -i.
+    agent_fds = sh(["container", "exec", NAME, "ls", "-l", "/proc/1/fd"]).stdout.splitlines()[1:]
+    results["agent_fds_root_view"] = [" ".join(line.split()[8:]) for line in agent_fds]
     results["ready"] = {"early_connected": early_connected,
                         "early_connect_after_run_ms": round((early_at - run_returned) * 1000),
                         "quiet_connections_before_hello": quiet,
@@ -346,7 +350,8 @@ def main() -> None:
     with open(RESULTS, "w") as f:
         json.dump(results, f, indent=1)
     print(json.dumps({key: results.get(key) for key in
-                      ("build", "ready", "quiet_connections_after_ready", "probe", "payload",
+                      ("build", "ready", "agent_fds_root_view", "quiet_connections_after_ready",
+                       "probe", "payload",
                        "concurrent", "burst", "cancel", "error")},
                      indent=1))
 

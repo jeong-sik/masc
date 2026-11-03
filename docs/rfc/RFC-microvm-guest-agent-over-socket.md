@@ -155,11 +155,12 @@ agent 가 내려간 뒤 `dumpable` 0, `no_new_privs` 1 을 읽었어요. capabil
 
 구현 3층의 `masc-exec-shim --serve` 를 0절 실행 옵션으로 띄우고, 호스트에서 소켓으로 실제 shim 요청을 보냈어요.
 
-- hello 는 `/` 읽기 전용, uid 502, gid 20, `no_new_privs` 를 알렸어요. payload 도 같은 uid·gid 였고 CapEff 0, NoNewPrivs 1 이었어요. 바운딩 셋에는 0절의 세 capability 가 남아 있었어요.
+- hello 는 `/` 읽기 전용, uid 502, gid 20, `no_new_privs` 를 알렸어요. payload 도 같은 uid·gid 였고 CapEff·CapPrm·CapInh·CapAmb 0, NoNewPrivs 1 이었어요. 바운딩 셋에는 0절의 세 capability 가 남아 있었어요. agent 의 보조 그룹은 비어 있었어요.
+- agent(PID 1)의 fd 는 0·1·2 와 리스너뿐이었어요. agent 는 그래도 시작할 때 3 이상의 fd 를 모두 close-on-exec 로 표시해요.
 - payload 의 rootfs 쓰기, 소켓 디렉터리 읽기, agent 소켓 연결, agent 의 fd 목록 읽기는 모두 거부됐어요. `/tmp` 와 작업 디렉터리 쓰기는 됐어요.
 - 요청 50번 동안 runtime 의 짝 없는 pipe 는 0 → 0 이었어요(두 실행). 틀린 응답은 없었어요.
 - 요청 도중 연결을 끊으면 payload 가 취소됐어요.
-- agent 가 듣기 전에 연 연결: 부팅 9번에서 hello 5번, 바로 EOF 3번, 12분 동안 아무것도 오지 않음 1번이었어요. 첫 hello 뒤 54개 연결은 다시 연결할 일이 없었어요.
+- agent 가 듣기 전에 연 연결: 부팅 10번에서 hello 5번, 바로 EOF 4번, 12분 동안 아무것도 오지 않음 1번이었어요. 첫 hello 뒤에는 두 실행에서 54개씩, 다시 연결할 일이 없었어요.
 
 ## 5. 검토한 대안
 

@@ -1,16 +1,16 @@
 {
  "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
- "name": "masc-agent-l3-1793682241",
+ "name": "masc-agent-l3-1793685271",
  "keeper": "502:20",
- "started_at": "2026-11-03T14:04:01+0900",
- "worktree_head": "24e813bde2e31779ed6f195209ef4a2e05a14e0d",
+ "started_at": "2026-11-03T14:54:31+0900",
+ "worktree_head": "ff8eb471a31e90d69c9a8a0c396203a8f750c927",
  "worktree_dirty": false,
  "container_version": "container CLI version 1.6.1 (build: release, commit: unspeci)",
  "build": {
-  "reused": true,
-  "seconds": 0.0,
-  "sources_sha256": "4f461c864a9546e911043f4df0815bdb6d2c1bef04b864d3663722c8dcf51971",
-  "shim_sha256": "63698133b5e9d2035adb5545e72317486e9a38660b4b66817787c0aa56f3aba2"
+  "reused": false,
+  "seconds": 2.4,
+  "sources_sha256": "ebf5a67663962d79f1baa7e624febc282c9a99b2f4fa586506d437c0f305d287",
+  "shim_sha256": "744528fc61d20c6a7a0e9561b6f10d59866a72331f69fec3d7f0f7579fd3f5b1"
  },
  "start": {
   "argv": [
@@ -19,7 +19,7 @@
    "-d",
    "--rm",
    "--name",
-   "masc-agent-l3-1793682241",
+   "masc-agent-l3-1793685271",
    "--cap-drop",
    "ALL",
    "--cap-add",
@@ -53,11 +53,17 @@
    "502:20"
   ]
  },
+ "agent_fds_root_view": [
+  "0",
+  "1",
+  "2",
+  "3"
+ ],
  "ready": {
   "early_connected": true,
   "early_connect_after_run_ms": 0,
-  "quiet_connections_before_hello": 9,
-  "hello_after_run_ms": 142,
+  "quiet_connections_before_hello": 68,
+  "hello_after_run_ms": 119,
   "hello": {
    "relay_version": 1,
    "root_read_only": true,
@@ -65,7 +71,7 @@
    "gid": 20,
    "no_new_privs": true
   },
-  "early_after_s": 53,
+  "early_after_s": 19,
   "early_outcome": "eof"
  },
  "probe": {
@@ -90,14 +96,24 @@
    "work_write_rc=0",
    "socket_dir_rc=2",
    "agent_fd_listing_rc=2",
+   "CapInh: 0000000000000000",
    "CapPrm: 0000000000000000",
    "CapEff: 0000000000000000",
    "CapBnd: 00000000002000c0",
+   "CapAmb: 0000000000000000",
    "NoNewPrivs: 1",
    "agent_Uid: 502 502 502 502",
    "agent_Gid: 20 20 20 20",
+   "agent_Groups:  ",
+   "agent_CapInh: 0000000000000000",
+   "agent_CapPrm: 0000000000000000",
    "agent_CapEff: 0000000000000000",
+   "agent_CapAmb: 0000000000000000",
    "agent_NoNewPrivs: 1",
+   "payload_fd 0 -> pipe:[215]",
+   "payload_fd 1 -> pipe:[216]",
+   "payload_fd 2 -> pipe:[217]",
+   "payload_fd 4 -> pipe:[1423]",
    "hijack_connect=Permission denied"
   ],
   "exits": [
@@ -106,20 +122,20 @@
    }
   ],
   "trailer_exit": 7,
-  "ms": 244.1
+  "ms": 32.1
  },
  "concurrent": {
-  "quick_ms": 12.3,
-  "slow_ms": 2093.4,
+  "quick_ms": 213.1,
+  "slow_ms": 2006.8,
   "quick_stdout": "quick\n",
   "slow_stdout": "slow\n"
  },
  "burst": {
   "n": 50,
   "wrong": 0,
-  "p50_ms": 21.0,
-  "max_ms": 417.7,
-  "runtime_pid": 12225,
+  "p50_ms": 207.8,
+  "max_ms": 464.6,
+  "runtime_pid": 93006,
   "pipes_before": {
    "orphan": 0,
    "connected": 0

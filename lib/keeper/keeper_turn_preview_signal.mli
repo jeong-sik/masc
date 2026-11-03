@@ -4,8 +4,9 @@
     {!Keeper_turn_preview} calls {!changed} after a write to the writer the
     turns answer reads for that Keeper: a new writer installed by [reset], a
     note that changed the entry, and a preparation scope that started or
-    finished. A write to an older writer changes nothing the answer shows and
-    says nothing.
+    finished. The answer reads only the installed writer, for the Owner slot
+    that owns it. A write to an older writer, or to one installed outside an
+    Owner slot, changes nothing the answer shows and says nothing.
 
     The observer runs on the writer's fiber, after the write and outside the
     preview lock. It must be short, must not yield and must not raise; the

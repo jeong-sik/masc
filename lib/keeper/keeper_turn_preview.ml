@@ -90,10 +90,13 @@ let with_lock f =
   Mutex.lock mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
 
-(* Under the lock: whether [writer] is the one the turns answer reads. *)
+(* Under the lock: whether the turns answer can read [writer]. It reads the
+   installed writer only, and only for the Owner slot that owns it
+   ([current_for_turn]), so a writer installed without an owner shows
+   nothing. *)
 let displayed writer =
   match Hashtbl.find_opt table (!writer).shown_as.keeper_name with
-  | Some shown -> shown == writer
+  | Some shown -> shown == writer && Option.is_some (!writer).owner
   | None -> false
 
 (* After the lock, for a write [displayed] saw. *)
@@ -215,8 +218,9 @@ let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
   let writer = ref { preview = empty ~execution_scope now; text_intake = redacting redaction;
     released_bytes = 0; tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
     owner = Keeper_turn_preview_owner.current (); original_turn_ref = turn_ref; shown_as } in
-  with_lock (fun () -> Hashtbl.replace table keeper_name writer);
-  announce (Some shown_as);
+  announce (with_lock (fun () ->
+    Hashtbl.replace table keeper_name writer;
+    shown_after_write writer));
   writer
 
 let original_turn_ref writer = with_lock (fun () -> (!writer).original_turn_ref)

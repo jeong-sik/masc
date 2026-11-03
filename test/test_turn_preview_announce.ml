@@ -12,7 +12,15 @@ let quiet_wait_s = Server_turn_preview_broadcast.post_interval_s *. 4.0
 
 let ignore_writes ~base_path:_ ~keeper_name:_ = ()
 
-let reset ~base_path keeper_name =
+(* The turns answer reads a preview only for the Owner slot that owns it. *)
+let reset_owned ~base_path keeper_name =
+  Keeper_turn_preview_owner.with_owner ~interrupt_token:(Keeper_interrupt_token.fresh ())
+    ~observation:(Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
+      Keeper_turn_preview.reset ~base_path ~keeper_name ~execution_scope:None ~turn_ref:None
+        ~now:(Unix.gettimeofday ()) ~redaction:Keeper_secret_redaction.empty)
+;;
+
+let reset_unowned ~base_path keeper_name =
   Keeper_turn_preview.reset ~base_path ~keeper_name ~execution_scope:None ~turn_ref:None
     ~now:(Unix.gettimeofday ()) ~redaction:Keeper_secret_redaction.empty
 ;;
@@ -20,16 +28,21 @@ let reset ~base_path keeper_name =
 let note_tool writer tool = Keeper_turn_preview.note_tool ~writer:(Some writer) ~now:(Unix.gettimeofday ()) tool
 
 let test_only_the_shown_writer_reports () =
+  (* An Owner slot is a fiber binding, so the writers run in Eio. *)
+  Eio_main.run @@ fun _env ->
   let heard = ref [] in
   Keeper_turn_preview_signal.install (fun ~base_path ~keeper_name ->
     heard := (base_path, keeper_name) :: !heard);
   Fun.protect ~finally:(fun () -> Keeper_turn_preview_signal.install ignore_writes) (fun () ->
     let base_path = "turn-preview-announce" in
-    let first = reset ~base_path "alpha" in
+    let unowned = reset_unowned ~base_path "alpha" in
+    note_tool unowned "read_file";
+    check int "a preview outside an Owner slot reports nothing" 0 (List.length !heard);
+    let first = reset_owned ~base_path "alpha" in
     check int "installing a preview reports it" 1 (List.length !heard);
     note_tool first "read_file";
     check int "a note on the shown preview reports it" 2 (List.length !heard);
-    let second = reset ~base_path "alpha" in
+    let second = reset_owned ~base_path "alpha" in
     check int "a newer preview reports itself" 3 (List.length !heard);
     note_tool first "write_file";
     check int "a note on the older preview reports nothing" 3 (List.length !heard);
@@ -76,7 +89,7 @@ let test_a_burst_is_sent_once_after_the_interval () =
           | Ok name -> failf "%s: a second signal for %s" label name
           | Error `Timeout -> ()
         in
-        let writer = reset ~base_path "alpha" in
+        let writer = reset_owned ~base_path "alpha" in
         expect_one "a new preview is sent at once";
         note_tool writer "read_file";
         note_tool writer "write_file";

@@ -25,6 +25,7 @@ vi.mock('../api/core', () => ({
   setStoredToken: vi.fn(),
 }))
 vi.mock('../api/mcp', () => ({ resetMcpClientState: vi.fn() }))
+vi.mock('../api/dev-token', () => ({ devTokenBootstrapStatus: { value: 'idle' }, ensureDevToken: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../lib/dashboard-auth-access', () => ({
   dashboardAuthAccess: vi.fn().mockReturnValue({ allowed: true, reason: null }),
   cleanErrorMessage: (value: string | null | undefined): string | null =>
@@ -42,6 +43,7 @@ vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 import { AuthStatus, __resetForTests } from './auth-status'
 import { shellAuthSummary } from '../store'
 import { setStoredToken } from '../api/core'
+import { ensureDevToken } from '../api/dev-token'
 import { syncDashboardActorName } from '../lib/dashboard-actor'
 
 // Macrotask turns with the microtask queue drained between them, rather than a
@@ -103,6 +105,21 @@ describe('AuthStatus popover behavior (Iter 2)', () => {
     else expect(setStoredToken).toHaveBeenCalledExactlyOnceWith('draft-value', { source: 'manual' })
     await flushUi()
   })
+
+  it.each([['dashboard', true], ['alice', false]] as const)(
+    'only restarts local bootstrap for the selected %s actor', async (actor, shouldBootstrap) => {
+      vi.mocked(ensureDevToken).mockClear()
+      shellAuthSummary.value = null
+      render(html`<${AuthStatus} />`, container)
+      fireEvent.click(container.querySelector('button[aria-haspopup]')!)
+      await flushUi()
+      const input = container.querySelector('input[aria-label="Dashboard actor"]') as HTMLInputElement
+      fireEvent.input(input, { target: { value: actor } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+      await flushUi()
+      expect(vi.mocked(ensureDevToken).mock.calls.length).toBe(shouldBootstrap ? 1 : 0)
+    },
+  )
 
   it('renders the trigger collapsed (popover closed) by default', () => {
     render(html`<${AuthStatus} />`, container)

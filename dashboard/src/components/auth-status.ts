@@ -11,7 +11,7 @@ import {
   isRemoteAccess,
   setStoredToken,
 } from '../api/core'
-import { devTokenBootstrapStatus } from '../api/dev-token'
+import { devTokenBootstrapStatus, ensureDevToken } from '../api/dev-token'
 import { resetMcpClientState } from '../api/mcp'
 import { dashboardAuthAccess, cleanErrorMessage } from '../lib/dashboard-auth-access'
 import {
@@ -206,6 +206,7 @@ async function handleApplyActor(): Promise<void> {
   })
   actorInput.value = normalized
   resetMcpClientState()
+  if (normalized === 'dashboard' && !isRemoteAccess() && !dashboardBearerToken()) await ensureDevToken()
   await refreshAuthTruth()
   const summary = shellAuthSummary.value
   const type = summary?.auth_error_code === 'actor_mismatch' ? 'warning' : 'success'

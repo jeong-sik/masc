@@ -43,12 +43,19 @@ let parse_status header_raw =
   in
   find_http lines
 
-let run_curl ?(headers = []) ~port ~path () =
+let run_curl ?(headers = []) ?(query = []) ~port ~path () =
   let header_file = Filename.temp_file "openapi-api-header-" ".txt" in
   let body_file = Filename.temp_file "openapi-api-body-" ".txt" in
   let url = Printf.sprintf "http://127.0.0.1:%d%s" port path in
   let header_args =
     List.fold_right (fun header acc -> "-H" :: header :: acc) headers []
+  in
+  let query_args =
+    match query with
+    | [] -> []
+    | fields ->
+      "--get" :: List.concat_map (fun (key, value) ->
+        [ "--data-urlencode"; key ^ "=" ^ value ]) fields
   in
   let args =
     Array.of_list
@@ -66,6 +73,7 @@ let run_curl ?(headers = []) ~port ~path () =
       header_file;
       ]
       @ header_args
+      @ query_args
       @ [ url ])
   in
   let (ic, oc, ec) =
@@ -158,7 +166,7 @@ let merge_env_overrides overrides =
   let injected = List.map (fun (k, v) -> k ^ "=" ^ v) overrides in
   Array.of_list (base @ injected)
 
-let with_server f =
+let with_server ?(env_overrides = []) f =
   let exe = Masc_test_runtime.find_main_eio_exe () in
   let port =
     match find_free_port () with
@@ -171,7 +179,7 @@ let with_server f =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in
   let env =
-    merge_env_overrides [ ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0") ]
+    merge_env_overrides (("MASC_KEEPER_AUTONOMOUS_ENABLED", "0") :: env_overrides)
   in
   let argv =
     [| exe; "--port"; string_of_int port; "--base-path"; base_path |]
@@ -324,6 +332,54 @@ let test_invalid_authority_is_rejected_before_authority_routes () =
   check bool "invalid authority performs no dev-token I/O" false
     (Sys.file_exists dev_token_path)
 
+let test_dev_token_workspace_precondition () =
+  with_server
+    ~env_overrides:[ ("MASC_HOST", "127.0.0.1"); ("MASC_HTTP_AUTH_STRICT", "false")
+                   ; ("MASC_HTTP_BASE_URL", "") ]
+  @@ fun ~port ~base_path ->
+  let base = Unix.realpath base_path in
+  let root = Unix.realpath (Filename.concat base_path ".masc") in
+  let token_path =
+    Server_routes_http_dashboard_dev_token.dashboard_dev_token_path base_path
+  in
+  let path = "/api/v1/dashboard/dev-token" in
+  let check_refusal label fields status code =
+    let response = run_curl ~port ~path ~query:fields () in
+    check (option int) (label ^ " status") (Some status) response.status;
+    let json = Yojson.Safe.from_string response.body in
+    check string (label ^ " code") code
+      Yojson.Safe.Util.(json |> member "error_code" |> to_string);
+    check bool (label ^ " does not mint a token") false (Sys.file_exists token_path)
+  in
+  check bool "dev token absent before workspace refusals" false
+    (Sys.file_exists token_path);
+  check_refusal "another workspace"
+    [ "expected_base_path", base ^ "/other"; "expected_masc_root", root ]
+    409 "workspace_precondition_failed";
+  check_refusal "partial workspace"
+    [ "expected_base_path", base ]
+    400 "invalid_workspace_precondition";
+  check_refusal "duplicate workspace"
+    [ "expected_base_path", base; "expected_base_path", base; "expected_masc_root", root ]
+    400 "invalid_workspace_precondition";
+  let read_token label query =
+    let response = run_curl ~port ~path ~query () in
+    check (option int) (label ^ " status") (Some 200) response.status;
+    let json = Yojson.Safe.from_string response.body in
+    let token = Yojson.Safe.Util.(json |> member "token" |> to_string) in
+    check bool (label ^ " returns a token") true (String.length token > 0);
+    check string (label ^ " actor") "dashboard"
+      Yojson.Safe.Util.(json |> member "actor" |> to_string);
+    check string (label ^ " role") "admin"
+      Yojson.Safe.Util.(json |> member "role" |> to_string);
+    token
+  in
+  let unbound = read_token "unbound bootstrap" [] in
+  let bound = read_token "bound bootstrap"
+      [ "expected_base_path", base; "expected_masc_root", root ] in
+  check bool "the same workspace reuses the bootstrap credential" true
+    (String.equal unbound bound)
+
 let () =
   run "openapi_api_e2e"
     [
@@ -335,5 +391,9 @@ let () =
             "invalid authority rejected before authority routes"
             `Slow
             test_invalid_authority_is_rejected_before_authority_routes;
+          test_case
+            "dev token respects the bound workspace"
+            `Slow
+            test_dev_token_workspace_precondition;
         ] );
     ]

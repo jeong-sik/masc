@@ -448,6 +448,8 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
          | Error
              (( Workspace.Goal_lock_failed _
               | Workspace.Unknown_goal _
+              | Workspace.Ambiguous_goal _
+              | Workspace.Goal_closed _
               | Workspace.Backlog_read_failed _
               | Workspace.Goal_link_write_failed _
               | Workspace.Backlog_write_failed _
@@ -456,7 +458,8 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
               | Workspace.Predecessor_not_terminal _ ) as err) ->
            Tool_result.error
              ~failure_class:(match err with
-               | Workspace.Unknown_goal _ | Workspace.Unknown_predecessor _
+               | Workspace.Unknown_goal _ | Workspace.Ambiguous_goal _ | Workspace.Goal_closed _
+               | Workspace.Unknown_predecessor _
                | Workspace.Predecessor_not_terminal _ -> Tool_result.Workflow_rejection
                | Workspace.Goal_source_unavailable _ | Workspace.Goal_lock_failed _
                | Workspace.Backlog_read_failed _
@@ -471,6 +474,14 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
    shared with the dashboard HTTP route, so neither surface re-implements the
    precondition checks. All caller-input violations are [Workflow_rejection]. *)
 let handle_set_goal ~tool_name ~start_time ctx args =
+  match Workspace.validate_expected_workspace ~config:ctx.config args with
+  | Error error ->
+    let detail = match error with
+      | Workspace.Invalid_workspace_precondition -> "invalid expected_workspace precondition"
+      | Workspace.Workspace_precondition_failed -> "workspace precondition failed" in
+    Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name ~start_time detail
+  | Ok args ->
   let valid_keys = [ "task_id"; "goal_id" ] in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
@@ -512,13 +523,18 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           (( Task_goal_assignment.Goal_lock_failed _
            | Task_goal_assignment.Backlog_read_failed _
            | Task_goal_assignment.Unknown_task _
+           | Task_goal_assignment.Ambiguous_task _
            | Task_goal_assignment.Unknown_goal _
+           | Task_goal_assignment.Ambiguous_goal _
+           | Task_goal_assignment.Goal_closed _
            | Task_goal_assignment.Task_finished _
            | Task_goal_assignment.Already_assigned _
            | Task_goal_assignment.Link_write_failed _ ) as err) ->
         Tool_result.error
           ~failure_class:(match err with
-            | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Unknown_goal _
+            | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Ambiguous_task _
+            | Task_goal_assignment.Unknown_goal _
+            | Task_goal_assignment.Ambiguous_goal _ | Task_goal_assignment.Goal_closed _
             | Task_goal_assignment.Task_finished _
             | Task_goal_assignment.Already_assigned _ -> Tool_result.Workflow_rejection
             | Task_goal_assignment.Goal_source_unavailable _
@@ -622,13 +638,16 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
      | Error
          (( Workspace.Batch_goal_lock_failed _
           | Workspace.Batch_unknown_goal _
+          | Workspace.Batch_ambiguous_goal _
+          | Workspace.Batch_goal_closed _
           | Workspace.Batch_backlog_read_failed _
           | Workspace.Batch_goal_link_write_failed _
           | Workspace.Batch_backlog_write_failed _
           | Workspace.Batch_unexpected_error _ ) as err) ->
        Tool_result.error
          ~failure_class:(match err with
-           | Workspace.Batch_unknown_goal _ -> Tool_result.Workflow_rejection
+           | Workspace.Batch_unknown_goal _ | Workspace.Batch_ambiguous_goal _
+           | Workspace.Batch_goal_closed _ -> Tool_result.Workflow_rejection
            | Workspace.Batch_goal_source_unavailable _ | Workspace.Batch_goal_lock_failed _
            | Workspace.Batch_backlog_read_failed _
            | Workspace.Batch_goal_link_write_failed _ | Workspace.Batch_backlog_write_failed _

@@ -14,6 +14,7 @@ import {
   getPublic,
   getStoredToken,
   getStoredTokenMeta,
+  isLoopbackHostname,
   post,
   readCacheMode,
   runOperatorAction,
@@ -36,6 +37,22 @@ afterEach(() => {
   } catch {
     // Ignore cleanup failures in the test environment.
   }
+})
+
+describe('browser loopback authority', () => {
+  it.each([
+    ['http://localhost/', true],
+    ['http://127.0.0.1/', true],
+    ['http://127.0.0.2/', true],
+    ['http://[::1]/', true],
+    ['http://[::ffff:127.2.3.4]/', true],
+    ['http://[::ffff:192.0.2.1]/', false],
+    ['http://127.example.test/', false],
+    ['http://192.0.2.1/', false],
+    ['http://[2001:db8::1]/', false],
+  ] as const)('classifies %s', (url, local) => {
+    expect(isLoopbackHostname(new URL(url).hostname)).toBe(local)
+  })
 })
 
 describe('stored token metadata', () => {

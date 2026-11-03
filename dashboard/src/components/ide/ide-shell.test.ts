@@ -585,6 +585,17 @@ describe('IdeShell', () => {
     ])
   })
 
+  it.each(['\u00a0goal-a\u00a0', '\u00a0'])('keeps the focused Goal ID in the statusbar: %s', goalId => {
+    const model = deriveIdeStatusbarModel({
+      activeView: 'source', activeLayers: new Set<string>(), activeFilePath: null,
+      findOpen: false, terminalOpen: false, railsCollapsed: false, reviewFocusActive: false, routeParams: {},
+      contextFocus: { file_path: 'lib/runtime.ml', surface: 'Task', label: 'Task', source_id: 'event-1',
+        activated_at_ms: 1, route_links: [{ id: 'goal', label: 'Goal', tab: 'workspace',
+          params: { section: 'planning', goal: goalId }, evidence: 'Goal' }] },
+    })
+    expect(model.chips.find(chip => chip.id === 'goal')?.label).toBe(`Goal ${goalId}`)
+  })
+
   it('renders statusbar operational chips for the focused PR/task/log route', async () => {
     route.value = {
       tab: 'code',

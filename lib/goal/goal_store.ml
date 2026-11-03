@@ -493,6 +493,48 @@ let with_existing_goals config ~goal_ids f =
      | Ok result -> result
      | Error error -> Error (Goal_lock_failed error))
 
+type assignable_goal_error =
+  | Assignment_source_unavailable of unavailable
+  | Assignment_lock_failed of Masc_domain.masc_error
+  | Assignment_goal_missing of string
+  | Assignment_goal_ambiguous of string
+  | Assignment_goal_closed of { goal_id : string; phase : Goal_phase.t }
+
+(* Assignment and Task creation must recheck every row under the same lock
+   held through the link write. A map lookup loses duplicate rows and misses
+   whitespace aliases. *)
+let with_assignable_goals config ~goal_ids f =
+  match goal_ids with
+  | [] -> Ok (f ())
+  | first_id :: _ ->
+    (match Workspace_utils.with_file_lock_r config (goals_path config) (fun () ->
+      match load_prepared_source config with
+      | `Unavailable u -> Error (Assignment_source_unavailable u)
+      | `Uninitialized -> Error (Assignment_goal_missing first_id)
+      | `Available prepared ->
+        let rec first_rejection = function
+          | [] -> None
+          | goal_id :: remaining ->
+            (match List.filter (fun (goal : goal) ->
+              String.equal (String.trim goal.id) goal_id) prepared.state.goals with
+             | [] -> Some (Assignment_goal_missing goal_id)
+             | [goal] when String.equal goal.id goal_id ->
+               (match goal.phase with
+                | Goal_phase.Completed | Goal_phase.Dropped ->
+                  Some (Assignment_goal_closed { goal_id; phase = goal.phase })
+                | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+                | Goal_phase.Paused _ | Goal_phase.Blocked _ -> first_rejection remaining)
+             | [_] | _ :: _ :: _ -> Some (Assignment_goal_ambiguous goal_id))
+        in
+        (match first_rejection goal_ids with
+         | Some error -> Error error
+         | None -> Ok (f ()))) with
+     | Ok result -> result
+     | Error error -> Error (Assignment_lock_failed error))
+
+let with_assignable_goal config ~goal_id f =
+  with_assignable_goals config ~goal_ids:[goal_id] f
+
 type 'a state_commit = {
   next_state : state;
   value : 'a;
@@ -906,8 +948,10 @@ let resolve_goal_id = function
           (validate_goal_id raw_id) in
       Ok raw_id
 
+type upsert_precondition = Unconditional | Require_absent
+
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
-    ?priority () =
+    ?priority ?(precondition = Unconditional) () =
   let is_new_goal = id = None in
   if is_new_goal && blank_opt title then
     Error (Rejected "title required for new goal")
@@ -918,6 +962,14 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
     | None ->
         commit_state config (fun state ->
           let now = Masc_domain.now_iso () in
+          let* () =
+            match precondition with
+            | Unconditional -> Ok ()
+            | Require_absent ->
+                if List.exists (fun (goal : goal) ->
+                  String.equal (String.trim goal.id) resolved_id) state.goals
+                then Error (Rejected "goal ID is already present")
+                else Ok () in
           let* existing_goal = unique_goal_in state.goals resolved_id in
           let* goal, action =
             match existing_goal with
@@ -991,8 +1043,8 @@ let upsert_goal_with_revision config ?id ?title ?metric ?target_value ?due_date 
   upsert_goal_internal config ?id ?title ?metric ?target_value ?due_date ?priority ()
   |> Result.map (fun (goal, action, revision, _) -> goal, action, revision)
 
-let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date ?priority () =
-  upsert_goal_internal config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ()
+let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ?precondition () =
+  upsert_goal_internal config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ?precondition ()
   |> Result.map (fun (goal, action, _, events) -> goal, action, events)
 
 let compute_rollup goals =

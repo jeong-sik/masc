@@ -4,7 +4,9 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { confirmationBinding, readGoalConfirmation, sameConfirmationBinding, submitGoalConfirmation } from '../../api/goal-confirmation'
 import type { GoalConfirmationEvidence } from '../../api/goal-confirmation'
 import type { ArtifactWorkspace } from '../../api/published-artifacts'
-import { ApiRequestError } from '../../api/core'
+import { ApiRequestError, currentStoredTokenRevision, getStoredToken, getStoredTokenMeta } from '../../api/core'
+import { recoverScopedRejectedCredential } from '../../api/dev-token'
+import { noteManagedCredentialRefusalObservation } from '../../lib/dashboard-session-actor'
 
 type View =
   | { kind: 'loading' }
@@ -14,6 +16,10 @@ type View =
   | { kind: 'uncertain'; evidence: GoalConfirmationEvidence; detail: string; status: number | null }
   | { kind: 'confirmed'; evidence: GoalConfirmationEvidence }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+const noteOwnedRefusal = (status: number | undefined, sentToken: string | null, current: boolean) => {
+  if (status === 401 && current && sentToken !== null && sentToken === getStoredToken()
+    && getStoredTokenMeta()?.source === 'dev') noteManagedCredentialRefusalObservation(currentStoredTokenRevision())
+}
 
 type ConfirmationOwner = { key: string; goalId: string; workspace: ArtifactWorkspace; credentialScope: string; executionEpoch: string }
 type Receipt = { owner: ConfirmationOwner; ticket: number; view: Extract<View, { kind: 'submitting' | 'uncertain' | 'confirmed' }> }
@@ -54,6 +60,11 @@ function beginAuthorityRead(key: string) {
 }
 
 const errorStatus = (error: unknown) => error instanceof ApiRequestError ? error.status : undefined
+const recoverRefusal = (error: unknown, token: string | null, isCurrent: () => boolean,
+  waitForCurrent?: () => Promise<boolean>, workspace?: ArtifactWorkspace) =>
+  error instanceof ApiRequestError && error.status === 401 && token
+    ? recoverScopedRejectedCredential({ token, authErrorCode: error.authErrorCode, httpStatus: 401 }, isCurrent, waitForCurrent, workspace)
+    : Promise.resolve()
 
 function anotherRequestPending(owner: ConfirmationOwner): boolean {
   return Object.values(receipts.peek()).some(receipt => receipt.owner.key !== owner.key
@@ -84,9 +95,12 @@ export function confirmationHasUnsettledReceipt(workspace: ArtifactWorkspace, go
     && (receipt.view.kind === 'submitting' || receipt.view.kind === 'uncertain'))
 }
 
-export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed }: {
+export function GoalConfirmationPanel({ owner, isCurrent, isRecoveryCurrent, waitForRecoveryCurrent, readAuthority, lifecyclePending, hasLifecyclePending, onConfirmed, onOutcome }: {
   owner: ConfirmationOwner; isCurrent: () => boolean; readAuthority: object
+  isRecoveryCurrent?: () => boolean
+  waitForRecoveryCurrent?: () => Promise<boolean>
   lifecyclePending: boolean; hasLifecyclePending: () => boolean; onConfirmed: () => void
+  onOutcome?: (result: { ticket: number; state: 'pending' | 'confirmed' | 'uncertain' }) => void
 }) {
   const { goalId, workspace } = owner
   const [storedView, setView] = useState<View>({ kind: 'loading' })
@@ -141,8 +155,11 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
     setVerifiedOwner(null)
     setReadingAuthority({ key: owner.key, readAuthority, ticket })
     setView({ kind: 'loading' })
+    const sentToken = getStoredToken()
+    const recoveryCurrent = () => isRecoveryCurrent ? isRecoveryCurrent() : ticket === generation.current && current()
     try {
       const evidence = await readGoalConfirmation(goalId, workspace, owner.executionEpoch, status => {
+        noteOwnedRefusal(status, sentToken, recoveryCurrent())
         if (ticket === generation.current && current()) refuseAuthority(
           status === undefined ? '서버 또는 작업 공간을 다시 확인해야 합니다' : '응답 내용을 확인하는 중입니다', status)
       })
@@ -164,6 +181,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
           setView({ kind: 'unavailable', detail })
         }
       }
+      if (recoveryCurrent()) void recoverRefusal(error, sentToken, recoveryCurrent, waitForRecoveryCurrent, workspace)
     } finally {
       if (ticket === generation.current && current()) setReadingAuthority(null)
     }
@@ -183,10 +201,14 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
     let readbackStarted = false
     setDismissedTicket(null)
     setReceipt({ owner, ticket, view: { kind: 'submitting', evidence, stage: 'sending' } })
+    onOutcome?.({ ticket, state: 'pending' })
+    const sentToken = getStoredToken()
     try {
       // No await separates this authority check from constructing the POST.
       if (!current()) throw new Error('인증 또는 작업 공간이 변경되어 요청을 보내지 않았습니다')
       const acknowledged = await submitGoalConfirmation(binding, status => {
+        noteOwnedRefusal(status, sentToken, receipts.peek()[owner.key]?.ticket === ticket
+          && (isRecoveryCurrent ? isRecoveryCurrent() : current()))
         if (receipts.peek()[owner.key]?.ticket === ticket) refuseAuthority(
           status === undefined ? '서버를 다시 확인해야 합니다' : '응답 내용을 확인하는 중입니다', status)
       })
@@ -197,6 +219,8 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
       setReceipt({ owner, ticket, view: { kind: 'submitting', evidence, stage: 'readback' } })
       readbackStarted = true
       const readback = await readGoalConfirmation(goalId, workspace, owner.executionEpoch, status => {
+        noteOwnedRefusal(status, sentToken, receipts.peek()[owner.key]?.ticket === ticket
+          && (isRecoveryCurrent ? isRecoveryCurrent() : current()))
         if (receipts.peek()[owner.key]?.ticket === ticket) refuseAuthority(
           status === undefined ? '서버 또는 작업 공간을 다시 확인해야 합니다' : '응답 내용을 확인하는 중입니다', status)
       })
@@ -208,6 +232,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
       if (!current()) throw new Error('원래 연결에서 확인 후 재조회가 필요합니다')
       if (receipts.peek()[owner.key]?.ticket !== ticket) return
       setReceipt({ owner, ticket, view: { kind: 'confirmed', evidence: readback } })
+      onOutcome?.({ ticket, state: 'confirmed' })
       onConfirmed()
     } catch (error) {
       if (receipts.peek()[owner.key]?.ticket === ticket) {
@@ -215,6 +240,14 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
         setReceipt({ owner, ticket, view: { kind: 'uncertain', evidence,
           detail: readbackStarted ? '확인 후 재조회에 실패했습니다.' : message(error),
           status: errorStatus(error) ?? refusalStatuses.peek()[owner.key] ?? null } })
+        // Start recovery under the original owner, then immediately withdraw
+        // the old tree. Never replay the POST after a credential change.
+        const recovery = recoverRefusal(error, sentToken, () =>
+          (isRecoveryCurrent ? isRecoveryCurrent() : current()) && receipts.peek()[owner.key]?.ticket === ticket,
+        waitForRecoveryCurrent ? async () => await waitForRecoveryCurrent() && receipts.peek()[owner.key]?.ticket === ticket : undefined,
+        workspace)
+        onOutcome?.({ ticket, state: 'uncertain' })
+        void recovery.catch(error => console.warn('[goal-confirmation] credential recovery failed', error))
       }
     }
   }

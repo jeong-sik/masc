@@ -8,10 +8,12 @@ import {
   resetDevTokenBootstrap,
   type DevTokenBootstrapStatus,
 } from './dev-token'
+import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 const {
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout,
   getStoredToken,
   getStoredTokenMeta,
@@ -20,6 +22,7 @@ const {
 } = vi.hoisted(() => ({
   clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn(),
+  currentStoredTokenRevision: vi.fn(() => 0),
   fetchWithTimeout: vi.fn(),
   getStoredToken: vi.fn(),
   getStoredTokenMeta: vi.fn(),
@@ -30,6 +33,7 @@ const {
 vi.mock('./core', () => ({
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout: (path: string, init: RequestInit, timeout: number, consume?: (res: Response) => Promise<unknown>) => {
     const response = fetchWithTimeout(path, init, timeout, consume)
     return consume ? Promise.resolve(response).then(consume) : response
@@ -54,6 +58,7 @@ function setBootstrapStatus(value: DevTokenBootstrapStatus): void {
 describe('ensureDevToken', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    currentStoredTokenRevision.mockReset().mockReturnValue(0)
     resetDevTokenBootstrap()
     setBootstrapStatus('idle')
     getStoredToken.mockReturnValue(null)
@@ -63,6 +68,7 @@ describe('ensureDevToken', () => {
   })
 
   afterEach(() => {
+    setCanonicalDashboardActor(null)
     vi.useRealTimers()
   })
 
@@ -70,6 +76,70 @@ describe('ensureDevToken', () => {
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse(null))
     await ensureDevToken()
     expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+    expect(setStoredToken).not.toHaveBeenCalled()
+  })
+
+  it('withdraws a reset bootstrap without letting its late response replace a newer one', async () => {
+    let finishOld!: (response: Response) => void
+    let finishNew!: (response: Response) => void
+    fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve }))
+    const old = ensureDevToken()
+    expect(devTokenBootstrapStatus.value).toBe('fetching')
+    resetDevTokenBootstrap()
+    expect(devTokenBootstrapStatus.value).toBe('idle')
+    const current = ensureDevToken()
+    finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
+    await old
+    expect(devTokenBootstrapStatus.value).toBe('fetching')
+    expect(setStoredToken).not.toHaveBeenCalled()
+    finishNew(jsonResponse({ token: 'current', actor: 'dashboard', role: 'admin' }))
+    await current
+    expect(setStoredToken).toHaveBeenCalledOnce()
+    expect(setStoredToken).toHaveBeenCalledWith('current', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(devTokenBootstrapStatus.value).toBe('ok')
+  })
+
+  it('restarts once for a changed owner that still permits dashboard bootstrap', async () => {
+    let finishOld!: (response: Response) => void
+    fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce(jsonResponse({ token: 'current', actor: 'dashboard', role: 'admin' }))
+    const pending = ensureDevToken()
+    setCanonicalDashboardActor('alice')
+    setCanonicalDashboardActor(null)
+    finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
+    await pending
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
+    expect(setStoredToken).toHaveBeenCalledOnce()
+    expect(setStoredToken).toHaveBeenCalledWith('current', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(devTokenBootstrapStatus.value).toBe('ok')
+  })
+
+  it('does not replace an explicitly selected non-dashboard actor after an owner change', async () => {
+    let finishOld!: (response: Response) => void
+    fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    const pending = ensureDevToken()
+    currentDashboardActor.mockReturnValue('alice')
+    finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
+    await pending
+    expect(fetchWithTimeout).toHaveBeenCalledOnce()
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(devTokenBootstrapStatus.value).toBe('idle')
+  })
+
+  it('does not bootstrap a selected actor even if old dev metadata remains without a token', async () => {
+    getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue({ source: 'dev', actor: 'dashboard', role: 'admin' })
+    setCanonicalDashboardActor('alice')
+    await ensureDevToken()
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+    expect(setStoredToken).not.toHaveBeenCalled()
+  })
+
+  it('does not request a loopback development token from a remote browser', async () => {
+    isRemoteAccess.mockReturnValue(true)
+    await ensureDevToken()
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
     expect(setStoredToken).not.toHaveBeenCalled()
   })
 
@@ -209,6 +279,7 @@ describe('ensureDevToken', () => {
 
   it('refreshes a managed loopback token only for a typed refreshable auth code', async () => {
     let token: string | null = 'stale-token'
+    let revision = 0
     let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
       source: 'dev',
       actor: 'dashboard',
@@ -216,6 +287,7 @@ describe('ensureDevToken', () => {
     }
     getStoredToken.mockImplementation(() => token)
     getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
@@ -223,6 +295,7 @@ describe('ensureDevToken', () => {
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      revision += 1
     })
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'fresh-token',
@@ -244,6 +317,7 @@ describe('ensureDevToken', () => {
 
   it('coalesces concurrent stale-token recovery onto one refresh', async () => {
     let token: string | null = 'stale-token'
+    let revision = 0
     let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
       source: 'dev',
       actor: 'dashboard',
@@ -255,6 +329,7 @@ describe('ensureDevToken', () => {
     })
     getStoredToken.mockImplementation(() => token)
     getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
@@ -262,6 +337,7 @@ describe('ensureDevToken', () => {
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      revision += 1
     })
     fetchWithTimeout.mockReturnValueOnce(pendingFetch)
 

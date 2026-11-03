@@ -110,7 +110,9 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
    separated regardless. *)
 let test_task_create_failure_route_splits_workflow_from_runtime () =
   let workflow_rejection_cases =
-    [ "Unknown_predecessor", Workspace_task.Unknown_predecessor "task-999"
+    [ "Ambiguous_goal", Workspace_task.Ambiguous_goal "goal-a"
+    ; "Goal_closed", Workspace_task.Goal_closed "goal-b"
+    ; "Unknown_predecessor", Workspace_task.Unknown_predecessor "task-999"
     ; ( "Predecessor_not_terminal"
       , Workspace_task.Predecessor_not_terminal
           { predecessor_task_id = "task-001"; status = "todo" } )

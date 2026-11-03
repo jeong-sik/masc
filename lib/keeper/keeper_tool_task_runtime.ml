@@ -111,6 +111,8 @@ type task_create_failure_route =
 let task_create_failure_route : Workspace_task.add_task_error -> task_create_failure_route
   = function
   | Workspace_task.Unknown_goal _
+  | Workspace_task.Ambiguous_goal _
+  | Workspace_task.Goal_closed _
   | Workspace_task.Unknown_predecessor _
   | Workspace_task.Predecessor_not_terminal _ -> Task_create_workflow_rejection
   | Workspace_task.Goal_source_unavailable _

@@ -3,6 +3,7 @@ import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout,
   getStoredToken,
   getStoredTokenMeta,
@@ -11,11 +12,79 @@ import {
   setStoredToken,
   type RejectedCredential,
 } from './core'
+import { currentCanonicalDashboardActor, currentDashboardActorName, dashboardActorRevision, managedDashboardActorRevision,
+  managedDashboardAuthRevision, managedDashboardRefusal, managedDashboardUnverified, recordManagedCredentialRefusal } from '../lib/dashboard-session-actor'
+import { WARM_MAX_RETRIES, warmRetryDelayFor } from '../lib/warm-retry'
+import type { ArtifactWorkspace } from './published-artifacts'
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
-let devTokenBootstrapPromise: Promise<void> | null = null
-let devTokenRefreshPromise: Promise<boolean> | null = null
+type TokenOwner = { token: string | null; revision: number; actor: string; actorRevision: number; managed: boolean }
+type OwnedPromise<T> = { owner: TokenOwner; promise: Promise<T> }
+let devTokenBootstrapPromise: OwnedPromise<void> | null = null
+let devTokenRefreshPromise: OwnedPromise<boolean> | null = null
+type ManagedRecoveryClaim = { owner: TokenOwner; authRevision: number; retries: number; inFlight: boolean;
+  notBefore: number; timer: ReturnType<typeof setTimeout> | null }
+let managedRecoveryAttempt: ManagedRecoveryClaim | null = null
+let bootstrapGeneration = 0
+let bootstrapRetryAfterMs = 0
+let bootstrapApplication: { generation: number; before: TokenOwner; after: TokenOwner } | null = null
+
+function tokenOwner(): TokenOwner {
+  const token = getStoredToken()
+  const managed = token !== null && getStoredTokenMeta()?.source === 'dev'
+  return { token, revision: currentStoredTokenRevision(), actor: currentDashboardActor(),
+    actorRevision: managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek(), managed }
+}
+
+function sameTokenOwner(left: TokenOwner, right: TokenOwner): boolean {
+  return left.token === right.token && left.revision === right.revision
+    && left.actor === right.actor && left.managed === right.managed && left.actorRevision === right.actorRevision
+}
+
+function claimManagedRecovery(owner: TokenOwner): ManagedRecoveryClaim | null {
+  const authRevision = managedDashboardAuthRevision.peek()
+  if (managedRecoveryAttempt?.owner.revision === owner.revision && managedRecoveryAttempt.authRevision === authRevision) {
+    if (Date.now() < managedRecoveryAttempt.notBefore || sameTokenOwner(managedRecoveryAttempt.owner, owner)
+      || (!managedRecoveryAttempt.inFlight && managedRecoveryAttempt.timer === null)) return null
+  }
+  if (managedRecoveryAttempt?.timer) clearTimeout(managedRecoveryAttempt.timer)
+  managedRecoveryAttempt = { owner, authRevision, retries: 0, inFlight: false, notBefore: 0, timer: null }
+  return managedRecoveryAttempt
+}
+
+function releaseManagedRecovery(claim: ManagedRecoveryClaim): void {
+  if (managedRecoveryAttempt !== claim) return
+  if (claim.timer) clearTimeout(claim.timer)
+  managedRecoveryAttempt = null
+}
+
+function managedRecoveryIsCurrent(claim: ManagedRecoveryClaim, generation: number): boolean {
+  return managedRecoveryAttempt === claim && claim.authRevision === managedDashboardAuthRevision.peek()
+    && sameTokenOwner(claim.owner, tokenOwner()) && generation === bootstrapGeneration
+}
+
+function scheduleManagedRecovery(claim: ManagedRecoveryClaim, generation: number, retry: () => void,
+  retryAfterMs = 0): void {
+  if (!managedRecoveryIsCurrent(claim, generation)) return
+  claim.notBefore = Math.max(claim.notBefore, Date.now() + retryAfterMs)
+  if (claim.timer || claim.retries >= WARM_MAX_RETRIES) return
+  claim.retries++
+  claim.timer = setTimeout(() => {
+    claim.timer = null
+    if (managedRecoveryIsCurrent(claim, generation)) retry()
+    else releaseManagedRecovery(claim)
+  }, Math.max(warmRetryDelayFor(claim.retries), retryAfterMs))
+}
+
+function retryAfterMs(response: Response): number {
+  const maxTimerDelayMs = 2_147_483_647
+  const value = response.headers.get('retry-after')?.trim()
+  if (!value) return 0
+  if (/^\d+$/.test(value)) return Math.min(Number(value) * 1000, maxTimerDelayMs)
+  const time = Date.parse(value)
+  return Number.isFinite(time) ? Math.min(Math.max(0, time - Date.now()), maxTimerDelayMs) : 0
+}
 
 /**
  * Tracks the outcome of the loopback dev-token bootstrap so the UI can
@@ -42,8 +111,15 @@ export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
 
 export function devTokenBootstrapNeedsReadinessProbe(): boolean {
   return shouldRefreshDevToken()
+    && !currentManagedDevTokenRefused()
     && (devTokenBootstrapStatus.value === 'warming'
       || devTokenBootstrapStatus.value === 'network')
+}
+
+function currentManagedDevTokenRefused(): boolean {
+  return getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
+    && (managedDashboardRefusal.peek() === currentStoredTokenRevision()
+      || managedDashboardUnverified.peek() === currentStoredTokenRevision())
 }
 
 interface DevTokenBootstrapPayload {
@@ -81,7 +157,9 @@ export function isRefreshableDashboardAuthCode(
 export function shouldRefreshDevToken(): boolean {
   const token = getStoredToken()
   const meta = getStoredTokenMeta()
-  if (!token) return true
+  // An explicitly selected operator without a token must not silently be
+  // replaced by the local dashboard administrator on the next MCP request.
+  if (!token) return !isRemoteAccess() && currentDashboardActorName() === 'dashboard'
   if (meta?.source === 'dev') return true
   // A manually-pasted token should never be silently overwritten by the
   // loopback dev-token bootstrapper.  (Issue: token appeared reset after
@@ -100,10 +178,37 @@ export function shouldRefreshDevToken(): boolean {
     strict-auth overrides disabled; in every other case this quietly no-ops
     and existing flows (URL `?token=...`, manual paste) continue to work. */
 export async function ensureDevToken(): Promise<void> {
+  await ensureDevTokenImpl(false)
+}
+
+async function ensureDevTokenImpl(allowRefused: boolean): Promise<void> {
+  if (!allowRefused && currentManagedDevTokenRefused()) return
   if (!shouldRefreshDevToken()) return
-  if (devTokenBootstrapPromise) return devTokenBootstrapPromise
-  devTokenBootstrapPromise = (async () => {
+  const owner = tokenOwner()
+  if (devTokenBootstrapPromise && sameTokenOwner(devTokenBootstrapPromise.owner, owner)) return devTokenBootstrapPromise.promise
+  const generation = ++bootstrapGeneration
+  bootstrapApplication = null
+  const current = () => generation === bootstrapGeneration && sameTokenOwner(owner, tokenOwner())
+  const forget = () => { if (generation === bootstrapGeneration) devTokenBootstrapPromise = null }
+  const continueForChangedOwner = async (): Promise<void> => {
+    if (generation !== bootstrapGeneration) return
+    forget()
+    ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'idle'
+    // An explicitly selected non-dashboard actor must not be replaced by an
+    // automatic dashboard token, nor may an older request replace a token
+    // that another owner installed while it was in flight.
+    const nextOwner = tokenOwner()
+    if (nextOwner.token === owner.token && nextOwner.revision === owner.revision
+      && !isRemoteAccess() && nextOwner.actor === 'dashboard' && shouldRefreshDevToken()) {
+      await ensureDevTokenImpl(allowRefused)
+    }
+  }
+  const rememberCurrentOwner = () => {
+    if (generation === bootstrapGeneration && devTokenBootstrapPromise) devTokenBootstrapPromise.owner = tokenOwner()
+  }
+  const promise = (async () => {
     const storedMeta = getStoredTokenMeta()
+    bootstrapRetryAfterMs = 0
     ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'fetching'
     if (getStoredTokenMeta()?.source === 'manual' && getStoredToken()) return
     try {
@@ -113,18 +218,22 @@ export async function ensureDevToken(): Promise<void> {
           DEV_TOKEN_FETCH_TIMEOUT_MS,
           async res => ({ res, payload: res.ok ? await res.json() as DevTokenBootstrapPayload : null }),
         )
+        if (!current()) return continueForChangedOwner()
         if (!res.ok) {
+          bootstrapRetryAfterMs = retryAfterMs(res)
           if (res.status === 404 && storedMeta?.source === 'dev') {
             clearStoredToken()
           }
+          if (generation !== bootstrapGeneration) return
           if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
             ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
-            devTokenBootstrapPromise = null
+            forget()
           } else {
             ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = res.status === 404
               ? 'no_endpoint'
               : 'invalid_response'
           }
+          rememberCurrentOwner()
           return
         }
         if (payload === null || typeof payload !== 'object') {
@@ -133,7 +242,7 @@ export async function ensureDevToken(): Promise<void> {
         }
         if (payload.status === 'initializing') {
           ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
-          devTokenBootstrapPromise = null
+          forget()
           return
         }
         const token = typeof payload.token === 'string' ? payload.token.trim() : ''
@@ -154,33 +263,55 @@ export async function ensureDevToken(): Promise<void> {
           token !== currentToken
           || currentMeta?.source !== 'dev'
         ) {
+          const actorRevisionBeforeSet = managedDashboardActorRevision.peek()
+          const actorReset = currentCanonicalDashboardActor() === null ? 0 : 1
           setStoredToken(token, {
             source: 'dev',
             actor: 'dashboard',
             role: 'admin',
           })
+          const after = tokenOwner()
+          if (generation === bootstrapGeneration && after.token === token && after.revision === owner.revision + 1
+            && after.actor === 'dashboard' && after.actorRevision === actorRevisionBeforeSet + actorReset) {
+            bootstrapApplication = { generation, before: owner, after }
+          }
         }
+        if (generation !== bootstrapGeneration) return
         ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
+        rememberCurrentOwner()
         return
     } catch {
+      if (!current()) return continueForChangedOwner()
       ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
-      devTokenBootstrapPromise = null
+      forget()
       return
     }
   })()
-  return devTokenBootstrapPromise
+  devTokenBootstrapPromise = { owner, promise }
+  return promise
 }
 
 export function resetDevTokenBootstrap(): void {
+  bootstrapGeneration += 1
   devTokenBootstrapPromise = null
+  bootstrapApplication = null
+  if (devTokenBootstrapStatus.peek() === 'fetching') {
+    ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'idle'
+  }
 }
 
 export async function refreshDevTokenAfterAuthError(code: unknown): Promise<boolean> {
+  return refreshDevTokenAfterAuthErrorWithClaim(code)
+}
+
+async function refreshDevTokenAfterAuthErrorWithClaim(code: unknown, claim?: ManagedRecoveryClaim | null): Promise<boolean> {
   if (!isRefreshableDashboardAuthCode(code)) return false
   if (isRemoteAccess()) return false
   if (getStoredTokenMeta()?.source === 'manual') return false
-  if (devTokenRefreshPromise) return devTokenRefreshPromise
   if (!getStoredToken()) return false
+  if (currentManagedDevTokenRefused() && (!claim || managedRecoveryAttempt !== claim)) return false
+  const owner = tokenOwner()
+  if (devTokenRefreshPromise && sameTokenOwner(devTokenRefreshPromise.owner, owner)) return devTokenRefreshPromise.promise
 
   const refresh = (async () => {
     // Re-fetch in place instead of clearing first. `clearStoredToken()` +
@@ -193,23 +324,26 @@ export async function refreshDevTokenAfterAuthError(code: unknown): Promise<bool
     // true for a stored `dev` token, so dropping the clear does not stop the
     // re-fetch — and `ensureDevToken` only writes when the token differs.
     const rejectedToken = getStoredToken()
-    resetDevTokenBootstrap()
-    await ensureDevToken()
-    const refreshedToken = getStoredToken()
+    const existing = devTokenBootstrapPromise
+    const pending = existing && sameTokenOwner(existing.owner, owner) && devTokenBootstrapStatus.peek() === 'fetching'
+      ? existing.promise : (() => { resetDevTokenBootstrap(); return ensureDevTokenImpl(true) })()
+    const generation = bootstrapGeneration
+    await pending
+    const applied = bootstrapApplication
     // Recovery means the caller now holds a *different* credential. Getting
     // the same token back proves the token was not the reason the request
     // was rejected; reporting success there makes the caller retry the
     // identical request, fail identically, and refresh again — a loop that
     // reconnects the websocket on every pass and never terminates.
-    return getStoredTokenMeta()?.source === 'dev'
-      && refreshedToken !== null
-      && refreshedToken !== rejectedToken
+    return applied !== null && applied.generation === generation
+      && sameTokenOwner(applied.before, owner) && sameTokenOwner(applied.after, tokenOwner())
+      && getStoredTokenMeta()?.source === 'dev' && applied.after.token !== rejectedToken
   })()
-  devTokenRefreshPromise = refresh
+  devTokenRefreshPromise = { owner, promise: refresh }
   try {
     return await refresh
   } finally {
-    if (devTokenRefreshPromise === refresh) devTokenRefreshPromise = null
+    if (devTokenRefreshPromise?.promise === refresh) devTokenRefreshPromise = null
   }
 }
 
@@ -229,13 +363,204 @@ export async function refreshDevTokenAfterAuthError(code: unknown): Promise<bool
 export async function recoverFromRejectedCredential(
   rejection: RejectedCredential,
 ): Promise<void> {
-  if (getStoredToken() !== rejection.token) return
-  if (await refreshDevTokenAfterAuthError(rejection.authErrorCode)) return
+  await recoverFromRejectedCredentialAttempt(rejection)
+}
+
+async function recoverFromRejectedCredentialAttempt(
+  rejection: RejectedCredential,
+  retry?: { claim: ManagedRecoveryClaim; generation: number },
+): Promise<void> {
+  const owner = retry?.claim.owner ?? tokenOwner()
+  if (retry && !managedRecoveryIsCurrent(retry.claim, retry.generation)) {
+    releaseManagedRecovery(retry.claim)
+    return
+  }
+  if (owner.token !== rejection.token) return
+  let claim = retry?.claim ?? null
+  if (!retry && owner.managed && isCredentialRejectionCode(rejection.authErrorCode) && !isRemoteAccess()) {
+    claim = claimManagedRecovery(owner)
+    if (!claim) return
+  }
+  if (claim) claim.inFlight = true
+  const pending = refreshDevTokenAfterAuthErrorWithClaim(rejection.authErrorCode, claim)
+  const generation = bootstrapGeneration
+  const refreshed = await pending
+  if (claim && managedRecoveryAttempt === claim) claim.inFlight = false
+  if (refreshed) return
+  if (claim && !managedRecoveryIsCurrent(claim, generation)) {
+    releaseManagedRecovery(claim)
+    return
+  }
+  if (claim && (devTokenBootstrapStatus.peek() === 'warming' || devTokenBootstrapStatus.peek() === 'network')) {
+    scheduleManagedRecovery(claim, generation, () => {
+      void recoverFromRejectedCredentialAttempt(rejection, { claim, generation })
+    }, bootstrapRetryAfterMs)
+  }
   if (!isCredentialRejectionCode(rejection.authErrorCode)) return
-  if (getStoredToken() !== rejection.token) return
+  if (!sameTokenOwner(owner, tokenOwner())) return
   if (getStoredTokenMeta()?.source === 'dev' && !isRemoteAccess()) return
   clearStoredToken()
   resetDevTokenBootstrap()
+}
+
+/** An explicit retry can restart an exhausted or terminal managed recovery. */
+export async function retryRejectedDevToken(workspace: ArtifactWorkspace, isCurrent: () => boolean): Promise<boolean> {
+  const owner = tokenOwner()
+  if (!owner.managed || !owner.token || isRemoteAccess() || managedDashboardRefusal.peek() !== owner.revision || !isCurrent()) return false
+  const existing = managedRecoveryAttempt
+  if (existing && existing.owner.revision === owner.revision && existing.authRevision === managedDashboardAuthRevision.peek()) {
+    if (existing.inFlight || Date.now() < existing.notBefore) return false
+    releaseManagedRecovery(existing)
+  }
+  let applied = false
+  await recoverScopedRejectedCredentialAttempt({ token: owner.token, authErrorCode: undefined }, isCurrent, undefined, workspace,
+    undefined, true, () => { applied = true })
+  const pending = managedRecoveryAttempt
+  const recoveryPending = pending && pending.owner.revision === owner.revision
+    && pending.authRevision === managedDashboardAuthRevision.peek() && (pending.inFlight || pending.timer !== null)
+  return applied || (isCurrent() && !recoveryPending)
+}
+
+/** Recover a refusal only while the requesting surface still owns it.
+    A scoped request does not reuse another owner's bootstrap promise. */
+export async function recoverScopedRejectedCredential(
+  rejection: RejectedCredential,
+  isCurrent: () => boolean,
+  waitForCurrent?: () => Promise<boolean>,
+  workspace?: ArtifactWorkspace,
+): Promise<void> {
+  await recoverScopedRejectedCredentialAttempt(rejection, isCurrent, waitForCurrent, workspace)
+}
+
+async function recoverScopedRejectedCredentialAttempt(
+  rejection: RejectedCredential,
+  isCurrent: () => boolean,
+  waitForCurrent: (() => Promise<boolean>) | undefined,
+  workspace: ArtifactWorkspace | undefined,
+  retry?: { claim: ManagedRecoveryClaim; generation: number },
+  explicit = false,
+  onApplied?: () => void,
+): Promise<void> {
+  const owner = retry?.claim.owner ?? tokenOwner()
+  if (retry && !managedRecoveryIsCurrent(retry.claim, retry.generation)) {
+    releaseManagedRecovery(retry.claim)
+    return
+  }
+  const current = () => isCurrent() && sameTokenOwner(owner, tokenOwner())
+  const applyWhenCurrent = async (apply: () => void): Promise<void> => {
+    while (sameTokenOwner(owner, tokenOwner())) {
+      // There is no await between this check and applying the change.
+      if (isCurrent()) { apply(); return }
+      if (!waitForCurrent) return
+      try { if (!await waitForCurrent()) return } catch { return }
+    }
+  }
+  const resetForRecovery = (expectedGeneration: number | null): boolean => {
+    if (expectedGeneration !== null && expectedGeneration !== bootstrapGeneration) return false
+    const resetGeneration = bootstrapGeneration + 1
+    resetDevTokenBootstrap()
+    return bootstrapGeneration === resetGeneration && current()
+  }
+  if (owner.token !== rejection.token) return
+  if (!current()) {
+    if (!waitForCurrent) { if (retry) releaseManagedRecovery(retry.claim); return }
+    try {
+      if (!await waitForCurrent() || !current()) { if (retry) releaseManagedRecovery(retry.claim); return }
+    } catch { if (retry) releaseManagedRecovery(retry.claim); return }
+  }
+  if (retry && !managedRecoveryIsCurrent(retry.claim, retry.generation)) {
+    releaseManagedRecovery(retry.claim)
+    return
+  }
+  if (!retry && !explicit && owner.managed && rejection.httpStatus === 401 && isCredentialRejectionCode(rejection.authErrorCode)) {
+    const beforeRefusal = bootstrapGeneration
+    recordManagedCredentialRefusal(owner.revision)
+    if (bootstrapGeneration !== beforeRefusal || !current()) return
+  }
+  const meta = getStoredTokenMeta()
+  let scopedGeneration: number | null = null
+  if ((explicit || isRefreshableDashboardAuthCode(rejection.authErrorCode)) && !isRemoteAccess() && shouldRefreshDevToken()) {
+    if (owner.managed && !workspace) { if (retry) releaseManagedRecovery(retry.claim); return }
+    let claim = retry?.claim ?? null
+    if (!retry && owner.managed && (explicit || (rejection.httpStatus === 401 && isCredentialRejectionCode(rejection.authErrorCode)))) {
+      claim = claimManagedRecovery(owner)
+      if (!claim) return
+    }
+    // A prior unscoped bootstrap must not publish after this recovery starts.
+    const generation = bootstrapGeneration + 1
+    resetDevTokenBootstrap()
+    if (bootstrapGeneration !== generation || !current()) { if (claim) releaseManagedRecovery(claim); return }
+    scopedGeneration = generation
+    if (claim) claim.inFlight = true
+    const scheduleRetry = (delay = 0) => {
+      if (!claim) return
+      claim.inFlight = false
+      scheduleManagedRecovery(claim, generation, () => {
+        void recoverScopedRejectedCredentialAttempt(rejection, isCurrent, waitForCurrent, workspace, { claim, generation }, explicit, onApplied)
+      }, delay)
+    }
+    try {
+      const query = workspace ? `?${new URLSearchParams({ expected_base_path: workspace.basePath, expected_masc_root: workspace.mascRoot })}` : ''
+      const { res, payload } = await fetchWithTimeout(
+        `/api/v1/dashboard/dev-token${query}`,
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        DEV_TOKEN_FETCH_TIMEOUT_MS,
+        async res => ({ res, payload: res.ok ? await res.json() as DevTokenBootstrapPayload : null }),
+      )
+      if (claim && managedRecoveryAttempt === claim) claim.inFlight = false
+      if (claim && !managedRecoveryIsCurrent(claim, generation)) {
+        releaseManagedRecovery(claim)
+        return
+      }
+      if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500
+        || (res.ok && payload && typeof payload === 'object' && payload.status === 'initializing')) {
+        scheduleRetry(retryAfterMs(res))
+        return
+      }
+      if (res.status === 404 && meta?.source === 'dev') {
+        let applied = false
+        await applyWhenCurrent(() => {
+          if (resetForRecovery(scopedGeneration)) {
+            clearStoredToken()
+            applied = currentStoredTokenRevision() === owner.revision + 1 && getStoredToken() === null
+            if (applied) onApplied?.()
+          }
+        })
+        if (claim) releaseManagedRecovery(claim)
+        return
+      }
+      if (res.ok && payload && typeof payload === 'object' && payload.actor === 'dashboard' && payload.role === 'admin') {
+        const token = typeof payload.token === 'string' ? payload.token.trim() : ''
+        if (token && token !== owner.token) {
+          let applied = false
+          await applyWhenCurrent(() => {
+            if (resetForRecovery(scopedGeneration)) {
+              setStoredToken(token, { source: 'dev', actor: 'dashboard', role: 'admin' })
+              applied = currentStoredTokenRevision() === owner.revision + 1 && getStoredToken() === token
+                && getStoredTokenMeta()?.source === 'dev'
+              if (applied) onApplied?.()
+            }
+          })
+          if (claim) releaseManagedRecovery(claim)
+        }
+        if (claim && token === owner.token && !current()) releaseManagedRecovery(claim)
+        if (token) return
+      }
+    } catch (error) {
+      // A failed re-mint is not evidence that a loopback dev token should be cleared.
+      if (claim && managedRecoveryAttempt === claim) claim.inFlight = false
+      if (claim && !managedRecoveryIsCurrent(claim, generation)) {
+        releaseManagedRecovery(claim)
+        return
+      }
+      if (!(error instanceof SyntaxError)) scheduleRetry()
+    }
+  }
+  if (!isCredentialRejectionCode(rejection.authErrorCode)) return
+  if (meta?.source === 'dev' && !isRemoteAccess()) return
+  await applyWhenCurrent(() => {
+    if (resetForRecovery(scopedGeneration)) clearStoredToken()
+  })
 }
 
 export function installRejectedCredentialRecovery(): () => void {

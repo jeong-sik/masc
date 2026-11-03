@@ -8,8 +8,9 @@
 
 import { html } from 'htm/preact'
 import type { Goal } from '../../types'
-import { goals } from '../../store'
-import { assignTaskToGoal } from '../task-manage/task-manage-state'
+import { assignTaskToGoal, type GoalAssignmentDispatch } from '../task-manage/task-manage-state'
+import { showToast } from '../common/toast'
+import { isUnambiguousGoalId, type GoalIdentityObservation } from '../../lib/goal-identity'
 
 // A completed or dropped goal is not somewhere new work should land. Every
 // other phase is offered, including ones this build does not know: the phase
@@ -17,14 +18,33 @@ import { assignTaskToGoal } from '../task-manage/task-manage-state'
 // is closed.
 const CLOSED_PHASES: ReadonlySet<string> = new Set(['completed', 'dropped'])
 
-export function activeGoals(all: readonly Goal[]): Goal[] {
-  return all.filter(goal => !CLOSED_PHASES.has(goal.phase))
+export function activeGoals(all: readonly Goal[], observation: GoalIdentityObservation): Goal[] {
+  if (!observation.complete) return []
+  return all.filter(goal => !CLOSED_PHASES.has(goal.phase) && isUnambiguousGoalId(goal.id, observation.ids))
 }
 
-/** Per-row picker for a backlog task that carries no goal. Renders nothing
-    when no goal is open, because an empty picker offers no action. */
-export function GoalAssignPicker({ taskId }: { taskId: string }) {
-  const options = activeGoals(goals.value)
+export type GoalAssignmentSource = GoalAssignmentDispatch & {
+  readonly goals: readonly Goal[]
+  readonly observation: GoalIdentityObservation
+  readonly rowsIncomplete?: boolean
+}
+
+function assignmentState(source: GoalAssignmentSource) {
+  const options = activeGoals(source.goals, source.observation)
+  const openGoalObserved = source.goals.some(goal => !CLOSED_PHASES.has(goal.phase))
+  const incomplete = !source.observation.complete || source.rowsIncomplete === true
+  return { options, unavailable: options.length === 0 && (openGoalObserved || incomplete) }
+}
+
+export function GoalAssignAvailability({ source }: { source: GoalAssignmentSource }) {
+  return assignmentState(source).unavailable
+    ? html`<p role="status" class="text-xs text-warn">Goal ID 또는 목록을 확인할 수 없어 배정할 수 없습니다. 목록을 다시 확인해 주세요.</p>`
+    : null
+}
+
+/** Per-row picker for a backlog task that carries no goal. */
+export function GoalAssignPicker({ taskId, source }: { taskId: string; source: GoalAssignmentSource }) {
+  const { options } = assignmentState(source)
   if (options.length === 0) return null
   return html`
     <select
@@ -39,7 +59,12 @@ export function GoalAssignPicker({ taskId }: { taskId: string }) {
         // select left on a goal would read as a saved choice rather than an
         // action that already happened.
         select.value = ''
-        if (goalId) void assignTaskToGoal(taskId, goalId)
+        if (!goalId) return
+        if (!source.isCurrent() || !activeGoals(source.goals, source.observation).some(goal => goal.id === goalId)) {
+          showToast('목록이 바뀌었거나 목표를 확인할 수 없습니다. 다시 확인한 뒤 선택해 주세요.', 'warning')
+          return
+        }
+        void assignTaskToGoal(taskId, goalId, source)
       }}
     >
       <option value="">goal에 배정</option>

@@ -68,9 +68,9 @@ let test_properties_keep_their_order_and_requirement () =
        check (list string) (name ^ " properties, in order") props (property_names name);
        check (list string) (name ^ " required, in order") required (required_names name))
     [ "masc_task_history", [ "task_id"; "limit" ], [ "task_id" ]
-    ; "masc_tasks", [ "status"; "include_done"; "include_cancelled" ], []
+    ; "masc_tasks", [ "status"; "include_done"; "include_cancelled"; "creation_request_id"; "expected_workspace" ], []
     ; "masc_update_priority", [ "task_id"; "priority" ], [ "task_id"; "priority" ]
-    ; "masc_task_set_goal", [ "task_id"; "goal_id" ], [ "task_id"; "goal_id" ]
+    ; "masc_task_set_goal", [ "task_id"; "goal_id"; "expected_workspace" ], [ "task_id"; "goal_id" ]
     ]
 ;;
 

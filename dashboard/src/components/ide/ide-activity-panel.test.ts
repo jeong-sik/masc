@@ -6,7 +6,8 @@ import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-pa
 import { focusIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
-import { goals, tasks } from '../../store'
+import { goalIdentityObservation, goals, tasks } from '../../store'
+import type { Goal } from '../../types'
 
 const renderedContainers = new Set<Parameters<typeof preactRender>[1]>()
 
@@ -22,6 +23,11 @@ function stubEmptyActivityFetch(): void {
       headers: { 'Content-Type': 'application/json' },
     }),
   ))
+}
+
+function observedGoalList<T extends Goal>(list: T[]): T[] {
+  goalIdentityObservation.value = { goals: list, observation: { ids: list.map(goal => goal.id), complete: true } }
+  return list
 }
 
 beforeEach(() => {
@@ -43,6 +49,7 @@ afterEach(() => {
     availability: 'available',
   })
   goals.value = []
+  goalIdentityObservation.value = null
   tasks.value = []
   window.location.hash = ''
   clearTraces()
@@ -813,7 +820,7 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
   })
 
-  it('renders active run goal progress from activity goal and task links', async () => {
+  it('renders the Goal and activity Task without claiming Goal Task progress', async () => {
     goals.value = [{
       id: 'goal-runtime',
       title: 'Runtime goal',
@@ -824,6 +831,7 @@ describe('IdeActivityPanel', () => {
       created_at: '2026-05-05T09:00:00Z',
       updated_at: '2026-05-05T09:30:00Z',
     }]
+    observedGoalList(goals.value)
     tasks.value = [
       { id: 'task-runtime-a', title: 'Done runtime task', goal_id: 'goal-runtime', status: 'done' },
       { id: 'task-runtime-b', title: 'Open runtime task', goal_id: 'goal-runtime', status: 'in_progress' },
@@ -854,19 +862,176 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('GOAL TRACK')
       expect(container.textContent).toContain('Runtime goal')
-      expect(container.textContent).toContain('1/2 tasks')
+      expect(container.textContent).toContain('Task progress unavailable from activity')
+      expect(container.textContent).toContain('Goal–Task relationship unverified')
+      expect(container.textContent).not.toContain('1/2')
       expect(container.textContent).not.toContain('50%')
     })
 
     const goalLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-goal-links button')]
     expect(goalLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
-    expect(goalLinks.map(link => link.textContent)).toEqual(['Goal', 'Task'])
+    expect(goalLinks.map(link => link.textContent)).toEqual(['Goal', 'Activity Task'])
 
     fireEvent.click(goalLinks[0]!)
     expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
 
     fireEvent.click(goalLinks[1]!)
     expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-runtime-b')
+  })
+
+  it.each(['task', 'payload', 'context'])('keeps the exact Goal ID in %s activity progress', async source => {
+    const goalId = '\u00a0goal-a\u00a0'
+    goals.value = [
+      { id: goalId, title: 'Unicode Goal', priority: 1, phase: 'executing', created_at: '', updated_at: '' },
+      { id: 'goal-a', title: 'Different Goal', priority: 1, phase: 'executing', created_at: '', updated_at: '' },
+    ]
+    observedGoalList(goals.value)
+    tasks.value = source === 'task'
+      ? [{ id: 'task-a', title: 'Task', goal_id: goalId, status: 'done' }]
+      : [
+          { id: 'task-a', title: 'Different Task', goal_id: 'goal-a', status: 'done' },
+          { id: 'task-proof', title: 'Unicode Goal Task', goal_id: goalId, status: 'done' },
+        ]
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      events: [{ seq: 1, ts_ms: 100, ts_iso: '2026-05-05T10:00:00Z', workspace_id: 'run-default',
+        kind: 'telemetry.turn', actor: { kind: 'keeper', id: 'keeper' },
+        subject: { kind: 'task', id: 'task-a' },
+        context: source === 'context' ? { goal_id: goalId, task_id: 'task-a' } : undefined,
+        payload: source === 'payload' ? { goal_id: goalId, task_id: 'task-a' } : { task_id: 'task-a' }, tags: [] }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+    await waitFor(() => {
+      expect(container.textContent).toContain('Unicode Goal')
+      expect(container.textContent).toContain('Task progress unavailable from activity')
+      expect(container.textContent).not.toContain('Different Goal')
+    })
+    const goalLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-goal-links button')]
+    expect(goalLinks.map(link => link.textContent)).toEqual(['Goal', 'Activity Task'])
+    expect(container.textContent).toContain('Goal–Task relationship unverified')
+    fireEvent.click(goalLinks[0]!)
+    expect(new URLSearchParams(window.location.hash.split('?')[1]).get('goal')).toBe(goalId)
+    fireEvent.click(goalLinks[1]!)
+    expect(new URLSearchParams(window.location.hash.split('?')[1]).get('task')).toBe('task-a')
+  })
+
+  it.each(['missing', 'incomplete', 'duplicate', 'different snapshot'])(
+    'does not claim a Goal Track identity from a %s observation', scenario => {
+      const list: Goal[] = [{ id: 'goal-a', title: 'Possibly wrong title', priority: 1,
+        phase: 'executing', created_at: '', updated_at: '' }]
+      goalIdentityObservation.value = scenario === 'missing' ? null : {
+        goals: scenario === 'different snapshot' ? [...list] : list,
+        observation: { ids: scenario === 'duplicate' ? ['goal-a', 'goal-a'] : ['goal-a'],
+          complete: scenario !== 'incomplete' },
+      }
+      const summary = deriveIdeRunProgressSummary([{
+        id: 'event-1', run_id: 'run-default', keeper_id: 'keeper', verb: 'noted', target: 'task',
+        timestamp_ms: 100, context: { goal_id: 'goal-a', task_id: 'task-a' },
+      }], '', list, [{ id: 'task-a', title: 'Task', goal_id: 'goal-a', status: 'done' }])
+      expect(summary.activeGoal).toMatchObject({ goalId: 'goal-a', identityUnambiguousInObservation: false,
+        title: 'goal-a', phase: 'unknown', activityTaskId: null, progressLabel: 'Goal identity unavailable' })
+    },
+  )
+
+  it('does not offer Goal Track links when the Goal identity observation is ambiguous', async () => {
+    goals.value = [{ id: 'goal-a', title: 'Possibly wrong title', priority: 1,
+      phase: 'executing', created_at: '', updated_at: '' }]
+    goalIdentityObservation.value = { goals: goals.value, observation: { ids: ['goal-a', 'goal-a'], complete: true } }
+    tasks.value = [{ id: 'task-a', title: 'Task', goal_id: 'goal-a', status: 'done' }]
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      events: [{ seq: 1, ts_ms: 100, ts_iso: '2026-05-05T10:00:00Z', workspace_id: 'run-default',
+        kind: 'telemetry.turn', actor: { kind: 'keeper', id: 'keeper' },
+        subject: { kind: 'task', id: 'task-a' }, payload: { goal_id: 'goal-a', task_id: 'task-a' }, tags: [] }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, {}), container)
+    await waitFor(() => expect(container.textContent).toContain('Goal identity unavailable'))
+    const track = container.querySelector('.ide-run-progress-goal')
+    expect(track?.textContent).not.toContain('Possibly wrong title')
+    expect(track?.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('does not attach a Task link to a Goal track when the observed Task ID is duplicated', () => {
+    const summary = deriveIdeRunProgressSummary([{
+      id: 'event-1', run_id: 'run-default', keeper_id: 'keeper', verb: 'noted', target: 'task',
+      timestamp_ms: 100, context: { goal_id: 'goal-a', task_id: 'task-a' },
+    }], '', observedGoalList([
+      { id: 'goal-a', title: 'Goal A', priority: 1, phase: 'executing', created_at: '', updated_at: '' },
+      { id: 'goal-b', title: 'Goal B', priority: 1, phase: 'executing', created_at: '', updated_at: '' },
+    ]), [
+      { id: 'task-a', title: 'First Task', goal_id: 'goal-b', status: 'todo' },
+      { id: 'task-a', title: 'Second Task', goal_id: 'goal-a', status: 'todo' },
+    ])
+    expect(summary.activeGoal).toMatchObject({ goalId: 'goal-a', activityTaskId: null,
+      progressLabel: 'Task progress unavailable from activity' })
+  })
+
+  it('keeps task-only Goal attribution when duplicate Task rows agree, without inventing progress', () => {
+    const event = { id: 'event-1', run_id: 'run-default', keeper_id: 'keeper', verb: 'noted' as const,
+      target: 'task', timestamp_ms: 100, context: { task_id: 'task-a' } }
+    const goal = { id: 'goal-a', title: 'Goal A', priority: 1, phase: 'executing' as const, created_at: '', updated_at: '' }
+    const first = { id: 'task-a', title: 'First', goal_id: 'goal-a', status: 'todo' as const }
+    const second = { id: 'task-a', title: 'Second', goal_id: 'goal-a', status: 'done' as const }
+    const observed = observedGoalList([goal])
+    const sameGoal = deriveIdeRunProgressSummary([event], '', observed, [first, second])
+    expect(sameGoal.activeGoal).toMatchObject({ goalId: 'goal-a', activityTaskId: null,
+      progressLabel: 'Task progress unavailable from activity' })
+    const differentGoals = deriveIdeRunProgressSummary([event], '', observed, [first, { ...second, goal_id: 'goal-b' }])
+    expect(differentGoals.activeGoal).toBeNull()
+  })
+
+  it('retains an activity Task link when only unrelated Task IDs are duplicated', () => {
+    const summary = deriveIdeRunProgressSummary([{
+      id: 'event-1', run_id: 'run-default', keeper_id: 'keeper', verb: 'noted', target: 'task',
+      timestamp_ms: 100, context: { goal_id: 'goal-a', task_id: 'task-a' },
+    }], '', observedGoalList([{ id: 'goal-a', title: 'Goal A', priority: 1, phase: 'executing', created_at: '', updated_at: '' }]), [
+      { id: 'task-a', title: 'Goal A Task', goal_id: 'goal-a', status: 'done' },
+      { id: 'task-b', title: 'Other 1', goal_id: 'goal-b', status: 'todo' },
+      { id: 'task-b', title: 'Other 2', goal_id: 'goal-b', status: 'todo' },
+    ])
+    expect(summary.activeGoal).toMatchObject({ goalId: 'goal-a', activityTaskId: 'task-a',
+      progressLabel: 'Task progress unavailable from activity' })
+  })
+
+  it('does not infer Goal completion from an empty or partial execution Task projection', () => {
+    const observed = observedGoalList([
+      { id: 'goal-a', title: 'Goal A', priority: 1, phase: 'executing', created_at: '', updated_at: '' },
+    ])
+    const event = { id: 'event-1', run_id: 'run-default', keeper_id: 'keeper', verb: 'noted' as const,
+      target: 'task', timestamp_ms: 100, context: { goal_id: 'goal-a', task_id: 'task-a' } }
+    const projections = [
+      [],
+      [{ id: 'task-a', title: 'Recent completed Task', goal_id: 'goal-a', status: 'done' as const }],
+      [
+        { id: 'task-a', title: 'Cancelled Task', goal_id: 'goal-a', status: 'cancelled' as const },
+        { id: 'task-a', title: 'Other Task', goal_id: 'goal-b', status: 'done' as const },
+      ],
+    ]
+    for (const projection of projections) {
+      const activeGoal = deriveIdeRunProgressSummary([event], '', observed, projection).activeGoal
+      expect(activeGoal?.progressLabel).toBe('Task progress unavailable from activity')
+      expect(activeGoal).not.toHaveProperty('progress')
+    }
+  })
+
+  it('shows unavailable progress when a Goal has duplicate Task IDs', async () => {
+    goals.value = [{ id: 'goal-a', title: 'Goal A', priority: 1, phase: 'executing', created_at: '', updated_at: '' }]
+    observedGoalList(goals.value)
+    tasks.value = [
+      { id: 'task-a', title: 'First', goal_id: 'goal-a', status: 'todo' },
+      { id: 'task-a', title: 'Second', goal_id: 'goal-a', status: 'done' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      events: [{ seq: 1, ts_ms: 100, ts_iso: '2026-05-05T10:00:00Z', workspace_id: 'run-default',
+        kind: 'telemetry.turn', actor: { kind: 'keeper', id: 'keeper' },
+        subject: { kind: 'task', id: 'task-a' }, payload: { task_id: 'task-a' }, tags: [] }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, {}), container)
+    await waitFor(() => expect(container.textContent).toContain('Task progress unavailable from activity'))
+    const track = container.querySelector('.ide-run-progress-goal')
+    expect(track?.textContent).not.toContain('1/2 tasks')
+    expect([...track!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Goal'])
   })
 
   it('ignores non-positive numeric payload ids when deriving context links', async () => {
@@ -1075,14 +1240,14 @@ describe('IdeActivityPanel', () => {
     const summary = deriveIdeRunProgressSummary(
       events,
       'lib/runtime.ml',
-      [{
+      observedGoalList([{
         id: 'goal-runtime',
         title: 'Runtime goal',
         priority: 1,
         phase: 'executing',
         created_at: '2026-05-05T09:00:00Z',
         updated_at: '2026-05-05T09:30:00Z',
-      }],
+      }]),
       [
         { id: 'task-runtime', title: 'Runtime task', goal_id: 'goal-runtime', status: 'done' },
         { id: 'task-followup', title: 'Runtime follow-up', goal_id: 'goal-runtime', status: 'todo' },
@@ -1099,10 +1264,9 @@ describe('IdeActivityPanel', () => {
       latestAgeLabel: '30s ago',
       activeGoal: {
         goalId: 'goal-runtime',
-        taskId: 'task-runtime',
+        activityTaskId: 'task-runtime',
         title: 'Runtime goal',
-        progress: { done: 1, total: 2, ratio: 0.5 },
-        progressLabel: '1/2 tasks',
+        progressLabel: 'Task progress unavailable from activity',
       },
     })
     expect(summary.surfaceCounts.map(surface => [surface.label, surface.count])).toEqual([

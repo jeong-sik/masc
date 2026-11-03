@@ -12,7 +12,7 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 const devTokenMocks = vi.hoisted(() => ({
-  recoverFromRejectedCredential: vi.fn(async () => undefined),
+  recoverFromRejectedCredential: vi.fn(async (_rejection: { token: string; authErrorCode: string | undefined }): Promise<void> => {}),
 }))
 
 vi.mock('./api', () => apiMocks)
@@ -229,7 +229,82 @@ describe('rejected shell credential recovery', () => {
     })
   })
 
-  it('reads the sent token before a shell refresh leaves', async () => {
+  it('retires a managed owner once per newly observed shell rejection', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = actor.managedDashboardActorRevision.peek()
+    const authRevision = actor.managedDashboardAuthRevision.peek()
+    const hydrate = (auth: Record<string, unknown>) => store.hydrateShellSnapshot(shellBody(auth), {
+      light: true, sentToken: 'dev-token', authOwner: core.captureDashboardCredentialOwner(),
+    })
+    hydrate(rejected)
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 1)
+    hydrate(rejected)
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 1)
+    hydrate({ ...rejected, token_valid: true, token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null })
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 2)
+    expect(actor.managedDashboardRefusal.peek()).toBeNull()
+    hydrate(rejected)
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 3)
+    expect(actor.managedDashboardAuthRevision.peek()).toBe(authRevision + 3)
+    expect(actor.managedDashboardRefusal.peek()).toBe(core.currentStoredTokenRevision())
+  })
+
+  it('does not hydrate an older valid shell response after the credential is refused', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveShell!: (value: unknown) => void
+    apiMocks.fetchDashboardShell.mockImplementationOnce(() => new Promise(resolve => { resolveShell = resolve }))
+    const pending = store.refreshShell({ force: true })
+    await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledOnce())
+    actor.recordManagedCredentialRefusal(core.currentStoredTokenRevision())
+    resolveShell(shellBody({ ...rejected, token_valid: true, token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null }))
+    expect(await pending).toBe(false)
+    expect(actor.currentCanonicalDashboardActor()).toBeNull()
+    expect(actor.managedDashboardRefusal.peek()).toBe(core.currentStoredTokenRevision())
+    expect(store.shellAuthSummary.peek()).toBeNull()
+  })
+
+  it('does not let a valid shell response erase a later refusal of the same token', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = core.currentStoredTokenRevision()
+    actor.recordManagedCredentialRefusal(revision)
+    let resolveShell!: (value: unknown) => void
+    apiMocks.fetchDashboardShell.mockImplementationOnce(() => new Promise(resolve => { resolveShell = resolve }))
+    const pending = store.refreshShell({ force: true })
+    await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledOnce())
+    actor.recordManagedCredentialRefusal(revision)
+    resolveShell(shellBody({ ...rejected, token_valid: true, token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null }))
+    expect(await pending).toBe(false)
+    expect(actor.managedDashboardRefusal.peek()).toBe(revision)
+    expect(actor.currentCanonicalDashboardActor()).toBeNull()
+  })
+
+  it('retires a delayed 401 body when a later shell verifies its token', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const ownerBeforeHeader = core.captureDashboardCredentialOwner()
+    const managedActor = actor.managedDashboardActorRevision.peek()
+    actor.noteManagedCredentialRefusalObservation(core.currentStoredTokenRevision())
+    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody({ ...rejected, token_valid: true,
+      token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null }))
+    expect(await store.refreshShell({ force: true })).toBe(true)
+    expect(actor.currentCanonicalDashboardActor()).toBe('dashboard')
+    expect(actor.managedDashboardActorRevision.peek()).toBe(managedActor + 1)
+    expect(core.dashboardCredentialOwnerIsCurrent(ownerBeforeHeader)).toBe(false)
+    expect(actor.managedCredentialNeedsRevalidation(core.currentStoredTokenRevision())).toBe(false)
+  })
+
+  it('does not recover or hydrate auth from a shell response for a changed credential', async () => {
     const core = await import('./api/core')
     core.setStoredToken('sent-token', { source: 'manual' })
     apiMocks.fetchDashboardShell.mockImplementationOnce(async () => {
@@ -237,11 +312,67 @@ describe('rejected shell credential recovery', () => {
       return shellBody(rejected)
     })
     const store = await import('./store')
-    await store.refreshShell({ force: true })
-    expect(devTokenMocks.recoverFromRejectedCredential).toHaveBeenCalledWith({
-      token: 'sent-token',
-      authErrorCode: 'invalid_token',
-    })
+    expect(await store.refreshShell({ force: true })).toBe(false)
+    expect(devTokenMocks.recoverFromRejectedCredential).not.toHaveBeenCalled()
+    expect(store.shellAuthSummary.value).toBeNull()
+  })
+
+  it.each(['token', 'actor'] as const)('does not hydrate an old shell response after %s changes and returns', async changed => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('token-a', { source: 'manual' })
+    actor.setCanonicalDashboardActor('actor-a')
+    let resolveFirst!: (value: unknown) => void
+    apiMocks.fetchDashboardShell.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+    const pending = store.refreshShell({ force: true })
+    if (changed === 'token') {
+      core.setStoredToken('token-b', { source: 'manual' })
+      core.setStoredToken('token-a', { source: 'manual' })
+      actor.setCanonicalDashboardActor('actor-a')
+    } else {
+      actor.setCanonicalDashboardActor('actor-b')
+      actor.setCanonicalDashboardActor('actor-a')
+    }
+    resolveFirst(shellBody(rejected))
+    expect(await pending).toBe(false)
+    expect(devTokenMocks.recoverFromRejectedCredential).not.toHaveBeenCalled()
+    expect(actor.currentCanonicalDashboardActor()).toBe('actor-a')
+    expect(store.shellAuthSummary.value).toBeNull()
+
+    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody({
+      ...rejected, token_valid: true, effective_agent: 'actor-a', auth_error_code: null,
+    }))
+    expect(await store.refreshShell()).toBe(true)
+    expect(store.shellAuthSummary.value?.token_valid).toBe(true)
+  })
+
+  it('does not clear the new actor when an older shell request fails', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('token-a', { source: 'manual' })
+    let rejectFirst!: (error: Error) => void
+    apiMocks.fetchDashboardShell.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject }))
+    const pending = store.refreshShell({ force: true })
+    core.setStoredToken('token-b', { source: 'manual' })
+    actor.setCanonicalDashboardActor('actor-b')
+    rejectFirst(new Error('old request failed'))
+    expect(await pending).toBe(false)
+    expect(actor.currentCanonicalDashboardActor()).toBe('actor-b')
+  })
+
+  it('recovers a current rejected token after the shell resets its actor', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const actualRecovery = await vi.importActual<typeof import('./api/dev-token')>('./api/dev-token')
+    devTokenMocks.recoverFromRejectedCredential.mockImplementationOnce(actualRecovery.recoverFromRejectedCredential)
+    const store = await import('./store')
+    core.setStoredToken('token-a', { source: 'manual' })
+    actor.setCanonicalDashboardActor('actor-a')
+    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody(rejected))
+    expect(await store.refreshShell({ force: true })).toBe(true)
+    await vi.waitFor(() => expect(core.getStoredToken()).toBeNull())
   })
 
   it('leaves an accepted credential alone', async () => {

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import type { Goal, Keeper, Task } from '../../types'
 import { goals, keepers, tasks } from '../../store'
 import { firstNonEmptyString } from '../../lib/format-string'
+import { nonblankGoalId } from '../../lib/goal-identity'
 import { normalizeKeeperBlockerText } from '../../lib/keeper-runtime-display'
 import { KeeperBadge } from '../keeper-badge'
 import {
@@ -331,10 +332,9 @@ export function keeperWorkSummary(
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null
-  const currentGoalId = firstNonEmptyString(
-    currentTask?.goal_id,
-    activeTasks.find(task => task.goal_id)?.goal_id,
-  )
+  const currentGoalId = nonblankGoalId(currentTask?.goal_id)
+    ?? activeTasks.map(task => nonblankGoalId(task.goal_id)).find(id => id !== undefined)
+    ?? null
   const trust = keeper?.trust ?? null
   const latestTerminal = trust?.latest_terminal_reason ?? null
   const terminalSummary = normalizeKeeperBlockerText(

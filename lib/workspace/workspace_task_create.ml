@@ -26,6 +26,8 @@ type add_task_error =
   | Goal_lock_failed of string
       (** The goal file lock could not be taken; no goal was read. *)
   | Unknown_goal of string
+  | Ambiguous_goal of string
+  | Goal_closed of string
   | Backlog_read_failed of string
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
@@ -43,6 +45,8 @@ type batch_add_tasks_error =
   | Batch_goal_source_unavailable of Goal_store_unavailable.t
   | Batch_goal_lock_failed of string
   | Batch_unknown_goal of string
+  | Batch_ambiguous_goal of string
+  | Batch_goal_closed of string
   | Batch_backlog_read_failed of string
   | Batch_goal_link_write_failed of string
   | Batch_backlog_write_failed of string
@@ -53,6 +57,8 @@ let add_task_error_to_string = function
     "Goal store unavailable: " ^ Goal_store_unavailable.to_string unavailable
   | Goal_lock_failed message -> "Goal store lock failed: " ^ message
   | Unknown_goal id -> Printf.sprintf "Unknown goal_id '%s'" id
+  | Ambiguous_goal id -> Printf.sprintf "goal_id '%s' has an ambiguous ID" id
+  | Goal_closed id -> Printf.sprintf "goal_id '%s' is completed or dropped; new work cannot be linked" id
   | Backlog_read_failed msg -> Printf.sprintf "Error: %s" msg
   | Goal_link_write_failed msg ->
     Printf.sprintf "Error linking task to goal: %s" msg
@@ -76,6 +82,8 @@ let batch_add_tasks_error_to_string = function
     "Goal store unavailable: " ^ Goal_store_unavailable.to_string unavailable
   | Batch_goal_lock_failed message -> "Goal store lock failed: " ^ message
   | Batch_unknown_goal id -> Printf.sprintf "Unknown goal_id '%s'" id
+  | Batch_ambiguous_goal id -> Printf.sprintf "goal_id '%s' has an ambiguous ID" id
+  | Batch_goal_closed id -> Printf.sprintf "goal_id '%s' is completed or dropped; new work cannot be linked" id
   | Batch_backlog_read_failed msg -> Printf.sprintf "Error adding batch tasks: %s" msg
   | Batch_goal_link_write_failed msg ->
     Printf.sprintf "Error linking batch tasks to goals: %s" msg

@@ -433,14 +433,13 @@ describe('IdeConversationRail', () => {
     })
 
     const badge = container.querySelector('.ide-conversation-context-badge')
-    expect(badge?.textContent).toBe('CTX 10')
+    expect(badge?.textContent).toBe('CTX 9')
     expect(badge?.getAttribute('title'))
-      .toBe('Linked context: Code, Goal, Task, Board, Comment, PR, Git, Log, Telemetry, Keeper')
+      .toBe('Linked context: Code, Task, Board, Comment, PR, Git, Log, Telemetry, Keeper')
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
     expect(links.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

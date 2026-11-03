@@ -193,6 +193,10 @@ function routeParam(params: Record<string, string>, ...keys: ReadonlyArray<strin
   return undefined
 }
 
+function goalRouteParam(params: Record<string, string>): string | undefined {
+  return params.goal_id || params.goal || undefined
+}
+
 function shortStatusbarPath(path: string): string {
   const trimmed = path.trim()
   if (!trimmed) return 'no file'
@@ -416,10 +420,11 @@ function addStatusbarChip(
   label: string | undefined,
   tone: IdeStatusbarChipTone,
   title: string,
+  preserveWhitespace = false,
 ) {
   const trimmed = label?.trim()
-  if (!trimmed) return
-  chips.push({ id, label: trimmed, tone, title })
+  if (!trimmed || label === undefined) return
+  chips.push({ id, label: preserveWhitespace ? label : trimmed, tone, title })
 }
 
 export function deriveIdeStatusbarModel({
@@ -513,8 +518,9 @@ export function deriveIdeStatusbarModel({
     'Route-focused IDE context',
   )
 
-  const goal = routeParam(routeParams, 'goal_id', 'goal')
-    ?? focusRouteParam(contextFocus, ['Goal'], 'goal')
+  const goalLink = focusRouteLinkByLabel(contextFocus, 'Goal')
+  const goal = goalRouteParam(routeParams)
+    ?? (goalLink ? goalRouteParam(goalLink.params) : undefined)
   const task = routeParam(routeParams, 'task_id', 'task')
     ?? focusRouteParam(contextFocus, ['Task'], 'task')
   const board = routeParam(routeParams, 'board_post_id', 'post')
@@ -533,7 +539,7 @@ export function deriveIdeStatusbarModel({
     ?? focusRouteParam(contextFocus, ['Keeper'], 'keeper')
     ?? contextFocus?.keeper_id
 
-  addStatusbarChip(chips, 'goal', goal ? `Goal ${goal}` : undefined, 'brass', 'Focused goal')
+  addStatusbarChip(chips, 'goal', goal ? `Goal ${goal}` : undefined, 'brass', 'Focused goal', true)
   addStatusbarChip(chips, 'task', task ? `Task ${task}` : undefined, 'brass', 'Focused task')
   addStatusbarChip(chips, 'board', board ? `Board ${board}` : undefined, 'info', 'Focused board post')
   addStatusbarChip(chips, 'comment', comment ? `Comment ${comment}` : undefined, 'info', 'Focused comment')
@@ -771,7 +777,7 @@ export function IdeShell() {
     ? routeFocusSourceId(route.value.params, routeFileFocus, routeLineFocus)
     : ''
   const routeKeeperFocus = route.value.params.keeper?.trim() || undefined
-  const routeGoalFocus = routeParam(route.value.params, 'goal_id', 'goal')
+  const routeGoalFocus = goalRouteParam(route.value.params)
   const routeTaskFocus = routeParam(route.value.params, 'task_id', 'task')
   const routeBoardPostFocus = routeParam(route.value.params, 'board_post_id', 'post')
   const routeCommentFocus = routeParam(route.value.params, 'comment_id', 'comment')

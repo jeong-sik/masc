@@ -697,7 +697,7 @@ function buildAnchors(
         surface: eventSurface,
         label: truncate(event.detail || `${event.verb} ${event.target}`, 48),
         sourceId: `event-${event.id}`,
-        goalId: event.context?.goal_id ?? refs.goalId,
+        goalId: event.context?.goal_id,
         taskId: event.context?.task_id ?? refs.taskId,
         boardPostId: event.context?.board_post_id ?? refs.boardPostId,
         commentId: event.context?.comment_id ?? refs.commentId,
@@ -770,7 +770,6 @@ function diagnosticTelemetryQuery(diagnostic: IdeContextDiagnostic): string | un
 
 export interface IdeContextTextRouteRefs {
   readonly line?: number
-  readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
   readonly commentId?: string
@@ -784,7 +783,6 @@ export interface IdeContextTextRouteRefs {
 
 const REF_VALUE_PATTERN = '([A-Za-z0-9][A-Za-z0-9._/@:-]*)'
 const EVENT_REF_PATTERNS = {
-  goalId: new RegExp(`\\bgoal[:#/]+${REF_VALUE_PATTERN}`, 'i'),
   taskId: new RegExp(`\\btask[:#/]+${REF_VALUE_PATTERN}`, 'i'),
   boardPostId: new RegExp(`\\b(?:board|post)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
   commentId: new RegExp(`\\bcomment[:#/]+${REF_VALUE_PATTERN}`, 'i'),
@@ -803,7 +801,6 @@ function eventRouteRefs(event: RunActivityEvent): IdeContextTextRouteRefs {
 export function routeRefsFromText(text: string): IdeContextTextRouteRefs {
   return {
     line: eventLineRef(text),
-    goalId: firstEventRef(text, EVENT_REF_PATTERNS.goalId),
     taskId: firstEventRef(text, EVENT_REF_PATTERNS.taskId),
     boardPostId: firstEventRef(text, EVENT_REF_PATTERNS.boardPostId),
     commentId: firstEventRef(text, EVENT_REF_PATTERNS.commentId),
@@ -845,7 +842,7 @@ function eventLineRef(text: string): number | undefined {
 
 function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs): string {
   const context = event.context
-  const goalId = context?.goal_id ?? refs.goalId
+  const goalId = context?.goal_id
   const taskId = context?.task_id ?? refs.taskId
   const prId = context?.pr_id ?? refs.prId
   const boardPostId = context?.board_post_id ?? refs.boardPostId
@@ -912,7 +909,8 @@ export function routeLinksForContext(
       evidence: `Code ${filePath}${line !== undefined ? `:${line}` : ''}`,
     })
   }
-  const goalId = cleanId(context.goalId)
+  // Goal IDs are identities: trimming can create a link to a different Goal.
+  const goalId = context.goalId || null
   if (goalId) {
     add({
       id: `goal:${goalId}`,

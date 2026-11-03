@@ -185,6 +185,15 @@ describe('SessionTraceEntry', () => {
     expect(links.map(link => link.label)).toEqual(['Goal', 'Board', 'Comment', 'Keeper'])
   })
 
+  it('routes structured Goal IDs exactly and does not infer one from a goal description', () => {
+    for (const context of [{ goal_id: ' \u00a0g\u00a0 ' }, { goal_ids: [' \u00a0g\u00a0 '] }]) {
+      const links = traceRouteLinks(sampleToolCallEvent({ detail: { context } }))
+      expect(links.find(link => link.label === 'Goal')?.params.goal).toBe(' \u00a0g\u00a0 ')
+    }
+    const links = traceRouteLinks(sampleToolCallEvent({ detail: { context: { goal: 'g' } } }))
+    expect(links.some(link => link.label === 'Goal')).toBe(false)
+  })
+
   it('shows tok/sec for durable LLM response lifecycle details', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: {

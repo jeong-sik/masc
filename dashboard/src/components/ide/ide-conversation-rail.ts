@@ -505,7 +505,6 @@ function conversationRouteLinks(
     surface: KIND_LABEL[kind],
     label: bodyText || post.title || 'board thread',
     sourceId: `thread-${post.id}`,
-    goalId: refs.goalId,
     taskId: refs.taskId,
     boardPostId: post.id,
     commentId: refs.commentId,

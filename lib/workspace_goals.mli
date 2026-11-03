@@ -17,7 +17,11 @@ val handle_goal_list
   -> Tool_result.result
 
 (** [handle_goal_upsert ctx args] handles [masc_goal_upsert] —
-    create-or-update a goal record. Explicit empty criterion strings are
+    create-or-update a goal record. An optional [expected_workspace]
+    precondition is checked before reading or mutating the Goal store.
+    [if_absent:true] refuses an existing ID or trimmed alias under the Goal
+    lock instead of updating it.
+    Explicit empty criterion strings are
     preserved for the store's locked effective-condition validation; omission
     retains the stored field. Validates priority and rejects lifecycle
     fields, which belong to [masc_goal_transition]. Lifecycle field errors are

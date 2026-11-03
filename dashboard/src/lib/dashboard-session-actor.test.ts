@@ -3,6 +3,9 @@ import {
   currentCanonicalDashboardActor,
   currentDashboardActorHint,
   currentDashboardActorName,
+  managedDashboardActorRevision,
+  managedDashboardAuthRevision,
+  managedDashboardRefusal,
   resetDashboardSessionActorForTests,
   setCanonicalDashboardActor,
 } from './dashboard-session-actor'
@@ -38,5 +41,32 @@ describe('dashboard session actor runtime', () => {
 
     expect(currentCanonicalDashboardActor()).toBeNull()
     expect(currentDashboardActorName()).toBe('dashboard')
+  })
+
+  it('keeps same-actor hydration but retires each new managed credential refusal', () => {
+    const revision = managedDashboardActorRevision.peek()
+    const authRevision = managedDashboardAuthRevision.peek()
+    setCanonicalDashboardActor(null, { tokenRevision: 17, rejected: true })
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 1)
+    setCanonicalDashboardActor(null, { tokenRevision: 17, rejected: true })
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 1)
+    setCanonicalDashboardActor('dashboard', { tokenRevision: 17, rejected: false })
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 1)
+    setCanonicalDashboardActor(null, { tokenRevision: 17, rejected: true })
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 2)
+    setCanonicalDashboardActor('dashboard', { tokenRevision: 17, rejected: false })
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 2)
+    expect(managedDashboardRefusal.peek()).toBe(17)
+    expect(managedDashboardAuthRevision.peek()).toBe(authRevision + 1)
+  })
+
+  it('retires old managed authority when a fresh shell revalidates the refused token', () => {
+    const revision = managedDashboardActorRevision.peek()
+    const authRevision = managedDashboardAuthRevision.peek()
+    setCanonicalDashboardActor(null, { tokenRevision: 18, rejected: true })
+    setCanonicalDashboardActor('dashboard', { tokenRevision: 18, rejected: false, verifiedAfterRefusal: true })
+    expect(managedDashboardRefusal.peek()).toBeNull()
+    expect(managedDashboardActorRevision.peek()).toBe(revision + 2)
+    expect(managedDashboardAuthRevision.peek()).toBe(authRevision + 2)
   })
 })

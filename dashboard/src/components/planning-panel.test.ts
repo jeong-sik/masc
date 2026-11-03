@@ -23,10 +23,12 @@ vi.mock('../router', () => ({
 
 const tasksSignal = signal<unknown[]>([])
 const goalsSignal = signal<unknown[]>([])
+const goalIdentitySignal = signal<{ goals: unknown[]; observation: { ids: string[]; complete: boolean } } | null>(null)
 
 vi.mock('../store', () => ({
   get tasks() { return tasksSignal },
   get goals() { return goalsSignal },
+  get goalIdentityObservation() { return goalIdentitySignal },
 }))
 
 vi.mock('./goals/planning', () => ({
@@ -53,6 +55,7 @@ describe('PlanningPanel', () => {
     setRoute()
     tasksSignal.value = []
     goalsSignal.value = []
+    goalIdentitySignal.value = null
     openTaskDetailMock.mockReset()
   })
   afterEach(() => cleanup())
@@ -122,6 +125,7 @@ describe('PlanningPanel', () => {
         updated_at: '2026-05-14T00:00:00Z',
       },
     ]
+    goalIdentitySignal.value = { goals: goalsSignal.value, observation: { ids: ['goal-runtime'], complete: true } }
 
     render(html`<${PlanningPanel} />`)
 
@@ -133,6 +137,42 @@ describe('PlanningPanel', () => {
     expect(screen.getByText('Runtime context goal')).toBeTruthy()
     expect(screen.getByText('executing')).toBeTruthy()
   })
+
+  it('preserves the exact padded Goal route ID without selecting an alias', () => {
+    routeSignal.value = { tab: 'workspace', params: { section: 'planning', goal: ' goal-a ' }, postId: null }
+    goalsSignal.value = [
+      { id: 'goal-a', title: 'Canonical', phase: 'executing' },
+      { id: ' goal-a ', title: 'Padded', phase: 'executing' },
+    ]
+    goalIdentitySignal.value = { goals: goalsSignal.value, observation: { ids: ['goal-a', ' goal-a '], complete: true } }
+    render(html`<${PlanningPanel} />`)
+    const focus = screen.getByTestId('planning-route-focus')
+    expect(focus.getAttribute('data-route-focused-goal')).toBe(' goal-a ')
+    expect(focus.textContent).toContain('identity unavailable')
+    expect(focus.textContent).not.toContain('Padded')
+    expect(focus.textContent).not.toContain('Canonical')
+  })
+
+  it.each(['missing', 'incomplete', 'hidden duplicate', 'hidden padded alias', 'different snapshot'])(
+    'does not display route focus details from a %s Goal observation', scenario => {
+      routeSignal.value = { tab: 'workspace', params: { section: 'planning', goal: 'goal-a' }, postId: null }
+      goalsSignal.value = [{ id: 'goal-a', title: 'Possibly wrong title', phase: 'executing' }]
+      goalIdentitySignal.value = scenario === 'missing' ? null : {
+        goals: scenario === 'different snapshot' ? [...goalsSignal.value] : goalsSignal.value,
+        observation: {
+          ids: scenario === 'hidden duplicate' ? ['goal-a', 'goal-a']
+            : scenario === 'hidden padded alias' ? ['goal-a', ' goal-a '] : ['goal-a'],
+          complete: scenario !== 'incomplete',
+        },
+      }
+      render(html`<${PlanningPanel} />`)
+      const focus = screen.getByTestId('planning-route-focus')
+      expect(focus.textContent).toContain('GOAL goal-a')
+      expect(focus.textContent).toContain('identity unavailable')
+      expect(focus.textContent).not.toContain('Possibly wrong title')
+      expect(focus.textContent).not.toContain('executing')
+    },
+  )
 
   it('opens task detail for task route params', async () => {
     const task = {
@@ -162,6 +202,20 @@ describe('PlanningPanel', () => {
     await waitFor(() => {
       expect(openTaskDetailMock).toHaveBeenCalledWith(task)
     })
+  })
+
+  it('does not open an arbitrary Task when displayed Task IDs are duplicated', () => {
+    routeSignal.value = { tab: 'workspace', params: { section: 'planning', task: 'task-a' }, postId: null }
+    tasksSignal.value = [
+      { id: 'task-a', title: 'First Task', status: 'todo' },
+      { id: 'task-a', title: 'Second Task', status: 'done' },
+    ]
+    render(html`<${PlanningPanel} />`)
+    const focus = screen.getByTestId('planning-route-focus')
+    expect(focus.textContent).toContain('task not loaded')
+    expect(focus.textContent).not.toContain('First Task')
+    expect(focus.textContent).not.toContain('Second Task')
+    expect(openTaskDetailMock).not.toHaveBeenCalled()
   })
 
   it('clears goal and task route focus while preserving other planning params', () => {

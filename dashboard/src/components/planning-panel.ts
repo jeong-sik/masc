@@ -7,7 +7,8 @@ import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { replaceRoute, route } from '../router'
-import { goals, tasks } from '../store'
+import { goalIdentityObservation, goals, tasks } from '../store'
+import { isUnambiguousGoalId } from '../lib/goal-identity'
 import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals/planning'
 import { GoalTree } from './goals/goal-tree'
@@ -56,10 +57,15 @@ function clearPlanningRouteFocus(): void {
 
 function PlanningRouteFocusPanel() {
   const params = route.value.params as Record<string, string | undefined>
-  const goalId = cleanRouteFocusId(params.goal)
+  const goalId = params.goal || null
   const taskId = cleanRouteFocusId(params.task)
-  const goal = goalId ? goals.value.find(item => item.id === goalId) ?? null : null
-  const task = taskId ? tasks.value.find(item => item.id === taskId) ?? null : null
+  const goalList = goals.value
+  const binding = goalIdentityObservation.value
+  const goal = goalId && binding?.goals === goalList && binding.observation.complete
+    && isUnambiguousGoalId(goalId, binding.observation.ids)
+    ? goalList.find(item => item.id === goalId) ?? null : null
+  const matchingTasks = taskId ? tasks.value.filter(item => item.id === taskId) : []
+  const task = matchingTasks.length === 1 ? matchingTasks[0] : null
 
   useEffect(() => {
     if (task) openTaskDetail(task)
@@ -86,7 +92,7 @@ function PlanningRouteFocusPanel() {
                 GOAL ${goalId}
               </span>
               <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
-                ${goal?.title ?? 'goal not loaded'}
+                ${goal?.title ?? 'goal not loaded or identity unavailable'}
               </span>
               ${goal?.phase ? html`<span class="font-mono text-3xs text-text-muted">${goal.phase}</span>` : null}
             ` : null}

@@ -171,6 +171,83 @@ let goal_has_task links ~goal_id ~task_id =
     links
 ;;
 
+let replace_goal_rows config transform =
+  match Goal_store.load_source config with
+  | Goal_store.Available state ->
+    (match Goal_store.write_state_result config { state with goals = transform state.goals } with
+     | Ok () -> ()
+     | Error detail -> failf "could not prepare Goal rows: %s" detail)
+  | Goal_store.Uninitialized -> fail "fixture Goal store was not initialized"
+  | Goal_store.Unavailable error -> fail (Goal_store.unavailable_to_string error)
+;;
+
+let test_assignment_rejects_ambiguous_goal_rows () =
+  let cases =
+    [ "duplicate", (fun (goal : Goal_store.goal) -> [ goal; goal ])
+    ; "canonical and padded", (fun goal -> [ goal; { goal with id = " goal-a " } ])
+    ; "padded only", (fun goal -> [ { goal with id = " goal-a " } ])
+    ] in
+  List.iter (fun (label, rows) ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      let task_id = make_unassigned_task config ~title:"t" in
+      replace_goal_rows config (function
+        | [ goal ] -> rows goal
+        | _ -> fail "expected one fixture Goal");
+      let before = Workspace_goal_index.read_goal_task_links config in
+      (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+       | Error (Goal_assignment.Ambiguous_goal "goal-a") -> ()
+       | Error other -> failf "%s: expected Ambiguous_goal, got %s" label (err_to_string other)
+       | Ok () -> failf "%s: ambiguous Goal was assigned" label);
+      check bool (label ^ ": no link changed") true
+        (before = Workspace_goal_index.read_goal_task_links config))) cases
+;;
+
+let test_assignment_rejects_ambiguous_task_rows () =
+  let cases =
+    [ "duplicate", (fun (task : Masc_domain.task) -> [ task; task ])
+    ; "canonical and padded", (fun task -> [ task; { task with id = " " ^ task.id ^ " " } ])
+    ; "padded only", (fun task -> [ { task with id = " " ^ task.id ^ " " } ])
+    ] in
+  List.iter (fun (label, rows) ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      let task_id = make_unassigned_task config ~title:"t" in
+      let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+      let tasks = match backlog.tasks with
+        | [task] -> rows task
+        | _ -> fail "expected one fixture task" in
+      Workspace_backlog.write_backlog config { backlog with tasks };
+      let before = Workspace_goal_index.read_goal_task_links config in
+      (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+       | Error (Goal_assignment.Ambiguous_task id) -> check string "names task" task_id id
+       | Error other -> failf "%s: expected Ambiguous_task, got %s" label (err_to_string other)
+       | Ok () -> failf "%s: ambiguous task was assigned" label);
+      check bool (label ^ ": no link changed") true
+        (before = Workspace_goal_index.read_goal_task_links config))) cases
+;;
+
+let test_assignment_checks_goal_phase_at_link_write () =
+  List.iter (fun phase ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      let task_id = make_unassigned_task config ~title:"t" in
+      replace_goal_rows config (List.map (fun (goal : Goal_store.goal) -> { goal with phase }));
+      let before = Workspace_goal_index.read_goal_task_links config in
+      let result = Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" in
+      match phase, result with
+      | (Goal_phase.Completed | Goal_phase.Dropped),
+        Error (Goal_assignment.Goal_closed { goal_id = "goal-a"; phase = actual }) ->
+        check bool "reports current Goal phase" true (actual = phase);
+        check bool "closed Goal leaves links unchanged" true
+          (before = Workspace_goal_index.read_goal_task_links config)
+      | (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+        | Goal_phase.Paused _ | Goal_phase.Blocked _), Ok () -> ()
+      | _, Error other -> failf "phase %s: %s" (Goal_phase.to_string phase) (err_to_string other)
+      | _, Ok () -> failf "closed Goal phase %s was assigned" (Goal_phase.to_string phase)))
+    Goal_phase.all
+;;
+
 let finished_statuses =
   [ ( "done"
     , Done { assignee = "claude"; completed_at = "2026-09-01T00:00:00Z"; notes = None } )
@@ -291,6 +368,43 @@ let test_set_goal_tool_rejects_a_finished_task () =
          (Workspace_goal_index.read_goal_task_links config)
          ~goal_id:"goal-a"
          ~task_id))
+;;
+
+let test_set_goal_tool_checks_expected_workspace_before_linking () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"workspace bound" in
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_dir config) in
+    let expected base_path =
+      `Assoc [ "base_path", `String base_path; "masc_root", `String root ]
+    in
+    let call extra =
+      Task.Tool.dispatch ctx ~name:"masc_task_set_goal"
+        ~args:(`Assoc ([ "task_id", `String task_id; "goal_id", `String "goal-a" ] @ extra))
+    in
+    let refused =
+      [ [ "expected_workspace", expected (base ^ "-replacement") ]
+      ; [ "expected_workspace", `String "invalid" ]
+      ; [ "expected_workspace", expected base; "expected_workspace", expected base ]
+      ]
+    in
+    List.iter
+      (fun extra ->
+        (match call extra with
+         | Some (Tool_result.Failed { class_ = Tool_result.Workflow_rejection; _ }) -> ()
+         | _ -> fail "invalid workspace was not rejected before assignment");
+        check bool "refusal did not write a link" false
+          (goal_has_task (Workspace_goal_index.read_goal_task_links config)
+             ~goal_id:"goal-a" ~task_id))
+      refused;
+    (match call [ "expected_workspace", expected base ] with
+     | Some (Tool_result.Completed _) -> ()
+     | _ -> fail "the matching workspace did not allow assignment");
+    check bool "matching workspace linked the task" true
+      (goal_has_task (Workspace_goal_index.read_goal_task_links config)
+         ~goal_id:"goal-a" ~task_id))
 ;;
 
 let test_assignment_reports_goal_link_write_failure () =
@@ -427,6 +541,111 @@ let test_unknown_goal_batch_has_no_partial_write () =
     check (option string) "no partial links" links (file_bytes (Workspace_goal_index.goal_task_links_path config)))
 ;;
 
+let test_creation_rejects_ambiguous_goal_rows () =
+  let cases =
+    [ "duplicate", (fun (goal : Goal_store.goal) -> [ goal; goal ])
+    ; "canonical and padded", (fun goal -> [ goal; { goal with id = " goal-a " } ])
+    ; "padded only", (fun goal -> [ { goal with id = " goal-a " } ])
+    ] in
+  List.iter (fun (label, rows) ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      make_goal config ~id:"goal-b";
+      replace_goal_rows config (List.concat_map (fun (goal : Goal_store.goal) ->
+        if String.equal goal.id "goal-a" then rows goal else [goal]));
+      let backlog_path = Workspace.backlog_path config in
+      let links_path = Workspace_goal_index.goal_task_links_path config in
+      let before_backlog = file_bytes backlog_path in
+      let before_links = file_bytes links_path in
+      (match Goal_assignment.add_task_with_result ~goal_id:"goal-a" config
+        ~title:"single" ~priority:3 ~description:"" with
+       | Error (Workspace_task.Ambiguous_goal "goal-a") -> ()
+       | Error error -> failf "%s: %s" label (Workspace_task.add_task_error_to_string error)
+       | Ok _ -> failf "%s: created a Task for an ambiguous Goal" label);
+      (match Goal_assignment.batch_add_tasks_with_contracts_result config
+        ["valid",3,"",None,Some "goal-b"; "ambiguous",3,"",None,Some "goal-a"] with
+       | Error (Workspace_task.Batch_ambiguous_goal "goal-a") -> ()
+       | Error error -> failf "%s: %s" label (Workspace_task.batch_add_tasks_error_to_string error)
+       | Ok _ -> failf "%s: batch created a Task for an ambiguous Goal" label);
+      check (option string) (label ^ ": backlog unchanged") before_backlog (file_bytes backlog_path);
+      check (option string) (label ^ ": links unchanged") before_links (file_bytes links_path))) cases
+;;
+
+let test_creation_checks_goal_phase_at_link_write () =
+  List.iter (fun phase ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      make_goal config ~id:"goal-b";
+      replace_goal_rows config (List.map (fun (goal : Goal_store.goal) ->
+        if String.equal goal.id "goal-a" then { goal with phase } else goal));
+      let backlog_path = Workspace.backlog_path config in
+      let links_path = Workspace_goal_index.goal_task_links_path config in
+      let before_backlog = file_bytes backlog_path in
+      let before_links = file_bytes links_path in
+      let single = Goal_assignment.add_task_with_result ~goal_id:"goal-a" config
+        ~title:"single" ~priority:3 ~description:"" in
+      let batch = Goal_assignment.batch_add_tasks_with_contracts_result config
+        ["valid",3,"",None,Some "goal-b"; "phase",3,"",None,Some "goal-a"] in
+      match phase with
+      | Goal_phase.Completed | Goal_phase.Dropped ->
+        check bool "single creation reports the closed Goal" true
+          (single = Error (Workspace_task.Goal_closed "goal-a"));
+        check bool "batch creation reports the closed Goal" true
+          (batch = Error (Workspace_task.Batch_goal_closed "goal-a"));
+        check (option string) "closed Goal leaves backlog unchanged" before_backlog (file_bytes backlog_path);
+        check (option string) "closed Goal leaves links unchanged" before_links (file_bytes links_path)
+      | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+      | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
+        (match single, batch with
+         | Ok created, Ok created_batch ->
+           let links = Workspace_goal_index.read_goal_task_links config in
+           check bool "single Task links to the open Goal" true
+             (goal_has_task links ~goal_id:"goal-a" ~task_id:created.task_id);
+           (match created_batch.task_ids with
+            | [valid_id; phase_id] ->
+              check bool "first batch Task links to its Goal" true
+                (goal_has_task links ~goal_id:"goal-b" ~task_id:valid_id);
+              check bool "second batch Task links to the open Goal" true
+                (goal_has_task links ~goal_id:"goal-a" ~task_id:phase_id)
+            | [] | [_] | _ :: _ :: _ :: _ -> fail "batch did not return two Tasks")
+         | Error error, _ -> failf "phase %s: %s" (Goal_phase.to_string phase)
+             (Workspace_task.add_task_error_to_string error)
+         | Ok _, Error error -> failf "phase %s: %s" (Goal_phase.to_string phase)
+             (Workspace_task.batch_add_tasks_error_to_string error))))
+    Goal_phase.all
+;;
+
+let test_creation_tools_reject_closed_goal_without_writes () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    replace_goal_rows config (List.map (fun (goal : Goal_store.goal) ->
+      if String.equal goal.id "goal-a" then { goal with phase = Goal_phase.Completed } else goal));
+    let backlog_path = Workspace.backlog_path config in
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let before_backlog = file_bytes backlog_path in
+    let before_links = file_bytes links_path in
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    let single = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc ["title", `String "single"; "goal_id", `String "goal-a"]) in
+    let item title goal_id = `Assoc ["title", `String title; "goal_id", `String goal_id] in
+    let batch = Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc ["tasks", `List [item "valid" "goal-b"; item "closed" "goal-a"]]) in
+    List.iter (function
+      | Tool_result.Failed _ as failure ->
+        (match Tool_result.failure_class failure with
+         | Some Tool_result.Workflow_rejection -> ()
+         | Some class_ ->
+           failf "expected workflow rejection, got %s: %s"
+             (Tool_result.tool_failure_class_to_string class_)
+             (Tool_result.message failure)
+         | None -> fail "expected workflow rejection, got unclassified failure")
+      | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "closed Goal accepted Task creation")
+      [single; batch];
+    check (option string) "tool refusals leave backlog unchanged" before_backlog (file_bytes backlog_path);
+    check (option string) "tool refusals leave links unchanged" before_links (file_bytes links_path))
+;;
+
 (* Exercise the authority primitive with a real dependent backlog/link write.
    The delete is submitted while membership is held; its completion must follow
    the dependent commit. Promises determine order without sleep-based races. *)
@@ -487,9 +706,15 @@ let () =
       , [ test_case "Goal source failure prevents every binding" `Quick test_goal_source_failure_blocks_all_bindings
         ; test_case "masc_add_task projects the Unavailable envelope" `Quick test_add_task_tool_projects_unavailable_envelope
         ; test_case "batch unknown Goal has no partial write" `Quick test_unknown_goal_batch_has_no_partial_write
+        ; test_case "ambiguous Goal prevents single and batch creation" `Quick test_creation_rejects_ambiguous_goal_rows
+        ; test_case "current Goal phase gates single and batch creation" `Quick test_creation_checks_goal_phase_at_link_write
+        ; test_case "Task creation tools reject closed Goals" `Quick test_creation_tools_reject_closed_goal_without_writes
         ; test_case "delete and binding share membership lock" `Quick test_delete_and_binding_share_membership_lock
         ; test_case "unknown task is rejected" `Quick test_unknown_task
         ; test_case "unknown goal is rejected" `Quick test_unknown_goal
+        ; test_case "ambiguous Goal rows cannot authorize assignment" `Quick test_assignment_rejects_ambiguous_goal_rows
+        ; test_case "ambiguous task rows cannot authorize assignment" `Quick test_assignment_rejects_ambiguous_task_rows
+        ; test_case "current Goal phase gates assignment" `Quick test_assignment_checks_goal_phase_at_link_write
         ; test_case "goalless task links to goal" `Quick test_links_goalless_task
         ; test_case "whitespace-padded ids are trimmed before lookup" `Quick
             test_whitespace_padded_ids_are_trimmed_before_lookup
@@ -507,6 +732,10 @@ let () =
             "the tool rejects a finished task with a workflow rejection"
             `Quick
             test_set_goal_tool_rejects_a_finished_task
+        ; test_case
+            "the tool checks the expected workspace before linking"
+            `Quick
+            test_set_goal_tool_checks_expected_workspace_before_linking
         ; test_case
             "link write failure is reported"
             `Quick

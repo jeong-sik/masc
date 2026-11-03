@@ -292,7 +292,17 @@ let goal_upsert_lifecycle_field_supplied args =
     [ "phase"; "status" ]
 ;;
 
-let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
+let goal_upsert_precondition args =
+  match args with
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key "if_absent") fields with
+     | [] | [ _, `Bool false ] -> Ok Goal_store.Unconditional
+     | [ _, `Bool true ] -> Ok Goal_store.Require_absent
+     | _ -> Error ())
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error ()
+;;
+
+let handle_goal_upsert_validated ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   (* Lifecycle fields are rejected as soon as they are supplied, before any value
      validation. Validating the value first answered "in_progress" with the enum
      message "allowed: active, paused, done, dropped", which sent the caller back
@@ -300,6 +310,10 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
   match goal_upsert_lifecycle_field_supplied args with
   | Some field -> goal_upsert_lifecycle_error ~tool_name ~start_time field
   | None ->
+  match goal_upsert_precondition args with
+  | Error () -> error_result_typed ~tool_name ~start_time ~code:Validation_error
+      "if_absent must be a boolean and may appear only once"
+  | Ok precondition ->
   match parse_optional_priority args "priority" with
   | Error err -> validation_error_result ~tool_name ~start_time [ err ]
   | Ok priority ->
@@ -312,7 +326,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
     let due_date = get_string_opt args "due_date" in
     (match
           Goal_store.upsert_goal_with_events
-            ctx.config ~actor:ctx.agent_name
+            ctx.config ~actor:ctx.agent_name ~precondition
             ?id
             ?title
             ?metric
@@ -362,6 +376,15 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ; ( "linked_task_title_example"
               , `String (Printf.sprintf "[child] %s" goal.title) )
             ])
+;;
+
+let handle_goal_upsert ~tool_name ~start_time (ctx : context) args =
+  match Workspace.validate_expected_workspace ~config:ctx.config args with
+  | Ok args -> handle_goal_upsert_validated ~tool_name ~start_time ctx args
+  | Error Workspace.Invalid_workspace_precondition ->
+    error_result_typed ~tool_name ~start_time ~code:Validation_error "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict "workspace precondition failed"
 ;;
 
 let handle_goal_measure ~tool_name ~start_time (ctx : context) args

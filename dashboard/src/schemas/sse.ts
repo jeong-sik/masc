@@ -110,6 +110,10 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // A workspace's schedules changed (lib/server/server_schedule_broadcast.ml).
   // The TUI re-reads on it.
   'schedules_changed',
+  // A Keeper's native task or child content journal took a record
+  // (lib/keeper/keeper_runtime_journal_broadcast.ml). The TUI re-reads on it.
+  'keeper_native_tasks_appended',
+  'keeper_child_content_appended',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

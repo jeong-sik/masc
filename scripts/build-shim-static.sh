@@ -63,6 +63,9 @@ shim_sources=(
   lib/exec_shim/shim_build_id.mli
   lib/exec_shim/fdpass_stub.c
   lib/exec_shim/shim_fdpass.ml
+  lib/exec_shim/agent_stub.c
+  lib/exec_shim/shim_agent.ml
+  lib/exec_shim/shim_agent.mli
   lib/exec_shim/shim_libraries.inc
   bin/masc_exec_shim.ml
 )

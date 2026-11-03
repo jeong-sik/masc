@@ -28,10 +28,23 @@
   (language c)
   (names fdpass_stub)))
 
+; RFC microvm-guest-agent-over-socket. The guest agent behind
+; [masc-exec-shim --serve]; a leaf library for the same reason as the two
+; above. It takes the signal-number conversion from exec_shim as an argument
+; rather than depending on it, so exec_shim's main can dispatch to it.
+(library
+ (name shim_agent)
+ (wrapped false)
+ (modules shim_agent)
+ (libraries exec_ssh_protocol unix)
+ (foreign_stubs
+  (language c)
+  (names agent_stub)))
+
 (library
  (name exec_shim)
  (modules exec_shim shim_build_id)
- (libraries exec_ssh_protocol shim_clock shim_fdpass unix uuidm)
+ (libraries exec_ssh_protocol shim_agent shim_clock shim_fdpass unix uuidm)
  (foreign_stubs
   (language c)
   (names prctl_stub observe_stub)))

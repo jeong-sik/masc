@@ -87,6 +87,7 @@ agent 는 PID 1 이라 고아 프로세스를 거둬야 해요. `--init` 은 쓰
 - 덩어리를 나눠 지금과 같은 `(종료 상태, stdout, stderr)` 와 chunk 콜백을 만들어요. 수락 프레임 처리, trailer 대조, 경로 바꾸기는 그대로예요.
 - 호스트 쪽 시간 초과는 연결을 닫고 `WEXITED 124` 로 돌려줘요. 지금 `Process_eio` 가 시간 초과를 돌려주는 방식과 같아요.
 - 첫 요청 전에 hello 를 받아야 해요. 게스트의 첫 요청은 첫 handoff 정리라서, agent 가 아직 안 떴을 때 끊긴 연결을 "결과 모름"으로 읽으면 안 돼요.
+- hello 에는 기한을 둬요. agent 가 듣기 전에 연 연결은 바로 끝나기도 하고, 드물게 아무것도 오지 않은 채 남기도 해요(4.4). 기한 안에 hello 가 오지 않으면 그 연결을 닫고 새로 연결해요. hello 전에는 아무것도 보내지 않으므로 다시 연결해도 요청이 두 번 돌지 않아요.
 
 ### 3.6 boot plan 과 붙이기(attach)
 
@@ -149,6 +150,17 @@ VM 생성·삭제·조회와 볼륨 작업은 `container` CLI 로 해요(`-i` �
 | 위 + 묶은 직후 `/` 읽기 전용 재마운트 | 있음 | `Read-only file system` | 권한 거부 | 진짜 |
 
 agent 가 내려간 뒤 `dumpable` 0, `no_new_privs` 1 을 읽었어요. capability 가 사라지는 것은 uid 0 에서 다른 uid 로 바꿀 때의 Linux 동작이고, 이번에 직접 읽지는 않았어요.
+
+### 4.4 실제 agent
+
+구현 3층의 `masc-exec-shim --serve` 를 0절 실행 옵션으로 띄우고, 호스트에서 소켓으로 실제 shim 요청을 보냈어요.
+
+- hello 는 `/` 읽기 전용, uid 502, gid 20, `no_new_privs` 를 알렸어요. payload 도 같은 uid·gid 였고 CapEff·CapPrm·CapInh·CapAmb 0, NoNewPrivs 1 이었어요. 바운딩 셋에는 0절의 세 capability 가 남아 있었어요. agent 의 보조 그룹은 비어 있었어요.
+- agent(PID 1)의 fd 는 0·1·2 와 리스너뿐이었어요. agent 는 그래도 시작할 때 3 이상의 fd 를 모두 close-on-exec 로 표시해요.
+- payload 의 rootfs 쓰기, 소켓 디렉터리 읽기, agent 소켓 연결, agent 의 fd 목록 읽기는 모두 거부됐어요. `/tmp` 와 작업 디렉터리 쓰기는 됐어요.
+- 요청 50번 동안 runtime 의 짝 없는 pipe 는 0 → 0 이었어요(두 실행). 틀린 응답은 없었어요.
+- 요청 도중 연결을 끊으면 payload 가 취소됐어요.
+- agent 가 듣기 전에 연 연결: 부팅 10번에서 hello 5번, 바로 EOF 4번, 12분 동안 아무것도 오지 않음 1번이었어요. 첫 hello 뒤에는 두 실행에서 54개씩, 다시 연결할 일이 없었어요.
 
 ## 5. 검토한 대안
 

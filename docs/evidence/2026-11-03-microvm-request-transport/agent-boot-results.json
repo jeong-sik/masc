@@ -1,0 +1,67 @@
+{
+ "started_at": "2026-11-03T14:01:46+0900",
+ "container_version": "container CLI version 1.6.1 (build: release, commit: unspeci)",
+ "wait_sec": 30.0,
+ "boots": [
+  {
+   "name": "masc-agent-boot-1793682106-0",
+   "run_rc": 0,
+   "connect_after_run_ms": 0,
+   "early": "hello",
+   "early_seconds": 0.057,
+   "later": "hello",
+   "later_seconds": 0.069,
+   "stop_rc": 0
+  },
+  {
+   "name": "masc-agent-boot-1793682116-1",
+   "run_rc": 0,
+   "connect_after_run_ms": 0,
+   "early": "hello",
+   "early_seconds": 0.158,
+   "later": "hello",
+   "later_seconds": 0.003,
+   "stop_rc": 0
+  },
+  {
+   "name": "masc-agent-boot-1793682128-2",
+   "run_rc": 0,
+   "connect_after_run_ms": 0,
+   "early": "hello",
+   "early_seconds": 0.226,
+   "later": "hello",
+   "later_seconds": 0.082,
+   "stop_rc": 0
+  },
+  {
+   "name": "masc-agent-boot-1793682142-3",
+   "run_rc": 0,
+   "connect_after_run_ms": 0,
+   "early": "hello",
+   "early_seconds": 0.081,
+   "later": "hello",
+   "later_seconds": 0.001,
+   "stop_rc": 0
+  },
+  {
+   "name": "masc-agent-boot-1793682154-4",
+   "run_rc": 0,
+   "connect_after_run_ms": 0,
+   "early": "eof",
+   "early_seconds": 0.004,
+   "later": "eof",
+   "later_seconds": 0.002,
+   "stop_rc": 0
+  },
+  {
+   "name": "masc-agent-boot-1793682164-5",
+   "run_rc": 0,
+   "connect_after_run_ms": 0,
+   "early": "hello",
+   "early_seconds": 0.039,
+   "later": "hello",
+   "later_seconds": 0.001,
+   "stop_rc": 0
+  }
+ ]
+}

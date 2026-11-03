@@ -1,0 +1,155 @@
+{
+ "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+ "name": "masc-agent-l3-1793685271",
+ "keeper": "502:20",
+ "started_at": "2026-11-03T14:54:31+0900",
+ "worktree_head": "ff8eb471a31e90d69c9a8a0c396203a8f750c927",
+ "worktree_dirty": false,
+ "container_version": "container CLI version 1.6.1 (build: release, commit: unspeci)",
+ "build": {
+  "reused": false,
+  "seconds": 2.4,
+  "sources_sha256": "ebf5a67663962d79f1baa7e624febc282c9a99b2f4fa586506d437c0f305d287",
+  "shim_sha256": "744528fc61d20c6a7a0e9561b6f10d59866a72331f69fec3d7f0f7579fd3f5b1"
+ },
+ "start": {
+  "argv": [
+   "container",
+   "run",
+   "-d",
+   "--rm",
+   "--name",
+   "masc-agent-l3-1793685271",
+   "--cap-drop",
+   "ALL",
+   "--cap-add",
+   "CAP_SETUID",
+   "--cap-add",
+   "CAP_SETGID",
+   "--cap-add",
+   "CAP_SYS_ADMIN",
+   "--tmpfs",
+   "/tmp",
+   "-m",
+   "1G",
+   "-c",
+   "1",
+   "-v",
+   "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/agent-l3-stage/out:/opt/masc-exec-shim:ro",
+   "-v",
+   "/private/tmp/claude-502/-Users-dancer-me-workspace-yousleepwhen-masc/bd1a8d20-14d5-4e92-89fc-e053a75bb7d9/scratchpad/agent-l3-stage/work:/masc-work",
+   "-w",
+   "/masc-work",
+   "--env",
+   "HOME=/tmp",
+   "--env",
+   "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf",
+   "--publish-socket",
+   "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/al3/a.sock:/run/masc-agent/agent.sock",
+   "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+   "/opt/masc-exec-shim/masc-exec-shim",
+   "--serve",
+   "/run/masc-agent/agent.sock",
+   "502:20"
+  ]
+ },
+ "agent_fds_root_view": [
+  "0",
+  "1",
+  "2",
+  "3"
+ ],
+ "ready": {
+  "early_connected": true,
+  "early_connect_after_run_ms": 0,
+  "quiet_connections_before_hello": 68,
+  "hello_after_run_ms": 119,
+  "hello": {
+   "relay_version": 1,
+   "root_read_only": true,
+   "uid": 502,
+   "gid": 20,
+   "no_new_privs": true
+  },
+  "early_after_s": 19,
+  "early_outcome": "eof"
+ },
+ "probe": {
+  "name": "masc-exec-shim",
+  "version": "3.0.0+l3check",
+  "capabilities": [
+   "observe",
+   "user_notif",
+   "request_acceptance_frame"
+  ],
+  "exits": [
+   {
+    "exited": 0
+   }
+  ]
+ },
+ "payload": {
+  "lines": [
+   "id_u=502 id_g=20 id_groups=20",
+   "rootfs_write_rc=1",
+   "tmpfs_write_rc=0",
+   "work_write_rc=0",
+   "socket_dir_rc=2",
+   "agent_fd_listing_rc=2",
+   "CapInh: 0000000000000000",
+   "CapPrm: 0000000000000000",
+   "CapEff: 0000000000000000",
+   "CapBnd: 00000000002000c0",
+   "CapAmb: 0000000000000000",
+   "NoNewPrivs: 1",
+   "agent_Uid: 502 502 502 502",
+   "agent_Gid: 20 20 20 20",
+   "agent_Groups:  ",
+   "agent_CapInh: 0000000000000000",
+   "agent_CapPrm: 0000000000000000",
+   "agent_CapEff: 0000000000000000",
+   "agent_CapAmb: 0000000000000000",
+   "agent_NoNewPrivs: 1",
+   "payload_fd 0 -> pipe:[215]",
+   "payload_fd 1 -> pipe:[216]",
+   "payload_fd 2 -> pipe:[217]",
+   "payload_fd 4 -> pipe:[1423]",
+   "hijack_connect=Permission denied"
+  ],
+  "exits": [
+   {
+    "exited": 0
+   }
+  ],
+  "trailer_exit": 7,
+  "ms": 32.1
+ },
+ "concurrent": {
+  "quick_ms": 213.1,
+  "slow_ms": 2006.8,
+  "quick_stdout": "quick\n",
+  "slow_stdout": "slow\n"
+ },
+ "burst": {
+  "n": 50,
+  "wrong": 0,
+  "p50_ms": 207.8,
+  "max_ms": 464.6,
+  "runtime_pid": 93006,
+  "pipes_before": {
+   "orphan": 0,
+   "connected": 0
+  },
+  "pipes_after": {
+   "orphan": 0,
+   "connected": 0
+  }
+ },
+ "cancel": {
+  "late_file_exists": false,
+  "sleep_processes_left": "0"
+ },
+ "quiet_connections_after_ready": 0,
+ "agent_logs": "[WARNING] Running as root is not recommended\n",
+ "stop_rc": 0
+}

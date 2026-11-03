@@ -5489,6 +5489,16 @@
  (enabled_if (= %{system} linux))
  (libraries alcotest exec_shim shim_fdpass unix))
 
+; RFC microvm-guest-agent-over-socket: the masc-exec-shim --serve relay and
+; serve, against small programs and the real shim binary.
+(test
+ (name test_shim_agent)
+ (modules test_shim_agent)
+ (enabled_if (= %{system} linux))
+ (libraries alcotest shim_agent exec_shim exec_ssh_protocol unix)
+ (deps ../bin/masc_exec_shim.exe)
+ (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
+
 (test
  (name test_shim_clock)
  (modules test_shim_clock)

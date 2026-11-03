@@ -407,14 +407,6 @@ let move_runtime_config_cursor state ~delta =
   set_runtime_config_cursor_near state ~direction
     ~target:(state.runtime_config_cursor + direction)
 
-(* The columns the Identity pane wraps its notice at. Asked of the terminal
-   the same way {!surface_rows} asks for its rows, so the key handler counts
-   the lines the renderer is about to draw. *)
-let identity_pane_columns (state : state) =
-  let _rows, columns = get_terminal_size () in
-  Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
-    ~cols:columns
-
 (* A row cursor over a plain listing: the keypress moves the cursor and the
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
@@ -464,57 +456,24 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
       let height = surface_body_height_at state ~cursor scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
-(* The Identity tab's provider list. The cursor names a provider while the
-   pane scrolls lines, so the row kept visible is the line that provider is
-   drawn on rather than the cursor itself -- the two differ by whatever the
-   pane prints above the list, which is why that preamble is a value both
-   sides read instead of a number each side counts. *)
+(* The Identity tab's provider list. The key moves the cursor only: the
+   detail pane draws the provider rows below whatever failure, progress and
+   preamble lines that frame carries, so the frame is where the cursor's line
+   is known and kept in view ([Masc_tui_render_identity.drawn.cursor_row]). *)
 let move_identity_cursor (state : state) ~delta =
   match state.identity_view with
   | None -> ()
-  | Some (keeper_name, providers) ->
+  | Some (_keeper_name, providers) ->
+      let listing = Masc_tui_identity_input.current_listing state in
       let count =
-        List.length
-          (Masc_tui_identity_model.identity_connectable ~query:(Masc_tui_identity_input.current_query state)
-             providers)
+        List.length (Masc_tui_identity_model.identity_connectable ~listing providers)
       in
       if count > 0 then begin
-        let query = Masc_tui_identity_input.current_query state in
         let cursor =
-          Masc_tui_identity_model.identity_cursor_clamped ~query ~providers
+          Masc_tui_identity_model.identity_cursor_clamped ~listing ~providers
             state.identity_cursor
         in
-        let cursor = Masc_tui_scroll.cursor_move ~count ~delta cursor in
-        state.identity_cursor <- cursor;
-        match scrolled_surface state state.view with
-        | None -> ()
-        | Some scrolled ->
-            let height =
-              surface_body_height ~rows:(surface_rows state) scrolled
-            in
-            state.detail_scroll <-
-              Masc_tui_scroll.ensure_visible
-                ~cursor:
-                  (Masc_tui_identity_model.identity_provider_line
-                     ~summary:
-                       (Masc_tui_identity_model.identity_summary ~providers ~query)
-                     ~callback:
-                       (Masc_tui_identity_model.identity_callback_rows ~providers
-                          state.identity_callback)
-                     ~notice:
-                       (Masc_tui_identity_model.identity_notice
-                          ~cols:(identity_pane_columns state)
-                          state.identity_attempt_error
-                       @ Masc_tui_identity_model.identity_started_rows
-                           ~cols:(identity_pane_columns state)
-                           ~keeper_name:keeper_name
-                           state.identity_logins
-                       @ Masc_tui_identity_model.identity_app_form_rows
-                           state.identity_app_form
-                       @ Masc_tui_identity_model.identity_filter_rows ~providers
-                           state.identity_filter)
-                     ~index:cursor)
-                ~height state.detail_scroll
+        state.identity_cursor <- Masc_tui_scroll.cursor_move ~count ~delta cursor
       end
 
 let keeper_log_content_height (state : state) =
@@ -33780,6 +33739,16 @@ Use relative paths for resources already held in the package. -->
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity ->
            Masc_tui_identity_input.open_app_form state
+        | Some ("O" | "o")
+          when state.view = Keepers Keeper_detail
+               && state.detail_tab = Detail_identity
+               && Option.is_none (text_input_target state ~compact_viewport) ->
+           Masc_tui_identity_input.next_order state
+        | Some ("V" | "v")
+          when state.view = Keepers Keeper_detail
+               && state.detail_tab = Detail_identity
+               && Option.is_none (text_input_target state ~compact_viewport) ->
+           Masc_tui_identity_input.next_show state
         | Some ("D" | "d")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity

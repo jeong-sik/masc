@@ -11,20 +11,32 @@ type view =
   ; attempt_error : (Masc_tui_identity_model.identity_notice_kind * string) option
   ; app_form : Masc_tui_identity_model.identity_app_form option
   ; callback : Masc_tui_identity_model.identity_callback option
+  ; order : Masc_tui_identity_model.identity_order
+  ; show : Masc_tui_identity_model.identity_show
+  }
+
+type drawn =
+  { rows : string list
+  ; cursor_row : int option
   }
 
 (* The Identity tab's body. Numbering comes from
    [Masc_tui_identity_model.identity_connectable], which is also what the key handler
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
-let lines ~cols (view : view) =
+let draw ~cols (view : view) =
   let providers = view.providers in
   (* Everything on this pane reads the filtered list: the rows drawn, the
      number beside each one, and the row the marker is on. A screen that
      numbered the whole set while the keys acted on a subset would start the
      wrong service. *)
-  let query = Option.value view.filter ~default:"" in
-  let connectable = Masc_tui_identity_model.identity_connectable ~query providers in
+  let listing : Masc_tui_identity_model.identity_listing =
+    { query = Option.value view.filter ~default:""; order = view.order; show = view.show }
+  in
+  let connectable = Masc_tui_identity_model.identity_connectable ~listing providers in
+  let cursor =
+    Masc_tui_identity_model.identity_cursor_clamped ~listing ~providers view.cursor
+  in
   let tools_of id =
     List.find_map
       (function
@@ -78,34 +90,44 @@ let lines ~cols (view : view) =
            The reading itself is [Masc_tui_identity_model.identity_row_state], which
            is also what the summary above the list counts, so the line and
            the rows cannot disagree about what this Keeper holds. *)
-         let row_state =
-           match Masc_tui_identity_model.identity_row_state ~providers ~id with
+         let state = Masc_tui_identity_model.identity_row_state ~providers ~id in
+         let held = Masc_tui_identity_model.identity_attached state in
+         (* The mark says held or not before any word does; an unheld row
+            needs no word at all. *)
+         let mark, row_state =
+           match state with
            | Masc_tui_identity_model.Identity_not_attached ->
-             Ansi.dim ^ "not attached" ^ Ansi.reset
+             Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset, ""
            | Identity_attached_without_tools ->
-             Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-           | Identity_switch_unreadable -> Theme.bad () ^ "switch unreadable" ^ Ansi.reset
-           | Identity_switched_off -> Theme.warn () ^ "off" ^ Ansi.reset
+             ( Theme.warn () ^ "\xe2\x97\x8f" ^ Ansi.reset
+             , Theme.warn () ^ "attached, no tools" ^ Ansi.reset )
+           | Identity_switch_unreadable ->
+             ( Theme.bad () ^ "\xe2\x97\x8f" ^ Ansi.reset
+             , Theme.bad () ^ "switch unreadable" ^ Ansi.reset )
+           | Identity_switched_off ->
+             Theme.warn () ^ "\xe2\x97\x8f" ^ Ansi.reset, Theme.warn () ^ "off" ^ Ansi.reset
            | Identity_attached tools ->
-             Printf.sprintf
-               "%s%s%s"
-               (Theme.ok ())
-               (Masc_tui_message_layout.count_noun tools "tool")
-               Ansi.reset
+             ( Theme.ok () ^ "\xe2\x97\x8f" ^ Ansi.reset
+             , Printf.sprintf
+                 "%s%s%s"
+                 (Theme.ok ())
+                 (Masc_tui_message_layout.count_noun tools "tool")
+                 Ansi.reset )
          in
          (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
            and the marker is what says which one enter would start. *)
-         let here =
-           index
-           = Masc_tui_identity_model.identity_cursor_clamped ~query ~providers view.cursor
-         in
+         let here = index = cursor in
          let marker = if here then Theme.ok () ^ ">" ^ Ansi.reset else " " in
          (* Padded before it is emphasised: the escape codes are characters
            to a width specifier and nothing on screen, so padding afterwards
            shortens the column by however long the codes are. *)
          let padded = Printf.sprintf "%-24s" (Terminal_text.single_line label) in
-         let shown = if here then Ansi.bold ^ padded ^ Ansi.reset else padded in
+         let shown =
+           if here then Ansi.bold ^ padded ^ Ansi.reset
+           else if held then padded
+           else Ansi.dim ^ padded ^ Ansi.reset
+         in
          let elsewhere =
            match also_on id with
            | [] -> ""
@@ -135,10 +157,33 @@ let lines ~cols (view : view) =
              Theme.bad () ^ "  · callback unreadable" ^ Ansi.reset
            | None -> ""
          in
-         Printf.sprintf "%s %2d  %s %s%s%s%s" marker (index + 1) shown row_state app
-           own_callback elsewhere)
+         ( index
+         , held
+         , Printf.sprintf "%s %2d %s %s %s%s%s%s" marker (index + 1) mark shown row_state
+             app own_callback elsewhere ))
       connectable
   in
+  (* Attached first puts a blank row between the services this Keeper holds
+     and the rest, so the split is read from the layout. Each entry keeps the
+     index it numbers, which is how the cursor's row is found below. *)
+  let listed =
+    match view.order with
+    | Masc_tui_identity_model.Identity_declared_order ->
+      List.map (fun (index, _, line) -> Some index, line) numbered
+    | Masc_tui_identity_model.Identity_attached_first ->
+      let rec place previous = function
+        | [] -> []
+        | (index, held, line) :: rest ->
+          let gap =
+            match previous with
+            | Some true when not held -> [ None, "" ]
+            | Some _ | None -> []
+          in
+          gap @ ((Some index, line) :: place (Some held) rest)
+      in
+      place None numbered
+  in
+  let numbered = List.map snd listed in
   let attached_tool_lines =
     connectable
     |> List.concat_map (fun (id, _) ->
@@ -223,31 +268,53 @@ let lines ~cols (view : view) =
   let filter_rows =
     List.map
       (fun line -> if line = "" then line else Theme.ok () ^ line ^ Ansi.reset)
-      (Masc_tui_identity_model.identity_filter_rows ~providers view.filter)
+      (Masc_tui_identity_model.identity_filter_rows ~providers ~listing view.filter)
+  in
+  let preamble () =
+    Masc_tui_identity_model.identity_preamble
+      ~summary:(Masc_tui_identity_model.identity_summary ~providers ~listing)
+      ~callback
+      ~notice:
+        (attempt
+         @ started
+         @ Masc_tui_identity_model.identity_app_form_rows view.app_form
+         @ filter_rows)
+  in
+  let narrowed_by_view =
+    match view.show with
+    | Masc_tui_identity_model.Identity_show_all -> false
+    | Identity_show_attached | Identity_show_not_attached -> true
   in
   if numbered = [] && rejected = [] && view.filter <> None
   then
-    Masc_tui_identity_model.identity_preamble
-      ~summary:(Masc_tui_identity_model.identity_summary ~providers ~query)
-      ~callback
-      ~notice:
-        (attempt
-         @ started
-         @ Masc_tui_identity_model.identity_app_form_rows view.app_form
-         @ filter_rows)
-    @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
+    { rows =
+        preamble ()
+        @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
+    ; cursor_row = None
+    }
+  else if numbered = [] && rejected = [] && narrowed_by_view
+  then
+    { rows =
+        preamble ()
+        @ [ Ansi.dim ^ "  Nothing in this view. v to see the others." ^ Ansi.reset ]
+    ; cursor_row = None
+    }
   else if numbered = [] && rejected = []
-  then [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
+  then
+    { rows = [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
+    ; cursor_row = None
+    }
   else
-    Masc_tui_identity_model.identity_preamble
-      ~summary:(Masc_tui_identity_model.identity_summary ~providers ~query)
-      ~callback
-      ~notice:
-        (attempt
-         @ started
-         @ Masc_tui_identity_model.identity_app_form_rows view.app_form
-         @ filter_rows)
-    @ numbered
-    @ rejected
-    @ attached_tool_lines
+    let preamble = preamble () in
+    (* The row the marker is drawn on, counted from the rows built here
+       rather than restated by whoever scrolls the pane. *)
+    let cursor_row =
+      let rec position row = function
+        | [] -> None
+        | (Some index, _) :: _ when index = cursor -> Some (List.length preamble + row)
+        | (Some _, _) :: rest | (None, _) :: rest -> position (row + 1) rest
+      in
+      position 0 listed
+    in
+    { rows = preamble @ numbered @ rejected @ attached_tool_lines; cursor_row }
 ;;

@@ -113,6 +113,18 @@ let providers_loaded (state : state) request ~report ~attempts result =
   then (
     match providers_result with
     | Ok providers ->
+      (* A reading can reorder the list -- a login that lands moves its row
+         up -- so the cursor stays on the provider it was on rather than on
+         the index. *)
+      (match state.identity_view with
+       | Some (shown, before) when String.equal shown keeper_name ->
+         let listing = Masc_tui_identity_input.current_listing state in
+         state.identity_cursor
+         <- Masc_tui_identity_model.identity_cursor_following
+              ~before:(listing, before)
+              ~after:(listing, providers)
+              state.identity_cursor
+       | Some _ | None -> ());
       state.identity_view <- Some (keeper_name, providers);
       state.identity_view_error <- None
     | Error detail -> state.identity_view_error <- Some detail);

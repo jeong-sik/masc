@@ -9842,6 +9842,11 @@ type state = {
      which is a different screen from not filtering -- one says the list is
      everything, the other says it is everything so far. *)
   mutable identity_filter: string option;
+  (* The order and view the operator picked with [o] and [v]. Kept across
+     Keepers and tab visits: it is how this operator reads the list, not a
+     property of one Keeper's reading. *)
+  mutable identity_order: Masc_tui_identity_model.identity_order;
+  mutable identity_show: Masc_tui_identity_model.identity_show;
   (* The app form, when it is open: which provider it is for, which field is
      taking keys, and what has been typed. The secret is held here only
      until it is sent, and cleared with the form -- a field left filled is a
@@ -19235,6 +19240,8 @@ let create_state
   identity_cursor = 0;
   identity_attempt_error = None;
   identity_filter = None;
+  identity_order = Masc_tui_identity_model.identity_listing_default.order;
+  identity_show = Masc_tui_identity_model.identity_listing_default.show;
   identity_app_form = None;
   identity_disconnect_armed = None;
   github_identity_view_error = None;

@@ -3,10 +3,38 @@
 
 open Masc_tui_types
 
-(* The query the list is showing, which is the empty one whenever the filter
-   is not open. Asked here so the renderer, the cursor and the keys all read
-   the same list. *)
-let current_query (state : state) = Option.value state.identity_filter ~default:""
+(* What the list is showing: the query, which is the empty one whenever the
+   filter is not open, and the order and view picked with [o] and [v]. Asked
+   here so the renderer, the cursor and the keys all read the same list. *)
+let current_listing (state : state) : Masc_tui_identity_model.identity_listing =
+  { query = Option.value state.identity_filter ~default:""
+  ; order = state.identity_order
+  ; show = state.identity_show
+  }
+
+(* [o] and [v]: the cursor stays on the provider it was on when that one is
+   still listed. *)
+let change_listing (state : state) ~order ~show =
+  let before = current_listing state in
+  state.identity_order <- order;
+  state.identity_show <- show;
+  match state.identity_view with
+  | None -> ()
+  | Some (_, providers) ->
+    state.identity_cursor
+    <- Masc_tui_identity_model.identity_cursor_following
+         ~before:(before, providers)
+         ~after:(current_listing state, providers)
+         state.identity_cursor
+
+let next_order (state : state) =
+  change_listing state
+    ~order:(Masc_tui_identity_model.identity_next_order state.identity_order)
+    ~show:state.identity_show
+
+let next_show (state : state) =
+  change_listing state ~order:state.identity_order
+    ~show:(Masc_tui_identity_model.identity_next_show state.identity_show)
 
 let app_form_key (state : state) ~save key =
   match state.identity_app_form with
@@ -63,7 +91,7 @@ let toggle (state : state) ~switch ~report =
   | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
     (match
        Masc_tui_identity_model.identity_cursor_provider
-         ~query:(current_query state)
+         ~listing:(current_listing state)
          ~providers
          state.identity_cursor
      with
@@ -98,7 +126,7 @@ let open_app_form (state : state) =
   | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
     (match
        Masc_tui_identity_model.identity_cursor_provider
-         ~query:(current_query state)
+         ~listing:(current_listing state)
          ~providers
          state.identity_cursor
      with
@@ -139,7 +167,7 @@ let filter_key (state : state) ~move_cursor ~login key =
      | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
        (match
           Masc_tui_identity_model.identity_cursor_provider
-            ~query:(current_query state)
+            ~listing:(current_listing state)
             ~providers
             state.identity_cursor
         with
@@ -161,7 +189,7 @@ let start_numbered (state : state) ~login ~index =
     (match
        List.nth_opt
          (Masc_tui_identity_model.identity_connectable
-            ~query:(current_query state)
+            ~listing:(current_listing state)
             providers)
          wanted
      with
@@ -196,7 +224,7 @@ let start_cursor (state : state) ~login =
   | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
     (match
        Masc_tui_identity_model.identity_cursor_provider
-         ~query:(current_query state)
+         ~listing:(current_listing state)
          ~providers
          state.identity_cursor
      with
@@ -246,7 +274,7 @@ let disconnect (state : state) ~unbind ~report =
   | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
     (match
        Masc_tui_identity_model.identity_cursor_provider
-         ~query:(current_query state)
+         ~listing:(current_listing state)
          ~providers
          state.identity_cursor
      with

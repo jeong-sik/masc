@@ -3275,6 +3275,7 @@
 (include stanzas/test_keeper_async_requests_announce.inc)
 (include stanzas/test_pending_confirms_announce.inc)
 (include stanzas/test_schedules_announce.inc)
+(include stanzas/test_runtime_assignment_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

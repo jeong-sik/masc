@@ -38,6 +38,10 @@ val read_authority_route : read_authority -> Yojson.Safe.t
 val apple_snapshot_route :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> (Yojson.Safe.t, string) result
 (** Observe the host snapshot and route without observing or executing the guest. *)
+val microvm_endpoint_route : Keeper_sandbox_remote.t -> Yojson.Safe.t
+(** A microVM endpoint in the Task review's route vocabulary: what carries its
+    requests (an exec argv, or a guest agent's socket and owner) and its
+    workspace root. *)
 val read_authority_workspace_root : read_authority -> string
 val read_authority_declared_path : read_authority -> string -> string option
 val read_authority_declared_path_of_args :

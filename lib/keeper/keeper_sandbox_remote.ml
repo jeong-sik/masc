@@ -417,46 +417,40 @@ let openssh_prefix (o : openssh) =
    process -- the shim moves to the request cwd itself and jails it under the
    config root -- and the one environment entry the shim reads for itself
    ([Exec_ssh_protocol.shim_config_env_var]). Payload env never travels this
-   way on either transport. *)
-(* What carries one request to the shim: a local process whose stdin takes
-   the frame, or a connection to a guest agent. *)
-type delivery =
-  | Local_process of string list
+   way on either transport. OpenSSH hands the remote command to a shell, so
+   the probe is one word; a guest exec takes an argv, so the flag is its own
+   element. *)
+type carrier =
+  | Local_process of
+      { request : string list
+      ; probe : string list
+      }
   | Guest_agent of
       { host_socket : string
       ; expected : Keeper_guest_socket.expected
       }
 
-let delivery t =
+let carrier t =
   match t.transport with
-  | Openssh o -> Local_process (openssh_prefix o @ [ shim_command ])
-  | Docker_exec c -> Local_process (c.prefix @ [ c.shim_path ])
-  | Microvm { shim_path; delivery = Exec_per_request { prefix; _ }; _ } ->
-    Local_process (prefix @ [ shim_path ])
-  | Microvm { delivery = Agent_socket { host_socket; expected }; _ } ->
-    Guest_agent { host_socket; expected }
-;;
-
-(* OpenSSH hands the remote command to a shell, so the probe is one word; a
-   guest exec takes an argv, so the flag is its own element. *)
-let probe_delivery t =
-  match t.transport with
-  | Openssh o -> Local_process (openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ])
+  | Openssh o ->
+    let prefix = openssh_prefix o in
+    Local_process
+      { request = prefix @ [ shim_command ]
+      ; probe = prefix @ [ shim_command ^ " " ^ probe_flag ]
+      }
   | Docker_exec c ->
-    Local_process (Option.value c.probe_prefix ~default:c.prefix @ [ c.shim_path; probe_flag ])
+    Local_process
+      { request = c.prefix @ [ c.shim_path ]
+      ; probe = Option.value c.probe_prefix ~default:c.prefix @ [ c.shim_path; probe_flag ]
+      }
   | Microvm { shim_path; delivery = Exec_per_request { prefix; probe_prefix }; _ } ->
-    Local_process (Option.value probe_prefix ~default:prefix @ [ shim_path; probe_flag ])
+    Local_process
+      { request = prefix @ [ shim_path ]
+      ; probe = Option.value probe_prefix ~default:prefix @ [ shim_path; probe_flag ]
+      }
   | Microvm { delivery = Agent_socket { host_socket; expected }; _ } ->
     Guest_agent { host_socket; expected }
 ;;
-
-let process_argv = function
-  | Local_process argv -> Some argv
-  | Guest_agent _ -> None
-;;
-
-let transport_argv t = process_argv (delivery t)
-let probe_argv t = process_argv (probe_delivery t)
 
 let host_label t =
   match t.transport with
@@ -715,7 +709,7 @@ let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
    uploads it. A microVM guest runs the host's copy through a read-only mount
    ({!Config_dir_resolver.microvm_shim_dir}), so the repair is on this host
    and reaches a running guest's next request, which execs the shim anew
-   ([transport_argv]). For a Docker container the server knows only the path
+   ([carrier]). For a Docker container the server knows only the path
    it execs: nothing in this tree starts one or places its shim. One line for
    all three sent the operator of a microVM to the SSH bootstrap (#42726). *)
 let outdated_shim_repair t =
@@ -843,13 +837,13 @@ let run_probe_locked t =
       (Printf.sprintf "%s: endpoint %s: %s" (code t "endpoint_unreachable") t.name detail)
   in
   let response =
-    match probe_delivery t with
-    | Local_process argv ->
+    match carrier t with
+    | Local_process { probe; _ } ->
       (try Ok (Process_eio.run_argv_with_stdin_and_status_split
          ~timeout_sec:(preflight_timeout_sec t)
          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
          ~stdin_content:""
-         argv) with
+         probe) with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> unreachable (Printexc.to_string exn))
     | Guest_agent { host_socket; expected } ->
@@ -863,7 +857,9 @@ let run_probe_locked t =
        | Ok (Keeper_guest_socket.Not_sent not_sent) ->
          unreachable (agent_not_sent_to_string not_sent)
        | Ok (Keeper_guest_socket.Timed_out _) -> unreachable "the probe ran out of time"
-       | Ok (Keeper_guest_socket.Broken { reason; _ }) -> unreachable reason)
+       | Ok (Keeper_guest_socket.Broken { reason; _ }) -> unreachable reason
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn -> unreachable (Printexc.to_string exn))
   in
   match response with
   | Error detail ->
@@ -1090,12 +1086,15 @@ let completed_execution_observation record raw_stderr =
 
 type stdout_mode = Text_paths | Binary_bytes
 
-(* How one request came back. [Wire_status] is the transport process's
-   status, or the guest agent's exit chunk (a spent budget reads as
-   [Process_eio.timed_out_status] either way). [Wire_broken] is an agent
-   connection that ended or broke before its exit chunk. *)
+(* How one request came back. [Wire_status] is the transport process's own
+   status; a spent budget reads as [Process_eio.timed_out_status]. The other
+   three are a guest agent connection: the shim's exit code from the exit
+   chunk, the budget running out, or a connection that ended or broke before
+   its exit chunk. A shim exit code is never read as a spent budget. *)
 type wire_end =
   | Wire_status of Unix.process_status
+  | Wire_exit_chunk of int
+  | Wire_timed_out
   | Wire_broken of string
 
 type wire =
@@ -1240,8 +1239,8 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                (Transport_unavailable
                   (if acceptance_frame then Acceptance_not_read else Acceptance_not_asked));
            let wire =
-             match delivery t with
-             | Local_process argv ->
+             match carrier t with
+             | Local_process { request; _ } ->
                let status, stdout, raw_stderr =
                  Process_eio.run_argv_with_stdin_held_open_and_status_split
                    ~timeout_sec:budget
@@ -1250,7 +1249,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                      (Option.map fst stdout_path_stream)
                    ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
                    ~stdin_content:frame
-                   argv
+                   request
                in
                Wire_answered { ended = Wire_status status; stdout; raw_stderr }
              | Guest_agent { host_socket; expected } ->
@@ -1265,14 +1264,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                 | Ok (Keeper_guest_socket.Not_sent not_sent) ->
                   Wire_not_sent (agent_not_sent_to_string not_sent)
                 | Ok (Keeper_guest_socket.Exited { code; stdout; stderr }) ->
-                  Wire_answered
-                    { ended = Wire_status (Unix.WEXITED code); stdout; raw_stderr = stderr }
+                  Wire_answered { ended = Wire_exit_chunk code; stdout; raw_stderr = stderr }
                 | Ok (Keeper_guest_socket.Timed_out { stdout; stderr }) ->
-                  Wire_answered
-                    { ended = Wire_status Process_eio.timed_out_status
-                    ; stdout
-                    ; raw_stderr = stderr
-                    }
+                  Wire_answered { ended = Wire_timed_out; stdout; raw_stderr = stderr }
                 | Ok (Keeper_guest_socket.Broken { reason; stdout; stderr }) ->
                   Wire_answered { ended = Wire_broken reason; stdout; raw_stderr = stderr })
            in
@@ -1305,7 +1299,8 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              match ended with
              | Wire_status status ->
                Process_eio.exit_reason_of_status status = Process_eio.Timed_out
-             | Wire_broken _ -> false
+             | Wire_timed_out -> true
+             | Wire_exit_chunk _ | Wire_broken _ -> false
            in
            let settle record triple =
              Option.iter (fun value -> observation := value)
@@ -1334,7 +1329,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                  transport_error t
                    (match ended with
                     | Wire_broken reason -> reason
-                    | Wire_status _ -> detail)
+                    | Wire_status _ | Wire_exit_chunk _ | Wire_timed_out -> detail)
              in
              settle (failed failure error)
                (transport_failed ~failure ~stdout:(rewrite stdout)
@@ -1354,44 +1349,49 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                settle (failed Transport_failed error)
                  (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
              in
+             (* The shim's own exit status, read against its trailer. *)
+             let by_trailer status =
+               match Exec_ssh_protocol.parse_trailer trailer_bytes with
+               | Error error ->
+                 let error = transport_error t error in
+                 settle (failed Transport_failed error)
+                   (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+               | Ok trailer
+                 when trailer.timed_out && status = Unix.WEXITED 0 ->
+                 let error = remote_timeout_error t timeout_sec in
+                 settle (failed Remote_timeout error)
+                   (transport_failed ~failure:Remote_timeout ~stdout ~prefix_stderr:payload_stderr error)
+               | Ok { shim_error = Some error; _ }
+                 when status = Unix.WEXITED 1 ->
+                 settle (failed Shim_refused error)
+                   (transport_failed ~failure:Shim_refused ~stdout ~prefix_stderr:payload_stderr error)
+               | Ok { exit = Some code; signal = None; shim_error = None; _ }
+                 when status = Unix.WEXITED 0 ->
+                 settle (finished (Unix.WEXITED code))
+                   (ran (Unix.WEXITED code) stdout payload_stderr)
+               | Ok { signal = Some signal; exit = None; shim_error = None; _ }
+                 when status = Unix.WEXITED 0 ->
+                 settle (finished (Unix.WSIGNALED signal))
+                   (ran (Unix.WSIGNALED signal) stdout payload_stderr)
+               | Ok _ ->
+                 let error =
+                   transport_error t "transport status and result trailer disagree"
+                 in
+                 settle (failed Trailer_disagreement error)
+                   (transport_failed ~failure:Trailer_disagreement ~stdout ~prefix_stderr:payload_stderr error)
+             in
              (match local_timed_out, ended with
-              | true, (Wire_status _ | Wire_broken _) ->
+              | true, (Wire_status _ | Wire_exit_chunk _ | Wire_timed_out | Wire_broken _)
+              | false, Wire_timed_out ->
                 let error = local_timeout_error t budget in
                 settle (failed Local_timeout error)
                   (transport_failed ~failure:Local_timeout ~stdout ~prefix_stderr:payload_stderr error)
               | false, Wire_broken detail -> broken detail
               | false, Wire_status status ->
-                match transport_failure t status with
-                | Some detail -> broken detail
-                | None ->
-                (match Exec_ssh_protocol.parse_trailer trailer_bytes with
-                 | Error error ->
-                   let error = transport_error t error in
-                   settle (failed Transport_failed error)
-                     (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
-                 | Ok trailer
-                   when trailer.timed_out && status = Unix.WEXITED 0 ->
-                   let error = remote_timeout_error t timeout_sec in
-                   settle (failed Remote_timeout error)
-                     (transport_failed ~failure:Remote_timeout ~stdout ~prefix_stderr:payload_stderr error)
-                 | Ok { shim_error = Some error; _ }
-                   when status = Unix.WEXITED 1 ->
-                   settle (failed Shim_refused error)
-                     (transport_failed ~failure:Shim_refused ~stdout ~prefix_stderr:payload_stderr error)
-                 | Ok { exit = Some code; signal = None; shim_error = None; _ }
-                   when status = Unix.WEXITED 0 ->
-                   settle (finished (Unix.WEXITED code))
-                     (ran (Unix.WEXITED code) stdout payload_stderr)
-                 | Ok { signal = Some signal; exit = None; shim_error = None; _ }
-                   when status = Unix.WEXITED 0 ->
-                   settle (finished (Unix.WSIGNALED signal))
-                     (ran (Unix.WSIGNALED signal) stdout payload_stderr)
-                 | Ok _ ->
-                   let error =
-                     transport_error t "transport status and result trailer disagree"
-                   in
-                   settle (failed Trailer_disagreement error)
-                     (transport_failed ~failure:Trailer_disagreement ~stdout ~prefix_stderr:payload_stderr error)))))))
+                (match transport_failure t status with
+                 | Some detail -> broken detail
+                 | None -> by_trailer status)
+              | false, Wire_exit_chunk code -> by_trailer (Unix.WEXITED code))))))
 ;;
 
 let runner ?stdout_mode ?mode ?on_receipt ~timeout_sec t =

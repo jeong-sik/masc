@@ -4121,9 +4121,10 @@ let test_running_guest_is_a_remote_endpoint () =
   | Error message -> Alcotest.fail message
   | Ok endpoint ->
     let argv =
-      match Masc.Keeper_sandbox_remote.transport_argv endpoint with
-      | Some argv -> argv
-      | None -> Alcotest.fail "a container exec guest has an exec argv"
+      match Masc.Keeper_sandbox_remote.carrier endpoint with
+      | Masc.Keeper_sandbox_remote.Local_process { request; _ } -> request
+      | Masc.Keeper_sandbox_remote.Guest_agent _ ->
+        Alcotest.fail "a container exec guest has an exec argv"
     in
     Alcotest.(check bool) "execs into the guest" true
       (adjacent ~flag:"exec" ~value:"-i" argv && contains container_name argv);
@@ -4199,9 +4200,10 @@ let test_running_guest_is_a_remote_endpoint () =
          (prefix @ [ shim_path ])
          argv;
        let probe_argv =
-         match Masc.Keeper_sandbox_remote.probe_argv endpoint with
-         | Some argv -> argv
-         | None -> Alcotest.fail "a container exec guest has a probe argv"
+         match Masc.Keeper_sandbox_remote.carrier endpoint with
+         | Masc.Keeper_sandbox_remote.Local_process { probe; _ } -> probe
+         | Masc.Keeper_sandbox_remote.Guest_agent _ ->
+           Alcotest.fail "a container exec guest has a probe argv"
        in
        Alcotest.(check bool) "probe argv does not pass -i (#33431)" false
          (List.mem "-i" probe_argv);

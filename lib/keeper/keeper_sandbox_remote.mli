@@ -154,14 +154,25 @@ val lane_prefix : transport -> string
 (** ["remote_ssh"], ["microvm_remote"] or ["docker_observe"]: the prefix every lane-specific
     error code starts with. *)
 
-val transport_argv : t -> string list option
-(** Exact argv that delivers the framed request to the shim: the pinned
-    OpenSSH argv ending in the fixed remote command [masc-exec-shim], or the
-    guest's prebuilt exec prefix with the guest path of the shim appended.
-    [None] for an {!Agent_socket} guest, which no local process reaches. *)
+(** What carries one request to the shim. *)
+type carrier =
+  | Local_process of
+      { request : string list
+        (** exact argv that delivers the framed request: the pinned OpenSSH
+            argv ending in the fixed remote command [masc-exec-shim], or the
+            guest's prebuilt exec prefix with the guest path of the shim
+            appended *)
+      ; probe : string list  (** [request] with the shim asked for [--probe] *)
+      }
+  | Guest_agent of
+      { host_socket : string  (** the host end of the VM's [--publish-socket] *)
+      ; expected : Keeper_guest_socket.expected
+        (** the Keeper uid and gid the agent's hello must report *)
+      }
+      (** an {!Agent_socket} guest: each request and probe is one connection
+          to its agent, and no local process carries it *)
 
-val probe_argv : t -> string list option
-(** {!transport_argv} with the shim asked for [--probe]. *)
+val carrier : t -> carrier
 
 val check_preflight : ?force:bool -> t -> (unit, string) result
 (** Verify endpoint reachability, shim major version, remote git/rg, the

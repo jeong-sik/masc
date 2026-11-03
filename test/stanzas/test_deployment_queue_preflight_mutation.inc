@@ -15,6 +15,7 @@
  (modules deployment_preflight_queue_omitted)
  (libraries
   masc
+  masc.masc_process
   masc.server
   masc.host_config
   masc.keeper_runtime

@@ -1588,6 +1588,16 @@ let official_client_dispatch ~provider_config_transform result =
   | Some _, _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
   | None, Error error when Option.is_some (Keeper_internal_error.guidance_preparation_failure error) ->
     Keeper_attempt_dispatch.Rejected_before_dispatch
+  (* [Attempt_rejected] is itself the witness that the binding refused the
+     prepared request before sending it ([Retry.invalid_request_reason]). An
+     official client returns it from its own pre-turn admission, such as a
+     Claude Code auth probe that failed (#47787). *)
+  | ( None
+    , Error
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest
+              { reason = Llm_provider.Retry.Attempt_rejected; _ })) ) ->
+    Keeper_attempt_dispatch.Rejected_before_dispatch
   | None, (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
 
 (* Whether any request of this attempt reached a provider. The pre-dispatch

@@ -2837,7 +2837,15 @@ let test_preparation_marker_requires_no_prior_dispatch () =
   Alcotest.check dispatch_disposition "unknown transport failure keeps conservative dispatch"
     Masc.Keeper_attempt_dispatch.Dispatched
     (Driver.For_testing.official_client_dispatch ~provider_config_transform:None
-      (Error (retryable_network_error "partial write or unknown outcome")))
+      (Error (retryable_network_error "partial write or unknown outcome")));
+  Alcotest.check dispatch_disposition "binding refusal is rejected before dispatch"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (Driver.For_testing.official_client_dispatch ~provider_config_transform:None
+      (Error
+         (Agent_core.Error.Api
+            (Llm_provider.Retry.InvalidRequest
+               { message = "auth status: invalid JSON"
+               ; reason = Llm_provider.Retry.Attempt_rejected }))))
 ;;
 
 let test_attempt_loop_retries_provider_wire_failure_same_turn () =

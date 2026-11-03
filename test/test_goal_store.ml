@@ -309,6 +309,31 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
     false
     (List.exists (fun goal -> String.equal goal.Goal_store.id "g-1") goals)
 
+let test_delete_goal_reports_ambiguous_link_cleanup () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "g-1" "deleted goal" in
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [goal] };
+  Workspace_goal_index.write_goal_task_links config [ "g-1", [ "task-a" ] ];
+  let path = Workspace_goal_index.goal_task_links_path config in
+  let mirror = path ^ ".last-good" in
+  let raw = {|{"links":[{"goal_id":" g-1 ","task_ids":["task-a"]}]}|} in
+  let write path = Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc raw) in
+  write path; write mirror;
+  (match Goal_store.delete_goal config ~goal_id:"g-1" with
+   | Ok (Goal_store.Deleted_with_orphaned_links detail) ->
+       check bool "cleanup failure is reported" true (String.length detail > 0)
+   | Ok Goal_store.Deleted -> fail "ambiguous links were silently rewritten"
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  check bool "Goal deletion committed" false
+    (List.exists (fun (item : Goal_store.goal) -> String.equal item.id goal.id) (available config).goals);
+  check string "ambiguous primary retained" raw (In_channel.with_open_bin path In_channel.input_all);
+  check string "ambiguous recovery retained" raw (In_channel.with_open_bin mirror In_channel.input_all);
+  (match Goal_store.delete_goal config ~goal_id:"g-1" with
+   | Error (Goal_store.Unknown_goal _) -> ()
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error)
+   | Ok _ -> fail "a repeated Goal deletion does not retry cleanup")
+
 let test_status_field_no_longer_decodes () =
   with_workspace @@ fun config ->
   (* Hard cut: "status" is not an accepted Goal field. A row still carrying the
@@ -2367,6 +2392,8 @@ let () =
             test_delete_goal_prunes_goal_task_links;
           test_case "prune failure reports partial delete" `Quick
             test_delete_goal_wraps_prune_failure_after_goal_delete;
+          test_case "ambiguous links report partial Goal deletion" `Quick
+            test_delete_goal_reports_ambiguous_link_cleanup;
           test_case "status field no longer decodes" `Quick
             test_status_field_no_longer_decodes;
           test_case "serializer omits status" `Quick

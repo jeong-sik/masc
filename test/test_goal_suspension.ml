@@ -520,6 +520,166 @@ let test_drop_continues_after_post_commit_error () = with_workspace @@ fun confi
    | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
    | Masc_domain.Done _ -> fail "independent Task was not cancelled")
 
+let test_drop_refuses_padded_raw_link ~padded_goal () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "ambiguous link" in
+  let independent = add_task ~goal_id:goal.id config "independent" in
+  let row goal_id task_id = `Assoc ["goal_id", `String goal_id; "task_ids", `List [`String task_id]] in
+  let raw_goal = if padded_goal then " " ^ goal.id else goal.id in
+  let raw_task = if padded_goal then id else id ^ " " in
+  let document = `Assoc ["links", `List [row raw_goal raw_task; row goal.id independent]] in
+  save_atomic (Workspace_goal_index.goal_task_links_path config) (Yojson.Safe.to_string document);
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "padded raw link is reported" [id] (failed_task_ids json);
+  check (list string) "independent Task still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  (match task_status config id, task_status config independent with
+   | Masc_domain.Todo, Masc_domain.Cancelled _ -> ()
+   | _ -> fail "raw-link candidates have the wrong state")
+
+let test_drop_refuses_duplicate_raw_link_members ~duplicate_root ~duplicate_goal () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let other = create config in
+  let id = add_task ~goal_id:goal.id config "possibly shared" in
+  let row = `Assoc ["goal_id", `String goal.id; "task_ids", `List [`String id]] in
+  let other_row = if duplicate_goal then
+      `Assoc ["goal_id", `String other.id; "goal_id", `String goal.id; "task_ids", `List [`String id]]
+    else `Assoc ["goal_id", `String other.id; "task_ids", `List [];
+                 "task_ids", `List [`String id]] in
+  let document = if duplicate_root then
+      `Assoc ["links", `List [row]; "links", `List [other_row]]
+    else `Assoc ["links", `List [row; other_row]] in
+  save_atomic (Workspace_goal_index.goal_task_links_path config) (Yojson.Safe.to_string document);
+  let json = transition config goal.id "drop" |> success in
+  let unread = Yojson.Safe.Util.(json |> member "tasks" |> member "unread" |> to_string) in
+  check bool "duplicate link member is reported" true (contains ~sub:"duplicate" unread);
+  (match task_status config id with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "unreadable links changed the Task")
+
+let test_drop_refuses_padded_target_goal_alias () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "possibly owned by the alias" in
+  let current = state config in
+  let padded = { goal with id = " " ^ goal.id ^ " "; title = "Historical alias" } in
+  (match Goal_store.write_state_result config { current with goals = padded :: current.goals } with
+   | Ok () -> () | Error detail -> fail detail);
+  let json = transition config goal.id "drop" |> success in
+  phase GP.Dropped (saved config goal.id);
+  check (list string) "ambiguous target link is reported" [id] (failed_task_ids json);
+  check (list string) "no Task was cancelled" []
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  (match task_status config id with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "ambiguous Task changed")
+
+let test_drop_refuses_padded_shared_goal_alias () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let other = create config in
+  set_phase config other GP.Dropped;
+  let other = saved config other.id in
+  let shared = add_task ~goal_id:goal.id config "possibly shared" in
+  let independent = add_task ~goal_id:goal.id config "independent" in
+  (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:other.id ~task_id:shared with
+   | Ok _ -> () | Error _ -> fail "link the other Goal");
+  let current = state config in
+  let padded = { other with id = " " ^ other.id; phase = GP.Executing } in
+  (match Goal_store.write_state_result config { current with goals = padded :: current.goals } with
+   | Ok () -> () | Error detail -> fail detail);
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "ambiguous shared link is reported" [shared] (failed_task_ids json);
+  check (list string) "independent Task still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  (match task_status config shared, task_status config independent with
+   | Masc_domain.Todo, Masc_domain.Cancelled _ -> ()
+   | _ -> fail "the shared or independent Task has the wrong state")
+
+let test_drop_refuses_padded_task_alias () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "possibly another Task" in
+  let independent = add_task ~goal_id:goal.id config "independent" in
+  Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
+    let current = backlog config in
+    let original = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id id) current.tasks with
+      | Some task -> task | None -> fail "candidate missing" in
+    let padded = { original with id = " " ^ id ^ " " } in
+    Workspace_backlog.write_backlog config { current with tasks = padded :: current.tasks });
+  let before = (backlog config).tasks |> List.filter (fun (task : Masc_domain.task) -> String.equal (String.trim task.id) id) in
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "ambiguous Task link is reported" [id] (failed_task_ids json);
+  check (list string) "independent Task still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  let after = (backlog config).tasks |> List.filter (fun (task : Masc_domain.task) -> String.equal (String.trim task.id) id) in
+  check bool "neither Task alias was rewritten" true
+    (List.length before = List.length after && List.for_all2 Masc_domain.equal_task before after)
+
+let test_drop_rechecks_padded_task_alias () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "candidate" in
+  let original = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id id) (backlog config).tasks with
+    | Some task -> task | None -> fail "candidate missing" in
+  Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
+    let current = backlog config in
+    let padded = { original with id = id ^ " " } in
+    Workspace_backlog.write_backlog config { current with tasks = padded :: current.tasks });
+  let ctx : Masc.Workspace_types.context = { config; agent_name = "operator" } in
+  let cancelled, failed = Goals.For_testing.cancel_dropped_goal_todos ctx ~goal_id:goal.id ~reason:"fixture" [original] in
+  check (list string) "no candidate was cancelled" [] cancelled;
+  check (list string) "the new alias is reported" [id] (List.map fst failed);
+  (match task_status config id with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "candidate changed")
+
+let test_drop_refuses_single_padded_task_row () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "only padded row" in
+  Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
+    let current = backlog config in
+    let tasks = List.map (fun (task : Masc_domain.task) ->
+      if String.equal task.id id then { task with id = " " ^ id } else task) current.tasks in
+    Workspace_backlog.write_backlog config { current with tasks });
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "padded row is reported" [id] (failed_task_ids json);
+  check (list string) "no Task was cancelled" []
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  (match task_status config (" " ^ id) with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "padded Task changed")
+
+let test_drop_does_not_fold_non_breaking_spaces () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "unambiguous" in
+  let current = state config in
+  let distinct = { goal with id = goal.id ^ "\194\160"; title = "Distinct Goal" } in
+  (match Goal_store.write_state_result config { current with goals = distinct :: current.goals } with
+   | Ok () -> () | Error detail -> fail detail);
+  Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
+    let current = backlog config in
+    let original = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id id) current.tasks with
+      | Some task -> task | None -> fail "candidate missing" in
+    let distinct_task = { original with id = id ^ "\194\160" } in
+    Workspace_backlog.write_backlog config { current with tasks = distinct_task :: current.tasks });
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "the unambiguous Task cancels" [id]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  check (list string) "no alias failure" [] (failed_task_ids json);
+  (match task_status config (id ^ "\194\160") with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "distinct Task changed")
+
 let test_drop_refuses_duplicate_task_rows ~claimed () = with_workspace @@ fun config _ ->
   ignore (Masc.Workspace.init config ~agent_name:None);
   let goal = create config in
@@ -702,6 +862,17 @@ let () = run "Goal suspension" ["drop", [
   test_case "drop refuses a claim between Task read and transition" `Quick test_drop_cas_refuses_claim_after_fresh_read;
   test_case "drop refuses a deleted then restored Task" `Quick test_drop_refuses_deleted_then_restored_task;
   test_case "drop continues after a post-commit Task error" `Quick test_drop_continues_after_post_commit_error;
+  test_case "drop reports a padded raw Goal link" `Quick (fun () -> test_drop_refuses_padded_raw_link ~padded_goal:true ());
+  test_case "drop reports a padded raw Task link" `Quick (fun () -> test_drop_refuses_padded_raw_link ~padded_goal:false ());
+  test_case "drop refuses duplicate raw task members" `Quick (fun () -> test_drop_refuses_duplicate_raw_link_members ~duplicate_root:false ~duplicate_goal:false ());
+  test_case "drop refuses duplicate raw Goal members" `Quick (fun () -> test_drop_refuses_duplicate_raw_link_members ~duplicate_root:false ~duplicate_goal:true ());
+  test_case "drop refuses duplicate raw links collections" `Quick (fun () -> test_drop_refuses_duplicate_raw_link_members ~duplicate_root:true ~duplicate_goal:false ());
+  test_case "drop reports a padded target Goal alias" `Quick test_drop_refuses_padded_target_goal_alias;
+  test_case "drop reports a padded shared Goal alias" `Quick test_drop_refuses_padded_shared_goal_alias;
+  test_case "drop reports a padded Task alias" `Quick test_drop_refuses_padded_task_alias;
+  test_case "drop rechecks for a new padded Task alias" `Quick test_drop_rechecks_padded_task_alias;
+  test_case "drop reports a single padded Task row" `Quick test_drop_refuses_single_padded_task_row;
+  test_case "drop preserves distinct non-breaking-space IDs" `Quick test_drop_does_not_fold_non_breaking_spaces;
   test_case "drop refuses duplicate Todo rows" `Quick (fun () -> test_drop_refuses_duplicate_task_rows ~claimed:false ());
   test_case "drop refuses duplicate Todo and Claimed rows" `Quick (fun () -> test_drop_refuses_duplicate_task_rows ~claimed:true ());
   test_case "drop refuses Todo linked to duplicate Goal rows" `Quick (fun () -> test_drop_refuses_duplicate_linked_goal ~claimed:false ());

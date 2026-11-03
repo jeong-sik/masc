@@ -31,11 +31,14 @@ module Goal_id_map = Map.Make (String)
 module Task_id_map = Workspace_backlog.Task_id_map
 module Task_id_set = Workspace_backlog.Task_id_set
 
+(* This is the link registry's lossy historical key, not an identity check. *)
+let normalize_link_id = String.trim
+
 let normalize_link_set links =
   let by_goal =
     List.fold_left
       (fun acc (goal_id, task_ids) ->
-         let goal_id = String.trim goal_id in
+         let goal_id = normalize_link_id goal_id in
          if String.equal goal_id ""
          then acc
          else (
@@ -47,7 +50,7 @@ let normalize_link_set links =
            let seen, rev_ids =
              List.fold_left
                (fun (seen_acc, rev_acc) task_id ->
-                  let task_id = String.trim task_id in
+                  let task_id = normalize_link_id task_id in
                   if String.equal task_id "" || Task_id_set.mem task_id seen_acc
                   then seen_acc, rev_acc
                   else Task_id_set.add task_id seen_acc, task_id :: rev_acc)
@@ -84,11 +87,11 @@ let link_of_yojson = function
   | `Assoc fields ->
     (match List.assoc_opt "goal_id" fields, List.assoc_opt "task_ids" fields with
      | Some (`String goal_id), Some (`List values) ->
-       let goal_id = String.trim goal_id in
+       let goal_id = normalize_link_id goal_id in
        let rec collect acc = function
          | [] -> Some (goal_id, List.rev acc)
          | `String value :: rest ->
-           let task_id = String.trim value in
+           let task_id = normalize_link_id value in
            if String.equal task_id "" then None
            else collect (task_id :: acc) rest
          | _ -> None
@@ -118,6 +121,56 @@ let links_of_yojson = function
   | _ -> Error "goal_task_links: top level is not an object"
 ;;
 
+(* Ownership-sensitive work needs keys before [links_of_yojson] folds them.
+   A changed key makes that Task's ownership uncertain. Duplicate structural
+   members can hide links, so they make the observation unreadable without
+   changing the regular link reader's existing behavior. *)
+type prepared_link_ambiguity =
+  { has_padded_key : bool
+  ; affected_tasks : Task_id_set.t
+  }
+
+let link_ambiguity_of_yojson json =
+  let ( let* ) = Result.bind in
+  let one_member name fields =
+    match List.filter_map (fun (key, value) -> if String.equal key name then Some value else None) fields with
+    | [value] -> Ok value
+    | [] -> Error ("goal_task_links: missing " ^ name)
+    | _ :: _ :: _ -> Error ("goal_task_links: duplicate " ^ name)
+  in
+  let rec rows ambiguous = function
+    | [] -> Ok ambiguous
+    | `Assoc fields :: rest ->
+        let* goal = one_member "goal_id" fields in
+        let* tasks = one_member "task_ids" fields in
+        (match goal, tasks with
+         | `String goal_id, `List values ->
+             let goal_changed = not (String.equal goal_id (normalize_link_id goal_id)) in
+             let ambiguous = { ambiguous with has_padded_key = ambiguous.has_padded_key || goal_changed } in
+             let rec add_tasks ambiguous = function
+               | [] -> rows ambiguous rest
+               | `String task_id :: remaining ->
+                   let link_id = normalize_link_id task_id in
+                   let task_changed = not (String.equal task_id link_id) in
+                   let affected_tasks = if goal_changed || task_changed
+                     then Task_id_set.add link_id ambiguous.affected_tasks else ambiguous.affected_tasks in
+                   let ambiguous = { has_padded_key = ambiguous.has_padded_key || task_changed; affected_tasks } in
+                   add_tasks ambiguous remaining
+               | _ -> Error "goal_task_links: invalid task ID in link observation"
+             in
+             add_tasks ambiguous values
+         | _ -> Error "goal_task_links: invalid row in link observation")
+    | _ :: _ -> Error "goal_task_links: invalid row in link observation"
+  in
+  match json with
+  | `Assoc fields ->
+      let* links = one_member "links" fields in
+      (match links with
+       | `List values -> rows { has_padded_key = false; affected_tasks = Task_id_set.empty } values
+       | _ -> Error "goal_task_links: invalid links in link observation")
+  | _ -> Error "goal_task_links: invalid link observation"
+;;
+
 (* Content-addressed cache keyed by file path -> (raw_content, prepared_link_registry).
    Comparing exact [raw_content] avoids heuristic mtime checks while eliminating
    repeated JSON parsing, link-set normalization, and reverse task->goals map
@@ -129,6 +182,7 @@ let links_of_yojson = function
 type prepared_link_registry =
   { links : (string * string list) list
   ; goals_by_task_id : string list Task_id_map.t
+  ; link_ambiguity : (prepared_link_ambiguity, string) result
   }
 
 let build_task_goal_map
@@ -153,9 +207,10 @@ let build_task_goal_map
   Task_id_map.map List.rev rev_by_task
 ;;
 
-let prepare_link_registry links =
+let prepare_link_registry links json =
   { links
   ; goals_by_task_id = build_task_goal_map ~goal_task_links:links ()
+  ; link_ambiguity = link_ambiguity_of_yojson json
   }
 ;;
 
@@ -219,7 +274,7 @@ let read_link_registry_prepared_typed config path =
                 clear_link_registry_cache_for path;
                 Error (Schema_decode_error detail)
               | Ok links ->
-                let prepared = prepare_link_registry links in
+                let prepared = prepare_link_registry links json in
                 Stdlib.Mutex.lock link_registry_cache_mu;
                 Fun.protect
                   ~finally:(fun () -> Stdlib.Mutex.unlock link_registry_cache_mu)
@@ -236,16 +291,43 @@ let read_link_registry config path =
   Result.map_error link_registry_read_error_to_string (read_link_registry_typed config path)
 ;;
 
-let read_goal_task_links_authoritative_r config =
-  match read_link_registry config (goal_task_links_path config) with
+let read_authoritative_link_registry config =
+  let read path =
+    Result.map_error link_registry_read_error_to_string
+      (read_link_registry_prepared_typed config path)
+  in
+  match read (goal_task_links_path config) with
   | Error _ as error -> error
-  | Ok (Some links) -> Ok links
+  | Ok (Some prepared) -> Ok (Some prepared)
   | Ok None ->
-    (match read_link_registry config (goal_task_links_recovery_path config) with
+    (match read (goal_task_links_recovery_path config) with
      | Error _ as error -> error
      | Ok (Some _) ->
        Error "goal_task_links: primary registry is missing; recovery is non-authoritative"
-     | Ok None -> Ok [])
+     | Ok None -> Ok None)
+;;
+
+let read_goal_task_links_authoritative_r config =
+  Result.map (function None -> [] | Some prepared -> prepared.links)
+    (read_authoritative_link_registry config)
+;;
+
+type goal_task_link_observation =
+  { normalized_links : (string * string list) list
+  ; ambiguous_task_ids : string list
+  ; padded_key_present : bool
+  }
+
+let read_goal_task_links_observed_r config =
+  match read_authoritative_link_registry config with
+  | Error _ as error -> error
+  | Ok None -> Ok { normalized_links = []; ambiguous_task_ids = []; padded_key_present = false }
+  | Ok (Some prepared) ->
+      Result.map (fun ambiguity ->
+        { normalized_links = prepared.links
+        ; ambiguous_task_ids = Task_id_set.elements ambiguity.affected_tasks
+        ; padded_key_present = ambiguity.has_padded_key })
+        prepared.link_ambiguity
 ;;
 
 let read_goal_task_links_r config =
@@ -493,14 +575,16 @@ let remove_link_from_links links ~goal_id ~task_id =
 ;;
 
 let read_goal_task_links_for_mutation config =
-  match read_goal_task_links_authoritative_r config with
-  | Ok links -> Ok links
+  match read_goal_task_links_observed_r config with
+  | Ok { normalized_links; padded_key_present = false; _ } -> Ok normalized_links
+  | Ok { padded_key_present = true; _ } ->
+    Error "goal_task_links has padded Goal or Task link IDs; repair the ambiguous links before mutation"
   | Error msg ->
     Error (Printf.sprintf "goal_task_links read failed before mutation: %s" msg)
 ;;
 
 let prune_links_for_goal_result config ~goal_id =
-  let goal_id = String.trim goal_id in
+  let goal_id = normalize_link_id goal_id in
   if String.equal goal_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
@@ -530,8 +614,8 @@ let prune_links_for_task_result config ~task_id =
 ;;
 
 let link_task_to_goal_result config ~goal_id ~task_id =
-  let goal_id = String.trim goal_id in
-  let task_id = String.trim task_id in
+  let goal_id = normalize_link_id goal_id in
+  let task_id = normalize_link_id task_id in
   if String.equal goal_id "" || String.equal task_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
@@ -549,8 +633,8 @@ let link_task_to_goal_result config ~goal_id ~task_id =
 let before_unlink_task_from_goal_for_testing = Atomic.make None
 
 let unlink_task_from_goal_result_impl config ~goal_id ~task_id =
-  let goal_id = String.trim goal_id in
-  let task_id = String.trim task_id in
+  let goal_id = normalize_link_id goal_id in
+  let task_id = normalize_link_id task_id in
   if String.equal goal_id "" || String.equal task_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
@@ -585,8 +669,8 @@ module For_testing = struct
 end
 
 let link_goalless_task_to_goal config ~goal_id ~task_id =
-  let goal_id = String.trim goal_id in
-  let task_id = String.trim task_id in
+  let goal_id = normalize_link_id goal_id in
+  let task_id = normalize_link_id task_id in
   if String.equal goal_id "" || String.equal task_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
@@ -610,11 +694,11 @@ let link_tasks_to_goals_result config links =
   let trimmed_links =
     List.filter_map
       (fun (task_id, goal_id_opt) ->
-         let task_id = String.trim task_id in
+         let task_id = normalize_link_id task_id in
          match goal_id_opt with
          | None -> None
          | Some goal_id ->
-           let goal_id = String.trim goal_id in
+           let goal_id = normalize_link_id goal_id in
            if String.equal goal_id "" || String.equal task_id ""
            then None
            else Some (task_id, goal_id))

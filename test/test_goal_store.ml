@@ -1022,11 +1022,8 @@ let test_upsert_accepts_a_real_calendar_day () =
     [ "2026-09-23"; "2028-02-29"; "9999-12-31" ]
 
 (* Creation input check. A goal born without a
-   name states no success condition to hold it to, on either create path;
-   a goal born past its due date is overdue before its first observation.
-   Due-date updates may be overdue: an existing goal's due date passing is ordinary
-   life, and backdating a stored date is a correction, not a birth. *)
-let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
+   name states no success condition to hold it to, on either create path. *)
+let test_upsert_refuses_a_blank_title_at_creation () =
   with_workspace ~now:calendar_fixture_now @@ fun config ->
   let rejected_naming affix = function
     | Error (Goal_store.Rejected message) ->
@@ -1058,40 +1055,14 @@ let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
          fail (Printf.sprintf "id %S was not Rejected: %s" bad_id (write_error_msg other))
        | Ok _ -> fail (Printf.sprintf "a goal with id %S was accepted" bad_id))
     [ ""; "   "; " goal-x"; "goal-x "; "\tgoal-x\n" ];
-  (* A past due date is unreachable by construction. *)
-  rejected_naming "already past"
-    (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Late" ~metric:"m" ~target_value:"1"
-       ~due_date:"2026-09-21" ());
   check bool "refused creates wrote no goals.json" false
     (Sys.file_exists (Goal_store.goals_path config));
-  (* A reachable future date creates. *)
+  (* A due date already past is stored as written. *)
   let goal =
-    upsert_exn config ~title:"Early" ~metric:"m" ~target_value:"1"
-      ~due_date:"2026-09-23" ()
+    upsert_exn config ~title:"Late" ~metric:"m" ~target_value:"1"
+      ~due_date:"2026-09-21" ()
   in
-  check (option string) "the future date is stored" (Some "2026-09-23") goal.due_date;
-  (* Backdating that same row by update is a correction, not a birth. *)
-  let backdated = upsert_exn config ~id:goal.id ~due_date:"2026-09-21" () in
-  check (option string) "the backdate is stored" (Some "2026-09-21") backdated.due_date
-;;
-
-let test_upsert_due_date_uses_the_utc_day_boundary () =
-  let due_date = "2026-09-23" in
-  List.iter (fun time ->
-    with_workspace ~now:(utc_time (2026, 9, 23) time) @@ fun config ->
-    let created = upsert_exn config ~title:"Due today" ~metric:"m"
-        ~target_value:"1" ~due_date () in
-    check (option string) "today is reachable at its UTC end-of-day instant"
-      (Some due_date) created.due_date)
-    [ (0, 0, 0); (23, 59, 59) ];
-  with_workspace ~now:(utc_time (2026, 9, 24) (0, 0, 0)) @@ fun config ->
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Due yesterday" ~metric:"m"
-      ~target_value:"1" ~due_date () with
-   | Error (Goal_store.Rejected _) -> ()
-   | Error error -> fail (write_error_msg error)
-   | Ok _ -> fail "the previous UTC day's due date was accepted on creation");
-  check bool "overdue creation writes no store" false
-    (Sys.file_exists (Goal_store.goals_path config))
+  check (option string) "the past date is stored" (Some "2026-09-21") goal.due_date
 ;;
 
 (* An update is checked like a create, and a refused one changes nothing. *)
@@ -1988,10 +1959,7 @@ let test_refused_audited_upserts_preserve_store_and_outbox () =
     [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
           ~id:"unknown-goal" ~metric:"m" ~target_value:"1" ());
       (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
-          ~title:"No condition" ());
-      (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
-          ~title:"Already late" ~metric:"m" ~target_value:"1"
-          ~due_date:"2026-09-21" ()) ] in
+          ~title:"No condition" ()) ] in
   List.iter (fun attempt ->
     refused (attempt ());
     (match Goal_store.load_source config with
@@ -2280,10 +2248,8 @@ let () =
             test_upsert_refuses_a_due_date_that_is_not_a_calendar_day;
           test_case "a real calendar day is stored as written" `Quick
             test_upsert_accepts_a_real_calendar_day;
-          test_case "creation refuses a blank title and a past due date" `Quick
-            test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation;
-          test_case "creation uses the UTC due-day boundary" `Quick
-            test_upsert_due_date_uses_the_utc_day_boundary;
+          test_case "creation refuses a blank title" `Quick
+            test_upsert_refuses_a_blank_title_at_creation;
           test_case "a refused update keeps the stored due date" `Quick
             test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused;
           test_case "an update returns the row as it was" `Quick

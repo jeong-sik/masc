@@ -300,79 +300,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function taskDetails(value: unknown, detailKey: 'error' | 'holder'): Array<{ id: string; detail: string }> | null {
-  if (!Array.isArray(value)) return null
-  const result: Array<{ id: string; detail: string }> = []
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.task_id !== 'string' || typeof item[detailKey] !== 'string') return null
-    result.push({ id: item.task_id, detail: item[detailKey] as string })
-  }
-  return result
-}
-
-type DropTaskObservation = Array<Pick<GoalTreeTask, 'id' | 'status'>> | null
-
-function dropReceiptContext(goalId: string, observedTasks: DropTaskObservation, note: string | undefined): string {
-  const tasks = observedTasks === null ? '시도 전 Dashboard tree의 Task 관측을 구별할 수 없습니다.'
-    : observedTasks.length === 0 ? '시도 전 Dashboard tree에 표시된 Task ID가 없습니다.'
-      : `시도 전 Dashboard tree에서 관측한 Task: ${observedTasks.map(task => `${task.id} (${task.status})`).join(', ')}`
+function dropReceiptContext(goalId: string, note: string | undefined): string {
   const reason = note === undefined ? '이 시도의 사유를 확인할 수 없습니다.' : `이 시도에서 입력한 사유(앞뒤 공백 제거): ${note}`
-  return `Goal ${goalId}의 과거 Drop 시도 기록입니다. 같은 ID의 현재 Goal과 동일한 인스턴스인지는 확인되지 않았습니다.\n${reason}\n${tasks} 이 관측은 누락될 수 있으며 서버의 취소 대상이나 Task의 현재 상태를 증명하지 않습니다.`
+  return `Goal ${goalId}의 과거 Drop 시도 기록입니다. 같은 ID의 현재 Goal과 동일한 인스턴스인지는 확인되지 않았습니다.\n${reason}`
 }
 
-// A successful Goal transition and its separately attempted Task effects are
-// different outcomes. A repeated Drop does not retry the original Task work.
 function dropResponseMatchesGoal(response: Record<string, unknown>): boolean {
   return response.phase === 'dropped' && isRecord(response.goal)
     && response.goal.id === response.goal_id && response.goal.phase === 'dropped'
 }
 
-function goalDropReceipt(response: Record<string, unknown>, observedTasks: DropTaskObservation,
-  note: string | undefined): { state: 'warning'; message: string; uncertain: true } {
-  const lines: string[] = [dropReceiptContext(String(response.goal_id), observedTasks, note)]
+function goalDropReceipt(response: Record<string, unknown>, note: string | undefined):
+  { state: 'warning'; message: string; uncertain: true } {
+  const lines: string[] = [dropReceiptContext(String(response.goal_id), note)]
   const matchesDropped = dropResponseMatchesGoal(response)
   if (!matchesDropped) {
     lines.push('Drop 응답에서 Goal 상태를 확인할 수 없습니다. 현재 Goal을 확인하세요.')
   } else if (response.noop === true) {
     lines.push('서버는 요청 당시 Goal이 이미 Dropped 상태였다고 응답했습니다.')
-    lines.push('tasks' in response ? '입력한 사유가 저장됐는지 이 응답으로 확인할 수 없습니다.'
-      : '입력한 사유는 이 요청으로 저장되지 않았습니다.')
+    lines.push('입력한 사유는 이 요청으로 저장되지 않았습니다.')
   } else if (response.noop === false) {
     lines.push('서버는 요청 당시 Goal Drop이 적용되었다고 응답했습니다.')
-  } else if (response.noop !== false) {
+  } else {
     lines.push('Drop 응답에서 Goal 변경 여부를 확인할 수 없습니다. 현재 Goal을 확인하세요.')
   }
-  if (response.noop === true && !('tasks' in response)) {
-    lines.push('이전 Task 취소 결과는 이 응답에 없습니다.')
-  } else {
-    if (response.noop === true) lines.push('이미 Dropped라는 응답에 Task 결과도 포함되어 있어 일관성을 확인할 수 없습니다.')
-    const tasks = response.tasks
-    if (isRecord(tasks) && typeof tasks.unread === 'string'
-      && !('cancelled' in tasks) && !('cancel_failed' in tasks) && !('held' in tasks)) {
-      lines.push(`서버가 연결된 Task 취소 대상을 읽지 못했다고 보고했습니다: ${tasks.unread}`)
-    } else if (isRecord(tasks) && !('unread' in tasks)) {
-      const cancelled = Array.isArray(tasks.cancelled) && tasks.cancelled.every((id: unknown) => typeof id === 'string')
-        ? tasks.cancelled as string[] : null
-      const failed = taskDetails(tasks.cancel_failed, 'error')
-      const held = taskDetails(tasks.held, 'holder')
-      if (cancelled === null || failed === null || held === null) {
-        lines.push('Task 취소 결과 형식을 확인할 수 없습니다.')
-      } else {
-        lines.push(`서버 보고: 취소 성공 ${cancelled.length}건, 취소 오류 ${failed.length}건, Drop 전 보유 상태 ${held.length}건.`)
-        if (cancelled.length > 0) lines.push(`서버가 취소 성공으로 보고한 Task: ${cancelled.join(', ')} (이미 취소된 Task가 포함될 수 있습니다.)`)
-        if (failed.length > 0) {
-          lines.push(`서버가 취소 오류를 보고한 Task: ${failed.map(item => `${item.id} (${item.detail})`).join(', ')} (취소가 이미 적용되었을 수 있습니다.)`)
-        }
-        if (held.length > 0) {
-          lines.push(`Drop 전에 보유 상태로 관측된 Task: ${held.map(item => `${item.id} (${item.detail})`).join(', ')}`)
-        }
-      }
-    } else {
-      lines.push('Task 취소 결과를 확인할 수 없습니다.')
-    }
-  }
-  lines.push('Task 결과는 서버가 관측한 후보에 한정되며 누락될 수 있습니다. 연결 Task의 현재 상태를 확인하세요.')
-  lines.push('이미 Dropped 상태에서 다시 요청해도 기존 Task 취소는 재시도되지 않습니다.')
   const delivery = response.effect_delivery
   if (isRecord(delivery) && delivery.status === 'deferred') {
     lines.push(`서버의 Goal 기록·알림 일괄 전달에서 지연이 보고되었습니다. 이 Goal의 개별 전달 여부는 확인되지 않았습니다.${typeof delivery.detail === 'string' ? ` ${delivery.detail}` : ''}${delivery.durable_retry === true ? ' 서버는 재시도 대상으로 보관했다고 보고합니다.' : ''}`)
@@ -413,7 +364,7 @@ function goalOperationNoticeMessage(state: GoalOperationNoticeState): string {
   switch (state) {
     case 'transition_pending': return 'Goal 변경 요청을 처리 중입니다. 서버 수신 여부는 아직 확인되지 않았습니다.'
     case 'transition_ack': return '서버가 Goal 변경 요청에 응답했습니다. 요청한 작업 공간의 현재 상태를 확인해 주세요.'
-    case 'transition_drop': return '서버가 Drop 요청에 응답했습니다. Goal과 Task별 결과를 확인해 주세요.'
+    case 'transition_drop': return '서버가 Drop 요청에 응답했습니다. Goal 결과를 확인해 주세요.'
     case 'transition_unknown': return 'Goal 변경 결과를 확인하지 못했습니다. 다시 요청하기 전에 원래 작업 공간을 확인해 주세요.'
     case 'transition_refused': return 'Goal 변경 요청은 적용 전에 거절되었습니다.'
     case 'confirmation_pending': return '최종 확인 요청을 처리 중입니다. 서버 수신 여부는 아직 확인되지 않았습니다.'
@@ -1017,9 +968,6 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
     }
     if (confirmationPending(binding.workspace, node.id) || goalActionReceipts.value[ownerKey]?.state === 'pending'
       || otherGoalActionPending(goalActionReceipts.peek(), ownerKey, owner)) return
-    const snapshotNodes = action === 'drop' ? flattenGoalTree(binding.snapshot.tree).filter(item => item.id === node.id) : []
-    const dropTasks: DropTaskObservation = snapshotNodes.length === 1
-      ? snapshotNodes[0]!.tasks.map(task => ({ id: task.id, status: task.status })) : null
     const actorId = currentDashboardActor()
     const actionSelectionRevision = selectedGoalRevision.peek()
     let recoveryObservation: { request: number; observation: number; workspace: ArtifactWorkspace } | null = null
@@ -1099,7 +1047,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
         const reconciled = parsed.reconciled === true
         const message = reconciled ? 'Existing verification reconciled'
           : retry ? 'Verification retry requested' : `${GOAL_TRANSITION_LABELS[action]} applied`
-        const outcome = action === 'drop' ? goalDropReceipt(parsed, dropTasks, note) : { state: 'success' as const, message }
+        const outcome = action === 'drop' ? goalDropReceipt(parsed, note) : { state: 'success' as const, message }
         if (goalActionReceipts.value[ownerKey]?.ticket !== ticket) return
         setGoalActionReceipt(ownerKey, { owner, ticket, action, ...outcome, ...(completionBinding ? { binding: completionBinding } : {}) })
         notice(action === 'drop' ? 'transition_drop' : 'transition_ack')
@@ -1121,9 +1069,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           ? `요청 결과를 확인하지 못했습니다. 다시 시도하기 전에 원래 Goal 상태를 확인하세요. ${rawDetail}`
           : disposition === 'known_tool_response'
             ? `${rawDetail} 일부 변경이 적용되었을 수 있습니다. 다시 시도하기 전에 Goal 상태를 확인하세요.` : rawDetail
-        const dropEffectDetail = disposition !== 'known_pre_effect'
-          ? ' 연결 Task의 현재 상태도 확인하세요. 이미 Dropped 상태에서 다시 요청해도 기존 Task 취소는 재시도되지 않습니다.' : ''
-        const detail = action === 'drop' ? `${dropReceiptContext(node.id, dropTasks, note)}\n${requestDetail}${dropEffectDetail}` : requestDetail
+        const detail = action === 'drop' ? `${dropReceiptContext(node.id, note)}\n${requestDetail}` : requestDetail
         if (goalActionReceipts.value[ownerKey]?.ticket !== ticket) return
         setGoalActionReceipt(ownerKey, { owner, ticket, action, state: 'error', message: detail,
           uncertain: disposition !== 'known_pre_effect', ...(completionBinding ? { binding: completionBinding } : {}) })
@@ -1163,7 +1109,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
       ${binding === null ? html`<p role="status" class="mb-3 text-xs text-text-muted">현재 workspace에서 Goal을 다시 확인한 뒤 변경할 수 있습니다.</p>` : null}
       ${otherPending && !previousPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 같은 Goal 요청이 끝나기를 기다리는 중입니다.</p>` : null}
       ${confirmationInFlight ? html`<p role="status" class="mb-3 text-xs text-text-muted">이 목표의 최종 확인이 끝나기를 기다리는 중입니다.</p>` : null}
-      ${otherUncertain && !otherPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 Goal 요청이나 연결 Task 결과에 확인이 필요한 항목이 있습니다. 현재 상태를 확인해 주세요.</p>` : null}
+      ${otherUncertain && !otherPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 Goal 요청에 확인이 필요한 항목이 있습니다. 현재 상태를 확인해 주세요.</p>` : null}
       ${node.resume_phase ? html`<p class="mb-3 text-xs text-text-muted" data-goal-resume-phase>재개 시 ${goalPhaseLabel(node.resume_phase)} · 연결된 Task는 별도로 진행됩니다.</p>` : null}
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -1210,7 +1156,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           }}
         >
           <label class="flex flex-col gap-1 text-xs text-text-muted">
-            <span>Drop 사유 · 일부 연결 Task가 취소될 수 있습니다. 연결 Task의 현재 상태를 별도로 확인하세요. 같은 ID의 현재 Goal이 초안 작성 당시와 동일한 인스턴스인지는 확인되지 않았습니다.</span>
+            <span>Drop 사유 · 같은 ID의 현재 Goal이 초안 작성 당시와 동일한 인스턴스인지는 확인되지 않았습니다.</span>
             <textarea
               rows=${2}
               class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2 text-text-strong"

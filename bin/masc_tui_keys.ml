@@ -835,7 +835,7 @@ let for_surface = function
       ; b Act "a" "confirm proof" ~detail:Detail_only
           ~help:"in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation"
       ; b Act "x" "drop" ~detail:Detail_only
-          ~help:"in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop"
+          ~help:"in Goal detail, enter a reason and press Enter"
       ; b Act "o" "reopen" ~detail:Detail_only
           ~help:"in Goal detail, press twice to request reopening"
       ; b Act goal_candle_refresh_key "Candle"

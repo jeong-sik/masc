@@ -1076,7 +1076,7 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
        | None -> []
        | Some reason ->
            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-             (Printf.sprintf "DROP REASON: %s_ -- Enter requests drop; linked Tasks may be cancelled"
+             (Printf.sprintf "DROP REASON: %s_ -- Enter requests drop"
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 

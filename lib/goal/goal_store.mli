@@ -402,11 +402,8 @@ val upsert_goal_with_events :
       pending events.
     - Creation input check: a new row needs a
       non-blank [title] on every create path, including an explicit unknown
-      [id], and a [due_date]
-      already past is refused — a goal born overdue is unreachable by
-      construction. The date is a UTC calendar day and falls due at 23:59:59
-      UTC, independent of the operator's time zone. Updates may be overdue:
-      an existing goal's due date passing is ordinary life.
+      [id]. The due date is a UTC calendar day and falls due at 23:59:59
+      UTC, independent of the operator's time zone.
 
     [Require_absent] refuses an existing raw ID or its trimmed alias under the
     Goal write lock. It never updates an existing Goal. *)

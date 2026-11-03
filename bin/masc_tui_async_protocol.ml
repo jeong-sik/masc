@@ -400,11 +400,11 @@ type async_msg =
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
       (** Optional work/agent observation. Required metadata has its own typed reply. *)
-  | Lanes_loaded of
-      unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
-        * Masc.Tui_decode.keeper_secret_projection list,
-        string )
-      result
+  | Keeper_composite_loaded of
+      unit ref * string
+      * ( Masc.Tui_decode.keeper_lane * Masc.Tui_decode.keeper_secret_projection option,
+          string )
+        result
   | Lane_inventory_loaded of
       int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
@@ -969,7 +969,7 @@ let rec workspace_message_is_read = function
   | Local_workspace_read _
   | Local_keepers_read _
   | Live_context_loaded _
-  | Lanes_loaded _
+  | Keeper_composite_loaded _
   | Lane_inventory_loaded _
   | Clients_loaded _
   | Lane_runs_loaded _
@@ -1180,7 +1180,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded _
   | Keeper_preparation_loaded _ | Keeper_child_content_loaded _ | Context_inspector_loaded _
   | Context_inspector_part_loaded _ | Keeper_chat_older_loaded _ | Live_context_loaded _
-  | Local_keepers_read _ | Local_workspace_read _ | Lanes_loaded _ | Lane_inventory_loaded _
+  | Local_keepers_read _ | Local_workspace_read _ | Keeper_composite_loaded _ | Lane_inventory_loaded _
   | Clients_loaded _ | Lane_runs_loaded _ | Lane_run_detail_loaded _
   | Measurement_artifact_loaded _ | Verification_loaded _ | Harness_loaded _
   | Fusion_runs_loaded _ | Fusion_detail_loaded _ | Fusion_historical_detail_loaded _
@@ -1326,7 +1326,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
     | Context_inspector_part_loaded (_, _)
     | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _)
-    | Lanes_loaded (_, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
+    | Keeper_composite_loaded (_, _, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
     | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
     | Measurement_artifact_loaded (_, _, _) | Verification_loaded _
     | Harness_loaded _ | Fusion_runs_loaded (_, _)
@@ -1464,7 +1464,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)
   | Context_inspector_loaded (_, _, _)
   | Context_inspector_part_loaded (_, _) | Keeper_chat_older_loaded (_, _, _, _)
-  | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Lanes_loaded (_, _)
+  | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_composite_loaded (_, _, _)
   | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
   | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
   | Measurement_artifact_loaded (_, _, _) | Verification_loaded _

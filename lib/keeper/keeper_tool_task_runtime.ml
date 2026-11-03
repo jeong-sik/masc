@@ -718,10 +718,8 @@ let handle_keeper_task_tool_with_outcome
                   ~title
                   ~priority
                   ~description
-                    (* Attribute keeper-created tasks so the self-author filter
-                       (below, and in claimable counting) can recognize them.
-                       Without this the row has [created_by = None] and a keeper
-                       is offered its own routing/report tasks back as work. *)
+                    (* The author is a fact on the Task row; the cancellation
+                       notice to the creating Keeper reads it. *)
                   ~created_by:meta.name
               with
               | Ok created ->

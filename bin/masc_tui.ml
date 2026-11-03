@@ -15197,6 +15197,17 @@ let starting_rows_due roster =
       | Some _ | None -> None)
     rows
 
+(* No cadence reads the roster again, so a failed whole read is owed: it
+   reads again after a wait that grows with each failure in a row, whatever
+   started it (RFC-0481 §3.3). *)
+let owe_failed_whole_roster_read state =
+  let read = Masc_tui_roster_owed.Read_roster in
+  state.keeper_roster_owed <-
+    Masc_tui_roster_owed.failed ~retry_s:stream_reconnect_s
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()) read
+      (Masc_tui_roster_owed.started read
+         (Masc_tui_roster_owed.roster_changed state.keeper_roster_owed))
+
 let apply_keeper_roster_load state result =
   (match result with
   | Ok (roster, candle) ->
@@ -15229,6 +15240,7 @@ let apply_keeper_roster_load state result =
          wrong one. *)
       state.keeper_roster <- Keeper_control.unobserved_roster;
       state.keeper_roster_owed <- Masc_tui_roster_owed.schedule_rows [] state.keeper_roster_owed;
+      owe_failed_whole_roster_read state;
       withdraw_keeper_items state;
       state.item_account_error <- Some "Keeper roster authority is unavailable";
       state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
@@ -15489,7 +15501,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
                Option.iter (fun identity -> publish identity observation) expected_workspace) on_roster;
              observation)) roster_request)
 
-let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_query
+let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_query
     ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
   let publish_bound ~dataset load =
@@ -15554,7 +15566,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   in
   let read_keeper_surfaces () =
     load_http_keeper_surfaces ~on_progress:None ~on_asks:None ~on_roster:None
-      ~ask_request ~roster_request ~server_identity ~host ~port ~needs
+      ~ask_request ~roster_request:None ~server_identity ~host ~port ~needs
   in
   let read_runtime_quota () =
     when_needed ~source:Surface_read_order.Runtime_quota
@@ -15728,7 +15740,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                   ~ask_request ~roster_request ~server_identity:http_server_identity
                   ~host ~port ~needs:{ needs with needs_asks = true })
              (fun () ->
-                load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request:None ~roster_request:None ~refresh_ticket
+                load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
                   ~board_query ~system_log_level ~provider_history_days
@@ -17986,13 +17998,6 @@ let owe_keeper_roster_change state = function
         Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed
   | Masc_tui_observer.Every_row_changed -> owe_whole_keeper_roster_read state
 
-(* A refresh that starts while the roster's owed read runs shares that read
-   instead of throwing its answer away. Any other read in flight is replaced
-   as before. *)
-let keeper_roster_read_intent state =
-  if Masc_tui_roster_owed.reading state.keeper_roster_owed then Snapshot_read.Poll
-  else Snapshot_read.Refresh
-
 let fail_keeper_roster_read state read =
   state.keeper_roster_owed <-
     Masc_tui_roster_owed.failed ~retry_s:stream_reconnect_s
@@ -18145,17 +18150,17 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          replace every dataset currently drawn rather than omit that read.
          The cadence leaves the Board out: it re-reads on
          [notifications/board] ([launch_owed_board_list]), and a scoped
-         Board read in flight keeps its datasets. *)
+         Board read in flight keeps its datasets. It leaves the Keeper
+         roster out too: the roster reads the rows the server names and the
+         whole roster when every row changed ([launch_owed_keeper_roster],
+         RFC-0481 §3.3). *)
       let current = current_surface_needs state in
       match intent with
       | Revalidate -> current
-      | Cadence -> { current with needs_board = false }
+      | Cadence -> { current with needs_board = false; needs_keeper_roster = false }
     in
     let roster_request = if needs.needs_keeper_roster
-      then Masc_tui_types.begin_keeper_roster_read state
-          ~intent:(match intent with
-            | Revalidate -> Snapshot_read.Refresh
-            | Cadence -> keeper_roster_read_intent state)
+      then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
       else None in
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
@@ -18714,6 +18719,12 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
 let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
+  (* Entering a surface that draws the roster owes it a whole read rather
+     than reading it in this bundle. A newer full bundle drops a navigation
+     bundle's answers, and with no cadence roster read nothing else would
+     free the roster's read slot. *)
+  if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
+  let needs = { needs with needs_keeper_roster = false } in
   let authority = state.workspace_authority in
   if Masc_tui_types.surface_needs_any needs then begin
     let collection_inflight = !full_refresh_inflight
@@ -18736,9 +18747,6 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
       else dispatch_approvals_listing state
     in
     let ask_request = if needs.needs_asks then Masc_tui_types.begin_asks_read state else None in
-    let roster_request = if needs.needs_keeper_roster
-      then Masc_tui_types.begin_keeper_roster_read ~intent:(keeper_roster_read_intent state) state
-      else None in
     (* Chat history has its own generation-guarded loader rather than a field
        in the HTTP surface record. It still follows the same delta: entering
        chat asks once; moving among Keeper modes that share the roster does
@@ -18774,7 +18782,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
           enqueue_async mailbox (Http_dataset_loaded
             {ed_ticket=refresh_ticket;ed_authority=authority;ed_request=surface_request;
              ed_identity;ed_dataset}) in
-        let readings = load_http_scoped_surface_reads ~on_progress:None ~on_dataset:(Some on_dataset) ~surface_request ~ask_request ~roster_request ~refresh_ticket
+        let readings = load_http_scoped_surface_reads ~on_progress:None ~on_dataset:(Some on_dataset) ~surface_request ~ask_request ~refresh_ticket
               ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_query
               ~provider_history_days
@@ -21933,7 +21941,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let previous_items = visible_item_revision state in
         apply_keeper_roster_load state result;
         match result with
-        | Error _ -> fail_keeper_roster_read state Masc_tui_roster_owed.Read_roster
+        | Error _ -> ()
         | Ok _ ->
             state.keeper_roster_owed <-
               Masc_tui_roster_owed.succeeded Masc_tui_roster_owed.Read_roster

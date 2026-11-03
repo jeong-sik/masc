@@ -65,11 +65,11 @@ Current `[keeper]` fields:
 
 Any other TOML key fails closed as `unknown keeper TOML keys`.
 
-`microvm_backend` and `microvm_delivery` are checked against the
-`sandbox_profile` written in the same file, not one inherited from the
-workspace. A file that sets either also sets `sandbox_profile = "microvm"`,
-and `microvm_delivery = "agent_socket"` also needs
-`microvm_backend = "apple_container"` in that file.
+`microvm_backend` and `microvm_delivery` are valid only with
+`sandbox_profile = "microvm"`. `microvm_delivery = "agent_socket"` also needs
+`microvm_backend = "apple_container"` written in the file: a Keeper that
+leaves the backend to the host default writes that line too, because the
+default is resolved after this file is read.
 
 `mention_targets` are exact direct-address tokens. `board_interests` are
 semantic topics for targetless Board discovery; `[]` (and omission for a new

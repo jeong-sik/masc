@@ -312,24 +312,24 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | Some Micro_vm, (None | Some (Nerdctl_kata | Microsandbox)), Some Agent_socket ->
         Error
           "microvm_delivery_requires_apple_container: keeper.microvm_delivery \
-           = \"agent_socket\" needs microvm_backend = \"apple_container\" in \
-           the same keeper file, the runtime that publishes the agent's socket \
-           to the host; write it there, or remove microvm_delivery"
+           = \"agent_socket\" needs microvm_backend = \"apple_container\" \
+           written in this file, the runtime that publishes the agent's socket \
+           to the host. A keeper that leaves the backend to the host default \
+           writes the line too; otherwise remove microvm_delivery"
     | ( (None | Some (Docker | Remote_ssh))
       , (None | Some (Apple_container | Nerdctl_kata | Microsandbox))
       , Some (Exec_per_request | Agent_socket) ) ->
         Error
           "microvm_delivery_requires_microvm: keeper.microvm_delivery is only \
-           valid with sandbox_profile = \"microvm\" written in the same \
-           keeper file, not inherited from the workspace; write it there, or \
+           valid with sandbox_profile = \"microvm\"; set that profile, or \
            remove microvm_delivery"
   in
   (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
      before the judge is asked. The spelling is checked whether or not a
      profile is declared; the profile pairing
      ({!Keeper_types_profile_sandbox.observation_run_rejection}) only when
-     one is, since an absent profile is resolved later from the workspace
-     default and this loader cannot see it. *)
+     one is: a file without a profile is refused when its keeper boots
+     (sandbox_profile is required). *)
   let* observation_run =
     closed "observation_run" observation_run_of_string ~invalid:(fun raw ->
       Printf.sprintf

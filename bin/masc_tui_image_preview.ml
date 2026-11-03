@@ -72,9 +72,6 @@ let in_message_previews ~text ~attachments =
   List.map (fun path -> Named_path path) (Masc_tui_image_ref.paths text)
   @ diagrams @ attachments
 
-let in_message ~text ~attachments =
-  in_message_previews ~text ~attachments |> newest
-
 let newest_first ~conversation ~staged ~order =
   let conversation = List.filter is_image conversation in
   let staged = List.map (fun attachment -> Staged attachment) staged in

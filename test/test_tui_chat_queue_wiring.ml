@@ -2790,7 +2790,9 @@ let test_journal_replacement_retains_history_media () =
       let source = match Tui_types.journal_source_of_history history with
         | Some source -> source | None -> fail "fixture must select its actual operation/autonomous journal" in
       let request_id=Log.source_key source in
-      let image=Media.newest_image history.media |> Option.get in
+      let image=match Masc_tui_image_preview.newest (Media.images history.media) with
+        | Masc_tui_image_preview.No_image -> fail "fixture must carry an image"
+        | image -> image in
       let row = { (chat_entry ~request_id ~role:(if autonomous then Tui_types.Message_autonomous else Message_keeper)
           ~text:(Media.append_text ~text:history.text history.media) ~at:2. ()) with
         me_identity=Tui_types.Persisted_row (Option.get history.structural_id);
@@ -3797,7 +3799,7 @@ let test_fold_measurement_retains_raw_source_height () =
      cmi_observed_at=None; cmi_entry_index=0} in
   let parsed = ref [] in
   let text = initial.body ^ " delta" in
-  ignore (Cache.measure_growing Render.For_testing.thinking_height_cache
+  ignore (Cache.measure_growing_details Render.For_testing.thinking_height_cache
     ~theme_revision:Render.For_testing.chat_markdown_theme_revision
     ~palette_generation:context.palette_generation ~width ~identity ~text
     ~renderer:(fun ~width text ->

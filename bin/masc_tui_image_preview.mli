@@ -41,16 +41,14 @@ val mermaid_source : string -> output_source
 (** The bare source for callers that build an image request source directly.
     The type stays private; match on it, do not rebuild it. *)
 
-val in_message : text:string -> attachments:preview list -> preview
-(** The last image attachment, otherwise the last closed Mermaid fence, then
-    the last path in the original text.
-    Attachment display labels must never be included in [text]. *)
-
 val in_message_previews : text:string -> attachments:preview list -> preview list
 (** All named images, closed Mermaid fences and supplied image attachments,
-    oldest first within each group. The last item preserves {!in_message}'s
-    precedence. A Mermaid source also present as a supplied structured output
-    appears only once, with that output's caption. Does not read or decode bytes. *)
+    oldest first within each group and the groups in that order, so {!newest}
+    picks the last image attachment, otherwise the last closed Mermaid fence,
+    then the last path in the text. A Mermaid source also present as a supplied
+    structured output appears only once, with that output's caption. Does not
+    read or decode bytes. Attachment display labels must never be included in
+    [text]. *)
 
 val newest : preview list -> preview
 (** Last non-[No_image] item, or [No_image]. *)

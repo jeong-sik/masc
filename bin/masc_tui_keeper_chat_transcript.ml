@@ -750,16 +750,6 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
 let tool_calls t =
   List.rev t.reversed_tool_calls |> List.map (activity_of_live_call t)
 
-(* Which reasoning lines the pane shows, kept here rather than in the drawing
-   because it is a question about the content. The whole trail, minus the runs
-   of blank lines models emit: reasoning is the only part of a live turn the
-   durable transcript does not keep, so one line out of it would say what the
-   keeper concluded without saying how it got there. *)
-let thinking_lines t =
-  Buffer.contents t.thinking_buffer
-  |> String.split_on_char '\n'
-  |> List.filter (fun line -> String.trim line <> "")
-
 (* A stretch of reasoning as the lines the pane draws. Models separate
    paragraphs with blank lines, often several; one empty line keeps the break
    and the rest is padding. No line opens or closes the stretch blank: the

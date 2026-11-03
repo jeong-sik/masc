@@ -7953,7 +7953,13 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Schedules -> launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
-  | Verification | Planning -> launch_verification_load state ~mailbox
+  (* Arriving owes the queue a read as well as starting one: a read already
+     in flight may have begun before a change that came while the queue was
+     off screen, and the owed read follows it. *)
+  | Verification ->
+      owe_verification_read state;
+      launch_verification_load state ~mailbox
+  | Planning -> launch_verification_load state ~mailbox
   | Harness -> launch_harness_load state ~mailbox
   | Fusion ->
       let demand = Masc_tui_fusion_updates.After_change in
@@ -22406,7 +22412,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
-               | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
+               | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ ->
                    ());
               (match event with
                | Masc_tui_observer.Fusion_run_status { keeper; run_id; _ } ->
@@ -22424,9 +22430,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    waiting_sources_invalidated := true
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change
-               | Masc_tui_observer.Snapshot name
-                 when String.equal name Masc.Dashboard_event_slices.execution_snapshot_type ->
-                   execution_snapshot_seen := true
+               | Masc_tui_observer.Execution_snapshot -> execution_snapshot_seen := true
                | Masc_tui_observer.Agent_core
                    { kind = Masc_tui_observer.Relay_subscription_loss
                        { source_id; sequence; _ }; _ } ->

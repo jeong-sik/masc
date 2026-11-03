@@ -656,7 +656,7 @@ let render_acting_evidence (state : state) entry =
     | Masc_tui_observer.Keeper_chat_stream_frame _
     | Masc_tui_observer.Keeper_turn_stream_frame _
     | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Fusion_run_status _
-    | Masc_tui_observer.Lane_resource _ | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ -> []
+    | Masc_tui_observer.Lane_resource _ | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ -> []
   in
   let lines = lines @ io_lines in
   let content_height = max 1 (rows - count_frame_lines buf - listing_rows_below_the_body) in
@@ -750,7 +750,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Fusion_run_status _
       | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
       | Masc_tui_observer.Lane_resource _
-      | Masc_tui_observer.Snapshot _
+      | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot
       | Masc_tui_observer.Other _ ->
           None
     in

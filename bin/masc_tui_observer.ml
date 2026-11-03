@@ -131,6 +131,10 @@ type approval_change =
   | Installation_asks_changed of { declaration_id : string }
   | Pending_confirms_changed
 
+type roster_change =
+  | Keeper_row_changed of { keeper : string }
+  | Every_row_changed
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -155,6 +159,8 @@ type event =
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
   | Keeper_async_requests_changed of { keeper : string }
+  (* Server push: a Keeper's roster row, or every row, may have changed. *)
+  | Keeper_roster_change of roster_change
   (* Server push, not a keeper act: a fusion deliberation changed stage or
      settled. The Fusion surface treats it as a reload trigger the way the
      dashboard does (sse-store: event = trigger, HTTP = SSOT); the payload
@@ -205,7 +211,7 @@ let chat_appended_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
@@ -216,7 +222,7 @@ let composite_changed_keeper = function
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
@@ -227,7 +233,7 @@ let tool_call_keeper = function
   | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
@@ -240,7 +246,7 @@ let memory_journal_appended_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
@@ -256,7 +262,7 @@ let held_calls_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
@@ -272,7 +278,7 @@ let tool_modes_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
@@ -284,10 +290,22 @@ let async_requests_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
       false
+
+let roster_change = function
+  | Keeper_roster_change change -> Some change
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _
+  | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
+      None
 
 let runtime_journal_appended = function
   | Keeper_runtime_journal_appended { keeper; journal; _ } -> Some (keeper, journal)
@@ -295,7 +313,7 @@ let runtime_journal_appended = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
@@ -307,7 +325,7 @@ let schedules_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Other _ ->
@@ -323,7 +341,7 @@ let pending_confirms_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
@@ -339,7 +357,7 @@ let asks_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
@@ -351,7 +369,7 @@ let board_changed_post = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Approval_change _ | Lane_resource _
   | Snapshot _ | Other _ ->
@@ -369,7 +387,7 @@ let gate_snapshot_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Lane_resource _
   | Snapshot _ | Other _ ->
@@ -823,6 +841,14 @@ let reading_of_type type_name =
         (fun fields ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_memory_journal_appended { keeper; at }))
+  | event when String.equal event Masc.Keeper_row_broadcast.row_changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Keeper_roster_change (Keeper_row_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | event when String.equal event Masc.Keeper_row_broadcast.roster_changed_event ->
+      Named (Keeper_roster_change Every_row_changed)
   | other -> (
       (* Which event types are whole-projection pushes is the wire's
          business, not this decoder's. Three were named here and the

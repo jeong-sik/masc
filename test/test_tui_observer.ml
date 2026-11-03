@@ -152,6 +152,9 @@ let summary = function
          | Observer.Pending_confirms_changed -> "pending_confirms")
   | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
       "async_requests:" ^ keeper
+  | Observer.Event (Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })) ->
+      "roster_row:" ^ keeper
+  | Observer.Event (Observer.Keeper_roster_change Observer.Every_row_changed) -> "roster_all"
   | Observer.Event (Observer.Board_changed { post_id }) ->
       Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
@@ -714,6 +717,37 @@ let test_only_an_async_request_change_reads_the_async_requests () =
          String.starts_with ~prefix:"keeper_async_requests_changed" reason
      | _ -> false)
 
+let roster_frames =
+  [ {|data: {"type":"keeper_row_changed","name":"lane-smith","ts_unix":100.0}
+
+|}
+  ; {|data: {"type":"keeper_roster_changed","ts_unix":100.0}
+
+|}
+  ]
+
+let test_a_roster_push_names_the_row_or_every_row () =
+  check (list string) "a row push names its Keeper; a roster push names every row"
+    [ "roster_row:lane-smith"; "roster_all" ]
+    (List.map summary (decode_all roster_frames));
+  let changes frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.roster_change event
+         | Observer.Undecodable _ -> None)
+    |> List.length
+  in
+  check int "both owe the roster a read" 2 (changes roster_frames);
+  check int "no question, Gate or held call change does" 0
+    (changes (asks_frames @ gate_frames @ tool_approval_frames));
+  check bool "a row push without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_row_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_row_changed" reason
+     | _ -> false)
+
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"
     [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
@@ -1151,6 +1185,8 @@ let () =
             test_only_a_question_change_reads_the_questions
         ; test_case "only an async request change reads the async requests" `Quick
             test_only_an_async_request_change_reads_the_async_requests
+        ; test_case "a roster push names the row or every row" `Quick
+            test_a_roster_push_names_the_row_or_every_row
         ; test_case "only a confirmation change reads the confirmations" `Quick
             test_only_a_confirmation_change_reads_the_confirmations
         ; test_case "only a schedule change reads the schedules" `Quick

@@ -4839,6 +4839,15 @@ type keeper_roster_observation = {
      Masc_tui_keeper_control.roster_failure) result;
 }
 
+(* One Keeper's roster row, read after the server named it (RFC-0481 §3.3). *)
+type keeper_row_observation = {
+  row_request: Snapshot_read.request;
+  row_keeper: string;
+  row_result:
+    (Masc_tui_keeper_control.row_reading * (Candle_observation.t, string) result,
+     Masc_tui_keeper_control.roster_failure) result;
+}
+
 module Local_read_observation = Masc_tui_local_read_observation
 
 type local_read_source = Local_read_observation.source = Local_keepers | Local_work
@@ -9946,6 +9955,10 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable keeper_roster_read: Snapshot_read.t;
+  mutable keeper_row_read: Snapshot_read.t;
+  (* The rows, or the whole roster, the server said changed and the TUI has
+     not read since (RFC-0481 §3.3). *)
+  mutable keeper_roster_owed: Masc_tui_roster_owed.t;
   mutable local_workspace_read_order: Local_read_order.t;
   mutable local_work_observation: Local_read_observation.t option;
   mutable local_keeper_observation: Local_read_observation.t option;
@@ -12003,6 +12016,18 @@ let take_keeper_roster_observation (state : state) observation =
   | Some reading ->
       state.keeper_roster_read <- reading;
       Some observation.roster_result
+
+let begin_keeper_row_read (state : state) =
+  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_row_read in
+  state.keeper_row_read <- reading;
+  request
+
+let take_keeper_row_observation (state : state) observation =
+  match Snapshot_read.settle state.keeper_row_read observation.row_request with
+  | None -> None
+  | Some reading ->
+      state.keeper_row_read <- reading;
+      Some observation.row_result
 
 let take_early_keeper_roster_observation (state : state) early =
   if can_admit_early_http_read state ~ticket:early.er_ticket
@@ -14424,6 +14449,9 @@ let suspend_workspace_readings state =
   retire_asks_read state;
   retire_ask_followup_read state;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
+  state.keeper_row_read <- Snapshot_read.invalidate state.keeper_row_read;
+  (* A resumed authority reads the whole roster again. *)
+  state.keeper_roster_owed <- Masc_tui_roster_owed.settled;
   invalidate_local_source_read state Local_work;
   invalidate_local_source_read state Local_keepers;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
@@ -19304,6 +19332,8 @@ let create_state
   keeper_roster = Masc_tui_keeper_control.unobserved_roster;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
+  keeper_row_read = Snapshot_read.idle;
+  keeper_roster_owed = Masc_tui_roster_owed.settled;
   local_workspace_read_order = Local_read_order.idle;
   local_work_observation = None;
   local_keeper_observation = None;

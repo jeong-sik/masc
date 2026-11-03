@@ -1902,11 +1902,12 @@ let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, str
 (** Load the live keeper roster. Truncation is carried into the typed roster
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
-    that answer. *)
-let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
+    that answer. [fresh] reads past the server's list cache (RFC-0481
+    §3.3). *)
+let load_keeper_roster ~(host : string) ~(port : int) ~(fresh : bool) ~expected_workspace :
     (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
-  match fetch_keeper_runtimes ~host ~port ~expected_workspace with
+  match fetch_keeper_runtimes ~host ~port ~fresh ~expected_workspace with
   | Error transport ->
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->

@@ -2531,10 +2531,12 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int)
+let fetch_keeper_runtimes ~(host : string) ~(port : int) ~(fresh : bool)
     ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (int * string, string) result =
-  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true"
+    ^ (if fresh then "&fresh=true" else "")
+    ^ "&expected_workspace="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
     ^ "&expected_masc_root="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))

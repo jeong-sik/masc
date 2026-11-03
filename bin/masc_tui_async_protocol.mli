@@ -511,6 +511,10 @@ type async_msg =
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Asks_reloaded of asks_observation
       (** The questions read again on their own, after a change or a failure. *)
+  | Keeper_roster_reloaded of keeper_roster_observation
+      (** The whole roster read on its own, after a change or a failure. *)
+  | Keeper_row_reloaded of keeper_row_observation
+      (** One Keeper's row read on its own, after the server named it. *)
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
   | Sent_image_ready of {

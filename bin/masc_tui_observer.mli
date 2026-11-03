@@ -186,6 +186,14 @@ type approval_change =
       (** [lane_addon_asks_changed] *)
   | Pending_confirms_changed  (** [pending_confirms_changed] *)
 
+(** What a Keeper roster push says changed (RFC-0481 §3.2). *)
+type roster_change =
+  | Keeper_row_changed of { keeper : string }
+      (** [keeper_row_changed]: that Keeper's row may have changed,
+          appeared or gone. *)
+  | Every_row_changed
+      (** [keeper_roster_changed]: a value every row reads changed. *)
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -238,6 +246,9 @@ type event =
       (** [keeper_async_requests_changed]: the Keeper's durable async message
           requests changed. A server push: the reader re-fetches
           [/api/v1/async-requests]. *)
+  | Keeper_roster_change of roster_change
+      (** Named by {!Masc.Keeper_row_broadcast}. A server push: the roster
+          reads the named row, or the whole roster, again. *)
   | Fusion_run_status of { keeper : string; run_id : string; status : string }
       (** A fusion deliberation changed stage or settled. A server push, not
           a keeper act: the Fusion surface re-fetches the run on it instead of
@@ -316,6 +327,9 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val roster_change : event -> roster_change option
+(** What a Keeper roster push owes the roster. *)
 
 val runtime_journal_appended : event -> (string * runtime_journal) option
 (** The Keeper and journal a runtime journal push names. *)

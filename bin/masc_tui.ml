@@ -11209,7 +11209,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           | None -> Error "Workspace identity is unavailable; input remains retained" in
         let* owner_paused =
           if not local_resume then Ok true else
-            (match Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace with
+            (match Masc_tui_loader.load_keeper_roster ~host ~port ~fresh:false ~expected_workspace with
              | Error failure -> Error (Keeper_control.roster_failure_message
                  ~credential_sent:(Masc_tui_http.operator_token_present ()) failure)
              | Ok (roster, _) ->
@@ -15456,7 +15456,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
            (fun () ->
              let roster_result = match expected_workspace with
                | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
-               | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace in
+               | Some expected_workspace -> load_keeper_roster ~host ~port ~fresh:false ~expected_workspace in
              let observation = {roster_request;roster_result} in
              (* Success and failure settle the same request. A failed read
                 withdraws stale actions without waiting for sibling readers. *)
@@ -17948,6 +17948,78 @@ let resolve_opening_chat state ~base_path ~mailbox =
           end
   end
 
+(* The Keeper roster reads again when the server says a row or every row
+   changed, on a revalidation or a resumed authority, and after a failed read
+   (RFC-0481 §3.3). A named row is read alone; every row, or two or more rows
+   due at once, is read whole with [fresh=true], so the server's list cache
+   cannot hand back a row older than one already read. *)
+let owe_whole_keeper_roster_read state =
+  state.keeper_roster_owed <- Masc_tui_roster_owed.roster_changed state.keeper_roster_owed
+
+let owe_keeper_roster_change state = function
+  | Masc_tui_observer.Keeper_row_changed { keeper } ->
+      state.keeper_roster_owed <-
+        Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed
+  | Masc_tui_observer.Every_row_changed -> owe_whole_keeper_roster_read state
+
+let fail_keeper_roster_read state read =
+  state.keeper_roster_owed <-
+    Masc_tui_roster_owed.failed ~retry_s:stream_reconnect_s
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      read state.keeper_roster_owed
+
+let launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read =
+  let enqueue_async = workspace_enqueue state in
+  let host = server_peer_host and port = state.port in
+  let launch ~deliver load =
+    state.keeper_roster_owed <- Masc_tui_roster_owed.started read state.keeper_roster_owed;
+    Masc_tui_async_read.launch_with
+      ~boundary_error:(fun cause -> Keeper_control.Roster_unreachable cause)
+      ~deliver load
+  in
+  match read with
+  | Masc_tui_roster_owed.Read_roster ->
+      Option.iter (fun roster_request ->
+        launch
+          ~deliver:(fun roster_result ->
+            enqueue_async mailbox (Keeper_roster_reloaded { roster_request; roster_result }))
+          (fun () ->
+            Masc_tui_loader.load_keeper_roster ~host ~port ~fresh:true ~expected_workspace))
+        (Masc_tui_types.begin_keeper_roster_read state)
+  | Masc_tui_roster_owed.Read_row keeper_name ->
+      Option.iter (fun row_request ->
+        launch
+          ~deliver:(fun row_result ->
+            enqueue_async mailbox
+              (Keeper_row_reloaded { row_request; row_keeper = keeper_name; row_result }))
+          (fun () ->
+            Masc_tui_loader.load_keeper_row ~host ~port ~expected_workspace ~keeper_name))
+        (Masc_tui_types.begin_keeper_row_read state)
+
+(* Runs on every loop iteration. One roster read runs at a time, the
+   refresh's whole read included; a read that will not deliver leaves what it
+   was reading owed again. Off the surfaces that draw the roster nothing is
+   owed: entering one reads the roster whole. *)
+let launch_owed_keeper_roster state ~mailbox =
+  if not (current_surface_needs state).needs_keeper_roster then
+    state.keeper_roster_owed <- Masc_tui_roster_owed.settled
+  else begin
+    let reading =
+      Snapshot_read.in_flight state.keeper_roster_read
+      || Snapshot_read.in_flight state.keeper_row_read
+    in
+    if not reading then
+      state.keeper_roster_owed <- Masc_tui_roster_owed.abandoned state.keeper_roster_owed;
+    match
+      reading,
+      state.server_identity,
+      Masc_tui_roster_owed.next_read ~now:(monotonic_now_s ()) state.keeper_roster_owed
+    with
+    | false, Some expected_workspace, Some read when server_authority_ready state ->
+        launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read
+    | false, Some _, Some _ | true, _, _ | false, None, _ | false, Some _, None -> ()
+  end
+
 let log_http_surface_read_started state ~full_refresh_running context =
   let request=Surface_read_context.current context in
   Log.Transport.info
@@ -17992,6 +18064,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_held_calls_read state;
        owe_tool_modes_read state;
        owe_async_requests_read state;
+       owe_whole_keeper_roster_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state
@@ -18362,6 +18435,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_gate_snapshot_read state;
     owe_asks_read state;
     owe_async_requests_read state;
+    owe_whole_keeper_roster_read state;
     owe_pending_confirms_read state;
     owe_schedules_read state;
     owe_keeper_schedules_read state;
@@ -21186,6 +21260,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
         | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _
+        | Keeper_roster_reloaded _ | Keeper_row_reloaded _
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
         | Keeper_chat_control_received (_, _, _) | Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
@@ -21809,6 +21884,40 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.http_refresh_started_ns)
         (take_approval_observation state early.eap_observation)
   | Asks_reloaded observation -> apply_asks_observation state observation
+  | Keeper_roster_reloaded observation ->
+      Option.iter (fun result ->
+        let previous_items = visible_item_revision state in
+        apply_keeper_roster_load state result;
+        match result with
+        | Error _ -> fail_keeper_roster_read state Masc_tui_roster_owed.Read_roster
+        | Ok _ ->
+            state.keeper_roster_owed <-
+              Masc_tui_roster_owed.succeeded Masc_tui_roster_owed.Read_roster
+                state.keeper_roster_owed;
+            refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
+            resolve_opening_chat state ~base_path ~mailbox)
+        (Masc_tui_types.take_keeper_roster_observation state observation)
+  | Keeper_row_reloaded observation ->
+      Option.iter (fun result ->
+        let keeper_name = observation.row_keeper in
+        let read = Masc_tui_roster_owed.Read_row keeper_name in
+        match result with
+        | Error _ ->
+            (* One row that did not answer leaves the other rows standing
+               and reads again after a wait. A whole read decides whether
+               the roster itself is still readable. *)
+            fail_keeper_roster_read state read
+        | Ok (reading, candle) ->
+            state.keeper_roster_owed <- Masc_tui_roster_owed.succeeded read state.keeper_roster_owed;
+            match Keeper_control.replace_row state.keeper_roster ~keeper_name reading with
+            | None -> owe_whole_keeper_roster_read state
+            | Some roster ->
+                (* One row read is not a roster refresh: the open Keeper's
+                   Items read again only when its own row moved. *)
+                let previous_items = visible_item_revision state in
+                apply_keeper_roster_load state (Ok (roster, candle));
+                refresh_changed_keeper_items state ~mailbox ~roster_refreshed:false previous_items)
+        (Masc_tui_types.take_keeper_row_observation state observation)
   | Http_asks_loaded early ->
       Option.iter (fun result ->
         apply_asks_read state result;
@@ -22078,7 +22187,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
-               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
@@ -22091,6 +22200,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                        ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
+               | Masc_tui_observer.Keeper_roster_change change ->
+                   owe_keeper_roster_change state change
                | Masc_tui_observer.Snapshot name
                  when String.equal name Masc.Dashboard_event_slices.execution_snapshot_type ->
                    execution_snapshot_seen := true
@@ -31410,6 +31521,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
       launch_owed_async_requests state ~mailbox:async_messages;
+      launch_owed_keeper_roster state ~mailbox:async_messages;
       launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_keeper_schedules state ~mailbox:async_messages;

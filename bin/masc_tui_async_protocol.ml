@@ -520,6 +520,8 @@ type async_msg =
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Asks_reloaded of asks_observation
+  | Keeper_roster_reloaded of keeper_roster_observation
+  | Keeper_row_reloaded of keeper_row_observation
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
   | Sent_image_ready of {
@@ -1008,7 +1010,7 @@ let rec workspace_message_is_read = function
   | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)
   | Runtime_catalog_loaded _
   | Keeper_tool_approvals_loaded _
-  | Asks_reloaded _
+  | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _
   | Approvals_summary_loaded _
   | Listen_prepared _
   | Sent_image_ready _
@@ -1199,7 +1201,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Task_document_prepared _ | Tools_async_task_body_loaded _
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
-  | Keeper_tool_approvals_loaded _ | Asks_reloaded _ | Listen_prepared _ | Resource_diagram_ready _
+  | Keeper_tool_approvals_loaded _ | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _ | Listen_prepared _ | Resource_diagram_ready _
   | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
@@ -1349,7 +1351,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
     | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
-    | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _ | Listen_prepared _ | Sent_image_ready _
+    | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _ | Listen_prepared _ | Sent_image_ready _
     | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
     | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
@@ -1487,7 +1489,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
   | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)
-  | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _ | Listen_prepared _ | Sent_image_ready _
+  | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _ | Listen_prepared _ | Sent_image_ready _
   | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)

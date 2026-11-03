@@ -4039,6 +4039,11 @@
  (libraries alcotest masc_tui_owed_read))
 
 (test
+ (name test_tui_roster_owed)
+ (modules test_tui_roster_owed)
+ (libraries alcotest masc_tui_roster_owed))
+
+(test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
  (libraries

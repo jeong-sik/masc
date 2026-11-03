@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
 import type { DashboardKeeperWaitingInventory } from './api'
 import { fetchKeeperWaitingInventory } from './api'
-import { dashboardWsReconnectCount } from './dashboard-ws-state'
+import { dashboardWsReady } from './dashboard-ws-state'
 import { registerKeeperWaitingInventoryRefresh } from './sse-store'
 
 export type KeeperWaitingInventoryState = {
@@ -26,8 +26,7 @@ const subscriberCounts = new Map<string, number>()
 const inFlight = new Map<string, Promise<void>>()
 const pendingInvalidations = new Set<string>()
 let stopPushRefresh: (() => void) | null = null
-let stopReconnectRefresh: (() => void) | null = null
-let lastReconnectCount = dashboardWsReconnectCount.value
+let stopReadyRefresh: (() => void) | null = null
 
 function stateFor(keeperName: string): KeeperWaitingInventoryState {
   return keeperWaitingInventoryStates.value[keeperName] ?? EMPTY_STATE
@@ -96,25 +95,31 @@ function invalidateKeeperWaitingInventory(keeperName: string): void {
   void refreshKeeperWaitingInventory(keeperName)
 }
 
-function refreshActiveKeepers(): void {
-  if (document.visibilityState !== 'visible') return
+function invalidateSubscribedKeepers(): void {
   for (const [keeperName, count] of subscriberCounts) {
     if (count > 0) invalidateKeeperWaitingInventory(keeperName)
   }
 }
 
+function refreshActiveKeepers(): void {
+  if (document.visibilityState === 'visible') invalidateSubscribedKeepers()
+}
+
 function startRecoveryListeners(): void {
   if (stopPushRefresh) return
-  stopPushRefresh = registerKeeperWaitingInventoryRefresh(keeperName => {
-    if ((subscriberCounts.get(keeperName) ?? 0) > 0) {
-      invalidateKeeperWaitingInventory(keeperName)
+  stopPushRefresh = registerKeeperWaitingInventoryRefresh(change => {
+    if (change.scope === 'workspace') {
+      invalidateSubscribedKeepers()
+    } else if ((subscriberCounts.get(change.keeperName) ?? 0) > 0) {
+      invalidateKeeperWaitingInventory(change.keeperName)
     }
   })
-  stopReconnectRefresh = dashboardWsReconnectCount.subscribe(count => {
-    if (count !== lastReconnectCount) {
-      lastReconnectCount = count
-      refreshActiveKeepers()
-    }
+  // The first read may precede hello, when the server intentionally drops
+  // pushes. Re-read after every transition to ready, including the first.
+  let wasReady = dashboardWsReady.value
+  stopReadyRefresh = dashboardWsReady.subscribe(ready => {
+    if (ready && !wasReady) refreshActiveKeepers()
+    wasReady = ready
   })
   window.addEventListener('focus', refreshActiveKeepers)
   document.addEventListener('visibilitychange', refreshActiveKeepers)
@@ -123,8 +128,8 @@ function startRecoveryListeners(): void {
 function stopRecoveryListeners(): void {
   stopPushRefresh?.()
   stopPushRefresh = null
-  stopReconnectRefresh?.()
-  stopReconnectRefresh = null
+  stopReadyRefresh?.()
+  stopReadyRefresh = null
   window.removeEventListener('focus', refreshActiveKeepers)
   document.removeEventListener('visibilitychange', refreshActiveKeepers)
 }

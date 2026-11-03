@@ -116,12 +116,14 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
   _keeperTurnRefreshFn = fn
 }
 
-// Queue push is an invalidation signal. Keeper-scoped read models register
-// their authoritative re-read here instead of reconstructing queue state from
-// event deltas.
-const _refreshKeeperWaitingInventoryFns = new Set<(keeperName: string) => void>()
+// Waiting-inventory pushes are invalidations, not row updates.
+export type KeeperWaitingInventoryChange =
+  | { scope: 'keeper'; keeperName: string }
+  | { scope: 'workspace' }
+
+const _refreshKeeperWaitingInventoryFns = new Set<(change: KeeperWaitingInventoryChange) => void>()
 export function registerKeeperWaitingInventoryRefresh(
-  fn: (keeperName: string) => void,
+  fn: (change: KeeperWaitingInventoryChange) => void,
 ): () => void {
   _refreshKeeperWaitingInventoryFns.add(fn)
   return () => _refreshKeeperWaitingInventoryFns.delete(fn)
@@ -906,8 +908,13 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   if (event.type === 'keeper_waiting_inventory_changed') {
     const keeperName = event.keeper_name?.trim() ?? ''
     if (keeperName) {
-      for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(keeperName)
+      for (const refresh of _refreshKeeperWaitingInventoryFns) refresh({ scope: 'keeper', keeperName })
     }
+    return true
+  }
+
+  if (event.type === 'schedule_store_invalidated' || event.type === 'operator_pending_confirm_invalidated') {
+    for (const refresh of _refreshKeeperWaitingInventoryFns) refresh({ scope: 'workspace' })
     return true
   }
 

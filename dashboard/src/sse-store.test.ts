@@ -740,8 +740,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
       queue_kind: 'chat_operation',
     })
     expect(refreshQueue).toHaveBeenCalledTimes(2)
-    expect(refreshQueue).toHaveBeenNthCalledWith(1, 'echo')
-    expect(refreshQueue).toHaveBeenNthCalledWith(2, 'echo')
+    expect(refreshQueue).toHaveBeenNthCalledWith(1, { scope: 'keeper', keeperName: 'echo' })
+    expect(refreshQueue).toHaveBeenNthCalledWith(2, { scope: 'keeper', keeperName: 'echo' })
   })
 
   it('refreshes waiting inventory for event-queue changes', async () => {
@@ -755,7 +755,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
       queue_kind: 'event_queue',
     })
     expect(refreshQueue).toHaveBeenCalledTimes(1)
-    expect(refreshQueue).toHaveBeenCalledWith('echo')
+    expect(refreshQueue).toHaveBeenCalledWith({ scope: 'keeper', keeperName: 'echo' })
   })
 
   it.each(['approval_count', 'approval_detail'])(
@@ -772,7 +772,21 @@ describe('setupServerPushReaction reconnect hydration', () => {
       expect(event).not.toBeNull()
       if (event) sseStore.routeServerPushEvent(event)
       expect(refreshQueue).toHaveBeenCalledOnce()
-      expect(refreshQueue).toHaveBeenCalledWith('echo')
+      expect(refreshQueue).toHaveBeenCalledWith({ scope: 'keeper', keeperName: 'echo' })
+    },
+  )
+
+  it.each(['schedule_store_invalidated', 'operator_pending_confirm_invalidated'])(
+    'routes %s as a workspace waiting-inventory invalidation', async eventType => {
+      const { sseStore } = await loadSseStore()
+      const refreshQueue = vi.fn()
+      sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
+      const event = parseSSEMessage({ type: eventType })
+
+      expect(event).not.toBeNull()
+      if (event) sseStore.routeServerPushEvent(event)
+      expect(refreshQueue).toHaveBeenCalledOnce()
+      expect(refreshQueue).toHaveBeenCalledWith({ scope: 'workspace' })
     },
   )
 

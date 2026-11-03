@@ -14,7 +14,6 @@ type receipt =
   ; spans : span list
   }
 type system_observation = Active_goals of string | Completion_authority of string
-  | Admitted_scheduled_input of string
 
 let observation_block = function
   | Active_goals text -> Prompt_block_id.Active_goals, text

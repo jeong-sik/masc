@@ -123,6 +123,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // What /api/v1/keepers/turns answers for one Keeper may have changed
   // (lib/keeper/keeper_turn_broadcast.ml). A turns reader re-reads on it.
   'keeper_turn_changed',
+  // A Keeper's running-turn preview was written
+  // (lib/server/server_turn_preview_broadcast.ml). A turns reader re-reads on it.
+  'keeper_turn_preview_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

@@ -1243,7 +1243,7 @@ let check_a_401_is_cleared_by_one_reactive_refresh ~proactive () =
       }
   in
   match
-    Identity_tools.run_call ~transports:{ Identity_tools.mcp_post; token_post; discover }
+    Identity_tools.run_call ~transports:{ Identity_tools.mcp_post = { Mcp_client.deadline_s = 60.; send = (fun ~deadline:_ ~url ~headers ~body -> mcp_post ~url ~headers ~body) }; token_post; discover }
       ~config:(Masc.Workspace.default_config base_path) ~keeper_name
       ~provider ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
   with
@@ -1279,7 +1279,7 @@ let test_catalog_discovery_cannot_reattach_after_disconnect () =
           body=echo_request_id body {|{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}|}})
     else normal_post ~url ~headers ~body
   in
-  (match Identity_tools.refresh ~attachment:initial ~mcp_post
+  (match Identity_tools.refresh ~attachment:initial ~mcp_post:({ Mcp_client.deadline_s = 60.; send = (fun ~deadline:_ ~url ~headers ~body -> mcp_post ~url ~headers ~body) })
            ~config:(Masc.Workspace.default_config base_path) ~keeper_name ~provider ~now:1. () with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "late discovery reported a published catalog");
@@ -1351,7 +1351,7 @@ let test_post_send_401_does_not_refresh_and_repeat () =
   in
   let token_post ~url:_ ~headers:_ ~body:_ = Alcotest.fail "post-send 401 triggered token refresh" in
   let discover ~mcp_url:_ = Alcotest.fail "post-send 401 triggered OAuth discovery" in
-  (match Identity_tools.run_call ~transports:{ Identity_tools.mcp_post; token_post; discover }
+  (match Identity_tools.run_call ~transports:{ Identity_tools.mcp_post = { Mcp_client.deadline_s = 60.; send = (fun ~deadline:_ ~url ~headers ~body -> mcp_post ~url ~headers ~body) }; token_post; discover }
            ~config:(Masc.Workspace.default_config base_path) ~keeper_name ~provider
            ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) () with
    | Error (Identity_tools.Mcp { phase = Identity_tools.Tool_call; error = Mcp_client.Unauthorized _ } as error) ->

@@ -390,6 +390,7 @@ let request_context_of_call_usage (usage : Msp.token_usage)
                 }
             | Some _, None | None, Some _ | None, None -> None)
        ; output_tokens = Some usage.output_tokens
+       ; provenance = Turn_input_provenance.Measured_request
        })
     usage.prompt_tokens
 ;;

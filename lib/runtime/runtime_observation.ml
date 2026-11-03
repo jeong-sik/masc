@@ -13,10 +13,13 @@ type request_cache = {
   cache_read_input_tokens : int;
 }
 
+type input_provenance = Turn_input_provenance.t
+
 type request_context = {
   input_tokens : int;
   cache : request_cache option;
   output_tokens : int option;
+  provenance : input_provenance;
 }
 
 type host_acceptance = Accepted | Rejected of string

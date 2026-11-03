@@ -175,6 +175,7 @@ let sample_record () : Turn_record.t =
       ; cache_creation_input_tokens = Some 2048
       ; cache_read_input_tokens = Some 15000
       ; scope = Runtime_usage_scope.Per_request
+      ; input_provenance = Some Turn_input_provenance.Measured_request
       }
   ; turn_output_tokens = None
   ; ts = 1781200000.5
@@ -334,6 +335,42 @@ let test_historical_row_without_usage_scope_is_unavailable () =
       "missing scope is not guessed"
       true
       (decoded.usage.scope = Runtime_usage_scope.Usage_scope_unavailable)
+
+(* An estimate and a counted request read identically as bare numbers, so
+   what the record has to keep is which one it was. A row written before
+   the field existed keeps [None]: the doubt itself is the fact. *)
+let test_input_provenance_round_trip_and_stay_optional () =
+  let measured = sample_record () in
+  (match Turn_record.of_json (Turn_record.to_json measured) with
+   | Error detail -> failf "measured row failed to decode: %s" detail
+   | Ok decoded ->
+     check bool "a measured request stays measured" true
+       (decoded.usage.input_provenance = Some Turn_input_provenance.Measured_request));
+  let estimate =
+    { measured with
+      usage =
+        { measured.usage with
+          input_provenance = Some Turn_input_provenance.Context_estimate
+        }
+    }
+  in
+  (match Turn_record.of_json (Turn_record.to_json estimate) with
+   | Error detail -> failf "estimate row failed to decode: %s" detail
+   | Ok decoded ->
+     check bool "an estimate stays an estimate" true
+       (decoded.usage.input_provenance = Some Turn_input_provenance.Context_estimate));
+  let historical =
+    match Turn_record.to_json measured with
+    | `Assoc fields -> `Assoc (List.remove_assoc "input_provenance" fields)
+    | other -> other
+  in
+  match Turn_record.of_json historical with
+  | Error detail -> failf "provenance-less row failed to decode: %s" detail
+  | Ok decoded ->
+    check bool "absent provenance decodes as None" true
+      (decoded.usage.input_provenance = None);
+    check (option int) "the input figure itself is unaffected" (Some 18000)
+      decoded.usage.input_tokens
 ;;
 
 (* The Dashboard refuses a whole turn record that names a prompt block id it
@@ -527,6 +564,7 @@ let test_codec_optional_fields_absent () =
         ; cache_creation_input_tokens = None
         ; cache_read_input_tokens = None
         ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        ; input_provenance = None
         }
     }
   in
@@ -1298,6 +1336,8 @@ let () =
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "historical row without usage scope is unavailable" `Quick
             test_historical_row_without_usage_scope_is_unavailable
+        ; test_case "input provenance round trip and stay optional" `Quick
+            test_input_provenance_round_trip_and_stay_optional
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current observation fields required" `Quick

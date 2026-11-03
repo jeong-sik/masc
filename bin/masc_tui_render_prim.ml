@@ -4640,10 +4640,11 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         gap @ bar @ rows @ into_request @ against_wire
   in
   (* Recorded per-request-scoped input, newest first, one row per decoded
-     turn the page holds. Some runtimes store a post-compaction estimate in
-     the same field, with no retained distinction from a request count.
-     A provider that reports its usage across the whole conversation gets a
-     row that says so rather than a number that looks like this turn's. *)
+     turn the page holds. A post-compaction context estimate travels with
+     its provenance and gets its own sentence, so it is never read as a
+     dispatched request's count. A provider that reports its usage across
+     the whole conversation gets a row that says so rather than a number
+     that looks like this turn's. *)
   let recent_turns_lines =
     let row index (recent : Inspector.recent_turn) =
       let ts = Masc_domain.iso8601_of_unix_seconds recent.ts in
@@ -4670,7 +4671,17 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                 recent.turn ts
             ^ Ansi.reset
           ]
-      | Runtime_usage_scope.Per_request, Some input ->
+      | Runtime_usage_scope.Per_request, Some input -> (
+          match recent.input_provenance with
+          | Some Turn_input_provenance.Context_estimate ->
+              [ marker ^ Ansi.dim
+                ^ Printf.sprintf
+                    " #%-4d %s  context estimate %s after compaction, not a \
+                     dispatched request"
+                    recent.turn ts (Inspector.format_tokens input)
+                ^ Ansi.reset
+              ]
+          | Some Turn_input_provenance.Measured_request | None -> (
           fact
             (* fit_width, not %-7s: the cells hold the no-value mark, which is
                three bytes and one column, and byte padding would end the row
@@ -4690,7 +4701,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                (match recent.output_tokens, recent.turn_output_tokens with
                  | Some tokens, _ -> Inspector.format_tokens tokens
                  | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
-                 | None, None -> Masc_tui_theme.Glyph.no_value))
+                 | None, None -> Masc_tui_theme.Glyph.no_value))))
       | Runtime_usage_scope.Per_request, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -4728,29 +4739,37 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             | Some (minimum, maximum) ->
                 let scaled_inputs = List.map (function
                   | Inspector.Input_count n -> n
+                  | Inspector.Input_estimate n -> n
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
                 Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
                 Printf.sprintf "scale %d–%d tokens" minimum maximum in
           let marks = List.map2 (fun sample bar -> match sample with
             | Inspector.Input_unavailable -> "·"
             | Inspector.Input_invalid _ -> "!"
+            | Inspector.Input_estimate _ -> "~"
             | Inspector.Input_count 0 -> "0"
             | Inspector.Input_count _ -> bar) inputs bars |> String.concat "" in
           let legends =
             [ (List.exists (( = ) Inspector.Input_unavailable) inputs, "· unavailable")
             ; (List.exists (( = ) (Inspector.Input_count 0)) inputs, "0 recorded zero")
+            ; (List.exists (function Inspector.Input_estimate _ -> true
+                       | Inspector.Input_count _ | Inspector.Input_invalid _
+                       | Inspector.Input_unavailable -> false) inputs,
+               "~ context estimate, no dispatched request")
             ; (List.exists (function Inspector.Input_invalid _ -> true
-                       | Inspector.Input_count _ | Inspector.Input_unavailable -> false) inputs,
+                       | Inspector.Input_count _ | Inspector.Input_estimate _
+                       | Inspector.Input_unavailable -> false) inputs,
                "! invalid negative count")
             ]
             |> List.filter_map (fun (present, text) -> if present then Some text else None) in
           wrapped "" ("Input by turn: " ^ marks)
           @ wrapped Ansi.dim (Printf.sprintf
-              "Oldest to newest; %d of %d valid per-request-scoped values; %s%s."
-              trend.Inspector.valid_count (List.length inputs) scale
+              "Oldest to newest; %d measured and %d estimated of %d turns; %s%s."
+              trend.Inspector.measured_count trend.Inspector.estimate_count
+              (List.length inputs) scale
               (if legends = [] then "" else "; " ^ String.concat "; " legends))
           @ wrapped Ansi.dim
-              "Values can include post-compaction context estimates, not just dispatched-request counts."
+              "Records older than provenance may hold estimates among the unmarked values too."
       | [] -> []
     in
     let source_warning = match selection.Inspector.recent, selection.skipped_rows with

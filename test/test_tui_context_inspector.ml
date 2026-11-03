@@ -49,6 +49,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = Some 500
       ; scope = usage_scope
+      ; input_provenance = None
       }
   ; turn_output_tokens = None
   ; ts = 1_787_600_000.
@@ -126,16 +127,17 @@ let test_recent_input_trend_keeps_unavailable_and_zero () =
     (observed.samples =
        [ Inspector.Input_count 100; Inspector.Input_unavailable; Inspector.Input_count 0
        ; Inspector.Input_unavailable; Inspector.Input_invalid (-1); Inspector.Input_count 200 ]);
-  check int "only nonnegative counts set the scale" 3 observed.valid_count;
+  check int "only nonnegative counts set the scale" 3 observed.measured_count;
+  check int "no estimates in this page" 0 observed.estimate_count;
   check (option (pair int int)) "zero is included in the bounds"
     (Some (0, 200)) observed.bounds;
   let no_valid = trend [absent; invalid] in
   check bool "missing and invalid turns remain distinct" true
     (no_valid.samples = [Inspector.Input_unavailable; Inspector.Input_invalid (-1)]);
-  check int "no valid counts" 0 no_valid.valid_count;
+  check int "no valid counts" 0 no_valid.measured_count;
   check (option (pair int int)) "no valid counts have no scale" None no_valid.bounds;
   let only_zero = trend [zero] in
-  check int "one zero is valid" 1 only_zero.valid_count;
+  check int "one zero is valid" 1 only_zero.measured_count;
   check (option (pair int int)) "one zero has a zero scale"
     (Some (0, 0)) only_zero.bounds
 
@@ -167,6 +169,49 @@ let test_client_context_sum_stays_representable () =
   check (option int) "other scopes still report no figure" None
     (read ~scope:Runtime_usage_scope.Conversation_cumulative
        ~input_tokens:(Some 1000) ~output_tokens:(Some 200))
+
+(* An estimate after a compaction and a counted request carry the same bare
+   number; the provenance the record keeps is what the trend separates them
+   by, and a record without it stays an ordinary count rather than a
+   guess. *)
+let test_recent_input_trend_marks_estimates_apart () =
+  let marked input_tokens provenance (record : Turn_record.t) =
+    { record with
+      usage =
+        { record.usage with input_tokens; input_provenance = provenance }
+    }
+  in
+  let measured =
+    record ~trace:"estimate" ~turn:1 ()
+    |> marked (Some 100) (Some Turn_input_provenance.Measured_request)
+  in
+  let estimate =
+    record ~trace:"estimate" ~turn:2 ()
+    |> marked (Some 45000) (Some Turn_input_provenance.Context_estimate)
+  in
+  let unmarked = record ~trace:"estimate" ~turn:3 () |> marked (Some 200) None in
+  match
+    Inspector.decode_turn_records (envelope [ measured; estimate; unmarked ])
+  with
+  | Error detail -> fail detail
+  | Ok selection -> (
+      let trend = Inspector.recent_input_trend selection.recent in
+      check bool "an estimate keeps its own kind, oldest first" true
+        (trend.samples =
+           [ Inspector.Input_count 100
+           ; Inspector.Input_estimate 45000
+           ; Inspector.Input_count 200
+           ]);
+      check int "measured counts stay measured" 2 trend.measured_count;
+      check int "estimates are counted apart" 1 trend.estimate_count;
+      check (option (pair int int)) "an estimate still spans the scale"
+        (Some (100, 45000)) trend.bounds;
+      match selection.recent with
+      | _unmarked :: estimate_row :: _ ->
+          check bool "the estimate row carries its provenance" true
+            (estimate_row.input_provenance
+             = Some Turn_input_provenance.Context_estimate)
+      | _ -> fail "the page held three rows")
 
 let test_recent_page_skipped_count_is_not_invented () =
   let row = record ~trace:"skipped" ~turn:1 () in
@@ -858,6 +903,8 @@ let () =
             test_recent_input_trend_keeps_unavailable_and_zero
         ; test_case "client context sum stays representable" `Quick
             test_client_context_sum_stays_representable
+        ; test_case "recent input history marks estimates apart" `Quick
+            test_recent_input_trend_marks_estimates_apart
         ; test_case "recent page keeps skipped-count availability" `Quick
             test_recent_page_skipped_count_is_not_invented
         ; test_case "page failure is distinct from partial failures" `Quick

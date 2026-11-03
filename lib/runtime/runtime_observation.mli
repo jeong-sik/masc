@@ -22,6 +22,10 @@ type request_cache = {
   cache_read_input_tokens : int;
 }
 
+type input_provenance = Turn_input_provenance.t
+(** What [input_tokens] counted: a dispatched request or a context
+    estimate. See {!Turn_input_provenance}. *)
+
 type request_context = {
   input_tokens : int;
       (** Inclusive: uncached input plus both cache components. *)
@@ -34,6 +38,9 @@ type request_context = {
       (** That request's output, when the runtime reports its final count
           (Codex's per-response frame). [None] when only a mid-stream
           snapshot exists (Claude Code's assistant frames). *)
+  provenance : input_provenance;
+      (** What [input_tokens] is: a counted request or a context estimate.
+          Decides how a durable record and a reader may describe it. *)
 }
 (** The newest provider request of the turn: how much of the context window
     it occupied, and its output when known. A runtime that reports the

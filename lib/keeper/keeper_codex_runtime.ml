@@ -291,9 +291,14 @@ let request_context_of_last_usage : Runtime_codex_app_server.last_usage -> Runti
           ; cache_read_input_tokens = usage.cached_input_tokens
           }
     ; output_tokens = Some usage.output_tokens
+    ; provenance = Turn_input_provenance.Measured_request
     }
   | Runtime_codex_app_server.Context_estimate { estimated_tokens } ->
-    { input_tokens = estimated_tokens; cache = None; output_tokens = None }
+    { input_tokens = estimated_tokens
+    ; cache = None
+    ; output_tokens = None
+    ; provenance = Turn_input_provenance.Context_estimate
+    }
 ;;
 
 (* OpenAI counting, as Backend_openai_parse reads the API wire: the input

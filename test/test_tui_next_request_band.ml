@@ -456,6 +456,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
         ; cache_creation_input_tokens = None
         ; cache_read_input_tokens = None
         ; scope = Runtime_usage_scope.Per_request
+        ; input_provenance = None
         }
     ; turn_output_tokens = None
     ; ts = 1_787_600_000.

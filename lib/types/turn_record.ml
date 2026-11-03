@@ -36,6 +36,10 @@ type usage =
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
   ; scope : Runtime_usage_scope.t
+  ; input_provenance : Turn_input_provenance.t option
+        (* [None] on records written before the field existed: whether that
+           input counted a dispatched request or a context estimate is not
+           recorded, and a reader reports the doubt instead of guessing. *)
   }
 
 type request_wire_observation =
@@ -286,6 +290,9 @@ let to_json (r : t) : Yojson.Safe.t =
         r.usage.cache_read_input_tokens
      @ opt_field "output_tokens" (fun v -> `Int v) r.usage.output_tokens
     @ [ ("usage_scope", `String (Runtime_usage_scope.to_string r.usage.scope)) ]
+    @ opt_field "input_provenance"
+        (fun v -> `String (Turn_input_provenance.to_string v))
+        r.usage.input_provenance
     @ opt_field "turn_output_tokens" (fun v -> `Int v) r.turn_output_tokens
     @ [ ("ts", `Float r.ts) ])
 
@@ -559,6 +566,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "cache_read_input_tokens"
             ; "output_tokens"
             ; "usage_scope"
+            ; "input_provenance"
             ; "turn_output_tokens"
             ; "ts"
             ]
@@ -806,6 +814,17 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
              Error (Printf.sprintf "turn_record: unknown usage_scope %S" value))
         | Some _ -> Error "turn_record: usage_scope is not a string"
       in
+      let* input_provenance =
+        match List.assoc_opt "input_provenance" fields with
+        | None -> Ok None
+        | Some (`String value) ->
+          (match Turn_input_provenance.of_string value with
+           | Some provenance -> Ok (Some provenance)
+           | None ->
+             Error
+               (Printf.sprintf "turn_record: unknown input_provenance %S" value))
+        | Some _ -> Error "turn_record: input_provenance is not a string"
+      in
       let* turn_output_tokens = opt_member "turn_output_tokens" fields as_int in
       let* ts_json = require "ts" fields in
       let* ts = as_float "ts" ts_json in
@@ -841,6 +860,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; cache_creation_input_tokens
             ; cache_read_input_tokens
             ; scope = usage_scope
+            ; input_provenance
             }
         ; turn_output_tokens
         ; ts
@@ -917,4 +937,5 @@ let usage_of_reported_counts
   ; cache_creation_input_tokens
   ; cache_read_input_tokens
   ; scope
+  ; input_provenance = Some Turn_input_provenance.Measured_request
   }

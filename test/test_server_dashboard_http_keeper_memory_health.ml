@@ -1158,6 +1158,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
         ; cache_creation_input_tokens = None
         ; cache_read_input_tokens = None
         ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        ; input_provenance = None
         }
       ~turn_output_tokens:None
       ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ()

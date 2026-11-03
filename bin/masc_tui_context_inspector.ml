@@ -32,6 +32,7 @@ type recent_turn =
   { turn : int
   ; ts : float
   ; input_tokens : int option
+  ; input_provenance : Turn_input_provenance.t option
   ; provider_context_window : int option
   ; cache_read : int option
   ; output_tokens : int option
@@ -42,11 +43,15 @@ type recent_turn =
 type input_sample =
   | Input_unavailable
   | Input_invalid of int
+  | Input_estimate of int
+      (** The whole context as the runtime estimated it after a compaction
+          -- no request was dispatched at this size. *)
   | Input_count of int
 
 type input_trend =
   { samples : input_sample list
-  ; valid_count : int
+  ; measured_count : int
+  ; estimate_count : int
   ; bounds : (int * int) option
   }
 
@@ -55,15 +60,29 @@ let recent_input_trend recent =
     match turn.input_tokens with
     | None -> Input_unavailable
     | Some count when count < 0 -> Input_invalid count
-    | Some count -> Input_count count) recent in
-  let valid_count, bounds = List.fold_left (fun (valid_count, bounds) -> function
-    | Input_unavailable | Input_invalid _ -> valid_count, bounds
-    | Input_count count ->
-        let bounds = match bounds with
-          | None -> count, count
-          | Some (minimum, maximum) -> min minimum count, max maximum count in
-        valid_count + 1, Some bounds) (0, None) samples in
-  { samples; valid_count; bounds }
+    | Some count ->
+      (match turn.input_provenance with
+       | Some Turn_input_provenance.Context_estimate -> Input_estimate count
+       | Some Turn_input_provenance.Measured_request | None -> Input_count count)) recent in
+  let measured_count, estimate_count, bounds =
+    List.fold_left
+      (fun (measured_count, estimate_count, bounds) -> function
+        | Input_unavailable | Input_invalid _ ->
+          measured_count, estimate_count, bounds
+        | Input_count count ->
+            let bounds = match bounds with
+              | None -> count, count
+              | Some (minimum, maximum) -> min minimum count, max maximum count in
+            measured_count + 1, estimate_count, Some bounds
+        | Input_estimate count ->
+            (* An estimate is not a request count, but its size is the
+               occupancy the scale has to span. *)
+            let bounds = match bounds with
+              | None -> count, count
+              | Some (minimum, maximum) -> min minimum count, max maximum count in
+            measured_count, estimate_count + 1, Some bounds)
+      (0, 0, None) samples in
+  { samples; measured_count; estimate_count; bounds }
 
 type selection =
   { latest : Turn_record.t
@@ -321,8 +340,12 @@ let decode_turn_records = function
                              }
                        | None -> newest_attributed rest)
                 in
-                (* Other scopes cannot describe one request. Even this scope
-                   can carry a post-compaction estimate without provenance. *)
+                (* Other scopes cannot describe one request. A per-request
+                   figure whose provenance says the whole context was only
+                   estimated still travels with its provenance: the number
+                   stays readable as an estimate, not as a dispatched
+                   request. Records written before provenance existed carry
+                   [None] and are read as unknown. *)
                 let per_request_tokens (record : Turn_record.t) =
                   match record.usage.scope with
                   | Runtime_usage_scope.Turn_total
@@ -337,6 +360,7 @@ let decode_turn_records = function
                       { turn = record.absolute_turn
                       ; ts = record.ts
                       ; input_tokens = per_request_tokens record
+                      ; input_provenance = record.usage.input_provenance
                       ; provider_context_window = record.provider_context_window
                       ; cache_read = record.usage.cache_read_input_tokens
                       ; output_tokens = record.usage.output_tokens

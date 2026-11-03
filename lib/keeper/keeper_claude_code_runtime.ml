@@ -577,6 +577,7 @@ let request_context_of_request_input (input : Runtime_claude_code.request_input)
            }
        | Some _, None | None, Some _ | None, None -> None)
   ; output_tokens = None (* an assistant frame's output is a streaming snapshot *)
+  ; provenance = Turn_input_provenance.Measured_request
   }
 ;;
 

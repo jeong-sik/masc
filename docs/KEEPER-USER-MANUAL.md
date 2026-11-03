@@ -588,6 +588,15 @@ A bare host admits port 443 and a wildcard does not include its apex. Other
 backends do not silently fall back to `inherit` when `policy` is unsupported;
 they refuse it.
 
+To send one Keeper's requests through a guest agent instead of one
+`container exec` per request, add `microvm_delivery = "agent_socket"` to its
+`[keeper]` table ([RFC](rfc/RFC-microvm-guest-agent-over-socket.md); a
+per-Keeper canary for now). Only `microvm_backend = "apple_container"`
+accepts it. The Keeper's next turn replaces its guest with one whose first
+process is the shim's agent, and removing the line replaces it back on the
+turn after the change. The host end of the agent's socket is under
+`<base>/.masc/microvm/agent/`.
+
 ### One Docker Keeper
 
 ```toml

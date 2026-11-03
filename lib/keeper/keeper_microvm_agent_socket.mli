@@ -36,6 +36,33 @@ val plan :
     an exec request gets as [--env], is in the plan's environment. Everything
     else is the exec plan's. *)
 
+val delivery_of_facts :
+  base_path:string -> guest_name:string -> Keeper_microvm_boot_plan.facts ->
+  Keeper_types_profile_sandbox.microvm_delivery
+(** How a running guest is reached, read from what the runtime reports it
+    publishes rather than from the keeper TOML. A guest that publishes
+    {!guest_path} at {!host_path} serves requests through its agent; any
+    other guest takes an exec per request. A reader that did not assess the
+    guest so talks to it the way it was booted, also while a changed choice
+    waits for its keeper's next turn to replace it. *)
+
+type agent_check =
+  | Agent_answered
+  | Agent_unusable of string
+      (** no hello within the connect budget, a hello this host refuses, an
+          answer it cannot read, or a probe that did not exit 0 *)
+  | Check_unavailable of string
+      (** nothing was asked: this caller has no Eio network and clock, or
+          passed a budget that is not finite and positive *)
+
+val check_agent :
+  host_socket:string -> expected:Keeper_guest_socket.expected ->
+  connect_budget_sec:float -> budget_sec:float -> agent_check
+(** One [Probe] through the agent's socket (RFC 3.6): what an attach reads
+    before it adopts a running agent guest, since attaching does not go
+    through the boot plan assessment. Only [Agent_unusable] says anything
+    about the guest. *)
+
 type preparation_error =
   | Directory_unusable of
       { path : string

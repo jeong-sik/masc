@@ -94,6 +94,8 @@ agent 는 PID 1 이라 고아 프로세스를 거둬야 해요. `--init` 은 쓰
 - `Keeper_microvm_boot_plan` 의 사실에 `publishedSockets`, `useInit`, relay 형식 버전을 더해요. `container inspect` 는 `--init` 을 명령 줄이 아닌 `useInit` 필드로 보여 줘요(4.2). 그래서 지금의 명령 줄 비교는 그대로 둬요.
   - relay 형식 버전은 agent plan 의 안정 라벨(`masc.mcp.agent_relay`)로 digest 에 들어가요. 다른 버전을 말하는 서버는 게스트를 붙이지 않고 교체해요.
 - plan 이 달라지면 `assess` 가 교체를 허용해요. 서버 재시작 뒤 붙이는 경로(attach)는 `assess` 를 거치지 않아요. 그래서 붙일 때 hello 를 읽고, agent 가 없거나 형식 버전이 다르면 타입이 있는 오류로 교체를 요청해요.
+  - 턴 시작 판정이 `Matches_plan` 이어도 plan 은 agent 를 보지 못해요. agent guest 는 붙이기 전에 agent 에 probe 를 한 번 보내요. hello 가 없거나 거절되거나 probe 가 0 으로 끝나지 않으면 붙이지 않고 교체해요. 물어보지도 못했으면(Eio 밖, 잘못된 예산) 교체하지 않고 오류로 멈춰요.
+  - 턴 없이 붙는 쪽(읽기, 상태)은 게스트 inspect 의 `publishedSockets` 로 전달 방식을 정해요. TOML 을 바꿨는데 아직 교체 전인 게스트도 부팅된 방식대로 읽어요. 게스트를 읽지 않는 snapshot 경로만 TOML 의 선택을 따라요.
 - 첫 프로세스는 `--user 0:0` 으로 띄워요. `--user` 를 빼면 이미지의 기본 사용자로 뜨는데, 그 값에 기대지 않으려는 거예요. inspect 의 `userString` 은 `"0:0"` 이라 plan 과 그대로 비교돼요(4.5).
 - 호스트 소켓 경로는 base path 와 게스트 이름에서 정해요. 붙이기(attach)가 이름만으로 endpoint 를 다시 만들기 때문이에요. TMPDIR 같은 프로세스 환경에는 기대지 않아요.
   - 경로는 `<base>/.masc/microvm/agent/<게스트 이름 SHA-256 앞 16자>.sock` 이에요. 게스트 이름은 63자까지라, 이름을 그대로 쓰면 `/Users/<사용자>/me` 아래에서도 105바이트가 돼요.

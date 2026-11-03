@@ -4044,6 +4044,11 @@
  (libraries alcotest masc_tui_roster_owed))
 
 (test
+ (name test_tui_candle)
+ (modules test_tui_candle)
+ (libraries alcotest masc masc.masc_candle masc_tui_candle ptime))
+
+(test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
  (libraries

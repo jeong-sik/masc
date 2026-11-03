@@ -135,14 +135,14 @@ roster 경로에 `name=<키퍼>` 를 더한다. 그 키퍼의 행 하나(또는 
 | `runtime.toml` 배정 트랜잭션, 기본 경로 변경, 설정 다시 읽기(catalogue publication 하나하나) | 모든 행(`keeper_roster_changed`). 행의 provider 쉼이 lane 후보, runtime, binding 까지 catalogue 전체를 읽어서, 배정 id 만 비교하면 놓친다 |
 | 실행 영수증 쓰기 | 그 키퍼 |
 | `Candle_ledger.update`, Candle 설정 변경 | 원장 쓰기가 닿는 키퍼마다. 설정은 모든 행(`keeper_roster_changed`). 원장 라이브러리는 키퍼도 SSE 도 모르므로, 서버가 append 를 받는 hook 으로 이벤트에서 키퍼를 찾는다 |
-| provider 쉼 기록이 생기거나 지워짐 | 그 runtime 을 지나는 키퍼마다 |
+| provider 쉼과 걷는 순서의 기록. 쓰는 곳은 `Runtime_candidate_backpressure` 의 `note_rate_limit`·`note_failed_attempt`·`note_candidate_success` 와 `Runtime_quota_window` 의 `note_exhausted`·`note_observed_exhausted`·`note_succeeded` 여섯 함수뿐이다. 실패한 시도와 성공도 걷는 순서를 바꿔 행의 serving runtime 을 바꾼다 | 행에 보이는 값(`runtime_path_rest`)이 바뀐 키퍼마다. 쓰기마다 서버 fiber 하나가 깨어 모든 키퍼의 이 값을 다시 계산하고 앞 값과 비교한다. 바뀐 키퍼가 없으면 보내지 않는다 |
 | `Keeper_autonomous_stream.create`·`finish` | 그 키퍼 |
 
 Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owner.ml:20~24`). 신호는 `Sse.broadcast` 한 번이라 이 조건을 지킨다. 다시 계산은 신호를 받은 쪽(TUI)이 읽기로 한다.
 
 ### 3.3 TUI 의 roster
 
-- `keeper_row_changed` 마다 그 키퍼에 읽을 빚을 남긴다(RFC-0480 §3.1 의 읽을 빚). 키퍼마다 하나다. 읽은 행은 roster 안의 그 키퍼 자리를 바꿔 끼운다. 처음 보는 이름이면 이름 순서 자리에 더하고, 행이 없다는 답이면 그 행을 지운다.
+- `keeper_row_changed` 마다 그 키퍼에 읽을 빚을 남긴다(RFC-0480 §3.1 의 읽을 빚). 키퍼마다 하나다. 읽은 행은 roster 안의 그 키퍼 자리를 바꿔 끼운다. 처음 보는 이름이면 이름 순서 자리에 더하고, 행이 없다는 답이면 그 행을 지운다. 한 배치에서 둘 이상의 키퍼가 빚을 지면 키퍼마다 읽지 않고 전체 읽기(`fresh=true`) 하나로 갚는다. 같은 runtime 을 지나는 키퍼들이 한꺼번에 바뀌는 경우다.
 - `keeper_roster_changed`, 다시 읽기(Revalidate), 권한 회복은 roster 전체를 `fresh=true` 로 읽는다. 캐시된 전체 목록이 그 사이에 받은 키퍼 행을 옛 값으로 덮지 않게 하기 위해서다.
 - 실패한 읽기는 키퍼마다 늘어나는 간격으로 다시 읽는다. 전체 읽기 실패는 지금처럼 옛 목록을 버리고 수명 동작을 거둔다(§1.8).
 - 2초 묶음의 roster 읽기와 `needs_keeper_roster` 의 2초 갈래를 지운다.
@@ -167,7 +167,7 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 ### 3.7 읽는 시각으로 바뀌는 다른 값
 
 - Candle 잔액: 행에 잔액을 계산한 시각과 반감기를 같이 싣는다. TUI 는 그릴 때 같은 `Candle_decay.remaining` 으로 그 시각의 잔액을 계산한다. 서버 타이머도, 다시 읽기도 없다.
-- provider 쉼: `Rest_dated` 는 끝나는 시각을 행에 싣는다. TUI 는 §3.6 처럼 그 시각에 그 키퍼에 읽을 빚을 한 번 남긴다. `Rest_until_answered` 는 시각으로 끝나지 않으므로 싣지 않고, 쉼 기록이 바뀔 때의 신호(§3.2)로 맞춘다.
+- provider 쉼: §3.2 의 서버 fiber 가 `Rest_dated` 중 가장 이른 끝나는 시각에 한 번 깨어 다시 계산한다. 키퍼마다 타이머를 두지 않고, fiber 하나가 다음 시각 하나만 기다린다. 행에는 끝나는 시각을 싣지 않고, TUI 에도 타이머가 없다. `Rest_until_answered` 는 시각으로 끝나지 않으므로 쓰기 신호로만 맞춘다.
 
 ## 4. 규모
 
@@ -184,12 +184,12 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 | L0 | 이 RFC | 리뷰 |
 | L1 | roster 경로의 `name=` 키퍼 하나 읽기 | 같은 키퍼의 행이 전체 읽기의 행과 같은지, 오류 행, 인증 |
 | L2a~ | §3.2 의 신호. 쓰기 하나가 층 하나다 | 쓰기마다 신호가 한 번 나가는지 |
+| L2f | provider 쉼 신호: 여섯 쓰기 함수의 hook, 서버 fiber 의 다시 계산과 비교, 가장 이른 `Rest_dated` 시각에 깨기(§3.2, §3.7) | 쓰기·시각마다 값이 바뀐 키퍼에게만 신호, 바뀌지 않으면 없음 |
 | L3 | TUI roster: 키퍼별 빚 읽기, 목록 변화 전체 읽기, 2초 roster 읽기 삭제 | 신호 하나 → 요청 하나, 실패 재시도 |
 | L4 | 대기 목록 빈 곳 알림(일정, 확인 대기, fusion), TUI turns 의 2초 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
 | L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |
 | L6 | `next_action` 시각 읽기 | 120초 뒤 읽기 하나 |
 | L6b | Candle 잔액을 TUI 가 계산(§3.7), Candle 원장·설정 신호 | 원장 이벤트 하나 → 닿은 키퍼마다 신호, 그린 잔액 = 서버가 같은 시각에 계산한 잔액 |
-| L6c | provider 쉼 기록 신호, `Rest_dated` 끝나는 시각 읽기(§3.7) | 쉼이 생기고 끝날 때 그 runtime 의 키퍼마다 신호, 끝나는 시각에 읽기 하나 |
 
 L2 가 다 들어가기 전에는 L3 을 넣지 않는다. 신호가 빠진 필드는 L3 뒤에 멈추기 때문이다.
 

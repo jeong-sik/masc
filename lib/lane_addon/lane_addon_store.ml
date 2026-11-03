@@ -1001,60 +1001,6 @@ let inventory_blocking ~label work =
     let result = Systhread_host.run ~label blocking in
     Eio.Fiber.check (); result
 
-let fold_archived_tool_request_owners t ~init ~f =
-  inventory_blocking ~label:"addon-archived-original-inventory" (fun () ->
-    let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
-      let owner_uid = Unix.geteuid () in
-      let root = Filename.concat (Fs_compat.owned_inventory_root_path anchor) (Filename.basename t.root) in
-      let archive = Filename.concat root tool_request_archive_directory in
-      let result = inventory_directory ~owner_uid ~parent:anchor ~path:archive (fun scopes names ->
-        let rec scan_scopes acc = function
-          | [] -> Ok acc
-          | scope_name :: rest ->
-            if not (String_util.is_lowercase_sha256_hex scope_name) then
-              Error "unknown directory in settled original request namespace"
-            else
-              let path = Filename.concat (Fs_compat.owned_inventory_root_path scopes) scope_name in
-              let* days = inventory_directory ~owner_uid ~parent:scopes ~path (fun scope dates ->
-                let rec scan_days acc = function
-                  | [] -> Ok acc
-                  | date :: tail ->
-                    let* () = settled_day date in
-                    let path = Filename.concat (Fs_compat.owned_inventory_root_path scope) date in
-                    let* day = inventory_directory ~owner_uid ~parent:scope ~path (fun held entries ->
-                      let* () = if List.for_all (fun name -> name = "records" || name = "bodies") entries
-                        then Ok () else Error "unknown directory in settled original request day" in
-                      let* () = if not (List.mem "bodies" entries) then Ok () else
-                        let bodies = Filename.concat (Fs_compat.owned_inventory_root_path held) "bodies" in
-                        let* result = inventory_directory ~owner_uid ~parent:held ~path:bodies (fun _ _ -> Ok ()) in
-                        require_inventory result in
-                      if not (List.mem "records" entries) then Ok acc else
-                      let records = Filename.concat (Fs_compat.owned_inventory_root_path held) "records" in
-                      let* result = inventory_directory ~owner_uid ~parent:held ~path:records (fun files names ->
-                        let rec scan_records acc = function
-                          | [] -> Ok acc
-                          | name :: remaining ->
-                            (match tool_request_owner_entry name with
-                             | Staged_entry ->
-                               let* () = inspect_staged_tool_request ~owner_uid files name in
-                               scan_records acc remaining
-                             | Unknown_entry -> Error "unknown entry in settled original request records"
-                             | Record_entry ->
-                               let* json = read_startup_tool_request ~owner_uid files name in
-                               let* acc = f acc ~directory_name:scope_name ~file_name:name json in
-                               scan_records acc remaining) in
-                        scan_records acc names) in
-                      require_inventory result) in
-                    let* acc = require_inventory day in
-                    scan_days acc tail in
-                scan_days acc dates) in
-              let* acc = require_inventory days in
-              scan_scopes acc rest in
-        scan_scopes init names) in
-      Ok result) |> owned_result in
-    let* result = result in
-    match result with None -> Ok init | Some value -> Ok value)
-
 type tool_request_body_entry = {
   scope_directory : string;
   request_digest : string;

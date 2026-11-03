@@ -244,17 +244,6 @@ val tool_request_owner_inventory_all : t -> ((string * string * Yojson.Safe.t) l
     individual scope reads are serialized, not one cross-scope atomic snapshot.
     No Keeper metadata/profile list is needed and no state is created. *)
 
-val fold_archived_tool_request_owners :
-  t -> init:'a ->
-  f:('a -> directory_name:string -> file_name:string -> Yojson.Safe.t -> ('a, string) result) ->
-  ('a, string) result
-(** Complete, strictly owned inventory of settled record files across scope and
-    day directories. The callback validates each record's schema and key.
-    Missing archive descendants are settled as absence, but a listed entry
-    that disappears or any malformed namespace rejects the entire fold. The
-    archive bodies directory is checked, but its contents are not inputs to
-    this record inventory. *)
-
 type tool_request_body_entry = private {
   scope_directory : string;
   request_digest : string;

@@ -37,6 +37,7 @@ let stage_orphan store ~scope request =
   get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes)
 let run store = get (Result.map_error Inventory.error_to_string (Inventory.run ~store))
 let exists path = Sys.file_exists path
+let file_size path = Int64.of_int (Unix.stat path).Unix.st_size
 
 let test_unprotected_body_and_owned_bodies_survive () =
   with_store (fun root store ->
@@ -61,11 +62,11 @@ let test_unprotected_body_and_owned_bodies_survive () =
     Unix.rename archive_path original_path;
     stage_orphan store ~scope:"orphan-scope" orphan;
     let report = run store in
-    Alcotest.(check int) "only the unprotected live body is counted" 1 report.unprotected_files;
-    Alcotest.(check int64) "count reports the body's logical bytes"
-      (Int64.of_int (String.length (Yojson.Safe.to_string orphan))) report.unprotected_logical_bytes;
-    Alcotest.(check bool) "an unprotected live body makes the archive read" true
-      (report.archive = Inventory.Archive_read);
+    Alcotest.(check int) "the orphan and the body only a settled record names are counted" 2
+      report.unprotected_files;
+    Alcotest.(check int64) "count reports both bodies' logical bytes"
+      (Int64.add (file_size (body_path root ~scope:"orphan-scope" ~request:orphan))
+         (file_size original_path)) report.unprotected_logical_bytes;
     Alcotest.(check bool) "unprotected body remains" true (exists (body_path root ~scope:"orphan-scope" ~request:orphan));
     Alcotest.(check bool) "active original still loads" true ((load store ~scope ~id:"parent-id").request = parent);
     Alcotest.(check bool) "intent in a different scope still restores its exact body" true
@@ -75,26 +76,11 @@ let test_unprotected_body_and_owned_bodies_survive () =
      | Ok () -> () | Error error -> Alcotest.fail (Owner.settle_error_to_string error));
     Alcotest.(check bool) "the original settlement can still be retried" true (exists archive_path))
 
-let test_bad_archive_refuses_before_any_removal () = with_store (fun root store ->
-  let archived = `Assoc ["kind",`String "archive"] and orphan = `String "orphan" in
-  retain store ~scope:"archived" ~id:"id" ~request:archived;
-  let record = Owner.listed (load store ~scope:"archived" ~id:"id") in
-  (match Owner.settle ~store ~date:"2026-10-27" record with
-   | Ok () -> () | Error error -> Alcotest.fail (Owner.settle_error_to_string error));
-  stage_orphan store ~scope:"orphan" orphan;
-  let path = Filename.concat root (Store.tool_request_archive_record_path ~scope:"archived"
-    ~date:"2026-10-27" ~request_id:"id") in
-  get (Fs_compat.save_file_atomic_strict path "{}");
-  (match Inventory.run ~store with
-   | Error (Inventory.Inventory_unavailable _) -> ()
-   | Ok _ -> Alcotest.fail "bad archive did not reject the inventory");
-  Alcotest.(check bool) "unrelated body was not deleted" true (exists (body_path root ~scope:"orphan" ~request:orphan)))
-
-(* Archived records only add protection. When the live records protect every
-   live body, the archive is not read: a settled record that would refuse the
-   inventory changes nothing. *)
-let test_protected_live_bodies_leave_the_archive_unread () = with_store (fun root store ->
+(* Settled records are never read: a settled record that would refuse the
+   inventory changes nothing, with or without an unprotected live body. *)
+let test_settled_records_are_not_read () = with_store (fun root store ->
   let active = `Assoc ["kind",`String "active"] and archived = `Assoc ["kind",`String "archive"] in
+  let orphan = `String "orphan" in
   retain store ~scope:"active" ~id:"active-id" ~request:active;
   retain store ~scope:"archived" ~id:"id" ~request:archived;
   let record = Owner.listed (load store ~scope:"archived" ~id:"id") in
@@ -105,8 +91,12 @@ let test_protected_live_bodies_leave_the_archive_unread () = with_store (fun roo
   get (Fs_compat.save_file_atomic_strict path "{}");
   let report = run store in
   Alcotest.(check int) "no live body lacks digest protection" 0 report.unprotected_files;
-  Alcotest.(check bool) "the archive is not read" true (report.archive = Inventory.Archive_not_needed);
   Alcotest.(check int) "only the live record's digest is counted" 1 report.protected_digests;
+  stage_orphan store ~scope:"orphan" orphan;
+  let report = run store in
+  Alcotest.(check int) "an unprotected live body does not make the archive read" 1 report.unprotected_files;
+  Alcotest.(check bool) "unrelated body was not deleted" true
+    (exists (body_path root ~scope:"orphan" ~request:orphan));
   Alcotest.(check bool) "the active original still loads" true
     ((load store ~scope:"active" ~id:"active-id").request = active))
 
@@ -304,9 +294,8 @@ let test_inventory_errors_do_not_disclose_input () =
     refuses_without_leak store)
 
 let () = Alcotest.run "lane addon original body inventory" ["inventory", [
-  Alcotest.test_case "protect live, successor and archived requests" `Quick test_unprotected_body_and_owned_bodies_survive;
-  Alcotest.test_case "archive corruption refuses the count" `Quick test_bad_archive_refuses_before_any_removal;
-  Alcotest.test_case "protected live bodies leave the archive unread" `Quick test_protected_live_bodies_leave_the_archive_unread;
+  Alcotest.test_case "live and successor requests protect their bodies" `Quick test_unprotected_body_and_owned_bodies_survive;
+  Alcotest.test_case "settled records are not read" `Quick test_settled_records_are_not_read;
   Alcotest.test_case "hard linked body refuses the count" `Quick test_hard_link_refuses_before_any_removal;
   Alcotest.test_case "displaced unknown owner retains its original body" `Quick test_displaced_unknown_owner_preserves_original_body;
   Alcotest.test_case "missing body in one scope is not masked" `Quick test_missing_active_body_is_not_masked_by_another_scope;

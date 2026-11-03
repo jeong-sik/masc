@@ -232,7 +232,7 @@ flowchart LR
 
 **도는 중에는 큐가 새로 보이지 않는다. Codex 는 안내문 한 문장이 예외다.**
 
-- 에이전트 코어는 도구 뒤 요청에 다섯 종류 블록만 다시 싣는다. `Keeper_instructions`, `Active_goals`, `Completion_authority`, `Admitted_scheduled_input`, `Operator_note` 다(`prompt_block_id.ml:86-90`). `keeper_run_tools_hooks.ml` 에는 큐를 읽는 코드가 없다.
+- 에이전트 코어는 도구 뒤 요청에 네 종류 블록만 다시 싣는다. `Keeper_instructions`, `Active_goals`, `Completion_authority`, `Operator_note` 다(`Prompt_block_id.injected_on_post_tool_round`). `keeper_run_tools_hooks.ml` 에는 큐를 읽는 코드가 없다.
 - 공식 클라이언트의 도구 경계 함수는 `None`, `Terminal_tool_boundary`, 오류 중 하나를 돌려준다(`keeper_agent_run.ml:262-279`). 호스트는 빈 응답으로 턴을 끝내고(`keeper_official_client_host.ml:183-219`), 도구 뒤에 문맥을 더하는 주입은 오류로 거절한다(`:1590-1599`).
 - Codex 는 도는 턴에 문장을 보내는 길이 따로 있다. 대기 채팅 작업이 생기면 `turn/steer` 로 "Host scheduling notice: a direct message is waiting for this Keeper. ... then finish this turn so the host can deliver the waiting message. ... This notice does not contain that message ..." 를 보낸다(`runtime_codex_app_server.ml:1676-1687`, 연결은 `keeper_codex_runtime.ml:1470-1486`). 활성 도구 결과를 처리한 뒤 보내고, 본문은 담지 않으며, 턴은 모델이 자연히 끝낸다(`runtime_codex_app_server.mli:500-505`). 직접 턴이 이렇게 끝나면 `Yielded_to_operation_queued`, 자율 턴은 `Completed` 다(`keeper_codex_runtime.ml:1696-1703`). Claude Code, Muse, Antigravity 에서는 이런 길을 찾지 못했다. grep 으로만 확인했다. **[확인 필요]**
 
@@ -351,7 +351,7 @@ flowchart TD
 
   | 길 | 뜻 | 닿는 런타임 | 범위 |
   |---|---|---|---|
-  | 푸시 | 턴 시작 때 입력 층으로 항상 보인다 | 에이전트 코어와 공식 클라이언트 모두 | 층 하나를 더하는 데 18개 파일이 걸린다(`lib`, `bin`, `config`, `test` 에서 `Admitted_scheduled_input` 이 나오는 곳을 센 값: 소스 14개, 시험 4개) |
+  | 푸시 | 턴 시작 때 입력 층으로 항상 보인다 | 에이전트 코어와 공식 클라이언트 모두 | 층 하나를 더하는 데 18개 파일이 걸린다(당시 한 블록 층이 `lib`, `bin`, `config`, `test` 에 나오는 곳을 센 값: 소스 14개, 시험 4개) |
   | 풀 | 읽기 전용 도구를 Keeper 가 필요할 때 부른다 | 모두. 도는 중에도 부를 수 있다 | 기존 도구 하나(`keeper_workspace_memory_read`)의 이름이 `lib`, `bin`, `config`, `test` 에 나오는 곳이 16개 파일이다(소스 6, 설정 2, 시험 8). 처리 코드는 따로 더해야 한다 |
   | 도는 중 주입 | 도구 뒤 요청에 블록을 다시 싣는다(`injected_on_post_tool_round`) | 에이전트 코어. Codex 는 `turn/steer` 로 문장을 보낼 수 있다. Claude Code, Muse, Antigravity 는 길을 찾지 못했다(1.7) | 블록 종류 하나를 더한다. Codex 는 보내는 문장을 더한다 |
 

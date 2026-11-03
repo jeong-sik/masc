@@ -3023,6 +3023,7 @@
 (include stanzas/test_tui_observer_reopen_revalidate.inc)
 (include stanzas/test_tui_chat_owed_history.inc)
 (include stanzas/test_tui_waiting_event.inc)
+(include stanzas/test_tui_observer_epoch.inc)
 (include stanzas/test_tui_task_event.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)

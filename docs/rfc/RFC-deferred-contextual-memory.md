@@ -161,8 +161,9 @@ Measurement for this change: run the six development scenarios of #41922 again
 with the Librarian's own citations and compare the decisions with every
 observation (18/18) and with the pair-only question (15/18). Live, count the pairs
 asked with cited observations, the pairs whose candidate cites nothing, the pairs
-whose cited observations were left out for size, and the unjudgeable pairs, per
-Keeper and per day.
+whose cited observations were left out for size, the unjudgeable pairs, and the
+Librarian answers refused for citing an observation their input does not have,
+per Keeper and per day.
 
 The closed choices are `mergeable`, `different_context`, `loses_knowledge`, and
 `uncertain`. Only `mergeable` permits that source to leave current memory.

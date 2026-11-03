@@ -75,6 +75,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_turn_preview_changed')).toBe('keeper_turn_preview_changed')
   })
 
+  it('accepts verification request changes', () => {
+    expect(SSEEventTypeSchema.parse('verification_requests_changed')).toBe('verification_requests_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

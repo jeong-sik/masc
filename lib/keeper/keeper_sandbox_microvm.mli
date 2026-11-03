@@ -690,12 +690,17 @@ val remove_apple_keeper_volumes :
     guest cannot forge or remove a claim. Workspaces attempt a claim at fresh
     boot ({!add_apple_work_volume_claim}) and release at dissolution
     ({!release_apple_work_volume_claim}). Fresh Apple provisioning stops if the
-    claim helper fails or gives an unexpected report. The marker can still omit a legacy or adopted owner,
-    so a last recorded claim is not proof that no other workspace needs it.
+    claim helper fails or gives an unexpected report. The marker can still
+    omit a legacy or adopted owner, so a last recorded claim is not proof
+    that no other workspace needs it.
 
     Dissolution keeps a volume when the marker is missing or unreadable, but
-    a present marker can still omit an owner. [container list --all] includes
-    stopped guests, while a paused Keeper can have no guest container at all.
+    a present marker can still omit an owner. Reclamation
+    ({!Keeper_volume_gc}) also keeps work volumes with missing or empty claims;
+    it deletes a build-only candidate only after a fresh listing confirms the
+    shape at delete time, and past that confirmation the platform refuses to
+    delete a volume a container references. [container list --all] includes
+    stopped guests, while a paused Keeper can have no guest container.
     Neither observation alone establishes that a volume is safe to reclaim. *)
 
 val volume_claims_marker_name : string
@@ -775,6 +780,17 @@ val add_apple_work_volume_claim :
     [Error]. A failed or interrupted helper does not prove whether its write
     occurred. A fresh Apple guest does not proceed when this returns [Error].
     [Ok] requires the helper's exact [added] or [present] report. *)
+
+val apple_keeper_owner_containers :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> keeper_name:string
+  -> (string list, string) result
+(** Every observed container that references [keeper_name]: guests by their
+    scoping label, and the trim, repair and claims helpers by their stable
+    names. An unreadable listing is [Error]. Rows without a matching keeper
+    label count only when their name matches one of these helpers. Reclamation
+    uses this before touching a volume, and so does a claim release. *)
 
 type apple_volume_claim_release =
   | Kept_for_claimants of string list

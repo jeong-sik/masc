@@ -96,6 +96,7 @@ type misc_operation =
   | Misc_config
   | Misc_dashboard
   | Misc_gc
+  | Misc_sandbox_volume_gc
   | Misc_keeper_waiting_inventory
   | Misc_tool_help
   | Misc_web_fetch

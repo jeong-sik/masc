@@ -67,6 +67,7 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_config
   | Tool_schemas_misc.Misc_dashboard
   | Tool_schemas_misc.Misc_gc
+  | Tool_schemas_misc.Misc_sandbox_volume_gc
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help
   | Tool_schemas_misc.Misc_portrait_read

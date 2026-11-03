@@ -669,6 +669,7 @@
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
+  test_keeper_volume_gc
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
   test_keeper_efficiency_protocol
@@ -1023,6 +1024,7 @@
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
+  test_keeper_volume_gc
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
   test_keeper_efficiency_protocol

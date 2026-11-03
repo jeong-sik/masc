@@ -79,6 +79,136 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
     let gc_result = Workspace.gc ctx.config ~days () in
     text_ok ~tool_name ~start_time gc_result
 
+(* The operator's Apple-volume reclamation: a report the operator reads
+   before anything is deleted. The image argument names either a sandbox
+   image catalog entry (resolved for the Apple store) or a full reference;
+   without it there is no claim evidence, and every unowned keeper stays
+   kept as unverified rather than reclaimed on a guess. *)
+let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_result.result =
+  let resolve_gc_image image =
+    if String.equal image ""
+    then Ok None
+    else
+      match Keeper_sandbox_image_catalog.name_error ~field:"image" image with
+      | None ->
+        (match
+           Keeper_sandbox_image_resolver.resolve_in_workspace
+             ~base_path:ctx.config.Workspace.base_path
+             ~store:
+               (Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+             (Some image)
+         with
+         | Ok pinned -> Ok (Some pinned.Keeper_sandbox_image_catalog.reference)
+         | Error error ->
+           Error (Keeper_sandbox_image_resolver.error_to_string error))
+      | Some _ ->
+        if Keeper_sandbox_image_catalog.is_reference image
+        then Ok (Some image)
+        else Error (Printf.sprintf "%S is neither a catalog name nor a repository:tag reference" image)
+  in
+  let option_volume = function
+    | None -> `Null
+    | Some volume_name -> `String volume_name
+  in
+  let report_json executed image_given (report : Keeper_volume_gc.report) =
+    let keepers =
+      List.map
+        (fun (verdict : Keeper_volume_gc.keeper_verdict) ->
+           `Assoc
+             [ ("keeper_name", `String verdict.keeper_name)
+             ; ("work_volume", option_volume verdict.work_volume)
+             ; ("build_volume", option_volume verdict.build_volume)
+             ; ( "outcome"
+               , `String (Keeper_volume_gc.keeper_outcome_to_string verdict.outcome) )
+             ])
+        report.keepers
+    in
+    let count predicate = List.length (List.filter predicate report.keepers) in
+    `Assoc
+      [ ("executed", `Bool executed)
+      ; ("image_given", `Bool image_given)
+      ; ("foreign_volumes", `List (List.map (fun name -> `String name) report.foreign_volumes))
+      ; ("keepers", `List keepers)
+      ; ( "summary"
+        , `Assoc
+            [ ( "kept"
+              , `Int
+                  (count (fun v ->
+                       match v.outcome with
+                       | Kept _ -> true
+                       | Reclaim_candidate | Reclaimed | Reclaim_failed _ -> false)) )
+            ; ( "reclaim_candidates"
+              , `Int
+                  (count (fun v ->
+                       match v.outcome with
+                       | Reclaim_candidate -> true
+                       | Kept _ | Reclaimed | Reclaim_failed _ -> false)) )
+            ; ( "reclaimed"
+              , `Int
+                  (count (fun v ->
+                       match v.outcome with
+                       | Reclaimed -> true
+                       | Kept _ | Reclaim_candidate | Reclaim_failed _ -> false)) )
+            ; ( "reclaim_failed"
+              , `Int
+                  (count (fun v ->
+                       match v.outcome with
+                       | Reclaim_failed _ -> true
+                       | Kept _ | Reclaim_candidate | Reclaimed -> false)) )
+            ] )
+      ]
+  in
+  match get_float_opt args "timeout_sec" with
+  | Some seconds when seconds <= 0. ->
+    workflow_err ~tool_name ~start_time "timeout_sec must be > 0"
+  | timeout_opt ->
+    let timeout_sec =
+      Option.value timeout_opt
+        ~default:
+          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Env_config_sandbox.Shell_timeout.Io ())
+    in
+    let image_argument = String.trim (get_string args "image" "") in
+    let execute = get_bool args "execute" false in
+    match resolve_gc_image image_argument with
+    | Error detail -> workflow_err ~tool_name ~start_time detail
+    | Ok claims_image ->
+      let registered_keeper name =
+        Option.is_some
+          (Config_dir_resolver.keeper_toml_path_opt_for_base_path
+             ~base_path:ctx.config.Workspace.base_path
+             name)
+      in
+      (match
+         Keeper_volume_gc.apple_keeper_volume_gc
+           ~run:(fun ~timeout_sec argv ->
+              (* The same boundary every keeper CLI spawn crosses: the
+                 environment is scrubbed of keeper-secret keys and the
+                 descriptor is accounted, so the operator tool cannot leak
+                 what a keeper lane would not see. *)
+              Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+                  Process_eio.run_argv_with_status_split
+                    ~timeout_sec
+                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                    ~cwd:(Config_dir_resolver.current_working_dir ())
+                    argv))
+           ~timeout_sec
+           ~registered_keeper
+           ~claims_image
+           ~execute
+       with
+       | Error detail ->
+         Tool_result.make_err
+           ~tool_name
+           ~class_:Tool_result.Runtime_failure
+           ~start_time
+           detail
+       | Ok report ->
+         Tool_result.make_ok
+           ~tool_name
+           ~start_time
+           ~data:(report_json execute (Option.is_some claims_image) report)
+           ())
+
 let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_result.result =
   match expect_no_args ~tool_name ~start_time args with
   | Error result -> result
@@ -180,6 +310,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Tool_schemas_misc.Misc_ask | Tool_schemas_misc.Misc_ask_status
         | Tool_schemas_misc.Misc_ask_withdraw | Tool_schemas_misc.Misc_config
         | Tool_schemas_misc.Misc_dashboard | Tool_schemas_misc.Misc_gc
+        | Tool_schemas_misc.Misc_sandbox_volume_gc
         | Tool_schemas_misc.Misc_keeper_waiting_inventory | Tool_schemas_misc.Misc_tool_help
         | Tool_schemas_misc.Misc_web_fetch | Tool_schemas_misc.Misc_web_search
         | Tool_schemas_misc.Misc_browser_tabs | Tool_schemas_misc.Misc_browser_read
@@ -281,6 +412,8 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_gc ->
       Some (handle_gc ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_sandbox_volume_gc ->
+      Some (handle_sandbox_volume_gc ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_tool_help ->
       Some (handle_tool_help ~schemas:ctx.help_schemas ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_ask ->
@@ -383,6 +516,9 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_ask_withdraw
   | Tool_schemas_misc.Misc_config
   | Tool_schemas_misc.Misc_gc
+  | (* Volume reclamation deletes volumes when asked to execute; the
+       report-only call is folded into the same classification. *)
+    Tool_schemas_misc.Misc_sandbox_volume_gc
   | (* A navigation reaches the web from a keeper-owned profile — the same
        classification the web fetch carries. *)
     Tool_schemas_misc.Misc_browser_goto

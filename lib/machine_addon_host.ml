@@ -71,6 +71,7 @@ let execution_machine operation arguments =
   | Some (Tool_schemas_misc.Misc_ask) | Some (Tool_schemas_misc.Misc_ask_status)
   | Some (Tool_schemas_misc.Misc_ask_withdraw) | Some (Tool_schemas_misc.Misc_config)
   | Some (Tool_schemas_misc.Misc_dashboard) | Some (Tool_schemas_misc.Misc_gc)
+  | Some (Tool_schemas_misc.Misc_sandbox_volume_gc)
   | Some (Tool_schemas_misc.Misc_keeper_waiting_inventory) | Some (Tool_schemas_misc.Misc_tool_help)
   | Some (Tool_schemas_misc.Misc_web_fetch) | Some (Tool_schemas_misc.Misc_web_search)
   | Some (Tool_schemas_misc.Misc_browser_tabs) | Some (Tool_schemas_misc.Misc_browser_read)

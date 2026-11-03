@@ -450,6 +450,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_close", broadcast_tool);
     ("masc_board_reopen", broadcast_tool);
     ("masc_gc", admin_tool);
+    (* Volume reclamation deletes retired keepers' disks; the report-only
+       call shares the tier so the tool is one surface, not two. *)
+    ("masc_sandbox_volume_gc", admin_tool);
     (* POST /api/v1/prompts. An override replaces a prompt for every keeper the
        runtime serves, so it carries the same admin permission as the other
        fleet-wide mutations here. *)

@@ -15,11 +15,10 @@ records, scope listings and body bytes are still read on every request. Changed,
 missing or unreadable bodies receive the current decoder's refusal. This reuse
 does not persist between scope scans or installations.
 
-The helper reads up to 4 stores at once, each in its own process. `--jobs N`
-changes the limit, and `--jobs 1` reads one store after another in the helper's
-own process. A store's `scan_started` line prints when its read begins. Its
-`scan_elapsed_s` line and report print in store order, after the reports of the
-stores before it, whatever N is.
+The helper reads one store after another in its own process. `--jobs N` reads
+up to N stores at once, each in its own process. A store's `scan_started` line
+prints when its read begins. Its `scan_elapsed_s` line and report print in
+store order, after the reports of the stores before it, whatever N is.
 
 `scan_failed` means the scan could not complete; it is not an empty store.
 `first refusal` is one example, not an inventory of every affected file.

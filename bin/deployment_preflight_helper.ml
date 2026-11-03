@@ -875,12 +875,11 @@ let media_reading_maintenance_cmd =
 module D = Masc.Keeper_durable_store
 module L = Masc.Lane_addon_store_preflight
 
-(* How many store scans read at once. In one sequential run on a real
-   workspace, three scans (Lane Add-on exact requests, Lane Add-on tool request
-   owners and the provider-input snapshots) took 95% of the elapsed time, and no
-   scan is split between processes. Four processes let one more scan read beside
-   those three. Other values were not measured. *)
-let default_scan_jobs = 4
+(* How many store scans read at once. The default stays sequential: on the one
+   real workspace measured so far, 4 processes read slower than 1 and used more
+   CPU (PR #47890 Evidence), so parallel reads stay opt-in through --jobs N
+   until a setup shows they help. *)
+let default_scan_jobs = 1
 
 (* What a scan hands back to the process that started it. Only plain data
    crosses: the scan itself stays in the process that runs it. *)

@@ -28,28 +28,6 @@ let workflow_rejection_result
     ~data
     (Yojson.Safe.to_string data)
 
-let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
-      ~action_s =
-  sync_owner_current_task_binding ctx;
-  sync_planning_current_task_with_owned_task ctx;
-  task_log_warn ~task_id
-    "transition rejected stale task_id for action=%s agent=%s; reconciled current task bindings"
-    action_s ctx.agent_name;
-  workflow_rejection_result
-    ~tool_name
-    ~start_time
-    ~rule_id:"stale_task_id_not_found"
-    ~extra_fields:
-      [ "task_id", `String task_id
-      ; "action", `String action_s
-      ; "requested_agent", `String ctx.agent_name
-      ; "stale_context", `Bool true
-      ]
-    (Printf.sprintf
-       "Task %s is absent from the live backlog; cleared stale current-task \
-        bindings and suppressed transition action=%s."
-       task_id action_s)
-
 let handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
@@ -120,60 +98,11 @@ let handle_transition ~tool_name ~start_time ctx args =
     log_task_transition_failed ~agent_name:ctx.agent_name err;
     result_to_response ~tool_name ~start_time (Error err)
   | Ok prepared ->
+  (* The lifecycle decides under the backlog lock. [task_opt] supplies
+     observation and metrics only. *)
   let task_opt =
     Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id
   in
-  match task_opt with
-  | None ->
-    missing_live_task_transition_rejection
-      ~tool_name
-      ~start_time
-      ctx
-      ~task_id
-      ~action_s
-  | Some task_before ->
-  (* The lifecycle checks ownership under the backlog lock. [task_before]
-     supplies observation/metrics only; it cannot admit or refuse submission. *)
-  let completion_state_error =
-    if (=) action Masc_domain.Done_action then
-      completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
-    else
-      None
-  in
-  match completion_state_error with
-  | Some err ->
-    log_task_transition_failed ~agent_name:ctx.agent_name err;
-    let message = Masc_domain.masc_error_to_string err in
-    let rule_id, recoverable =
-      (* Exhaustive, no catch-all: [completion_state_error] returns only
-         [Task] errors and only four of the five constructors, but a [_] arm
-         here would silently absorb a newly added variant into the generic
-         rule id instead of failing to compile. [recoverable] is decided in the
-         same arm as the rule id it belongs to. *)
-      match err with
-      | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
-        Some "task_done_requires_claimed_or_started", Some true
-      | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
-        Some "task_done_requires_current_owner", None
-      | Masc_domain.Task
-          (Masc_domain.Task_error.TransitionRejected _
-          | Masc_domain.Task_error.InvalidState _
-          | Masc_domain.Task_error.VerificationSuperseded _) ->
-        Some "task_done_invalid_lifecycle_state", None
-      | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
-        Some "task_done_task_not_found", None
-      | Masc_domain.Task (Masc_domain.Task_error.InvalidId _)
-      | Masc_domain.Agent _
-      | Masc_domain.Auth _
-      | Masc_domain.System _ -> Some "task_done_lifecycle_rejected", None
-    in
-    workflow_rejection_result
-      ~tool_name
-      ~start_time
-      ?rule_id
-      ?recoverable
-      message
-  | None ->
   match handoff_context with
   | Error error ->
       (* RFC-0189: handoff_context parse error — caller passed
@@ -182,16 +111,6 @@ let handle_transition ~tool_name ~start_time ctx args =
         ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time error
   | Ok handoff_context ->
-  if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
-     && Option.is_none handoff_context
-  then
-    (* RFC-0189: strict-release-without-handoff = workflow violation. *)
-    Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
-      ~tool_name ~start_time
-      "Strict task release requires handoff_context.summary"
-  else
-  let action_s = Masc_domain.task_action_to_string action in
   (* [now () -. 60.0] used to stand in whenever the status carried no usable
      start: Todo, Done, Cancelled, an unparseable timestamp, or no task at all.
      That number reaches [Metrics_store_eio] as [started_at] and the average is
@@ -255,11 +174,21 @@ let handle_transition ~tool_name ~start_time ctx args =
       ?handoff_context
       ()
   in
-  Result.iter
-    (fun _ ->
-       sync_owner_current_task_binding ctx;
-       sync_planning_current_task_with_owned_task ctx)
-    result;
+  (* A missing task leaves any binding that still points at it stale, so it
+     is reconciled the same way a committed transition is. *)
+  (match result with
+   | Ok _ | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) ->
+     sync_owner_current_task_binding ctx;
+     sync_planning_current_task_with_owned_task ctx
+   | Error
+       ( Masc_domain.Task
+           ( Masc_domain.Task_error.AlreadyClaimed _
+           | Masc_domain.Task_error.NotClaimed _
+           | Masc_domain.Task_error.InvalidState _
+           | Masc_domain.Task_error.InvalidId _
+           | Masc_domain.Task_error.TransitionRejected _
+           | Masc_domain.Task_error.VerificationSuperseded _ )
+       | Masc_domain.Agent _ | Masc_domain.Auth _ | Masc_domain.System _ ) -> ());
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->

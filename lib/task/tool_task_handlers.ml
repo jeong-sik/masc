@@ -118,8 +118,6 @@ include Tool_task_completion_review
 
 include Tool_task_args
 
-include Tool_task_contract_gate
-
 (* Handlers *)
 
 type task_skill_authoring_error =

@@ -886,19 +886,6 @@ let handle_keeper_task_tool_with_outcome
              (Keeper_tool_outcome.Error
                 { reason = "keeper_task_release rejected: task_id required" })
            "task_id is required.")
-    else if summary = ""
-    then
-      (* The next owner reads this and nothing else about where the work
-         stands, so an empty summary is refused here rather than stored. *)
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Workflow_rejection
-        (workflow_rejection_error_json
-           ~typed_outcome:
-             (Keeper_tool_outcome.Error
-                { reason = "keeper_task_release rejected: summary required" })
-           "summary is required. Say where the task stands so the next owner \
-            can start from it. Example: summary='reproduced on the merged-cell \
-            table, fix not started'.")
     else (
       let evidence_refs_field =
         match Json_util.assoc_member_opt "evidence_refs" args with

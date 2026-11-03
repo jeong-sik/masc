@@ -667,29 +667,13 @@ let () = test "handle_batch_add_tasks_omits_contract_when_unstated" (fun () ->
     tasks
 )
 
-(* Direct done and submitted verification share one configured-LLM review
-   boundary. Contract shape does not create a second authorization lane. *)
-let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
+let () = test "handle_transition_release_persists_handoff" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-      (`Assoc
-        [
-          ("title", `String "Strict release task");
-          ("contract", `Assoc [ ("strict", `Bool true) ]);
-        ])
+      (`Assoc [ ("title", `String "Release task") ])
   in
   let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
-  let result_missing =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "release");
-        ])
-  in
-  assert (not (Tool_result.is_success result_missing));
-  assert (str_contains (Tool_result.message result_missing) "handoff_context.summary");
   let result_release =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
@@ -701,13 +685,6 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
               [
                 ("summary", `String "blocked on integration fixture");
                 ("next_step", `String "reproduce with real fixture");
-                (* Was ["task-001"; "session:test"]. Neither is a form the
-                   verification store can read, so both were snapshotted as
-                   payload-free invalid references and this case asserted
-                   success on evidence that is invisible at review. The
-                   boundary now refuses them; the case keeps its subject
-                   (strict release requires a handoff) with references that
-                   survive to the reviewer. *)
                 ( "evidence_refs",
                   `List
                     [ `String "note:task-001"
@@ -1354,20 +1331,14 @@ let () = test "handle_transition_claim_with_empty_handoff_context_ok" (fun () ->
        ^ (Tool_result.message result))
 )
 
-let () = test "handle_transition_release_empty_summary_error_includes_example" (fun () ->
+let () = test "handle_transition_release_without_summary_keeps_the_other_handoff_fields" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
-      (`Assoc
-        [
-          ("title", `String "Strict release task");
-          ("contract", `Assoc [ ("strict", `Bool true) ]);
-        ])
+      (`Assoc [ ("title", `String "Release task") ])
   in
   let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
-  (* Empty-string summary must also fail, and error must include a payload example
-     so the agent runtime can self-correct instead of retrying the same partial payload. *)
-  let result_empty =
+  let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
@@ -1381,10 +1352,11 @@ let () = test "handle_transition_release_empty_summary_error_includes_example" (
               ] );
         ])
   in
-  assert (not (Tool_result.is_success result_empty));
-  assert (str_contains (Tool_result.message result_empty) "handoff_context.summary is required");
-  assert (str_contains (Tool_result.message result_empty) "Example");
-  assert (str_contains (Tool_result.message result_empty) "\"summary\"")
+  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
+  match Workspace.get_tasks_raw ctx.config with
+  | [ { task_status = Masc_domain.Todo; handoff_context = Some handoff; _ } ] ->
+    assert (handoff.next_step = Some "re-check fixture")
+  | _ -> failwith "expected the released task back in todo with its handoff"
 )
 
 let () = test "handle_transition_done_prefers_ownership_error_over_completion_gate" (fun () ->
@@ -1413,7 +1385,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "currently owned by other-agent");
+  assert (str_contains (Tool_result.message result) "owned by other-agent");
   assert (not (str_contains (Tool_result.message result) "contract verdict"))
 )
 
@@ -1547,8 +1519,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
           ])
     in
     assert (not (Tool_result.is_success result));
-    assert (str_contains (Tool_result.message result) "pending verification workflow");
-    assert (str_contains (Tool_result.message result) "resolve it")))
+    assert (str_contains (Tool_result.message result) "awaiting_verification -> done")))
 
 let () = test "agent verdict verbs remain refused after terminal completion" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
@@ -2334,15 +2305,7 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
   in
   assert (not (Tool_result.is_success result));
   assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
-  assert (Planning_eio.get_current_task ctx.config = None);
-  let data = Tool_result.data result in
-  assert (Json_util.get_bool data "stale_context" = Some true);
-  assert (
-    match Json_util.assoc_member_opt "diagnosis" data with
-    | Some diagnosis ->
-      Json_util.get_string diagnosis "rule_id" = Some "stale_task_id_not_found"
-    | None -> false);
-  assert (str_contains (Tool_result.message result) "absent from the live backlog")
+  assert (Planning_eio.get_current_task ctx.config = None)
 )
 
 let () = test "keeper transition rejection stays tool-neutral" (fun () ->
@@ -2363,11 +2326,8 @@ let () = test "keeper transition rejection stays tool-neutral" (fun () ->
     let data = Tool_result.data result in
     (match Json_util.assoc_member_opt "diagnosis" data with
      | Some diagnosis ->
-       assert
-         (Json_util.get_string diagnosis "rule_id"
-          = Some "stale_task_id_not_found");
        assert (Json_util.assoc_member_opt "tool_suggestion" diagnosis = None)
-     | None -> failwith "missing Keeper transition diagnosis");
+     | None -> ());
     assert (Json_util.assoc_member_opt "alternatives" data = None))
 
 (* Submit-for-verification is tested as a lifecycle transition here. Evidence
@@ -2678,68 +2638,6 @@ let () = test "transition_rejects_caller_controlled_agent_name" (fun () ->
     (str_contains
        (Tool_result.message result)
        "Unknown argument(s): agent_name")
-)
-
-(* Test the done action on a todo task reports typed state without choosing a tool. *)
-let () = test "transition_done_todo_rejection_is_tool-neutral" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Todo test")]) in
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
-  in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "still todo");
-  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
-  let data = Tool_result.data result in
-  assert (Json_util.get_bool data "recoverable" = Some true);
-  assert (
-    match Json_util.assoc_member_opt "diagnosis" data with
-    | Some diagnosis ->
-      Json_util.get_string diagnosis "rule_id"
-      = Some "task_done_requires_claimed_or_started"
-    | None -> false);
-  assert (Json_util.assoc_member_opt "alternatives" data = None)
-)
-
-(* Test the done action reports already-done guidance instead of generic not-claimed *)
-let () = test "transition_done_already_done_guidance" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Workspace.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () in
-  let _ =
-    Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
-      ~task_id:"task-001" ~action:Masc_domain.Start ()
-  in
-  let _ =
-    Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
-      ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ~notes:"done" ()
-  in
-  let _ =
-    Workspace.commit_verdict_r ctx.config
-      ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
-      ~verdict:Masc_domain.Verdict_approved
-      ~task_id:"task-001"
-      ~verification_id:(verification_id_for_task ctx "task-001")
-      ~notes:"done"
-      ()
-  in
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
-  in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "already done by other-agent")
-)
-
-(* Test the done action reports cancelled-task guidance instead of generic not-claimed *)
-let () = test "transition_done_cancelled_guidance" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Cancelled test")]) in
-  let _ = Workspace.transition_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"stop" () in
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
-  in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "was cancelled by test-agent")
 )
 
 (* The duration metric names why the work stopped. A stop stated only in

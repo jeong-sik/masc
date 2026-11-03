@@ -20,8 +20,7 @@ type = "string"
 required = true
 description = """
 Which transition to apply. claim takes an unclaimed Task; start moves your \
-claim into progress; release hands it back with a required \
-handoff_context.summary; cancel ends it with a reason. Completion goes \
+claim into progress; release hands it back; cancel ends it. Completion goes \
 through submit_for_verification with evidence in notes — done is refused \
 from every working status and cannot complete a Task here."""
 enum = ["claim", "start", "done", "cancel", "release", "submit_for_verification"]
@@ -62,8 +61,8 @@ description = "Why this Task should stop existing (used with action='cancel'). T
 name = "handoff_context"
 type = "object"
 description = """
-Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
-actions (submit_for_verification / release / cancel). On \
+Typed handoff payload. 'summary' is REQUIRED (non-empty) for \
+submit_for_verification and cancel. On \
 action='submit_for_verification', every 'evidence_refs' entry must use \
 'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
 'note:<text>' for narrative evidence, 'board:<post-id>' for a frozen thread, or \
@@ -80,10 +79,8 @@ persisted as typed invalid references. The list itself is optional. Example: \
 [[params.params]]
 name = "summary"
 type = "string"
-required = true
-min_length = 1
 description = """
-REQUIRED. Non-empty one-line summary of current state at release time. \
+One-line summary of where the Task stands. \
 Example: 'tests green, PR #123 pending review'."""
 
 [[params.params]]

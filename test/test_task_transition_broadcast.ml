@@ -431,10 +431,9 @@ let test_submit_defers_to_board () =
       (contents config ~baseline_seq))
 ;;
 
-(* [release_task_r] takes no [reason]: it forwards only [handoff_context], and
-   the production release tool requires one for a strict release. Driving the
-   real wrapper here rather than [transition] pins the entry point that was
-   publishing a bare "Released <id>" while holding the explanation. *)
+(* [release_task_r] takes no [reason]: it forwards only [handoff_context].
+   Driving the real wrapper here rather than [transition] pins the entry point
+   that was publishing a bare "Released <id>" while holding the explanation. *)
 let test_release_wrapper_broadcasts_its_handoff_reason () =
   with_test_env (fun config ~baseline_seq ->
     seed config
@@ -459,10 +458,9 @@ let test_release_wrapper_broadcasts_its_handoff_reason () =
       (contents config ~baseline_seq))
 ;;
 
-(* A strict release is rejected without [handoff_context.summary] while
-   [reason] stays optional, so a release whose whole explanation is its summary
-   is a valid and ordinary shape. Reading only [reason] published a bare
-   "Released <id>" and dropped text the caller was required to supply. *)
+(* A release whose whole explanation is its summary is an ordinary shape.
+   Reading only [reason] published a bare "Released <id>" and dropped the
+   caller's text. *)
 let test_release_broadcasts_a_summary_only_handoff () =
   with_test_env (fun config ~baseline_seq ->
     seed config

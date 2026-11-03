@@ -30,11 +30,9 @@ min_length = 1
 [[params]]
 name = "summary"
 type = "string"
-required = true
 description = """
 Where the task stands right now, in one line. The next owner starts from \
 this. Example: 'reproduced on the merged-cell table, fix not started'."""
-min_length = 1
 
 [[params]]
 name = "reason"
@@ -58,11 +56,10 @@ peer's sandbox file. Export binary files with keeper_artifact_transfer \
 and pass the exported objects through masc_keeper_delegate artifacts."""
 
 [help]
-short_description = "Hand your claimed task back to the backlog with a summary."
+short_description = "Hand your claimed task back to the backlog."
 when_to_use = "Use when you hold a task you cannot finish and it should go back so someone else can take it."
 key_constraints = [
   "Caller must own the task.",
-  "summary is required; the next owner starts from it.",
   "The task returns to the backlog and can be reclaimed. It is not cancelled.",
 ]
 details_markdown = "Issues release. Include evidence_refs to retain the current sources with your handoff; the next owner's claim preserves them and your attribution. Export files separately when the next owner needs their bytes."

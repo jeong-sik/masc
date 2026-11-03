@@ -829,6 +829,7 @@ let cors_expose_headers_value =
   String.concat ", "
     [ "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
     ; fst Workspace.read_precondition_admission_header
+    ; fst Server_utils.goal_tree_direct_read_header
     ; "x-masc-runtime-instance-id, x-masc-execution-publication-epoch" ]
 
 let cors_headers origin =
@@ -1306,8 +1307,15 @@ let with_read_workspace_precondition state handler request reqd =
       (fun () -> handler state request reqd)
   | Error error ->
     let json, status = read_workspace_precondition_error_response error in
-    Http_server_eio.Response.json_value ~status ~request
-      ~extra_headers:(public_read_cors_headers request) json reqd
+    (* The refusal is a small fixed envelope. Answer it without waiting for a
+       saturated projection pool, while honoring all encoding field lines. *)
+    let accept_encoding = Http_response_payload.accept_encoding_fields
+      (Httpun.Headers.get_multi request.headers "accept-encoding") in
+    let body, encoding_headers = Http_response_payload.compress_body ~accept_encoding
+      (Yojson.Safe.to_string json) in
+    Http_server_eio.Response.bytes ~status
+      ~headers:(public_read_cors_headers request @ encoding_headers)
+      ~content_type:"application/json; charset=utf-8" body reqd
 
 let rec with_public_read handler request reqd =
   match ready_server_state () with

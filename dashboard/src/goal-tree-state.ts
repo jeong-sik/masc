@@ -15,6 +15,10 @@ import type {
 } from './types'
 
 export const goalTreeData = signal<DashboardGoalsTreeResponse | null>(null)
+// Every published observation, including an error with the same message,
+// invalidates reads which started before it.
+export const goalTreeObservationRevision = signal(0)
+export function advanceGoalTreeObservation(): void { goalTreeObservationRevision.value += 1 }
 export const goalTreeLoading = signal(false)
 export const goalTreeError = signal<string | null>(null)
 export const goalTreeApprovalQueueState = signal<KeeperApprovalQueueState | null>(null)
@@ -29,6 +33,7 @@ export const goalStoreUnavailable = signal<GoalStoreUnavailable | null>(null)
 function applyUnavailableState(
   state: Extract<KeeperApprovalQueueState, { state: 'unavailable' }>,
 ): void {
+  advanceGoalTreeObservation()
   goalTreeApprovalQueueState.value = state
   goalStoreUnavailable.value = null
   goalTreeData.value = null
@@ -37,6 +42,7 @@ function applyUnavailableState(
 }
 
 export function hydrateGoalSourceUnavailable(unavailable: GoalSourceUnavailable): void {
+  advanceGoalTreeObservation()
   goalTreeApprovalQueueState.value = null
   goalTreeData.value = null
   goalTreeLoading.value = false
@@ -67,6 +73,7 @@ export function hydrateGoalTreeError(error: unknown): boolean {
 }
 
 export function hydrateGoalTreeObservationError(error: unknown): void {
+  advanceGoalTreeObservation()
   const detail = error instanceof Error
     ? error.message
     : typeof error === 'string' && error.length > 0
@@ -99,6 +106,7 @@ export function hydrateGoalTreeSnapshot(payload: unknown): boolean {
   if (!Array.isArray(candidate.tree) || !candidate.summary || typeof candidate.summary !== 'object') {
     return false
   }
+  advanceGoalTreeObservation()
   goalTreeApprovalQueueState.value = approvalQueueState
   goalStoreUnavailable.value = null
   goalTreeData.value = {

@@ -117,6 +117,13 @@ val install_planning_cache_invalidation : unit -> unit
 val dashboard_goals_tree_http_json :
   config:Workspace.config -> Yojson.Safe.t
 
+val direct_goals_tree_payload : scope:Mcp_server.workspace_scope -> accept_encoding:string option ->
+  (Yojson.Safe.t * string * (string * string) list, Yojson.Safe.t) result
+(** Generate, serialize and encode a fresh Goal tree on the CPU pool. Concurrent
+    callers share only work that starts after they arrive. This is not an
+    atomic snapshot across stores. *)
+val goal_tree_scope_current : Mcp_server.server_state -> Mcp_server.workspace_scope -> bool
+
 val goal_cache_scope : config:Workspace.config -> string
 (** Cache scope including the current canonical Goal store root. *)
 

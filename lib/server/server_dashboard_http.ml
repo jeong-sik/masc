@@ -729,6 +729,28 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
   Dashboard_goals.dashboard_goals_tree_json ~config
 ;;
 
+let direct_goals_tree_reads = Dashboard_fresh_read.create ()
+
+let direct_goals_tree_payload ~(scope : Mcp_server.workspace_scope) ~accept_encoding =
+  let encoding = match Http_response_payload.negotiate_encoding accept_encoding with
+    | Http_response_payload.Prefer_zstd -> "zstd"
+    | Http_response_payload.Prefer_gzip -> "gzip"
+    | Http_response_payload.Identity_only -> "identity" in
+  let key = "goals_tree_direct:" ^ Mcp_server.Workspace_scope_epoch.to_string scope.epoch ^ ":" ^ encoding in
+  let work = Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    let json = dashboard_goals_tree_http_json ~config:scope.config in
+    let body, headers = Http_response_payload.compress_body ~accept_encoding (Yojson.Safe.to_string json) in
+    json, body, headers) in
+  match Dashboard_cache.within_default_compute_window ~key (fun () ->
+    Dashboard_fresh_read.run direct_goals_tree_reads ~key work) with
+  | Ok payload -> Ok payload
+  | Error json -> Error json
+;;
+
+let goal_tree_scope_current state (scope : Mcp_server.workspace_scope) =
+  Mcp_server.Workspace_scope_epoch.equal scope.epoch (Mcp_server.workspace_scope state).epoch
+;;
+
 (* RFC-0474 L4d. The tree's key names the goal projection generation, so the
    read after any goal or measurement write found no entry and computed the
    tree in the read. On 2026-10-28 one such read took 9.3 s, and

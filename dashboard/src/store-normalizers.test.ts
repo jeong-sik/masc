@@ -167,6 +167,11 @@ describe('normalizeTaskStatus', () => {
     })
   })
 
+  it('preserves the exact Goal identity of a Task', () => {
+    expect(normalizeTask({ id: 'task-1', title: 'Task', goal_id: '\u00a0goal-a\u00a0' }))
+      .toMatchObject({ goal_id: '\u00a0goal-a\u00a0' })
+  })
+
   // PredecessorSection guards on this field and returns null when it is absent,
   // so dropping it here makes the lineage link unrenderable no matter what the
   // backend sends. The overlay's own test asserts on its source text, which

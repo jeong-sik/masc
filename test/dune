@@ -1797,6 +1797,11 @@
   yojson))
 
 (test
+ (name test_dashboard_fresh_read)
+ (modules test_dashboard_fresh_read)
+ (libraries alcotest masc.dashboard masc.masc_core masc.masc_eio_context eio eio_main eio.mock))
+
+(test
  (name test_dashboard_cache_lane)
  (modules test_dashboard_cache_lane)
  (libraries

@@ -50,6 +50,21 @@ let dashboard_error_json ?ok message =
   in
   `Assoc fields
 
+let respond_goal_tree_workspace_refusal req reqd error =
+  let json, status = Server_auth.read_workspace_precondition_error_response error in
+  (* This bounded refusal must not queue behind a busy read pool. *)
+  let body, headers = Http_response_payload.compress_body
+    ~accept_encoding:(Http_response_payload.accept_encoding_fields
+      (Httpun.Headers.get_multi req.Httpun.Request.headers "accept-encoding"))
+    (Yojson.Safe.to_string json) in
+  let admitted_name = fst Workspace.read_precondition_admission_header in
+  let other_headers = Http.Response.scoped_headers () |> List.filter (fun (name, _) ->
+    not (String.equal (String.lowercase_ascii name) admitted_name)) in
+  Http.Response.with_scoped_headers other_headers (fun () ->
+    Http.Response.bytes ~status ~headers:(headers @ public_read_cors_headers req)
+      ~content_type:"application/json; charset=utf-8" body reqd)
+;;
+
 let fusion_run_list_response ~registry =
   Server_dashboard_fusion_run_projection.list_response
     ~generated_at:(Masc_domain.now_iso ())
@@ -3171,13 +3186,34 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/goals" (fun state req reqd ->
-         let config = Mcp_server.workspace_config state in
+         let scope = Mcp_server.workspace_scope state in
+         let config = scope.config in
          match Server_auth.validate_read_workspace_precondition ~config req with
-         | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
+         | Ok Server_auth.Workspace_read_unbound ->
            Server_cached_read_http.respond ~request:req reqd (cached_goals_tree_payload ~config)
+         | Ok Server_auth.Workspace_read_matched ->
+           let accept_encoding = Http_response_payload.accept_encoding_fields
+             (Httpun.Headers.get_multi req.headers "accept-encoding") in
+           let json, body, encoding_headers = match direct_goals_tree_payload ~scope ~accept_encoding with
+             | Ok (json, body, headers) -> json, body, headers
+             | Error json ->
+               let body, headers = Http_response_payload.compress_body ~accept_encoding (Yojson.Safe.to_string json) in
+               json, body, headers in
+           let status = Http.Response.timeout_envelope_status_override ~status:`OK json in
+           let respond_changed_scope () =
+             respond_goal_tree_workspace_refusal req reqd Workspace.Workspace_precondition_failed in
+           let still_matched () = goal_tree_scope_current state scope &&
+             match Server_auth.validate_read_workspace_precondition ~config req with
+             | Ok Server_auth.Workspace_read_matched -> true
+             | Ok Server_auth.Workspace_read_unbound | Error _ -> false in
+           if still_matched () then
+             Http.Response.bytes ~status
+               ~headers:(encoding_headers @ ("cache-control", "private, no-store") ::
+                 Server_utils.goal_tree_direct_read_header :: public_read_cors_headers req)
+               ~content_type:"application/json; charset=utf-8" body reqd
+           else respond_changed_scope ()
          | Error error ->
-           let body, status = Server_auth.read_workspace_precondition_error_response error in
-           respond_json_value_with_cors ~status req reqd body
+           respond_goal_tree_workspace_refusal req reqd error
        )
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/candle" (fun state _actor req reqd ->
          let config = Mcp_server.workspace_config state in

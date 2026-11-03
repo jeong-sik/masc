@@ -269,6 +269,8 @@ describe('dashboardSlicesForRoute', () => {
   })
 
   it('subscribes execution for execution-heavy monitoring and planning routes', () => {
+    expect(dashboardSlicesForRoute({ tab: 'workspace', params: {} })).toContain('execution')
+    expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'work' } })).toContain('execution')
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
       .toContain('execution')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'observatory' } }))

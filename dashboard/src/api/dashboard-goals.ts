@@ -5,12 +5,14 @@ import { decodeGoalResumePhase } from './goal-lifecycle'
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
+import { exactGoalIds } from '../lib/goal-identity'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { asTrustDisposition } from '../lib/trust-disposition'
 import { get, getWithResponse } from './core'
 import { artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactWorkspace } from './published-artifacts'
 import { decodeKeeperApprovalQueueState } from './dashboard-gate'
 import { goalStoreUnavailableSummary } from '../lib/goal-store-unavailable-labels'
+import { observeGoalIds } from '../lib/goal-identity'
 import {
   GOAL_STORE_MIRROR_STATUSES,
   GOAL_STORE_RESET_STEPS,
@@ -187,7 +189,7 @@ function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
     status_color: asString(raw.status_color, ''),
     priority: asInt(raw.priority) ?? 0,
     assignee: asNullableString(raw.assignee),
-    goal_id: asNullableString(raw.goal_id),
+    goal_id: typeof raw.goal_id === 'string' && raw.goal_id !== '' ? raw.goal_id : null,
     is_terminal: asBoolean(raw.is_terminal, false),
     created_at: asString(raw.created_at, ''),
     updated_at: asString(raw.updated_at, ''),
@@ -232,7 +234,7 @@ function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEv
     ts_unix: asNumber(raw.ts_unix) ?? null,
     keeper_turn_id: asInt(raw.keeper_turn_id) ?? null,
     task_id: asNullableString(raw.task_id),
-    goal_ids: asStringArray(raw.goal_ids),
+    goal_ids: exactGoalIds(raw.goal_ids),
     title,
     summary,
     severity,
@@ -362,7 +364,8 @@ function decodeGoalMeasurement(
       }
       const decoded = {
         id: measurementText(record.id, 'id'),
-        goal_id: measurementText(record.goal_id, 'goal_id'),
+        goal_id: typeof record.goal_id === 'string' && record.goal_id !== ''
+          ? record.goal_id : measurementText(record.goal_id, 'goal_id'),
         criterion_revision: measurementText(record.criterion_revision, 'criterion_revision'),
         observed_value: measurementText(record.observed_value, 'observed_value'),
         evidence: measurementText(record.evidence, 'evidence'),
@@ -392,7 +395,8 @@ function decodeGoalMeasurement(
 
 function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
-  const id = asString(raw.id)
+  // An ID is an identity, not display text. Trimming can select another Goal.
+  const id = typeof raw.id === 'string' ? raw.id : undefined
   const title = asString(raw.title)
   const phase = asString(raw.phase)
   if (!id || !title || !phase) return null
@@ -415,11 +419,12 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     resume_phase: decodeGoalResumePhase(phase, raw.resume_phase),
     phase_color: asString(raw.phase_color, ''),
     goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, phase),
-    verification: decodeGoalProof(raw.verification),
+    verification: decodeGoalProof(raw.verification, id),
     priority: asInt(raw.priority) ?? 0,
     metric,
     target_value: targetValue,
     due_date: asNullableString(raw.due_date),
+    last_review_note: asNullableString(raw.last_review_note),
     criterion_revision: criterionRevision,
     measurement,
     tasks,
@@ -521,9 +526,15 @@ function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeRespo
   const summary = decodeGoalTreeSummary(raw.summary)
   if (!summary) return null
   const generatedAt = asString(raw.generated_at)
+  const observedIds = observeGoalIds(raw.tree, true)
+  const rawTotalGoals = isRecord(raw.summary) ? raw.summary.total_goals : undefined
+  const validTotal = typeof rawTotalGoals === 'number'
+    && Number.isSafeInteger(rawTotalGoals) && rawTotalGoals >= 0
+  const identity_observation = { ...observedIds, complete: observedIds.complete && validTotal
+    && observedIds.ids.length === rawTotalGoals }
   return generatedAt
-    ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary }
-    : { approval_queue_state: approvalQueueState, tree, summary }
+    ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary, identity_observation }
+    : { approval_queue_state: approvalQueueState, tree, summary, identity_observation }
 }
 
 function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {
@@ -549,10 +560,14 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
   return generatedAt ? { ...decoded, generated_at: generatedAt } : decoded
 }
 
-export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace): Promise<DashboardGoalsTreeResponse> {
-  const raw = workspace === undefined ? await get<unknown>('/api/v1/dashboard/goals') : await (async () => {
-    const result = await getWithResponse<unknown>(`/api/v1/dashboard/goals?${artifactWorkspaceQuery(workspace)}`, { consumeWithinTimeout: true })
+export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace, signal?: AbortSignal): Promise<DashboardGoalsTreeResponse> {
+  const raw = workspace === undefined ? await get<unknown>('/api/v1/dashboard/goals', signal ? { signal } : undefined) : await (async () => {
+    const result = await getWithResponse<unknown>(`/api/v1/dashboard/goals?${artifactWorkspaceQuery(workspace)}`,
+      { consumeWithinTimeout: true, reportCredentialRefusal: false, ...(signal ? { signal } : {}) })
     requireArtifactWorkspaceRead(result.headers)
+    if (result.headers.get('x-masc-goal-tree-read') !== 'direct-v1') {
+      throw new Error('현재 Goal 목록을 직접 조회했는지 확인할 수 없습니다.')
+    }
     return result.data
   })()
   const unavailable = goalSourceUnavailable(raw)
@@ -575,5 +590,6 @@ export async function fetchDashboardGoalDetail(goalId: string, workspace?: Artif
   if (unavailable !== null) throw new GoalSourceUnavailableError(unavailable)
   const decoded = decodeDashboardGoalDetailResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goal detail payload')
+  if (decoded.goal.id !== goalId) throw new Error('dashboard goal detail identity mismatch')
   return decoded
 }

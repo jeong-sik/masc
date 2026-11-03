@@ -147,6 +147,32 @@ let reset client exchange response =
 (* Two stream windows, so an unread response cannot flush its whole body. *)
 let payload=String.init 131070 (fun i -> Char.chr (97+i mod 26))
 
+let test_bound_goal_tree_compresses_before_capacity_reservation () =
+  let previous = Masc.Server_startup_state.snapshot () in
+  Fun.protect ~finally:(fun () -> Masc.Server_startup_state.For_testing.restore previous) (fun () ->
+    Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
+    with_listener H2_only ~capacity:4096 (fun ~gateway -> gateway) (fun ~connect ~port ->
+      let state = match Server_auth.For_testing.snapshot_server_state () with
+        | Some state -> state | None -> fail "fixture server has no workspace" in
+      let config = Masc.Mcp_server.workspace_config state in
+      (match Goal_store.upsert_goal config ~title:(String.make 32768 'g')
+         ~metric:"count" ~target_value:"1" () with
+       | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
+      let base = Unix.realpath config.base_path in
+      let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let path = Uri.with_query (Uri.of_string "/api/v1/dashboard/goals")
+          [ "expected_base_path", [base]; "expected_masc_root", [root] ] |> Uri.to_string in
+      let client = connect () in
+      let raw = request client ~port path |> response in
+      check int "uncompressed tree exceeds listener capacity" 503 (H2.Status.to_code raw.response.status);
+      ignore (read_complete raw);
+      let zipped = request ~headers:["accept-encoding", "gzip"] client ~port path |> response in
+      check int "compressed tree fits listener capacity" 200 (H2.Status.to_code zipped.response.status);
+      check (option string) "selected gzip" (Some "gzip") (H2.Headers.get zipped.response.headers "content-encoding");
+      let body = read_complete zipped in
+      check bool "gzip stream is present" true
+        (String.length body >= 2 && Char.code body.[0] = 0x1f && Char.code body.[1] = 0x8b)))
+
 let test_listener_shares_capacity mode () =
   let released,release=Eio.Promise.create () in
   let make_handler ~gateway:_ ~request_sw _ reqd =
@@ -455,6 +481,7 @@ let test_actual_subscription_route () =
       ping blocked))
 
 let ()=run "H2 listener response resources" ["actual listeners and MCP",[
+  test_case "bound Goal tree compresses before capacity reservation" `Quick test_bound_goal_tree_compresses_before_capacity_reservation;
   test_case "H2 listener shares capacity across TCP connections" `Quick (test_listener_shares_capacity H2_only);
   test_case "auto listener shares capacity across detected H2 connections" `Quick (test_listener_shares_capacity Auto);
   test_case "H2 listener refuses excess streams and reuses only released slots" `Quick (test_listener_stream_admission H2_only);

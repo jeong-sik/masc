@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { confirmationBinding, readGoalConfirmation, submitGoalConfirmation } from './goal-confirmation'
 import { clearStoredToken, get, setRejectedCredentialListener, setStoredToken } from './core'
+import { captureArtifactWorkspace } from './published-artifacts'
+import { fetchDashboardGoalsTree } from './dashboard-goals'
 
 const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
 const epoch = 'epoch-a'
@@ -18,6 +20,17 @@ const refusal = JSON.stringify({ error: 'invalid token', auth_error_code: 'inval
 afterEach(() => { setRejectedCredentialListener(null); clearStoredToken(); vi.unstubAllGlobals() })
 
 describe('Goal confirmation credential boundaries', () => {
+  it('does not let scoped workspace and Goal tree refusals invoke global credential recovery', async () => {
+    setStoredToken('fixture-token')
+    const rejected = vi.fn()
+    setRejectedCredentialListener(rejected)
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(refusal, { status: 401 })))
+    await expect(captureArtifactWorkspace('/workspace-a', undefined, { reportCredentialRefusal: false }))
+      .rejects.toMatchObject({ status: 401 })
+    await expect(fetchDashboardGoalsTree(workspace)).rejects.toMatchObject({ status: 401 })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(rejected).not.toHaveBeenCalled()
+  })
   it('rejects a different execution epoch before waiting for the proof body', async () => {
     let stream!: ReadableStreamDefaultController<Uint8Array>
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(

@@ -1,5 +1,7 @@
 
 (** Parse query param from request target *)
+let goal_tree_direct_read_header = "x-masc-goal-tree-read", "direct-v1"
+
 let query_param request key =
   let uri = Uri.of_string request.Httpun.Request.target in
   Uri.get_query_param uri key

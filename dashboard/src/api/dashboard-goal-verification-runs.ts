@@ -5,6 +5,7 @@
 import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 import { decodeGoalProofCriterion } from './goal-proof'
+import { nonblankGoalId } from '../lib/goal-identity'
 import type { GoalProofCriterion } from '../types/core'
 import {
   GOAL_STORE_MIRROR_STATUSES,
@@ -84,6 +85,12 @@ function nonEmptyString(value: unknown, context: string): string {
     protocolError(`${context} must be a non-empty string`)
   }
   return value
+}
+
+function goalIdString(value: unknown, context: string): string {
+  const id = nonblankGoalId(value)
+  if (id === undefined) protocolError(`${context} must be a non-empty Goal ID`)
+  return id
 }
 
 function finiteNonNegative(value: unknown, context: string): number {
@@ -178,7 +185,7 @@ function parseRun(raw: Record<string, unknown>, context: string): GoalVerificati
       : protocolError(`${context}.tools must be an array`)
   return {
     runId: nonEmptyString(raw.run_id, `${context}.run_id`),
-    goalId: nonEmptyString(raw.goal_id, `${context}.goal_id`),
+    goalId: goalIdString(raw.goal_id, `${context}.goal_id`),
     requestId: nonEmptyString(raw.request_id, `${context}.request_id`),
     criterion,
     evaluatedVerdict,

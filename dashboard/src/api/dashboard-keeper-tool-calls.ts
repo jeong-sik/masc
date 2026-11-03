@@ -2,6 +2,7 @@
 // Extracted from dashboard.ts. Public symbols re-exported from dashboard.ts.
 
 import { isRecord, asBoolean, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
+import { exactGoalIds } from '../lib/goal-identity'
 import { get, type AbortableRequestOptions } from './core'
 import { decodeTelemetryFreshnessMetadata, type TelemetryFreshnessMetadata } from './dashboard-shared'
 
@@ -307,7 +308,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
         : undefined,
     parent_tool_use_id:
       typeof raw.parent_tool_use_id === 'string' ? raw.parent_tool_use_id : undefined,
-    goal_ids: asStringArray(raw.goal_ids),
+    goal_ids: exactGoalIds(raw.goal_ids),
     runtime_contract: decodeRuntimeContract(raw.runtime_contract),
     action_radius: decodeActionRadius(raw.action_radius),
     route_evidence: decodeRouteEvidence(raw.route_evidence),

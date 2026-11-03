@@ -32,6 +32,7 @@ import type {
 import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-hot'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
+import { observeGoalIds, type GoalIdentityObservation } from './lib/goal-identity'
 import type { FusionRunEvidence } from './api/board'
 import { isAbortError } from './lib/async-state'
 import { normalizeKeepers } from './keeper-store-normalize'
@@ -47,6 +48,7 @@ import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from 
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import {
   goalTreeData,
+  advanceGoalTreeObservation,
   goalTreeError,
   goalTreeLoading,
   hydrateGoalSourceUnavailable,
@@ -328,6 +330,7 @@ export function removeBoardPost(postId: string | undefined): void {
 // --- Goals state ---
 
 export const goals = signal<Goal[]>([])
+export const goalIdentityObservation = signal<{ readonly goals: Goal[]; readonly observation: GoalIdentityObservation } | null>(null)
 export const goalsLoading = signal(false)
 
 // --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
@@ -792,17 +795,18 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
 }
 
 function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
-  goals.value = (Array.isArray(data.goals) ? data.goals : [])
+  const observedGoals = (Array.isArray(data.goals) ? data.goals : [])
     .map((row): Goal | null => {
       if (!isRecord(row)) return null
-      const id = asString(row.id)
+      // Preserve the stored Goal identity; action surfaces validate it.
+      const id = typeof row.id === 'string' ? row.id : undefined
       const title = asString(row.title)
       const phase = asString(row.phase)
       const createdAt = asString(row.created_at)
       const updatedAt = asString(row.updated_at)
       if (!id || !title || !phase || !createdAt || !updatedAt) return null
       return {
-        verification: decodeGoalProof(row.verification),
+        verification: decodeGoalProof(row.verification, id),
         resume_phase: decodeGoalResumePhase(phase, row.resume_phase),
         id,
         title,
@@ -818,6 +822,19 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       }
     })
     .filter((row): row is Goal => row !== null)
+  const observedIds = observeGoalIds(data.goals)
+  const rollup = data.rollup
+  const countFields = ['active_count', 'verifying_count', 'awaiting_confirmation_count',
+    'done_count', 'dropped_count', 'paused_count', 'blocked_count'] as const
+  const counts = isRecord(rollup) ? countFields.map(field => rollup[field]) : []
+  const completeCounts = counts.length === countFields.length
+    && counts.every((count): count is number => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
+  const observation = { ...observedIds, complete: observedIds.complete && completeCounts
+    && (counts as number[]).reduce((total, count) => total + count, 0) === observedIds.ids.length }
+  batch(() => {
+    goals.value = observedGoals
+    goalIdentityObservation.value = { goals: observedGoals, observation }
+  })
 }
 
 export function hydratePlanningSnapshot(
@@ -1530,6 +1547,7 @@ export async function refreshGoals(): Promise<void> {
       // Any failure invalidates the combined goal/tree snapshot so consumers
       // do not act on stale or partially-hydrated data.
       goals.value = []
+      advanceGoalTreeObservation()
       goalTreeData.value = null
       lastGoalsRefreshAt.value = null
       goalTreeError.value = errors.join('; ')

@@ -82,23 +82,81 @@ afterEach(() => {
 })
 
 describe('fetchDashboardGoalsTree decoding', () => {
-  it('requires a workspace attestation for a bound tree and detail', async () => {
+  it.each([1.9, '1', '1junk', -1, null, undefined])(
+    'does not treat a malformed raw Goal count %s as a complete identity observation',
+    async totalGoals => {
+      getMock.mockResolvedValueOnce({
+        ...readyApprovalQueue,
+        tree: [validNode('goal-a', 'Goal')],
+        summary: { ...emptySummary(), total_goals: totalGoals },
+      })
+      const result = await fetchDashboardGoalsTree()
+      expect(result.identity_observation).toEqual({ ids: ['goal-a'], complete: false })
+    },
+  )
+
+  it('accepts a matching raw integer Goal count as a complete identity observation', async () => {
+    getMock.mockResolvedValueOnce({
+      ...readyApprovalQueue,
+      tree: [validNode('goal-a', 'Goal')],
+      summary: { ...emptySummary(), total_goals: 1 },
+    })
+    expect((await fetchDashboardGoalsTree()).identity_observation).toEqual({ ids: ['goal-a'], complete: true })
+  })
+
+  it('retains the review note from the same Goal tree node', async () => {
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue,
+      tree: [validNode('goal-a', 'Goal', { last_review_note: 'Needs evidence' })],
+      summary: { ...emptySummary(), total_goals: 1 },
+    })
+    expect((await fetchDashboardGoalsTree()).tree[0]?.last_review_note).toBe('Needs evidence')
+  })
+
+  it('retains exact IDs and refuses a detail response for a different ID', async () => {
+    getMock.mockResolvedValueOnce({
+      ...readyApprovalQueue,
+      tree: [validNode('goal-a', 'Canonical'), validNode(' goal-a ', 'Padded')],
+      summary: emptySummary(),
+    })
+    const tree = await fetchDashboardGoalsTree()
+    expect(tree.tree.map(node => node.id)).toEqual(['goal-a', ' goal-a '])
+    getMock.mockResolvedValueOnce({
+      ...readyApprovalQueue, goal: validNode('goal-a', 'Canonical'),
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    await expect(fetchDashboardGoalDetail(' goal-a ')).rejects.toThrow('identity mismatch')
+  })
+
+  it('retains exact Goal IDs on decoded linked Tasks', async () => {
+    getMock.mockResolvedValueOnce({
+      ...readyApprovalQueue,
+      tree: [validNode('\u00a0goal-a\u00a0', 'Unicode Goal', { tasks: [
+        validTask('task-a', 'Task', { goal_id: '\u00a0goal-a\u00a0' }),
+      ] })], summary: emptySummary(),
+    })
+    expect((await fetchDashboardGoalsTree()).tree[0]?.tasks[0]?.goal_id).toBe('\u00a0goal-a\u00a0')
+  })
+
+  it('requires workspace and direct-read attestations for a bound tree', async () => {
     const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
     getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers: new Headers() })
     await expect(fetchDashboardGoalsTree(workspace)).rejects.toThrow('작업 공간 확인')
-    const headers = new Headers({ 'x-masc-workspace-read': 'matched-v1' })
+    const workspaceOnly = new Headers({ 'x-masc-workspace-read': 'matched-v1' })
+    getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers: workspaceOnly })
+    await expect(fetchDashboardGoalsTree(workspace)).rejects.toThrow('직접 조회')
+    const headers = new Headers({ 'x-masc-workspace-read': 'matched-v1', 'x-masc-goal-tree-read': 'direct-v1' })
     getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers })
     const tree = await fetchDashboardGoalsTree(workspace)
     expect(tree.tree[0]?.id).toBe('goal-measured')
-    expect(getWithResponseMock.mock.calls[1]![0]).toContain('expected_base_path=%2Fworkspace-a')
-    expect(getWithResponseMock.mock.calls[1]![1]).toEqual({ consumeWithinTimeout: true })
+    expect(getWithResponseMock.mock.calls[2]![0]).toContain('expected_base_path=%2Fworkspace-a')
+    expect(getWithResponseMock.mock.calls[2]![1]).toEqual({ consumeWithinTimeout: true, reportCredentialRefusal: false })
     getWithResponseMock.mockResolvedValueOnce({
       data: { approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
         linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] }, headers,
     })
     expect((await fetchDashboardGoalDetail('goal-measured', workspace)).goal.id).toBe('goal-measured')
-    expect(getWithResponseMock.mock.calls[2]![0]).toContain('expected_masc_root=%2Fworkspace-a%2F.masc')
-    expect(getWithResponseMock.mock.calls[2]![1]).toEqual({ consumeWithinTimeout: true })
+    expect(getWithResponseMock.mock.calls[3]![0]).toContain('expected_masc_root=%2Fworkspace-a%2F.masc')
+    expect(getWithResponseMock.mock.calls[3]![1]).toEqual({ consumeWithinTimeout: true })
   })
 
   it('preserves current criterion measurements through tree and detail fetches', async () => {
@@ -423,6 +481,18 @@ function verificationRecord(completion: unknown) {
 }
 
 describe('Goal proof projection through tree and detail APIs', () => {
+  it('binds proof to the exact Goal ID, including IDs outside JavaScript trim semantics', async () => {
+    const id = '\u00a0'
+    const verification = { goal_id: id, updated_at: '2026-09-09T00:00:00Z', completion: { state: 'idle' } }
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, tree: [validNode(id, 'Goal', { verification })],
+      summary: { ...emptySummary(), total_goals: 1 } })
+    expect((await fetchDashboardGoalsTree()).tree[0]?.verification).toMatchObject({ state: 'current', completion: { state: 'idle' } })
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, tree: [validNode(id, 'Goal', {
+      verification: { ...verification, goal_id: 'other-goal' },
+    })], summary: { ...emptySummary(), total_goals: 1 } })
+    expect((await fetchDashboardGoalsTree()).tree[0]?.verification?.state).toBe('unreadable')
+  })
+
   it.each([
     ['idle', verificationRecord({ state: 'idle' }), 'current', 'idle'],
     ['pending', verificationRecord({ state: 'proof_pending', criterion: proofCriterion,

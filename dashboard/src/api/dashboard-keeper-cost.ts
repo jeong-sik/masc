@@ -6,6 +6,7 @@ import { get, type AbortableRequestOptions } from './core'
 import { isRecord, asInt, asNumber, asNullableString, asString, asStringArray, asRecordArray } from '../components/common/normalize'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import { decodeDashboardFeedMetadata, type DashboardFeedMetadata } from './dashboard-shared'
+import { nonblankGoalId } from '../lib/goal-identity'
 
 const REDACTED_RUNTIME_LABEL = 'runtime'
 const UNKNOWN_MODEL_LABEL = 'unknown_model'
@@ -244,8 +245,9 @@ function decodeKeeperDecisionContext(raw: unknown): KeeperDecisionContext | null
   if (filePath !== null) context.file_path = filePath
   const line = asNumber(raw.line)
   if (line !== undefined) context.line = line
+  const goalId = nonblankGoalId(raw.goal_id)
+  if (goalId !== undefined) context.goal_id = goalId
   const stringFields = [
-    ['goal_id', 'goal_id'],
     ['task_id', 'task_id'],
     ['board_post_id', 'board_post_id'],
     ['comment_id', 'comment_id'],

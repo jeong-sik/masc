@@ -5,7 +5,7 @@ import type { RouteState } from './types'
 export function routeRequiresExecutionAuthority(route: Pick<RouteState, 'tab' | 'params'>): boolean {
   const { tab, params } = route
   switch (tab) {
-    case 'workspace': return params.section === 'artifacts'
+    case 'workspace': return !params.section || params.section === 'work' || params.section === 'artifacts'
     case 'monitoring':
       switch (params.section) {
         case 'skills':

@@ -1,4 +1,5 @@
 import { isRecord } from '../components/common/normalize'
+import { isCanonicalGoalId } from '../lib/goal-identity'
 import type { GoalProof, GoalProofCompletion, GoalProofCriterion } from '../types/core'
 
 function nonblank(value: unknown): value is string {
@@ -48,11 +49,11 @@ function completion(raw: unknown): GoalProofCompletion | null {
   }
 }
 
-export function decodeGoalProof(raw: unknown): GoalProof {
+export function decodeGoalProof(raw: unknown, goalId: string): GoalProof {
   if (!isRecord(raw)) return { state: 'unreadable', detail: '검증 원장이 응답에 없습니다' }
   if (raw.state === 'ledger_error' && nonblank(raw.detail))
     return { state: 'unreadable', detail: raw.detail }
-  if (!nonblank(raw.goal_id) || !nonblank(raw.updated_at) || !isRecord(raw.completion))
+  if (!isCanonicalGoalId(goalId) || raw.goal_id !== goalId || !nonblank(raw.updated_at) || !isRecord(raw.completion))
     return { state: 'unreadable', detail: '검증 원장의 필드가 올바르지 않습니다' }
   if (raw.completion.state === 'stale_criterion') {
     const historical = completion(raw.completion.historical_completion)

@@ -863,6 +863,7 @@ export type GetOptions = AbortableRequestOptions & {
   includeActorHeader?: boolean
   extraHeaders?: Record<string, string>
   consumeWithinTimeout?: boolean
+  reportCredentialRefusal?: boolean
 }
 
 async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean): Promise<T> {
@@ -884,6 +885,7 @@ async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean)
     ...(anonymous ? { credentials: 'omit' as const } : {}),
     cache: readCacheMode(path),
     signal: opts.signal,
+    reportCredentialRefusal: opts.reportCredentialRefusal,
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
   if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)

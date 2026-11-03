@@ -630,7 +630,6 @@ let () = test "dispatch_claim_next" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test handle_done triggers calibration logging (#3164) *)
 let () = test "handle_add_task_persists_contract" (fun () ->
   let ctx = make_test_ctx () in
   let result =
@@ -2744,24 +2743,12 @@ let () = test "transition_rejects_caller_controlled_agent_name" (fun () ->
        "Unknown argument(s): agent_name")
 )
 
-(* Test handle_done returns owner guidance when another agent owns the task *)
-let () = test "handle_done_owned_by_other_guidance" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
-  let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
-  in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "currently owned by other-agent")
-)
-
-(* Test handle_done on a todo task reports typed state without choosing a tool. *)
-let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
+(* Test the done action on a todo task reports typed state without choosing a tool. *)
+let () = test "transition_done_todo_rejection_is_tool-neutral" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Todo test")]) in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "still todo");
@@ -2777,8 +2764,8 @@ let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
   assert (Json_util.assoc_member_opt "alternatives" data = None)
 )
 
-(* Test handle_done reports already-done guidance instead of generic not-claimed *)
-let () = test "handle_done_already_done_guidance" (fun () ->
+(* Test the done action reports already-done guidance instead of generic not-claimed *)
+let () = test "transition_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
   let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
@@ -2800,19 +2787,19 @@ let () = test "handle_done_already_done_guidance" (fun () ->
       ()
   in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "already done by other-agent")
 )
 
-(* Test handle_done reports cancelled-task guidance instead of generic not-claimed *)
-let () = test "handle_done_cancelled_guidance" (fun () ->
+(* Test the done action reports cancelled-task guidance instead of generic not-claimed *)
+let () = test "transition_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Cancelled test")]) in
   let _ = Workspace.transition_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"stop" () in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "was cancelled by test-agent")

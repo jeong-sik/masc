@@ -50,24 +50,7 @@ let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
         bindings and suppressed transition action=%s."
        task_id action_s)
 
-let rec handle_done ~tool_name ~start_time ctx args =
-  let notes = get_string args "notes" "" in
-  let evidence_refs = get_string_list args "evidence_refs" in
-  handle_transition ~tool_name ~start_time ctx
-    (`Assoc
-       [
-         ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
-         ("action", `String "done");
-         ("notes", `String notes);
-         ("handoff_context",
-          `Assoc
-            [
-              ("summary", `String notes);
-              ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
-            ]);
-       ])
-
-and handle_transition ~tool_name ~start_time ctx args =
+let handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Client_identity and must not
@@ -238,23 +221,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         | Masc_domain.Cancelled _ -> (None, []))
     | None -> (None, [])
   in
-  let completion_owner =
-    match task_opt with
-    | Some task ->
-      Option.value
-        ~default:ctx.agent_name
-        (Masc_domain.task_assignee_of_status task.task_status)
-    | None -> ctx.agent_name
-  in
-  let completion_collaborators =
-    (* The approve branch is gone: it added the approving agent to the task's
-       collaborator set, which only made sense while a keeper could be the
-       verifier. A completion authority is not an agent and never joins it. *)
-    collaborators_from_task
-  in
-  (* The pre-transition verification_id capture (issue #7543) is gone with the
-     approve/reject actions: no agent transition consumes an AwaitingVerification
-     state any more, so there is nothing to snapshot before it changes. *)
   (* Bind the receipt to the request created by this transition, before its
      notification can race with a verdict or another submission. An ordinary
      diagnostic read failure does not reject submission; cancellation still
@@ -313,18 +279,6 @@ and handle_transition ~tool_name ~start_time ctx args =
      The transition itself is already recorded elsewhere; this hook exists to
      measure duration. *)
   (match result, action, started_at_actual with
-   | Ok _, Masc_domain.Done_action, Some started_at ->
-       (Atomic.get Workspace_hooks.record_task_metric_fn)
-         ctx.config
-         ~agent_id:completion_owner
-         ~task_id
-         ~started_at
-         ~completed_at:(Some (Time_compat.now ()))
-         ~terminal:Task_outcome_measurement.Approved
-         ~error_message:None
-         ~collaborators:completion_collaborators
-         ~handoff_from:None
-         ~handoff_to:None
    | Ok _, Masc_domain.Cancel, Some started_at ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
@@ -346,9 +300,9 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~collaborators:collaborators_from_task
          ~handoff_from:None
          ~handoff_to:None
-  | Ok _, (Masc_domain.Done_action | Masc_domain.Cancel), None
+  | Ok _, Masc_domain.Cancel, None
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Release), _
+            | Masc_domain.Release | Masc_domain.Done_action), _
   | Error _, _, _ -> ());
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected rejection)) ->

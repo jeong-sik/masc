@@ -23,8 +23,6 @@ val handle_batch_add_tasks :
   Tool_result.result
 val handle_claim : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_claim_next : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_done :
-  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_transition :
   tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 val task_history_events_json :

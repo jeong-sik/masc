@@ -121,6 +121,11 @@ let summary = function
       Printf.sprintf "chat(%s,%s)" keeper (Option.value ~default:"-" connector)
   | Observer.Event (Observer.Keeper_memory_journal_appended { keeper; _ }) ->
       "memory(" ^ keeper ^ ")"
+  | Observer.Event (Observer.Keeper_runtime_journal_appended { keeper; journal; _ }) ->
+      Printf.sprintf "runtime_journal(%s,%s)" keeper
+        (match journal with
+         | Observer.Native_tasks_journal -> "native_tasks"
+         | Observer.Child_content_journal -> "child_content")
   | Observer.Event (Observer.Keeper_chat_stream_frame { keeper; frame; _ }) ->
       Printf.sprintf "stream(%s,%s)" keeper (Option.value ~default:"-" frame)
   | Observer.Event (Observer.Keeper_turn_stream_frame { keeper; turn_ref; _ }) ->
@@ -478,6 +483,38 @@ let test_only_a_chat_appended_event_names_a_reload_keeper () =
        ]);
   check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
     (reload_keepers [ chat_appended_frame ])
+
+(* Server shape: keeper_runtime_journal_broadcast.ml writes the keeper in
+   "name". *)
+let native_tasks_frame =
+  "data: {\"type\":\"keeper_native_tasks_appended\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507576.0}\n\n"
+
+let child_content_frame =
+  "data: {\"type\":\"keeper_child_content_appended\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507576.0}\n\n"
+
+let test_only_a_runtime_journal_event_names_a_runtime_journal () =
+  check (list string) "the journal frames decode with their keeper and journal"
+    [ "runtime_journal(lane-smith,native_tasks)"; "runtime_journal(lane-smith,child_content)" ]
+    (List.map summary (decode_all [ native_tasks_frame; child_content_frame ]));
+  let journals frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.runtime_journal_appended event
+         | Observer.Undecodable _ -> None)
+  in
+  check int "both name a journal" 2 (List.length (journals [ native_tasks_frame; child_content_frame ]));
+  check int "a memory journal or chat frame names none" 0
+    (List.length (journals [ memory_journal_frame; chat_appended_frame ]));
+  check (list string) "neither reloads the chat history or the memory journal" []
+    (decode_all [ native_tasks_frame; child_content_frame ]
+     |> List.filter_map (function
+          | Observer.Event event ->
+            (match Observer.chat_appended_keeper event, Observer.memory_journal_appended_keeper event with
+             | None, None -> None
+             | Some keeper, _ | _, Some keeper -> Some keeper)
+          | Observer.Undecodable _ -> None))
 
 let test_only_a_memory_journal_event_names_a_journal_keeper () =
   check (list string) "the journal frame decodes with its keeper"
@@ -1104,6 +1141,8 @@ let () =
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "only a memory journal event names a journal keeper" `Quick
             test_only_a_memory_journal_event_names_a_journal_keeper
+        ; test_case "only a runtime journal event names a runtime journal" `Quick
+            test_only_a_runtime_journal_event_names_a_runtime_journal
         ; test_case "only a board notification names a board change" `Quick
             test_only_a_board_notification_names_a_board_change
         ; test_case "only a Gate change changes the Gate snapshot" `Quick

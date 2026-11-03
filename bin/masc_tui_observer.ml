@@ -33,6 +33,9 @@ let session_id_of_headers headers =
   | Some _ | None ->
       Error "initialize answered without an Mcp-Session-Id header"
 
+(* The two journals a Keeper's runtime fills beside its chat. *)
+type runtime_journal = Native_tasks_journal | Child_content_journal
+
 type agent_core_kind =
   | Tool_called
   | Tool_completed
@@ -137,6 +140,9 @@ type event =
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_memory_journal_appended of { keeper : string; at : float }
+  (* A Keeper's native task or child content journal took a record. *)
+  | Keeper_runtime_journal_appended of
+      { keeper : string; journal : runtime_journal; at : float }
   | Keeper_chat_stream_frame of
       { keeper : string
       ; operation_id : string
@@ -198,7 +204,7 @@ let chat_appended_keeper = function
   | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
-  | Keeper_composite_changed _ | Keeper_memory_journal_appended _
+  | Keeper_composite_changed _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_async_requests_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _ | Approval_change _
@@ -207,7 +213,7 @@ let chat_appended_keeper = function
 
 let composite_changed_keeper = function
   | Keeper_composite_changed { keeper; _ } -> Some keeper
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
@@ -218,7 +224,7 @@ let composite_changed_keeper = function
 
 let tool_call_keeper = function
   | Keeper_tool_call { kt_keeper; _ } -> Some kt_keeper
-  | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _
+  | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
@@ -229,6 +235,7 @@ let tool_call_keeper = function
 
 let memory_journal_appended_keeper = function
   | Keeper_memory_journal_appended { keeper; _ } -> Some keeper
+  | Keeper_runtime_journal_appended _
   | Keeper_chat_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -245,7 +252,7 @@ let held_calls_changed = function
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _
       | Keeper_asks_changed _ | Installation_asks_changed _ | Pending_confirms_changed )
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -261,7 +268,7 @@ let tool_modes_changed = function
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _
       | Pending_confirms_changed )
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -273,7 +280,7 @@ let tool_modes_changed = function
 
 let async_requests_changed = function
   | Keeper_async_requests_changed _ -> true
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -282,9 +289,21 @@ let async_requests_changed = function
   | Lane_resource _ | Snapshot _ | Other _ ->
       false
 
+let runtime_journal_appended = function
+  | Keeper_runtime_journal_appended { keeper; journal; _ } -> Some (keeper, journal)
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedules_changed | Board_changed _
+  | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
+      None
+
 let schedules_changed = function
   | Schedules_changed -> true
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -300,7 +319,7 @@ let pending_confirms_changed = function
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -316,7 +335,7 @@ let asks_changed = function
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ | Pending_confirms_changed )
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -328,7 +347,7 @@ let asks_changed = function
 
 let board_changed_post = function
   | Board_changed { post_id } -> Some post_id
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -346,7 +365,7 @@ let gate_snapshot_changed = function
   | Approval_change
       ( Tool_approval_waits_changed _ | Tool_approval_mode_changed _ | Keeper_asks_changed _
       | Installation_asks_changed _ | Pending_confirms_changed )
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -789,6 +808,16 @@ let reading_of_type type_name =
           | Some declaration_id ->
               Ok (Approval_change (Installation_asks_changed { declaration_id }))
           | None -> Error (event ^ " carries no declaration_id"))
+  | event when String.equal event Masc.Keeper_runtime_journal_broadcast.native_tasks_appended_event ->
+      From_fields
+        (fun fields ->
+          decode_named_keeper_event ~event fields (fun ~keeper ~at ->
+              Keeper_runtime_journal_appended { keeper; journal = Native_tasks_journal; at }))
+  | event when String.equal event Masc.Keeper_runtime_journal_broadcast.child_content_appended_event ->
+      From_fields
+        (fun fields ->
+          decode_named_keeper_event ~event fields (fun ~keeper ~at ->
+              Keeper_runtime_journal_appended { keeper; journal = Child_content_journal; at }))
   | "keeper_memory_journal_appended" as event ->
       From_fields
         (fun fields ->

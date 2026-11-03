@@ -8840,6 +8840,91 @@ let launch_owed_keeper_schedules state ~mailbox =
             Some { owed with kso_read = Masc_tui_owed_read.started read }
       end
 
+(* The Keeper whose chat pane is open; its native tasks and child content are
+   drawn beside the transcript. *)
+let chat_keeper_on_screen state =
+  match state.view with
+  | Keepers Keeper_message -> state.msg_target_keeper_name
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs ->
+      None
+
+(* The chat pane's journals read when the pane opens on a Keeper, when the
+   server announces a record in one, on a revalidation or a resumed
+   authority, and again after a failed read (RFC-0480 §3.1). *)
+let owe_chat_journal owed ~keeper =
+  let read =
+    match owed with
+    | Some { cjo_keeper; cjo_read } when String.equal cjo_keeper keeper -> cjo_read
+    | Some _ | None -> Masc_tui_owed_read.settled
+  in
+  Some { cjo_keeper = keeper; cjo_read = Masc_tui_owed_read.changed read }
+
+let owe_chat_journal_read state ~keeper = function
+  | Masc_tui_observer.Native_tasks_journal ->
+      state.chat_native_tasks_owed <- owe_chat_journal state.chat_native_tasks_owed ~keeper
+  | Masc_tui_observer.Child_content_journal ->
+      state.chat_child_content_owed <- owe_chat_journal state.chat_child_content_owed ~keeper
+
+let owe_chat_journal_reads state =
+  Option.iter
+    (fun keeper ->
+      owe_chat_journal_read state ~keeper Masc_tui_observer.Native_tasks_journal;
+      owe_chat_journal_read state ~keeper Masc_tui_observer.Child_content_journal)
+    (chat_keeper_on_screen state)
+
+let settle_chat_journal owed ~keeper ~succeeded =
+  match owed with
+  | Some ({ cjo_keeper; cjo_read } as owed) when String.equal cjo_keeper keeper ->
+      Some
+        { owed with
+          cjo_read =
+            (if succeeded then Masc_tui_owed_read.succeeded cjo_read else failed_read cjo_read) }
+  | Some _ | None -> owed
+
+(* One journal's record follows the pane: a Keeper no longer shown drops it,
+   and the pane opening on a Keeper owes the read, which a read already on
+   the wire for it answers. A read on the wire is let finish first; one that
+   will not deliver leaves the read owed. *)
+let follow_chat_journal owed ~on_screen ~reading ~launch =
+  match on_screen with
+  | None -> None
+  | Some keeper ->
+      let busy = reading keeper in
+      let owed =
+        match owed with
+        | Some ({ cjo_keeper; _ } as owed) when String.equal cjo_keeper keeper -> owed
+        | Some _ | None ->
+            let read = Masc_tui_owed_read.changed Masc_tui_owed_read.settled in
+            { cjo_keeper = keeper;
+              cjo_read = (if busy then Masc_tui_owed_read.started read else read) }
+      in
+      let read = if busy then owed.cjo_read else Masc_tui_owed_read.abandoned owed.cjo_read in
+      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && (not busy) && launch keeper
+      then Some { owed with cjo_read = Masc_tui_owed_read.started read }
+      else Some { owed with cjo_read = read }
+
+(* Runs on every loop iteration. *)
+let launch_owed_chat_journals state ~mailbox =
+  let on_screen = chat_keeper_on_screen state in
+  let ready = server_authority_ready state in
+  let native_reading keeper_name = List.mem_assoc keeper_name state.msg_native_tasks_inflight in
+  let child_reading keeper_name = List.mem_assoc keeper_name state.msg_child_content_inflight in
+  state.chat_native_tasks_owed <-
+    follow_chat_journal state.chat_native_tasks_owed ~on_screen ~reading:native_reading
+      ~launch:(fun keeper_name ->
+        ready
+        && (launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
+            native_reading keeper_name));
+  state.chat_child_content_owed <-
+    follow_chat_journal state.chat_child_content_owed ~on_screen ~reading:child_reading
+      ~launch:(fun keeper_name ->
+        ready
+        && (launch_keeper_child_content_load state ~mailbox ~keeper_name;
+            child_reading keeper_name))
+
 let apply_board_hearths_load state result =
   Masc_tui_types.apply_board_census_load state result;
   match result with
@@ -17190,13 +17275,6 @@ let launch_ask_followup_load state ~mailbox =
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
   if server_authority_ready state then begin
   launch_ask_followup_load state ~mailbox;
-  (* Independent task observations continue while reading older chat rows.
-     Root-turn settlement and history scroll do not own their lifecycle. *)
-  (if needs.Masc_tui_types.needs_keeper_chat then
-     Option.iter (fun keeper_name ->
-         launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
-         launch_keeper_child_content_load state ~mailbox ~keeper_name)
-       state.msg_target_keeper_name);
   (* An operator who consented in a browser is standing in front of a tab
      that does not know it happened: the callback lands on the server, not
      here. So while a login this TUI started is still outstanding, the tick
@@ -17915,7 +17993,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_tool_modes_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
-       owe_keeper_schedules_read state
+       owe_keeper_schedules_read state;
+       owe_chat_journal_reads state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -18286,6 +18365,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_pending_confirms_read state;
     owe_schedules_read state;
     owe_keeper_schedules_read state;
+    owe_chat_journal_reads state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21886,6 +21966,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let async_requests_changed = ref false in
       let pending_confirms_changed = ref false in
       let schedules_changed = ref false in
+      let runtime_journals = ref [] in
       let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
@@ -21976,6 +22057,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
               if Masc_tui_observer.schedules_changed event then schedules_changed := true;
+              Option.iter (fun appended -> runtime_journals := appended :: !runtime_journals)
+                (Masc_tui_observer.runtime_journal_appended event);
               if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
@@ -21994,7 +22077,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
-               | Masc_tui_observer.Keeper_memory_journal_appended _
+               | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
@@ -22044,7 +22127,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
-               | Masc_tui_observer.Keeper_memory_journal_appended _
+               | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _
@@ -22175,6 +22258,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_schedules_read state;
          owe_keeper_schedules_read state
        end);
+      (if not !observer_source_loss_seen then
+         List.iter
+           (fun (keeper, journal) ->
+             if Option.equal String.equal (chat_keeper_on_screen state) (Some keeper) then
+               owe_chat_journal_read state ~keeper journal)
+           !runtime_journals);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -25541,6 +25630,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (settled_log_for_request state ~keeper_name operation_id)
   | Keeper_native_tasks_loaded (keeper_name,result) ->
       state.msg_native_tasks_inflight <- List.filter (fun (name,_) -> name <> keeper_name) state.msg_native_tasks_inflight;
+      state.chat_native_tasks_owed <-
+        settle_chat_journal state.chat_native_tasks_owed ~keeper:keeper_name
+          ~succeeded:(Result.is_ok result);
       let previous = Option.value ~default:Masc_tui_native_tasks.empty
           (List.assoc_opt keeper_name state.msg_native_tasks) in
       let tasks = match result with
@@ -25551,6 +25643,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
   | Keeper_child_content_loaded (keeper_name,result) ->
       state.msg_child_content_inflight <- List.remove_assoc keeper_name state.msg_child_content_inflight;
+      state.chat_child_content_owed <-
+        settle_chat_journal state.chat_child_content_owed ~keeper:keeper_name
+          ~succeeded:(Result.is_ok result);
       let previous = Option.value ~default:Masc_tui_child_content.empty
           (List.assoc_opt keeper_name state.msg_child_content) in
       let snapshots = match result with
@@ -31318,6 +31413,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_keeper_schedules state ~mailbox:async_messages;
+      launch_owed_chat_journals state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

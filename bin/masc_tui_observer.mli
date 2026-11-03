@@ -49,6 +49,9 @@ val session_id_of_headers : (string * string) list -> (string, string) result
     A run that ended carries how long it ran, and a failed one the error's
     code and text, read from the payload with {!Sse_event.Json}'s readers -- the
     contract the bridge writes it with. *)
+type runtime_journal = Native_tasks_journal | Child_content_journal
+(** The two journals a Keeper's runtime fills beside its chat. *)
+
 type agent_core_kind =
   | Tool_called
   | Tool_completed
@@ -194,6 +197,12 @@ type event =
   | Keeper_memory_journal_appended of { keeper : string; at : float }
       (** The keeper's memory journal gained a row. The chat pane shows that
           journal beside the transcript and reads it again. *)
+  | Keeper_runtime_journal_appended of
+      { keeper : string; journal : runtime_journal; at : float }
+      (** [keeper_native_tasks_appended] or [keeper_child_content_appended],
+          named by {!Masc.Keeper_runtime_journal_broadcast}: the Keeper's
+          journal took a record. A server push: a reader that shows the
+          records reads them again. *)
   | Keeper_chat_stream_frame of
       { keeper : string
       ; operation_id : string
@@ -307,6 +316,9 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val runtime_journal_appended : event -> (string * runtime_journal) option
+(** The Keeper and journal a runtime journal push names. *)
 
 val schedules_changed : event -> bool
 (** The workspace's schedules changed. *)

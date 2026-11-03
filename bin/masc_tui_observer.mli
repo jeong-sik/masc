@@ -286,6 +286,11 @@ type event =
       (** The workspace's schedules changed. A server push with no payload,
           named by {!Masc.Schedules_changed_event}: the reader re-fetches
           [/api/v1/dashboard/scheduled-automation]. *)
+  | Keeper_event_queue_changed of { keeper : string }
+      (** [keeper]'s event queue, or the reaction record beside it, was
+          written. A server push named by
+          {!Masc.Keeper_event_queue_changed_event}: a schedule row whose
+          target is [keeper] carries that queue's evidence. *)
   | Board_changed of { post_id : string option }
       (** A Board write: a post, a comment, a vote, a reaction, or a change
           to an existing post. It arrives as the JSON-RPC
@@ -375,6 +380,9 @@ val runtime_journal_appended : event -> (string * runtime_journal) option
 
 val schedules_changed : event -> bool
 (** The workspace's schedules changed. *)
+
+val event_queue_changed : event -> string option
+(** The Keeper whose event queue or reaction record a push names. *)
 
 val pending_confirms_changed : event -> bool
 (** The confirmations waiting for an operator changed or one passed its

@@ -17,9 +17,9 @@ mcp_url = "https://mcp.betterstack.com"
 # the redirect, so nothing short of a real login tells whether it takes this
 # server's public callback. Atlassian and Datadog behave the same way, and
 # both refused the public callback after sign-in while logins through the
-# loopback form completed. Registration here has not been tried with the
-# loopback form. So a login here names the loopback callback, and the browser
-# that consents has to reach this server on 127.0.0.1.
+# loopback form completed. A client registered here on 2026-11-03 with the
+# loopback form was accepted. So a login here names the loopback callback, and
+# the browser that consents has to reach this server on 127.0.0.1.
 callback = "loopback"
 
 access_token_env = "BETTERSTACK_ACCESS_TOKEN"

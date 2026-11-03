@@ -14,14 +14,9 @@ id = "calendly"
 label = "Calendly"
 mcp_url = "https://mcp.calendly.com"
 
-# Seen 2026-11-03: the authorize step here goes to sign-in before it looks at
-# the redirect, so nothing short of a real login tells whether it takes this
-# server's public callback. Atlassian and Datadog behave the same way, and
-# both refused the public callback after sign-in while logins through the
-# loopback form completed. Registration here has not been tried with the
-# loopback form. So a login here names the loopback callback, and the browser
-# that consents has to reach this server on 127.0.0.1.
-callback = "loopback"
+# Measured 2026-11-03: registration refuses the RFC 8252 loopback form with
+# "redirect_uri must start with https in Production", so a login here keeps
+# this server's public callback.
 
 access_token_env = "CALENDLY_ACCESS_TOKEN"
 expires_at_env = "CALENDLY_ACCESS_TOKEN_EXPIRES_AT"

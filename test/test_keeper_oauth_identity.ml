@@ -2040,7 +2040,7 @@ let test_the_shipped_loopback_providers_declare_it () =
       check Alcotest.bool (id ^ " names the loopback callback") true
         (callback id = Keeper_oauth_provider.Loopback_callback))
     [ "airtable"; "algolia"; "apify"; "asana"; "atlassian"; "betterstack"; "braze"
-    ; "calendly"; "canva"; "circleci"; "datadog"; "flagsmith"; "incidentio"
+    ; "canva"; "circleci"; "datadog"; "flagsmith"; "incidentio"
     ; "make"; "mintlify"; "mixpanel"; "monday"; "netlify"; "posthog"; "prisma"
     ; "prismic"; "ramp"; "rootly"; "rudderstack"; "shortcut"; "square"
     ; "storyblok"; "stripe"; "turso"; "upstash"; "vercel"; "webflow" ];

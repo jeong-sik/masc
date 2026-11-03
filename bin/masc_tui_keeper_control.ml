@@ -143,15 +143,17 @@ let replace_row roster ~keeper_name reading =
   | Roster_unobserved | Roster_partial _ | Roster_invalid { complete = false; _ } -> None
 
 let starting_up_until (row : Decode.keeper_runtime) =
-  match row.kr_health, row.kr_next_action, row.kr_identity with
-  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), Some Status.Probe, Ok identity -> (
+  match
+    Decode.keeper_health_reading row.kr_health, row.kr_next_action, row.kr_identity
+  with
+  | (Decode.Health_running | Decode.Health_idle), Some Status.Probe, Ok identity -> (
       match Workspace_resilience.Time.parse_iso8601_opt identity.Decode.k_created_at with
       | Some created when created > 0.0 -> Some (created +. Status.agent_staleness_threshold_s)
       | Some _ | None -> None)
-  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), Some Status.Probe, Error _
-  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), Some (Status.Recover | Status.Direct_message), _
-  | (Keeper_types.KH_healthy | Keeper_types.KH_idle), None, _
-  | (Keeper_types.KH_failing | Keeper_types.KH_offline), _, _ ->
+  | (Decode.Health_running | Decode.Health_idle), Some Status.Probe, Error _
+  | (Decode.Health_running | Decode.Health_idle), Some (Status.Recover | Status.Direct_message), _
+  | (Decode.Health_running | Decode.Health_idle), None, _
+  | (Decode.Health_failing | Decode.Health_offline), _, _ ->
     None
 
 type roster_failure =

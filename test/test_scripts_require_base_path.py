@@ -150,14 +150,14 @@ class ToolRoundtrips(Workdir):
         base = self.root / "base"
         result = self.run_python(self.SCRIPT, "--date", "2026-09-01", base=base)
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn(f"no such log file: {base}/.masc/tool_calls/2026-09/01.jsonl", result.stderr)
+        self.assertIn(f"no log files for day: {base}/.masc/tool_calls/2026-09/01.jsonl", result.stderr)
 
     def test_reads_the_base_the_flag_names(self):
         flagged = self.root / "flagged"
         result = self.run_python(
             self.SCRIPT, "--base-path", str(flagged), "--date", "2026-09-01", base=self.root / "base"
         )
-        self.assertIn(f"no such log file: {flagged}/.masc/tool_calls/2026-09/01.jsonl", result.stderr)
+        self.assertIn(f"no log files for day: {flagged}/.masc/tool_calls/2026-09/01.jsonl", result.stderr)
 
 
 class StructuredOutputProbe(Workdir):

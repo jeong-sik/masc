@@ -1079,8 +1079,11 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         } in
       let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
       let scope = Masc.Mcp_server.workspace_scope state in
+      let previous_authority = Masc.Sse.runtime_authority_exn ~base_path:scope.config.base_path in
       let instance_id = Masc.Build_identity.runtime_instance_id ^ "."
         ^ Masc.Mcp_server.Workspace_scope_epoch.to_string scope.epoch in
+      let previous_scope = Masc.Sse.observer_scope ~runtime_authority:previous_authority
+        ~instance_id in
       let deps : Transport.deps =
         { get_origin = (fun _ -> "")
         ; cors_headers = (fun _ -> [])
@@ -1185,10 +1188,32 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         Alcotest.(check bool) "old workspace cursor resets" true
           (Sse_wire.decode_observer_response next_headers =
            Ok (Some { instance_id = next_instance; replay = Sse_wire.Reset Sse_wire.Instance_changed }));
-        Masc.Sse.broadcast_to Masc.Sse.Observers (`Assoc [ "type", `String "replacement-scope-live" ]);
+        (* Model a producer that committed under the previous scope, then was
+           delayed until the replacement's stream was already connected. *)
+        let replay_start = Masc.Sse.current_id () in
+        Masc.Sse.broadcast_to (Masc.Sse.Scoped_runtime_observers previous_scope)
+          (`Assoc [ "type", `String "previous-scope-delayed";
+                    "keeper_name", `String "previous-scope-only" ]);
+        let replacement_scope = Masc.Sse.observer_scope ~runtime_authority:previous_authority
+          ~instance_id:next_instance in
+        Masc.Sse.broadcast_to (Masc.Sse.Scoped_runtime_observers replacement_scope)
+          (`Assoc [ "type", `String "replacement-scope-live" ]);
         Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await next_live);
         Alcotest.(check bool) "the previous scope tail is not replayed" false
           (List.mem {|{"type":"previous-scope-tail"}|} !next_payloads);
+        Alcotest.(check bool) "the previous scope's delayed event is not delivered" false
+          (List.mem {|{"type":"previous-scope-delayed","keeper_name":"previous-scope-only"}|}
+             !next_payloads);
+        let replay = Masc.Sse.replay_after_for_session ~runtime_authority:previous_authority
+          ~observer_instance_id:next_instance ~session_id:successor_id ~kind:Observer replay_start in
+        Alcotest.(check bool) "replacement replay excludes the delayed previous event" false
+          (List.exists (fun (delivery : Masc.Sse.delivery) ->
+            Yojson.Safe.Util.member "type" delivery.payload = `String "previous-scope-delayed")
+            replay.deliveries);
+        Alcotest.(check bool) "replacement replay retains its own event" true
+          (List.exists (fun (delivery : Masc.Sse.delivery) ->
+            Yojson.Safe.Util.member "type" delivery.payload = `String "replacement-scope-live")
+            replay.deliveries);
         Transport.stop_sse_session successor_id)))
 ;;
 

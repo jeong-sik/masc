@@ -868,6 +868,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             Some handshake, cursor
         | Sse.Agent_stream | Sse.Presence -> None, last_event_id
       in
+      let observer_instance_id = Option.map
+          (fun handshake -> handshake.Sse_wire.instance_id) observer_handshake in
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
       in
@@ -901,8 +903,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
-               Sse.register ~kind:sse_kind ~auth session_id
-                 (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
+               Sse.register ~kind:sse_kind ~auth ?observer_instance_id session_id
                  ~last_event_id:(Option.value ~default:0 last_event_id)
                  ~on_disconnect)
            with
@@ -931,7 +932,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               let replay =
                 Option.map
                   (Sse.replay_after_for_session
-                     ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~session_id ~kind:sse_kind)
+                     ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
+                     ?observer_instance_id ~session_id ~kind:sse_kind)
                   last_event_id
               in
               let observer_headers =

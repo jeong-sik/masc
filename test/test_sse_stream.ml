@@ -34,13 +34,13 @@ let test_format_event_preserves_multiline_data () =
   | Error Sse.Missing_data_payload ->
       Alcotest.fail "format_event emitted a frame without a data field"
 
-let register_exn ~auth ?kind ?on_disconnect session_id ~last_event_id =
+let register_exn ~auth ?kind ?on_disconnect ?observer_instance_id session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
   let (_ : Session.McpSessionStore.mcp_session) =
     Session.McpSessionStore.get_or_create ~id:session_id ()
   in
-  match Sse.register ?kind ?on_disconnect ~auth session_id ~last_event_id with
+  match Sse.register ?kind ?on_disconnect ?observer_instance_id ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->
       Alcotest.fail
@@ -468,6 +468,54 @@ let test_concurrent_enqueue_and_drain_metrics ~auth () =
         Atomic.set acknowledged n
       done)
 
+let test_observer_instance_authority ~auth () =
+  reset ();
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  let base = auth.Sse.config in
+  let foreign_base = Filename.concat base "observer-scope-foreign" in
+  Fs_compat.mkdir_p (Filename.concat foreign_base Common.masc_dirname);
+  let foreign_auth = Masc_test_deps.make_sse_auth foreign_base "scope-agent" in
+  let authority = Sse.runtime_authority_exn ~base_path:base in
+  let foreign_authority = Sse.runtime_authority_exn ~base_path:foreign_base in
+  let sessions = ["scope-old"; "scope-current"; "scope-unbound"; "scope-foreign"; "scope-agent"] in
+  Fun.protect
+    ~finally:(fun () -> List.iter Sse.unregister sessions; Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      ignore (register_exn ~auth ~kind:Observer ~observer_instance_id:"old" "scope-old" ~last_event_id:0);
+      ignore (register_exn ~auth ~kind:Observer ~observer_instance_id:"current" "scope-current" ~last_event_id:0);
+      ignore (register_exn ~auth ~kind:Observer "scope-unbound" ~last_event_id:0);
+      ignore (register_exn ~auth:foreign_auth ~kind:Observer ~observer_instance_id:"old"
+                "scope-foreign" ~last_event_id:0);
+      ignore (register_exn ~auth ~kind:Agent_stream ~observer_instance_id:"old"
+                "scope-agent" ~last_event_id:0);
+      let before = Sse.current_id () in
+      let scope = Sse.observer_scope ~runtime_authority:authority ~instance_id:"old" in
+      Sse.broadcast_to (Sse.Scoped_runtime_observers scope) (`Assoc ["type", `String "scope-change"]);
+      let received id = Option.is_some (Sse.try_pop id) in
+      Alcotest.(check (list bool)) "only the exact instance receives the live event"
+        [true; false; false; false; false] (List.map received sessions);
+      let replay ?runtime_authority ?observer_instance_id () =
+        (Sse.replay_after_for_session ?runtime_authority ?observer_instance_id
+           ~session_id:"scope-replay" ~kind:Observer before).deliveries in
+      Alcotest.(check int) "matching instance can replay" 1
+        (List.length (replay ~runtime_authority:authority ~observer_instance_id:"old" ()));
+      Alcotest.(check int) "replacement instance cannot replay" 0
+        (List.length (replay ~runtime_authority:authority ~observer_instance_id:"current" ()));
+      Alcotest.(check int) "unbound instance cannot replay" 0
+        (List.length (replay ~runtime_authority:authority ()));
+      Alcotest.(check int) "instance without workspace authority cannot replay" 0
+        (List.length (replay ~observer_instance_id:"old" ()));
+      Alcotest.(check int) "another workspace cannot replay" 0
+        (List.length (replay ~runtime_authority:foreign_authority ~observer_instance_id:"old" ()));
+      Alcotest.(check int) "agent streams cannot replay Observer events" 0
+        (List.length (Sse.replay_after_for_session ~runtime_authority:authority
+          ~observer_instance_id:"old" ~session_id:"scope-agent" ~kind:Agent_stream before).deliveries);
+      Sse.broadcast_to (Sse.Runtime_observers authority) (`Assoc ["type", `String "workspace-change"]);
+      Alcotest.(check (list bool)) "workspace-only events still reach matching observers"
+        [true; true; true; false; false] (List.map received sessions))
+;;
+
 let test_waiting_inventory_observer_authority ~auth () =
   reset ();
   let base_a = auth.Sse.config in
@@ -708,6 +756,8 @@ let () =
             ] );
           ( "broadcast_to_targeting",
             [
+              Alcotest.test_case "observer instance live and replay authority" `Quick
+                (test_observer_instance_authority ~auth);
               Alcotest.test_case "runtime authority live, replay and external" `Quick
                 (test_runtime_observer_authority ~auth);
               Alcotest.test_case "waiting inventory authority live and replay" `Quick

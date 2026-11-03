@@ -1,21 +1,11 @@
 type t =
   | Off
   | Disabled of string
-  | Ready of
-      { policy : Candle_config.policy
-      ; balance : Candle_balance.t
-      ; events : Candle_event.t list
-      ; basis : Candle_decay_basis.t
-      }
+  | Ready of { policy : Candle_config.policy; balance : Candle_balance.t; events : Candle_event.t list }
 
 let read ~now ~base_path =
   match Candle_status.observed_view ~now ~base_path with
-  | Ok view -> (
-      (* The same events folded without the decay to the read time. The fold
-         just succeeded inside [of_events], so this one does too. *)
-      match Candle_decay_basis.of_events view.events with
-      | Ok basis -> Ready {policy=view.policy;balance=view.balance;events=view.events;basis}
-      | Error error -> Disabled (Candle_balance.error_to_string error))
+  | Ok view -> Ready {policy=view.policy;balance=view.balance;events=view.events}
   | Error Candle_status.Off -> Off
   | Error (Candle_status.Disabled reason) -> Disabled reason
   | Error ((Candle_status.Invalid_time _ | Candle_status.Invalid_ledger _
@@ -27,9 +17,12 @@ let summary = function
   | Disabled reason -> Candle_observation.Disabled {reason}
   | Ready { balance; _ } -> Candle_observation.Ready (Candle_balance.supply balance)
 
+(* Folded on demand from the same events: only the gate roster carries it,
+   and other readers do not pay for a second fold. *)
 let decay_basis = function
   | Off | Disabled _ -> None
-  | Ready { basis; _ } -> Some basis
+  | Ready { events; _ } ->
+      Some (Result.map_error Candle_balance.error_to_string (Candle_decay_basis.of_events events))
 
 let balance observation ~keeper = match observation with
   | Off | Disabled _ -> None
@@ -183,7 +176,7 @@ let account_revision_reader = function
   | Disabled reason ->
       let rev = Some (disabled_account_revision reason) in
       (fun ~keeper:_ -> rev)
-  | Ready { policy; balance; events; basis = _ } ->
+  | Ready { policy; balance; events } ->
       let reader = ready_account_revision_reader ~events ~policy ~balance in
       (fun ~keeper -> Some (reader ~keeper))
 

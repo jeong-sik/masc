@@ -124,5 +124,12 @@ let of_json json =
     | None, _ :: _ -> Error "Candle decay basis has balances without a half-life"
     | Some _, [] -> Error "Candle decay basis has a half-life without balances"
   in
-  if Z.lt issued_milli burned_milli then Error "Candle decay basis burns more than was issued"
-  else Ok { issued_milli; burned_milli; decay }
+  let held =
+    match decay with
+    | No_decaying_balance -> Z.zero
+    | Decaying { keepers; _ } ->
+        List.fold_left (fun held (_, { amount_milli; _ }) -> Z.add held (Z.of_int amount_milli))
+          Z.zero keepers
+  in
+  if Z.equal (Z.sub issued_milli burned_milli) held then Ok { issued_milli; burned_milli; decay }
+  else Error "Candle decay basis wallets do not hold what was issued less what was burned"

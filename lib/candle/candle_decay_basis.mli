@@ -35,4 +35,5 @@ val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Strict: amounts are canonical decimal strings, a half-life comes with at
     least one Keeper and the other way round, Keeper names are in order and
-    unique, and an unknown field is refused. *)
+    unique, the wallets hold exactly issued less burned, and an unknown field
+    is refused. *)

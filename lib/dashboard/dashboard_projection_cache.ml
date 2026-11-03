@@ -228,8 +228,13 @@ let with_current_gate_keeper_observations ~(config : Workspace_utils.config) sna
      time without reading again (RFC-0481 §3.7). *)
   let decay =
     match Candle_observe.decay_basis candle with
-    | Some basis -> Candle_decay_basis.to_json basis
+    | Some (Ok basis) -> Candle_decay_basis.to_json basis
     | None -> `Null
+    | Some (Error reason) ->
+        (* The same events just folded inside the observation, so this does
+           not happen; the reader then reports a ready Candle without a basis. *)
+        Log.Dashboard.warn "gate roster Candle decay basis unavailable: %s" reason;
+        `Null
   in
   (* Project only compact row objects; the independent [keepers] name list
      must remain untouched, including when the response also contains items. *)

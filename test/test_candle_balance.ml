@@ -310,6 +310,8 @@ let test_the_decay_basis_refuses_what_the_fold_refuses () =
     {|{"issued_milli":"1","burned_milli":"0","half_life":null,"keepers":[{"name":"a","since":"2026-09-29T00:00:00Z","amount_milli":"1"}]}|};
   refused "Keepers out of order"
     {|{"issued_milli":"2","burned_milli":"0","half_life":"off","keepers":[{"name":"b","since":"2026-09-29T00:00:00Z","amount_milli":"1"},{"name":"a","since":"2026-09-29T00:00:00Z","amount_milli":"1"}]}|};
+  refused "wallets that do not hold issued less burned"
+    {|{"issued_milli":"5","burned_milli":"0","half_life":"off","keepers":[{"name":"a","since":"2026-09-29T00:00:00Z","amount_milli":"1"}]}|};
   refused "an unknown field"
     {|{"issued_milli":"0","burned_milli":"0","half_life":null,"keepers":[],"extra":1}|}
 

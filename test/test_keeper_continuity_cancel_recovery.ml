@@ -67,7 +67,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   let first_calls=ref 0 and notifications=ref [] in
   let initial_runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr first_calls;
-    Ok {|{"new_claims":[{"claim":"The project is called Meridian.","category":"fact","board_post_id":null,"board_comment_id":null,"supersedes":null,"absorbs":[]}],"dropped":[],"working_contexts":[],"working_state":"Meridian is awaiting publication approval."}|} in
+    Ok {|{"new_claims":[{"claim":"The project is called Meridian.","category":"fact","board_post_id":null,"board_comment_id":null,"supersedes":null,"absorbs":[],"evidence":{"conversation":[],"tools":[],"counterpart":false,"task_contexts":false}}],"dropped":[],"working_contexts":[],"working_state":"Meridian is awaiting publication approval."}|} in
   let physical_keepers_dir=Unix.realpath keepers_dir in
   (try
      Eio.Cancel.sub (fun cancellation ->

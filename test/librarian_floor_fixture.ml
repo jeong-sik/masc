@@ -285,7 +285,7 @@ let run_step fixture record step =
   | (Step_owner.Answered _ | Step_owner.Refused _) as outcome -> outcome
 
 let claim_of text = `Assoc [ "claim", `String text; "category", `String "fact"; "board_post_id", `Null;
-                              "board_comment_id", `Null; "supersedes", `Null; "absorbs", `List [] ]
+                              "board_comment_id", `Null; "supersedes", `Null; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ]
 
 let answer ~claim ~state = `Assoc
   [ "new_claims", `List [ claim_of claim ]; "dropped", `List []; "working_contexts", `List [];

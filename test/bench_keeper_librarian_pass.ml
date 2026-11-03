@@ -70,7 +70,7 @@ let originals_for ~keeper_name base_path keepers_dir store =
   |> Result.map_error Durable_owner.error_to_string |> get
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
-  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]
+  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]
 let answer _capture = `Assoc ["new_claims",`List [new_claim "Knowledge from original completed history"];
   "dropped",`List [];"working_state",`Null;"working_contexts",`List []]
 let publish_routes base_path urls =
@@ -187,7 +187,7 @@ let drive_until_advanced fixture =
     | Error error -> fail (Consumer.error_to_string error) in
   go 1
 let step_answer n = `Assoc ["new_claims",`List [`Assoc ["claim",`String (Printf.sprintf "claim number %d" n);
-    "category",`String "fact";"board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]];
+    "category",`String "fact";"board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
   "dropped",`List [];"working_contexts",`List [];"working_state",`String (Printf.sprintf "working state %d" n)]
 let reconcile fixture=Runtime.reconcile_configuration ~config:fixture.config
   ~directory:(Runtime.configuration_directory fixture.config) |> get |> ignore

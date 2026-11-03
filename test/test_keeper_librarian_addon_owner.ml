@@ -61,7 +61,7 @@ let originals_for ~keeper_name base_path keepers_dir store =
     let capture=Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) record |> get in record,capture)
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
-  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]
+  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]
 let answer select capture =
   let rows=Queue.candidates (Capture.batch capture) in
   let selected=List.filter select rows in

@@ -56,7 +56,7 @@ let originals_for ~keeper_name base_path keepers_dir store =
   |> Result.map_error Durable_owner.error_to_string |> get
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
-  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]
+  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]
 let answer _capture = `Assoc ["new_claims",`List [new_claim "Knowledge from original completed history"];
   "dropped",`List [];"working_state",`Null;"working_contexts",`List []]
 let publish_routes base_path urls =
@@ -1644,7 +1644,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
       check bool label true (List.exists (Astring.String.is_infix ~affix:phrase) sent))
       ["the sent request includes the later user message","Original official-client question";
        "the sent request includes the later assistant message","Original official-client answer";
-       "the sent request includes the later tool observation",{|{"tool_name":"read_file","outcome":"succeeded"}|};
+       "the sent request includes the later tool observation",{|{"index":0,"tool_name":"read_file","outcome":"succeeded"}|};
        "the sent request includes the original external evidence","Original admitted external evidence";
        "the sent request includes the complete oversized counterpart body",String.make 65536 'x';
        "the sent request includes the appended counterpart",appended];
@@ -2321,7 +2321,7 @@ let frame_refuses_the_turn_twice fixture =
   ended_by_one_refusal (run_worker fixture);
   ended_by_one_refusal (run_worker fixture)
 let step_claim n = `Assoc ["claim",`String (Printf.sprintf "claim number %d" n);"category",`String "fact";
-  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]
+  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]
 let step_answer n = `Assoc ["new_claims",`List [step_claim n];"dropped",`List [];"working_contexts",`List [];
   "working_state",`String (Printf.sprintf "working state %d" n)]
 (* The provider numbers its answer by the first of [tags] the request carries.

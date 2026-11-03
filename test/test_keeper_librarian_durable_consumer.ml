@@ -3541,7 +3541,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
     let first_accepted = if expected_holes=[] then 1 else 2 in
     let new_claims = if not all_holes && index=first_accepted then
       [`Assoc ["claim",`String claim;"category",`String "fact";"board_post_id",`Null;
-        "board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]] else [] in
+        "board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]] else [] in
     `Assoc ["new_claims",`List new_claims;"dropped",`List [];
       "working_contexts",`List [];"working_state",`String "Only successfully judged checkpoint messages are represented."] in
   let refuse = `Request_entity_too_large,

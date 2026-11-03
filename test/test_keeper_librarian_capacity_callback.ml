@@ -139,7 +139,7 @@ let test_absorb_evidence_capacity_recovers ~base_path () =
   let before = Fs_compat.load_file path in
   let output = `Assoc ["new_claims", `List [`Assoc [
       "claim", `String "A17 was investigated and then resolved.";
-      "category", `String "fact"; "absorbs", `List [`String "m1"]]];
+      "category", `String "fact"; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
       "dropped", `List []; "working_contexts", `List []] in
   let librarian = Fixture.start_server ~sw ~net ~clock
     (Fixture.Reply (Fixture.openai_response output)) in

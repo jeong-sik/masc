@@ -1664,7 +1664,7 @@ let test_uncommitted_memory_message_floor ?native case () =
     ["new_claims", (if first then `List [`Assoc
        ["claim", `String claim; "category", `String "fact";
         "board_post_id", `Null; "board_comment_id", `Null;
-        "supersedes", `Null; "absorbs", `List []]] else `List []);
+        "supersedes", `Null; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]] else `List []);
      "dropped", `List []; "working_contexts", `List [];
      "working_state", `String (if first then "volatile-call-read" else "complete-call-and-result")]) in
   let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =

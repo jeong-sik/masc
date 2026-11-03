@@ -827,7 +827,7 @@ let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
           [ "working_contexts", `List []
           ; Librarian.wire_field_new_claims, `List
               [ `Assoc [ "claim", `String merged; "category", `String "fact"
-                       ; "absorbs", `List [`String "m1"; `String "m2"] ] ]
+                       ; "absorbs", `List [`String "m1"; `String "m2"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] ]
           ; Librarian.wire_field_dropped, `List [] ]
       ; "change_support", `List (List.map (fun id -> `String id) present)
       ; "candidates", `List (List.map (fun id -> `Assoc
@@ -971,7 +971,7 @@ let test_admission_retirement_evidence ~reobserved () =
   let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     captured := prompt :: !captured;
     let claims = if reobserved then [`Assoc ["claim",`String policy.claim;
-      "category",`String "fact"; "supersedes",`Null; "absorbs",`List []]] else [] in
+      "category",`String "fact"; "supersedes",`Null; "absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]] else [] in
     Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["new_claims",`List claims;
       "dropped",`List []; "working_contexts",`List []];
       "change_support",`List (if reobserved then [`String candidate.request_id] else []);
@@ -1117,7 +1117,7 @@ let test_mixed_admission ~depends_on_deferred () =
     incr requests;
     Ok (Yojson.Safe.to_string (`Assoc [
       "memory",`Assoc ["new_claims",`List [`Assoc ["claim",`String confirmed_claim;
-        "category",`String "fact";"supersedes",`Null;"absorbs",`List []]];
+        "category",`String "fact";"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
         "dropped",`List [];"working_contexts",`List []];
       "change_support",`List [`String (if depends_on_deferred then uncertain_id else confirmed_id)];
       "candidates",`List [
@@ -1178,7 +1178,7 @@ let inference_answer =
   `Assoc ["new_claims", `List [`Assoc
     ["claim", `String "A and revised B remain grounded in the original observations."
     ; "category", `String "fact"; "supersedes", `String "m2"
-    ; "absorbs", `List [`String "m1"]]]
+    ; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]]
   ; "dropped", `List [`Assoc ["memory_id", `String "m2";
       "reason", `String "B was revised by the selected observation."]]
   ; "working_contexts", `List []; "working_state", `String "planned continuation"]
@@ -1579,7 +1579,7 @@ let test_ordered_memory_source_binding () =
   let reordered_input = {source with current=Some {Librarian.facts=[current_b;current_a]}} in
   let reordered_answer = `Assoc ["new_claims", `List [`Assoc
     ["claim", `String "Both original facts were judged in the opposite surrogate order.";
-     "category", `String "fact"; "supersedes", `String "m1"; "absorbs", `List [`String "m2"]]];
+     "category", `String "fact"; "supersedes", `String "m1"; "absorbs", `List [`String "m2"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
     "dropped", `List [retire_wire "m1"]; "working_contexts", `List [];
     "working_state", `String "opposite source order"] in
   let reordered_step = infer reordered_input reordered_answer in
@@ -1603,7 +1603,7 @@ let test_ordered_memory_retains_source_when_gated_target_loses_support () =
   @@ fun ~keepers_dir ~keeper_id ~snapshot:_ ~source ~plan ~infer ->
   let step = infer source
     (memory_answer ~new_claims:[`Assoc ["claim", `String target.claim;
-      "category", `String "fact"; "absorbs", `List [`String "m1"]]]
+      "category", `String "fact"; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]]
       ~dropped:[retire_wire "m2"] "the target loses support") in
   check bool "actual parsing and gate preserve the proposed absorption" true
     (step.absorbed=[{Memory.absorbed=Memory.memory_id original; into=Memory.memory_id target}]);

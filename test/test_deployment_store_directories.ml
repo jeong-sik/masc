@@ -761,7 +761,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
   let parent=retain (Admission.scope owner) (Admission.request_id capture) request in
   let proposal=`Assoc ["memory",`Assoc ["new_claims",`List [`Assoc ["claim",`String fact.claim;
     "category",`String "fact";"board_post_id",`Null;"board_comment_id",`Null;
-    "supersedes",`Null;"absorbs",`List []]];"dropped",`List [];"working_state",`Null;"working_contexts",`List []];
+    "supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];"dropped",`List [];"working_state",`Null;"working_contexts",`List []];
     "candidates",`List [`Assoc ["request_id",`String "source";"outcome",`String "incorporated";
       "memory_claim",`String fact.claim;"reason",`String "The original source supports this claim."]];
     "change_support",`List [`String "source"]] in

@@ -43,7 +43,7 @@ let answer = `Assoc
           ; "board_post_id", `Null
           ; "board_comment_id", `Null
           ; "supersedes", `Null
-          ; "absorbs", `List [`String "m1"] ] ]
+          ; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] ]
   ; "dropped", `List []
   ; "working_state", `Null
   ; "working_contexts", `List [] ]

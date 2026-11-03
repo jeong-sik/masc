@@ -100,7 +100,7 @@ let test_case ~base_path ~registry scenario () =
     "next_steps", `List [`String "Answer progress without publishing"]] in
   let claims = if scenario = Cancel_absorb then
       [`Assoc ["claim", `String "Publication of the draft needs prior approval.";
-        "category", `String "fact"; "absorbs", `List [`String "m1"]]] else [] in
+        "category", `String "fact"; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]] else [] in
   let dropped = if scenario = Conversation_queue then
     [`Assoc ["memory_id", `String "m1"; "reason", `String "The note is outdated."]] else [] in
   (* A Context-only pass asks for the working contexts alone, so its answer

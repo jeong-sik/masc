@@ -18,8 +18,10 @@ type receipt = private
 type system_observation =
   | Active_goals of string
   | Completion_authority of string
-  | Admitted_scheduled_input of string
-(** Only these renderer-issued observations can become a System suffix. *)
+(** Only these renderer-issued observations can become a System suffix. The
+    System prompt precedes the history on the wire, so a block that changes
+    on most turns does not belong here: it leaves every first request of a
+    turn without a reusable history prefix (#47788). *)
 val observation_block : system_observation -> Prompt_block_id.t * string
 
 type system_prompt = private

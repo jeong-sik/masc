@@ -50,8 +50,10 @@ val assemble_request_context :
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
 (** Split uniquely renderer-attributed Active Goals and Completion Authority
-    into a stable system suffix. Missing, stale or duplicate renderer sections
-    do not acquire an observation identity.
+    into a stable system suffix, and the turn-entry admission into its own
+    first-round extra-context block. Missing, stale or duplicate renderer
+    sections, or an admission block the caller already passes, leave the
+    context unsplit.
     [base_system_prompt] is the pre-existing override when present, otherwise
     the original turn system prompt. Later tool rounds retain only that exact
     issued observations and permitted extra blocks. Other world state stays

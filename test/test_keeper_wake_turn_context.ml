@@ -1664,7 +1664,7 @@ let test_prepared_direct_context_keeps_original_work_and_request_routes () =
       initial (project None))
 ;;
 
-let test_admitted_schedule_entry_survives_tools_and_official_resume () =
+let test_admitted_schedule_entry_rides_the_first_round_and_official_resume () =
   let module Fields = Masc.Keeper_unified_prompt_event_fields in
   let module Layers = Masc.Keeper_context_layers in
   let module Assembly = Masc.Keeper_context_assembly in
@@ -1701,13 +1701,26 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
       ~base_system_prompt:"BASE_ENTRY" ~post_tool_round:false ~previous_assembly:None
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let issued_a = assemble first.world_partition in
   let issued_b = assemble second.world_partition in
-  let observation_text assembly = match assembly.Assembly.system_prompt with
-    | Some {observations; _} -> List.find_map (function
-        | Assembly.Admitted_scheduled_input text -> Some text
-        | Active_goals _ | Completion_authority _ -> None) observations |> Option.get
+  let observation_text assembly =
+    match List.find_map (fun (id, text) ->
+        if Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input then Some text else None)
+        assembly.Assembly.blocks with
+    | Some text -> text
     | None -> fail "entry observation was not issued" in
+  let system_text = Assembly.effective_system_prompt ~base_text:"BASE_ENTRY" in
   let b_text = observation_text issued_b in
+  (* #47788: the System prompt precedes the history, so it must not change
+     when only the turn-entry admission does. *)
+  check string "a different admission leaves the System bytes unchanged"
+    (system_text issued_a) (system_text issued_b);
+  check bool "the System carries no admission" false
+    (contains ~needle:"scheduled_admission_at_turn_entry" (system_text issued_b));
+  check bool "the first round's trailing context carries the admission" true
+    (match issued_b.Assembly.extra_system_context with
+     | Some text -> contains ~needle:b_text text
+     | None -> false);
   List.iter (fun expected -> check bool "exact selected source identity is present" true
       (contains ~needle:expected b_text))
     [Ids.Turn_ref.to_string (turn 2); Yojson.Safe.to_string (`String "schedule-B\"한글");
@@ -1731,8 +1744,12 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
     (contains ~needle:"standing-unselected" (observation_text multiple));
   let later = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:(Some issued_b) ~dynamic_context_partition:None
-      ~existing_extra_system_context:None ~blocks:[] in
-  check string "post-tool round retains exact entry bytes" b_text (observation_text later);
+      ~existing_extra_system_context:None ~blocks:issued_b.Assembly.blocks in
+  check bool "a round after tool results does not repeat the admission" false
+    (List.exists (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input)
+       later.Assembly.blocks);
+  check string "a round after tool results keeps the first round's System bytes"
+    (system_text issued_b) (system_text later);
   let missing = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:None ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[] in
@@ -1753,7 +1770,7 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
       ~composed_context:(Some (fun () -> Some assembly)) with
     | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
   let prepared_b = prepare issued_b in
-  check bool "Start persistent System excludes current entry" false
+  check bool "the prepared Start System excludes the current entry" false
     (contains ~needle:"scheduled_admission_at_turn_entry" prepared_b.system_prompt);
   check bool "Start preserves the fixed instructions" true
     (String.starts_with ~prefix:"BASE_ENTRY" prepared_b.system_prompt);
@@ -1762,18 +1779,14 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   check (list string) "A/B durable User bodies remain unchanged"
     (List.map Host.encode_history_message history) (List.map Host.encode_history_message conversation);
   let start = Host.start_prompt prepared_b "OWNER" in
-  let binding projection =
-    Masc.Keeper_context_submission_link.binding_to_json ~slot:Runtime_official_client_write.Whole_write
-      projection (Runtime_official_client_write.raw (Masc.Keeper_context_submission_link.text projection)) in
-  let open Yojson.Safe.Util in
-  check string "Start User observation keeps its exact issuer/write-slot binding" "matched_completed_slot"
-    (binding start |> member "status" |> to_string);
-  let stale = Masc.Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user
-      ~block:Prompt_block_id.Admitted_scheduled_input ~assembly:(Some (assemble first.world_partition))
-      (Agent_core.Types.user_msg b_text) in
-  check string "B cannot borrow A's observation receipt" "unavailable"
-    (binding stale |> member "issuer_attribution" |> member "status" |> to_string);
-  check bool "Start User carries B entry" true
+  (* The admission is a context block, not a System observation, so a Start
+     sends it with the context carrier in the rendered input rather than in
+     the separate User observation prefix. *)
+  let start_input = match Host.framed_prompt_for_turn ~held:[] ~is_resume:false ~goal:"OWNER" prepared_b with
+    | Ok input -> input | Error error -> fail (Agent_core.Error.to_string error) in
+  check bool "Start input carries B entry" true
+    (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) start_input);
+  check bool "the Start User observation prefix does not carry the entry" false
     (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) (Masc.Keeper_context_submission_link.text start));
   let held = { Masc.Keeper_official_client_session_store.context = Context_block Prompt_block_id.Admitted_scheduled_input;
                sha256 = Agent_core_sha256.(digest_string b_text |> to_hex) }
@@ -1781,9 +1794,20 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   let resume assembly held =
     let prepared = prepare assembly in
     Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
-  let repeated = resume later held in
+  let repeated = resume issued_b held in
   check bool "even held entry bytes reach Resume User" true
     (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) repeated.prompt);
+  let occurrences ~needle text =
+    let step = String.length needle in
+    let rec count from found =
+      match String.index_from_opt text from needle.[0] with
+      | None -> found
+      | Some at when at + step <= String.length text && String.sub text at step = needle ->
+        count (at + step) (found + 1)
+      | Some at -> count (at + 1) found in
+    count 0 0 in
+  check int "a Resume sends the entry exactly once" 1
+    (occurrences ~needle:"scheduled_admission_at_turn_entry" repeated.prompt);
   let rebound = assemble (parts 3 (Fields.Known [a]) (observation a)).world_partition in
   let a_resume = resume rebound repeated.held_context in
   check bool "exact A readmission has a fresh entry identity" true
@@ -1822,8 +1846,8 @@ let () =
   init_runtime_default_for_tests ();
   run "keeper_wake_turn_context"
     [
-      ("prepared prompt ownership", [test_case "admitted entry is exact through tools and official Start/Resume" `Quick
-          test_admitted_schedule_entry_survives_tools_and_official_resume;
+      ("prepared prompt ownership", [test_case "admitted entry rides the first round and official Start/Resume" `Quick
+          test_admitted_schedule_entry_rides_the_first_round_and_official_resume;
         test_case "common turn input survives request-specific access and source failure" `Quick
           test_prepared_prompt_keeps_turn_inputs_and_request_authority;
         test_case "direct work survives interleaved preparation and changing request routes" `Quick

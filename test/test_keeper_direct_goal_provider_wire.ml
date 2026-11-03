@@ -319,6 +319,17 @@ let test_goal_survives_read_then_task_creation () =
     List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
       (contains ~needle extra)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
         "INITIAL_WORKTREE_SNAPSHOT";"INITIAL_TURN_INSTRUCTIONS";"INITIAL_CLOCK"];
+    (* #47788: the turn-entry admission names its turn. In the System, which
+       precedes the history, it would deny every turn's first request the
+       cached history; it rides the first request's trailing context only. *)
+    check bool "no request carries the admission in its System" false
+      (contains ~needle:"scheduled_admission_at_turn_entry" context);
+    check bool "only the first request's trailing context carries the admission" (index=0)
+      (contains ~needle:"scheduled_admission_at_turn_entry" extra);
+    if index = 0 then
+      check bool "the first request's admission is explicitly Unknown for this turn" true
+        (contains ~needle:"availability=\"unknown\"" extra
+         && contains ~needle:(Ids.Turn_ref.to_string turn_ref) extra);
     if index > 0 then check bool "tool feedback remains the newest message" true
       (Json.member "role" (List.hd (List.rev messages)) = `String "tool")) bodies;
   let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
@@ -350,26 +361,16 @@ let test_goal_survives_read_then_task_creation () =
     (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
   let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
     | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
-  check int "capture contains exactly the three stable producers" 3 (List.length capture.blocks);
+  (* The capture is the turn's last request, a round after tool results, so
+     the first-round admission is not among its blocks. *)
+  check int "capture contains exactly the two stable producers" 2 (List.length capture.blocks);
   List.iter (fun id -> check int ("capture attributes " ^ Prompt_block_id.to_string id ^ " exactly once") 1
       (List.length (List.filter (fun (block : Keeper_prompt_capture.block) ->
         Prompt_block_id.equal block.id id) capture.blocks)))
-    [Prompt_block_id.Keeper_instructions; Active_goals; Admitted_scheduled_input];
-  let admission = List.find (fun (block : Keeper_prompt_capture.block) ->
-      Prompt_block_id.equal block.id Admitted_scheduled_input) capture.blocks in
-  let physical = match Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt) with
-    | Some issued -> issued | None -> fail "captured System issuer missing" in
-  (match List.filter (fun (span : Keeper_context_assembly.span) ->
-      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) physical.partition.spans with
-   | [span] -> check string "captured admission is the exact issued System span"
-       admission.text (String.sub physical.text span.offset span.bytes)
-   | _ -> fail "one exact issued admission span required");
+    [Prompt_block_id.Keeper_instructions; Active_goals];
   let captured_turn = Ids.Turn_ref.make ~trace_id:capture.trace_id ~absolute_turn:capture.absolute_turn in
   check bool "capture and direct preparation identify the same actual fixture turn" true
     (Ids.Turn_ref.equal turn_ref captured_turn);
-  check bool "captured direct admission is explicitly Unknown for the actual captured turn" true
-    (contains ~needle:"availability=\"unknown\"" admission.text
-     && contains ~needle:(Ids.Turn_ref.to_string captured_turn) admission.text);
   check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
   check (option string) "capture records the physical stable system value"
     (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)

@@ -51,7 +51,12 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
         let sections = Keeper_context_layers.sections partition in
         let unique layer = List.length (List.filter (fun (section : Keeper_context_layers.section) ->
           section.section_source = Keeper_context_layers.Layer layer) sections) <= 1 in
+        (* The partition is this round's one source of the admission block;
+           a caller that already passes one would send it twice. *)
+        let admission_supplied = List.exists (fun (id, _) ->
+          Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input) blocks in
         if not (unique Active_goals && unique Completion_authority && unique Admitted_scheduled_input)
+           || admission_supplied
         then [], blocks, dynamic_context_partition
         else
           let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
@@ -61,12 +66,20 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
             (match Keeper_context_layers.text goals with
              | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)])
             @ (match Keeper_context_layers.text authority with
-               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)])
-            @ (match Keeper_context_layers.text admission with
-               | "" -> [] | text -> [Keeper_context_assembly.Admitted_scheduled_input (Inference_utils.sanitize_text_utf8 text)]) in
+               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)]) in
+          (* The admission names its own turn, so it differs on most turns.
+             The System prompt sits in front of the history, and a block
+             there that changes every turn leaves a turn's first request no
+             history prefix the provider can reuse (#47788). It rides this
+             round's trailing context and, like the rest of the world state,
+             not a round that follows tool results. *)
+          let admission_blocks = match Keeper_context_layers.text admission with
+            | "" -> []
+            | text -> [Prompt_block_id.Admitted_scheduled_input, Inference_utils.sanitize_text_utf8 text] in
           observations, List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
-            then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining
+            then id, Keeper_context_layers.text remaining else id, text) blocks @ admission_blocks,
+          Some remaining
       | Some _, _ | None, _ -> [], blocks, dynamic_context_partition
   in
   let blocks = blocks

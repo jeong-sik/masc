@@ -71,7 +71,7 @@ let test_cancelled_leader_does_not_cancel_joined_reader () =
       Eio.Promise.await finish;
       "shared" in
     let a = Eio.Fiber.fork_promise ~sw (fun () ->
-      Eio.Time.with_timeout clock 0.05 (fun () -> read gate ~key:"scope" work)) in
+      Eio.Time.with_timeout clock 0.05 (fun () -> Ok (read gate ~key:"scope" work))) in
     let b = Eio.Fiber.fork_promise ~sw (fun () -> read gate ~key:"scope" work) in
     Eio.Promise.resolve release_held ();
     Eio.Promise.await_exn blocker;
@@ -105,9 +105,9 @@ let test_last_waiter_cancels_producer_and_future_reads_work () =
     let started, mark_started = Eio.Promise.create () in
     let settled, mark_settled = Eio.Promise.create () in
     let a = Eio.Fiber.fork_promise ~sw (fun () ->
-      Eio.Time.with_timeout clock 0.05 (fun () -> read gate ~key:"scope" (fun () ->
+      Eio.Time.with_timeout clock 0.05 (fun () -> Ok (read gate ~key:"scope" (fun () ->
         Fun.protect ~finally:(fun () -> Eio.Promise.resolve mark_settled ()) (fun () ->
-          Eio.Promise.resolve mark_started (); Eio.Fiber.await_cancel ())))) in
+          Eio.Promise.resolve mark_started (); Eio.Fiber.await_cancel ()))))) in
     Eio.Promise.await started;
     (match Eio.Promise.await_exn a with Error `Timeout -> () | Ok _ -> fail "reader did not time out");
     Eio.Promise.await settled;

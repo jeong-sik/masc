@@ -14,6 +14,7 @@ import { Planning } from './goals/planning'
 import { GoalTree } from './goals/goal-tree'
 import { PlanningFocusPanel } from './planning-focus-panel'
 import { openTaskDetail } from './goals/task-detail-state'
+import { TaskCreateReceiptsPanel } from './task-manage/task-create-receipt-panel'
 
 type PlanningView = 'default' | 'goal-tree'
 
@@ -133,6 +134,7 @@ export function PlanningPanel() {
       />
       <${PlanningRouteFocusPanel} />
       <${PlanningFocusPanel} />
+      <${TaskCreateReceiptsPanel} />
       ${view === 'goal-tree' ? html`<${GoalTree} />` : html`<${Planning} />`}
     </div>
   `

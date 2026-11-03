@@ -2,15 +2,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import type { Signal } from '@preact/signals'
 import { TaskCreateForm, resetForm } from './task-create-form'
 import { showTaskCreate, taskCreating } from './task-manage-state'
+
+const mockedCreating = taskCreating as Signal<boolean>
 
 const mockCreateTask = vi.fn()
 
 vi.mock('./task-manage-state', async () => {
   const actual = await vi.importActual<typeof import('./task-manage-state')>('./task-manage-state')
+  const { signal } = await import('@preact/signals')
   return {
     ...actual,
+    taskCreating: signal(false),
     createTask: (...args: any[]) => mockCreateTask(...args),
   }
 })
@@ -20,7 +25,7 @@ const flush = () => new Promise<void>((r) => setTimeout(() => r(), 10))
 describe('TaskCreateForm', () => {
   beforeEach(() => {
     showTaskCreate.value = false
-    taskCreating.value = false
+    mockedCreating.value = false
     resetForm()
     mockCreateTask.mockReset()
     mockCreateTask.mockResolvedValue(true)
@@ -175,7 +180,7 @@ describe('TaskCreateForm', () => {
     const container = document.createElement('div')
     render(html`<${TaskCreateForm} />`, container)
     showTaskCreate.value = true
-    taskCreating.value = true
+    mockedCreating.value = true
     await flush()
     expect(container.textContent).toContain('추가 중...')
   })

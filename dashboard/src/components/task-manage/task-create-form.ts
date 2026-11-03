@@ -5,7 +5,9 @@ import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { ActionButton } from '../common/button'
 import { RichComposer } from '../common/rich-composer'
-import { showTaskCreate, taskCreating, createTask, type GoalTaskDispatch } from './task-manage-state'
+import { beginSeparateTaskDraft, chooseTaskCreateMemoryOnly, retryTaskCreateStorage, showTaskCreate, taskCreating,
+  taskCreateStorageNotice, taskCreateUsingMemoryOnly, taskDraftHasUnconfirmedRequest,
+  createTask, type GoalTaskDispatch } from './task-manage-state'
 import { isCanonicalGoalId } from '../../lib/goal-identity'
 import { Tk } from '../tk'
 
@@ -51,7 +53,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           variant="primary"
           size="md"
           block=${true}
-          onClick=${() => { draftRevision++; showTaskCreate.value = true }}
+          onClick=${() => { beginSeparateTaskDraft(); draftRevision++; showTaskCreate.value = true }}
         >태스크 추가<//>
       </div>
     `
@@ -117,21 +119,39 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
         </div>
 
         <div class="mt-1 flex flex-wrap gap-2">
+          ${taskDraftHasUnconfirmedRequest.value ? html`
+            <div role="status" class="w-full text-xs text-text-muted">
+              이 초안으로 이미 생성 요청을 보냈습니다. 이전 요청을 확인하거나 별도 새 태스크를 작성해 주세요.
+              <${ActionButton} variant="ghost" size="sm" onClick=${() => { beginSeparateTaskDraft(); resetForm() }}>
+                별도 새 태스크 작성
+              <//>
+            </div>` : null}
+          ${taskCreateStorageNotice.value ? html`
+            <div role="alert" class="w-full text-xs text-text-muted">
+              요청 기록을 저장할 수 없습니다. 메모리에만 보관하면 새로고침 뒤 결과를 확인할 식별자가 사라집니다.
+              <${ActionButton} variant="ghost" size="sm" onClick=${retryTaskCreateStorage}>저장 다시 확인<//>
+              <${ActionButton} variant="ghost" size="sm" onClick=${chooseTaskCreateMemoryOnly}>이번 초안은 메모리에만 보관<//>
+            </div>` : null}
+          ${taskCreateUsingMemoryOnly.value ? html`<p role="status" class="w-full text-xs text-text-muted">
+            이번 요청은 이 탭의 메모리에만 보관됩니다. 새로고침 전에 결과를 확인해 주세요.
+          </p>` : null}
           <${ActionButton}
             variant="primary"
             size="md"
-            disabled=${taskCreating.value || !title.value.trim() || goalUnavailable}
+            disabled=${taskCreating.value || taskDraftHasUnconfirmedRequest.value || !title.value.trim() || goalUnavailable}
             onClick=${() => {
               if (linkedGoalId !== null && (!props.goalDispatch || !props.goalDispatch.isCurrent())) return
               const submittedDraft = draftRevision
+              const isDraftCurrent = () => mounted.current && draftRevision === submittedDraft && showTaskCreate.peek()
               void createTask({
                 title: title.value,
                 description: description.value,
                 priority: priority.value,
                 goal_id: linkedGoalId,
               }, props.goalDispatch, {
+                isCurrent: isDraftCurrent,
                 finish: () => {
-                  if (!mounted.current || draftRevision !== submittedDraft || !showTaskCreate.peek()
+                  if (!isDraftCurrent()
                     || (linkedGoalId !== null && !props.goalDispatch?.isCurrent())) return false
                   batch(() => { showTaskCreate.value = false; resetForm() })
                   return true

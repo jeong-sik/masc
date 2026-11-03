@@ -24,6 +24,7 @@ import {
 } from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
+import { parseUniqueJson } from '../lib/json-unique'
 import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardRefusal, managedDashboardUnverified,
   noteManagedCredentialRefusalObservation } from '../lib/dashboard-session-actor'
 
@@ -197,6 +198,7 @@ async function mcpPost(
   actorName?: string | null,
   scoped = false,
   onUnauthorized?: () => void,
+  onStaleTaskSuccess?: (text: string) => void,
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
@@ -207,7 +209,9 @@ async function mcpPost(
     reportCredentialRefusal: !scoped,
   }
   const consume = async (res: Response) => {
-    assertBinding(binding)
+    // Only a Task creation's completed HTTP 200 can preserve evidence under
+    // its original owner. Other responses keep the normal header guard.
+    if (!onStaleTaskSuccess || res.status !== 200) assertBinding(binding)
     if (!res.ok) {
       if (res.status === 401) onUnauthorized?.()
       if (res.status === 403 && !scoped) {
@@ -219,6 +223,11 @@ async function mcpPost(
       throw error
     }
     const text = await res.text()
+    if (onStaleTaskSuccess && res.status === 200 && currentStoredTokenRevision() !== binding.authRevision) {
+      // The observer receives only a validated projection and cannot change
+      // the stale result or trigger credential recovery by throwing.
+      try { onStaleTaskSuccess(text) } catch { /* preserve the stale error */ }
+    }
     assertBinding(binding)
     return text
   }
@@ -282,6 +291,13 @@ class McpPreDispatchIdentityChangedError extends Error {
   }
 }
 
+class McpScopedTaskBindingError extends Error {
+  constructor() {
+    super('Task request requires an original request ID and workspace')
+    this.name = 'McpScopedTaskBindingError'
+  }
+}
+
 export function mcpIdentityRequiresGoalRefresh(error: unknown): boolean {
   return error instanceof McpPreDispatchIdentityChangedError
 }
@@ -309,6 +325,7 @@ export type McpCallFailureDisposition =
 
 export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposition {
   if (mcpIdentityRequiresGoalRefresh(error)) return 'known_pre_effect'
+  if (error instanceof McpScopedTaskBindingError) return 'known_pre_effect'
   if (error instanceof McpToolCallError) return 'known_tool_response'
   if (error instanceof McpProtocolError && error.code === -32001) {
     return 'known_pre_effect'
@@ -335,7 +352,7 @@ function structuredAuthErrorCode(value: unknown): unknown {
   return (value as Record<string, unknown>).auth_error_code
 }
 
-function parseMcpHttpResponse(raw: string, expectedId?: string): McpCallResponse {
+function parseMcpHttpResponse(raw: string, expectedId?: string, unique = false): McpCallResponse {
   const text = raw.trim()
   const payloads: string[] = []
   if (text.startsWith('{') || text.startsWith('[')) {
@@ -361,7 +378,7 @@ function parseMcpHttpResponse(raw: string, expectedId?: string): McpCallResponse
 
   let response: McpCallResponse | null = null
   for (const payload of payloads) {
-    const value: unknown = JSON.parse(payload)
+    const value: unknown = unique ? parseUniqueJson(payload) : JSON.parse(payload)
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       throw new Error('Invalid MCP response')
     }
@@ -369,7 +386,9 @@ function parseMcpHttpResponse(raw: string, expectedId?: string): McpCallResponse
     const hasResult = Object.hasOwn(message, 'result')
     const hasError = Object.hasOwn(message, 'error')
     if (!hasResult && !hasError && typeof message.method === 'string') continue
-    if (hasResult === hasError || response !== null) throw new Error('Invalid MCP response')
+    if (hasResult === hasError || response !== null || (unique && message.jsonrpc !== '2.0')) {
+      throw new Error('Invalid MCP response')
+    }
     if (expectedId !== undefined && message.id !== expectedId) {
       throw new Error('MCP response does not match the request')
     }
@@ -404,6 +423,29 @@ function extractMcpText(res: McpCallResponse): string {
   return res.result.content?.[0]?.text ?? ''
 }
 
+export type StaleTaskCreation = { readonly kind: 'created'; readonly taskId: string }
+
+type TaskCreationCapture = {
+  readonly requestId: string
+  readonly goalId: string | null
+  readonly onStaleSuccess: (result: StaleTaskCreation) => void
+}
+
+function retainStaleTaskCreation(raw: string, rpcId: string, capture: TaskCreationCapture): void {
+  const message = parseMcpHttpResponse(raw, rpcId, true)
+  if (message.error !== undefined || typeof message.result !== 'object' || message.result === null
+    || Array.isArray(message.result) || (message.result.isError !== undefined && message.result.isError !== false)
+    || !Array.isArray(message.result.content)) return
+  const content = message.result.content[0]
+  if (!content || content.type !== 'text' || typeof content.text !== 'string') return
+  const value = parseUniqueJson(content.text)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return
+  const result = value as Record<string, unknown>
+  if (result.ok !== true || result.creation_request_id !== capture.requestId || result.goal_id !== capture.goalId
+    || typeof result.task_id !== 'string' || result.task_id.trim() === '') return
+  capture.onStaleSuccess({ kind: 'created', taskId: result.task_id })
+}
+
 async function callMcpToolInternal(
   toolName: string,
   args: Record<string, unknown>,
@@ -412,6 +454,9 @@ async function callMcpToolInternal(
   isCurrent?: () => boolean,
   recoveryIsCurrent?: () => boolean,
   waitForRecoveryCurrent?: () => Promise<boolean>,
+  taskCapture?: TaskCreationCapture,
+  strictTaskResult = false,
+  onReceiptUnauthorized?: () => void,
 ): Promise<string> {
   const requestId = randomUuid()
   let explicitActor: string | null = null
@@ -476,12 +521,24 @@ async function callMcpToolInternal(
       id: requestId,
     }, binding, DEFAULT_MCP_TIMEOUT_MS, actor, expectedIdentity !== undefined, () => {
       const headerCurrent = recoveryIsCurrent ?? isCurrent
+      const current = expectedIdentity && sentWorkspace && sentRevision === expectedIdentity.revision
+        && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && headerCurrent && headerCurrent()
+      if (current && onReceiptUnauthorized) {
+        try { onReceiptUnauthorized() } catch { /* The observer cannot change transport semantics. */ }
+      }
       if (expectedIdentity && sentWorkspace && sentManagedDev && sentRevision === expectedIdentity.revision
-        && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && headerCurrent && headerCurrent()) {
+        && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && current) {
         noteManagedCredentialRefusalObservation(expectedIdentity.revision)
       }
-    })
-    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined)
+    }, taskCapture ? text => { retainStaleTaskCreation(text, requestId, taskCapture) } : undefined)
+    const strictResult = taskCapture !== undefined || strictTaskResult
+    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined, strictResult)
+    if (strictResult && parsed.error === undefined && parsed.result?.isError !== true) {
+      const content = parsed.result?.content?.[0]
+      if (!Array.isArray(parsed.result?.content) || !content || content.type !== 'text' || typeof content.text !== 'string') {
+        throw new Error('Invalid MCP Task result')
+      }
+    }
     return extractMcpText(parsed)
   } catch (err) {
     const authErrorCode = err instanceof McpToolCallError
@@ -540,6 +597,47 @@ export async function callMcpToolAtIdentity(
   waitForRecoveryCurrent?: () => Promise<boolean>,
 ): Promise<string> {
   return callMcpToolInternal(toolName, args, false, expectedIdentity, isCurrent, recoveryIsCurrent, waitForRecoveryCurrent)
+}
+
+/** Preserve only a validated late Task result for its original receipt.
+ * A retired credential still rejects the call; the callback grants no current
+ * presentation or mutation authority. No Task request is replayed. */
+export async function callMcpTaskCreationAtIdentity(
+  args: Record<string, unknown>,
+  expectedIdentity: { revision: number; actor: string },
+  isCurrent: () => boolean,
+  recoveryIsCurrent: (() => boolean) | undefined,
+  waitForRecoveryCurrent: (() => Promise<boolean>) | undefined,
+  onStaleSuccess: (result: StaleTaskCreation) => void,
+): Promise<string> {
+  const workspace = scopedWorkspace(args)
+  const requestId = args.creation_request_id
+  const goalId = args.goal_id ?? null
+  if (!workspace || typeof requestId !== 'string' || requestId.trim() === ''
+    || !(goalId === null || (typeof goalId === 'string' && goalId.trim() !== ''))
+    || typeof onStaleSuccess !== 'function') throw new McpScopedTaskBindingError()
+  const capturedArgs = { ...args, creation_request_id: requestId,
+    expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot } }
+  return callMcpToolInternal('masc_add_task', capturedArgs, false, { ...expectedIdentity }, isCurrent,
+    recoveryIsCurrent, waitForRecoveryCurrent, { requestId, goalId, onStaleSuccess })
+}
+
+/** Read one Task creation receipt under its original workspace and current identity. */
+export async function callMcpTaskReceiptAtIdentity(
+  args: Record<string, unknown>,
+  expectedIdentity: { revision: number; actor: string },
+  isCurrent: () => boolean,
+  onUnauthorized?: () => void,
+): Promise<string> {
+  const workspace = scopedWorkspace(args)
+  const requestId = args.creation_request_id
+  if (!workspace || typeof requestId !== 'string' || requestId.trim() === '') {
+    throw new McpScopedTaskBindingError()
+  }
+  const capturedArgs = { ...args, creation_request_id: requestId,
+    expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot } }
+  return callMcpToolInternal('masc_tasks', capturedArgs, false, { ...expectedIdentity }, isCurrent,
+    undefined, undefined, undefined, true, onUnauthorized)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

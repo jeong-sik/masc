@@ -22,6 +22,7 @@ const refreshGoalTreeMock = vi.hoisted(() => vi.fn())
 vi.mock('../api/mcp', () => ({
   callMcpTool: callMcpToolMock,
   callMcpToolAtIdentity: (name: string, args: Record<string, unknown>) => callMcpToolMock(name, args),
+  callMcpTaskReceiptAtIdentity: (args: Record<string, unknown>) => callMcpToolMock('masc_tasks', args),
   mcpCallFailureDisposition: () => 'outcome_unknown',
   mcpStructuredContentFromError: () => null,
 }))
@@ -47,6 +48,7 @@ vi.mock('../store', () => ({
   keepers: signal([]),
   executionTaskTotal: signal<number | null>(null),
   executionWorkspaceAuthority: signal({ epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }),
+  executionWorkspaceRevision: signal(0),
   refreshGoals: vi.fn().mockResolvedValue(undefined),
 }))
 

@@ -10,6 +10,7 @@ import type {
 } from '../../types'
 import { hydrateGoalTreeError, hydrateGoalTreeSnapshot } from '../../goal-tree-state'
 import { observeGoalIds } from '../../lib/goal-identity'
+import { DASHBOARD_AGENT_NAME_KEY, persistDashboardActorName, resolveDashboardActorName } from '../../lib/dashboard-actor'
 
 const mocks = vi.hoisted(() => ({
   fetchDashboardGoalDetail: vi.fn(),
@@ -235,6 +236,8 @@ describe('GoalTree', () => {
     mocks.post.mockReset()
     clearStoredToken()
     resetDashboardSessionActorForTests()
+    localStorage.removeItem(DASHBOARD_AGENT_NAME_KEY)
+    window.history.replaceState({}, '', '/')
     vi.unstubAllGlobals()
   })
 
@@ -1406,6 +1409,42 @@ describe('GoalTree', () => {
     await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(child.id))
     expect(screen.getByRole('button', { name: /Parent goal/ }).getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByRole('button', { name: /Child goal/ })).toBeTruthy()
+  })
+
+  it('preserves routed selection and filters for managed hints, but resets them on an actor change', async () => {
+    window.history.replaceState({}, '', '/')
+    localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    setStoredToken('managed-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-routed-owner', 'Routed owner goal')
+    mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: goal.id }, postId: null }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 } })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [],
+      approvals: [], execution_receipts: [], timeline: [] })
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id))
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Routed owner' } })
+    fireEvent.click(screen.getByRole('tab', { name: /실행 중/ }))
+    await act(async () => { persistDashboardActorName('bob') })
+
+    expect((screen.getByLabelText('목표 트리 필터') as HTMLInputElement).value).toBe('Routed owner')
+    expect(screen.getByRole('tab', { name: /실행 중/ }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id)
+    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
+
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching goal' } })
+    await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
+    await act(async () => { persistDashboardActorName('carol') })
+    expect((screen.getByLabelText('목표 트리 필터') as HTMLInputElement).value).toBe('no matching goal')
+    expect(screen.queryByTestId('goal-detail-panel')).toBeNull()
+
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Routed owner' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id))
+    await act(async () => { setCanonicalDashboardActor('other-actor') })
+    await waitFor(() => expect((screen.getByLabelText('목표 트리 필터') as HTMLInputElement).value).toBe(''))
+    expect(screen.getByRole('tab', { name: /전체/ }).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id))
+    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2)
   })
 
   it('keeps a routed padded ID exact and blocks observed aliases even when filtered', async () => {
@@ -2676,6 +2715,33 @@ describe('GoalTree', () => {
     await screen.findByRole('button', { name: 'Request completion' })
     resolveOld(tree)
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('does not restore an older Goal read when an uncredentialed actor changes away and back', async () => {
+    window.history.replaceState({}, '', '/')
+    localStorage.setItem(DASHBOARD_AGENT_NAME_KEY, 'alice')
+    mocks.currentDashboardActor.mockImplementation(() => resolveDashboardActorName() ?? 'dashboard')
+    const oldGoal = makeGoal('goal-old-actor-read', 'Old actor observation')
+    const newGoal = makeGoal('goal-new-actor-read', 'Current actor observation')
+    const payload = (goal: GoalTreeNode): DashboardGoalsTreeResponse => ({
+      approval_queue_state: { state: 'ready' }, tree: [goal], summary: { ...emptySummary(), total_goals: 1 },
+    })
+    let resolveOld!: (tree: DashboardGoalsTreeResponse) => void
+    mocks.fetchDashboardGoalsTree
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValueOnce(payload(newGoal))
+    render(html`<${ObservationProbe} />`)
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      persistDashboardActorName('bob')
+      persistDashboardActorName('alice')
+    })
+    await waitFor(() => expect(screen.getByTestId('bound-tree').textContent).toBe('Current actor observation'))
+    await act(async () => { resolveOld(payload(oldGoal)) })
+
+    expect(screen.getByTestId('bound-tree').textContent).toBe('Current actor observation')
+    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2)
   })
 
   it('rechecks a pending bearer request when its canonical actor changes', async () => {

@@ -9,6 +9,7 @@ import type {
 } from '../types'
 import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
 import { isAbortError } from '../lib/async-state'
+import { parseUniqueJson } from '../lib/json-unique'
 import {
   currentCanonicalDashboardActor,
   currentDashboardActorName,
@@ -215,6 +216,7 @@ export interface DashboardCredentialOwner {
   actor: string
   actorRevision: number
   managed: boolean
+  managedActorRevision: number
   managedAuthRevision: number
   managedRefusalObservation: number
 }
@@ -227,6 +229,7 @@ export function captureDashboardCredentialOwner(): DashboardCredentialOwner {
     actor: currentDashboardActor(),
     actorRevision: dashboardActorRevision.peek(),
     managed: token !== null && getStoredTokenMeta()?.source === 'dev',
+    managedActorRevision: managedDashboardActorRevision.peek(),
     managedAuthRevision: managedDashboardAuthRevision.peek(),
     managedRefusalObservation: currentManagedRefusalObservation(),
   }
@@ -236,9 +239,12 @@ export function dashboardCredentialOwnerIsCurrent(owner: DashboardCredentialOwne
   return owner.token === dashboardBearerToken()
     && owner.tokenRevision === currentStoredTokenRevision()
     && owner.actor === currentDashboardActor()
-    && owner.actorRevision === dashboardActorRevision.peek()
-    && (!owner.managed || (owner.managedAuthRevision === managedDashboardAuthRevision.peek()
-      && owner.managedRefusalObservation === currentManagedRefusalObservation()))
+    && (owner.managed
+      ? getStoredTokenMeta()?.source === 'dev'
+        && owner.managedActorRevision === managedDashboardActorRevision.peek()
+        && owner.managedAuthRevision === managedDashboardAuthRevision.peek()
+        && owner.managedRefusalObservation === currentManagedRefusalObservation()
+      : owner.actorRevision === dashboardActorRevision.peek())
 }
 
 type HeaderOptions = {
@@ -779,6 +785,7 @@ async function parseJsonResponse<T>(
   path: string,
   res: Response,
   preserveAbort = false,
+  rejectDuplicateMembers = false,
 ): Promise<T> {
   let rawText = ''
   try {
@@ -805,7 +812,7 @@ async function parseJsonResponse<T>(
   }
 
   try {
-    return JSON.parse(rawText) as T
+    return (rejectDuplicateMembers ? parseUniqueJson(rawText) : JSON.parse(rawText)) as T
   } catch {
     throw new ApiRequestError({
       method,
@@ -999,6 +1006,7 @@ export async function getWithResponse<T>(
     beforeResponseBody?: (response: Pick<Response, 'status' | 'statusText' | 'ok' | 'headers'>) => void
     preserveErrorBodyFailure?: boolean
     reportCredentialRefusal?: boolean
+    rejectDuplicateJsonMembers?: boolean
   } = {},
 ): Promise<{ readonly data: T; readonly headers: Headers }> {
   const consume = async (res: Response): Promise<{ readonly data: T; readonly headers: Headers }> => {
@@ -1014,7 +1022,7 @@ export async function getWithResponse<T>(
       if (warmPayload !== null) return { data: warmPayload as T, headers: new Headers() }
       throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout, opts.preserveErrorBodyFailure)
     }
-    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout)
+    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout, opts.rejectDuplicateJsonMembers)
     if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
       const payload = bootstrapInitializingPayload(path)
       if (payload !== null) return { data: payload as T, headers: new Headers() }

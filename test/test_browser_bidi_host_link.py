@@ -762,7 +762,7 @@ class BidiHostLink(unittest.TestCase):
         answer = self.call(self.lane)
         self.assertFalse(answer["ok"])
         self.assertEqual(answer.get("effectPhase"), "not_started")
-        self.assertEqual(answer["error"], "BiDi EOF")
+        self.assertEqual(answer["error"], "browsingContext.getTree: BiDi EOF")
         self.assertTrue(self.lane.state.result_received.wait(EXIT_WAIT_SEC), self.host_log())
         try:
             # The last answer is offered once and cannot hold shutdown for the

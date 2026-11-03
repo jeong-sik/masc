@@ -595,7 +595,11 @@ let process_step root operation =
           | Ok None -> fail "Apple authority was missing"
           | Error detail -> fail detail in
         let first_projection = projection () in
-        let argv = strings (Keeper_sandbox_remote.transport_argv first_endpoint) in
+        let argv =
+          match Keeper_sandbox_remote.carrier first_endpoint with
+          | Keeper_sandbox_remote.Local_process { request; _ } -> strings request
+          | Keeper_sandbox_remote.Guest_agent _ -> fail "the Apple guest has an exec argv"
+        in
         let remote_root = Keeper_sandbox_remote.workspace_root first_endpoint in
         (* This is the exact pre-change projection. Credential and route
            revalidation are process-local and must not rewrite old originals. *)

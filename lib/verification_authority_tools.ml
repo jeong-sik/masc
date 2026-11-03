@@ -771,9 +771,7 @@ let review_route t =
            Keeper_sandbox_remote_lane.apple_snapshot_route ~config:t.config ~meta
          | None | Some (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) ->
            let* endpoint = Keeper_sandbox_remote_lane.attached_guest_endpoint ~config:t.config ~meta () in
-           Ok (`Assoc ["kind", `String "microvm";
-             "argv", `List (List.map (fun x -> `String x) (Keeper_sandbox_remote.transport_argv endpoint));
-             "root", `String (Keeper_sandbox_remote.workspace_root endpoint)])) in
+           Ok (Keeper_sandbox_remote_lane.microvm_endpoint_route endpoint)) in
     Ok (keeper_review_route meta route)
 
 let captured_review_route t =

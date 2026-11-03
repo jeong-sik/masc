@@ -83,7 +83,7 @@ agent 는 PID 1 이라 고아 프로세스를 거둬야 해요. `--init` 은 쓰
 
 ### 3.5 호스트 쪽
 
-- `Keeper_sandbox_remote.transport` 에 `Guest_socket of { host_socket : string; ... }` 를 더해요. masc 서버가 Eio 로 직접 접속해요.
+- `Keeper_sandbox_remote.transport` 의 microVM 레인(`Microvm`)은 전달 방식(`delivery`)을 가져요. 요청마다 `container exec` 를 하나 띄우는 지금 방식이 `Exec_per_request`, agent 소켓이 `Agent_socket of { host_socket; expected }` 예요. 레인만 보는 곳(작업 경로, 경로 바꾸기, 파일 쓰기 대상)은 전달 방식을 보지 않아요. masc 서버가 Eio 로 agent 에 직접 접속해요.
 - 덩어리를 나눠 지금과 같은 `(종료 상태, stdout, stderr)` 와 chunk 콜백을 만들어요. 수락 프레임 처리, trailer 대조, 경로 바꾸기는 그대로예요.
 - 호스트 쪽 시간 초과는 연결을 닫고 `WEXITED 124` 로 돌려줘요. 지금 `Process_eio` 가 시간 초과를 돌려주는 방식과 같아요.
 - 첫 요청 전에 hello 를 받아야 해요. 게스트의 첫 요청은 첫 handoff 정리라서, agent 가 아직 안 떴을 때 끊긴 연결을 "결과 모름"으로 읽으면 안 돼요.
@@ -105,9 +105,9 @@ agent 소켓은 root 전용 디렉터리에 있어서 Keeper uid 는 경로로 �
 
 ### 3.9 옮기는 순서
 
-1. 새 transport 를 Keeper 별 선택으로 더해요. canary 동안에만 두 경로가 같이 있어요. 되돌리기는 그 Keeper 의 선택을 원래대로 바꾸는 거예요.
+1. `Agent_socket` 전달 방식을 Keeper 별 선택으로 더해요. canary 동안에만 두 경로가 같이 있어요. 되돌리기는 그 Keeper 의 선택을 원래대로 바꾸는 거예요.
 2. canary 기준(7절)을 넘으면 나머지 Apple Keeper 를 옮겨요.
-3. 모두 옮기면 Apple backend 의 `Container_exec` 요청 경로와 선택 값을 한 PR 에서 지워요. 그 뒤 되돌리기는 그 PR 의 revert 예요.
+3. 모두 옮기면 `Exec_per_request` 전달 방식과 선택 값을 한 PR 에서 지워요. 그 뒤 되돌리기는 그 PR 의 revert 예요.
 
 ### 3.10 바뀌지 않는 것
 

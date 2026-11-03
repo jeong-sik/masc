@@ -163,16 +163,29 @@ type read_authority = {
   apple_revision : string option;
 }
 
+(* A guest agent in a route: its guest, the host socket and the owner its
+   hello must report. Another socket or owner is another route, as another
+   argv is for a local process. *)
+let agent_socket_json endpoint ~host_socket ~(expected : Keeper_guest_socket.expected) =
+  `Assoc ["guest", `String (Keeper_sandbox_remote.name endpoint);
+    "host_socket", `String host_socket;
+    "uid", `Int expected.Keeper_guest_socket.uid;
+    "gid", `Int expected.Keeper_guest_socket.gid]
+
 (* This value can contain environment values. It is compared only in memory. *)
 let apple_endpoint_route endpoint =
   let strings values = `List (List.map (fun value -> `String value) values) in
-  `Assoc ["name", `String (Keeper_sandbox_remote.name endpoint);
+  let carrier = match Keeper_sandbox_remote.carrier endpoint with
+    | Keeper_sandbox_remote.Local_process {request; probe} ->
+      ["transport_argv", strings request; "probe_argv", strings probe]
+    | Keeper_sandbox_remote.Guest_agent {host_socket; expected} ->
+      ["agent_socket", agent_socket_json endpoint ~host_socket ~expected] in
+  `Assoc (["name", `String (Keeper_sandbox_remote.name endpoint);
     "workspace_root", `String (Keeper_sandbox_remote.workspace_root endpoint);
-    "gh_config_dir", `String (Keeper_sandbox_remote.gh_config_dir endpoint);
-    "transport_argv", strings (Keeper_sandbox_remote.transport_argv endpoint);
-    "probe_argv", strings (Keeper_sandbox_remote.probe_argv endpoint);
-    "injected_env", `List (List.map (fun (key, value) ->
-      `List [`String key; `String value]) (Keeper_sandbox_remote.injected_env endpoint))]
+    "gh_config_dir", `String (Keeper_sandbox_remote.gh_config_dir endpoint)]
+    @ carrier
+    @ ["injected_env", `List (List.map (fun (key, value) ->
+      `List [`String key; `String value]) (Keeper_sandbox_remote.injected_env endpoint))])
 
 let capture_read_authority ~(config : Workspace.config) ~(meta : keeper_meta) () =
   let capture endpoint declaration apple_revision =
@@ -226,18 +239,25 @@ let read_authority_workspace_root authority = Keeper_sandbox_remote.workspace_ro
 
 let read_authority_identity authority =
   let strings values = `List (List.map (fun value -> `String value) values) in
-  `Assoc ["workspace",`String authority.base_path;"keeper",`String authority.keeper;
+  let carrier = match Keeper_sandbox_remote.carrier authority.endpoint with
+    | Keeper_sandbox_remote.Local_process {request; probe = _} -> ["transport_argv", strings request]
+    | Keeper_sandbox_remote.Guest_agent {host_socket; expected} ->
+      ["agent_socket", agent_socket_json authority.endpoint ~host_socket ~expected] in
+  `Assoc (["workspace",`String authority.base_path;"keeper",`String authority.keeper;
     "profile",`String (Keeper_types_profile.sandbox_profile_to_string authority.profile);
-    "workspace_root",`String (read_authority_workspace_root authority);
-    "transport_argv",strings (Keeper_sandbox_remote.transport_argv authority.endpoint);
-    "declaration",(match authority.declaration with
-      | None -> `Null | Some declaration -> `String (Exec_ssh_endpoint.to_toml declaration))]
+    "workspace_root",`String (read_authority_workspace_root authority)]
+    @ carrier
+    @ ["declaration",(match authority.declaration with
+      | None -> `Null | Some declaration -> `String (Exec_ssh_endpoint.to_toml declaration))])
 
 let microvm_endpoint_route endpoint =
-  `Assoc ["kind", `String "microvm";
-    "argv", `List (List.map (fun value -> `String value)
-      (Keeper_sandbox_remote.transport_argv endpoint));
-    "root", `String (Keeper_sandbox_remote.workspace_root endpoint)]
+  let carrier = match Keeper_sandbox_remote.carrier endpoint with
+    | Keeper_sandbox_remote.Local_process {request; probe = _} ->
+      ["argv", `List (List.map (fun value -> `String value) request)]
+    | Keeper_sandbox_remote.Guest_agent {host_socket; expected} ->
+      ["agent_socket", agent_socket_json endpoint ~host_socket ~expected] in
+  `Assoc (["kind", `String "microvm"] @ carrier
+    @ ["root", `String (Keeper_sandbox_remote.workspace_root endpoint)])
 
 let apple_snapshot_route ~(config : Workspace.config) ~(meta : keeper_meta) =
   Keeper_turn_sandbox_runtime.with_apple_snapshot_endpoint ~config ~meta

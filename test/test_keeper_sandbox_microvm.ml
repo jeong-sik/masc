@@ -4855,7 +4855,12 @@ let test_running_guest_is_a_remote_endpoint () =
   with
   | Error message -> Alcotest.fail message
   | Ok endpoint ->
-    let argv = Masc.Keeper_sandbox_remote.transport_argv endpoint in
+    let argv =
+      match Masc.Keeper_sandbox_remote.carrier endpoint with
+      | Masc.Keeper_sandbox_remote.Local_process { request; _ } -> request
+      | Masc.Keeper_sandbox_remote.Guest_agent _ ->
+        Alcotest.fail "a container exec guest has an exec argv"
+    in
     Alcotest.(check bool) "execs into the guest" true
       (adjacent ~flag:"exec" ~value:"-i" argv && contains container_name argv);
     Alcotest.(check bool) "names the mounted shim" true (contains M.shim_guest_path argv);
@@ -4921,15 +4926,20 @@ let test_running_guest_is_a_remote_endpoint () =
          (Some "/tmp/masc-runtime/.masc/keepers/lane-smith/github-cli/gitconfig")
          (List.assoc_opt "GIT_CONFIG_GLOBAL" configured_injected));
     (match Masc.Keeper_sandbox_remote.transport endpoint with
-     | Masc.Keeper_sandbox_remote.Container_exec
-         (guest : Masc.Keeper_sandbox_remote.container_exec) ->
+     | Masc.Keeper_sandbox_remote.Microvm
+         { shim_path; delivery = Masc.Keeper_sandbox_remote.Exec_per_request { prefix; _ }; _ } ->
        (* The prefix arrives prebuilt, so what this pins is that the argv the
           transport hands out is that prefix with the shim appended -- not a
           second assembly the transport does on its own. *)
        Alcotest.(check (list string)) "the transport appends only the shim"
-         (guest.prefix @ [ guest.shim_path ])
+         (prefix @ [ shim_path ])
          argv;
-       let probe_argv = Masc.Keeper_sandbox_remote.probe_argv endpoint in
+       let probe_argv =
+         match Masc.Keeper_sandbox_remote.carrier endpoint with
+         | Masc.Keeper_sandbox_remote.Local_process { probe; _ } -> probe
+         | Masc.Keeper_sandbox_remote.Guest_agent _ ->
+           Alcotest.fail "a container exec guest has a probe argv"
+       in
        Alcotest.(check bool) "probe argv does not pass -i (#33431)" false
          (List.mem "-i" probe_argv);
        Alcotest.(check bool) "probe argv ends with --probe" true
@@ -4938,6 +4948,8 @@ let test_running_guest_is_a_remote_endpoint () =
           reaching the exec rather than a value the prefix invented. *)
        Alcotest.(check bool) "execs as the runtime's uid:gid" true
          (adjacent ~flag:"--user" ~value:"0:0" argv)
+     | Masc.Keeper_sandbox_remote.Microvm
+         { delivery = Masc.Keeper_sandbox_remote.Agent_socket _; _ }
      | Masc.Keeper_sandbox_remote.Openssh _ | Masc.Keeper_sandbox_remote.Docker_exec _ ->
        Alcotest.fail "a microvm guest must retain its own transport");
     let docker =

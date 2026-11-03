@@ -256,10 +256,17 @@ let shell_quote value =
   "'" ^ String.concat "'\\''" (String.split_on_char '\'' value) ^ "'"
 ;;
 
+(* [Keeper_sandbox_ssh.create] builds an OpenSSH endpoint: its request argv is
+   the pinned ssh argv ending in the shim command, and that last element is
+   replaced here. *)
 let replace_remote_command ssh argv_command =
-  match List.rev (Keeper_sandbox_remote.transport_argv ssh) with
-  | _fixed :: rest -> List.rev (argv_command :: rest)
-  | [] -> [ "ssh"; argv_command ]
+  match Keeper_sandbox_remote.carrier ssh with
+  | Keeper_sandbox_remote.Local_process { request; _ } ->
+    (match List.rev request with
+     | _fixed :: rest -> Ok (List.rev (argv_command :: rest))
+     | [] -> Ok [ "ssh"; argv_command ])
+  | Keeper_sandbox_remote.Guest_agent _ ->
+    Error "the bootstrap endpoint is a guest agent socket, not an OpenSSH endpoint"
 ;;
 
 let remote_target (endpoint : Exec_ssh_endpoint.t) =
@@ -375,14 +382,14 @@ let authorize_key endpoint ~known_hosts_file public_file =
 
 let endpoint_shim_config ssh (endpoint : Exec_ssh_endpoint.t) =
   let default = "remote_root=" ^ endpoint.remote_root ^ "\n" in
-  let* content =
-    run_capture_stdout
-      (pinned_ssh ssh
-         ("if test -e /etc/masc-exec-shim.conf || test -L /etc/masc-exec-shim.conf; then "
-          ^ "test -f /etc/masc-exec-shim.conf && test ! -L /etc/masc-exec-shim.conf "
-          ^ "&& cat /etc/masc-exec-shim.conf; else printf %s "
-          ^ shell_quote default ^ "; fi"))
+  let* read_config =
+    pinned_ssh ssh
+      ("if test -e /etc/masc-exec-shim.conf || test -L /etc/masc-exec-shim.conf; then "
+       ^ "test -f /etc/masc-exec-shim.conf && test ! -L /etc/masc-exec-shim.conf "
+       ^ "&& cat /etc/masc-exec-shim.conf; else printf %s "
+       ^ shell_quote default ^ "; fi")
   in
+  let* content = run_capture_stdout read_config in
   let* config = Exec_shim.parse_config content in
   Ok
     (Exec_shim.render_config
@@ -452,14 +459,13 @@ let install_shim ssh endpoint shim_path =
   then Error (Printf.sprintf "shim artifact is not a regular file: %s" shim_path)
   else
     let* config = endpoint_shim_config ssh endpoint in
-    let* () =
-      run_inherited
-        (pinned_ssh ssh
-           (prepare_directory_command ~path:endpoint.remote_root ~mode:0o755 ()))
+    let* prepare_root =
+      pinned_ssh ssh (prepare_directory_command ~path:endpoint.remote_root ~mode:0o755 ())
     in
+    let* () = run_inherited prepare_root in
     let remote_temp = Printf.sprintf "/tmp/masc-exec-shim.%d" (Unix.getpid ()) in
-    let upload = "umask 077; cat > " ^ shell_quote remote_temp in
-    let* () = run_with_file_stdin (pinned_ssh ssh upload) shim_path in
+    let* upload = pinned_ssh ssh ("umask 077; cat > " ^ shell_quote remote_temp) in
+    let* () = run_with_file_stdin upload shim_path in
     let command =
       String.concat " && "
         [ "config_temp=$(sudo -n mktemp /etc/masc-exec-shim.conf.XXXXXX)"
@@ -476,7 +482,8 @@ let install_shim ssh endpoint shim_path =
         ; "printf '%s\\n' \"$probe\" | sudo -n tee /usr/local/share/masc/exec-shim.version >/dev/null"
         ]
     in
-    run_inherited (pinned_ssh ssh command)
+    let* install = pinned_ssh ssh command in
+    run_inherited install
 ;;
 
 let validate_keeper_name keeper =
@@ -490,10 +497,11 @@ let validate_keeper_name keeper =
 
 let provision_keeper_workspace ssh (endpoint : Exec_ssh_endpoint.t) keeper =
   let keeper_root = Filename.concat endpoint.remote_root keeper in
-  run_inherited
-    (pinned_ssh ssh
-       (prepare_directory_command ~owner:endpoint.user
-          ~path:keeper_root ~mode:0o700 ()))
+  let* prepare =
+    pinned_ssh ssh
+      (prepare_directory_command ~owner:endpoint.user ~path:keeper_root ~mode:0o700 ())
+  in
+  run_inherited prepare
 ;;
 
 let provision_keeper_identity ssh endpoint ~base_path (keeper, token_file) =
@@ -531,7 +539,8 @@ let provision_keeper_identity ssh endpoint ~base_path (keeper, token_file) =
     let* () = ensure_dir_0700 (Filename.dirname redaction_file) in
     let* () = write_atomic ~mode:0o600 redaction_file (token ^ "\n") in
     let* () = write_existing_private temp (token ^ "\n") in
-    run_with_file_stdin (pinned_ssh ssh prepare) temp
+    let* login = pinned_ssh ssh prepare in
+    run_with_file_stdin login temp
 ;;
 
 let parse_keeper_token value =

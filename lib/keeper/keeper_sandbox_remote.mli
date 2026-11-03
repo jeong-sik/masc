@@ -23,9 +23,34 @@ type container_exec =
   ; shim_path : string  (** Absolute guest path of [masc-exec-shim]. *)
   }
 
+(** How a request reaches a microVM guest's shim. *)
+type microvm_delivery =
+  | Exec_per_request of
+      { prefix : string list
+        (** the exec argv up to and including the guest name, as
+            {!Keeper_sandbox_microvm.shim_exec_prefix_for} built it *)
+      ; probe_prefix : string list option
+        (** the same without stdin-streaming flags, for probes; [None] uses
+            [prefix] *)
+      }  (** one exec of the shim per request *)
+  | Agent_socket of
+      { host_socket : string
+        (** the host end of the VM's [container run --publish-socket] *)
+      ; expected : Keeper_guest_socket.expected
+        (** the Keeper uid and gid the agent's hello must report *)
+      }
+      (** one connection per request to the guest agent
+          ([masc-exec-shim --serve], RFC microvm-guest-agent-over-socket) *)
+
+type microvm =
+  { container_name : string  (** the running guest *)
+  ; shim_path : string  (** absolute guest path of [masc-exec-shim] *)
+  ; delivery : microvm_delivery
+  }
+
 type transport =
   | Openssh of openssh
-  | Container_exec of container_exec
+  | Microvm of microvm
   | Docker_exec of container_exec
 
 type t
@@ -53,6 +78,26 @@ val of_container_exec :
     Keeper's commit names ({!Exec_ssh_protocol.keeper_git_author_env});
     the guest's shim must allowlist those names in its config for them to
     reach the payload. *)
+
+val of_agent_socket :
+  base_path:string ->
+  keeper_name:string ->
+  remote_root:string ->
+  gh_config_dir:string ->
+  injected_env:(string * string) list ->
+  env_allowlist:string list ->
+  connect_timeout_sec:int ->
+  max_concurrent_sessions:int ->
+  container_name:string ->
+  shim_path:string ->
+  host_socket:string ->
+  expected:Keeper_guest_socket.expected ->
+  t
+(** The same guest endpoint as {!of_container_exec}, reached through the
+    guest agent's published socket instead of an exec per request.
+    [connect_timeout_sec] bounds how long a request waits for the agent's
+    hello; an agent whose hello {!Keeper_guest_socket.refusal} refuses gets no
+    request. *)
 
 val of_docker_exec :
   base_path:string ->
@@ -109,13 +154,25 @@ val lane_prefix : transport -> string
 (** ["remote_ssh"], ["microvm_remote"] or ["docker_observe"]: the prefix every lane-specific
     error code starts with. *)
 
-val transport_argv : t -> string list
-(** Exact argv that delivers the framed request to the shim: the pinned
-    OpenSSH argv ending in the fixed remote command [masc-exec-shim], or the
-    guest's prebuilt exec prefix with the guest path of the shim appended. *)
+(** What carries one request to the shim. *)
+type carrier =
+  | Local_process of
+      { request : string list
+        (** exact argv that delivers the framed request: the pinned OpenSSH
+            argv ending in the fixed remote command [masc-exec-shim], or the
+            guest's prebuilt exec prefix with the guest path of the shim
+            appended *)
+      ; probe : string list  (** [request] with the shim asked for [--probe] *)
+      }
+  | Guest_agent of
+      { host_socket : string  (** the host end of the VM's [--publish-socket] *)
+      ; expected : Keeper_guest_socket.expected
+        (** the Keeper uid and gid the agent's hello must report *)
+      }
+      (** an {!Agent_socket} guest: each request and probe is one connection
+          to its agent, and no local process carries it *)
 
-val probe_argv : t -> string list
-(** {!transport_argv} with the shim asked for [--probe]. *)
+val carrier : t -> carrier
 
 val check_preflight : ?force:bool -> t -> (unit, string) result
 (** Verify endpoint reachability, shim major version, remote git/rg, the

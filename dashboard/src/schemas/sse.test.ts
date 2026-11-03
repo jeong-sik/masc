@@ -83,6 +83,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('repositories_changed')).toBe('repositories_changed')
   })
 
+  it('accepts Keeper event queue changes', () => {
+    expect(SSEEventTypeSchema.parse('keeper_event_queue_changed')).toBe('keeper_event_queue_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

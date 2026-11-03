@@ -94,6 +94,46 @@ msb 쪽은 누수를 일부러 일으키는 대조군이 없어요.
    - 두 경우 모두 agent 가 내려간 뒤 `dumpable` 0, `no_new_privs` 1 이에요. capability 값은 읽지 않았어요.
 
 `bin/agent_shape.py` 는 2번 측정 뒤 연결 로그를 남기게, `kit/agent_probe.py` 는 5번 측정 전에 `root-drop-ro` 모드와 rootfs 쓰기 확인을 더하게 고쳤어요. 저장소의 파일은 마지막 상태예요.
+
+### 실제 agent (`bin/agent_l3.py`, `bin/agent_boot_connect.py`)
+
+구현 3층의 `masc-exec-shim --serve` 를 RFC 0절 실행 옵션으로 띄워서 쟀어요. 위 python stand-in 이 아니라 실제 agent 와 실제 shim 이에요.
+
+- 이미지는 `masc-sandbox-ocaml:20260928T0216Z-c48e1e05` 예요. shim 은 `scripts/build-shim-static.sh --print-sources` 의 소스로 그 이미지 안에서 빌드했어요(정적 링크 아님). 결과 파일의 `sources_sha256` 은 그 소스 묶음의 해시이고(`4f461c864a95…`), 이 측정을 더한 PR 의 shim 소스와 같아요. `worktree_head` 는 main 위로 옮기기 전 커밋이에요.
+- 실행 옵션: `--cap-drop ALL --cap-add CAP_SETUID --cap-add CAP_SETGID --cap-add CAP_SYS_ADMIN --tmpfs /tmp`. `--user`·`--read-only` 는 없어요. shim 디렉터리는 읽기 전용, 작업 디렉터리는 쓰기로 마운트했어요.
+- 첫 명령: `/opt/masc-exec-shim/masc-exec-shim --serve /run/masc-agent/agent.sock 502:20`, 소켓은 `--publish-socket` 으로 호스트에 내보냈어요.
+
+`agent-l3-results.json`(두 번째 실행)과 `agent-l3-results-run1.json`(첫 실행). 첫 실행은 스크립트에 재연결 수 세기를 더하기 전이에요.
+
+| 확인 | 결과 |
+|---|---|
+| hello | relay_version 1, root_read_only true, uid 502, gid 20, no_new_privs true |
+| probe | `3.0.0+l3check`, capabilities `observe`·`user_notif`·`request_acceptance_frame`, 종료 0 |
+| payload 의 id | uid 502, gid 20, 보조 그룹 20 |
+| payload 의 쓰기 | rootfs(`/var/tmp`) 실패, `/tmp`(tmpfs)·`/masc-work` 성공 |
+| payload 의 capability | CapPrm·CapEff 0, CapBnd `0x2000c0`(SETGID·SETUID·SYS_ADMIN), NoNewPrivs 1 |
+| agent(PID 1) 의 `/proc/1/status` | Uid 502 넷, Gid 20 넷, CapEff 0, NoNewPrivs 1 |
+| payload 가 소켓 디렉터리 읽기, agent 의 fd 목록 읽기, agent 소켓 연결 | 셋 다 거부(Permission denied) |
+| payload 종료 7 | trailer exit 7, shim 종료 0 |
+| 2초 자는 요청 도중에 보낸 요청 | 212ms(첫 실행), 12ms(두 번째)에 끝남 |
+| 50번 연속 | 틀린 응답 0. p50 209ms / 최대 266ms(첫 실행), p50 21ms / 최대 418ms(두 번째) |
+| 50번 앞뒤 runtime pipe | 짝 없는 pipe 0 → 0, 연결된 pipe 0 → 0 (두 실행 모두) |
+| 요청 도중 연결 끊기 | 4초 뒤 `sleep 30` 프로세스 0, payload 가 나중에 쓸 파일 없음 |
+| 첫 hello 뒤 다시 연결해야 했던 연결 | 0 / 54 (두 번째 실행만 셈) |
+
+지연은 두 실행에서 열 배 가까이 달랐고, 원인은 따지지 않았어요. 위 `container exec` 표와도 바로 비교하지 않아요. 이번 요청은 shim 과 payload 를 실제로 돌리고, shim 감독 루프는 0.2초 단위로 돌아요(`exec_shim.ml` 의 `quantum`).
+
+**agent 가 듣기 전에 연 연결.** `container run -d` 가 돌아오자마자 호스트 소켓에 연결하면 세 가지가 나왔어요.
+
+| 실행 | 즉시 연 연결이 받은 것 |
+|---|---|
+| `agent_boot_connect.py`, 부팅 6번 (`agent-boot-results.json`) | hello 5번(0.04~0.23초), EOF 1번(4ms, 바로 다음 연결도 EOF) |
+| `agent_l3.py` 두 실행 | 둘 다 EOF. 그 뒤 1초 기한으로 6번·9번 다시 연결해서 436ms·142ms 에 hello |
+| `agent_l3.py` 를 고치기 전 실행 (읽기에 기한이 없었음) | 12분 동안 hello 도 EOF 도 없음 |
+
+마지막 줄은 결과 파일이 없어요. 멈춘 스크립트를 보고 확인했어요. 그때 게스트에는 agent(PID 1)만 있고 relay 프로세스가 없었어요(`container exec ... ps`). 스크립트는 연결 하나를 연 채 읽기에서 멈춰 있었어요(`lsof`). 같은 VM 에 새로 연결하면 hello 가 바로 왔어요.
+
+그래서 호스트는 hello 를 기한 안에 받지 못하면 그 연결을 닫고 새로 연결해야 해요. hello 전에는 아무것도 보내지 않으므로, 다시 연결해도 요청이 두 번 돌지 않아요.
 `bin/pipeleak.py` 는 10-28 부터 쓴 호스트 pipe 측정 스크립트예요(`once` 가 표를 찍어요). PIPE fd 만 세므로 소켓이나 vsock 누수는 못 봐요. 그래서 위 측정은 runtime 의 전체 fd 수도 같이 셌어요.
 
 ## 로그 집계 (`<base-path>/.masc/logs/system_log_<날짜>.jsonl`)

@@ -79,6 +79,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('verification_requests_changed')).toBe('verification_requests_changed')
   })
 
+  it('accepts repository catalog changes', () => {
+    expect(SSEEventTypeSchema.parse('repositories_changed')).toBe('repositories_changed')
+  })
+
   it('accepts board post changes', () => {
     expect(SSEEventTypeSchema.parse('post_changed')).toBe('post_changed')
   })

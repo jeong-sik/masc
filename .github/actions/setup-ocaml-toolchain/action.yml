@@ -187,3 +187,5 @@ runs:
       run: |
         echo "setup-ocaml-toolchain supports Linux and macOS runners only" >&2
         exit 1
+
+# timing probe for the PR type-check job; removed with this branch.

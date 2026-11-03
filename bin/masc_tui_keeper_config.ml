@@ -55,9 +55,6 @@ let editable_snapshot json =
            (editable_field_value json field))
        editable_fields)
 
-let editor_stem json =
-  editable_snapshot json |> Yojson.Safe.pretty_to_string |> fun text -> text ^ "\n"
-
 let editable_field_names = List.map editable_field_name editable_fields
 
 type editor_format = Toml | Json

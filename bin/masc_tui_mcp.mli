@@ -66,13 +66,6 @@ type resources_walk_stop =
   ]
 (** How a [resources_list_all] walk ended. *)
 
-val resources_of_body :
-  request_id:string -> string -> (resource list, string) result
-(** Read one [resources/list] answer in server order without discarding the
-    fields that explain what each resource contains. This is the first page
-    only; a caller that can lose the rest must use [resources_page_of_body]
-    or [resources_list_all]. *)
-
 val resources_page_of_body :
   request_id:string -> string -> (resource list * string option, string) result
 (** One [resources/list] answer as its page and the cursor for the next one,

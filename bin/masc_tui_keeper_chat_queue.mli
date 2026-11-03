@@ -124,12 +124,6 @@ val take_first_sendable : t -> sendable:(string -> bool) -> (item * t) option
     free them, because the keeper they are addressed to is idle and so has no
     settle coming to drain them. *)
 
-val take_newest : t -> (item * t) option
-(** Take the newest waiting request. The newest is the one an operator just
-    typed and the one a mis-send hits: cancel drops it, and pulling it back
-    into the composer is the edit. Nothing was dispatched, so both are local
-    decisions with nothing to undo on the server. [None] when nothing waits. *)
-
 val take_newest_for_keeper : t -> keeper_name:string -> (item * t) option
 (** The newest waiting item addressed to one Keeper, keeping every other
     Keeper's items in their original positions. Chat-pane cancel/edit uses

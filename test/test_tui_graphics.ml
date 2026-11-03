@@ -238,7 +238,8 @@ let test_raw_rgb_states_its_pixel_dimensions () =
   let data = String.init (w * h * 3) (fun index -> Char.chr (index mod 256)) in
   let keys =
     match
-      Masc_tui_graphics.place_rgb ~data ~pixel_width:w ~pixel_height:h ~rows:5
+      Masc_tui_graphics.replace_rgb ~image_id:1 ~placement_id:1 ~data ~pixel_width:w
+        ~pixel_height:h ~rows:5
       |> bodies
     with
     | first :: _ -> fst (keys_and_payload first)
@@ -264,9 +265,11 @@ let test_raw_rgb_states_its_pixel_dimensions () =
    test; drawing gives it a wrong picture and no way to know. *)
 let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
   check string "three bytes are not a 4x2 frame" ""
-    (Masc_tui_graphics.place_rgb ~data:"xyz" ~pixel_width:4 ~pixel_height:2 ~rows:5);
+    (Masc_tui_graphics.replace_rgb ~image_id:1 ~placement_id:1 ~data:"xyz" ~pixel_width:4
+       ~pixel_height:2 ~rows:5);
   check string "and neither is nothing" ""
-    (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
+    (Masc_tui_graphics.replace_rgb ~image_id:1 ~placement_id:1 ~data:"" ~pixel_width:4
+       ~pixel_height:2 ~rows:5)
 ;;
 
 (* Inflate the PNG IDAT, independently of the encoder. *)

@@ -14,6 +14,14 @@
     connection that ends or gives no hello within {!hello_wait_sec} is closed
     and a new one is made, until the connect budget runs out. Giving up on a
     connection before the request was written cannot have started anything.
+    An agent whose first chunk cannot be read, or is not a hello, is not
+    retried: it is there and speaks something else.
+
+    Each connection lives in its own switch, so a failed attempt holds no
+    descriptor past itself. The outcome keeps a local process's output bound
+    (the head and the tail, {!Common.max_process_capture_head_bytes} and
+    {!Common.max_process_capture_tail_bytes}); the chunk callbacks get every
+    byte.
 
     Closing the connection is the cancel: the agent closes the shim's stdin
     and the shim stops its payload. A budget that runs out closes it. *)
@@ -50,6 +58,9 @@ type not_sent =
       ; last : string  (** what the last attempt saw *)
       }  (** no accepted hello within the connect budget *)
   | Refused of refusal
+  | Incompatible of string
+      (** an agent answered with a first chunk this host cannot read, or one
+          that is not a hello *)
 
 type outcome =
   | Not_sent of not_sent  (** nothing was written to the agent *)
@@ -61,14 +72,15 @@ type outcome =
   | Timed_out of
       { stdout : string
       ; stderr : string
-      }  (** the budget ran out after the request was written *)
+      }  (** the budget ran out after the request started going out *)
   | Broken of
       { reason : string
       ; stdout : string
       ; stderr : string
       }
-      (** the request was written and the stream ended or broke before an
-          exit chunk, or the exit chunk reports the shim ended on a signal *)
+      (** the request started going out and the stream ended or broke
+          before an exit chunk, or the exit chunk reports the shim ended on a
+          signal *)
 
 val hello_wait_sec : float
 (** How long one connection waits for its hello. *)
@@ -85,6 +97,8 @@ val run :
   request ->
   outcome
 (** [budget_sec] bounds the whole call; [connect_budget_sec] bounds the part
-    before a hello is accepted. The chunk callbacks get the shim's stdout and
-    stderr bytes as they arrive; the outcome carries all of them. [accept] is
-    {!refusal} with the Keeper's [expected] ids in production. *)
+    before a hello is accepted. A budget that is not finite and positive ends
+    the call as [Unreachable] with no attempt. The chunk callbacks get the
+    shim's stdout and stderr bytes as they arrive; the outcome keeps them
+    bounded as above. [accept] is {!refusal} with the Keeper's [expected] ids
+    in production. *)

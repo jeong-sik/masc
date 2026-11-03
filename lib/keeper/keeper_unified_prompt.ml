@@ -211,9 +211,12 @@ type goal_summary =
   ; summary_held_task_link : held_task_link
   }
 
-(** Format active Goal rows with their titles (RFC-0315). Empty summaries
-    supply no rows; the authoritative observation still carries its heading.
-    Unobserved summaries do not authorize a fallback Goal list.
+(** Format active Goal rows with their titles (RFC-0315): id, title, the
+    verifying marker and the criterion. These change only on a Goal event, so
+    the block can sit in the System prompt. Each Goal's latest review,
+    measurement and this keeper's held-Task link are {!format_goal_observations}.
+    Empty summaries supply no rows; the authoritative observation still carries
+    its heading. Unobserved summaries do not authorize a fallback Goal list.
     A [Verifying] goal is annotated: completion is requested and the proof is
     being judged out-of-band, so the keeper keeps working the linked tasks
     instead of re-requesting completion. *)
@@ -240,12 +243,49 @@ let format_goal_summaries (summaries : goal_summary list) : string =
                   [ "criterion", Goal_store.criterion_to_yojson criterion
                     |> Yojson.Safe.to_string ] ]
           in
-          let details = details @
-            (match summary.summary_review_note with
-             | None -> []
-             | Some note ->
-               [ render_fragment Prompt_names.keeper_world_active_goals_review
-                   [ "note", note ] ])
+          let base = match summary.summary_phase with
+          | Some Goal_phase.Verifying ->
+            base
+            ^ " "
+            ^ render_fragment
+                Prompt_names.keeper_world_active_goals_verifying_annotation
+                []
+          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+                 | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
+            -> base
+          in
+          String.concat "\n" (base :: details))
+       summaries)
+
+(** Each Active Goal's latest review and measurement and this keeper's
+    held-Task link, one row per Goal named by its id. A measurement is recorded,
+    a review lands or a Task is claimed without any Goal event, so these rows
+    ride the turn's trailing context instead of the System prompt
+    (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
+let format_goal_observations (summaries : goal_summary list) : string =
+  String.concat "\n"
+    (List.map
+       (fun summary ->
+          let base =
+            render_fragment Prompt_names.keeper_world_goal_observations_row
+              [ "goal_id", summary.summary_goal_id ]
+          in
+          let base = match summary.summary_held_task_link with
+            | Served_by_held_task ->
+              base ^ " "
+              ^ render_fragment Prompt_names.keeper_world_active_goals_yours_annotation []
+            | Held_task_link_unreadable ->
+              base ^ " "
+              ^ render_fragment
+                  Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
+            | Not_served_by_held_task -> base
+          in
+          let review =
+            match summary.summary_review_note with
+            | None -> []
+            | Some note ->
+              [ render_fragment Prompt_names.keeper_world_active_goals_review
+                  [ "note", note ] ]
           in
           let measurement =
             match summary.summary_measurement with
@@ -262,29 +302,7 @@ let format_goal_summaries (summaries : goal_summary list) : string =
                 Prompt_names.keeper_world_active_goals_measurement_unavailable
                 [ "reason", reason ]
           in
-          let details = details @ [ measurement ] in
-          let base = match summary.summary_phase with
-          | Some Goal_phase.Verifying ->
-            base
-            ^ " "
-            ^ render_fragment
-                Prompt_names.keeper_world_active_goals_verifying_annotation
-                []
-          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
-                 | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
-            -> base
-          in
-          let base = match summary.summary_held_task_link with
-            | Served_by_held_task ->
-              base ^ " "
-              ^ render_fragment Prompt_names.keeper_world_active_goals_yours_annotation []
-            | Held_task_link_unreadable ->
-              base ^ " "
-              ^ render_fragment
-                  Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
-            | Not_served_by_held_task -> base
-          in
-          String.concat "\n" (base :: details))
+          String.concat "\n" (base :: review @ [ measurement ]))
        summaries)
 
 let format_task_skills ?surfaces skills =
@@ -1173,6 +1191,15 @@ let format_active_goal_summaries = function
        ^ "\n" ^ format_goal_summaries summaries ^ "\n\n")
 ;;
 
+let format_goal_observation_summaries = function
+  | Error (_ : Goal_store.unavailable) | Ok [] -> None
+  | Ok (_ :: _ as summaries) ->
+    Some
+      (render_fragment Prompt_names.keeper_world_goal_observations_heading
+         [ "count", string_of_int (List.length summaries) ]
+       ^ "\n" ^ format_goal_observations summaries ^ "\n\n")
+;;
+
 let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -1508,6 +1535,15 @@ let prepare_prompt_internal
          format_active_goal_summaries (Ok summaries)
        | Ok [], None -> format_active_goal_summaries (Ok [])
        | Ok (_ :: _), None -> None)
+    (* 1a. Each Active Goal's latest review, measurement and held-Task link:
+       observations that change without a Goal event, kept out of the
+       System prompt the Active Goals layer becomes. *)
+    | Keeper_context_layers.Goal_observations ->
+      (match observation.active_goals, active_goal_summaries with
+       | Error unavailable, _ | _, Some (Error unavailable) ->
+         format_goal_observation_summaries (Error unavailable)
+       | Ok _, Some (Ok summaries) -> format_goal_observation_summaries (Ok summaries)
+       | Ok _, None -> None)
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
@@ -2022,8 +2058,8 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
       |> Option.map Keeper_context_layers.prepare_content
     | Own_recent_actions -> own_recent_actions_section
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
-    | Active_goals | Current_task | Approval_authority | Connected_surfaces | Namespace_state
-    | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
+    | Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
+    | Namespace_state | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
     | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
     | Own_board_posts | Board_activity | Fleet_messages ->
       (* Captured and assembled through the same immutable [ordered] keys. *)

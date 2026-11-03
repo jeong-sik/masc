@@ -132,10 +132,17 @@ val active_goal_summaries :
 
 val format_active_goal_summaries :
   (goal_summary list, Goal_store.unavailable) result -> string option
-(** The shared Active Goals prompt layer, including current criterion and
-    measurement provenance. [Ok []] explicitly renders the empty observation;
-    [Error] renders the authoritative store failure. This projection grants no
-    effect authority. *)
+(** The shared Active Goals prompt layer: each Goal's id, title, verifying
+    marker and current criterion. [Ok []] explicitly renders the empty
+    observation; [Error] renders the authoritative store failure. This
+    projection grants no effect authority. *)
+
+val format_goal_observation_summaries :
+  (goal_summary list, Goal_store.unavailable) result -> string option
+(** The Goal Observations prompt layer: each Active Goal's latest review,
+    measurement provenance and this keeper's held-Task link, one row per Goal
+    id. [None] when there is no Goal or the store is unreadable; the Active
+    Goals layer states both. *)
 
 val build_system_prompt :
   workspace_root:string ->

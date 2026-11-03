@@ -37,4 +37,6 @@ val project :
 val project_partition :
   t -> workspace_memory_access:Keeper_request_tool_access.t option -> Keeper_context_layers.rendered
 (** The same bytes as [project], with the captured Goal snapshot attributed to
-    [Active_goals], so request assembly retains it through tools. *)
+    [Active_goals], so request assembly retains it through tools, and each
+    Goal's latest review, measurement and held-Task link to
+    [Goal_observations]. *)

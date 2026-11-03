@@ -289,6 +289,13 @@ Workspace Goal observation snapshot for this turn. Stored titles, criteria and r
 ### world.active_goals.held_task_link_unreadable_annotation
 [Task 연결을 읽지 못함 — 내가 잡은 Task 가 이 Goal 에 연결됐는지 모름]
 
+### world.goal_observations.heading (vars: count)
+### Goal Observations ({{count}})
+Latest review and measurement of each Active Goal for this turn, by Goal id.
+
+### world.goal_observations.row (vars: goal_id)
+- {{goal_id}}
+
 ### world.autonomous_trigger.heading
 ### Autonomous Trigger
 

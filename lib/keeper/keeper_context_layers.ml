@@ -2,6 +2,7 @@
 
 type layer_id =
   | Active_goals
+  | Goal_observations
   | Current_task
   | Approval_authority
   | Connected_surfaces
@@ -24,8 +25,10 @@ type layer_id =
 
 (* Prefix-cache ordering: emit larger, more stable sections first so providers
    can reuse a longer shared prefix across cycles; highly volatile reactive
-   signals stay later in the same user message. [Current_task] sits directly
-   after [Active_goals]: the claimed task is standing context that changes on
+   signals stay later in the same user message. [Goal_observations] follows
+   [Active_goals] so each Goal's latest review and measurement read next to
+   the Goals they name. [Current_task] sits directly
+   after them: the claimed task is standing context that changes on
    claim/release, not per cycle. [Own_board_posts] changes only when the
    keeper itself publishes, so it sits just ahead of the per-cycle reactive
    [Board_activity]. [Own_recent_actions] is a window that advances with recorded tool-call turns,
@@ -34,6 +37,7 @@ type layer_id =
    fleet-volatile section and sits last. *)
 let ordered =
   [ Active_goals
+  ; Goal_observations
   ; Current_task
   ; Approval_authority
   ; Connected_surfaces
@@ -61,25 +65,26 @@ let ordered =
    call site) a rendering for the new layer. *)
 let order_index = function
   | Active_goals -> 0
-  | Current_task -> 1
-  | Approval_authority -> 2
-  | Connected_surfaces -> 3
-  | Namespace_state -> 4
-  | Workspace_memory -> 5
-  | Wiki -> 6
-  | Lane_updates -> 7
-  | Repository_freshness -> 8
-  | Autonomous_trigger -> 9
-  | Scheduled_automation -> 10
-  | Completion_authority -> 11
-  | Task_cancellations -> 12
-  | Pending_mentions -> 13
-  | Scope_messages -> 14
-  | Own_board_posts -> 15
-  | Board_activity -> 16
-  | Own_recent_actions -> 17
-  | Recent_work -> 18
-  | Fleet_messages -> 19
+  | Goal_observations -> 1
+  | Current_task -> 2
+  | Approval_authority -> 3
+  | Connected_surfaces -> 4
+  | Namespace_state -> 5
+  | Workspace_memory -> 6
+  | Wiki -> 7
+  | Lane_updates -> 8
+  | Repository_freshness -> 9
+  | Autonomous_trigger -> 10
+  | Scheduled_automation -> 11
+  | Completion_authority -> 12
+  | Task_cancellations -> 13
+  | Pending_mentions -> 14
+  | Scope_messages -> 15
+  | Own_board_posts -> 16
+  | Board_activity -> 17
+  | Own_recent_actions -> 18
+  | Recent_work -> 19
+  | Fleet_messages -> 20
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -147,6 +152,7 @@ let assemble ~content_of =
 
 let layer_name = function
   | Active_goals -> "active_goals"
+  | Goal_observations -> "goal_observations"
   | Current_task -> "current_task"
   | Approval_authority -> "approval_authority"
   | Connected_surfaces -> "connected_surfaces"
@@ -193,7 +199,7 @@ let source_of_name name =
    [Dynamic_context] block has ({!Prompt_block_id.resent_when_held}). *)
 let resend_on_resume = function
   | Layer
-      ( Active_goals | Current_task | Approval_authority | Connected_surfaces
+      ( Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
       | Namespace_state | Workspace_memory | Wiki | Lane_updates | Repository_freshness
       | Own_board_posts | Own_recent_actions | Recent_work | Fleet_messages )
   | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->

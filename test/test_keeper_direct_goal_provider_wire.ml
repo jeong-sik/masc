@@ -137,24 +137,33 @@ let run_case source () =
   let context = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
     | [message] -> Json.member "content" message |> Json.to_string
     | _ -> fail "one effective leading system prompt required" in
-  check bool "Goal data never appears in the extra User carrier" false
+  check bool "the Active Goals list never appears in the extra User carrier" false
     (List.exists (fun text -> contains ~needle:"[system context]" text &&
-       contains ~needle:"Active Goals" text) content);
+       contains ~needle:"### Active Goals" text) content);
+  (* Each Goal's latest measurement rides the trailing carrier, not the System
+     that precedes the history (RFC-goal-observations-leave-the-system-prompt). *)
+  let carrier = String.concat "" (List.filter (contains ~needle:"[system context]") content) in
   (match source, goal, measurement with
    | Current, Some goal, Some observation ->
-     List.iter (fun needle -> check bool "receiver sees current Goal provenance" true
-       (contains ~needle context)) [goal.id; goal.criterion_revision; observation.id; reported_value;
-         "note:fixture operator inspected the persisted first result"]
+     List.iter (fun needle -> check bool "receiver System sees the current Goal and criterion" true
+       (contains ~needle context)) [goal.id; goal.criterion_revision];
+     List.iter (fun needle -> check bool "receiver carrier sees the current measurement provenance" true
+       (contains ~needle carrier)) [goal.id; observation.id; reported_value;
+         "note:fixture operator inspected the persisted first result"];
+     List.iter (fun needle -> check bool "the System carries no measurement" false
+       (contains ~needle context)) [observation.id; reported_value]
    | Revised, Some goal, Some observation ->
      List.iter (fun needle -> check bool "receiver sees revised current criterion" true
        (contains ~needle context)) [goal.id; goal.criterion_revision; "3/3"];
      List.iter (fun needle -> check bool "stale measurement never reaches new revision" false
-       (contains ~needle context)) [observation.id; observation.criterion_revision; reported_value]
+       (contains ~needle context || contains ~needle carrier))
+       [observation.id; observation.criterion_revision; reported_value]
    | Measurement_unavailable, Some goal, Some observation ->
      check bool "Goal survives failed measurement source" true (contains ~needle:goal.id context);
      check bool "measurement failure remains explicit on wire" true
-       (contains ~needle:"Measurement source unavailable:" context);
-     check bool "failed read borrows no prior measurement" false (contains ~needle:observation.id context)
+       (contains ~needle:"Measurement source unavailable:" carrier);
+     check bool "failed read borrows no prior measurement" false
+       (contains ~needle:observation.id context || contains ~needle:observation.id carrier)
    | Goal_unavailable, Some goal, _ ->
      check bool "Goal store failure remains explicit on wire" true
        (contains ~needle:"goal_store_unavailable:" context);
@@ -306,10 +315,14 @@ let test_goal_survives_read_then_task_creation () =
       let bytes = String.sub context span.offset span.bytes in
       check string "every issued physical span matches received bytes" span.sha256
         Agent_core_sha256.(digest_string bytes |> to_hex)) physical.partition.spans;
-    List.iter (fun needle -> check bool "every receiver request retains the exact Goal snapshot" true
-      (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
-    check bool "Goal is not duplicated in the extra User carrier" false
-      (List.exists (contains ~needle:goal.criterion_revision) contexts);
+    List.iter (fun needle -> check bool "every receiver request's System keeps the Goal and criterion" true
+      (contains ~needle context)) [goal.id;goal.criterion_revision];
+    List.iter (fun needle -> check bool "no request's System carries the latest measurement" false
+      (contains ~needle context)) [measurement.id;reported_value];
+    List.iter (fun needle -> check bool "only the first request's carrier carries the latest measurement" (index=0)
+      (List.exists (contains ~needle) contexts)) [measurement.id;reported_value];
+    check bool "the Active Goals list is not duplicated in the extra User carrier" false
+      (List.exists (contains ~needle:"### Active Goals") contexts);
     let extra = String.concat "" contexts in
     List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
       (contains ~needle extra)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";

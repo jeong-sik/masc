@@ -1581,24 +1581,60 @@ let muse_serve_client_config (execution : Runtime_execution.muse_serve)
   }
 ;;
 
+(* Whether an official client's attempt error says the binding sent nothing.
+   [Attempt_rejected] is itself that witness: the binding refused the
+   prepared request before sending it ([Retry.invalid_request_reason]). An
+   official client returns it from its own pre-turn admission, such as a
+   Claude Code auth probe that failed (#47787). Every other error keeps the
+   conservative [Dispatched]. Constructors are listed so a new one has to be
+   judged here. *)
+let official_client_error_dispatch (error : Agent_core.Error.t) =
+  match error with
+  | Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; _ }) ->
+    Keeper_attempt_dispatch.Rejected_before_dispatch
+  | Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { reason =
+             ( Llm_provider.Retry.Json_parse_error
+             | Llm_provider.Retry.Request_body_refused_by_provider _
+             | Llm_provider.Retry.Refusal_body_not_received
+             | Llm_provider.Retry.Unknown_invalid_request )
+         ; _
+         })
+  | Agent_core.Error.Api
+      ( Llm_provider.Retry.RateLimited _
+      | Llm_provider.Retry.Overloaded _
+      | Llm_provider.Retry.ServerError _
+      | Llm_provider.Retry.AuthError _
+      | Llm_provider.Retry.AuthorizationError _
+      | Llm_provider.Retry.PaymentRequired _
+      | Llm_provider.Retry.NotFound _
+      | Llm_provider.Retry.ContextOverflow _
+      | Llm_provider.Retry.InputCapacity _
+      | Llm_provider.Retry.NetworkError _
+      | Llm_provider.Retry.Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> Keeper_attempt_dispatch.Dispatched
+
 (* An official-client lane cannot apply a provider config transform, so a
    transform on such a lane is refused before the client is invoked. *)
 let official_client_dispatch ~provider_config_transform result =
   match provider_config_transform, result with
   | Some _, _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
-  | None, Error error when Option.is_some (Keeper_internal_error.guidance_preparation_failure error) ->
-    Keeper_attempt_dispatch.Rejected_before_dispatch
-  (* [Attempt_rejected] is itself the witness that the binding refused the
-     prepared request before sending it ([Retry.invalid_request_reason]). An
-     official client returns it from its own pre-turn admission, such as a
-     Claude Code auth probe that failed (#47787). *)
-  | ( None
-    , Error
-        (Agent_core.Error.Api
-           (Llm_provider.Retry.InvalidRequest
-              { reason = Llm_provider.Retry.Attempt_rejected; _ })) ) ->
-    Keeper_attempt_dispatch.Rejected_before_dispatch
-  | None, (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
+  | None, Ok _ -> Keeper_attempt_dispatch.Dispatched
+  | None, Error error ->
+    if Option.is_some (Keeper_internal_error.guidance_preparation_failure error)
+    then Keeper_attempt_dispatch.Rejected_before_dispatch
+    else official_client_error_dispatch error
 
 (* Whether any request of this attempt reached a provider. The pre-dispatch
    serialization observer fires just before a request leaves, after the

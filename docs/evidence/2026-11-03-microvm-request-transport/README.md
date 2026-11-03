@@ -137,6 +137,28 @@ msb 쪽은 누수를 일부러 일으키는 대조군이 없어요.
 그래서 호스트는 hello 를 기한 안에 받지 못하면 그 연결을 닫고 새로 연결해야 해요. hello 전에는 아무것도 보내지 않으므로, 다시 연결해도 요청이 두 번 돌지 않아요.
 `bin/pipeleak.py` 는 10-28 부터 쓴 호스트 pipe 측정 스크립트예요(`once` 가 표를 찍어요). PIPE fd 만 세므로 소켓이나 vsock 누수는 못 봐요. 그래서 위 측정은 runtime 의 전체 fd 수도 같이 셌어요.
 
+### agent 실행 옵션 (`bin/agent_boot_flags.py`, 결과 `agent-boot-flags-results.json`)
+
+masc 가 그리는 모양 그대로 첫 프로세스를 `--entrypoint <shim>` 과 인자 `--serve /run/masc-agent/agent.sock 502:20` 으로 두었어요.
+나머지 옵션은 위 실제 agent 측정과 같아요. 경우마다 VM 을 새로 띄우고(`--rm`) 끝에 멈췄어요. container 1.6.1.
+
+| 경우 | 호스트 경로 상태 | `container run` | hello |
+|---|---|---|---|
+| `--user 0:0` | 없음 | 성공 | 받음(두 번째 연결) |
+| `--user` 없음 | 없음 | 성공 | 받음 |
+| 소켓 파일이 남아 있음 | 소켓 | 실패: `host socket … already exists and may be in use` | — |
+| 일반 파일이 있음 | 파일 | 성공. 실행 중에는 소켓으로 바뀜 | 받음 |
+| 부모 디렉터리 없음 | 없음 | 성공. runtime 이 디렉터리를 만듦 | 받음 |
+| 112바이트 경로 | 없음 | 실패: `… is too long for a Unix Domain Socket path` (부팅 단계) | — |
+
+- `container inspect` 의 `.[0].configuration`(masc 가 읽는 곳):
+  - `--user 0:0` 이면 `initProcess.user.raw.userString` 은 `"0:0"`, `--user` 가 없으면 `"root"` 예요.
+  - `capAdd` 는 넘긴 이름 그대로 `["CAP_SETUID", "CAP_SETGID", "CAP_SYS_ADMIN"]`, `capDrop` 은 `["ALL"]`, `readOnly` 는 `false` 예요.
+  - `publishedSockets` 는 `[{"containerPath": …, "hostPath": …}]`, `useInit` 은 `false` 예요.
+  - `initProcess.executable` 은 shim 경로, `arguments` 는 `--serve` 부터예요.
+- VM 이 사라지면 성공한 네 경우 모두 runtime 이 호스트 소켓 파일을 지웠어요. 그래서 남은 소켓 파일은 VM 이 정상적으로 끝나지 못했을 때만 생겨요.
+- 지금 도는 Keeper VM(`--publish-socket` 없음, `--user 502:20`, `--read-only`)의 inspect 도 `publishedSockets: []`, `useInit: false`, `capAdd: []` 를 담고 있었어요.
+
 ## 로그 집계 (`<base-path>/.masc/logs/system_log_<날짜>.jsonl`)
 
 날짜는 UTC 예요. 명령은 `rg -c '<문구>' system_log_<날짜>.jsonl` 이에요.
@@ -166,3 +188,4 @@ msb 쪽은 누수를 일부러 일으키는 대조군이 없어요.
   모두 시험 컨테이너를 만들고 끝나면 지워요.
 - `socket_relay.py`, `agent_shape.py`, `relay_flags.py` 의 `SOCK_DIR` 은 소켓 경로 제한 때문에 짧은 로컬 경로로 고쳐 써야 해요.
 - `python3 -I bin/agent_shape.py`, `python3 -I bin/relay_flags.py` 도 같은 방식이에요. 4·5번 측정은 위에 적은 대로 `KEEPER_FLAGS`·`CASES` 를 바꿔 실행했어요.
+- `python3 -I bin/agent_boot_flags.py <stage> <소켓 디렉터리> <결과 json>`. `<stage>/out` 에는 `agent_l3.py` 가 만든 shim 과 설정 파일이 있어야 해요. 소켓 디렉터리는 짧은 로컬 경로여야 해요.

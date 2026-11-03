@@ -17,7 +17,7 @@ related: ["0395", "0405", "0427"]
 - `--publish-socket` 의 relay 는 **컨테이너 rootfs 위의 소켓에만** 닿아요. tmpfs, 볼륨, 호스트 디렉터리 마운트 위의 소켓에는 닿지 않아요(4.2).
 - 지금 Keeper VM 은 `--read-only` 라서 rootfs 에 소켓을 만들 수 없어요.
 - 그래서 VM 을 쓰기 가능한 rootfs 로 띄워요. agent 가 root 로 시작해서 소켓을 만든 직후 `/` 를 읽기 전용으로 다시 마운트하고, Keeper uid 로 내려가요(3.2). 측정에서 그 뒤 Keeper uid 의 rootfs 쓰기는 `Read-only file system` 으로 막혔어요.
-- 바뀌는 실행 옵션: `--user <uid>:<gid>` 와 `--read-only` 가 빠지고, `--cap-drop ALL` 뒤에 `CAP_SETUID`, `CAP_SETGID`, `CAP_SYS_ADMIN` 이 더해져요. 이 capability 는 agent 가 내려가면서 사라져요. 하지만 bounding set 에는 남아요. 그래서 agent 가 모든 자식에 `no_new_privs` 를 걸어요.
+- 바뀌는 실행 옵션: `--user <uid>:<gid>` 는 `--user 0:0` 이 되고 `--read-only` 가 빠져요. `--cap-drop ALL` 뒤에 `CAP_SETUID`, `CAP_SETGID`, `CAP_SYS_ADMIN` 이 더해져요. 이 capability 는 agent 가 내려가면서 사라져요. 하지만 bounding set 에는 남아요. 그래서 agent 가 모든 자식에 `no_new_privs` 를 걸어요.
 
 이 변경을 받아들이지 않으면 5절의 두 대안 중 하나를 골라요.
 
@@ -93,6 +93,10 @@ agent 는 PID 1 이라 고아 프로세스를 거둬야 해요. `--init` 은 쓰
 
 - `Keeper_microvm_boot_plan` 의 사실에 `publishedSockets`, `useInit`, relay 형식 버전을 더해요. `container inspect` 는 `--init` 을 명령 줄이 아닌 `useInit` 필드로 보여 줘요(4.2). 그래서 지금의 명령 줄 비교는 그대로 둬요.
 - plan 이 달라지면 `assess` 가 교체를 허용해요. 서버 재시작 뒤 붙이는 경로(attach)는 `assess` 를 거치지 않아요. 그래서 붙일 때 hello 를 읽고, agent 가 없거나 형식 버전이 다르면 타입이 있는 오류로 교체를 요청해요.
+- 첫 프로세스는 `--user 0:0` 으로 띄워요. `--user` 를 빼면 이미지의 기본 사용자로 뜨는데, 그 값에 기대지 않으려는 거예요. inspect 의 `userString` 은 `"0:0"` 이라 plan 과 그대로 비교돼요(4.5).
+- 호스트 소켓 경로는 base path 와 게스트 이름에서 정해요. 붙이기(attach)가 이름만으로 endpoint 를 다시 만들기 때문이에요. TMPDIR 같은 프로세스 환경에는 기대지 않아요.
+  - macOS 의 unix 소켓 경로는 103바이트까지예요. 넘으면 VM 을 띄우지 않고 타입이 있는 오류로 거절해요. 1.6.1 은 112바이트 경로를 받아 놓고 부팅 단계에서 실패했어요(4.5).
+  - VM 이 끝나면 runtime 이 소켓 파일을 지워요. 남은 소켓 파일은 VM 이 정상적으로 끝나지 못했을 때만 생기고, 그 파일이 있으면 `container run` 이 실패해요(4.5). 그래서 같은 이름의 게스트가 없을 때만, 부팅 직전에 남은 소켓 파일을 지워요.
 
 ### 3.7 stdin 을 쓰던 나머지 두 호출
 
@@ -162,6 +166,16 @@ agent 가 내려간 뒤 `dumpable` 0, `no_new_privs` 1 을 읽었어요. capabil
 - 요청 도중 연결을 끊으면 payload 가 취소됐어요.
 - agent 가 듣기 전에 연 연결: 부팅 10번에서 hello 5번, 바로 EOF 4번, 12분 동안 아무것도 오지 않음 1번이었어요. 첫 hello 뒤에는 두 실행에서 54개씩, 다시 연결할 일이 없었어요.
 
+### 4.5 agent 실행 옵션
+
+masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게스트 소켓> 502:20`) 띄웠어요. 1.6.1, 경우마다 새 VM.
+
+- `--user 0:0` 이면 `userString` 이 `"0:0"`, 빼면 `"root"` 예요. 두 경우 모두 hello 가 왔어요.
+- inspect 의 `capAdd` 는 넘긴 이름 그대로(`CAP_SETUID`, `CAP_SETGID`, `CAP_SYS_ADMIN`), `capDrop` 은 `ALL`, `readOnly` 는 `false`, `publishedSockets` 는 `[{containerPath, hostPath}]`, `useInit` 은 `false` 예요. 지금 Keeper VM 도 `publishedSockets: []`, `useInit: false` 를 담고 있어요.
+- 호스트 경로에 소켓 파일이 남아 있으면 `container run` 이 `already exists and may be in use` 로 실패해요. 일반 파일은 덮어쓰고, 없는 부모 디렉터리는 만들어요.
+- VM 이 끝나면 성공한 네 경우 모두 소켓 파일이 지워졌어요.
+- 112바이트 호스트 경로는 `container run` 이 받았다가 부팅 단계에서 `too long for a Unix Domain Socket path` 로 실패했어요.
+
 ## 5. 검토한 대안
 
 | 대안 | 판단 |
@@ -174,11 +188,10 @@ agent 가 내려간 뒤 `dumpable` 0, `no_new_privs` 1 을 읽었어요. capabil
 
 ## 6. 남은 질문
 
-1. **호스트 소켓 경로.** macOS 의 unix 소켓 경로는 104 바이트까지예요. 붙이기(attach)가 이름만으로 endpoint 를 다시 만들기 때문에, 경로는 base path 와 Keeper 이름에서 정해져야 해요. TMPDIR 처럼 프로세스 환경에 따라 바뀌면 안 돼요. 넘치면 VM 을 띄우지 않고 타입이 있는 오류로 거절해요. 남은 소켓 파일을 누가 지우는지도 정해야 해요.
-2. **`--cap-add` 를 쓴 VM 에서 root 로 도는 masc 명령.** build 디렉터리 생성처럼 masc 가 uid 0 으로 `container exec` 하는 명령은 더한 capability 를 가져요. payload 는 `container exec` 를 부를 수 없어요. 그래도 그 명령 범위를 다시 확인해요.
-3. **장시간 relay.** 이번 측정은 VM 하나에 몇 분이에요. 하루 부하에서 runtime 의 fd 가 늘지 않는지는 canary 에서 재요.
-4. **runtime 이 멈출 때.** #46602 처럼 게스트 runtime 이 멈추면 relay 도 멈출 수 있어요. 요청이 apiserver 전역 락을 지나지 않으니 다른 게스트로 번지지 않을 것으로 보지만, 재 보지 않았어요.
-5. **lane add-on.** `lane_addon_engine.ml` 도 Apple 컨테이너를 `--interactive` 로 만들고 `start --attach --interactive` 로 띄워요. 같은 누수 경로인지는 따로 재요.
+1. **`--cap-add` 를 쓴 VM 에서 root 로 도는 masc 명령.** build 디렉터리 생성처럼 masc 가 uid 0 으로 `container exec` 하는 명령은 더한 capability 를 가져요. payload 는 `container exec` 를 부를 수 없어요. 그래도 그 명령 범위를 다시 확인해요.
+2. **장시간 relay.** 이번 측정은 VM 하나에 몇 분이에요. 하루 부하에서 runtime 의 fd 가 늘지 않는지는 canary 에서 재요.
+3. **runtime 이 멈출 때.** #46602 처럼 게스트 runtime 이 멈추면 relay 도 멈출 수 있어요. 요청이 apiserver 전역 락을 지나지 않으니 다른 게스트로 번지지 않을 것으로 보지만, 재 보지 않았어요.
+4. **lane add-on.** `lane_addon_engine.ml` 도 Apple 컨테이너를 `--interactive` 로 만들고 `start --attach --interactive` 로 띄워요. 같은 누수 경로인지는 따로 재요.
 
 ## 7. 검증 계획
 

@@ -202,7 +202,12 @@ else
   # resolve_errors afterwards. A signal that lands after mktemp created the
   # file and before the assignment below, or SIGKILL, still leaves it.
   resolve_stderr=""
-  trap 'rm -f "$resolve_stderr"' EXIT HUP INT TERM
+  # A signal trap replaces the default "terminate" action, so each signal
+  # trap must exit itself (128+n); that exit then runs the EXIT trap.
+  trap 'rm -f "$resolve_stderr"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   resolve_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-resolve-workspace.XXXXXX")
   resolve_status=0
   resolution=$("$preflight_helper" "${resolve_args[@]}" 2>"$resolve_stderr") || resolve_status=$?

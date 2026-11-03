@@ -323,6 +323,11 @@ type tab =
   | Input_map
   | Response
 
+val scroll_plain_body : tab:tab -> target:target -> reading -> bool
+(** Whether this reading uses a scrollable message instead of selectable rows. *)
+val proof_scroll_should_reset : target:target -> previous:reading option -> reading -> bool
+(** Reset proof when it changes between a message and selectable rows. *)
+
 type input_source =
   | Turn_prompt_assembly
   | Effective_tool_surface

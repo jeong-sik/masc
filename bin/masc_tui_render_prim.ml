@@ -4094,6 +4094,51 @@ let context_split_width cols =
   min 62 (max 44 (available * 45 / 100))
 
 
+(* A cluster wider than the body cannot fit on any physical row. Preserve its
+   scalar values visibly rather than letting the frame replace it with an
+   ellipsis. This is only needed for unusually wide individual clusters. *)
+let context_escape_wide_clusters ~width text =
+  if Message_layout.widest_grapheme_cells text <= width then text
+  else
+    let output = Buffer.create (String.length text) in
+    let copy start stop = Buffer.add_substring output text start (stop - start) in
+    let escape start stop =
+      let rec loop offset =
+        if offset < stop then begin
+          let decoded = String.get_utf_8_uchar text offset in
+          let length = Uchar.utf_decode_length decoded in
+          if Uchar.utf_decode_is_valid decoded then begin
+            let scalar = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+            if scalar <= 0xffff then Printf.bprintf output "\\u%04X" scalar
+            else Printf.bprintf output "\\U%08X" scalar
+          end else Printf.bprintf output "\\x%02X" (Char.code text.[offset]);
+          loop (offset + length)
+        end
+      in
+      loop start
+    in
+    Message_layout.iter_display_pieces text
+      ~ascii:copy
+      ~piece:(fun start stop cells ansi ->
+        if ansi || cells <= width then copy start stop else escape start stop);
+    Buffer.contents output
+
+let context_wrapped_lines ~cols ~style text =
+  let inner = framed_inner_width cols in
+  let indent = min 2 (max 0 (inner - 1)) in
+  let width = max 1 (inner - indent) in
+  let text = context_escape_wide_clusters ~width text in
+  Context_bars.wrap ~width text
+  |> List.concat_map (Message_layout.split_cells ~max_cells:width)
+  |> List.map (fun line -> String.make indent ' ' ^ style ^ line ^ Ansi.reset)
+
+let context_detail_preview detail =
+  Keeper_chat.bounded_http_error_ends detail |> Keeper_chat.terminal_safe_text
+
+let context_error_lines ~cols ~label detail =
+  context_wrapped_lines ~cols ~style:(Theme.bad ())
+    (label ^ ": " ^ context_detail_preview detail)
+
 let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_note = false) ~cols ~scale
     (forecast : (Masc_tui_context_inspector.forecast, string) result) =
   let width = max 1 (framed_inner_width cols - 2) in
@@ -4105,12 +4150,17 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
   let fact text =
     List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
   in
+  let detail ~dim text =
+    context_wrapped_lines ~cols ~style:(if dim then Ansi.dim else "") text
+  in
   [ "  "
     ^ Context_bars.band ~width ~title:"NEXT REQUEST"
         ~caption:"what the next Agent Core request would carry, computed now"
   ]
-  @ Masc_tui_next_request_band.lines ~runtime_details ~prose ~fact
-      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
+  @ Masc_tui_next_request_band.lines ~runtime_details ~prose ~fact ~detail
+      ~error:(context_error_lines ~cols)
+      ~safe:Keeper_chat.terminal_safe_text ~safe_detail:context_detail_preview
+      ~scale forecast
   @ (if show_scale_note
      then prose (Masc_tui_token_scale.note scale)
      else [])
@@ -4120,17 +4170,6 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
 (* The width of a token figure in the recent-turns rows. "1.2M" and the
    no-value mark both sit in it, so the rows line up on the same column. *)
 let token_cell_width = 7
-
-let context_wrapped_lines ~width ~style text =
-  Context_bars.wrap ~width text
-  |> List.concat_map (Message_layout.split_cells ~max_cells:width)
-  |> List.map (fun line -> "  " ^ style ^ line ^ Ansi.reset)
-
-let context_error_lines ~cols ~label detail =
-  let width = max 1 (framed_inner_width cols - 2) in
-  let detail = Keeper_chat.bounded_http_error_ends detail in
-  context_wrapped_lines ~width ~style:(Theme.bad ())
-    (label ^ ": " ^ Keeper_chat.terminal_safe_text detail)
 
 let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     ?forecast
@@ -4379,9 +4418,8 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         @ prose "Range observation runtime: not recorded"
         @ prose reach_prose
     | None ->
-        [ (Theme.bad ())
-          ^ "  Conversation history window was not observed" ^ Ansi.reset
-        ]
+        context_wrapped_lines ~cols ~style:(Theme.bad ())
+          "Conversation history window was not observed"
   in
   let component_lines =
     match
@@ -4395,19 +4433,14 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     with
     | None ->
         (if turn_back > 0 then
-           [ (Theme.bad ())
-             ^ Printf.sprintf
-                 "  Turn #%d recorded no exact input composition"
-                 record.Turn_record.absolute_turn
-             ^ Ansi.reset
-           ]
+           context_wrapped_lines ~cols ~style:(Theme.bad ())
+             (Printf.sprintf "Turn #%d recorded no exact input composition"
+                record.Turn_record.absolute_turn)
          else
-           [ (Theme.bad ())
-             ^ "  No turn on this page recorded an exact input composition"
-             ^ Ansi.reset
-           ; Ansi.dim ^ "  The readings above still describe the latest turn."
-             ^ Ansi.reset
-           ])
+           context_wrapped_lines ~cols ~style:(Theme.bad ())
+             "No turn on this page recorded an exact input composition"
+           @ context_wrapped_lines ~cols ~style:Ansi.dim
+               "The readings above still describe the latest turn.")
     | Some { Inspector.record = attributed; components; turns_behind_latest } ->
         let total =
           List.fold_left
@@ -4420,12 +4453,10 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         let gap =
           if turns_behind_latest = 0 then []
           else
-            [ Printf.sprintf
-                "  %sMeasured on turn #%d, %d turns before the readings \
-                 above.%s"
-                (Theme.warn ()) attributed.Turn_record.absolute_turn
-                turns_behind_latest Ansi.reset
-            ]
+            context_wrapped_lines ~cols ~style:(Theme.warn ())
+              (Printf.sprintf
+                 "Measured on turn #%d, %d turns before the readings above."
+                 attributed.Turn_record.absolute_turn turns_behind_latest)
         in
         (* Grouped by the producer the bytes entered through, in the order a
            turn assembles them, and biggest share first inside a group. The
@@ -4677,7 +4708,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     in
     let trend = Inspector.recent_input_trend selection.Inspector.recent in
     let inputs = trend.Inspector.samples in
-    let wrapped style text = context_wrapped_lines ~width ~style text in
+    let wrapped style text = context_wrapped_lines ~cols ~style text in
     let input_trend_lines =
       match inputs with
       | _ :: _ ->
@@ -4746,7 +4777,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
   @ token_lines
   @ (match record.usage.scope, record.usage.input_tokens with
      | Runtime_usage_scope.Per_request, Some _ ->
-         context_wrapped_lines ~width ~style:Ansi.dim
+         context_wrapped_lines ~cols ~style:Ansi.dim
            "Recorded input can be a post-compaction context estimate; its provenance is not recorded."
      | Runtime_usage_scope.Per_request, None
      | (Runtime_usage_scope.Turn_total | Runtime_usage_scope.Conversation_cumulative
@@ -5715,10 +5746,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                        latest turn's totals would state bytes nobody
                        measured. *)
                     Plain
-                      ( [ (Theme.bad ())
-                          ^ "  No turn on this page recorded an exact input \
-                             composition" ^ Ansi.reset
-                        ]
+                      ( context_wrapped_lines ~cols ~style:(Theme.bad ())
+                          "No turn on this page recorded an exact input composition"
                       , None )
                 | Some record ->
                     let scale =

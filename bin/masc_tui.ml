@@ -24574,10 +24574,30 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let previous = Option.map snd state.context_inspector_reading in
         let reading = Masc_tui_context_inspector.merge_progress
             ~previous reading in
+        let proof_active =
+          state.context_inspector_tab = Masc_tui_context_inspector.Input_map
+          || (state.context_inspector_tab = Masc_tui_context_inspector.Response
+              && state.context_inspector_response_return = Masc_tui_context_inspector.Input_map)
+        in
+        let proof_changed = proof_active
+          && Masc_tui_context_inspector.proof_scroll_should_reset
+               ~target:state.context_inspector_target ~previous reading in
         if Masc_tui_context_inspector.page_scroll_should_reset ~previous reading
         then begin
           state.context_inspector_scroll <- 0;
           state.context_inspector_response_scroll <- 0
+        end;
+        if proof_changed then begin
+          state.context_inspector_scroll <- 0;
+          state.context_inspector_cursor <- 0;
+          state.context_inspector_detail_scroll <- 0;
+          state.context_inspector_exact <- None;
+          supersede_context_inspector_part_load state None;
+          (* Withdraw the in-flight read, retaining a completed immutable part
+             for the same turn and digest if the observation returns. *)
+          state.context_inspector_part <-
+            Masc_tui_fetched.cancel_pending ~reason:"Proof source changed"
+              state.context_inspector_part
         end;
         state.context_inspector_loading <- Masc_tui_context_inspector.is_loading reading;
         state.context_inspector_reading <- Some (keeper_name, reading);
@@ -30983,8 +31003,11 @@ Use relative paths for resources already held in the package. -->
                       Masc_tui_context_inspector.input_map_rows record
                         (Masc_tui_context_inspector.observed_input reading))
            in
-           let page_failed = match state.context_inspector_reading with
-             | Some (_, reading) -> Masc_tui_context_inspector.page_read_failed reading
+           let scroll_plain_body = match state.context_inspector_reading with
+             | Some (_, reading) ->
+                 Masc_tui_context_inspector.scroll_plain_body
+                   ~tab:state.context_inspector_tab
+                   ~target:state.context_inspector_target reading
              | None -> false in
            let close () = close_context_inspector state in
            (match k with
@@ -31113,7 +31136,7 @@ Use relative paths for resources already held in the package. -->
               when Option.is_some state.context_inspector_exact
                    || state.context_inspector_tab
                       = Masc_tui_context_inspector.Composition
-                   || page_failed ->
+                   || scroll_plain_body ->
                 let count, height =
                   Masc_tui_render.context_inspector_viewport state
                 in

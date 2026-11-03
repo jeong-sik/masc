@@ -369,12 +369,54 @@ let test_a_refused_walk_keeps_the_reason () =
 let test_runtime_configuration_attaches_by_exact_id () =
   let observed = ref [] in
   ignore
-    (Band.lines ~prose:(fun x -> [x]) ~fact:(fun x -> [x]) ~safe:Fun.id
+    (Band.lines ~prose:(fun x -> [x]) ~fact:(fun x -> [x])
+       ~detail:(fun ~dim:_ x -> [x])
+       ~error:(fun ~label:_ x -> [x]) ~safe:Fun.id ~safe_detail:Fun.id
        ~scale:Masc_tui_token_scale.fleet
        ~runtime_details:(fun id -> observed := id :: !observed; [])
        (Ok measured));
   Alcotest.(check (list string)) "lookup uses the candidate identity"
     ["ollama_cloud.deepseek-v4-1-flash"] !observed
+
+let test_unknown_origin_reason_reaches_sanitizer () =
+  let reason = "boundary\027[2J" in
+  let lane_reason = "lane unavailable" in
+  let parts_reason = "parts unavailable" in
+  let candidate = List.hd measured.candidates in
+  let carried = Option.get candidate.carried in
+  let candidate =
+    { candidate with carried = Some { carried with origin = Inspector.Carried_turn_start_unknown { reason } } }
+  in
+  let other =
+    { candidate with lane = Inspector.Lane_not_applicable lane_reason
+    ; parts = Error parts_reason; carried = None }
+  in
+  let observed = ref [] in
+  ignore
+    (Band.lines ~prose:(fun x -> [x]) ~fact:(fun x -> [x])
+       ~detail:(fun ~dim:_ x -> [x])
+       ~error:(fun ~label:_ _ -> [])
+       ~safe:Fun.id
+       ~safe_detail:(fun value -> observed := value :: !observed; "")
+       ~scale:Masc_tui_token_scale.fleet (Ok { measured with candidates = [candidate; other] }));
+  Alcotest.(check bool) "server origin reason is sanitized" true (List.mem reason !observed);
+  Alcotest.(check bool) "lane reason is sanitized" true (List.mem lane_reason !observed);
+  Alcotest.(check bool) "parts reason is sanitized" true (List.mem parts_reason !observed)
+
+let test_forecast_failures_reach_error_handler () =
+  let observed = ref [] in
+  let error ~label:_ detail = observed := detail :: !observed; [] in
+  let lines forecast =
+    Band.lines ~prose:(fun _ -> []) ~fact:(fun _ -> [])
+      ~detail:(fun ~dim:_ _ -> []) ~error ~safe:Fun.id
+      ~safe_detail:Fun.id
+      ~scale:Masc_tui_token_scale.fleet forecast
+    |> ignore
+  in
+  lines (Error "fetch failure");
+  lines (Ok { measured with walk = Error "walk refusal" });
+  Alcotest.(check (list string)) "both failures use the error handler"
+    ["walk refusal"; "fetch failure"] !observed
 
 let test_retained_forecast_reuses_recent_reading_only () =
   let turn_ref = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
@@ -419,9 +461,12 @@ let test_retained_forecast_reuses_recent_reading_only () =
     ; ts = 1_787_600_000.
     }
   in
+  let selection : Inspector.selection =
+    { latest; attributed = None; recent = []; rows = [ latest ]; skipped_rows = None }
+  in
   let turn_read =
     Inspector.Turn_read
-      { selection = { latest; attributed = None; recent = []; rows = [ latest ]; skipped_rows = None }
+      { selection
       ; provider_input = Error "absent"
       ; response = Error "absent"
       ; forecast = Ok measured
@@ -429,9 +474,33 @@ let test_retained_forecast_reuses_recent_reading_only () =
   in
   Alcotest.(check bool) "Turn_read retains its forecast" true
     (Inspector.retained_forecast turn_read = Some (Ok measured));
+  Alcotest.(check bool) "proof without an attributed record scrolls its message" true
+    (Inspector.scroll_plain_body ~tab:Inspector.Input_map ~target:(Inspector.Recent 0) turn_read);
+  Alcotest.(check bool) "request keeps its item navigation" false
+    (Inspector.scroll_plain_body ~tab:Inspector.Exact_input ~target:(Inspector.Recent 0) turn_read);
+  let attributed_record = { latest with input_components = Some [] } in
+  let attributed =
+    Some Inspector.{ record = attributed_record; components = []; turns_behind_latest = 0 }
+  in
+  let with_record = Inspector.Turn_read
+      { selection = { selection with attributed }
+      ; provider_input = Error "absent"; response = Error "absent"; forecast = Ok measured } in
+  Alcotest.(check bool) "proof with an attributed record keeps selection" false
+    (Inspector.scroll_plain_body ~tab:Inspector.Input_map ~target:(Inspector.Recent 0) with_record);
+  Alcotest.(check bool) "proof resets when attribution disappears" true
+    (Inspector.proof_scroll_should_reset ~target:(Inspector.Recent 0)
+       ~previous:(Some with_record) turn_read);
+  Alcotest.(check bool) "proof resets when attribution returns" true
+    (Inspector.proof_scroll_should_reset ~target:(Inspector.Recent 0)
+       ~previous:(Some turn_read) with_record);
+  Alcotest.(check bool) "unchanged attribution keeps its position" false
+    (Inspector.proof_scroll_should_reset ~target:(Inspector.Recent 0)
+       ~previous:(Some with_record) with_record);
   let failed_turn =
     Inspector.Turn_read_failed { detail = "turn-records 503"; forecast = Ok measured }
   in
+  Alcotest.(check bool) "a failed proof scrolls its message" true
+    (Inspector.scroll_plain_body ~tab:Inspector.Input_map ~target:(Inspector.Recent 0) failed_turn);
   Alcotest.(check bool) "Turn_read_failed retains its forecast" true
     (Inspector.retained_forecast failed_turn = Some (Ok measured));
   Alcotest.(check bool) "Request_failed carries no forecast" true
@@ -450,6 +519,10 @@ let () =
   Alcotest.run "tui_next_request_band"
     [ ( "render"
       , [ Alcotest.test_case "current account configuration follows exact runtime" `Quick test_runtime_configuration_attaches_by_exact_id
+        ; Alcotest.test_case "unknown origin reason reaches sanitizer" `Quick
+            test_unknown_origin_reason_reaches_sanitizer
+        ; Alcotest.test_case "forecast failures reach error handler" `Quick
+            test_forecast_failures_reach_error_handler
         ; Alcotest.test_case "a turn start origin decodes with its atom" `Quick
             test_a_turn_start_origin_decodes
         ; Alcotest.test_case "retained forecast reuses recent reading only" `Quick

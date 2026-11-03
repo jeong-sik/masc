@@ -670,12 +670,141 @@ val remove_apple_keeper_volumes :
 (** Low-level operation to delete the work and build volumes named for
     [keeper_name]. These names are shared across workspaces: the caller must
     establish that every owner has released them before calling this function.
-    A missing guest alone is not such proof. The operation names them by
-    {!work_volume_name} and {!build_volume_name}, then prove both absent from
-    one volume listing. Both deletes are attempted whatever either returns;
-    an already-absent volume is a success. A volume still listed, an
-    unreadable listing, or a keeper name those functions refuse is [Error].
-    This function does not establish ownership. *)
+    The claims marker and container listing do not prove that unrecorded or
+    paused owners are absent, and do not fence a concurrent boot. A missing
+    guest alone is not such proof. The
+    operation names them by {!work_volume_name} and {!build_volume_name},
+    then proves both absent from one volume listing. Both deletes are
+    attempted whatever either returns; an already-absent volume is a success.
+    A volume still listed, an unreadable listing, or a keeper name those
+    functions refuse is [Error]. This function does not establish ownership. *)
+
+(** {2 The work volume claims marker}
+
+    A keeper's volume names carry the keeper name but not its workspace, so
+    same-named keepers in separate workspaces share one work volume. A claim
+    is the base path of a workspace whose keeper boots onto the volume,
+    recorded as one JSON array of claimant strings in
+    {.masc-volume-claims.json} at the volume root. The file is written only
+    by the root helpers here, above the keeper's jailed work root, so a
+    guest cannot forge or remove a claim. Workspaces attempt a claim at fresh
+    boot ({!add_apple_work_volume_claim}) and release at dissolution
+    ({!release_apple_work_volume_claim}). Fresh Apple provisioning stops if the
+    claim helper fails or gives an unexpected report. The marker can still omit a legacy or adopted owner,
+    so a last recorded claim is not proof that no other workspace needs it.
+
+    Dissolution keeps a volume when the marker is missing or unreadable, but
+    a present marker can still omit an owner. [container list --all] includes
+    stopped guests, while a paused Keeper can have no guest container at all.
+    Neither observation alone establishes that a volume is safe to reclaim. *)
+
+val volume_claims_marker_name : string
+val claims_guest_root : string
+(** [/masc-claims]: where the claims helpers mount the work volume. *)
+
+val volume_claimant_env_var : string
+(** The [--env] name the add and release helpers receive the claimant base
+    path under. *)
+
+val volume_claim_helper_name : keeper_name:string -> string
+(** [masc-keeper-work-<keeper>-claims], the stable helper name. One helper
+    name per keeper name serializes concurrent claim writes across
+    workspaces: a second run collides on the name and fails. *)
+
+val valid_volume_claimant : string -> bool
+(** A claimant is a non-empty base path without a quote, a backslash or an
+    ASCII control byte. The helper scripts do no escaping of their own, so
+    anything else is refused before a helper runs. *)
+
+val volume_claim_add_script_with : marker:string -> string
+val volume_claim_release_script_with : marker:string -> string
+val volume_claims_read_script_with : marker:string -> string
+(** The three helper payloads with an explicit marker path, so a test can
+    run the exact script through [/bin/sh] against a plain file. Add requires
+    [cmp] before creating or checking a marker; release requires it when a
+    marker exists. Both validate existing bytes before changing them and
+    refuse if [cmp] is unavailable. The production spellings mount the work
+    volume at {!claims_guest_root}. *)
+
+val apple_volume_claims_read_argv :
+  keeper_name:string -> volume_name:string -> image:string -> string list
+val apple_volume_claim_add_argv :
+  keeper_name:string -> volume_name:string -> image:string -> claimant:string -> string list
+val apple_volume_claim_release_argv :
+  keeper_name:string -> volume_name:string -> image:string -> claimant:string -> string list
+(** [container run --rm] of [image] as root, every capability dropped, no
+    network, a read-only root, the work volume mounted at
+    {!claims_guest_root}, and one of the three payloads above. The add and
+    release argv carry the claimant in {!volume_claimant_env_var}. *)
+
+type volume_claims_read =
+  | Marker_absent
+  | Claims_read of string list
+  | Claims_invalid of string
+
+val volume_claims_of_output : string -> volume_claims_read
+(** Strict decode of marker content read by the read helper: empty output is
+    [Marker_absent], a JSON array of valid claimants is [Claims_read], and
+    anything else is [Claims_invalid]. No default for a shape this module
+    did not write. *)
+
+type apple_volume_claim_helper_report =
+  | Claims_marker_absent
+  | Claimant_not_present
+  | Released_last_claim
+  | Kept_with_claimants of string list
+  | Report_unrecognized of string
+
+val volume_claim_helper_report_of_output : string -> apple_volume_claim_helper_report
+(** Strict decode of the release helper's stdout protocol. The [absent],
+    [not-claimed] and [released-last] reports must be exactly the outcome
+    word followed by a newline. For [Kept_with_claimants], [kept] is followed
+    by a newline and the remaining marker content. *)
+
+val add_apple_work_volume_claim :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> claimant:string
+  -> (unit, string) result
+(** Record [claimant]'s claim on the work volume, idempotently. A fresh boot
+    calls this right after the work volume is ensured. A claims helper
+    already present under the shared name, or a helper failure status, is
+    [Error]. A failed or interrupted helper does not prove whether its write
+    occurred. A fresh Apple guest does not proceed when this returns [Error].
+    [Ok] requires the helper's exact [added] or [present] report. *)
+
+type apple_volume_claim_release =
+  | Kept_for_claimants of string list
+  | Kept_for_containers of string list
+        (** The claim was released and the volumes kept: a live or stopped
+            guest, or a volume helper, still references the keeper. *)
+  | Skipped_unverified of string
+
+val release_apple_work_volume_claim :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> claimant:string
+  -> apple_volume_claim_release
+(** Release [claimant]'s claim; the volumes are always kept. The last
+    recorded claim plus an empty owner listing cannot prove exclusive
+    ownership -- a legacy, adopted, or paused-unrecorded owner in another
+    workspace is absent from both observations -- so this call never
+    deletes. One helper reads the marker, filters the claim out and
+    rewrites it, so no other helper can land a claim between the read and
+    the write; the release helper runs even when owner containers are
+    present and even when the owner listing itself fails. A failed or
+    interrupted helper does not prove whether the claim was released. When
+    ours was the last recorded claim the helper removes the marker and
+    this call returns [Skipped_unverified] naming the unprovable
+    ownership. If owner containers are present, this call keeps the
+    volumes with [Kept_for_containers]. [Kept_for_claimants] carries the
+    claimants that remain. *)
 
 val recreate_apple_build_volume
   :  volume_name:string

@@ -884,6 +884,20 @@ let complete_cleanup
          (meta.sandbox_profile, meta.microvm_backend))
       effective_meta
   in
+  (* The claims helper that releases the Apple volumes runs on the keeper's
+     own sandbox image, resolved the same way the boot resolved it. There is
+     no image to fall back to: an unresolvable one leaves the removal
+     refused and the warning below names the volumes it kept. *)
+  let release_sandbox_image () =
+    match effective_meta with
+    | Error _ -> None
+    | Ok meta ->
+      (match
+         Keeper_sandbox_image_resolver.for_keeper ~base_path:config.base_path meta
+       with
+       | Ok pinned -> Some pinned.Keeper_sandbox_image_catalog.reference
+       | Error _ -> None)
+  in
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
@@ -1026,9 +1040,11 @@ let complete_cleanup
                 | Error detail -> Error detail
                 | Ok (backend, microvm_backend) ->
                   Keeper_turn_sandbox_runtime.remove_keeper_volumes_by_name
+                    ~base_path:config.base_path
                     ~keeper_name:operation.keeper_name
                     ~backend
                     ?microvm_backend
+                    ?sandbox_image:(release_sandbox_image ())
                     ())
               with
               | Ok () -> ()

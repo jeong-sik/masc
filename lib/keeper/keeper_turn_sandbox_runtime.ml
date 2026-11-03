@@ -1331,6 +1331,30 @@ let ensure_apple_volume_helpers_absent ~keeper_name ~timeout_sec =
           ; Keeper_sandbox_microvm.volume_repair_name ~keeper_name ]
 ;;
 
+(* A fresh Apple boot requires a successful claim-helper report before it can
+   use a volume shared across workspaces. This is not an independent marker
+   readback or proof about a legacy or already-paused Keeper. *)
+let claim_work_volume_at_boot (t : t) ~backend ~volume_name ~timeout_sec =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+  | Keeper_microvm_backend.Apple_container ->
+    let claimant =
+      Keeper_sandbox_runtime_setup.normalize_base_path_for_hash t.config.base_path
+    in
+    (match t.image with
+     | Error error ->
+       Error ("microvm_volume_claim_unconfirmed: " ^ image_unresolved_message error)
+     | Ok image ->
+       Keeper_sandbox_microvm.add_apple_work_volume_claim
+         ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+         ~timeout_sec
+         ~keeper_name:t.meta.name
+         ~volume_name
+         ~image
+         ~claimant
+       |> Result.map_error (fun detail -> "microvm_volume_claim_unconfirmed: " ^ detail))
+;;
+
 (** Everything a guest boot mounts besides config and identity, established
     before [container run] so a boot never starts without one of them. *)
 let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
@@ -1349,12 +1373,11 @@ let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
     (match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
      | Error _ as err -> err
      | Ok work_volume_name ->
-       (match microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
-        | Error _ as err -> err
-        | Ok build_volume_name ->
-          (match prepare_microvm_shim_dir t ~backend with
-           | Error _ as err -> err
-           | Ok shim_host_dir -> Ok { work_volume_name; build_volume_name; shim_host_dir })))
+       let open Result.Syntax in
+       let* () = claim_work_volume_at_boot t ~backend ~volume_name:work_volume_name ~timeout_sec in
+       let* build_volume_name = microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec in
+       let* shim_host_dir = prepare_microvm_shim_dir t ~backend in
+       Ok { work_volume_name; build_volume_name; shim_host_dir })
 ;;
 
 (** Boot invariant (RFC-0052), fail-closed:
@@ -2960,12 +2983,21 @@ let teardown_keeper_sandbox_by_name
    teardown has removed the guest that held the volumes. *)
 let remove_keeper_volumes_by_name
       ?timeout_sec
+      ~base_path:(base_path : string)
       ~(keeper_name : string)
       ~(backend : Keeper_sandbox.backend)
       ?microvm_backend
+      ?sandbox_image
       ()
   =
-  let _ = timeout_sec in
+  let timeout_sec =
+    Option.value
+      timeout_sec
+      ~default:
+        (Env_config_sandbox.Shell_timeout.timeout_sec
+           ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+           ())
+  in
   match backend with
   | Keeper_sandbox.Docker | Keeper_sandbox.Remote_ssh -> Ok ()
   | Keeper_sandbox.Micro_vm ->
@@ -2978,13 +3010,49 @@ let remove_keeper_volumes_by_name
             keeper_name)
      | Some Keeper_microvm_backend.Apple_container ->
        (* Work and build names contain the Keeper name but not its workspace.
-          A dormant Keeper in another workspace can still own these disks,
-          even if no live guest currently mounts either one. *)
-       Error
-         (Printf.sprintf
-            "microvm_volume_removal_owner_unverified: keeper %s's Apple volumes \
-             may be shared by another workspace; automatic deletion was skipped"
-            keeper_name)
+          The marker records confirmed claims, but a legacy or adopted owner
+          may be unrecorded and a paused owner may have no container, so the
+          release keeps the volumes instead of deleting them. The release
+          helper runs on the Keeper's own sandbox image; an unresolvable image
+          prevents this call from releasing the claim. *)
+       (match sandbox_image with
+        | None ->
+          Error
+            (Printf.sprintf
+               "microvm_volume_removal_image_unresolved: keeper %s's volumes \
+                cannot be released without an image to run the claims helper; \
+                automatic deletion was skipped"
+               keeper_name)
+        | Some image ->
+          (match Keeper_sandbox_microvm.work_volume_name ~keeper_name with
+           | Error detail -> Error ("microvm_volume_removal_unnamed: " ^ detail)
+           | Ok volume_name ->
+             let claimant =
+               Keeper_sandbox_runtime_setup.normalize_base_path_for_hash base_path
+             in
+             (match
+                Keeper_sandbox_microvm.release_apple_work_volume_claim
+                  ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+                  ~timeout_sec
+                  ~keeper_name
+                  ~volume_name
+                  ~image
+                  ~claimant
+              with
+              | Keeper_sandbox_microvm.Kept_for_claimants claimants ->
+                Log.Keeper.warn ~keeper_name
+                  "keeper removed; its Apple volumes are kept: %d other workspace(s) \
+                   still claim them: %s"
+                  (List.length claimants)
+                  (String.concat ", " claimants);
+                Ok ()
+              | Keeper_sandbox_microvm.Kept_for_containers owners ->
+                Log.Keeper.warn ~keeper_name
+                  "keeper removed; its claim was released but its Apple volumes are \
+                   kept: containers still reference the keeper: %s"
+                  (String.concat ", " owners);
+                Ok ()
+              | Keeper_sandbox_microvm.Skipped_unverified detail -> Error detail)))
      | Some
          ((Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata) as
           microvm_backend) ->

@@ -1675,20 +1675,59 @@ let remote_max_concurrent_sessions = 8
 
 (* ── Provisioning the work volume ──────────────────────────────────── *)
 
-(** Volume ids in a [container volume list --format json] payload. *)
+(** Volume ids in a [container volume list --format json] payload. Every
+    row must be identifiable before the list can prove that a volume is
+    absent. Apple encodes both [id] and [configuration.name] as the volume
+    name; accept either alone but refuse conflicting or malformed fields. *)
 let volume_names_of_json = function
   | `List entries ->
-    let open Yojson.Safe.Util in
-    Ok
-      (List.filter_map
-         (fun entry ->
-           match member "id" entry with
-           | `String id -> Some id
-           | _ ->
-             (match entry |> member "configuration" |> member "name" with
-              | `String name -> Some name
-              | _ -> None))
-         entries)
+    let unique_member key fields =
+      match List.filter (fun (name, _) -> String.equal name key) fields with
+      | [] -> Ok None
+      | [ (_, value) ] -> Ok (Some value)
+      | _ -> Error ("duplicate " ^ key)
+    in
+    let name_member key fields =
+      match unique_member key fields with
+      | Error _ as error -> error
+      | Ok None -> Ok None
+      | Ok (Some (`String name)) when not (String.equal (String.trim name) "") ->
+        Ok (Some name)
+      | Ok (Some _) -> Error (key ^ " is not a nonblank string")
+    in
+    let name_of_entry = function
+      | `Assoc fields ->
+        (match name_member "id" fields, unique_member "configuration" fields with
+         | Error detail, _ | _, Error detail -> Error detail
+         | Ok id, Ok configuration ->
+           let configured_name =
+             match configuration with
+             | None -> Ok None
+             | Some (`Assoc config) ->
+               (match name_member "name" config with
+                | Ok None -> Error "configuration.name is missing"
+                | Ok (Some _) as result -> result
+                | Error _ as error -> error)
+             | Some _ -> Error "configuration is not an object"
+           in
+           (match id, configured_name with
+            | _, Error detail -> Error detail
+            | Some id, Ok (Some name) when not (String.equal id name) ->
+              Error "id and configuration.name disagree"
+            | Some id, Ok _ -> Ok id
+            | None, Ok (Some name) -> Ok name
+            | None, Ok None -> Error "id and configuration.name are missing"))
+      | _ -> Error "row is not an object"
+    in
+    let rec collect index names = function
+      | [] -> Ok (List.rev names)
+      | entry :: rest ->
+        (match name_of_entry entry with
+         | Error detail ->
+           Error (Printf.sprintf "container volume list row %d: %s" index detail)
+         | Ok name -> collect (index + 1) (name :: names) rest)
+    in
+    collect 0 [] entries
   | _ -> Error "container volume list did not return a JSON array"
 ;;
 
@@ -2005,9 +2044,9 @@ let apple_volume_delete_argv ~volume_name =
 ;;
 
 (* Both volume names are exact, but same-named Keepers in other workspaces
-   may own the same volumes. The caller must establish ownership separately;
-   the operation itself checks no workspace. Each delete is attempted
-   whatever the other returned. A
+   may own the same volumes. The claims marker cannot prove that all owners
+   are recorded, and this operation checks no workspace itself. Each delete
+   is attempted whatever the other returned. A
    delete's exit code cannot prove absence: an already-absent volume and one
    a guest still holds can both exit non-zero. One listing after both deletes
    settles it, the same way the trim helper's removal is settled. *)
@@ -2057,6 +2096,535 @@ let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
             build
             (Keeper_sandbox_exec_failure.status_label status)
             (output_for_log ~stdout ~stderr)))
+;;
+
+(* ── The work volume claims marker ────────────────────────────────────
+   Volume names carry the keeper name but not its workspace, so two
+   workspaces running same-named keepers share one work volume and neither
+   can tell whether the other still wants it. A claim is the base path of a
+   workspace whose keeper boots onto the volume, recorded in a marker file
+   at the volume root. The marker sits above the keeper's jailed work root
+   and is written by root helpers only, so the guest's user can neither
+   create nor delete it. *)
+
+let volume_claims_marker_name = ".masc-volume-claims.json"
+let claims_guest_root = "/masc-claims"
+let volume_claimant_env_var = "MASC_VOLUME_CLAIMANT"
+
+let volume_claim_helper_name ~keeper_name =
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Micro_vm_volume_claim { keeper_name })
+  |> Keeper_sandbox_container_name.to_string
+;;
+
+(* A claimant travels in one [--env] argument and is written inside JSON
+   string quotes by the helper scripts, which do no escaping of their own:
+   a base path carrying a quote, a backslash or a control character is
+   refused here rather than silently mangled. Everything else a real base
+   path contains -- spaces, unicode, '$', '%' -- travels as data. *)
+let valid_volume_claimant claimant =
+  claimant <> ""
+  && String.for_all
+       (function
+         | '"' | '\\' | '\x7f' -> false
+         | c -> c >= ' ')
+       claimant
+;;
+
+(* The marker is one JSON array, one claimant per line, so the scripts can
+   match a whole element by quoting it and never drop a claim they read.
+   The [add] script only inserts: it re-emits every element it recognized
+   and ours. The [release] script filters ours out and regenerates; when
+   ours was the last claim the marker file is removed instead. Both refuse
+   a marker outside the complete line-oriented array they know how to write,
+   and both land the new file with one [mv], which is atomic on the same
+   filesystem. Reading is [cat] alone, so the host's strict decoder parses
+   that response. The byte comparison requires [cmp]; if the image lacks it,
+   an existing marker is refused without modification. *)
+let volume_claim_validate_script =
+  {sh|validate_claim_line() {
+  case "$1" in
+    '"'*'"') value=${1#\"}; value=${value%\"} ;;
+    *) return 1 ;;
+  esac
+  case "$value" in
+    ''|*'"'*|*\\*|*[[:cntrl:]]*) return 1 ;;
+  esac
+  return 0
+}
+validate_marker() {
+  state=open
+  while :; do
+    line=
+    if IFS= read -r line; then newline=1
+    elif [ -n "$line" ]; then newline=0
+    else break; fi
+    case "$state" in
+      open)
+        [ "$line" = '[' ] || return 1
+        state=first ;;
+      first)
+        if [ "$line" = ']' ]; then state=closed
+        else validate_claim_line "$line" || return 1; state=next; fi ;;
+      next)
+        if [ "$line" = ']' ]; then state=closed
+        else
+          case "$line" in
+            ,*) validate_claim_line "${line#,}" || return 1 ;;
+            *) return 1 ;;
+          esac
+        fi ;;
+      closed) return 1 ;;
+    esac
+    if [ "$newline" -eq 1 ]; then printf '%s\n' "$line"
+    else printf '%s' "$line"; fi
+  done < "$marker"
+  [ "$state" = closed ]
+}|sh}
+;;
+
+let volume_claim_add_script_with ~marker =
+  Printf.sprintf
+    {sh|set -eu
+LC_ALL=C
+export LC_ALL
+marker=%s
+%s
+tmp=$marker.tmp
+if ! command -v cmp >/dev/null 2>&1; then
+  printf 'claims marker byte comparison is unavailable\n' >&2
+  exit 1
+fi
+if [ -f "$marker" ]; then
+  if ! validate_marker > "$tmp" || ! cmp -s "$marker" "$tmp"; then
+    rm -f "$tmp"
+    printf 'claims marker is not a complete supported array\n' >&2
+    exit 1
+  fi
+  rm -f "$tmp"
+fi
+printf '[\n' > "$tmp"
+first=1
+present=0
+if [ -f "$marker" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      '['|']') ;;
+      *)
+        elem=${line#,}
+        case "$elem" in
+          '"'*'"')
+            elem=${elem#\"}; elem=${elem%%\"}
+            if [ "$elem" = "$MASC_VOLUME_CLAIMANT" ]; then present=1
+            elif [ "$first" -eq 1 ]; then printf '"%%s"\n' "$elem" >> "$tmp"; first=0
+            else printf ',"%%s"\n' "$elem" >> "$tmp"; fi ;;
+          *) printf 'claims marker line is not a claimant\n' >&2; rm -f "$tmp"; exit 1 ;;
+        esac ;;
+    esac
+  done < "$marker"
+fi
+if [ "$present" -eq 1 ]; then
+  rm -f "$tmp"
+  printf 'present\n'
+  exit 0
+fi
+if [ "$first" -eq 1 ]; then printf '"%%s"\n' "$MASC_VOLUME_CLAIMANT" >> "$tmp"
+else printf ',"%%s"\n' "$MASC_VOLUME_CLAIMANT" >> "$tmp"; fi
+printf ']\n' >> "$tmp"
+mv -f "$tmp" "$marker"
+printf 'added\n'|sh}
+    (Filename.quote marker) volume_claim_validate_script
+;;
+
+let volume_claim_release_script_with ~marker =
+  Printf.sprintf
+    {sh|set -eu
+LC_ALL=C
+export LC_ALL
+marker=%s
+%s
+if [ ! -f "$marker" ]; then printf 'absent\n'; exit 0; fi
+tmp=$marker.tmp
+if ! validate_marker > "$tmp" || ! cmp -s "$marker" "$tmp"; then
+  rm -f "$tmp"
+  printf 'claims marker is not a complete supported array\n' >&2
+  exit 1
+fi
+rm -f "$tmp"
+printf '[\n' > "$tmp"
+first=1
+found=0
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    '['|']') ;;
+    *)
+      elem=${line#,}
+      case "$elem" in
+        '"'*'"')
+          elem=${elem#\"}; elem=${elem%%\"}
+          if [ "$elem" = "$MASC_VOLUME_CLAIMANT" ]; then found=1
+          elif [ "$first" -eq 1 ]; then printf '"%%s"\n' "$elem" >> "$tmp"; first=0
+          else printf ',"%%s"\n' "$elem" >> "$tmp"; fi ;;
+        *) printf 'claims marker line is not a claimant\n' >&2; rm -f "$tmp"; exit 1 ;;
+      esac ;;
+  esac
+done < "$marker"
+if [ "$found" -eq 0 ]; then
+  rm -f "$tmp"
+  printf 'not-claimed\n'
+  exit 0
+fi
+if [ "$first" -eq 1 ]; then
+  rm -f "$marker" "$tmp"
+  printf 'released-last\n'
+  exit 0
+fi
+printf ']\n' >> "$tmp"
+mv -f "$tmp" "$marker"
+printf 'kept\n'
+cat "$marker"|sh}
+    (Filename.quote marker) volume_claim_validate_script
+;;
+
+let volume_claims_read_script_with ~marker =
+  Printf.sprintf
+    {sh|set -eu
+marker=%s
+if [ -f "$marker" ]; then cat "$marker"; fi|sh}
+    (Filename.quote marker)
+;;
+
+let volume_claim_marker_guest_path =
+  Filename.concat claims_guest_root volume_claims_marker_name
+;;
+
+let volume_claim_add_script = volume_claim_add_script_with ~marker:volume_claim_marker_guest_path
+let volume_claim_release_script = volume_claim_release_script_with ~marker:volume_claim_marker_guest_path
+let volume_claims_read_script = volume_claims_read_script_with ~marker:volume_claim_marker_guest_path
+
+(* The claims helper shares the trim helper's shape -- one [container run
+   --rm] of the keeper's own image, root, every capability dropped, no
+   network, a read-only root -- but needs no capability at all: it only
+   reads and writes files on the mounted volume. The helper name is
+   keeper-scoped and shared across workspaces, so two workspaces claiming
+   at once collide on the name and the second run fails; that failure, and
+   a name observed present before this one starts, both leave the marker
+   untouched and are reported rather than retried. *)
+let apple_volume_claim_run_argv ?(env = []) ~keeper_name ~volume_name ~image script =
+  command_argv_for Backend.Apple_container
+  @ [ "run"; "--rm"; "--name"; volume_claim_helper_name ~keeper_name
+    ; "--user"; "0"; "--cap-drop"; "ALL"
+    ; "--network"; "none"; "--read-only"
+    ; "--entrypoint"; "/bin/sh"
+    ; "--volume"; volume_name ^ ":" ^ claims_guest_root
+    ]
+  @ List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ]) env
+  @ [ image; "-eu"; "-c"; script ]
+;;
+
+let apple_volume_claims_read_argv ~keeper_name ~volume_name ~image =
+  apple_volume_claim_run_argv ~keeper_name ~volume_name ~image volume_claims_read_script
+;;
+
+let apple_volume_claim_add_argv ~keeper_name ~volume_name ~image ~claimant =
+  apple_volume_claim_run_argv
+    ~env:[ volume_claimant_env_var, claimant ]
+    ~keeper_name ~volume_name ~image volume_claim_add_script
+;;
+
+let apple_volume_claim_release_argv ~keeper_name ~volume_name ~image ~claimant =
+  apple_volume_claim_run_argv
+    ~env:[ volume_claimant_env_var, claimant ]
+    ~keeper_name ~volume_name ~image volume_claim_release_script
+;;
+
+(* Strict decode of marker content. Empty output means no marker (the read
+   helper prints nothing for an absent file); anything else must be a JSON
+   array of valid claimants, or it is invalid -- never a default. *)
+type volume_claims_read =
+  | Marker_absent
+  | Claims_read of string list
+  | Claims_invalid of string
+
+let volume_claims_of_output output =
+  let trimmed = String.trim output in
+  if String.equal trimmed ""
+  then Marker_absent
+  else
+    match Yojson.Safe.from_string trimmed with
+    | exception Yojson.Json_error detail -> Claims_invalid ("invalid JSON: " ^ detail)
+    | `List elements ->
+      let rec claimants_of elements acc =
+        match elements with
+        | [] -> Ok (List.rev acc)
+        | `String claimant :: rest when valid_volume_claimant claimant ->
+          claimants_of rest (claimant :: acc)
+        | `String claimant :: _ ->
+          Error (Printf.sprintf "claimant %S is not a valid base-path claim" claimant)
+        | _ :: _ -> Error "a claims element is not a string"
+      in
+      (match claimants_of elements [] with
+       | Ok claimants -> Claims_read claimants
+       | Error detail -> Claims_invalid detail)
+    | _ -> Claims_invalid "the claims marker is not a JSON array"
+;;
+
+(* The release helper's stdout protocol: one outcome word, and for [kept]
+   the marker content that remains. Pure, so the mapping is testable
+   without a container runtime. *)
+type apple_volume_claim_helper_report =
+  | Claims_marker_absent
+  | Claimant_not_present
+  | Released_last_claim
+  | Kept_with_claimants of string list
+  | Report_unrecognized of string
+
+let volume_claim_helper_report_of_output output =
+  match output with
+  | "absent\n" -> Claims_marker_absent
+  | "not-claimed\n" -> Claimant_not_present
+  | "released-last\n" -> Released_last_claim
+  | _ ->
+    (match String.index_opt output '\n' with
+     | None -> Report_unrecognized (String.trim output)
+     | Some index ->
+       let first = String.sub output 0 index in
+       let rest = String.sub output (index + 1) (String.length output - index - 1) in
+       match first with
+       | "kept" ->
+         (match volume_claims_of_output rest with
+          | Claims_read claimants -> Kept_with_claimants claimants
+          | Marker_absent | Claims_invalid _ ->
+            Report_unrecognized "kept without a readable claims array")
+       | other -> Report_unrecognized other)
+;;
+
+(* One container listing answers every presence question here. The strict
+   inventory decoder rejects malformed rows wholesale, and unlabelled rows
+   never prove a keeper's absence. *)
+let apple_claims_inventory ~run ~timeout_sec =
+  match run ~timeout_sec (apple_container_list_argv ()) with
+  | Unix.WEXITED 0, stdout, _ ->
+    (match Keeper_microvm_inventory_json.of_apple_json stdout with
+     | Ok inventory -> Ok inventory
+     | Error error ->
+       Error
+         ("microvm_volume_claims_inventory_invalid: "
+          ^ Keeper_microvm_inventory_json.invalid_inventory_message error))
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _, _ ->
+    Error
+      ("microvm_volume_claims_inventory_failed: container list "
+       ^ Keeper_sandbox_exec_failure.status_label status)
+;;
+
+let apple_claims_helper_absent ~run ~timeout_sec ~keeper_name =
+  let helper_name = volume_claim_helper_name ~keeper_name in
+  match apple_claims_inventory ~run ~timeout_sec with
+  | Error _ as error -> error
+  | Ok inventory ->
+    (match Keeper_microvm_inventory_json.presence ~guest_name:helper_name inventory with
+     | Ok Keeper_microvm_inventory_json.Absent -> Ok ()
+     | Ok Keeper_microvm_inventory_json.Present ->
+       Error
+         (Printf.sprintf
+            "microvm_volume_claim_helper_present: claims helper %s is present; its \
+             workspace owner is unknown, so this claim is not written"
+            helper_name)
+     | Error Keeper_microvm_inventory_json.Invalid_guest_name ->
+       Error ("microvm_volume_claim_helper_unnamed: " ^ helper_name))
+;;
+
+(* Every observed container that references this keeper: guests carry the
+   keeper's scoping label, and the three volume helpers carry its name. Any
+   one of them present means a workspace may hold the volume right now --
+   a live guest mounting it, or a helper mid-operation -- so a release
+   refuses rather than race it. Unlabelled foreign rows prove nothing and
+   are not treated as owners. *)
+let apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name =
+  match apple_claims_inventory ~run ~timeout_sec with
+  | Error _ as error -> error
+  | Ok inventory ->
+    let module Inventory = Keeper_microvm_inventory_json in
+    let guests =
+      List.filter_map
+        (fun (row : Inventory.row) ->
+           match row.scoping_labels with
+           | Some labels when String.equal labels.keeper keeper_name -> Some row.name
+           | Some _ | None -> None)
+        (Inventory.rows inventory)
+    in
+    let helpers =
+      List.filter_map
+        (fun name ->
+           match Inventory.presence ~guest_name:name inventory with
+           | Ok Inventory.Present -> Some name
+           | Ok Inventory.Absent | Error Inventory.Invalid_guest_name -> None)
+        [ work_volume_trim_name ~keeper_name
+        ; volume_repair_name ~keeper_name
+        ; volume_claim_helper_name ~keeper_name
+        ]
+    in
+    Ok (guests @ helpers)
+;;
+
+(* Record one workspace's claim, idempotently. Fresh Apple provisioning stops
+   on an error. This does not establish that legacy or adopted users of an
+   existing shared volume were recorded. *)
+let add_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~image ~claimant
+  : (unit, string) result
+  =
+  if not (valid_volume_claimant claimant)
+  then
+    Error
+      (Printf.sprintf
+         "microvm_volume_claimant_invalid: base path %S cannot be recorded as a claim"
+         claimant)
+  else
+    match apple_claims_helper_absent ~run ~timeout_sec ~keeper_name with
+    | Error _ as error -> error
+    | Ok () ->
+      let status, stdout, stderr =
+        run ~timeout_sec (apple_volume_claim_add_argv ~keeper_name ~volume_name ~image ~claimant)
+      in
+      match status, stdout with
+      | Unix.WEXITED 0, ("added\n" | "present\n") -> Ok ()
+      | Unix.WEXITED 0, _ ->
+        Error
+          (Printf.sprintf
+             "microvm_volume_claim_helper_unrecognized: %s returned %S"
+             (volume_claim_helper_name ~keeper_name)
+             (output_for_log ~stdout ~stderr))
+      | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _ ->
+        Error
+          (Printf.sprintf
+             "microvm_volume_claim_helper_failed: %s (%s; %s)"
+             (volume_claim_helper_name ~keeper_name)
+             (Keeper_sandbox_exec_failure.status_label status)
+             (output_for_log ~stdout ~stderr))
+;;
+
+type apple_volume_claim_release =
+  | Kept_for_claimants of string list
+  | Kept_for_containers of string list
+  | Skipped_unverified of string
+
+(* Release one workspace's claim and always keep the volumes. The last
+   recorded claim plus an empty owner listing cannot prove exclusive
+   ownership: a legacy, adopted, or paused-unrecorded owner in another
+   workspace is absent from both the marker and the container listing, and
+   no host-side enumeration can complete the owner set, so deletion on
+   those signals could destroy another keeper's resume data. A concurrent
+   boot between the listing and a deletion is likewise unfenced. This call
+   therefore never deletes; it only releases the caller's claim. The
+   release helper runs even when owner containers are present or the owner
+   listing fails. A dissolved workspace should release its claim:
+   dissolution is one-shot, and a workspace that never comes back would
+   keep the marker naming it forever. A helper failure does not prove that
+   the release took effect. One helper reads the marker, filters our claim
+   out and rewrites it: the read and the write are one container, so no
+   other helper can land a claim between them. When ours was the last
+   recorded claim the helper removes the marker; the volumes stay, and the
+   outcome reports the observation. *)
+let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~image ~claimant
+  : apple_volume_claim_release
+  =
+  let skipped detail = Skipped_unverified detail in
+  if not (valid_volume_claimant claimant)
+  then
+    skipped
+      (Printf.sprintf
+         "microvm_volume_claimant_invalid: base path %S cannot be matched against claims"
+         claimant)
+  else
+    let status, stdout, stderr =
+      run ~timeout_sec
+        (apple_volume_claim_release_argv ~keeper_name ~volume_name ~image ~claimant)
+    in
+    let report = volume_claim_helper_report_of_output stdout in
+    match apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name with
+    | Error listing_detail ->
+      let unverified detail =
+        skipped
+          (Printf.sprintf
+             "microvm_volume_release_owner_unverified: the owner listing failed (%s); %s"
+             listing_detail detail)
+      in
+      (match (status, report) with
+       | Unix.WEXITED 0, Claims_marker_absent ->
+         unverified "no claims marker, so no claim of this workspace remained anyway"
+       | Unix.WEXITED 0, Claimant_not_present ->
+         unverified
+           (Printf.sprintf
+              "%s held no recorded claim on the volume"
+              claimant)
+       | Unix.WEXITED 0, Kept_with_claimants claimants ->
+         unverified
+           (Printf.sprintf
+              "this workspace's claim was released; %d other claimant(s) remain: %s"
+              (List.length claimants)
+              (String.concat ", " claimants))
+       | Unix.WEXITED 0, Released_last_claim ->
+         unverified
+           "this workspace's claim was the last one and the marker was removed; the \
+            volumes are kept because no owner evidence could be read"
+       | Unix.WEXITED 0, Report_unrecognized word ->
+         unverified
+           (Printf.sprintf
+              "the claims helper reported %S, so the claim's release is unconfirmed (%s)"
+              word
+              (output_for_log ~stdout ~stderr))
+       | ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failure_status)
+         , ( Claims_marker_absent
+           | Claimant_not_present
+           | Released_last_claim
+           | Kept_with_claimants _
+           | Report_unrecognized _ ) ) ->
+         unverified
+           (Printf.sprintf
+              "the claims helper failed (%s; %s), so the claim's release is unconfirmed"
+              (Keeper_sandbox_exec_failure.status_label failure_status)
+              (output_for_log ~stdout ~stderr)))
+    | Ok owners ->
+      (match (status, report) with
+       | Unix.WEXITED 0, Claims_marker_absent ->
+         skipped
+           "microvm_volume_claims_absent: legacy volume without a claims marker; ownership \
+            is not provable"
+       | Unix.WEXITED 0, Claimant_not_present ->
+         skipped
+           (Printf.sprintf
+              "microvm_volume_claims_not_claimed: %s holds no recorded claim on %s"
+              claimant volume_name)
+       | Unix.WEXITED 0, Kept_with_claimants claimants -> Kept_for_claimants claimants
+       | Unix.WEXITED 0, Released_last_claim ->
+         (match owners with
+          | [] ->
+            skipped
+              "microvm_volume_ownership_unprovable: the last recorded claim was \
+               released and no owner container was observed, but a legacy, \
+               adopted, or paused-unrecorded owner in another workspace cannot \
+               be excluded and a concurrent boot is not fenced; the work and \
+               build volumes are kept"
+          | _ :: _ -> Kept_for_containers owners)
+       | Unix.WEXITED 0, Report_unrecognized word ->
+         skipped
+           (Printf.sprintf
+              "microvm_volume_claims_unrecognized: claims helper %s reported %S (%s)"
+              (volume_claim_helper_name ~keeper_name)
+              word
+              (output_for_log ~stdout ~stderr))
+       | ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status)
+         , ( Claims_marker_absent
+           | Claimant_not_present
+           | Released_last_claim
+           | Kept_with_claimants _
+           | Report_unrecognized _ ) ) ->
+         skipped
+           (Printf.sprintf
+              "microvm_volume_claim_helper_failed: %s (%s; %s)"
+              (volume_claim_helper_name ~keeper_name)
+              (Keeper_sandbox_exec_failure.status_label status)
+              (output_for_log ~stdout ~stderr)))
 ;;
 
 (** Recreate the build volume fresh on every boot rather than reusing one

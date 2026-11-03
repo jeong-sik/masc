@@ -85,14 +85,23 @@ esac
            || String.starts_with ~prefix:"delete " call) calls);
        Out_channel.with_open_bin calls_path (fun _ -> ());
        let remove_volumes () = Runtime.remove_keeper_volumes_by_name ~timeout_sec:30.
+           ~base_path:config.Workspace.base_path
            ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
-           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container () in
+           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container
+           ~sandbox_image:"masc-test-minimal:image" () in
+       (* The claims release runs one helper container against the shared
+          volume. This fake runtime answers [run] with exit 99, so the helper
+          fails and the release must keep the volumes and name the helper --
+          the same refuse-on-anything-unverified shape the owner check
+          carried before the claims marker existed. *)
        (match remove_volumes () with
-        | Ok () -> Alcotest.fail "an unowned shared volume was reported removed"
-        | Error detail -> Alcotest.(check bool) "unverified ownership is named" true
-            (Astring.String.is_infix ~affix:"microvm_volume_removal_owner_unverified" detail));
+        | Ok () -> Alcotest.fail "a volume whose claims could not be read was reported removed"
+        | Error detail -> Alcotest.(check bool) "the failed claims helper is named" true
+            (Astring.String.is_infix ~affix:"microvm_volume_claim_helper_failed" detail));
        let calls = In_channel.with_open_bin calls_path In_channel.input_all in
-       Alcotest.(check string) "no CLI calls for unverified ownership" "" calls)
+       Alcotest.(check bool) "no volume delete was issued for an unverified release" true
+         (not (List.exists (fun call -> String.starts_with ~prefix:"volume delete" call)
+                (String.split_on_char '\n' calls))))
 ;;
 
 (* A caller that forgets the runtime gets a refusal, not a guess. Shutdown

@@ -25,6 +25,10 @@ type spec =
       (** The one-shot helper that runs [e2fsck] on a Keeper's image-backed
           volume (RFC keeper-volume-filesystem-repair §3.3). Stable, so a
           repair finds and removes one a dead server left behind. *)
+  | Micro_vm_volume_claim of { keeper_name : string }
+      (** The one-shot helper that reads and writes the work volume's claims
+          marker. Stable across workspaces: the shared name is what
+          serializes two workspaces' claim writes against each other. *)
   | Docker_persistent of
       { keeper_name : string
       ; network_mode : Keeper_types_profile_sandbox.network_mode

@@ -23,10 +23,19 @@ val runtime_authority_exn : base_path:string -> runtime_authority
 (** Rejects invalid server configuration with [Invalid_argument]. *)
 val equal_runtime_authority : runtime_authority -> runtime_authority -> bool
 
+type observer_scope
+(** A workspace authority and the instance advertised to its Observer.
+    Capture the instance from the source's admitted workspace before an
+    operation; constructing it later does not identify that operation's owner. *)
+
+val observer_scope : runtime_authority:runtime_authority -> instance_id:string -> observer_scope
+
 type broadcast_target =
   | All
   | Observers
   | Runtime_observers of runtime_authority
+  | Scoped_runtime_observers of observer_scope
+  (** Only Observers that registered for this workspace and instance. *)
   | Presence_only
   | Runtime_presence of runtime_authority
 
@@ -53,6 +62,7 @@ type client = {
   id : int;
   kind : session_kind;
   runtime_authority : runtime_authority;
+  observer_scope : observer_scope option;
   event_stream : delivery_stream;
   last_event_id : int Atomic.t;
   created_at : float;
@@ -99,7 +109,7 @@ val registration_error_to_string : registration_error -> string
 (** {1 Session Management} *)
 
 val register :
-  ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
+  ?kind:session_kind -> ?on_disconnect:(unit -> unit) -> ?observer_instance_id:string ->
   auth:registration_auth -> string -> last_event_id:int ->
   (int * delivery_stream * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
@@ -111,6 +121,11 @@ val register :
 
     [?on_disconnect] is part of the client published atomically in the
     registry, so a removal wakes that client even if its session is reused.
+
+    [?observer_instance_id] binds an Observer to its server-advertised
+    workspace generation. The authenticated base path is always derived from
+    [auth], not from the instance supplied by the transport. The transport
+    must derive the instance from the workspace it actually admitted.
 
     On validation failure a typed [registration_error] is returned so the
     transport layer can respond with an auth error and close the connection
@@ -209,13 +224,16 @@ type external_event = {
 
 val subscribe_external :
   ?runtime_authority:runtime_authority ->
+  ?observer_instance_id:string ->
   id:string
   -> callback:(external_event -> unit)
   -> ?is_alive:(unit -> bool)
   -> unit
   -> unit
 (** An absent authority receives only unscoped broadcasts. Runtime-scoped
-    broadcasts are delivered only to an exact matching authority. *)
+    broadcasts are delivered only to an exact matching authority. An
+    instance-scoped event also requires the matching Observer instance;
+    subscribers must derive that instance from their admitted workspace. *)
 val unsubscribe_external : string -> unit
 val external_subscriber_count : unit -> int
 val external_subscriber_count_with_prefix : string -> int
@@ -235,11 +253,13 @@ type replay = { deliveries : delivery list; continuity : replay_continuity }
 
 val replay_after_for_session :
   ?runtime_authority:runtime_authority ->
+  ?observer_instance_id:string ->
   session_id:string -> kind:session_kind -> int -> replay
 (** Replay-buffer lookup for one exact session, read from one snapshot.
     Targeted deliveries are visible only to their named agent-stream session;
     broadcasts use the same target and JSON-RPC filtering rules as live
-    fan-out. Without a runtime authority, scoped events are excluded. *)
+    fan-out. Without a runtime authority, scoped events are excluded. An
+    instance-scoped event also requires its Observer instance. *)
 
 type replay_handoff
 

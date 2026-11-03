@@ -75,6 +75,33 @@ let test_broadcast_notifies_external () =
             with Not_found -> false);
     Masc.Sse.unsubscribe_external "test-broadcast")
 
+let test_scoped_observer_external_delivery () =
+  Eio_main.run (fun _env ->
+    let module Sse = Masc.Sse in
+    let authority = Sse.runtime_authority_exn ~base_path:"/tmp/observer-scope-a" in
+    let other = Sse.runtime_authority_exn ~base_path:"/tmp/observer-scope-b" in
+    let old = ref 0 and current = ref 0 and unbound = ref 0 and foreign = ref 0 in
+    let names = ["scope-old"; "scope-current"; "scope-unbound"; "scope-foreign"] in
+    Fun.protect
+      ~finally:(fun () -> List.iter Sse.unsubscribe_external names)
+      (fun () ->
+        Sse.subscribe_external ~runtime_authority:authority ~observer_instance_id:"old"
+          ~id:"scope-old" ~callback:(fun _ -> incr old) ();
+        Sse.subscribe_external ~runtime_authority:authority ~observer_instance_id:"current"
+          ~id:"scope-current" ~callback:(fun _ -> incr current) ();
+        Sse.subscribe_external ~runtime_authority:authority
+          ~id:"scope-unbound" ~callback:(fun _ -> incr unbound) ();
+        Sse.subscribe_external ~runtime_authority:other ~observer_instance_id:"old"
+          ~id:"scope-foreign" ~callback:(fun _ -> incr foreign) ();
+        let scope = Sse.observer_scope ~runtime_authority:authority ~instance_id:"old" in
+        Sse.broadcast_to (Sse.Scoped_runtime_observers scope) (`Assoc ["type", `String "change"]);
+        Alcotest.(check (list int)) "only the matching workspace and instance receive it"
+          [1; 0; 0; 0] [!old; !current; !unbound; !foreign];
+        Sse.broadcast_to (Sse.Runtime_observers authority) (`Assoc ["type", `String "broad"]);
+        Alcotest.(check (list int)) "workspace-wide broadcasts retain their prior audience"
+          [2; 1; 1; 0] [!old; !current; !unbound; !foreign]))
+;;
+
 let test_waiting_inventory_changed_wire_contract () =
   setup ();
   Eio_main.run (fun _env ->
@@ -435,6 +462,8 @@ let () =
     ("broadcast", [
       Alcotest.test_case "broadcast notifies external" `Quick
         test_broadcast_notifies_external;
+      Alcotest.test_case "observer instances isolate external deliveries" `Quick
+        test_scoped_observer_external_delivery;
       Alcotest.test_case "waiting inventory invalidation wire contract" `Quick
         test_waiting_inventory_changed_wire_contract;
       Alcotest.test_case "skips after unsubscribe" `Quick

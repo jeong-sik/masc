@@ -382,6 +382,75 @@ let test_disconnect_revokes_with_the_logins_client_and_forgets_it () =
     (Store.load_binding ~path:(binding_path base_path provider) = Ok None)
 ;;
 
+(* When the client the token was issued to cannot be named, nothing is sent
+   to the provider and the receipt says why: an empty client_id would only
+   come back as the provider's refusal. *)
+let test_disconnect_sends_no_revoke_without_the_logins_client () =
+  let disconnect_with binding =
+    with_disconnect_router
+    @@ fun ~base_path ~clock ~router:_ ~token:_ ->
+    let provider = provider_or_fail "slack" in
+    seed_attachment base_path provider;
+    let path = binding_path base_path provider in
+    (match binding with
+     | `Absent -> ()
+     | `Unreadable ->
+       (* Saved first so the directory is the store's own, then torn. *)
+       (match Store.save_binding ~path (Store.Bound_to_registered (registered "torn")) with
+        | Ok () -> ()
+        | Error message -> Alcotest.failf "seeding the binding failed: %s" message);
+       Out_channel.with_open_bin path (fun oc -> output_string oc "{not json"));
+    let posted = ref 0 in
+    let transports =
+      { Masc.Keeper_identity_tools.mcp_post = (fun ~url:_ ~headers:_ ~body:_ ->
+            Alcotest.fail "disconnect reached the MCP server")
+      ; token_post = (fun ~url:_ ~headers:_ ~body:_ ->
+            incr posted;
+            Ok (200, "{}"))
+      ; discover = (fun ~mcp_url:_ ->
+            Ok
+              { Keeper_oauth_discovery.resource = "https://mcp.example.com/mcp"
+              ; issuer = "https://auth.example.com"
+              ; authorize_url = "https://auth.example.com/authorize"
+              ; token_url = "https://auth.example.com/token"
+              ; registration_url = None
+              ; revocation_endpoint = Some "https://auth.example.com/revoke"
+              ; scopes_supported = []
+              ; supports_pkce_s256 = true
+              })
+      }
+    in
+    let receipt =
+      match
+        Server_keeper_oauth.disconnect ~transports ~clock ~config:(workspace_config ())
+          ~keeper ~provider_id:provider.Keeper_oauth_provider.id ~now:0. ()
+      with
+      | Ok receipt -> receipt
+      | Error message -> Alcotest.failf "disconnect failed: %s" message
+    in
+    let kind =
+      match receipt with
+      | `Assoc fields ->
+        (match List.assoc_opt "revocation" fields with
+         | Some (`Assoc revocation) ->
+           (match List.assoc_opt "kind" revocation with
+            | Some (`String kind) -> kind
+            | _ -> Alcotest.fail "the revocation has no kind")
+         | _ -> Alcotest.fail "the receipt has no revocation")
+      | _ -> Alcotest.fail "the receipt is not an object"
+    in
+    !posted, kind
+  in
+  List.iter
+    (fun (label, binding) ->
+       let posted, kind = disconnect_with binding in
+       check int (label ^ ": nothing was sent to the provider") 0 posted;
+       check string (label ^ ": the receipt says it was not sent") "not_sent" kind)
+    [ "no record of the login's client", `Absent
+    ; "an unreadable record", `Unreadable
+    ]
+;;
+
 (* A provider that enforces the two rules real ones were measured to enforce
    on 2026-11-02: the authorize step accepts only a redirect URI registered
    for that client, and a refresh token is redeemed only by the client it was
@@ -546,6 +615,8 @@ let () =
             test_a_finished_login_records_the_client_that_redeemed_it;
           Alcotest.test_case "disconnect revokes with the login's client and forgets it"
             `Quick test_disconnect_revokes_with_the_logins_client_and_forgets_it;
+          Alcotest.test_case "disconnect sends no revoke without the login's client"
+            `Quick test_disconnect_sends_no_revoke_without_the_logins_client;
           Alcotest.test_case "logins survive a moved callback and each keeper renews"
             `Quick test_logins_survive_a_moved_callback_and_each_keeper_renews;
         ] );

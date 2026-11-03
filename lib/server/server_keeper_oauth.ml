@@ -479,14 +479,36 @@ type revocation =
       (** the provider publishes no revocation endpoint, or there was no
           token of ours to revoke (a GitHub CLI provider's credential belongs
           to [gh]) *)
+  | Revoke_not_sent of string
+      (** the client the token was issued to could not be named, so no
+          request was sent *)
   | Revoke_revoked  (** the endpoint answered a success *)
   | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
 
 let revocation_to_json = function
   | Revoke_not_published -> `Assoc [ "kind", `String "not_published" ]
+  | Revoke_not_sent detail ->
+    `Assoc [ "kind", `String "not_sent"; "detail", `String detail ]
   | Revoke_revoked -> `Assoc [ "kind", `String "revoked" ]
   | Revoke_failed detail ->
     `Assoc [ "kind", `String "failed"; "detail", `String detail ]
+;;
+
+(* Why a disconnect could not name the client its token was issued to. The
+   store's own wording ends in "attach it again", which is advice for a
+   renewal, not for a Keeper being disconnected. *)
+let unnamed_client_reason : Store.redeem_error -> string = function
+  | Store.Not_bound -> "no record of the client this keeper's login used"
+  | Store.Binding_unreadable problem ->
+    Printf.sprintf "the record of the login's client cannot be read: %s" problem
+  | Store.App_unreadable problem ->
+    Printf.sprintf "the app on file cannot be read: %s" problem
+  | Store.App_gone { client_id } ->
+    Printf.sprintf "the login's app %s is no longer on file" client_id
+  | Store.App_replaced { bound; current } ->
+    Printf.sprintf "the login used app %s and the app on file is now %s" bound current
+  | Store.Registration_lapsed { client_id } ->
+    Printf.sprintf "the login's client %s has an expired secret" client_id
 ;;
 
 let disconnect_receipt_path ~base_path ~keeper_name ~provider_id =
@@ -568,31 +590,32 @@ let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider
          (match discovered.Keeper_oauth_discovery.revocation_endpoint with
           | None -> Revoke_not_published
           | Some url ->
-            (* The client this Keeper's login used, which is the one the
-               token was issued to. Without one, no client id is sent: for a
-               public client that is the same act, and the deletion above
-               never depended on knowing it. *)
-            let client_id, client_secret =
+            (* RFC 7009 has the client identify itself, and the token
+               belongs to the client this Keeper's login used. When that
+               client cannot be named, a request with an empty client_id
+               would only come back as the provider's refusal and hide the
+               reason, so none is sent and the receipt says why. The
+               deletion above never depended on this. *)
+            let client =
               match detached.Keeper_identity_tools.client with
-              | None -> "", None
+              | None -> Error Store.Not_bound
               | Some binding ->
-                (match
-                   Store.redeeming_client ~identity_dir:(identity_dir ~base_path)
-                     ~provider ~binding ~now
-                 with
-                 | Ok client -> client
-                 | Error _ -> "", None)
+                Store.redeeming_client ~identity_dir:(identity_dir ~base_path)
+                  ~provider ~binding ~now
             in
-            (match
-               Keeper_oauth_flow.revoke
-                 ~post:transports.Keeper_identity_tools.token_post
-                 ?client_secret ~url ~client_id
-                 ~token:(Option.value refresh_token ~default:"")
-                 ~token_type_hint:"refresh_token" ()
-             with
-             | Ok () -> Revoke_revoked
-             | Error error ->
-               Revoke_failed (Keeper_oauth_flow.revoke_error_to_string error))))
+            (match client with
+             | Error reason -> Revoke_not_sent (unnamed_client_reason reason)
+             | Ok (client_id, client_secret) ->
+               (match
+                  Keeper_oauth_flow.revoke
+                    ~post:transports.Keeper_identity_tools.token_post
+                    ?client_secret ~url ~client_id
+                    ~token:(Option.value refresh_token ~default:"")
+                    ~token_type_hint:"refresh_token" ()
+                with
+                | Ok () -> Revoke_revoked
+                | Error error ->
+                  Revoke_failed (Keeper_oauth_flow.revoke_error_to_string error)))))
   in
   let receipt =
     `Assoc

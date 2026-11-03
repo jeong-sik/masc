@@ -153,6 +153,11 @@ type revocation =
       (** the provider publishes no revocation endpoint, or there was no token
           of ours to revoke (a GitHub CLI provider's credential belongs to
           [gh], which masc never wrote) *)
+  | Revoke_not_sent of string
+      (** there is a token and an endpoint, but the client the token was
+          issued to could not be named -- no record of the login's client, or
+          one that cannot be read or used -- so no request was sent; the
+          string says which *)
   | Revoke_revoked  (** the endpoint answered a success *)
   | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
 

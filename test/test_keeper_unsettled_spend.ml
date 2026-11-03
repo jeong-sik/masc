@@ -187,10 +187,57 @@ let settled ?(rows = rows) masc_root =
   |> List.sort compare
 ;;
 
-let settle masc_root =
-  match Keeper_unsettled_spend.settle ~masc_root ~agent_name:keeper ~observed_at:1.0 with
+let settle_born ~born_at masc_root =
+  match
+    Keeper_unsettled_spend.settle ~masc_root ~agent_name:keeper ~born_at
+      ~observed_at:(Unix.gettimeofday ())
+  with
   | Ok outcome -> outcome
   | Error error -> failf "settle: %s" (Dated_jsonl.read_error_to_string error)
+;;
+
+let settle masc_root = settle_born ~born_at:0.0 masc_root
+
+let day = 86_400.0
+
+(* A raw row appended to the day file of [ts], as the ledger holds the rows
+   appended on an earlier day. *)
+let raw_on_day ~masc_root ~ts ~agent ~turn ~run ~input =
+  let key = Jsonl_writer.day_key ~ts in
+  let month_dir =
+    Filename.concat
+      (Dated_jsonl.base_dir (Cost_ledger.store_of_masc_root masc_root))
+      (String.sub key 0 7)
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      Unix.mkdir dir 0o755)
+  in
+  mkdir_p month_dir;
+  let row =
+    Keeper_hooks_agent_core.cost_event_payload
+      ~agent_name:agent
+      ~task_id:None
+      ~trace_id:trace
+      ~keeper_turn_id:turn
+      ~agent_core_turn_ordinal:1
+      ~model:"glm-fixture"
+      ~input_tokens:input
+      ~output_tokens:10
+      ~cost_usd:0.0
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~spend_observation:
+        (Keeper_spend_observation.Agent_core_response
+           { response_id = ""; ordinal = 1; model = "glm-fixture"; usage = Some (sample input) })
+      ~runtime_attempt:(run, "glm-coding.fixture", 0)
+      ()
+  in
+  Out_channel.with_open_gen [ Open_append; Open_creat ] 0o644
+    (Filename.concat month_dir (String.sub key 8 2 ^ ".jsonl"))
+    (fun channel ->
+       Out_channel.output_string channel (Yojson.Safe.to_string row ^ "\n"))
 ;;
 
 let settled_entry = list (pair int (pair string (pair int (pair int (pair int int)))))
@@ -278,6 +325,37 @@ let test_another_keepers_rows_are_not_settled () =
     check int "this keeper's one reading" 1 outcome.settled_readings;
     check settled_entry "this keeper's request"
       (flatten [ 11, "run-b", 0, 0, 100, 50 ]) (flatten (settled masc_root)))
+;;
+
+(* A Keeper created yesterday whose first turn stopped before it committed has
+   no resolved row to stop at. Day files from before it was created hold other
+   Keepers' rows and a removed Keeper's row under the same name; they are not
+   read, and the first turn's request is settled. *)
+let test_day_files_before_the_keeper_was_created_are_not_read () =
+  let seed masc_root ~now =
+    let before_birth = now -. (3.0 *. day) in
+    raw_on_day ~masc_root ~ts:before_birth ~agent:"other-keeper" ~turn:40 ~run:"run-x" ~input:700;
+    raw_on_day ~masc_root ~ts:before_birth ~agent:"other-keeper" ~turn:41 ~run:"run-y" ~input:800;
+    raw_on_day ~masc_root ~ts:before_birth ~agent:keeper ~turn:7 ~run:"run-removed" ~input:300;
+    raw ~masc_root ~turn:1 ~ordinal:1 ~run:"run-first" ~input:100 ()
+  in
+  with_ledger (fun masc_root ->
+    let now = Unix.gettimeofday () in
+    seed masc_root ~now;
+    let outcome = settle_born ~born_at:(now -. day) masc_root in
+    check int "only the row written since the keeper was created is read" 1
+      outcome.scanned_rows;
+    check settled_entry "the first turn's request"
+      (flatten [ 1, "run-first", 0, 0, 100, 50 ]) (flatten (settled masc_root)));
+  with_ledger (fun masc_root ->
+    let now = Unix.gettimeofday () in
+    seed masc_root ~now;
+    let outcome = settle_born ~born_at:(now -. (3.0 *. day)) masc_root in
+    check int "a keeper created on the older day reads that day too" 4
+      outcome.scanned_rows;
+    check settled_entry "and settles its own row there"
+      (flatten [ 1, "run-first", 0, 0, 100, 50; 7, "run-removed", 0, 0, 300, 150 ])
+      (flatten (settled masc_root)))
 ;;
 
 (* Two cancelled executions of one turn both ran lane attempt 0 and numbered
@@ -476,6 +554,8 @@ let () =
             test_a_client_turn_keeps_its_last_count
         ; test_case "another keeper's rows are not settled" `Quick
             test_another_keepers_rows_are_not_settled
+        ; test_case "day files before the keeper was created are not read" `Quick
+            test_day_files_before_the_keeper_was_created_are_not_read
         ; test_case "two cancelled runs of one turn keep distinct keys" `Quick
             test_two_cancelled_runs_of_one_turn_keep_distinct_keys
         ; test_case "a row without its observation is not settled" `Quick

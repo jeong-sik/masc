@@ -989,7 +989,8 @@ let run_turn
      settled under their own turn before this execution starts counting. *)
   Keeper_unsettled_spend.settle_before_execution
     ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.base_path)
-    ~agent_name:meta.name;
+    ~agent_name:meta.name
+    ~created_at:meta.created_at;
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_turn_preview.with_preparation_result

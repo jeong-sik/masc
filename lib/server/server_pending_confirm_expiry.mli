@@ -6,6 +6,12 @@ val start :
   state:Mcp_server.server_state -> unit
 
 module For_testing : sig
+  val invalidate_with :
+    enqueue:(base_path:string -> unit) -> restore:(base_path:string -> unit) ->
+    base_path:string -> unit
+  (** Drop the cached operator snapshots, then enqueue the publication and
+      restore full health, as the running server does. *)
+
   val start :
     sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> state:Mcp_server.server_state ->
     read:(Workspace.config -> (Operator_pending_confirm.pending_confirm list, string) result) ->

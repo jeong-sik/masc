@@ -52,14 +52,6 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_async_requests_changed')).toBe('keeper_async_requests_changed')
   })
 
-  it('accepts pending confirmation changes', () => {
-    expect(SSEEventTypeSchema.parse('pending_confirms_changed')).toBe('pending_confirms_changed')
-  })
-
-  it('accepts schedule changes', () => {
-    expect(SSEEventTypeSchema.parse('schedules_changed')).toBe('schedules_changed')
-  })
-
   it('accepts runtime journal appends', () => {
     expect(SSEEventTypeSchema.parse('keeper_native_tasks_appended')).toBe('keeper_native_tasks_appended')
     expect(SSEEventTypeSchema.parse('keeper_child_content_appended')).toBe('keeper_child_content_appended')

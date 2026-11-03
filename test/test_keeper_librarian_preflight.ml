@@ -20,7 +20,7 @@ let generated = Yojson.Safe.to_string (`Assoc
       [ "claim", `String "A newly established constraint must remain remembered."
       ; "category", `String "architecture_decision"
       ; "board_post_id", `Null; "board_comment_id", `Null
-      ; "supersedes", `Null; "absorbs", `List [] ]]
+      ; "supersedes", `Null; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ]]
   ; "dropped", `List []; "working_contexts", `List []; "working_state", `Null ])
 
 (* The working-context input a pass carries. [Live_nothing_pending] is what

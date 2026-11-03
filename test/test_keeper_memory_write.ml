@@ -2599,7 +2599,7 @@ let test_absorbed_search_preserves_board_basis source =
                [ `Assoc
                    [ "claim", `String "Combined observations"
                    ; "category", `String "fact"
-                   ; "absorbs", `List [ `String "m1"; `String "m2" ]
+                   ; "absorbs", `List [ `String "m1"; `String "m2" ]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]
                    ]
                ]
            ])

@@ -114,7 +114,7 @@ let test_a_chain_is_found_by_the_headers_of_its_steps () = with_fixture (fun fix
    step never saw: it is invalid output, not an answer. *)
 let test_the_host_does_not_take_an_answer_the_step_cannot_use () = with_fixture (fun fixture ->
   let unknown_memory = `Assoc [ "claim", `String "a claim"; "category", `String "fact"; "board_post_id", `Null;
-    "board_comment_id", `Null; "supersedes", `String "m404"; "absorbs", `List [] ] in
+    "board_comment_id", `Null; "supersedes", `String "m404"; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] in
   fixture.respond := (fun _ -> `OK, F.openai_response
     (`Assoc [ "new_claims", `List [ unknown_memory ]; "dropped", `List []; "working_contexts", `List [];
               "working_state", `String "a working state" ]));

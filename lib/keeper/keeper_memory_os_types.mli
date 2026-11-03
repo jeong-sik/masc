@@ -23,6 +23,18 @@ val wire_field_last_seen : string
 val wire_field_supersedes : string
 val wire_field_absorbs : string
 
+(** A new claim's [evidence]: the observations of the librarian's own input it
+    relied on (RFC-0456 §4.1). *)
+val wire_field_evidence : string
+
+val wire_evidence_conversation : string
+val wire_evidence_tools : string
+val wire_evidence_counterpart : string
+val wire_evidence_task_contexts : string
+
+(** Fields of the [evidence] object, all required. *)
+val wire_evidence_fields : string list
+
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
 val wire_librarian_claim_fields : string list
@@ -153,6 +165,36 @@ type absorbed_statement =
   { absorbed : string
   ; into : string
   }
+
+(** The observations of the librarian's input a new claim says it relied on
+    (RFC-0456 §4.1): conversation messages by the position the prompt shows as
+    [turn=N], tool observations by their 0-based index in the prompt's tool
+    observation array, and whether it used the counterpart block or the
+    historical task contexts. The absorb gate asks a claim's pairs with these
+    observations only (RFC-deferred-contextual-memory, Jev forward review).
+    Both position lists are ascending with no repeats. *)
+type evidence = private
+  { conversation : int list
+  ; tools : int list
+  ; counterpart : bool
+  ; task_contexts : bool
+  }
+
+(** Sorts both position lists and reads a repeated position once. Whether a
+    position names an observation of the input is the decoder's check. *)
+val evidence
+  :  conversation:int list
+  -> tools:int list
+  -> counterpart:bool
+  -> task_contexts:bool
+  -> evidence
+
+(** A claim that relied on no observation of the input. *)
+val no_evidence : evidence
+
+(** Everything either side cites: two claims with the same text are one
+    memory, so the merged claim relied on both. *)
+val union_evidence : evidence -> evidence -> evidence
 
 (** A new claim that continues a retired memory, both by exact memory id:
     [superseded] leaves the snapshot and [superseded_by] carries it on. The

@@ -317,7 +317,13 @@ claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억�
       "board_post_id": "지식을 읽은 Board 글의 실제 post_id(p-…) 또는 null",
       "board_comment_id": "그 글의 댓글에서 읽었으면 실제 comment_id, 아니면 null",
       "supersedes": "교정하는 옛 기억의 짧은 ID(m2 등), 없으면 null",
-      "absorbs": ["이 claim이 묶어서 대신 말하는 현재 기억의 짧은 ID(m3 등). 없으면 빈 배열"]
+      "absorbs": ["이 claim이 묶어서 대신 말하는 현재 기억의 짧은 ID(m3 등). 없으면 빈 배열"],
+      "evidence": {
+        "conversation": [3, 7],
+        "tools": [2],
+        "counterpart": false,
+        "task_contexts": false
+      }
     }
   ],
   "dropped": [
@@ -333,6 +339,13 @@ claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억�
 `board_comment_id`도 null입니다. `supersedes`의 ID는 반드시 `dropped`에도
 있어야 합니다. `absorbs`의 ID는 `dropped`에 없어야 합니다. 추가·삭제할 항목이 없으면 해당 배열을 비워 두세요 — 그 답은
 "이번에 바꿀 것이 없다"는 뜻이며, 기존 기억은 전부 그대로 남습니다.
+
+`evidence`는 그 claim이 기댄 이번 자료의 위치입니다. `conversation`에는 대화
+기록의 `turn=N` 번호를, `tools`에는 도구 관측의 `index` 번호를 적습니다.
+상대방 관측을 썼으면 `counterpart`가, 과거 Task/Goal 자료를 썼으면
+`task_contexts`가 true입니다. 기댄 자료가 없으면 빈 배열과 false입니다.
+`absorbs`가 있는 claim의 흡수를 확인할 때는 그 claim이 적은 자료만 함께
+보여 줍니다. 이번 자료에 없는 번호가 있는 답은 받아들여지지 않습니다.
 
 ## 진행 중인 맥락과 다음 행동 제안
 
@@ -374,8 +387,8 @@ Task가 없다는 뜻입니다.
 
 각 항목의 `first_message`부터 `after_message` 직전까지는 아래 대화의
 `turn=N` 메시지 번호입니다. 이 번호는 Keeper의 실제 turn_ref가 아닙니다.
-`first_tool_observation`부터 `after_tool_observation` 직전까지는 도구 관측 JSON
-배열의 0부터 시작하는 인덱스입니다. 본문이 없어도 해당 도구 관측은 그 Turn에
+`first_tool_observation`부터 `after_tool_observation` 직전까지는 도구 관측의
+`index` 번호입니다. 본문이 없어도 해당 도구 관측은 그 Turn에
 속합니다. 메시지 범위가 비었다고 다른 Turn의 도구 관측을 가져오지 마세요.
 `observed` 자료는 해당 turn_ref가 시작할 때 관측한 Task와 Goal이며 현재 상태나
 완료 증거가 아닙니다. `unattributed` 구간의 Task/Goal은 알 수 없습니다.

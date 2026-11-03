@@ -171,7 +171,7 @@ let test_a_message_every_slot_refuses_as_too_large_becomes_a_hole () = with_fixt
 
 let unusable_answer = `Assoc
   [ "new_claims", `List [ `Assoc [ "claim", `String "a claim"; "category", `String "fact"; "board_post_id", `Null;
-      "board_comment_id", `Null; "supersedes", `String "m404"; "absorbs", `List [] ] ];
+      "board_comment_id", `Null; "supersedes", `String "m404"; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] ];
     "dropped", `List []; "working_contexts", `List []; "working_state", `String "a working state" ]
 
 let test_a_refusal_that_shows_nothing_about_reading_less_stops_the_chain () = with_fixture (fun fixture ->
@@ -443,7 +443,7 @@ let test_a_pass_with_no_answered_step_does_not_read_the_gate_scope () = with_fix
 
 let absorbing_answer = `Assoc
   [ "new_claims", `List [ `Assoc [ "claim", `String "a claim that absorbs the stale fact"; "category", `String "fact";
-      "board_post_id", `Null; "board_comment_id", `Null; "supersedes", `Null; "absorbs", `List [ `String "m1" ] ] ];
+      "board_post_id", `Null; "board_comment_id", `Null; "supersedes", `Null; "absorbs", `List [ `String "m1" ]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] ];
     "dropped", `List []; "working_contexts", `List []; "working_state", `String "a working state" ]
 
 (* A gate that fails leaves a complete journal, which the inventory shows too,

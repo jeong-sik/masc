@@ -1664,7 +1664,7 @@ let test_uncommitted_memory_message_floor ?native case () =
     ["new_claims", (if first then `List [`Assoc
        ["claim", `String claim; "category", `String "fact";
         "board_post_id", `Null; "board_comment_id", `Null;
-        "supersedes", `Null; "absorbs", `List []]] else `List []);
+        "supersedes", `Null; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]] else `List []);
      "dropped", `List []; "working_contexts", `List [];
      "working_state", `String (if first then "volatile-call-read" else "complete-call-and-result")]) in
   let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =
@@ -1845,7 +1845,7 @@ let test_uncommitted_memory_message_floor ?native case () =
            (U.member "first_message" context |> U.to_int);
          check int "message attribution covers exactly one message" 1
            (U.member "after_message" context |> U.to_int))
-         [first,call,`List [`Assoc ["tool_name",`String tool_name;"outcome",`String "succeeded"]];
+         [first,call,`List [`Assoc ["index",`Int 0;"tool_name",`String tool_name;"outcome",`String "succeeded"]];
           second,result,`List []]
      | _ -> fail "the Memory publication lost its two real inference stages");
     let after = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get |> some in
@@ -1947,7 +1947,7 @@ let test_queue_memory_floor_retains_proven_api_holes ~all_refused () =
         let variables = U.member "prompt_variables" stage.decision.input_evidence in
         check bool "skipping a message does not discard the joined host tool outcome" true
           (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string =
-           `List [`Assoc ["tool_name",`String tool_name;"outcome",`String "succeeded"]]);
+           `List [`Assoc ["index",`Int 0;"tool_name",`String tool_name;"outcome",`String "succeeded"]]);
         check bool "the accepted step is explicitly told about the earlier unread message" true
           (contains ~sub:(Unread.message_digest (List.hd source))
              (U.member "continuity" variables |> U.to_string))

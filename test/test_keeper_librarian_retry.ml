@@ -2276,6 +2276,176 @@ let test_input_metadata_is_not_accepted_as_claim_output () =
     ; "basis", `Assoc ["kind", `String "observed"] ]
 ;;
 
+(* RFC-0456 §4.1: a claim's [evidence] names the observations of this input it
+   relied on. The fixture input has one conversation message ([turn=0]),
+   three tool observations ([index] 0..2), no counterpart block and no
+   historical task context. *)
+let evidence_json ?(conversation = []) ?(tools = []) ?(counterpart = false)
+      ?(task_contexts = false) () =
+  `Assoc
+    [ Memory.wire_evidence_conversation, `List (List.map (fun n -> `Int n) conversation)
+    ; Memory.wire_evidence_tools, `List (List.map (fun n -> `Int n) tools)
+    ; Memory.wire_evidence_counterpart, `Bool counterpart
+    ; Memory.wire_evidence_task_contexts, `Bool task_contexts
+    ]
+;;
+
+let citing_claim ?(claim = "A and B, together") ?(absorbs = `List []) evidence () =
+  `Assoc
+    [ Librarian.wire_field_claim, `String claim
+    ; Librarian.wire_field_category, `String "fact"
+    ; Librarian.wire_field_absorbs, absorbs
+    ; Memory.wire_field_evidence, evidence
+    ]
+;;
+
+let evidence_view (evidence : Memory.evidence) =
+  evidence.conversation, evidence.tools, evidence.counterpart, evidence.task_contexts
+;;
+
+let evidence_testable =
+  pair (pair (list int) (list int)) (pair bool bool)
+;;
+
+let evidence_pair (conversation, tools, counterpart, task_contexts) =
+  (conversation, tools), (counterpart, task_contexts)
+;;
+
+let cited_of selection =
+  List.map
+    (fun (identity, evidence) -> identity, evidence_pair (evidence_view evidence))
+    selection.Librarian.cited
+;;
+
+let test_claim_evidence_is_carried_in_cited () =
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ citing_claim
+               ~absorbs:(`List [ `String "m1"; `String "m2" ])
+               (evidence_json ~conversation:[ 0 ] ~tools:[ 2; 0; 2 ] ())
+               ()
+           ]
+         ())
+  with
+  | Error error -> failf "evidence rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let into = Memory.memory_id (fact ~claim:"A and B, together") in
+    check (list (pair string evidence_testable))
+      "the absorbing claim cites turn 0 and tools 0 and 2, the repeat read once"
+      [ into, (([ 0 ], [ 0; 2 ]), (false, false)) ]
+      (cited_of selection);
+    check (list string) "every absorption goes into the cited claim" [ into; into ]
+      (List.map (fun (a : Memory.absorbed_statement) -> a.into) selection.absorbed)
+;;
+
+let test_a_claim_without_evidence_cites_nothing () =
+  let nothing = evidence_pair (evidence_view Memory.no_evidence) in
+  List.iter
+    (fun (label, claim) ->
+       match parse (selection_json ~dropped:[] ~new_claims:[ claim ] ()) with
+       | Error error -> failf "%s: rejected: %s" label (Librarian.parse_error_to_string error)
+       | Ok selection ->
+         check (list (pair string evidence_testable)) label
+           [ Memory.memory_id (fact ~claim:"A and B, together"), nothing ]
+           (cited_of selection))
+    [ "no evidence field", absorbing_claim (`List [ `String "m1" ]) ()
+    ; "null evidence", citing_claim ~absorbs:(`List [ `String "m1" ]) `Null ()
+    ; ( "absent and null fields inside evidence"
+      , citing_claim ~absorbs:(`List [ `String "m1" ])
+          (`Assoc [ Memory.wire_evidence_conversation, `Null ]) () )
+    ]
+;;
+
+let test_evidence_must_name_an_observation_of_the_input () =
+  List.iter
+    (fun (label, citation, evidence) ->
+       expect_parse_error label (Librarian.Evidence_not_in_input citation)
+         (selection_json ~dropped:[] ~new_claims:[ citing_claim evidence () ] ()))
+    [ "a turn past the conversation", Librarian.Cited_conversation 1
+    , evidence_json ~conversation:[ 0; 1 ] ()
+    ; "a turn below zero", Librarian.Cited_conversation (-1)
+    , evidence_json ~conversation:[ -1 ] ()
+    ; "a tool past the observations", Librarian.Cited_tool 3, evidence_json ~tools:[ 3 ] ()
+    ; "a counterpart block the input does not have", Librarian.Cited_counterpart
+    , evidence_json ~counterpart:true ()
+    ; "task contexts the input does not have", Librarian.Cited_task_contexts
+    , evidence_json ~task_contexts:true ()
+    ]
+;;
+
+let test_evidence_must_be_the_closed_object () =
+  List.iter
+    (fun (label, evidence) ->
+       expect_parse_error label Librarian.Claim_schema_mismatch
+         (selection_json ~dropped:[] ~new_claims:[ citing_claim evidence () ] ()))
+    [ "evidence as a list", `List []
+    ; "evidence as a string", `String "turn=0"
+    ; "an unknown evidence field", `Assoc [ "turns", `List [ `Int 0 ] ]
+    ; ( "a repeated evidence field"
+      , `Assoc
+          [ Memory.wire_evidence_tools, `List [ `Int 0 ]
+          ; Memory.wire_evidence_tools, `List [ `Int 1 ]
+          ] )
+    ; "a position as a string", `Assoc [ Memory.wire_evidence_conversation, `List [ `String "0" ] ]
+    ; "a position as a float", `Assoc [ Memory.wire_evidence_tools, `List [ `Float 0. ] ]
+    ; "positions as one integer", `Assoc [ Memory.wire_evidence_conversation, `Int 0 ]
+    ; "a flag as a string", `Assoc [ Memory.wire_evidence_counterpart, `String "true" ]
+    ]
+;;
+
+let test_same_text_claims_cite_what_either_cites () =
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ citing_claim ~absorbs:(`List [ `String "m1" ]) (evidence_json ~tools:[ 1 ] ()) ()
+           ; citing_claim ~absorbs:(`List [ `String "m2" ])
+               (evidence_json ~conversation:[ 0 ] ~tools:[ 1 ] ()) ()
+           ]
+         ())
+  with
+  | Error error -> failf "same-text claims rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    check (list (pair string evidence_testable)) "one memory cites the union"
+      [ Memory.memory_id (fact ~claim:"A and B, together"), (([ 0 ], [ 1 ]), (false, false)) ]
+      (cited_of selection)
+;;
+
+(* A restatement of a memory another claim absorbs is read as not written, so
+   what it cites is never used and never checked. *)
+let test_a_restatement_read_as_not_written_is_not_checked () =
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ citing_claim ~absorbs:(`List [ `String "m1" ]) (evidence_json ~tools:[ 0 ] ()) ()
+           ; citing_claim ~claim:"keep A" (evidence_json ~conversation:[ 9 ] ()) ()
+           ]
+         ())
+  with
+  | Error error -> failf "ignored restatement checked: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    check (list string) "only the applied claim is cited"
+      [ Memory.memory_id (fact ~claim:"A and B, together") ]
+      (List.map fst selection.cited)
+;;
+
+let test_prompt_numbers_each_tool_observation () =
+  let observations =
+    List.assoc "turn_tool_observations" (Librarian.prompt_variables (input ()))
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.to_list
+  in
+  check (list int) "each tool observation carries the index a claim cites" [ 0; 1; 2 ]
+    (List.map (fun observation -> Yojson.Safe.Util.(member "index" observation |> to_int))
+       observations)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   run
@@ -2306,6 +2476,20 @@ let () =
             test_absorbs_must_name_a_known_memory
         ; test_case "absorbs must be a list of short ids" `Quick
             test_absorbs_must_be_a_list_of_short_ids
+        ; test_case "claim evidence is carried in cited" `Quick
+            test_claim_evidence_is_carried_in_cited
+        ; test_case "a claim without evidence cites nothing" `Quick
+            test_a_claim_without_evidence_cites_nothing
+        ; test_case "evidence must name an observation of the input" `Quick
+            test_evidence_must_name_an_observation_of_the_input
+        ; test_case "evidence must be the closed object" `Quick
+            test_evidence_must_be_the_closed_object
+        ; test_case "same-text claims cite what either cites" `Quick
+            test_same_text_claims_cite_what_either_cites
+        ; test_case "a restatement read as not written is not checked" `Quick
+            test_a_restatement_read_as_not_written_is_not_checked
+        ; test_case "the prompt numbers each tool observation" `Quick
+            test_prompt_numbers_each_tool_observation
         ; test_case "supersedes must be a string or null" `Quick
             test_supersedes_must_be_a_string_or_null
         ; test_case "new claim names the board post it was read from" `Quick

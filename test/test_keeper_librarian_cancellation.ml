@@ -86,7 +86,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
   let before_bytes = Fs_compat.load_file current_path in
   let claim text token =
     `Assoc [ "claim", `String text; "category", `String "fact"
-           ; "absorbs", `List [ `String token ] ] in
+           ; "absorbs", `List [ `String token ]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ] in
   let answer = `Assoc
     [ "new_claims", `List
         [ claim "Tuesday is the alpha service's deployment day." "m1"

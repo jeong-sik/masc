@@ -91,6 +91,7 @@ type selection =
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
   ; facts : fact list
   ; revisions : revision list
+  ; cited : (string * Keeper_memory_os_types.evidence) list
   ; working_contexts : working_contexts_answer
   }
 
@@ -262,12 +263,16 @@ let tool_observation_outcome_to_string = function
   | Unknown -> "unknown"
 ;;
 
+(* Each observation carries its 0-based [index], the position a claim's
+   [evidence.tools] cites, so the librarian reads the number instead of
+   counting the array. *)
 let format_tool_observations_for_prompt observations =
   `List
-    (List.map
-       (fun observation ->
+    (List.mapi
+       (fun index observation ->
           `Assoc
-            [ "tool_name", `String observation.tool_name
+            [ "index", `Int index
+            ; "tool_name", `String observation.tool_name
             ; ( "outcome"
               , `String
                   (tool_observation_outcome_to_string observation.outcome) )
@@ -430,6 +435,19 @@ let first_object_field_error ~allowed fields =
   loop String_set.empty fields
 ;;
 
+type evidence_citation =
+  | Cited_conversation of int
+  | Cited_tool of int
+  | Cited_counterpart
+  | Cited_task_contexts
+
+let evidence_citation_to_string = function
+  | Cited_conversation position -> Printf.sprintf "conversation %d" position
+  | Cited_tool position -> Printf.sprintf "tools %d" position
+  | Cited_counterpart -> "counterpart"
+  | Cited_task_contexts -> "task_contexts"
+;;
+
 type parse_error =
   | Top_level_not_object
   | Working_context_invalid of string
@@ -448,6 +466,7 @@ type parse_error =
   | Absorbs_unknown_memory_id of string
   | Absorbs_dropped_memory_id of string
   | Absorbs_memory_id_twice of string
+  | Evidence_not_in_input of evidence_citation
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
@@ -470,6 +489,8 @@ let parse_error_to_string = function
   | Absorbs_unknown_memory_id token -> "absorbs_unknown_memory_id: " ^ token
   | Absorbs_dropped_memory_id identity -> "absorbs_dropped_memory_id: " ^ identity
   | Absorbs_memory_id_twice identity -> "absorbs_memory_id_twice: " ^ identity
+  | Evidence_not_in_input citation ->
+    "evidence_not_in_input: " ^ evidence_citation_to_string citation
 ;;
 
 let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
@@ -531,12 +552,62 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
 ;;
 
 (* A new claim as the answer states it: the fact, the short id it corrects in
-   [supersedes], and the short ids it absorbs in [absorbs]. *)
+   [supersedes], the short ids it absorbs in [absorbs], and the observations
+   of this input it relied on in [evidence]. *)
 type new_claim =
   { claim_fact : fact
   ; supersedes_token : string option
   ; absorbs_tokens : string list
+  ; evidence : Keeper_memory_os_types.evidence
   }
+
+(* [evidence] is an object of the four fields RFC-0456 §4.1 names. Absent or
+   null cites nothing, as an absent [absorbs] absorbs nothing; so does an
+   absent or null field inside it. A position is an integer and a flag a
+   boolean. An unknown or repeated field, or any other value, rejects the
+   claim like any other malformed field. Whether a position names an
+   observation of the input is checked where the input is. *)
+let evidence_of_json (json : Yojson.Safe.t) : Keeper_memory_os_types.evidence option =
+  let positions = function
+    | None | Some `Null -> Some []
+    | Some (`List items) ->
+      traverse
+        (function
+          | `Int position -> Some position
+          | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `Null | `String _ -> None)
+        items
+    | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _) -> None
+  in
+  let flag = function
+    | None | Some `Null -> Some false
+    | Some (`Bool value) -> Some value
+    | Some (`Assoc _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) -> None
+  in
+  match json with
+  | `Null -> Some Keeper_memory_os_types.no_evidence
+  | `Assoc fields ->
+    (match
+       first_object_field_error ~allowed:Keeper_memory_os_types.wire_evidence_fields fields
+     with
+     | Some (Unexpected_object_field _ | Duplicate_object_field _) -> None
+     | None ->
+       let field key = List.assoc_opt key fields in
+       (match
+          ( positions (field Keeper_memory_os_types.wire_evidence_conversation)
+          , positions (field Keeper_memory_os_types.wire_evidence_tools)
+          , flag (field Keeper_memory_os_types.wire_evidence_counterpart)
+          , flag (field Keeper_memory_os_types.wire_evidence_task_contexts) )
+        with
+        | Some conversation, Some tools, Some counterpart, Some task_contexts ->
+          Some
+            (Keeper_memory_os_types.evidence
+               ~conversation
+               ~tools
+               ~counterpart
+               ~task_contexts)
+        | None, _, _, _ | _, None, _, _ | _, _, None, _ | _, _, _, None -> None))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> None
+;;
 
 (* [supersedes] names, by its short id, the dropped memory this claim
    continues. Absent or null is a claim that continues nothing. [absorbs] names,
@@ -568,10 +639,15 @@ let new_claim_of_json ~now (json : Yojson.Safe.t) : new_claim option =
           items
       | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _) -> None
     in
-    (match supersedes, absorbs with
-     | Some supersedes_token, Some absorbs_tokens ->
-       Some { claim_fact = fact; supersedes_token; absorbs_tokens }
-     | None, _ | _, None -> None)
+    let evidence =
+      match List.assoc_opt Keeper_memory_os_types.wire_field_evidence fields with
+      | None -> Some Keeper_memory_os_types.no_evidence
+      | Some json -> evidence_of_json json
+    in
+    (match supersedes, absorbs, evidence with
+     | Some supersedes_token, Some absorbs_tokens, Some evidence ->
+       Some { claim_fact = fact; supersedes_token; absorbs_tokens; evidence }
+     | None, _, _ | _, None, _ | _, _, None -> None)
   | None, _ -> None
   | Some _, (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) ->
     None
@@ -639,8 +715,10 @@ let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) ~ignor
   in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
-    | { supersedes_token = None; claim_fact = _; absorbs_tokens = _ } :: rest -> loop acc rest
-    | { supersedes_token = Some token; claim_fact = fact; absorbs_tokens = _ } :: rest ->
+    | { supersedes_token = None; claim_fact = _; absorbs_tokens = _; evidence = _ } :: rest ->
+      loop acc rest
+    | { supersedes_token = Some token; claim_fact = fact; absorbs_tokens = _; evidence = _ }
+      :: rest ->
       let identity = memory_id fact in
       (match String_map.find_opt token by_surrogate with
        | None -> Error (Supersedes_unknown_memory_id token)
@@ -704,9 +782,10 @@ let differing_fields ~(kept : fact) (claim : fact) =
 
 (* [memory_id] is the claim's own bytes, so two claims with the same text are
    one memory. They become one claim: the first keeps its fields and gains the
-   [absorbs] ids the later one adds. A list that names an id twice still names
-   it twice, so {!translate_absorbs} still refuses it. A later claim whose
-   fields differ from the first one's is named in the second result. *)
+   [absorbs] ids the later one adds, and cites what either cites. A list that
+   names an id twice still names it twice, so {!translate_absorbs} still
+   refuses it. A later claim whose fields differ from the first one's is named
+   in the second result. *)
 let merge_same_claims stated_claims =
   let same identity claim = String.equal (memory_id claim.claim_fact) identity in
   let rec loop acc ignored_rev = function
@@ -721,7 +800,12 @@ let merge_same_claims stated_claims =
              (fun token -> not (List.exists (String.equal token) first.absorbs_tokens))
              claim.absorbs_tokens
          in
-         let merged = { first with absorbs_tokens = first.absorbs_tokens @ added } in
+         let merged =
+           { first with
+             absorbs_tokens = first.absorbs_tokens @ added
+           ; evidence = Keeper_memory_os_types.union_evidence first.evidence claim.evidence
+           }
+         in
          let ignored_rev =
            match differing_fields ~kept:first.claim_fact claim.claim_fact with
            | [] -> ignored_rev
@@ -879,6 +963,27 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   }
 ;;
 
+(* A claim cites observations of this pass's input: a conversation message by
+   the position the prompt showed as [turn=N], a tool observation by its index
+   in the prompt's array, and the counterpart block or the historical task
+   contexts when the input has them. A citation of anything else names nothing
+   the absorb gate could carry, so the answer is refused, as one naming an
+   unknown short id is. *)
+let citation_not_in_input (inp : input) (evidence : Keeper_memory_os_types.evidence) =
+  let outside items position = position < 0 || position >= List.length items in
+  match List.find_opt (outside inp.messages) evidence.conversation with
+  | Some position -> Some (Cited_conversation position)
+  | None ->
+    (match List.find_opt (outside inp.tool_observations) evidence.tools with
+     | Some position -> Some (Cited_tool position)
+     | None ->
+       if evidence.counterpart && List.is_empty inp.counterpart_observations
+       then Some Cited_counterpart
+       else if evidence.task_contexts && List.is_empty inp.historical_task_contexts
+       then Some Cited_task_contexts
+       else None)
+;;
+
 let working_contexts_of_json (inp : input) json =
   Keeper_librarian_context.select inp.working_context json
   |> Result.map_error (fun detail -> Working_context_invalid detail)
@@ -1000,6 +1105,17 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                        ~dropped
                        ~absorbed
                    in
+                   (* Only the claims the answer applies are checked: a
+                      restatement read as not written cites nothing used. *)
+                   let* () =
+                     match
+                       List.find_map
+                         (fun claim -> citation_not_in_input inp claim.evidence)
+                         applied_claims
+                     with
+                     | Some citation -> Error (Evidence_not_in_input citation)
+                     | None -> Ok ()
+                   in
                    let+ revisions =
                      translate_revisions ~by_surrogate ~dropped ~ignored stated_claims
                    in
@@ -1010,6 +1126,10 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    ; absorbed
                    ; facts = materialized.facts_after
                    ; revisions
+                   ; cited =
+                       List.map
+                         (fun claim -> memory_id claim.claim_fact, claim.evidence)
+                         applied_claims
                    ; working_contexts
                    }
                  | Some _, None -> Error Dropped_schema_mismatch

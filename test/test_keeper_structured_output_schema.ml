@@ -226,7 +226,28 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
     (list string)
     "absorbs is a required array"
     [ "array" ]
-    (type_tokens (schema_property Keeper_memory_os_types.wire_field_absorbs claim_schema))
+    (type_tokens (schema_property Keeper_memory_os_types.wire_field_absorbs claim_schema));
+  (* RFC-0456 §4.1: every claim answers [evidence], a closed object whose four
+     fields are all answered, empty arrays and false when it relied on nothing. *)
+  let evidence_schema =
+    schema_property Keeper_memory_os_types.wire_field_evidence claim_schema
+  in
+  check
+    (list string)
+    "evidence fields are all required"
+    (List.sort String.compare Keeper_memory_os_types.wire_evidence_fields)
+    (required_strings evidence_schema);
+  check bool "evidence schema is closed" false
+    (allows_additional_properties evidence_schema);
+  List.iter
+    (fun (field, expected) ->
+       check (list string) (field ^ " has its type") [ expected ]
+         (type_tokens (schema_property field evidence_schema)))
+    [ Keeper_memory_os_types.wire_evidence_conversation, "array"
+    ; Keeper_memory_os_types.wire_evidence_tools, "array"
+    ; Keeper_memory_os_types.wire_evidence_counterpart, "boolean"
+    ; Keeper_memory_os_types.wire_evidence_task_contexts, "boolean"
+    ]
 ;;
 
 let test_librarian_dropped_schema_is_closed () =

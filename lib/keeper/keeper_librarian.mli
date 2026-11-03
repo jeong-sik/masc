@@ -144,6 +144,11 @@ type selection =
         the current memory itself when the claim restated one. *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
+  ; cited : (string * Keeper_memory_os_types.evidence) list
+    (** What each claim the answer applies cites, by the claim's identity:
+        every [new_claims] and [restated] memory has one entry, and the
+        [into] of every [absorbed] statement is one of them. A claim that
+        cites nothing has {!Keeper_memory_os_types.no_evidence}. *)
   ; working_contexts : working_contexts_answer
   }
 
@@ -186,6 +191,16 @@ val continuity_prompt_variables
     nor carries Memory. *)
 val working_context_prompt_variables : input -> (string * string) list
 
+(** An [evidence] citation the input has no observation for. *)
+type evidence_citation =
+  | Cited_conversation of int
+      (** A [turn=N] position past the conversation, or below zero. *)
+  | Cited_tool of int
+      (** An index past the tool observation array, or below zero. *)
+  | Cited_counterpart  (** [counterpart] true with no counterpart block. *)
+  | Cited_task_contexts
+      (** [task_contexts] true with no historical task context. *)
+
 type parse_error =
   | Top_level_not_object
   | Working_context_invalid of string
@@ -215,6 +230,9 @@ type parse_error =
           gone, not said by the new claim. *)
   | Absorbs_memory_id_twice of string
       (** Two [absorbs] lists, or one list twice, named the same memory. *)
+  | Evidence_not_in_input of evidence_citation
+      (** A claim the answer applies cited an observation this input does not
+          have. *)
 
 val parse_error_to_string : parse_error -> string
 

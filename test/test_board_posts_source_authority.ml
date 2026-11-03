@@ -1616,6 +1616,8 @@ let test_settle_superseded_on_third_party_rewrite base_path _workspace =
   let third_party = read_bytes (Board.persist_path store) in
   (match settle store with
    | Board.Posts_settle_superseded { failure = Board.Posts_snapshot_stale; _ } -> ()
+   | Board.Posts_settle_superseded _ ->
+     Alcotest.fail "third-party state was superseded for a reason other than stale"
    | Board.Posts_settled_written _ | Board.Posts_settled_not_written _
    | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle ->
      Alcotest.fail "third-party state was not superseded as stale");
@@ -1681,6 +1683,8 @@ let test_settle_missing_is_superseded base_path _workspace =
   Unix.unlink (Board.persist_path store);
   (match settle store with
    | Board.Posts_settle_superseded { failure = Board.Posts_missing; _ } -> ()
+   | Board.Posts_settle_superseded _ ->
+     Alcotest.fail "missing file was superseded for a reason other than missing"
    | Board.Posts_settled_written _ | Board.Posts_settled_not_written _
    | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle ->
      Alcotest.fail "missing file was not superseded as missing");
@@ -1768,7 +1772,7 @@ let test_explicit_raise_poisons_persist_only base_path _workspace =
   let retained = store.Board.posts_source in
   (match Board.with_persist_lock store (fun () -> raise (Failure "explicit test raise")) with
    | _ -> Alcotest.fail "explicit raise did not propagate"
-   | exception Failure "explicit test raise" -> ());
+   | exception Failure _ -> ());
   (match Board.with_persist_lock store (fun () -> ()) with
    | _ -> Alcotest.fail "poisoned persist mutex admitted a call"
    | exception Eio.Mutex.Poisoned _ -> ());

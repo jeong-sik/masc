@@ -28,8 +28,8 @@ let test_media_only_autonomous () =
   check string "visible media and exact transcript"
     "Image · result · inline payload\nVoice · 2.5s · /api/v1/audio/clip\n  음성\n\n본문  "
     (Media.append_text ~text:row.text row.media);
-  match Media.newest_image row.media with
-  | Some (Preview.Output_image { name = "result"; source = Preview.Inline_data src }) ->
+  match Preview.newest (Media.images row.media) with
+  | Preview.Output_image { name = "result"; source = Preview.Inline_data src } ->
     check string "payload decoded on opening" "image" (Result.get_ok (Masc_tui_image_payload.decode src))
   | _ -> fail "voice displaced the image action"
 
@@ -66,13 +66,13 @@ let test_image_attachment_and_svg () =
   let attachment = Blocks.Attach { name = "output"; dims = None; src = Some "/image";
     svg = None; ph = None; via = None; size = None; data = None;
     mime_type = Some "image/png"; size_bytes = None; kind = None } in
-  (match Media.newest_image (Media.of_json (Blocks.blocks_to_yojson [ attachment ])) with
-   | Some (Preview.Output_image { source = Preview.Server_path "/image"; _ }) -> ()
+  (match Preview.newest (Media.images (Media.of_json (Blocks.blocks_to_yojson [ attachment ]))) with
+   | Preview.Output_image { source = Preview.Server_path "/image"; _ } -> ()
    | _ -> fail "image attachment URL lost");
   let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"/>" in
-  match Media.newest_image (Media.of_json (Blocks.blocks_to_yojson
-    [ image; Blocks.Svg { svg; cap = Some "vector" } ])) with
-  | Some (Preview.Output_image { name = "vector"; source = Preview.Inline_svg markup }) ->
+  match Preview.newest (Media.images (Media.of_json (Blocks.blocks_to_yojson
+    [ image; Blocks.Svg { svg; cap = Some "vector" } ]))) with
+  | Preview.Output_image { name = "vector"; source = Preview.Inline_svg markup } ->
     check string "newest SVG retained" svg markup
   | _ -> fail "SVG did not replace the older image"
 
@@ -158,8 +158,8 @@ let test_canonical_mermaid_preview () =
   let source = "classDiagram\n  Keeper <|-- Librarian" in
   let row = read_message (message ~role:"assistant" ~autonomous:false ~text:""
     [ image; Blocks.Mermaid { source; caption = Some "Agents" } ]) in
-  (match Media.newest_image row.media with
-   | Some (Preview.Output_image { name = "Agents"; source = Preview.Inline_mermaid actual }) ->
+  (match Preview.newest (Media.images row.media) with
+   | Preview.Output_image { name = "Agents"; source = Preview.Inline_mermaid actual } ->
        check string "canonical block retains exact source" source actual
    | _ -> fail "canonical diagram did not replace an older image");
   let visible = Media.append_text ~text:row.text row.media in
@@ -169,9 +169,9 @@ let test_canonical_mermaid_preview () =
   check string "canonical source already in prose is not duplicated" prose
     (Media.append_text ~text:prose [Media.Mermaid { source; caption = None }]);
   check_playable "diagram is not audio" row.media None;
-  match Media.newest_image (Media.of_json (Blocks.blocks_to_yojson
-    [ Blocks.Mermaid { source; caption = None }; image ])) with
-  | Some (Preview.Output_image { source = Preview.Inline_data _; _ }) -> ()
+  match Preview.newest (Media.images (Media.of_json (Blocks.blocks_to_yojson
+    [ Blocks.Mermaid { source; caption = None }; image ]))) with
+  | Preview.Output_image { source = Preview.Inline_data _; _ } -> ()
   | _ -> fail "diagram displaced a later image output"
 
 let test_canonical_mermaid_fence_collision () =

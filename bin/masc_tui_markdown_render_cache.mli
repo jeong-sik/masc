@@ -58,23 +58,13 @@ val measure_growing_details :
   'identity t -> theme_revision:int -> palette_generation:int -> width:int ->
   renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
   identity:'identity -> text:string -> measurement
-(** Height plus raw nonblank logical-line count. Appends scan only newly
-    arrived bytes for the logical count, retaining the final line's state. *)
-
-val measure_growing :
-  'identity t ->
-  theme_revision:int ->
-  palette_generation:int ->
-  width:int ->
-  renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
-  identity:'identity ->
-  text:string ->
-  int
-(** Physical body-row height, dropping trailing blank rows and keeping one
-    row for an empty body as Message_layout does. Closed blocks retain counts
-    instead of row lists; only the mutable suffix reaches the renderer after
-    an append. The measurement has its own owner store, so rendering a folded
-    summary cannot replace the raw source's retained boundary. *)
+(** [height] is the physical body-row height, dropping trailing blank rows and
+    keeping one row for an empty body as Message_layout does. [nonblank_lines]
+    is the raw nonblank logical-line count. Closed blocks retain counts instead
+    of row lists; after an append only the mutable suffix reaches the renderer
+    and the logical count scans only newly arrived bytes, retaining the final
+    line's state. The measurement has its own owner store, so rendering a
+    folded summary cannot replace the raw source's retained boundary. *)
 
 module For_testing : sig
   val retained_entries : 'identity t -> int

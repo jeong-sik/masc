@@ -133,6 +133,8 @@ let summary = function
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
   | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
+  | Observer.Event (Observer.Board_changed { post_id }) ->
+      Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
     ->
       Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
@@ -484,6 +486,54 @@ let test_only_a_memory_journal_event_names_a_journal_keeper () =
        ]);
   check (list string) "the journal frame answers its keeper" [ "lane-smith" ]
     (journal_keepers [ memory_journal_frame ])
+
+(* The server sends Board writes as JSON-RPC notifications, with a method
+   where the other events have a type. *)
+let board_post_changed_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/board","params":{"type":"post_changed","event_type":"post.changed","post_id":"post-7","change":"pinned"}}
+
+|}
+
+let board_comment_voted_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/board","params":{"type":"comment_voted","comment_id":"comment-3","voter":"ann","direction":"up"}}
+
+|}
+
+let board_without_params_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/board"}
+
+|}
+
+let other_notification_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"post_id":"post-7"}}
+
+|}
+
+let test_only_a_board_notification_names_a_board_change () =
+  check (list string) "the post it names is read; a comment vote names none"
+    [ "board(post-7)"; "board(-)" ]
+    (List.map summary (decode_all [ board_post_changed_frame; board_comment_voted_frame ]));
+  let board_changes frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.board_changed_post event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list (option string)) "every other sample event answers no board change" []
+    (board_changes
+       [ tool_called_frame; agent_completed_frame; agent_failed_frame
+       ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+       ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+       ; waiting_inventory_frame; operator_digest_frame
+       ; transport_health_frame; fusion_run_status_frame
+       ; turn_observation_frame; chat_appended_frame; memory_journal_frame
+       ; other_notification_frame
+       ]);
+  check bool "a board notification without params says why it was not read" true
+    (match decode_all [ board_without_params_frame ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"notifications/board" reason
+     | _ -> false)
 
 let test_a_fusion_status_frame_decodes_its_identity_strings () =
   check (list string) "the three identity strings survive the decode"
@@ -850,6 +900,8 @@ let () =
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "only a memory journal event names a journal keeper" `Quick
             test_only_a_memory_journal_event_names_a_journal_keeper
+        ; test_case "only a board notification names a board change" `Quick
+            test_only_a_board_notification_names_a_board_change
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

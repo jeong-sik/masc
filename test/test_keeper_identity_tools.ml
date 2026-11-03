@@ -1222,6 +1222,9 @@ let check_a_401_is_cleared_by_one_reactive_refresh ~proactive () =
             {|{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"PK-1"}]}}|}
         }
   in
+  let mcp_post : Mcp_client.post =
+    { deadline_s = 60.; send = (fun ~deadline:_ -> mcp_post) }
+  in
   let renewals = ref 0 in
   let token_post ~url:_ ~headers:_ ~body:_ =
     incr renewals;
@@ -1278,6 +1281,9 @@ let test_catalog_discovery_cannot_reattach_after_disconnect () =
       Ok {Masc_http_client.status=200;headers=[];
           body=echo_request_id body {|{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}|}})
     else normal_post ~url ~headers ~body
+  in
+  let mcp_post : Mcp_client.post =
+    { deadline_s = 60.; send = (fun ~deadline:_ -> mcp_post) }
   in
   (match Identity_tools.refresh ~attachment:initial ~mcp_post
            ~config:(Masc.Workspace.default_config base_path) ~keeper_name ~provider ~now:1. () with
@@ -1348,6 +1354,9 @@ let test_post_send_401_does_not_refresh_and_repeat () =
       Ok { Masc_http_client.status = 200; headers = [];
            body = {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"not found"}}|} }
     else Ok { Masc_http_client.status = 200; headers = []; body = "{}" }
+  in
+  let mcp_post : Mcp_client.post =
+    { deadline_s = 60.; send = (fun ~deadline:_ -> mcp_post) }
   in
   let token_post ~url:_ ~headers:_ ~body:_ = Alcotest.fail "post-send 401 triggered token refresh" in
   let discover ~mcp_url:_ = Alcotest.fail "post-send 401 triggered OAuth discovery" in

@@ -1052,7 +1052,8 @@ let test_host_stop_carries_request_context_not_spend () =
   let context : Runtime_observation.request_context =
     { input_tokens = 305
     ; cache = Some { cache_creation_input_tokens = 0; cache_read_input_tokens = 5 }
-    ; output_tokens = None }
+    ; output_tokens = None
+    ; provenance = Turn_input_provenance.Measured_request }
   in
   let project request_context =
     match

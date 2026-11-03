@@ -46,7 +46,8 @@ let with_record kind f =
       ~sampling:{temperature=None;top_p=None;max_tokens=None;enable_thinking=None}
       ~turn_output_tokens:None
       ~usage:{input_tokens=None;output_tokens=None;cache_creation_input_tokens=None;
-        cache_read_input_tokens=None;scope=Runtime_usage_scope.Usage_scope_unavailable}
+        cache_read_input_tokens=None;scope=Runtime_usage_scope.Usage_scope_unavailable;
+        input_provenance=None}
       ~execution_ids:[id] ~blocks:[] ~input_components:None ~tool_surface_ref:None ();
     let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
         ~keeper Dated_jsonl.Store.Keeper.Turn_records in

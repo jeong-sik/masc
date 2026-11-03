@@ -145,6 +145,7 @@ let write_turn_record ?(execution_ids = []) config ~absolute_turn ~turn_kind ~ra
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = None
       ; scope = Runtime_usage_scope.Usage_scope_unavailable
+      ; input_provenance = None
       }
     ~execution_ids
     ~blocks:[]

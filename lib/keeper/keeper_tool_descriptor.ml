@@ -1585,8 +1585,8 @@ let portrait_read_output_schema =
 (* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and
    [operator_action] are null when unknown; [probe] and [last_dispatch] are
    the typed report's variants spelled out. Docker adds [note]; an unattached
-   remote lane adds [unreachable], and an unattached microVM guest also adds
-   [note]. All are successful status observations. *)
+   remote lane adds [unreachable], and a microVM guest observed as not
+   running also adds [note]. All are successful status observations. *)
 let lane_status_output_schema =
   object_output_schema
     ~properties:

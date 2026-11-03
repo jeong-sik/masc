@@ -79,6 +79,3 @@ let () =
             test_this_turn_outranks_the_page
         ] )
     ]
-
-(* pr-type-check canary (task-3166): the line below is intentionally broken and removed in the next commit on this branch. Expected run 1: failure with `Unbound value pr_type_check_canary_unbound`. Expected run 2: success. *)
-let () = ignore pr_type_check_canary_unbound

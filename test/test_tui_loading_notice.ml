@@ -332,7 +332,9 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (state.schedules_agenda_freshness = Masc_tui_agenda.Last_read);
   let read, before_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
-  state.schedules_agenda_event_pending <- true;
+  (* A schedule change announced while this read runs. *)
+  state.schedules_owed <-
+    Masc_tui_owed_read.changed (Masc_tui_owed_read.started Masc_tui_owed_read.settled);
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   Types.apply_schedule_agenda_read state (ticket before_change) (Ok (snapshot 99));
   check (option int) "a read overtaken by a schedule change cannot replace the agenda" (Some 3)
@@ -341,7 +343,7 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (Types.Snapshot_read.in_flight state.schedules_agenda_read);
   check bool "an overtaken reply leaves freshness pending" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
-  state.schedules_agenda_event_pending <- false;
+  state.schedules_owed <- Masc_tui_owed_read.started Masc_tui_owed_read.settled;
   let read, after_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
   Types.apply_schedule_agenda_read state (ticket after_change) (Ok (snapshot 4));
@@ -349,12 +351,14 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
   check bool "the successor completes freshness under a live observer" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Last_read);
-  let read, during_change = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Refresh state.schedules_agenda_read in
+  let read, before_owed_read = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Refresh state.schedules_agenda_read in
   state.schedules_agenda_read <- read;
-  state.schedules_owed <-
-    Masc_tui_owed_read.changed (Masc_tui_owed_read.started Masc_tui_owed_read.settled);
-  Types.apply_schedule_agenda_read state (ticket during_change) (Ok (snapshot 7));
-  check bool "a read that answers while a change is owed leaves the agenda uncertain" true
+  (* A change no read has answered yet: the owed read has not started. *)
+  state.schedules_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
+  Types.apply_schedule_agenda_read state (ticket before_owed_read) (Ok (snapshot 7));
+  check (option int) "a read that is not overtaken publishes" (Some 7)
+    (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
+  check bool "while a change is owed the published agenda is uncertain" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
   state.schedules_owed <- Masc_tui_owed_read.settled;
   state.observer <- Types.Observer_closed_after_live
@@ -471,7 +475,6 @@ let test_schedule_agenda_suspends_with_workspace_authority () =
   Types.suspend_workspace_readings state;
   check bool "the retained agenda is uncertain when its observer stops" true
     (state.schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed);
-  check bool "authority recovery owes an agenda read" true state.schedules_agenda_event_pending;
   check bool "the retired response cannot fill the next read" false
     (Types.Snapshot_read.is_current state.schedules_agenda_read ticket)
 

@@ -174,7 +174,9 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 
 ### 3.5 미리보기
 
-미리보기를 쓰는 화면(답변 중 배지, 채팅 화면)이 열려 있을 때만 그 키퍼의 turns 를 다시 읽는다. 서버는 `Keeper_turn_preview` 의 모든 쓰기(`change_entry`, `observe_preparation`, `reset`)에서 그 키퍼의 `keeper_turn_preview_changed` 를 내되, 키퍼마다 마지막으로 낸 뒤 `preview_post_interval_s` 가 지나지 않았으면 그 간격이 끝날 때 한 번만 낸다. 받는 쪽은 그때의 최신 값을 읽으므로 버려지는 값은 없다. 사이 값을 그리지 않을 뿐이다.
+미리보기를 쓰는 화면(답변 중 배지, 채팅 화면)이 열려 있을 때만 그 키퍼의 turns 를 다시 읽는다. 서버는 `Keeper_turn_preview` 의 쓰기(`change_entry`, `observe_preparation`, `reset`) 가운데 turns 답이 읽는 writer 에 쓴 것만 알린다. 옛 writer 의 쓰기는 turns 답을 바꾸지 않는다. 미리보기 표는 키퍼 이름으로만 잡혀 있으므로, `reset` 이 작업 공간(`base_path`)을 받아 writer 에 담는다.
+
+서버 fiber 하나가 쓰인 키퍼를 모아, 그 작업 공간의 관찰자에게 키퍼마다 `keeper_turn_preview_changed { name }` 를 한 번 보내고 `preview_post_interval_s` 를 기다린다. 첫 쓰기는 바로 나가고, 기다리는 동안의 쓰기는 기다림이 끝날 때 한 번에 나간다. 키퍼마다 타이머를 두지 않는다. 받는 쪽은 그때의 최신 값을 읽으므로 버려지는 값은 없다. 사이 값을 그리지 않을 뿐이다.
 
 키퍼 목록의 마지막 활동 시각은 미리보기 시각 대신, 도는 턴은 시작 시각을, 끝난 턴은 마지막 턴 시각을 쓴다. 목록이 초 단위로 미리보기를 따라가지 않는다. §7 결정 1 이다.
 
@@ -212,7 +214,8 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 | L4a | `keeper_turn_changed`: 턴 자리, turn ref, chat control token, shutdown id, Owner 사용 가능 여부의 쓰기 뒤 신호(§3.4) | 쓰기마다 신호가 한 번, 값이 바뀐 뒤에 나가는지 |
 | L4b | TUI turns 빚 읽기(신호, 다시 읽기, 권한 회복, 실패 재시도), 일정·확인 대기·fusion 알림의 대기 목록 빚 | §1.8 의 일들이 신호 뒤에 도는지 |
 | L4c | 2초 turns 읽기 삭제, 대기 목록 읽기 실패 재시도(L5 뒤) | 화면 하나의 turns 요청 수, 실패한 대기 목록 읽기를 기다린 뒤 다시 읽는지 |
-| L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |
+| L5a | 미리보기 알림: turns 답이 읽는 writer 의 쓰기 뒤, fiber 하나가 간격마다 모아 보냄 | 간격 안의 여러 쓰기 → 알림 하나, 옛 writer 의 쓰기 → 알림 없음 |
+| L5b | TUI 미리보기 읽기, 목록 활동 시각 | 알림 → turns 읽기 하나 |
 | L6 | `next_action` 시각 읽기 | 120초 뒤 읽기 하나 |
 | L6b | roster 응답의 `candle_decay`(서버), TUI 가 그릴 때 잔액·`burned`·`circulating` 계산(§3.7) | 같은 원장에서 기준으로 계산한 값 = 같은 시각의 `of_events` 값 |
 

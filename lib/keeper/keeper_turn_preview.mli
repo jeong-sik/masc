@@ -107,10 +107,13 @@ val with_preparation :
 (** Same owned scope for a value-returning preparation operation. Exceptions
     and cancellation still settle the observation and propagate unchanged. *)
 
-val reset : keeper_name:string -> execution_scope:Keeper_execution_scope_id.t option ->
+val reset : base_path:string -> keeper_name:string -> execution_scope:Keeper_execution_scope_id.t option ->
   turn_ref:Ids.Turn_ref.t option ->
   now:float -> redaction:Keeper_secret_redaction.t -> writer
-(** Install a new displayed preview and return its writer. Every response text the turn records passes
+(** Install a new displayed preview and return its writer. The install and
+    every later write to this writer while it is displayed call
+    {!Keeper_turn_preview_signal.changed} with [base_path] and [keeper_name].
+    Every response text the turn records passes
     through [redaction] first; streamed deltas pass through one
     {!Keeper_stream_text_redaction} per provider attempt, so the tail grows a
     line at a time and a secret split between deltas never reaches it. *)

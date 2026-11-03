@@ -3278,6 +3278,7 @@
 (include stanzas/test_runtime_assignment_announce.inc)
 (include stanzas/test_candle_ledger_announce.inc)
 (include stanzas/test_provider_rest_announce.inc)
+(include stanzas/test_turn_preview_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

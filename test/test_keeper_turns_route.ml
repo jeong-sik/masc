@@ -314,7 +314,7 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
     let finished, finish = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
       let outcome = Keeper_owner.run_maintenance_if_idle owner (fun () ->
-        let writer = Some (Keeper_turn_preview.reset ~keeper_name:name
+        let writer = Some (Keeper_turn_preview.reset ~base_path:config.base_path ~keeper_name:name
           ~execution_scope:None ~turn_ref:(Some original) ~now:0.
           ~redaction:Keeper_secret_redaction.empty) in
         Keeper_turn_preview.with_preparation ~writer ~turn_ref:(Some original)

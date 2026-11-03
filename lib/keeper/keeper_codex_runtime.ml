@@ -689,6 +689,17 @@ let codex_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.UnknownVariant
          { type_name = "codex_app_server.server_request"; value = method_ })
+  (* The handshake's account/read refusal. Reported as the request's own
+     provider failure; the session-side consequence (the prior settlement
+     stands, the claim releases as transient) is decided in
+     [recovery_failure_of_client_error], not here. *)
+  | Runtime_codex_app_server.Account_read_failed _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "account_read_failed"
+         ; detail = Runtime_codex_app_server.error_to_string error
+         })
   (* Effectful failed turns are fenced out of same-turn retry by
      [Keeper_provider_attempt_effect] at the driver level, so this mapping
      stays purely descriptive of what the provider reported. *)
@@ -743,6 +754,12 @@ let codex_error_to_core_error = function
 let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _ ->
     Keeper_official_client_session_store.Pre_dispatch_failed
+  | Runtime_codex_app_server.Account_read_failed _ ->
+    (* The handshake's account/read is refused before thread/resume and
+       turn/start are sent: the exchange touched no session, so the prior
+       settlement stands and the release path restores it. The refusal of
+       the request itself still reaches its caller unchanged. *)
+    Keeper_official_client_session_store.Pre_dispatch_failed
   | Runtime_codex_app_server.Spawn_failed _ ->
     Keeper_official_client_session_store.Transient_spawn_failed
   | Runtime_codex_app_server.Turn_interrupted
@@ -792,6 +809,7 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Invalid_config _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Spawn_failed _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Reasoning_effort_admission_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Account_read_failed _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_input_write_failed _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Protocol_error _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Rpc_error _)
@@ -851,6 +869,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
   | Runtime_codex_app_server.Process_exited { turn_accepted = false; _ }
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Account_read_failed _
   | Runtime_codex_app_server.Invalid_config _
   | Runtime_codex_app_server.Spawn_failed _
   | Runtime_codex_app_server.Protocol_error _
@@ -1617,6 +1636,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          (( Runtime_codex_app_server.Invalid_config _
           | Runtime_codex_app_server.Spawn_failed _
           | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+          | Runtime_codex_app_server.Account_read_failed _
           | Runtime_codex_app_server.Turn_input_write_failed _
           | Runtime_codex_app_server.Protocol_error _
           | Runtime_codex_app_server.Rpc_error _

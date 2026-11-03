@@ -27,6 +27,16 @@ val request_context_of_last_usage :
     {!Runtime_observation.Context_estimate}, so a durable record or a reader
     can tell the two apart. Pure: no I/O, no clock. *)
 
+
+val recovery_failure_of_client_error :
+  Runtime_codex_app_server.error ->
+  Keeper_official_client_session_store.recovery_failure
+(** Which session-store failure a client error settles the claim as. The
+    handshake's [account/read] refusal is a pre-dispatch failure -- nothing
+    of the exchange touched the session -- while an RPC error on
+    [thread/resume] itself stays protocol-failed, because that resume was
+    really refused. Pure: no I/O, no clock. *)
+
 val run :
   ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->

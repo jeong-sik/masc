@@ -9873,6 +9873,39 @@ let test_live_keeper_resumes_official_thread () =
            check int "resumed live turn count" 2 result.turns)
 ;;
 
+(* account/read belongs to the startup handshake and is sent before
+   thread/resume and turn/start. A refusal there touched no session: the
+   run reports its own typed failure and nothing is sent past the refused
+   read, so a settled session's resume information is not this exchange's
+   to revise. (#47706) *)
+let test_account_read_refusal_stops_before_the_thread () =
+  let account_refused =
+    {|{"id":2,"error":{"code":-32000,"message":"account lookup failed"}}|}
+  in
+  let capture = Filename.temp_file "codex-account-refused-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    (* The script template always writes the thread reply; the run never
+       reads it, because the refused account/read ends the handshake. *)
+    with_fixture ~capture_path:capture
+      [init_result; account_refused; thread_result]
+      (fun path ->
+        (match run_fixture path with
+         | Ok _ -> fail "a refused account read still completed a turn"
+         | Error (Runtime_codex_app_server.Account_read_failed
+                    { code; message; _ }) ->
+             check (option int) "the refusal code rides along" (Some (-32000)) code;
+             check string "the refusal message rides along"
+               "account lookup failed" message
+         | Error other ->
+             fail
+               ("account refusal classified as something else: "
+                ^ Runtime_codex_app_server.error_to_string other));
+        let open Yojson.Safe.Util in
+        let requests = captured_requests capture in
+        check (list string) "nothing is sent past the refused account read"
+          ["initialize"; "initialized"; "account/read"]
+          (List.map (fun request -> request |> member "method" |> to_string) requests)))
+
 let test_live_production_keeper_subscription () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
@@ -10517,6 +10550,10 @@ let () =
             "official Codex history injection"
             `Slow
             test_live_history_injection_subscription
+        ; test_case
+            "account read refusal stops before the thread"
+            `Quick
+            test_account_read_refusal_stops_before_the_thread
         ; test_case
             "Keeper through official Codex app-server"
             `Slow

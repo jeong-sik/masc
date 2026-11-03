@@ -32,6 +32,9 @@ let begin_runs state ~demand =
   | Masc_tui_fetched.Started (reading, request) ->
       state.fusion_runs <- reading;
       state.fusion_runs_reread_pending <- false;
+      state.fusion_retries <-
+        { state.fusion_retries with
+          fr_runs = Masc_tui_owed_read.started state.fusion_retries.fr_runs };
       state.fusion_runs_awaiting_observer <- false;
       state.fusion_runs_open_at_start <- open_identity state;
       Some request
@@ -60,6 +63,9 @@ let begin_detail state ~demand ~run_id =
       let generation = state.fusion_detail_generation in
       state.fusion_detail_inflight <- Some (generation, run_id);
       state.fusion_detail_reread_pending <- false;
+      state.fusion_retries <-
+        { state.fusion_retries with
+          fr_detail = Masc_tui_owed_read.started state.fusion_retries.fr_detail };
       state.fusion_detail_awaiting_observer <- false;
       Some generation
 
@@ -75,6 +81,9 @@ let begin_historical state ~demand ~reference =
       let generation = state.fusion_detail_generation in
       state.fusion_historical_inflight <- Some (generation, reference);
       state.fusion_historical_reread_pending <- false;
+      state.fusion_retries <-
+        { state.fusion_retries with
+          fr_historical = Masc_tui_owed_read.started state.fusion_retries.fr_historical };
       state.fusion_historical_awaiting_observer <- false;
       Some generation
 
@@ -96,6 +105,27 @@ let revalidate_visible state ~runs ~detail ~historical =
     | Approvals | Planning | Schedules | Verification | Harness
     | Repositories | Code | Changes | Connectors | Runtime | Config
     | Resources | Tools | System_logs -> ()
+
+type reading = Runs | Detail | Historical
+
+let settle_retry state reading ~failure =
+  let settle t = match failure with
+    | None -> Masc_tui_owed_read.succeeded t
+    | Some failed -> failed t in
+  let retries = state.fusion_retries in
+  state.fusion_retries <-
+    (match reading with
+     | Runs -> { retries with fr_runs = settle retries.fr_runs }
+     | Detail -> { retries with fr_detail = settle retries.fr_detail }
+     | Historical -> { retries with fr_historical = settle retries.fr_historical })
+
+let retry_due_visible state ~now ~runs ~detail ~historical =
+  let due t = Masc_tui_owed_read.due ~now t in
+  let retries = state.fusion_retries in
+  revalidate_visible state
+    ~runs:(fun () -> if due retries.fr_runs then runs ())
+    ~detail:(fun run_id -> if due retries.fr_detail then detail run_id)
+    ~historical:(fun reference -> if due retries.fr_historical then historical reference)
 
 let observer_failed state ~runs ~detail ~historical =
   revalidate_visible state

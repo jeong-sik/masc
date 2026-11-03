@@ -1250,6 +1250,20 @@ type keeper_chat_page = {
   kcp_older_error : string option;
 }
 
+(** The failed-read retries of the Fusion readings (RFC-0480 L2b). A change
+    during a read is the readings' own reread flag; these say only when a
+    read that failed is tried again. *)
+type fusion_retries = {
+  fr_runs : Masc_tui_owed_read.t;
+  fr_detail : Masc_tui_owed_read.t;
+  fr_historical : Masc_tui_owed_read.t;
+}
+
+let no_fusion_retries =
+  { fr_runs = Masc_tui_owed_read.settled
+  ; fr_detail = Masc_tui_owed_read.settled
+  ; fr_historical = Masc_tui_owed_read.settled }
+
 (** The open chat's history read that the TUI owes (RFC-0480 §3.1): the
     server announced a change, events were lost, or a read failed. It belongs
     to one Keeper under one workspace reading; any other drops it. [kho_audit]
@@ -10812,6 +10826,7 @@ type state = {
   mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
   mutable fusion_historical_reread_pending: bool;
   mutable fusion_historical_awaiting_observer: bool;
+  mutable fusion_retries: fusion_retries;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -14460,6 +14475,7 @@ let suspend_workspace_readings state =
   state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
   state.fusion_historical_reread_pending <- false;
+  state.fusion_retries <- no_fusion_retries;
   state.fusion_historical_awaiting_observer <- false;
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
@@ -15155,6 +15171,7 @@ let withdraw_fusion_workspace (state : state) =
   state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
   state.fusion_historical_reread_pending <- false;
+  state.fusion_retries <- no_fusion_retries;
   state.fusion_historical_awaiting_observer <- false;
   state.fusion_detail <- None;
   state.fusion_detail_stale <- false;
@@ -19792,6 +19809,7 @@ let create_state
   fusion_historical_detail_stale = false;
   fusion_historical_inflight = None;
   fusion_historical_reread_pending = false;
+  fusion_retries = no_fusion_retries;
   fusion_historical_awaiting_observer = false;
   fusion_launch = None;
   fusion_launch_generation = 0;

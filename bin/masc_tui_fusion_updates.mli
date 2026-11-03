@@ -29,6 +29,22 @@ val revalidate_visible :
 (** Revalidate visible readings when the current server identity authorizes
     reads. Called after subscription, including reconnects, resets and gaps. *)
 
+type reading = Runs | Detail | Historical
+
+val settle_retry :
+  Masc_tui_types.state -> reading ->
+  failure:(Masc_tui_owed_read.t -> Masc_tui_owed_read.t) option -> unit
+(** Settle the retry of an applied answer. [failure] is the transition a
+    failed answer takes (the caller supplies the clock and the backoff);
+    [None] is a success. A change during the read is not this value's
+    business: the reading's reread flag owns it. *)
+
+val retry_due_visible :
+  Masc_tui_types.state -> now:float -> runs:(unit -> unit) -> detail:(string -> unit) ->
+  historical:(Masc.Tui_decode_fusion.fusion_historical_evidence -> unit) -> unit
+(** Read again each visible reading whose failed read is due a retry. Fusion
+    re-reads on [fusion_run_status]; nothing else reads it on a timer. *)
+
 val observer_failed :
   Masc_tui_types.state -> runs:(unit -> unit) -> detail:(string -> unit) ->
   historical:(Masc.Tui_decode_fusion.fusion_historical_evidence -> unit) -> unit

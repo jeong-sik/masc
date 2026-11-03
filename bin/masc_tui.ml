@@ -7881,10 +7881,10 @@ let owe_held_calls_read state =
 let owe_tool_modes_read state =
   state.tool_modes_owed <- Masc_tui_owed_read.changed state.tool_modes_owed
 
-(* The turns read when the server says a Keeper's turns changed, on a
-   revalidation or a resumed authority, and after any failed turns read
-   (RFC-0481 §3.4). The answering badge is drawn on every surface, so the read
-   is owed whatever is on screen. *)
+(* The turns read when the server says a Keeper's turns or its running
+   turn's preview changed, on a revalidation or a resumed authority, and after
+   any failed turns read (RFC-0481 §3.4, §3.5). The answering badge is drawn on
+   every surface, so the read is owed whatever is on screen. *)
 let owe_keeper_turns_read state =
   state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed
 

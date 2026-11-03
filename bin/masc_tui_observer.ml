@@ -135,6 +135,10 @@ type roster_change =
   | Keeper_row_changed of { keeper : string }
   | Every_row_changed
 
+type turn_change =
+  | Turn_state
+  | Turn_preview
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -162,7 +166,7 @@ type event =
   (* Server push: a Keeper's roster row, or every row, may have changed. *)
   | Keeper_roster_change of roster_change
   (* Server push: what the turns answer says of a Keeper may have changed. *)
-  | Keeper_turn_changed of { keeper : string }
+  | Keeper_turn_changed of { keeper : string; change : turn_change }
   (* Server push, not a keeper act: a fusion deliberation changed stage or
      settled. The Fusion surface treats it as a reload trigger the way the
      dashboard does (sse-store: event = trigger, HTTP = SSOT); the payload
@@ -310,7 +314,7 @@ let roster_change = function
       None
 
 let turn_changed_keeper = function
-  | Keeper_turn_changed { keeper } -> Some keeper
+  | Keeper_turn_changed { keeper; _ } -> Some keeper
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -867,7 +871,13 @@ let reading_of_type type_name =
       From_fields
         (fun fields ->
           match string_field fields "name" with
-          | Some keeper -> Ok (Keeper_turn_changed { keeper })
+          | Some keeper -> Ok (Keeper_turn_changed { keeper; change = Turn_state })
+          | None -> Error (event ^ " carries no name"))
+  | event when String.equal event Masc.Keeper_turn_preview_signal.changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Keeper_turn_changed { keeper; change = Turn_preview })
           | None -> Error (event ^ " carries no name"))
   | other -> (
       (* Which event types are whole-projection pushes is the wire's

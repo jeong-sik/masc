@@ -430,7 +430,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Keeper_async_requests_changed { keeper }
   | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
-  | Observer.Keeper_turn_changed { keeper }
+  | Observer.Keeper_turn_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Approval_change change -> approval_change_keeper change
@@ -470,7 +470,8 @@ let label_of_event (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed _ -> "waiting queue"
   | Observer.Keeper_async_requests_changed _ -> "async requests"
   | Observer.Keeper_roster_change _ -> "roster"
-  | Observer.Keeper_turn_changed _ -> "turns"
+  | Observer.Keeper_turn_changed { change = Observer.Turn_state; _ } -> "turns"
+  | Observer.Keeper_turn_changed { change = Observer.Turn_preview; _ } -> "preview"
   | Observer.Fusion_run_status _ -> "fusion"
   | Observer.Lane_resource resource -> (
       match resource.Observer.lr_lifecycle with
@@ -577,7 +578,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
   | Observer.Keeper_runtime_journal_appended { keeper; _ }
   | Observer.Keeper_async_requests_changed { keeper }
   | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
-  | Observer.Keeper_turn_changed { keeper } ->
+  | Observer.Keeper_turn_changed { keeper; _ } ->
       { at; keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_roster_change Observer.Every_row_changed ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "" }

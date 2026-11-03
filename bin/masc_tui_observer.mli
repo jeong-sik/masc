@@ -194,6 +194,15 @@ type roster_change =
   | Every_row_changed
       (** [keeper_roster_changed]: a value every row reads changed. *)
 
+(** What a Keeper turns push says changed (RFC-0481 §3.4, §3.5). Either one
+    reads the turns again. *)
+type turn_change =
+  | Turn_state
+      (** [keeper_turn_changed]: the turn slot, turn ref, chat control
+          token, shutdown operation or Owner availability. *)
+  | Turn_preview
+      (** [keeper_turn_preview_changed]: the running turn's preview. *)
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -249,10 +258,11 @@ type event =
   | Keeper_roster_change of roster_change
       (** Named by {!Masc.Keeper_row_broadcast}. A server push: the roster
           reads the named row, or the whole roster, again. *)
-  | Keeper_turn_changed of { keeper : string }
-      (** Named by {!Masc.Keeper_turn_broadcast}. A server push: what
+  | Keeper_turn_changed of { keeper : string; change : turn_change }
+      (** Named by {!Masc.Keeper_turn_broadcast} and
+          {!Masc.Keeper_turn_preview_signal}. A server push: what
           [/api/v1/keepers/turns] answers for that Keeper may have changed,
-          so the turns are read again (RFC-0481 §3.4). *)
+          so the turns are read again. *)
   | Fusion_run_status of { keeper : string; run_id : string; status : string }
       (** A fusion deliberation changed stage or settled. A server push, not
           a keeper act: the Fusion surface re-fetches the run on it instead of

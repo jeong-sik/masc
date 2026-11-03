@@ -556,6 +556,7 @@ let initialize_apple_attached_read_fixture
         "workingDirectory", `String "/masc-work"; "executable", `String "tail";
         "arguments", `List [`String "-f"; `String "/dev/null"]; "environment", `List []];
       "mounts", `List []; "readOnly", `Bool true; "capDrop", `List []; "capAdd", `List [];
+      "publishedSockets", `List []; "useInit", `Bool false;
       "networks", `List []; "labels", `Assoc (List.map (fun (key, value) -> key, `String value) labels)]]] in
   write_file (Filename.concat base "guest-inspect.json") (Yojson.Safe.to_string inspect)
 ;;

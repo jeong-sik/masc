@@ -76,10 +76,11 @@ let inspect_from_run root arguments =
   let one = Hashtbl.create 16 and repeated = Hashtbl.create 8 in
   let add key v = Hashtbl.replace repeated key (v :: Option.value ~default:[] (Hashtbl.find_opt repeated key)) in
   let rec flags = function
-    | ("-d" | "--read-only" | "--rm" | "--no-dns") as key :: rest -> Hashtbl.replace one key "true"; flags rest
+    | ("-d" | "--read-only" | "--rm" | "--no-dns" | "--init") as key :: rest -> Hashtbl.replace one key "true"; flags rest
     | ("--name" | "--user" | "--memory" | "--cpus" | "--workdir" | "--network" | "--dns" | "--entrypoint") as key :: v :: rest ->
       Hashtbl.replace one key v; flags rest
-    | ("--label" | "--env" | "-e" | "-v" | "--volume" | "--tmpfs" | "--cap-drop" | "--cap-add") as key :: v :: rest ->
+    | ("--label" | "--env" | "-e" | "-v" | "--volume" | "--tmpfs" | "--cap-drop" | "--cap-add"
+      | "--publish-socket") as key :: v :: rest ->
       add key v; flags rest
     | image :: command -> image, command
     | [] -> fail "provider did not receive an image"
@@ -107,6 +108,10 @@ let inspect_from_run root arguments =
   let label raw = match String.index_opt raw '=' with
     | Some at -> String.sub raw 0 at, `String (String.sub raw (at + 1) (String.length raw - at - 1))
     | None -> fail "provider received invalid label" in
+  let published raw = match String.split_on_char ':' raw with
+    | [host_path; guest_path] ->
+      `Assoc ["containerPath", `String guest_path; "hostPath", `String host_path]
+    | _ -> fail "provider received invalid published socket" in
   let memory = value (Keeper_microvm_guest_size.memory_of_string (get "--memory")) in
   let name = get "--name" in
   let executable, args = match command with first :: rest -> first, rest | [] -> fail "provider got no command" in
@@ -124,6 +129,8 @@ let inspect_from_run root arguments =
         "arguments", strings args; "environment", strings ("PATH=/fixture/image/bin" :: all "--env")];
       "mounts", `List mounts; "readOnly", `Bool (Hashtbl.mem one "--read-only");
       "capDrop", strings (all "--cap-drop"); "capAdd", strings (all "--cap-add");
+      "publishedSockets", `List (List.map published (all "--publish-socket"));
+      "useInit", `Bool (Hashtbl.mem one "--init");
       "networks", `List (match Hashtbl.find_opt one "--network" with
         | Some "none" -> []
         | Some name -> [`Assoc ["network", `String name]]

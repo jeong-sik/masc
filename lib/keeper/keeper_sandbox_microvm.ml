@@ -827,6 +827,7 @@ let render_turn_start_argv_for
       ~mount_args
       ~image
       ~constraints
+      ~grant_args
       ~working_directory
       ~command:(executable, arguments)
   =
@@ -879,6 +880,9 @@ let render_turn_start_argv_for
           | Backend.Apple_container | Backend.Nerdctl_kata ->
             [ "--user"; user ])
        @ expressed
+       (* What the plan gives back after the constraints: added
+          capabilities and published sockets. *)
+       @ grant_args
        (* Always both. Leaving [--cpus] off took the CLI's own default, which
           is a size nobody configured and the status surface could not show. *)
        @ [ "--memory"
@@ -902,7 +906,7 @@ let turn_start_argv_for backend ~container_name ~label_args ~uid ~gid
   render_turn_start_argv_for backend ~container_name ~label_args
     ~backend_label_args:["--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend]
     ~user:(Printf.sprintf "%d:%d" uid gid) ~guest_size ~network_args ~mount_args
-    ~image ~constraints ~working_directory:work_volume_guest_root
+    ~image ~constraints ~grant_args:[] ~working_directory:work_volume_guest_root
     ~command:("tail", ["-f"; "/dev/null"])
 ;;
 
@@ -938,11 +942,16 @@ let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
     let label_args = List.concat_map
       (fun (key, value) -> ["--label"; key ^ "=" ^ value])
       (plan.labels @ lifecycle_labels @ [Plan.label_key, Plan.digest plan]) in
+    let grant_args =
+      List.concat_map (fun capability -> ["--cap-add"; Plan.capability_to_string capability])
+        plan.capabilities_added
+      @ List.concat_map (fun {Plan.host_path; guest_path} ->
+          ["--publish-socket"; host_path ^ ":" ^ guest_path]) plan.published_sockets in
     render_turn_start_argv_for Backend.Apple_container ~container_name ~label_args
       ~backend_label_args:[]
       ~user:plan.user ~guest_size:plan.guest_size ~network_args
       ~mount_args:(environment_args @ mount_args) ~image:plan.image
-      ~constraints:plan.isolation ~working_directory:plan.working_directory
+      ~constraints:plan.isolation ~grant_args ~working_directory:plan.working_directory
       ~command
     |> Result.map_error (fun refusals -> Apple_constraints_unexpressible refusals))
 ;;
@@ -3032,8 +3041,10 @@ let running_of_apple_inspect_json raw =
   | exception Yojson.Json_error _ -> Error "container inspect: unparseable JSON"
 ;;
 
-(* Apple 1.3.1 inspect configuration. Unknown metadata is left alone;
-   every identity/isolation field below is mandatory and duplicate-free. *)
+(* Apple inspect configuration. Unknown metadata is left alone; every
+   identity/isolation field below is mandatory and duplicate-free.
+   [publishedSockets] and [useInit] were read from 1.6.1, which reports both
+   for every guest (docs/evidence/2026-11-03-microvm-request-transport). *)
 let apple_guest_facts ~container_name raw =
   let module Plan = Keeper_microvm_boot_plan in
   let open Result.Syntax in
@@ -3138,13 +3149,19 @@ let apple_guest_facts ~container_name raw =
     let* read_only = member "readOnly" config >>= boolean "readOnly" in
     let* cap_drop = strings_member "capDrop" config in
     let* cap_add = strings_member "capAdd" config in
+    let* published_sockets = member "publishedSockets" config >>= list "publishedSockets" (fun value ->
+      let* fields = object_fields "published socket" value in
+      let* host_path = string_member "hostPath" fields in
+      let* guest_path = string_member "containerPath" fields in
+      Ok {Plan.host_path; guest_path}) in
+    let* use_init = member "useInit" config >>= boolean "useInit" in
     let* networks = member "networks" config >>= list "networks" (fun value ->
       object_fields "network" value >>= string_member "network") in
     let* environment = member "environment" init >>= environment in
     let* labels = member "labels" config >>= string_pairs "labels" in
     Ok {Plan.plan_label = List.assoc_opt Plan.label_key labels; image; image_identity; cpus; memory_bytes;
         user; working_directory; command = executable :: arguments; mounts;
-        read_only; cap_drop; cap_add; networks; environment; labels}
+        read_only; cap_drop; cap_add; published_sockets; use_init; networks; environment; labels}
   in
   match Yojson.Safe.from_string raw with
   | json -> (match decode json with Ok facts -> Plan.Facts facts | Error detail -> Plan.Unreadable detail)

@@ -1,0 +1,225 @@
+{
+ "container_version": "container CLI version 1.6.1 (build: release, commit: unspeci)",
+ "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+ "guest_socket": "/run/masc-agent/agent.sock",
+ "run_flags": [
+  "--cap-drop",
+  "ALL",
+  "--cap-add",
+  "CAP_SETUID",
+  "--cap-add",
+  "CAP_SETGID",
+  "--cap-add",
+  "CAP_SYS_ADMIN",
+  "--tmpfs",
+  "/tmp",
+  "-m",
+  "1G",
+  "-c",
+  "1"
+ ],
+ "cases": [
+  {
+   "case": "explicit_root",
+   "name": "masc-agent-flags-explicit-root-1793688218",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/root.sock",
+   "host_socket_bytes": 62,
+   "before": "absent",
+   "run_rc": 0,
+   "run_stderr": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]\n[6/6] Starting container [1s]",
+   "run_seconds": 1.887,
+   "while_running": "socket",
+   "connect": {
+    "hello": true,
+    "attempts": 2,
+    "seconds": 0.113
+   },
+   "inspect": {
+    "readOnly": false,
+    "capDrop": [
+     "ALL"
+    ],
+    "capAdd": [
+     "CAP_SETUID",
+     "CAP_SETGID",
+     "CAP_SYS_ADMIN"
+    ],
+    "publishedSockets": [
+     {
+      "containerPath": "/run/masc-agent/agent.sock",
+      "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/root.sock"
+     }
+    ],
+    "useInit": false,
+    "userString": "0:0",
+    "executable": "/opt/masc-exec-shim/masc-exec-shim",
+    "arguments": [
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ]
+   },
+   "stop_rc": 0,
+   "gone": true,
+   "after_stop": "absent",
+   "seconds": 7.873
+  },
+  {
+   "case": "no_user",
+   "name": "masc-agent-flags-no-user-1793688225",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/nouser.sock",
+   "host_socket_bytes": 64,
+   "before": "absent",
+   "run_rc": 0,
+   "run_stderr": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]\n[6/6] Starting container [1s]",
+   "run_seconds": 1.619,
+   "while_running": "socket",
+   "connect": {
+    "hello": true,
+    "attempts": 1,
+    "seconds": 0.007
+   },
+   "inspect": {
+    "readOnly": false,
+    "capDrop": [
+     "ALL"
+    ],
+    "capAdd": [
+     "CAP_SETUID",
+     "CAP_SETGID",
+     "CAP_SYS_ADMIN"
+    ],
+    "publishedSockets": [
+     {
+      "containerPath": "/run/masc-agent/agent.sock",
+      "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/nouser.sock"
+     }
+    ],
+    "useInit": false,
+    "userString": "root",
+    "executable": "/opt/masc-exec-shim/masc-exec-shim",
+    "arguments": [
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ]
+   },
+   "stop_rc": 0,
+   "gone": true,
+   "after_stop": "absent",
+   "seconds": 7.428
+  },
+  {
+   "case": "stale_socket",
+   "name": "masc-agent-flags-stale-socket-1793688233",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/stale.sock",
+   "host_socket_bytes": 63,
+   "before": "socket",
+   "run_rc": 1,
+   "run_stderr": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[5/6] Unpacking init image [0s]\nError: host socket /Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/stale.sock already exists and may be in use",
+   "run_seconds": 0.083,
+   "seconds": 0.083
+  },
+  {
+   "case": "stale_regular_file",
+   "name": "masc-agent-flags-stale-regular-file-1793688233",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/file.sock",
+   "host_socket_bytes": 62,
+   "before": "regular",
+   "run_rc": 0,
+   "run_stderr": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]\n[6/6] Starting container [1s]",
+   "run_seconds": 1.27,
+   "while_running": "socket",
+   "connect": {
+    "hello": true,
+    "attempts": 1,
+    "seconds": 0.016
+   },
+   "inspect": {
+    "readOnly": false,
+    "capDrop": [
+     "ALL"
+    ],
+    "capAdd": [
+     "CAP_SETUID",
+     "CAP_SETGID",
+     "CAP_SYS_ADMIN"
+    ],
+    "publishedSockets": [
+     {
+      "containerPath": "/run/masc-agent/agent.sock",
+      "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/file.sock"
+     }
+    ],
+    "useInit": false,
+    "userString": "0:0",
+    "executable": "/opt/masc-exec-shim/masc-exec-shim",
+    "arguments": [
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ]
+   },
+   "stop_rc": 0,
+   "gone": true,
+   "after_stop": "absent",
+   "seconds": 7.516
+  },
+  {
+   "case": "missing_parent",
+   "name": "masc-agent-flags-missing-parent-1793688240",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/absent-dir/agent.sock",
+   "host_socket_bytes": 74,
+   "before": "absent",
+   "run_rc": 0,
+   "run_stderr": "[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]",
+   "run_seconds": 1.212,
+   "while_running": "socket",
+   "connect": {
+    "hello": true,
+    "attempts": 1,
+    "seconds": 0.013
+   },
+   "inspect": {
+    "readOnly": false,
+    "capDrop": [
+     "ALL"
+    ],
+    "capAdd": [
+     "CAP_SETUID",
+     "CAP_SETGID",
+     "CAP_SYS_ADMIN"
+    ],
+    "publishedSockets": [
+     {
+      "containerPath": "/run/masc-agent/agent.sock",
+      "hostPath": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/absent-dir/agent.sock"
+     }
+    ],
+    "useInit": false,
+    "userString": "0:0",
+    "executable": "/opt/masc-exec-shim/masc-exec-shim",
+    "arguments": [
+     "--serve",
+     "/run/masc-agent/agent.sock",
+     "502:20"
+    ]
+   },
+   "stop_rc": 0,
+   "gone": true,
+   "after_stop": "absent",
+   "seconds": 7.329
+  },
+  {
+   "case": "long_path",
+   "name": "masc-agent-flags-long-path-1793688248",
+   "host_socket": "/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/dddddddddddddddddddddddddddddddddddddddddddddddd/agent.sock",
+   "host_socket_bytes": 112,
+   "before": "absent",
+   "run_rc": 1,
+   "run_stderr": "\n[6/6] Starting container [0s]\n[6/6] Starting container [1s]\n[6/6] Starting container [1s]\nError: failed to bootstrap container (cause: \"internalError: \"failed to bootstrap container masc-agent-flags-long-path-1793688248 (cause: \"unknown: \"/Users/dancer/me/workspace/yousleepwhen/masc/.tmp/af/dddddddddddddddddddddddddddddddddddddddddddddddd/agent.sock is too long for a Unix Domain Socket path\"\")\"\")",
+   "run_seconds": 1.961,
+   "seconds": 1.961
+  }
+ ]
+}

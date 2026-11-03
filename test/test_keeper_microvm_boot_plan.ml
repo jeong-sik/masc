@@ -16,14 +16,36 @@ let plan : Plan.t =
       [ Plan.Named_volume {name = "masc-keeper-work-fixture"; destination = "/masc-work"}
       ; Plan.Host_dir {source = "/private-fixture/identity"; destination = "/guest/identity"; read_only = true} ]
   ; isolation = Backend.all_guest_constraints
+  ; capabilities_added = []
+  ; published_sockets = []
   ; network = Plan.Network_none
   ; environment = ["GH_CONFIG_DIR", "/guest/identity"; "GIT_AUTHOR_NAME", "fixture"]
   ; labels = ["masc.mcp.keeper", "fixture"; Sandbox.microvm_backend_label_key, "apple_container"]
   }
 
-(* Shape observed from Apple 1.3.1, with independent synthetic values.
-   Executable/user/network/mount variants are runtime wire shapes, not plan JSON. *)
-let inspect ?(memory = `Int 2_147_483_648) ?(mount_kind = "volume") ?(extra = []) () =
+(* A guest whose first process is the shim's agent (RFC
+   microvm-guest-agent-over-socket 3.6): root first process, a writable root,
+   three capabilities given back and one published socket. *)
+let agent_socket =
+  {Plan.host_path = "/host/agents/fixture.sock"; guest_path = "/run/masc-agent/agent.sock"}
+
+let agent_plan =
+  { plan with
+    user = "0:0"
+  ; command = ["/opt/masc-exec-shim/masc-exec-shim"; "--serve"; agent_socket.guest_path; "502:20"]
+  ; isolation = List.filter (fun guest_constraint -> guest_constraint <> Backend.Read_only_rootfs)
+      Backend.all_guest_constraints
+  ; capabilities_added = [Plan.Cap_setuid; Plan.Cap_setgid; Plan.Cap_sys_admin]
+  ; published_sockets = [agent_socket]
+  }
+
+(* Shape observed from Apple 1.3.1, with independent synthetic values;
+   publishedSockets and useInit as 1.6.1 reports them for every guest.
+   Executable/user/network/mount variants are runtime wire shapes, not plan JSON.
+   [None] leaves a key out. *)
+let inspect ?(memory = `Int 2_147_483_648) ?(mount_kind = "volume") ?(extra = [])
+    ?(published_sockets = Some (`List [])) ?(use_init = Some (`Bool false)) () =
+  let optional key = function None -> [] | Some value -> [key, value] in
   let config =
     [ "id", `String "fixture"
     ; "image", `Assoc ["reference", `String "fixture:image"; "descriptor", `Assoc ["digest", `String "sha256:fixture-image"]]
@@ -42,10 +64,12 @@ let inspect ?(memory = `Int 2_147_483_648) ?(mount_kind = "volume") ?(extra = []
             "options", `List []; "type", `Assoc [mount_kind, `Assoc ["name", `String "masc-keeper-work-fixture"]]]
         ; `Assoc ["destination", `String "/guest/identity"; "source", `String "/private-fixture/identity";
             "options", `List [`String "ro"]; "type", `Assoc ["virtiofs", `Assoc []]] ]
-    ; "readOnly", `Bool true; "capDrop", `List [`String "ALL"]; "capAdd", `List []
-    ; "networks", `List []
-    ; "labels", `Assoc (List.map (fun (key, value) -> key, `String value)
-        ((Plan.label_key, Plan.digest plan) :: plan.labels)) ]
+    ; "readOnly", `Bool true; "capDrop", `List [`String "ALL"]; "capAdd", `List [] ]
+    @ optional "publishedSockets" published_sockets
+    @ optional "useInit" use_init
+    @ [ "networks", `List []
+      ; "labels", `Assoc (List.map (fun (key, value) -> key, `String value)
+          ((Plan.label_key, Plan.digest plan) :: plan.labels)) ]
   in
   Yojson.Safe.to_string (`List [`Assoc ["id", `String "fixture"; "configuration", `Assoc (extra @ config)]])
 
@@ -82,6 +106,9 @@ let test_requested_security_changes_digest () =
     ; {plan with mounts = [Plan.Host_dir {source = "/different/identity"; destination = "/guest/identity"; read_only = true}]}
     ; {plan with mounts = [Plan.Host_dir {source = "/private-fixture/identity"; destination = "/guest/identity"; read_only = false}]}
     ; {plan with isolation = [Backend.Read_only_rootfs]}
+    ; {plan with capabilities_added = [Plan.Cap_sys_admin]}
+    ; {plan with published_sockets = [agent_socket]}
+    ; {plan with published_sockets = [{agent_socket with host_path = "/host/agents/other.sock"}]}
     ; {plan with network = Plan.Network_inherit}
     ; {plan with environment = ["GH_CONFIG_DIR", "/other/identity"]}
     ; {plan with labels = ["masc.mcp.keeper", "another"]} ] in
@@ -89,7 +116,21 @@ let test_requested_security_changes_digest () =
     false (Plan.digest plan = Plan.digest changed)) changes;
   check string "enumeration order does not invent plan changes" (Plan.digest plan)
     (Plan.digest {plan with mounts = List.rev plan.mounts; isolation = List.rev plan.isolation;
-      environment = List.rev plan.environment; labels = List.rev plan.labels})
+      environment = List.rev plan.environment; labels = List.rev plan.labels});
+  check string "the order of given-back capabilities is not identity" (Plan.digest agent_plan)
+    (Plan.digest {agent_plan with capabilities_added = List.rev agent_plan.capabilities_added});
+  let second = {Plan.host_path = "/host/agents/second.sock"; guest_path = "/run/masc-agent/second.sock"} in
+  check string "the order of published sockets is not identity"
+    (Plan.digest {agent_plan with published_sockets = [agent_socket; second]})
+    (Plan.digest {agent_plan with published_sockets = [second; agent_socket]})
+
+(* Running Apple guests carry this digest as their boot plan label, so another
+   value here replaces every running guest on its next boot check. A plan
+   that adds no capability and publishes no socket keeps it. Change it only
+   on purpose. *)
+let test_an_exec_plan_keeps_its_digest () =
+  check string "the exec fixture's digest"
+    "0fd01693d44a732172f3845c1e736d236804031152deb3ce45c05f8992315b25" (Plan.digest plan)
 
 let test_label_separates_change_from_runtime_disagreement () =
   check bool "complete runtime facts match" true
@@ -139,11 +180,64 @@ let test_all_runtime_security_disagreements_are_named () =
   let original = facts () in
   let changed = {original with user = "0:0"; command = ["sh"];
     working_directory = "/other"; mounts = []; read_only = false;
-    cap_add = ["CAP_SYS_ADMIN"]; networks = ["default"];
-    environment = []; labels = []} in
+    cap_add = ["CAP_SYS_ADMIN"]; published_sockets = [agent_socket]; use_init = true;
+    networks = ["default"]; environment = []; labels = []} in
   check bool "all differing security axes are retained" true
     (Plan.differences ~image_command plan changed = [Plan.User; Plan.Working_directory; Plan.Command;
-      Plan.Mounts; Plan.Root_filesystem; Plan.Capabilities; Plan.Network; Plan.Environment; Plan.Labels])
+      Plan.Mounts; Plan.Root_filesystem; Plan.Capabilities; Plan.Published_sockets;
+      Plan.Init_process; Plan.Network; Plan.Environment; Plan.Labels])
+
+(* The facts an agent guest reports when the runtime did what its plan asked. *)
+let agent_facts () =
+  { (facts ()) with
+    plan_label = Some (Plan.digest agent_plan)
+  ; user = "0:0"
+  ; command = agent_plan.command
+  ; read_only = false
+  ; cap_add = List.map Plan.capability_to_string agent_plan.capabilities_added
+  ; published_sockets = [agent_socket]
+  ; use_init = false
+  }
+
+let test_an_agent_guest_is_compared_on_its_grants () =
+  let assess facts =
+    Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable
+      ~plan:agent_plan ~policy_environment:[] (Plan.Facts facts)
+  in
+  (match assess (agent_facts ()) with
+   | Plan.Matches_plan -> ()
+   | _ -> fail "an agent guest with every grant it asked for matches its plan");
+  (match assess {(agent_facts ()) with cap_add = List.rev (agent_facts ()).cap_add} with
+   | Plan.Matches_plan -> ()
+   | _ -> fail "the runtime may list the capabilities in another order");
+  (match assess {(agent_facts ()) with cap_add = ["CAP_SETUID"; "CAP_SETGID"]} with
+   | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Capabilities]) -> ()
+   | _ -> fail "a missing capability is a capability difference");
+  (match assess {(agent_facts ()) with published_sockets = []} with
+   | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Published_sockets]) -> ()
+   | _ -> fail "a socket the runtime did not publish is a difference");
+  (match assess {(agent_facts ()) with use_init = true} with
+   | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Init_process]) -> ()
+   | _ -> fail "an init in front of the agent is a difference");
+  match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable
+      ~plan ~policy_environment:[] (Plan.Facts (agent_facts ())) with
+  | Plan.Replace (Plan.Plan_label :: _) -> ()
+  | _ -> fail "an agent guest is another plan for an exec-per-request Keeper"
+
+let test_the_parser_reads_published_sockets_and_init () =
+  let socket = `Assoc ["containerPath", `String agent_socket.guest_path;
+    "hostPath", `String agent_socket.host_path] in
+  (match reading (inspect ~published_sockets:(Some (`List [socket])) ~use_init:(Some (`Bool true)) ()) with
+   | Plan.Facts facts ->
+     check bool "the published socket" true (facts.published_sockets = [agent_socket]);
+     check bool "the runtime's init" true facts.use_init
+   | Plan.Unreadable detail -> fail detail);
+  List.iter (fun raw -> match reading raw with
+    | Plan.Unreadable _ -> ()
+    | Plan.Facts _ -> fail "a guest without the field is unreadable, not a guest without sockets")
+    [ inspect ~published_sockets:None ()
+    ; inspect ~use_init:None ()
+    ; inspect ~published_sockets:(Some (`List [`Assoc ["containerPath", `String "/run/a.sock"]])) () ]
 
 let test_command_refusal_reports_fields_without_values () =
   let requested_secret = "requested-private-credential" in
@@ -196,7 +290,38 @@ let test_boot_projects_the_labelled_plan () =
   check bool "snapshot source is the plan's read-only mount" true
     (List.mem "/private-fixture/identity:/guest/identity:ro" argv);
   check bool "requested arguments follow the image" true
-    (List.rev [plan.image; "-f"; "/dev/null"] = List.take 3 (List.rev argv))
+    (List.rev [plan.image; "-f"; "/dev/null"] = List.take 3 (List.rev argv));
+  check bool "an exec-per-request plan publishes nothing and gives nothing back" false
+    (List.mem "--publish-socket" argv || List.mem "--cap-add" argv)
+
+let values_of flag argv =
+  let rec collect = function
+    | key :: value :: rest when key = flag -> value :: collect rest
+    | _ :: rest -> collect rest
+    | [] -> []
+  in
+  collect argv
+
+let position flag argv =
+  let rec find index = function
+    | key :: _ when key = flag -> index
+    | _ :: rest -> find (index + 1) rest
+    | [] -> fail (flag ^ " is missing")
+  in
+  find 0 argv
+
+let test_an_agent_plan_asks_for_its_grants () =
+  let argv = boot agent_plan None None in
+  check (option string) "the first process starts as root" (Some "0:0") (flag_value "--user" argv);
+  check bool "the root is left writable for the agent to remount" false (List.mem "--read-only" argv);
+  check (list string) "the capabilities the agent needs come back"
+    (List.map Plan.capability_to_string agent_plan.capabilities_added) (values_of "--cap-add" argv);
+  check bool "they come back after everything is dropped" true
+    (position "--cap-drop" argv < position "--cap-add" argv);
+  check (list string) "the agent's socket is published"
+    [agent_socket.host_path ^ ":" ^ agent_socket.guest_path] (values_of "--publish-socket" argv);
+  check (option string) "the shim is the first process" (Some (List.hd agent_plan.command))
+    (flag_value "--entrypoint" argv)
 
 let test_ephemeral_routes_do_not_change_plan_identity () =
   let inherit_plan = {plan with network = Plan.Network_inherit} in
@@ -252,6 +377,30 @@ let test_renderer_rejects_order_sensitive_duplicates () =
       ; Plan.Duplicate_label_key "masc.mcp.keeper", {plan with labels = order labels}
       ; Plan.Duplicate_mount_destination "/guest/identity", {plan with mounts = order mounts} ])
     [false; true]
+
+(* One byte over the macOS host limit. *)
+let long_host_path = "/" ^ String.make 98 'h' ^ ".sock"
+
+let test_duplicate_grants_are_refused () =
+  List.iter (fun (expected, invalid) ->
+    require_invalid_boot expected invalid ~lifecycle_labels:[] ~policy_proxy:None)
+    [ Plan.Duplicate_capability Plan.Cap_setuid,
+      {agent_plan with capabilities_added = [Plan.Cap_setuid; Plan.Cap_setuid]}
+    ; Plan.Capabilities_without_drop_all,
+      {agent_plan with isolation = [Backend.Remove_on_exit; Backend.Scratch_tmpfs]}
+    ; Plan.Invalid_published_socket {path = "agents/fixture.sock"; problem = Plan.Not_absolute},
+      {agent_plan with published_sockets = [{agent_socket with host_path = "agents/fixture.sock"}]}
+    ; Plan.Invalid_published_socket {path = "/host/a:b.sock"; problem = Plan.Contains_colon},
+      {agent_plan with published_sockets = [{agent_socket with host_path = "/host/a:b.sock"}]}
+    ; Plan.Invalid_published_socket
+        {path = long_host_path; problem = Plan.Too_long {bytes = 104; limit = 103}},
+      {agent_plan with published_sockets = [{agent_socket with host_path = long_host_path}]}
+    ; Plan.Duplicate_published_socket agent_socket.host_path,
+      {agent_plan with published_sockets =
+        [agent_socket; {agent_socket with guest_path = "/run/masc-agent/other.sock"}]}
+    ; Plan.Duplicate_published_socket agent_socket.guest_path,
+      {agent_plan with published_sockets =
+        [agent_socket; {agent_socket with host_path = "/host/agents/other.sock"}]} ]
 
 let test_renderer_rejects_implicit_and_execution_collisions () =
   let reject expected invalid =
@@ -315,9 +464,14 @@ let () = run "Keeper Apple boot plan"
                  ; test_case "identity and runtime refusal order" `Quick test_identity_refusal_priority
                  ; test_case "unreadable facts preserve guest" `Quick test_unreadable_is_not_replacement
                  ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named
+                 ; test_case "an agent guest is compared on its grants" `Quick test_an_agent_guest_is_compared_on_its_grants
+                 ; test_case "an exec plan keeps its digest" `Quick test_an_exec_plan_keeps_its_digest
+                 ; test_case "the parser reads published sockets and init" `Quick test_the_parser_reads_published_sockets_and_init
                  ; test_case "command refusal names fields without credentials" `Quick test_command_refusal_reports_fields_without_values
                  ; test_case "image command refusal preserves its diagnostic" `Quick test_image_command_refusal_preserves_diagnostic]
   ; "boot", [test_case "actual Apple argv projects its labelled plan" `Quick test_boot_projects_the_labelled_plan
+             ; test_case "an agent plan asks for its grants" `Quick test_an_agent_plan_asks_for_its_grants
+             ; test_case "malformed grants are refused" `Quick test_duplicate_grants_are_refused
              ; test_case "ephemeral routing is outside plan identity" `Quick test_ephemeral_routes_do_not_change_plan_identity
              ; test_case "renderer refuses duplicate keys in both orders" `Quick test_renderer_rejects_order_sensitive_duplicates
              ; test_case "renderer refuses implicit and execution collisions" `Quick test_renderer_rejects_implicit_and_execution_collisions

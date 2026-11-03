@@ -1855,6 +1855,7 @@ let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environm
           ; Plan.Named_volume {name=build_volume_name; destination=Keeper_sandbox_microvm.build_volume_guest_root}
           ; Plan.Host_dir {source=microvm_shim_host_dir t; destination=Keeper_sandbox_microvm.shim_guest_dir; read_only=true}]
     ; isolation=Keeper_microvm_backend.all_guest_constraints
+    ; capabilities_added=[]; published_sockets=[]
     ; network; environment
     ; labels=stable_labels @ [Keeper_sandbox_microvm.microvm_backend_label_key,
            Keeper_microvm_backend.to_string Keeper_microvm_backend.Apple_container]

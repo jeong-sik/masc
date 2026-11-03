@@ -819,9 +819,8 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
        (original_inventory_elapsed ()) (Masc.Lane_addon_original_body_inventory.error_to_string error)
    | Ok report ->
      let message = Printf.sprintf
-       "[Startup] original request body inventory: live_unprotected_files=%d live_unprotected_logical_bytes=%Ld protected_digests=%d archive=%s elapsed_s=%.3f"
+       "[Startup] original request body inventory: live_unprotected_files=%d live_unprotected_logical_bytes=%Ld protected_digests=%d elapsed_s=%.3f"
        report.unprotected_files report.unprotected_logical_bytes report.protected_digests
-       (Masc.Lane_addon_original_body_inventory.archive_to_string report.archive)
        (original_inventory_elapsed ()) in
      if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the

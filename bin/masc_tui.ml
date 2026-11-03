@@ -7550,6 +7550,20 @@ let row_list (state : state) : row_list option =
       windowed ~count:runs ~cursor:state.keeper_run_cursor (fun index ->
         state.keeper_run_cursor <- index;
         state.detail_scroll <- index)
+  (* The Identity tab is read by a cursor too, and the drawing keeps the
+     cursor's row in view, so an edge jump names a service. *)
+  | Keepers Keeper_detail
+    when state.detail_tab = Detail_identity && not state.context_inspector_open ->
+      (match state.identity_view with
+       | None -> None
+       | Some (_, providers) ->
+         let listing = Masc_tui_identity_input.current_listing state in
+         windowed
+           ~count:(List.length (Masc_tui_identity_model.identity_connectable ~listing providers))
+           ~cursor:
+             (Masc_tui_identity_model.identity_cursor_clamped ~listing ~providers
+                state.identity_cursor)
+           (fun index -> state.identity_cursor <- index))
   (* Named rather than caught. A surface that grows a row cursor is added
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
@@ -7605,10 +7619,12 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
       pane (fun edge ->
         Keeper_terminal_scroll (if edge = 0 then Masc_tui_types.clamped_scroll_end else 0))
   (* Except with the context inspector open, where the body is that tab's
-     item list and [row_list] owns the cursor -- and except on the Runs tab,
-     where the drawing follows [keeper_run_cursor] and [row_list] has it. *)
+     item list and [row_list] owns the cursor -- and except on the Runs and
+     Identity tabs, where the drawing follows a cursor and [row_list] has it. *)
   | Keepers Keeper_detail
-    when (not state.context_inspector_open) && state.detail_tab <> Detail_runs ->
+    when (not state.context_inspector_open)
+         && state.detail_tab <> Detail_runs
+         && state.detail_tab <> Detail_identity ->
       pane (fun v -> Keeper_detail v)
   | Keepers Keeper_calls -> pane (fun v -> Keeper_calls v)
   | Approvals ->
@@ -36314,6 +36330,10 @@ Use relative paths for resources already held in the package. -->
                 move_item_browser state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
                 move_list_by_rows state ~delta:(direction * page)
+            (* Identity as well: the drawing keeps the cursor's row in view,
+               so a page key that only scrolled was pulled straight back. *)
+            | Keepers Keeper_detail when state.detail_tab = Detail_identity ->
+                move_identity_cursor state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_terminal ->
                 Masc_tui_types.move_keeper_terminal state ~by:(-direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->

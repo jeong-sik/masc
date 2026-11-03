@@ -100,8 +100,11 @@ val injected_on_post_tool_round : t -> bool
     this turn's approval/rejection correlation keys. Both remain in the System
     carrier after tools without rebroadcasting Task, Gate, Lane or other inbox
     state. Operator
-    speech remains [Operator_note] (RFC-0366). A new constructor must declare
-    its class here before it can ride a post-tool round.
+    speech remains [Operator_note] (RFC-0366). [Admitted_scheduled_input]
+    answers [false]: the entry identity is first-round context, and
+    re-injecting it would end tool rounds with a User message again. A new
+    constructor must declare its class here before it can ride a post-tool
+    round.
 
     [Recalled_memory] and [Recalled_memory_status] are first-round blocks as
     well: the judgment is made once, before the turn's first request.

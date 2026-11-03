@@ -1743,6 +1743,13 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   check bool "post-tool round drops the entry block; tool feedback stays newest" false
     (List.exists (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input)
        later.Assembly.blocks);
+  let forced = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
+      ~post_tool_round:true ~previous_assembly:(Some issued_b) ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Admitted_scheduled_input, "stale-entry-bytes"] in
+  check bool "post-tool round filters a directly passed entry block" false
+    (List.exists (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input)
+       forced.Assembly.blocks);
   let missing = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:None ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[] in

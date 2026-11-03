@@ -199,13 +199,14 @@ describe('waiting inventory derivations', () => {
       keeper_name: 'k',
       state: 'waiting',
       waiting_on: [],
-      waiting_count: 5,
-      sources: { event_queue_pending: 3, hitl_pending: 1, future_source: 1 },
+      waiting_count: 6,
+      sources: { event_queue_pending: 3, hitl_pending: 1, observation_unavailable: 1, future_source: 1 },
     } as unknown as DashboardKeeperWaitingKeeper
     const { byStage, unknown } = laneStageBreakdown(entry)
     expect(byStage.queue.map(i => i.source)).toEqual(['event_queue_pending'])
     expect(byStage.queue[0]?.count).toBe('3')
-    expect(byStage.operator.map(i => i.source)).toEqual(['hitl_pending'])
+    expect(byStage.operator.map(i => i.source)).toEqual(['hitl_pending', 'observation_unavailable'])
+    expect(byStage.operator[1]?.tone).toBe('bad')
     expect(byStage.external).toHaveLength(0)
     expect(unknown.map(i => i.source)).toEqual(['future_source'])
   })

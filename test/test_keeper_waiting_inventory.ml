@@ -1115,7 +1115,7 @@ let test_health_placeholder_has_unknown_counts () =
   let health = Server_keeper_waiting_inventory.health_placeholder ~status:Health_status.Warming in
   check bool "not observed" false U.(health |> member "counts_known" |> to_bool);
   List.iter (fun key -> check bool (key ^ " is unknown") true U.(health |> member key = `Null))
-    ["keeper_count"; "total_row_count"; "observed_row_count"; "observed_source_counts"; "read_error_count"; "schedule_ledger"]
+    ["keeper_count"; "total_row_count"; "observed_row_count"; "observed_source_counts"; "read_error_count"; "observation_error_count"; "schedule_ledger"]
 ;;
 
 let admit_stimulus config keeper_name stimulus =

@@ -12657,7 +12657,8 @@ let keeper_turns_projection_complete ~current = function
         current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
           String.equal row.kwr_keeper_name turn.ktr_keeper_name
           && List.for_all (fun item ->
-            item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error)
+            item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error
+            && item.kwi_source <> Tui_decode.Waiting_source_observation_unavailable)
               row.kwr_waiting_on) waiting) rows
   | Ok { Tui_decode.waiting = (Tui_decode.Keeper_waiting_fleet_unreported _
                              | Tui_decode.Keeper_waiting_unavailable _); _ }

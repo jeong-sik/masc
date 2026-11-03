@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardKeeperWaitingInventory } from '../../api'
 import type { Keeper } from '../../types'
 import { KeeperLaneStrip } from '../keeper-workspace/keeper-lane-strip'
-import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel, sourceTone } from './keeper-waiting-inventory-panel'
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
   return {
@@ -264,6 +264,25 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('operator_pending_confirm_store')
     fireEvent.click(container.querySelector('[data-testid="keeper-lane-dev-toggle"]') as HTMLButtonElement)
     expect(container.textContent).toContain('repair_operator_pending_confirms')
+  })
+
+  it('shows a deadline observer failure as an unavailable confirmation count', () => {
+    const inventory = inventoryFixture()
+    inventory.global_pending_confirm_count_known = false
+    inventory.global_pending_confirm_count = 0
+    inventory.global_waiting_on = [{
+      source: 'observation_unavailable',
+      waiting_on: 'operator_pending_confirm_observer',
+      what: '운영자 확인 기한 관측 불가',
+      wake_producer: 'read_model_reader',
+      next_action: 'wait_for_observation_recovery',
+    }]
+
+    render(html`<${KeeperWaitingInventoryPanel} inventory=${inventory} />`, container)
+
+    expect(sourceTone('observation_unavailable')).toBe('bad')
+    expect(container.textContent).toContain('unmapped confirmsunknown')
+    expect(container.textContent).toContain('운영자 확인 기한 관측 불가')
   })
 
   it('renders unknown keeper count when discovery failed', () => {

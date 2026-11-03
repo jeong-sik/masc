@@ -23,11 +23,14 @@ let test_unknown_inventory_data_is_not_pending () =
 
 let test_global_inventory_errors_are_not_targets () =
   let rows = [inventory_row "read_error" "schedule store unreadable";
-              inventory_row "read_error" "approval store unreadable"] in
+              inventory_row "read_error" "approval store unreadable";
+              inventory_row "observation_unavailable" "confirmation deadline unavailable"] in
   let snapshot = `Assoc ["global_waiting_on", `List rows; "keepers", `List []] in
   let items = get (Inbox.waiting_items ~now:1000. snapshot) in
   Alcotest.(check bool) "unavailable sources cannot be selected as operations" true
     (List.for_all (fun (item : Inbox.item) -> item.id = None) items);
+  Alcotest.(check bool) "observer failure is counted as unavailable" true
+    (List.exists (fun (item : Inbox.item) -> String.ends_with ~suffix:"3 unavailable" item.text) items);
   Alcotest.(check bool) "missing global inventory is not an empty workspace" true
     (Result.is_error (Inbox.waiting_items ~now:1000. (`Assoc ["keepers", `List []])))
 

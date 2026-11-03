@@ -6,9 +6,10 @@ val dashboard_json : Workspace.config -> Yojson.Safe.t
 
 val health_json : Workspace.config -> Yojson.Safe.t
 (** Compact health projection from the same typed inventory snapshot. Normal
-    waiting does not imply a fault. Unreadable sources and a schedule recovery
-    mirror make completeness unknown, retain explicitly observed counts, and
-    report a repair reason. No payloads or raw storage errors are exposed. *)
+    waiting does not imply a fault. Unreadable sources, unavailable deadline
+    observation, and a schedule recovery mirror make completeness unknown;
+    explicitly observed counts remain available. No payloads or raw storage
+    errors are exposed. *)
 
 val health_placeholder : status:Health_status.t -> Yojson.Safe.t
 (** No inventory has been observed: all counts remain unknown. The caller
@@ -25,10 +26,10 @@ val keeper_json_by_name :
     The rows have the same shape as [dashboard_json]'s [keepers] entries and
     the per-Keeper endpoint, so another public-read projection can join them
     without recomputing the inventory or inventing a second wire contract.
-    If a fleet-scoped source is unreadable or the schedule ledger is observed
-    only through its recovery mirror, return public error rows instead of
-    attributing them to every Keeper or reporting an incomplete snapshot as
-    healthy. Per-Keeper errors remain in the affected Keeper's projection. *)
+    If a fleet-scoped source is unreadable, its deadline observer is
+    unavailable, or the schedule ledger is observed only through its recovery
+    mirror, return public error rows instead of reporting an incomplete
+    snapshot as healthy. Per-Keeper errors remain in the affected projection. *)
 
 type waiting_source =
   | Event_queue_pending
@@ -40,6 +41,7 @@ type waiting_source =
   | Owner_shutdown
   | Operator_pending_confirm
   | Read_error
+  | Observation_unavailable
 
 val source_of_string : string -> (waiting_source, string) result
 (** Decode the source vocabulary emitted by this inventory. Unknown sources

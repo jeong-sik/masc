@@ -249,7 +249,8 @@ let summarize_keeper_waiting context =
         row.kwr_waiting_on in
       let read_error = List.exists
         (fun (item : Reading.waiting_item) ->
-          item.kwi_source = Reading.Waiting_source_read_error)
+          item.kwi_source = Reading.Waiting_source_read_error
+          || item.kwi_source = Reading.Waiting_source_observation_unavailable)
         row.kwr_waiting_on in
       Waiting_items { schedules; delegate_result_waiting; read_error }
 

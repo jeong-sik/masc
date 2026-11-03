@@ -13,9 +13,12 @@ let test_rearm_after_early_wake () =
 
 let test_native_deadline () =
   Eio_main.run (fun env ->
-    let deadline = Unix.gettimeofday () +. 0.1 in
+    let deadline = Unix.gettimeofday () +. 1.0 in
+    let armed_at = ref None in
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
-      Wall_deadline.sleep_until deadline);
+      Wall_deadline.sleep_until ~on_armed:(fun () -> armed_at := Some (Unix.gettimeofday ())) deadline);
+    check bool "native timer reports arming before the deadline" true
+      (match !armed_at with Some at -> at < deadline | None -> false);
     check bool "the wall deadline has passed" true (Unix.gettimeofday () >= deadline))
 ;;
 

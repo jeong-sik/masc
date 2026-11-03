@@ -11,6 +11,7 @@ type waiting_source =
   | Owner_shutdown
   | Operator_pending_confirm
   | Read_error
+  | Observation_unavailable
 [@@deriving enumerate]
 
 type keeper_state =
@@ -67,6 +68,7 @@ let source_to_string = function
   | Owner_shutdown -> "owner_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
   | Read_error -> "read_error"
+  | Observation_unavailable -> "observation_unavailable"
 ;;
 
 let source_of_string value =
@@ -85,6 +87,7 @@ let all_waiting_sources =
   ; Owner_shutdown
   ; Operator_pending_confirm
   ; Read_error
+  ; Observation_unavailable
   ]
 ;;
 
@@ -946,6 +949,41 @@ let pending_confirms_or_error_rows config =
       ] )
 ;;
 
+let pending_confirm_observation_rows ~before ~after =
+  let status = Pending_confirm_observation.status after in
+  let detail =
+    match status with
+    | Pending_confirm_observation.Not_managed | Pending_confirm_observation.Observed
+      when Pending_confirm_observation.same_revision before after -> None
+    | Pending_confirm_observation.Not_managed | Pending_confirm_observation.Observed ->
+        Some ("changed_during_read", "운영자 확인을 읽는 중 변경됨", "wait_for_observation_recovery", false)
+    | Pending_confirm_observation.Initializing ->
+        Some ("initializing", "운영자 확인 관측 준비 중", "wait_for_observation_recovery", false)
+    | Pending_confirm_observation.Source_unavailable ->
+        Some ("source_unavailable", "운영자 확인 기록 관측 불가", "wait_for_observation_recovery", false)
+    | Pending_confirm_observation.Deadline_unavailable ->
+        Some ("deadline_unavailable", "운영자 확인 기한 관측 불가", "wait_for_observation_recovery", false)
+    | Pending_confirm_observation.Workspace_unobserved ->
+        Some ("workspace_unobserved", "이 workspace의 운영자 확인을 관측하지 않음", "switch_to_workspace", true)
+    | Pending_confirm_observation.Scope_unavailable ->
+        Some ("scope_unavailable", "운영자 확인의 workspace 경로를 확인할 수 없음", "repair_workspace_path", true)
+  in
+  match detail with
+  | None -> [], false
+  | Some (kind, what, next_action, action_required) ->
+      ( [ { keeper_name = None
+        ; source = Observation_unavailable
+        ; waiting_on = "operator_pending_confirm_observer"
+        ; what
+        ; wake_producer = Read_model_reader
+        ; since = None
+        ; due_at = None
+        ; next_action
+        ; detail = `Assoc [ "kind", `String kind ]
+        } ]
+      , action_required )
+;;
+
 let keeper_names_or_error_rows config =
   match Keeper_meta_store.keeper_names_result config with
   | Ok keeper_names -> keeper_names, []
@@ -1220,6 +1258,7 @@ type inventory_snapshot =
   ; keeper_count_known : bool
   ; pending_approval_state : Yojson.Safe.t
   ; pending_confirm_count_known : bool
+  ; pending_confirm_observation_action_required : bool
   ; global_confirm_count : int
   ; per_keeper :
       (string * bool * Keeper_event_queue_persistence.queue_residence * waiting_row list) list
@@ -1250,9 +1289,13 @@ let read_inventory_snapshot ?keeper_name ~read_pending config =
       , [ pending_approval_read_error error ] )
   in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
+  let pending_confirm_before = Pending_confirm_observation.read config in
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config
   in
+  let pending_confirm_after = Pending_confirm_observation.read config in
+  let pending_confirm_observation_rows, pending_confirm_observation_action_required =
+    pending_confirm_observation_rows ~before:pending_confirm_before ~after:pending_confirm_after in
   let schedule_observation = Schedule_store.read_state_observed config in
   let schedule_rows =
     schedule_rows_of_observation ?keeper_name ~keeper_names schedule_observation
@@ -1271,6 +1314,7 @@ let read_inventory_snapshot ?keeper_name ~read_pending config =
     @ global_confirm_rows
     @ keeper_name_read_error_rows
     @ pending_confirm_read_error_rows
+    @ pending_confirm_observation_rows
     @ pending_approval_read_error_rows
   in
   (match keeper_name with
@@ -1281,7 +1325,9 @@ let read_inventory_snapshot ?keeper_name ~read_pending config =
   ; keeper_names
   ; keeper_count_known = keeper_name_read_error_rows = []
   ; pending_approval_state
-  ; pending_confirm_count_known = pending_confirm_read_error_rows = []
+  ; pending_confirm_count_known =
+      pending_confirm_read_error_rows = [] && pending_confirm_observation_rows = []
+  ; pending_confirm_observation_action_required
   ; global_confirm_count = List.length global_confirm_rows
   ; per_keeper
   ; global_rows
@@ -1309,7 +1355,9 @@ let keeper_json_by_name config =
       config
   in
   let fleet_read_errors =
-    List.filter (fun row -> row.source = Read_error) snapshot.global_rows
+    List.filter
+      (fun row -> row.source = Read_error || row.source = Observation_unavailable)
+      snapshot.global_rows
   in
   let recovery_errors =
     match snapshot.schedule_observation with
@@ -1447,32 +1495,42 @@ let schedule_health_observation observation =
 let health_json_of_snapshot snapshot =
   let rows = inventory_rows snapshot in
   let read_errors = List.filter (fun row -> row.source = Read_error) rows in
+  let observation_errors =
+    List.filter (fun row -> row.source = Observation_unavailable) rows in
   let schedule_ledger, schedule_known, schedule_reasons =
     schedule_health_observation snapshot.schedule_observation
   in
   let counts_known =
-    snapshot.keeper_count_known && read_errors = [] && schedule_known
+    snapshot.keeper_count_known && read_errors = [] && observation_errors = [] && schedule_known
   in
-  let reasons =
+  let action_reasons =
     schedule_reasons
     @ List.map (fun row -> row.waiting_on ^ "_unreadable") read_errors
+    @ (if snapshot.pending_confirm_observation_action_required
+       then [ "operator_pending_confirm_observer_unavailable" ] else [])
+    |> List.sort_uniq String.compare
+  in
+  let reasons =
+    action_reasons
+    @ List.map (fun row -> row.waiting_on ^ "_unavailable") observation_errors
     |> List.sort_uniq String.compare
   in
   let status =
-    match read_errors, snapshot.schedule_observation with
-    | _ :: _, _ | [], Error (Corrupt_read_ledger _) -> Health_status.Unavailable
-    | [], Ok (_, Recovery_mirror _) -> Health_status.Degraded
-    | [], Ok (_, (Uninitialized | Primary_ledger)) -> Health_status.Ok
+    match read_errors, observation_errors, snapshot.schedule_observation with
+    | _ :: _, _, _ | _, _ :: _, _ | [], [], Error (Corrupt_read_ledger _) -> Health_status.Unavailable
+    | [], [], Ok (_, Recovery_mirror _) -> Health_status.Degraded
+    | [], [], Ok (_, (Uninitialized | Primary_ledger)) -> Health_status.Ok
   in
-  let work_rows = List.filter (fun row -> row.source <> Read_error) rows in
+  let work_rows =
+    List.filter (fun row -> row.source <> Read_error && row.source <> Observation_unavailable) rows in
   let observed_count = List.length work_rows in
   let reason_json = `List (List.map (fun reason -> `String reason) reasons) in
   `Assoc
     [ "schema", `String "masc.health.keeper_waiting_inventory.v1"
     ; "status", `String (Health_status.to_string status)
-    ; "operator_action_required", `Bool (reasons <> [])
+    ; "operator_action_required", `Bool (action_reasons <> [])
     ; "status_reasons", reason_json
-    ; "operator_action_reasons", reason_json
+    ; "operator_action_reasons", `List (List.map (fun reason -> `String reason) action_reasons)
     ; "counts_known", `Bool counts_known
     ; "keeper_count_known", `Bool snapshot.keeper_count_known
     ; "keeper_count",
@@ -1482,6 +1540,7 @@ let health_json_of_snapshot snapshot =
     ; "observed_row_count", `Int observed_count
     ; "observed_source_counts", `Assoc (source_counts work_rows)
     ; "read_error_count", `Int (List.length read_errors)
+    ; "observation_error_count", `Int (List.length observation_errors)
     ; "read_errors",
       `List
         (List.map
@@ -1509,6 +1568,7 @@ let health_placeholder ~status =
     ; "observed_row_count", `Null
     ; "observed_source_counts", `Null
     ; "read_error_count", `Null
+    ; "observation_error_count", `Null
     ; "read_errors", `Null
     ; "schedule_ledger", `Null
     ]

@@ -61,6 +61,7 @@ const LANE_SOURCE_LABELS: Record<DashboardKeeperWaitingSource, string> = {
   owner_shutdown: '종료 정리',
   operator_pending_confirm: '운영자 확인',
   read_error: '읽기 오류',
+  observation_unavailable: '관측 불가',
 }
 
 const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
@@ -73,6 +74,7 @@ const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   owner_shutdown: 'var(--color-fg-muted)',
   operator_pending_confirm: 'var(--status-warn)',
   read_error: 'var(--color-danger)',
+  observation_unavailable: 'var(--color-danger)',
 }
 
 /** The stage a source enters the keeper through. The pipeline reads left to
@@ -99,6 +101,7 @@ const LANE_SOURCE_STAGE: Record<DashboardKeeperWaitingSource, LaneStage> = {
   owner_shutdown: 'keeper',
   operator_pending_confirm: 'operator',
   read_error: 'queue',
+  observation_unavailable: 'operator',
 }
 
 const SECONDS_PER_MINUTE = 60

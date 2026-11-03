@@ -760,7 +760,11 @@ let render_keeper_list (state : state) =
          match failure with
          | Tui_decode.Keeper_waiting_sources_unavailable errors ->
              errors
-             |> List.map (fun item -> Terminal_text.single_line item.Tui_decode.kwi_waiting_on)
+             |> List.map (fun item ->
+               let detail =
+                 if item.Tui_decode.kwi_source = Tui_decode.Waiting_source_observation_unavailable
+                 then item.kwi_what else item.kwi_waiting_on in
+               Terminal_text.single_line detail)
              |> String.concat ", "
          | Tui_decode.Keeper_waiting_invalid detail -> Terminal_text.single_line detail
        in

@@ -8893,6 +8893,12 @@ let test_decode_keeper_turns_projection_separates_fleet_errors () =
         key, if String.equal key name then replacement else value) fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> assert false
   in
+  let observation_error = replace_error "source" (`String "observation_unavailable") in
+  (match Tui_decode.decode_keeper_turns_projection (wire `Null (`List [ observation_error ])) with
+   | Ok { waiting = Tui_decode.Keeper_waiting_unavailable
+              (Tui_decode.Keeper_waiting_sources_unavailable [ error ]); _ }
+     when error.Tui_decode.kwi_source = Tui_decode.Waiting_source_observation_unavailable -> ()
+   | Ok _ | Error _ -> Alcotest.fail "deadline observation failure must be visible" );
   let valid_waiting = `Assoc
       [ "keeper_name", `String "echo"; "state", `String "idle"; "waiting_count", `Int 0
       ; "since", `Null; "due_at", `Null; "waiting_on", `List [] ] in

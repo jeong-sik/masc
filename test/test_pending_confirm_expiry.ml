@@ -159,12 +159,93 @@ let test_unavailable_wall_timer_waits_for_publication () =
         ~invalidate:(fun ~base_path:_ -> incr invalidations);
       wait_for clock (fun () -> !invalidations >= 1);
       Eio.Time.sleep clock 0.2;
-      check int "failed timer is not retried on a cadence" 1 !waits;
+      check int "failed timer waits before retrying" 1 !waits;
       check int "failed timer does not trigger repeated reads" 1 !reads;
       entries := [];
       Store.write_pending_confirms config [] |> Result.get_ok;
       wait_for clock (fun () -> !reads >= 2);
       check int "a later publication resumes observation" 2 !reads))
+;;
+
+let test_failed_read_recovers_without_publication () =
+  with_workspace (fun env state _config ->
+    let clock = Eio.Stdenv.clock env in
+    let reads = ref 0 and invalidations = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Expiry.For_testing.start ~sw ~clock ~state
+        ~read:(fun _ ->
+          incr reads;
+          if !reads = 1 then Error "injected read failure" else Ok [])
+        ~invalidate:(fun ~base_path:_ -> incr invalidations);
+      wait_for clock (fun () -> !reads >= 2 && !invalidations >= 2);
+      check int "the failed source is retried without a store write" 2 !reads;
+      check int "failure and recovery both invalidate" 2 !invalidations;
+      Eio.Time.sleep clock 0.2;
+      check int "a recovered idle source is not scanned again" 2 !reads))
+;;
+
+let test_unavailable_wall_timer_recovers_without_publication () =
+  with_workspace (fun env state _config ->
+    let clock = Eio.Stdenv.clock env in
+    let text, at = future_time clock 20.0 in
+    let reads = ref 0 and waits = ref 0 and invalidations = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Expiry.For_testing.start_with_sleep ~sw ~clock ~state
+        ~sleep_until:(fun deadline ->
+          incr waits;
+          if !waits = 1 then failwith "injected timer failure";
+          Eio.Time.sleep_until clock deadline)
+        ~read:(fun _ -> incr reads; Ok [fixture ~token:"timer" ~expires_at:(Some text)])
+        ~invalidate:(fun ~base_path:_ -> incr invalidations);
+      wait_for clock (fun () -> !waits >= 2);
+      check int "the unavailable timer is retried without a store write" 2 !waits;
+      check int "timer installation retries do not reread the store" 1 !reads;
+      check int "the timer failure invalidates once" 1 !invalidations;
+      check bool "the deadline is still in the future" true (Eio.Time.now clock < at);
+      Eio.Time.sleep clock 0.2;
+      check int "an armed timer is not retried" 2 !waits))
+;;
+
+let test_replaced_workspace_cancels_retry () =
+  with_workspace (fun env state _config ->
+    let clock = Eio.Stdenv.clock env in
+    let reads = ref 0 and invalidations = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Expiry.For_testing.start ~sw ~clock ~state
+        ~read:(fun _ ->
+          incr reads;
+          if !reads = 1 then Error "injected read failure" else Ok [])
+        ~invalidate:(fun ~base_path:_ -> incr invalidations);
+      wait_for clock (fun () -> !invalidations = 1);
+      let old = Masc.Mcp_server.workspace_scope state in
+      Masc.Mcp_server.set_workspace_config state old.config |> Result.get_ok;
+      Eio.Time.with_timeout_exn clock 0.5 (fun () ->
+        while !reads < 2 do Eio.Time.sleep clock 0.005 done);
+      Eio.Time.sleep clock 1.2;
+      check int "retired scope's retry cannot scan the successor" 2 !reads;
+      check int "the successor does not inherit the old failure" 1 !invalidations))
+;;
+
+let test_timer_failure_still_notifies_expiry () =
+  with_workspace (fun env state _config ->
+    let clock = Eio.Stdenv.clock env in
+    let text, at = future_time clock 2.5 in
+    let reads = ref 0 and waits = ref 0 and invalidations = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Expiry.For_testing.start_with_sleep ~sw ~clock ~state
+        ~sleep_until:(fun deadline ->
+          incr waits;
+          if !waits = 1 then failwith "injected timer failure";
+          Wall_deadline.sleep_until deadline)
+        ~read:(fun _ -> incr reads; Ok [fixture ~token:"timer" ~expires_at:(Some text)])
+        ~invalidate:(fun ~base_path:_ -> incr invalidations);
+      wait_for clock (fun () -> !reads >= 2 && !invalidations >= 2);
+      check bool "the expiry is not published early" true (Eio.Time.now clock >= at);
+      check int "failure and expiry each invalidate once" 2 !invalidations;
+      check int "expiry rereads the store once" 2 !reads;
+      Eio.Time.sleep clock 0.2;
+      check int "an uncleared expiry does not cause another read" 2 !reads;
+      check int "an uncleared expiry does not cause another invalidation" 2 !invalidations))
 ;;
 
 let test_expired_at_start_wakes_once () =
@@ -369,10 +450,18 @@ let () =
           test_change_rearms_and_foreign_does_not_wake
       ; test_case "retired workspace discards an old read" `Quick
           test_replaced_workspace_discards_old_read
-      ; test_case "failed source waits for publication" `Quick
+      ; test_case "failed source accepts publication during backoff" `Quick
           test_failed_read_waits_for_publication
-      ; test_case "unavailable wall timer waits for publication" `Quick
+      ; test_case "unavailable wall timer accepts publication during backoff" `Quick
           test_unavailable_wall_timer_waits_for_publication
+      ; test_case "failed source recovers without publication" `Quick
+          test_failed_read_recovers_without_publication
+      ; test_case "unavailable timer recovers without publication" `Quick
+          test_unavailable_wall_timer_recovers_without_publication
+      ; test_case "workspace replacement cancels retry" `Quick
+          test_replaced_workspace_cancels_retry
+      ; test_case "timer failure still notifies expiry" `Quick
+          test_timer_failure_still_notifies_expiry
       ; test_case "expired entry at startup wakes once" `Quick
           test_expired_at_start_wakes_once
       ; test_case "publication during read rearms deadline" `Quick

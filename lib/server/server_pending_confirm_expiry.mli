@@ -1,6 +1,6 @@
 (** Wake full-health and invalidate the workspace waiting inventory on store
-    attempts, source transitions and confirmation expiry, without periodic
-    store reads. *)
+    attempts, source transitions and confirmation expiry. Failed observations
+    are retried with backoff; healthy sources do not require periodic reads. *)
 val start :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> mono_clock:_ Eio.Time.Mono.t ->
   state:Mcp_server.server_state -> unit

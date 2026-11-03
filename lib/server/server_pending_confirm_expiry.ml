@@ -1,6 +1,7 @@
 (* Pending confirmations change when their own deadline passes, even when no
    writer runs. This worker waits for that deadline, a store publication, or
-   workspace retirement; it never scans on an interval. *)
+   workspace retirement. Failed observations are retried with backoff; a
+   healthy idle source is never scanned on an interval. *)
 module Expiry_key = struct
   type t = string * string
   let compare = compare
@@ -30,7 +31,12 @@ let expiry_plan ~now entries =
     { expired = Expiry_set.empty; next = None } entries
 ;;
 
-let start_with ~sw ~clock ~sleep_until ~(state : Mcp_server.server_state) ~read ~invalidate ~restore =
+let retry_initial_s = 1.0
+let retry_ceiling_s = 60.0
+let next_retry delay = Float.min retry_ceiling_s (delay *. 2.0)
+
+let start_with ~sw ~clock ~sleep_until ~sleep_retry
+    ~(state : Mcp_server.server_state) ~read ~invalidate ~restore =
   let wake = Eio.Stream.create 1 in
   let wake_mu = Stdlib.Mutex.create () in
   let signal () =
@@ -66,17 +72,27 @@ let start_with ~sw ~clock ~sleep_until ~(state : Mcp_server.server_state) ~read 
                 | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                 | exception _ -> `Timer_unavailable)
               (fun () -> Eio.Stream.take wake; `Changed)) in
-  let rec await_usable_next scope next =
+  let await_retry scope delay =
+    Eio.Fiber.first
+      (fun () -> Eio.Promise.await (Mcp_server.workspace_scope_replaced scope); `Replaced)
+      (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Stream.take wake; `Changed)
+          (fun () -> sleep_retry delay; `Retry)) in
+  let rec await_usable_next scope next ~failed ~delay =
     match await_next scope next with
     | `Timer_unavailable ->
-      (* The periodic fallback still owns recovery when the platform cannot
-         install a deadline. Do not spin or kill the server switch. *)
-      Log.Server.error "pending-confirm wall deadline unavailable";
-      invalidate ~base_path:scope.Mcp_server.config.base_path;
-      await_usable_next scope None
+      if not failed then begin
+        Log.Server.error "pending-confirm wall deadline unavailable";
+        invalidate ~base_path:scope.Mcp_server.config.base_path
+      end;
+      (match await_retry scope delay with
+       | `Replaced -> `Replaced
+       | `Changed -> `Changed
+       | `Retry -> await_usable_next scope next ~failed:true ~delay:(next_retry delay))
     | (`Replaced | `Changed | `Deadline) as result -> result in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    let rec scan scope notified source_failed =
+    let rec scan scope notified source_failed delay =
       let result = Eio.Fiber.first
         (fun () -> `Read (read scope.Mcp_server.config))
         (fun () ->
@@ -86,23 +102,26 @@ let start_with ~sw ~clock ~sleep_until ~(state : Mcp_server.server_state) ~read 
       | `Replaced -> follow_current ()
       | `Read _ when not (is_current scope) -> follow_current ()
       | `Read reading ->
-        let notified, next, source_failed = match reading with
-          | Error _ ->
-              (* Store decoder errors may contain confirmation tokens. *)
-              Log.Server.warn "pending-confirm deadline observation failed";
-              if not source_failed then invalidate ~base_path:scope.config.base_path;
-              notified, None, true
-          | Ok entries ->
-              let plan = expiry_plan ~now:(Eio.Time.now clock) entries in
-              if source_failed ||
-                 not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) then
-                invalidate ~base_path:scope.config.base_path;
-              plan.expired, plan.next, false in
-        match await_usable_next scope next with
-        | `Replaced -> follow_current ()
-        | `Changed | `Deadline -> scan scope notified source_failed
+        (match reading with
+         | Error _ ->
+             (* Store decoder errors may contain confirmation tokens. *)
+             if not source_failed then begin
+               Log.Server.warn "pending-confirm deadline observation failed";
+               invalidate ~base_path:scope.config.base_path
+             end;
+             (match await_retry scope delay with
+              | `Replaced -> follow_current ()
+              | `Changed | `Retry -> scan scope notified true (next_retry delay))
+         | Ok entries ->
+             let plan = expiry_plan ~now:(Eio.Time.now clock) entries in
+             if source_failed ||
+                not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) then
+               invalidate ~base_path:scope.config.base_path;
+             match await_usable_next scope plan.next ~failed:false ~delay:retry_initial_s with
+             | `Replaced -> follow_current ()
+             | `Changed | `Deadline -> scan scope plan.expired false retry_initial_s)
     and follow_current () =
-      scan (Mcp_server.workspace_scope state) Expiry_set.empty false in
+      scan (Mcp_server.workspace_scope state) Expiry_set.empty false retry_initial_s in
     follow_current ())
 ;;
 
@@ -126,12 +145,13 @@ let start ~sw ~clock ~mono_clock ~state =
     enqueue ~base_path;
     restore ~base_path in
   start_with ~sw ~clock ~sleep_until:Wall_deadline.sleep_until ~state
-    ~read:read_storage ~invalidate ~restore
+    ~sleep_retry:(Eio.Time.Mono.sleep mono_clock) ~read:read_storage ~invalidate ~restore
 ;;
 
 module For_testing = struct
   let start_with_sleep ~sleep_until ~sw ~clock ~state ~read ~invalidate =
-    start_with ~sw ~clock ~sleep_until ~state ~read ~invalidate ~restore:invalidate
+    start_with ~sw ~clock ~sleep_until ~sleep_retry:(Eio.Time.sleep clock)
+      ~state ~read ~invalidate ~restore:invalidate
 
   let start ~sw ~clock ~state ~read ~invalidate =
     start_with_sleep ~sleep_until:(Eio.Time.sleep_until clock)

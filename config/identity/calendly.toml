@@ -14,6 +14,10 @@ id = "calendly"
 label = "Calendly"
 mcp_url = "https://mcp.calendly.com"
 
+# Measured 2026-11-03: registration refuses the RFC 8252 loopback form with
+# "redirect_uri must start with https in Production", so a login here keeps
+# this server's public callback.
+
 access_token_env = "CALENDLY_ACCESS_TOKEN"
 expires_at_env = "CALENDLY_ACCESS_TOKEN_EXPIRES_AT"
 refresh_token_file = "/home/keeper/.calendly/refresh_token"

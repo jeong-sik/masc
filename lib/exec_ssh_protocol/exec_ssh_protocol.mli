@@ -404,3 +404,70 @@ val major_of_probe : probe -> (major, string) result
     for ["2.4.1"], [Ok V3] for ["3.0.0"]; [Error] naming both sides for a
     major this build does not speak or a version with no numeric major.
     Never raises. *)
+
+(** {1 Guest agent relay}
+
+    The connection between masc and a microVM guest agent reached through
+    [container run --publish-socket] (RFC microvm-guest-agent-over-socket).
+    One connection carries one request. masc writes a {!Relay.request_kind}
+    byte and then, for a run, an ordinary request frame ({!encode_request}).
+    The agent answers with chunks: a [Hello] first, then the shim child's
+    stdout and stderr bytes as they arrive, then one [Exit].
+
+    A chunk is a kind byte, a 4-byte big-endian payload length, and the
+    payload. *)
+module Relay : sig
+  val version : int
+  (** The chunk layout and hello fields this build speaks. A peer with
+      another version is refused, never read past its hello. *)
+
+  type request_kind =
+    | Run  (** an ordinary request frame follows *)
+    | Probe  (** the agent answers with the shim's [--probe] output *)
+
+  val request_kind_byte : request_kind -> char
+  val request_kind_of_byte : char -> request_kind option
+
+  type exit_status =
+    | Exited of int
+    | Signaled of int  (** the guest OS signal number, as in the trailer *)
+
+  type hello =
+    { relay_version : int
+    ; root_read_only : bool
+      (** the agent re-mounted the guest root read-only after binding *)
+    ; uid : int  (** the uid the agent runs as once it has dropped root *)
+    ; gid : int
+    ; no_new_privs : bool
+    }
+
+  type chunk =
+    | Hello of hello
+    | Stdout of string
+    | Stderr of string
+    | Exit of exit_status
+
+  val max_payload_bytes : int
+  (** The largest payload one chunk carries; [decode] refuses a longer one.
+      [encode] splits longer [Stdout] and [Stderr] bytes into several
+      chunks. *)
+
+  val encode : chunk -> string
+  (** One or more complete chunks for [chunk], concatenated. *)
+
+  type decode_error =
+    | Unknown_kind of int  (** the kind byte *)
+    | Oversized of { length : int }
+    | Malformed_hello of string
+    | Malformed_exit of string
+
+  type decoded =
+    | Need_more  (** the chunk at [pos] is not complete yet *)
+    | Chunk of { chunk : chunk; consumed : int }
+        (** [consumed] bytes from [pos] made up [chunk] *)
+
+  val decode : string -> pos:int -> (decoded, decode_error) result
+  (** Reads the chunk that starts at [pos]. An unknown kind byte or an
+      oversized length is an error as soon as the 5-byte header is in
+      [buffer], before the payload arrives. Never raises. *)
+end

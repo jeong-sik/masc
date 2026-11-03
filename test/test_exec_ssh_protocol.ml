@@ -591,6 +591,122 @@ let test_a_cut_off_frame_is_not_payload () =
   check string "output without a separator is kept" "warn\n"
     (settle_acceptance_head "warn\n")
 
+(* {1 Guest agent relay} *)
+
+module Relay = Exec_ssh_protocol.Relay
+
+(* A raw chunk with any kind byte and payload, for the cases [encode] never
+   writes. *)
+let relay_frame kind payload =
+  let length = String.length payload in
+  let bytes = Bytes.create (5 + length) in
+  Bytes.set bytes 0 kind;
+  Bytes.set_int32_be bytes 1 (Int32.of_int length);
+  Bytes.blit_string payload 0 bytes 5 length;
+  Bytes.to_string bytes
+
+(* Every chunk in [bytes], in order. Fails on an error or a cut tail. *)
+let relay_decode_all bytes =
+  let rec go pos acc =
+    if pos = String.length bytes
+    then List.rev acc
+    else
+      match Relay.decode bytes ~pos with
+      | Ok (Relay.Chunk { chunk; consumed }) -> go (pos + consumed) (chunk :: acc)
+      | Ok Relay.Need_more -> fail "a complete stream ended in the middle of a chunk"
+      | Error _ -> fail "a chunk this module encoded did not decode"
+  in
+  go 0 []
+
+let relay_hello =
+  Relay.{ relay_version = Relay.version
+        ; root_read_only = true
+        ; uid = 502
+        ; gid = 20
+        ; no_new_privs = true }
+
+let test_relay_chunks_roundtrip () =
+  let chunks =
+    Relay.[ Hello relay_hello
+          ; Stdout "out"
+          ; Stderr "err\x1e"
+          ; Stdout ""
+          ; Exit (Exited 3)
+          ; Exit (Signaled 9) ]
+  in
+  check bool "every chunk decodes to itself, in order" true
+    (relay_decode_all (String.concat "" (List.map Relay.encode chunks)) = chunks)
+
+let test_relay_splits_long_output () =
+  let bytes =
+    String.init (2 * Relay.max_payload_bytes + 7) (fun index -> Char.chr (index mod 256))
+  in
+  match relay_decode_all (Relay.encode (Relay.Stdout bytes)) with
+  | [ Relay.Stdout first; Relay.Stdout second; Relay.Stdout third ] ->
+    check int "the first chunk is at the limit" Relay.max_payload_bytes (String.length first);
+    check int "the last chunk carries the rest" 7 (String.length third);
+    check bool "the pieces join back to the output" true (first ^ second ^ third = bytes)
+  | _ -> fail "long output did not become three stdout chunks"
+
+let test_relay_waits_for_a_whole_chunk () =
+  let whole = Relay.encode (Relay.Stdout "payload") in
+  for cut = 0 to String.length whole - 1 do
+    match Relay.decode (String.sub whole 0 cut) ~pos:0 with
+    | Ok Relay.Need_more -> ()
+    | Ok (Relay.Chunk _) | Error _ -> failf "a chunk cut at %d bytes was read" cut
+  done
+
+let test_relay_refuses_bad_headers () =
+  (match Relay.decode (relay_frame '\009' "") ~pos:0 with
+   | Error (Relay.Unknown_kind kind) -> check int "the unknown kind byte" 9 kind
+   | Ok _ | Error _ -> fail "an unknown kind byte was read");
+  let header length =
+    let bytes = Bytes.create 5 in
+    Bytes.set bytes 0 '\002';
+    Bytes.set_int32_be bytes 1 length;
+    Bytes.to_string bytes
+  in
+  List.iter
+    (fun (label, length) ->
+       match Relay.decode (header length) ~pos:0 with
+       | Error (Relay.Oversized _) -> ()
+       | Ok _ | Error _ -> failf "%s was waited for instead of refused" label)
+    [ "a length past the limit", Int32.of_int (Relay.max_payload_bytes + 1)
+    ; "a negative length", Int32.min_int ]
+
+let test_relay_hello_is_strict () =
+  List.iter
+    (fun (label, payload) ->
+       match Relay.decode (relay_frame '\001' payload) ~pos:0 with
+       | Error (Relay.Malformed_hello _) -> ()
+       | Ok _ | Error _ -> failf "%s was read as a hello" label)
+    [ "a missing field", {|{"relay_version":1,"root_read_only":true,"uid":502,"gid":20}|}
+    ; "a mistyped field",
+      {|{"relay_version":"1","root_read_only":true,"uid":502,"gid":20,"no_new_privs":true}|}
+    ; "an unknown field",
+      {|{"relay_version":1,"root_read_only":true,"uid":502,"gid":20,"no_new_privs":true,"extra":0}|}
+    ; "a repeated field",
+      {|{"relay_version":1,"relay_version":1,"root_read_only":true,"uid":502,"gid":20,"no_new_privs":true}|}
+    ; "not an object", {|[1]|}
+    ; "not JSON", "{" ]
+
+let test_relay_exit_is_strict () =
+  List.iter
+    (fun (label, payload) ->
+       match Relay.decode (relay_frame '\004' payload) ~pos:0 with
+       | Error (Relay.Malformed_exit _) -> ()
+       | Ok _ | Error _ -> failf "%s was read as an exit" label)
+    [ "a short payload", "\000\000\000\000"
+    ; "an unknown tag", "\007\000\000\000\001" ]
+
+let test_relay_request_kinds_are_closed () =
+  List.iter
+    (fun kind ->
+       check bool "a kind byte reads back as its kind" true
+         (Relay.request_kind_of_byte (Relay.request_kind_byte kind) = Some kind))
+    Relay.[ Run; Probe ];
+  check bool "another byte is no kind" true (Relay.request_kind_of_byte 'X' = None)
+
 let () =
   run "exec ssh protocol"
     [ "frame", [ test_case "roundtrip" `Quick test_frame_roundtrip
@@ -644,4 +760,12 @@ let () =
                ; test_case "carries the release it was built from" `Quick
                    test_probe_carries_the_release_it_was_built_from
                ; test_case "major is spoken or a skew" `Quick
-                   test_probe_major_is_spoken_or_a_skew ] ]
+                   test_probe_major_is_spoken_or_a_skew ]
+    ; "relay", [ test_case "chunks roundtrip" `Quick test_relay_chunks_roundtrip
+               ; test_case "long output is split" `Quick test_relay_splits_long_output
+               ; test_case "a cut chunk waits" `Quick test_relay_waits_for_a_whole_chunk
+               ; test_case "bad headers are refused" `Quick test_relay_refuses_bad_headers
+               ; test_case "hello is strict" `Quick test_relay_hello_is_strict
+               ; test_case "exit is strict" `Quick test_relay_exit_is_strict
+               ; test_case "request kinds are closed" `Quick
+                   test_relay_request_kinds_are_closed ] ]

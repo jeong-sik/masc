@@ -299,6 +299,10 @@ type event =
           mints, as {!Masc.Keeper_event_bridge.public_custom_event_type}
           spells them on the wire. *)
   | Snapshot of string
+  | Execution_snapshot
+      (** [execution_snapshot]: a backlog or goal index write, or the
+          server's periodic refresh. The Work surface and the Verification
+          queue read again on it. *)
       (** A whole-projection push; the name is kept, the payload is not. Which
           types these are comes from the wire's own routing table
           ({!Masc.Dashboard_event_slices}) rather than a list here, because

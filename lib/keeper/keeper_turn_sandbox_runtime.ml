@@ -1702,6 +1702,12 @@ type microvm_start_failure =
       (** Neither the keeper nor the workspace names a size that parses, so
           there is nothing to boot the guest with or compare a running one
           against. *)
+  | Delivery_unresolved of string
+      (** The keeper TOML could not be read for [microvm_delivery], so there
+          is no knowing which guest to boot or compare a running one with. *)
+  | Agent_socket_unavailable of Keeper_microvm_agent_socket.preparation_error
+      (** The host end of the agent's socket could not be made ready before
+          the boot that publishes it. *)
   | Unadoptable_guest_not_removed of string
       (** A running guest that may not be adopted -- its snapshot died with
           an older server, or its image, size or proxy port is not what the
@@ -1761,6 +1767,9 @@ let microvm_start_failure_message failure =
   | Network_unexpressible detail -> failed detail
   | Image_unresolved error -> failed (image_unresolved_message error)
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
+  | Delivery_unresolved detail -> failed ("microvm_delivery_unresolved: " ^ detail)
+  | Agent_socket_unavailable error ->
+    failed (Keeper_microvm_agent_socket.preparation_error_message error)
   | Unadoptable_guest_not_removed detail ->
     failed ("a running guest that cannot be adopted was not removed: " ^ detail)
   | Previous_mode_guest_not_removed { container_name; detail } ->
@@ -1811,6 +1820,8 @@ let microvm_start_failure_cause failure =
   | Image_unresolved _
   | Guest_state_unreadable _
   | Guest_size_invalid _
+  | Delivery_unresolved _
+  | Agent_socket_unavailable _
   | Unadoptable_guest_not_removed _
   | Previous_mode_guest_not_removed _
   | Adopted_guest_volume_unverified _
@@ -1824,10 +1835,36 @@ let microvm_start_failure_cause failure =
   | Boot_command_failed _ -> Sandbox_unavailable detail
 ;;
 
+(* Read where a guest's plan is made, as [observation_run] is read where a
+   route is built: the switch is TOML-owned, and every turn assesses its
+   keeper's guest again, so a changed choice is the next turn's plan.
+
+   A keeper with no declaration has chosen nothing, the same as a declaration
+   without the key. A running keeper was admitted with one, so this is a
+   declaration removed since, or a guest started with meta alone. A
+   declaration that is there and cannot be read is no choice to fall back
+   from: the plan waits until it can be read. *)
+let microvm_delivery_for ~base_path ~keeper_name =
+  let default = Keeper_types_profile_sandbox.default_microvm_delivery in
+  match
+    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      keeper_name
+  with
+  | Ok defaults -> Ok (Option.value defaults.microvm_delivery ~default)
+  | Error { Keeper_types_profile.kind = Declaration_not_found _; _ } -> Ok default
+  | Error
+      ({ Keeper_types_profile.kind =
+           Keeper_types_profile.(
+             Read_error | Parse_error | Profile_error | Invalid_name | Unknown_deny_tool _)
+       ; _
+       } as error) -> Error (Keeper_types_profile.keeper_toml_load_error_to_string error)
+;;
+
 (* The same immutable request drives comparison and Boot argv. Volume names,
    mount sources and stable labels are projections here; provisioning and
    policy route discovery belong to the Boot execution. *)
-let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment
+let requested_apple_plan (t : t) ~delivery ~image ~guest_size ~identity_host_dir ~environment
     ~config_mount ~stable_labels =
   let open Result.Syntax in
   let volume_name result = Result.map_error (fun detail -> Guest_provisions_unavailable detail) result in
@@ -1845,7 +1882,7 @@ let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environm
     | Keeper_types_profile_sandbox.Network_inherit -> Plan.Network_inherit
     | Keeper_types_profile_sandbox.Network_policy ->
       Plan.Network_policy {name=Keeper_sandbox_microvm.policy_network_name ~keeper_name:t.meta.name} in
-  Ok
+  let exec_plan =
     { Plan.image; guest_size; user=Printf.sprintf "%d:%d" t.uid t.gid
     ; working_directory=Keeper_sandbox_microvm.work_volume_guest_root
     ; command=["tail"; "-f"; "/dev/null"]
@@ -1859,7 +1896,14 @@ let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environm
     ; network; environment
     ; labels=stable_labels @ [Keeper_sandbox_microvm.microvm_backend_label_key,
            Keeper_microvm_backend.to_string Keeper_microvm_backend.Apple_container]
-    }
+    } in
+  match delivery with
+  | Keeper_types_profile_sandbox.Exec_per_request -> Ok exec_plan
+  | Keeper_types_profile_sandbox.Agent_socket ->
+    Ok (Keeper_microvm_agent_socket.plan ~uid:t.uid ~gid:t.gid
+          ~host_socket:(Keeper_microvm_agent_socket.host_path ~base_path:t.config.base_path
+                          ~guest_name:(keeper_vm_name t))
+          exec_plan)
 
 let start_process_bound_microvm_container ?timeout_sec (t : t) =
   (* The runtime is read once, before anything is spawned. A keeper whose
@@ -2633,7 +2677,9 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode) in
   let identity_host_dir = Store.host_path ~base_path:t.config.base_path
       ~keeper_name:t.meta.name ~backend ~network_mode:t.network_mode in
-  let* plan = requested_apple_plan t ~image ~guest_size ~identity_host_dir
+  let* delivery = microvm_delivery_for ~base_path:t.config.base_path ~keeper_name:t.meta.name
+    |> Result.map_error (fun detail -> Delivery_unresolved detail) in
+  let* plan = requested_apple_plan t ~delivery ~image ~guest_size ~identity_host_dir
       ~environment:identity_environment ~config_mount ~stable_labels in
   let* () = Plan.validate plan |> Result.map_error (fun errors -> Invalid_boot_plan errors) in
   let identity_reading = match stored with
@@ -2705,7 +2751,9 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
         ~network_mode:t.network_mode ~timeout_sec captured
       |> Result.map_error (fun error -> Guest_identity_store_unavailable error) in
     let boot_environment = Store.environment snapshot ~container_config_dir in
-    if boot_environment <> plan.environment then
+    (* The plan's environment is this identity wiring plus what the agent
+       hands its requests; only the wiring can have moved since. *)
+    if boot_environment <> identity_environment then
       Error (Github_identity_invalid "identity wiring changed while preparing the guest; retry with a new request")
     else
       let* () = Keeper_sandbox_microvm.image_present_for backend ~name:t.meta.sandbox_image
@@ -2725,6 +2773,16 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
           | Keeper_sandbox_microvm.Apple_network_unavailable detail -> Network_unexpressible detail
           | Keeper_sandbox_microvm.Apple_constraints_unexpressible refusals ->
             Constraints_unexpressible {backend; refusals}) in
+      (* Last before the boot: a socket file left by a guest that did not end
+         cleanly stops [container run] (RFC microvm-guest-agent-over-socket 3.6). *)
+      let guest_presence () =
+        Keeper_microvm_guest_inventory.read ~backend ~guest_name:container_name ~timeout_sec
+        |> Result.map_error Keeper_microvm_guest_inventory.error_message in
+      let* () = List.fold_left (fun previous {Plan.host_path; guest_path = _} ->
+          let* () = previous in
+          Keeper_microvm_agent_socket.prepare_host_socket ~guest_presence host_path
+          |> Result.map_error (fun error -> Agent_socket_unavailable error))
+          (Ok ()) plan.published_sockets in
       bind_github_identity_snapshot t (Guest_identity snapshot);
       let status, output = run_argv_with_status ~timeout_sec argv in
       let* postboot = read_apple_guest ~timeout_sec ~container_name in

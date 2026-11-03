@@ -1349,7 +1349,7 @@ let main () =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   match Array.to_list Sys.argv with
   | [ _; "--probe" ] -> print_endline (Exec_ssh_protocol.render_probe (probe ()))
-  | [ argv0; "--serve"; socket; owner ] ->
+  | [ argv0; flag; socket; owner ] when String.equal flag Exec_ssh_protocol.Relay.serve_flag ->
     Shim_agent.main ~host_signal_number ~argv0 ~socket ~owner
   | [ _ ] -> run ()
   | _ ->

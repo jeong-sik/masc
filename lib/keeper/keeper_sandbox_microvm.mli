@@ -273,6 +273,13 @@ val exec_argv_for :
     name and the command and spells stdin [--stream]; the other two take the
     command bare with [-i]. *)
 
+val request_environment : shim_config_path:string -> (string * string) list
+(** The environment a request runs with however it reaches the guest: the
+    writable guest [HOME] ({!Keeper_microvm_backend.scratch_guest_root}) and
+    the shim config location. {!shim_exec_prefix_for} sends it as [--env] on
+    every exec; an agent guest boots with it
+    ({!Keeper_microvm_agent_socket.plan}) and its requests inherit it. *)
+
 val shim_exec_prefix_for :
   ?stdin:bool ->
   Keeper_microvm_backend.t ->

@@ -980,6 +980,15 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
   @ command_argv
 ;;
 
+(* What a request finds in its environment however it reaches the guest:
+   [--env] on each exec below, or the agent's own environment when the agent
+   serves it ({!Keeper_microvm_agent_socket.plan}). *)
+let request_environment ~shim_config_path =
+  [ "HOME", Backend.scratch_guest_root
+  ; Exec_ssh_protocol.shim_config_env_var, shim_config_path
+  ]
+;;
+
 (** The prefix the remote lane delivers a framed shim request through.
 
     It differs from {!exec_argv_for} in one thing the shim cannot do without:
@@ -995,22 +1004,18 @@ let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~comma
     (0.6.16, 2026-09-04). For msb, [--user] is omitted; the work volume's
     [uid=,gid=] mount places writes at the right host uid. *)
 let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+  let environment_args =
+    List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ])
+      (request_environment ~shim_config_path) in
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata ->
     Ok
       (command_argv_for backend
        @ [ "exec" ]
        @ (if stdin then Backend.exec_stdin_args backend else [])
-       @ [ "--user"
-         ; Printf.sprintf "%d:%d" uid gid
-         ; "-w"
-         ; remote_root
-         ; "--env"
-         ; "HOME=" ^ Backend.scratch_guest_root
-         ; "--env"
-         ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
-         ; container_name
-         ]
+       @ [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; remote_root ]
+       @ environment_args
+       @ [ container_name ]
        @ Backend.command_separator backend)
   | Backend.Microsandbox ->
     (* msb [exec --user] names a guest user, not the uid:gid this lane maps
@@ -1022,14 +1027,9 @@ let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remo
       (command_argv_for backend
        @ [ "exec" ]
        @ (if stdin then Backend.exec_stdin_args backend else [])
-       @ [ "-w"
-         ; remote_root
-         ; "--env"
-         ; "HOME=" ^ Backend.scratch_guest_root
-         ; "--env"
-         ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
-         ; container_name
-         ]
+       @ [ "-w"; remote_root ]
+       @ environment_args
+       @ [ container_name ]
        @ Backend.command_separator backend)
 ;;
 

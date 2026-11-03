@@ -660,6 +660,7 @@ let parse_probe (s : string) : (probe, string) result =
 
 module Relay = struct
   let version = 1
+  let serve_flag = "--serve"
 
   type request_kind =
     | Run

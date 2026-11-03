@@ -421,6 +421,10 @@ module Relay : sig
   (** The chunk layout and hello fields this build speaks. A peer with
       another version is refused, never read past its hello. *)
 
+  val serve_flag : string
+  (** The shim argument that makes it the agent:
+      [masc-exec-shim --serve SOCKET UID:GID]. *)
+
   type request_kind =
     | Run  (** an ordinary request frame follows *)
     | Probe  (** the agent answers with the shim's [--probe] output *)

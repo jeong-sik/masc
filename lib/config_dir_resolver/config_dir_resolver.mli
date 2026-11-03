@@ -206,6 +206,12 @@ val microvm_identity_dir : base_path:string -> backend:string -> string
 (** [<base_path>/.masc/microvm/identity/<backend>/]. The caller supplies the
     canonical backend spelling; this leaf resolver does not select a runtime. *)
 
+val microvm_agent_socket_dir : base_path:string -> string
+(** [<base_path>/.masc/microvm/agent/]. The host ends of the sockets Apple
+    [container] publishes for guest agents (RFC microvm-guest-agent-over-socket
+    3.6). A process that can connect to one can have that guest's agent run a
+    request as its keeper, so the directory is the server's alone. *)
+
 val wiki_dir : base_path:string -> string
 (** [<base_path>/.masc/wiki/]. The wiki's pages with its [index.md] and
     [log.md]. *)

@@ -5488,6 +5488,17 @@
  (deps ../bin/masc_exec_shim.exe)
  (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
 
+; RFC microvm-guest-agent-over-socket: the host end of a guest agent
+; connection, against the real agent relay and shim and against listeners
+; that act out a VM runtime before the agent listens.
+(test
+ (name test_keeper_guest_socket)
+ (modules test_keeper_guest_socket)
+ (enabled_if (= %{system} linux))
+ (libraries masc_test_deps shim_agent exec_shim exec_ssh_protocol eio_main cstruct unix)
+ (deps ../bin/masc_exec_shim.exe)
+ (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
+
 (test
  (name test_shim_clock)
  (modules test_shim_clock)

@@ -59,13 +59,13 @@ type refusal =
             native claim. *)
   ; decoder : decoder
   ; detail : string  (** The decoder's own message. *)
-  ; aside : string list
-        (** Generic stopped-writer move scope. For a record
-            it is that file. For a native claim it is the slot directory, then
-            the binding and observations of the instance the slot names, when
-            that could be read and they exist; recovering #45106 moved all
-            three. For [Tool_request_payload] these are diagnostic locators,
-            not a complete cut list: linked original bundles require review. *)
+  ; delete : string list
+        (** What fresh state deletes with the server stopped. For a record it
+            is that file. For a native claim it is the slot directory, then the
+            binding and observations of the instance the slot names, when that
+            could be read and they exist. For a tool request owner it is the
+            record's scope directory and, when it exists, the scope's request
+            body directory. *)
   }
 
 type report =
@@ -81,9 +81,8 @@ val on_refusal : Store.t -> string
     decode. *)
 
 val fresh_state_step : refusal -> string
-(** Store-specific fresh-state guidance. Generic records name their stopped-
-    writer move scope; consumer payload refusals require reconciliation and
-    backup of the complete linked bundle before any reviewed cut. *)
+(** The fresh-state line the preflight prints: stop the server, delete
+    [delete], start the new build. *)
 
 val scan : ?validate_tool_request:payload_validator -> Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's

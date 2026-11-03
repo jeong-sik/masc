@@ -46,7 +46,7 @@ type refusal =
   { path : string
   ; decoder : decoder
   ; detail : string
-  ; aside : string list
+  ; delete : string list
   }
 
 type report =
@@ -80,11 +80,8 @@ let on_refusal = function
      does reading that request"
 
 let fresh_state_step refusal =
-  if refusal.decoder=Tool_request_payload then
-    "docs/guides/DURABLE-STORE-HARD-CUT.md: reconcile and back up the complete Librarian original/parent/gate bundle and dependent source and ACK evidence before setting aside a reviewed scope"
-  else Printf.sprintf
-    "stop the server, move %s aside, start the new build"
-    (String.concat " and " refusal.aside)
+  Printf.sprintf "stop the server, delete %s, start the new build"
+    (String.concat " and " refusal.delete)
 
 (* The Lane Add-on store root the runtime opens below the workspace's .masc
    directory (Lane_addon_runtime builds it the same way at each entry point). *)
@@ -133,21 +130,21 @@ let removed path =
    to [decode]. A file removed between the listing and the read is absent, and
    so is one removed while it was checked: a running server settles an
    original by moving its record and then the body the check reads next. *)
-let read_record ~after_read report ~path decode =
+let read_record ~after_read ~delete report ~path decode =
   match Fs_compat.load_file_opt path with
   | exception Sys_error detail ->
-    refused report { path; decoder = Json; detail; aside = [ path ] }
+    refused report { path; decoder = Json; detail; delete = delete path }
   | None -> report
   | Some bytes ->
     after_read path;
     (match Yojson.Safe.from_string bytes with
      | exception Yojson.Json_error detail ->
-       refused report { path; decoder = Json; detail; aside = [ path ] }
+       refused report { path; decoder = Json; detail; delete = delete path }
      | json ->
        (match decode json with
         | Ok () -> counted report
         | Error (decoder, detail) ->
-          if removed path then report else refused report { path; decoder; detail; aside = [ path ] }))
+          if removed path then report else refused report { path; decoder; detail; delete = delete path }))
 
 let decoded decoder result = Result.map_error (fun detail -> decoder, detail) result
 
@@ -168,14 +165,18 @@ let tool_request_owner_entry name =
   | Staged_entry -> Skipped
   | Unknown_entry -> Refused (Tool_request_inventory, "unknown entry in original request namespace")
 
-let read_entries ~after_read report ~dir ~entry decode names =
+(* What fresh state deletes for a refused record when nothing else reads it
+   with that record. *)
+let record_alone path = [ path ]
+
+let read_entries ~after_read ~delete report ~dir ~entry decode names =
   List.fold_left
     (fun report name ->
        let path = Filename.concat dir name in
        match entry name with
        | Skipped -> report
-       | Refused (decoder, detail) -> refused report { path; decoder; detail; aside = [ path ] }
-       | Record -> read_record ~after_read report ~path (decode ~name ~path))
+       | Refused (decoder, detail) -> refused report { path; decoder; detail; delete = delete path }
+       | Record -> read_record ~after_read ~delete report ~path (decode ~name ~path))
     report
     names
 
@@ -183,14 +184,14 @@ let scan_bindings ~after_read root =
   let dir = Filename.concat root Lane_addon_store.bindings_directory in
   let* names = entries dir in
   Ok
-    (read_entries ~after_read empty ~dir ~entry:json_entry
+    (read_entries ~after_read ~delete:record_alone empty ~dir ~entry:json_entry
        (fun ~name:_ ~path json ->
           let* () = decoded Retained_binding (Lane_addon_runtime.check_retained_binding json) in
           decoded Inventory_record (Lane_addon_runtime.check_inventory_record ~path json))
        names)
 
 (* Records grouped one directory deep: [<store>/<digest>/<digest>.json]. *)
-let scan_grouped ~after_read root directory ~entry decode =
+let scan_grouped ~after_read ~delete root directory ~entry decode =
   let dir = Filename.concat root directory in
   let* groups = entries dir in
   List.fold_left
@@ -201,7 +202,9 @@ let scan_grouped ~after_read root directory ~entry decode =
        then Ok report
        else
          let* names = entries group_dir in
-         Ok (read_entries ~after_read report ~dir:group_dir ~entry (decode ~group) names))
+         Ok
+           (read_entries ~after_read ~delete:(delete ~group ~group_dir) report ~dir:group_dir
+              ~entry (decode ~group) names))
     (Ok empty)
     groups
 
@@ -218,9 +221,9 @@ let check_action ~group ~name json =
   then Ok ()
   else Error "retained receipt belongs to a different request"
 
-(* The binding and observations of the instance a native claim holds go aside
-   with the slot: recovering #45106 moved all three, and a binding left behind
-   keeps retrying the cleanup of a slot that is gone. *)
+(* The binding and observations of the instance a native claim holds are
+   deleted with the slot: a binding left behind keeps retrying the cleanup of a
+   slot that is gone. *)
 let instance_records root instance =
   [ Lane_addon_store.binding_path instance; Lane_addon_store.observation_dir instance ]
   |> List.map (Filename.concat root)
@@ -238,7 +241,7 @@ let scan_native_claims root =
     (List.fold_left
        (fun report name ->
           let slot_dir = Filename.concat dir name in
-          let aside instance =
+          let delete instance =
             slot_dir :: Option.fold ~none:[] ~some:(instance_records root) instance
           in
           match Lane_addon_runtime.native_claim_slot_of_name name with
@@ -251,7 +254,7 @@ let scan_native_claims root =
                  { path = slot_dir
                  ; decoder = Native_lease
                  ; detail = lease.refusal
-                 ; aside = aside lease.refused_instance
+                 ; delete = delete lease.refused_instance
                  }
              | Ok None -> counted report
              | Ok (Some recorded) ->
@@ -268,7 +271,7 @@ let scan_native_claims root =
                     { path = Filename.concat slot_dir recorded.history
                     ; decoder = Cleanup_descriptor
                     ; detail
-                    ; aside = aside (Some recorded.instance)
+                    ; delete = delete (Some recorded.instance)
                     })))
        empty
        names)
@@ -280,10 +283,12 @@ let scan_with ?(validate_tool_request=(fun ~read:_ ~read_scope:_ ~read_body:_ _ 
     | Store.Bindings -> scan_bindings ~after_read root
     | Native_claims -> scan_native_claims root
     | Actions ->
-      scan_grouped ~after_read root Lane_addon_store.actions_directory ~entry:json_entry
+      scan_grouped ~after_read ~delete:(fun ~group:_ ~group_dir:_ -> record_alone) root
+        Lane_addon_store.actions_directory ~entry:json_entry
         (fun ~group ~name ~path:_ json -> check_action ~group ~name json |> decoded Action_receipt)
     | Exact_requests ->
-      scan_grouped ~after_read root Lane_addon_store.exact_requests_directory ~entry:json_entry
+      scan_grouped ~after_read ~delete:(fun ~group:_ ~group_dir:_ -> record_alone) root
+        Lane_addon_store.exact_requests_directory ~entry:json_entry
         (fun ~group:_ ~name:_ ~path:_ json ->
            Lane_addon_exact.check_retained_record json |> decoded Exact_record)
     | Tool_request_owners ->
@@ -297,8 +302,15 @@ let scan_with ?(validate_tool_request=(fun ~read:_ ~read_scope:_ ~read_body:_ _ 
           Error (path ^ ": " ^ operation ^ ": " ^ Unix.error_message error) in
       let read_body_bytes ~scope ~request_digest =
         read_text (Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest)) in
-      scan_grouped ~after_read root Lane_addon_store.tool_request_owners_directory
-        ~entry:tool_request_owner_entry
+      (* Discovery reads a scope as a whole and fails it on one record it
+         cannot read, so fresh state deletes the scope: its owner records and
+         its request bodies. *)
+      let scope_directories ~group ~group_dir _ =
+        group_dir
+        :: List.filter exists
+             [ Filename.concat root (Filename.concat Lane_addon_store.tool_request_bodies_directory group) ] in
+      scan_grouped ~after_read ~delete:scope_directories root
+        Lane_addon_store.tool_request_owners_directory ~entry:tool_request_owner_entry
         (fun ~group ->
           (* Share verified body decoding while checking this physical scope.
              Every parent/body/scope read still observes the current bytes.

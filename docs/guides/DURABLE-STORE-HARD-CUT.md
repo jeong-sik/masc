@@ -5,7 +5,7 @@
 binary when this check fails. `rows` is the number examined by a store;
 `refused` is the number that its current reader rejected. The final error sums
 refusals across stores, not just the last lines printed. A store with
-`refused=0` needs no cleanup because another store failed.
+`refused=0` needs nothing because another store failed.
 
 Each store prints `scan_started` before reading and `scan_elapsed_s` when the
 read returns, followed by its row/refusal report. Large histories can take time
@@ -15,250 +15,82 @@ records, scope listings and body bytes are still read on every request. Changed,
 missing or unreadable bodies receive the current decoder's refusal. This reuse
 does not persist between scope scans or installations.
 
-`scan_failed` means the scan could not complete;
-it is not an empty store or permission to reset it. `first refusal` is one
-example, not an inventory of every affected file. `on refusal` describes the
-runtime consequence, not an instruction to delete data.
+`scan_failed` means the scan could not complete; it is not an empty store.
+`first refusal` is one example, not an inventory of every affected file.
+`on refusal` describes what the running server does with such a row.
 
 The `memory OS current snapshot` scan also reports `pending recovery` for a
-readable publication receipt. This is not a decoder refusal: the check leaves
-the receipt, snapshot, journal and notification for their owner and cannot
-establish that recovery will succeed. Installation waits for that uncertainty
-to be resolved. A live writer may finish it and a later scan may pass. If it
-does not, preserve the receipt and its linked state; use the compatible owner
-only after verifying the workspace and its evidence. Do not delete or set aside
-a receipt merely because it is pending, and do not dispatch its notification
-from a disconnected inspection process.
+readable publication receipt. That receipt is current state, not a refusal: the
+running owner finishes the publication, and installation waits until a later
+scan passes.
 
-## Inspect the candidate and preserve the evidence
+## Fresh state
 
-Use the helper from the build being installed, against the resolved workspace
-printed by the installer. For a local Dune artifact:
+A build reads only the stored format it writes. State in an earlier format is
+not read, converted or migrated. The change that alters a format says what is
+no longer read and what to delete in its **Fresh state required** entry in
+`CHANGELOG.md` or `changelog.d/`.
+
+1. Stop every server and other writer for the workspace.
+2. Delete what the entry names. Lane Add-on stores also print a `fresh state`
+   line with the paths to delete.
+3. Run the candidate's `validate-stores` again. Every store passes.
+4. Install and start the server.
+
+Run the helper from the build being installed, against the workspace the
+installer prints:
 
 ```sh
 _build/default/bin/deployment_preflight_helper.exe validate-stores \
-  --base-path /path/to/workspace > /path/to/preflight.log 2>&1
+  --base-path /path/to/workspace
 ```
 
-Keep the exit status as well as the log. A live scan is a diagnosis; writers
-can change counts and files while it runs. Before any hard cut:
+## What goes with each store
 
-1. Record the candidate commit and helper identity, workspace, each failed
-   store, counts, full file paths and decoder errors. Read the change's
-   **Fresh state required** entry in `CHANGELOG.md` or `changelog.d/`.
-   Do not infer a schema upgrade from a row count: I/O and malformed JSON can
-   also cause refusals.
-2. Identify the consumers and work depending on those files. Reconcile pending
-   work under a compatible build, or document which work will remain
-   unresolved and how a fresh run will preserve its source and evidence.
-   A decoder failure does not prove that work completed or that its input was
-   acknowledged.
-3. Stop every server and other writer for that workspace through normal
-   shutdown. Verify that they stopped, then repeat the complete inventory.
-4. Back up the complete affected files and dependent state outside the runtime
-   tree. Record their relative paths, sizes and checksums, and verify the backup
-   by reading it back. Review the exact cut scope and its effect before moving
-   anything. A missing upgrade instruction requires a store-specific decision;
-   it does not authorize clearing the whole workspace.
+### Keeper turn records
 
-Do not add guessed fields to old rows, silently skip rejected rows, or disable
-the deployment check to make installation pass.
+Files live under `.masc/keepers/<keeper>/turn-records/YYYY-MM/DD.jsonl`. The
+first refusal names the file and line. Raw-trace retention keeps only the raw
+traces its most recent turn records name, so the next sweep after a Keeper's
+turn records are deleted removes that Keeper's raw traces. Carried-front
+recovery and request observation start from the turn records that remain.
 
-## Keeper turn records
+### Official-client turn fragments
 
-Store label: `keeper turn records`. Files live under
-`.masc/keepers/<keeper>/turn-records/YYYY-MM/DD.jsonl`. The first refusal names
-the full file and physical line number. For example, a missing
-`request_observations` field means the current decoder requires evidence the
-old row did not retain. Inserting an empty array would assert that no request
-was observed; the old row does not establish that.
+The files are `.masc/traces/<trace>/history.jsonl` and
+`history.internal.jsonl`. The first refusal names the file and line. The pair
+is the trace's conversation history and the Librarian's named-turn input.
 
-Turn records feed more than display: raw-trace retention, carried-front
-recovery and request observation also read them. Preserve referenced traces,
-turn boundaries, provider inputs and request receipts. Do not let removal of
-a turn-record reference authorize collection of the only remaining raw trace.
+### Lane Add-on tool request owners
 
-After reconciling these consumers and verifying a stopped-writer backup, the
-reviewed fresh-state scope may set aside the affected complete daily files.
-Mixed files include valid rows too: record that loss of active history and
-keep the whole file in the backup. Do not rewrite individual rows or move all
-Keeper metadata, memory snapshots, queues or session state along with them.
+Librarian original executions and absorption gates are owner records under
+`.masc/lane-addons/tool-request-owners/<scope digest>/` with request bodies
+under `.masc/lane-addons/tool-request-bodies/<scope digest>/`. The check
+decodes each record with its body and the consumer's payload decoder, and
+follows parent, retry, partition and replacement links inside the scope. It does
+not run Memory parts discovery, publication recovery or a provider. Discovery
+reads a scope as a whole and fails it on one record it cannot read, so the
+`fresh state` line names both scope directories.
 
-## Official-client turn fragments
+### Run registries
 
-Store label: `keeper official-client turn fragments`. The source files are
-`.masc/traces/<trace>/history.jsonl` and `history.internal.jsonl`. The first
-refusal names the exact file and physical line number. For example, missing
-`origin` means a message lacks provenance the current reader requires. Do not
-invent an origin or remove its `turn_ref` to make it untagged.
-
-These files are also conversation history. The Librarian consumes named-turn
-fragments using turn boundaries and durable progress; moving history alone
-can make unconsumed material disappear from its input. Preserve the complete
-session, its history pair, boundary records, Librarian progress/range receipts,
-current memory and any admission originals, proofs and ACK state that refer
-to it. History rejection is not evidence of successful absorption.
-
-Resolve unconsumed turns under a compatible reader before cutting history.
-If that is impossible, record them as unresolved and review a fresh session
-and its dependent Librarian state together. Only then set aside the reviewed
-history scope while stopped. Do not clear all traces or reset a cursor to
-pretend the old input was consumed. This guide intentionally provides no
-blanket move command: the correct session and progress scope depends on the
-persisted bindings, not just the first failed file.
-
-## Librarian original executions and absorption gates
-
-Store label: `lane-addon tool request owners`, decoder `consumer original
-request payload`. A readable generic owner envelope and matching body digest
-do not establish that this build can read the Librarian payload. Admission
-executions require schema 2 with captured admission policy. Retirement policy
-may be explicitly null only when the captured batch and retirement evidence
-produce no suffix; matching or unavailable history requires captured policy.
-Non-null retirement policy always uses the strict decoder and captured render.
-All admission, completed-history and message-floor absorption gate requests
-require version 3 with captured guidance when evaluation is needed. Unavailable
-authority or a validated original proposal with no absorptions may explicitly
-capture `guidance: null`; neither needs unused prompt assets. Available
-authority with actual absorptions still requires the complete captured bundle.
-Guidance version 2 captures the common policies and only the forward context
-selected by the original observations: pair-only for empty observations and
-with-observations otherwise. Its context must match the strictly restored
-original input; the unused context's missing or empty asset does not block it.
-Guidance version 1, which captured both contexts, has no reader or conversion.
-Non-null captured guidance always goes through the strict decoder, including
-for an empty proposal. Execution schema 1 and gate version
-2 have no reader or automatic conversion in this build.
-
-The refusal names the owner record's full path, scope, request ID, request
-digest and decoder error. Owner records live under
-`.masc/lane-addons/tool-request-owners/`; the named complete bodies are separate
-files in that store. The check includes still-live historical gate records, full gate
-preparations retained by execution parents, and digest-only retry bodies that
-have not yet acquired a child owner record. It checks current payload, source
-and host bindings through read-only ports, including reciprocal root/retry
-IDs and digests, ancestry cycles and unacknowledged child progress. It also
-checks the captured candidate forest's partition ancestry, child ownership,
-replacement lineage and active-root overlap, history replacement parents and
-their full publication intents, and floor steps' previous IDs/digests,
-transaction/range identity and consecutive positions. These structural checks do
-not observe or initialize
-today's Memory epoch, run parts discovery or publication recovery, replay a
-provider, save Memory, or acknowledge input.
-
-This is an inventory of live owner records and their referenced bodies, not a
-scan of settled owner archives. The external-cursor scan decodes its current
-record but does not join it to archived originals, gates, Memory receipts or
-ACKs. A passing scan does not establish that archived work was completed or
-that a cursor was safe to advance.
-
-For a parent answer that fails its strict consumer schema, this payload scan
-checks the original host's consumer shape and requires the gate proposal to
-match the answer exactly. The scan does not read the host terminal or execution
-proof. Runtime recovery still requires both the matching retained terminal and
-the latest completed execution before using that answer.
-
-Reconcile the work under a compatible build before cutting state. Review the
-complete captured physical workspace/keepers/runtime roots, Keeper identity,
-Memory epoch and queue generation, rather than moving only the first refused
-file. Preserve the connected scope together:
-
-- Execution originals and their complete bodies, immutable candidate parts,
-  two-child partition transactions/children, and replacement/frontier records.
-- Admission, history and floor-step gate originals, captured guidance,
-  parent judgments and preparation intents, retry predecessors/successors and
-  unpublished bodies, plus the host execution/size evidence they name.
-- Original pending candidates and their generation/sequence/payload identity,
-  Memory commit/publication and admission/range receipts, original source and
-  history snapshots/boundaries, source progress, and dependent queue or
-  external-cursor ACK evidence.
-
-Parts discovery restores originals before receipt-backed queue ACK. An old
-execution or gate can therefore block the complete inventory even when it is
-historical. Removing its gate alone can leave a parent preparation, retry or
-partition pointing at missing evidence. A refused record, finished worker
-reply or delivery receipt does not prove domain completion or consumption.
-Record unresolved work explicitly; keep its original source evidence and
-pending input instead of manufacturing an ACK or replaying an effect.
-
-Apply the stopped-writer inventory, verified backup and scope review above.
-Do not fill missing policy from today's prompts, reset an epoch to hide an
-old scope, or clear a complete Librarian worker volume. A clean current-payload
-scan is only decoding evidence; actual continuity, execution proofs and
-consumption still require their normal authorities.
-
-## Goal store path failures and rollback
-
-A Goal store path that cannot be read, including a dangling link, may report
-`inspect_path`. Inspect the original paths, links, mounts and server state
-before deciding how to recover. A mirror link observed after a primary commit
-is left in place; the primary can advance while that mirror remains stale.
-
-The current reader accepts the previous Goal unavailable values; upgrading
-does not by itself require fresh state. Once a writer has recorded
-`inspect_path`, older readers reject it. The value can appear in
-`.masc/goal-verification-runs.jsonl` skipped-scan rows and in
-`.masc/keepers/<keeper>/turn-boundaries.jsonl` task context. An older run
-registry can start with a malformed replay but refuse strict reads and
-reconciliation; an older Keeper can fail to read the affected generation
-floor, and Librarian consumption may stop. Older Dashboard and TUI clients
-also reject the new response token. Update those clients with the server.
-
-Observed nonregular Goal paths add distinct `nonregular` and
-`mirror_nonregular` values. Their durable records preserve the observed file
-kind; existing `unreadable` Unix errors, including `eisdir` and `eopnotsupp`,
-stay Unix errors and must not be reinterpreted as a file kind. A target build
-without the new variants rejects records containing them. Dashboard and TUI
-readers without the new response tokens reject the corresponding envelope.
-
-The task context recorded in a turn boundary can also be frozen into
-Librarian original inputs and their related parent and gate work. Before a
-rollback, verify the target readers against the complete affected bundle,
-including the original, parent, gate, source and pending or completed ACK
-evidence described above. Reconcile unresolved work and verify backups before
-setting aside any reviewed scope. Do not remove a boundary or manufacture an
-ACK merely to make an older reader accept the remaining files. The
-`scripts/librarian/compare-preflight.py` analysis reader also validates frozen
-historical task contexts; its successful comparison is not an installation
-preflight or evidence that a target runtime can resume the bundle.
-
-The older `validate-stores` checks turn boundaries, not the Goal verification
-registry. With all writers stopped, identify the registry paths read by the
-rollback build's helper; file names can differ between builds. Before running
-it, inspect each path's file type without opening it and follow any symlink to
-check its target. Record confirmed missing files without creating them. If a
-path or target cannot be checked, or is not a regular file, investigate it
-before running the helper: opening a FIFO can block even in read-only mode.
-These checks cannot eliminate a path replacement race or a stalled mount.
-
-Use a new log path outside the state and evidence being preserved: shell
-redirection replaces an existing log. Then inspect the registries:
+The exact-lane, fusion, verification and Goal verification run registries drop
+unreadable rows only through compaction, and replay refuses to compact while
+one is on disk. With the server stopped, this cuts those rows:
 
 ```sh
-/path/to/older-build/bin/deployment_preflight_helper.exe cut-run-registries \
-  --base-path /path/to/workspace > /path/to/registry-preflight.log 2>&1
+_build/default/bin/deployment_preflight_helper.exe cut-run-registries \
+  --base-path /path/to/workspace --execute
 ```
 
-Keep the exit status and log. This checks four registries. An absent or
-unreadable file can produce the same `whole_file=false` summary as an
-incomplete line, so check each reported file's existence and access as well.
-`validate-stores` does not count an incomplete turn-boundary tail as a refused
-row; its success does not prove complete history. Omit `--execute`: it rewrites
-the files. Before rollback, reconcile pending work under a compatible build,
-stop all writers, and preserve the registry, turn boundaries and dependent
-Keeper and Librarian state. Follow the backup and rollback procedure below. Do
-not delete rows or replace the new value with an older recovery instruction.
+Without `--execute` it only reports. A registry whose last line is
+unterminated is left alone and reported.
 
-## Verify and roll back
+### Goal store paths
 
-Re-run the candidate's full `validate-stores` against the stopped workspace.
-Every examined store must pass; an interrupted scan is incomplete. Run the
-installer again, then start the server and verify the affected Keeper and
-Librarian paths with their actual pending work. A clean scan only proves that
-the remaining state decodes; it does not prove continuity or consumption.
-
-For rollback, stop all writers first and restore the matching binary and the
-complete backed-up scope, including its reviewed dependent state. Reconcile
-work that advanced since the backup before enabling execution. Do not combine
-old history with a newer cursor or replay a provider effect solely because
-the backup restored its request.
+A Goal store path that cannot be read, including a dangling link, reports
+`inspect_path`; the path, its link target and its mount are where to look. Observed nonregular Goal paths report `nonregular` and
+`mirror_nonregular`. These values appear in `.masc/goal-verification-runs.jsonl`
+and in the task context of `.masc/keepers/<keeper>/turn-boundaries.jsonl`.
+Dashboard and TUI clients read them, so they are updated with the server. An
+older build does not read them; installing one is its own fresh state.

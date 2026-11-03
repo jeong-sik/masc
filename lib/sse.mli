@@ -158,6 +158,10 @@ val current_id : unit -> int
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
 
+val broadcast_to_sse_runtime_observers : runtime_authority -> Yojson.Safe.t -> unit
+(** Send a replayable event to this runtime's SSE observers without invoking
+    external subscriber callbacks on the publisher's path. *)
+
 val broadcast_to_with_commit
   : broadcast_target -> on_committed:(unit -> unit) -> Yojson.Safe.t -> unit
 (** The non-yielding callback runs once the replay buffer and live queues have

@@ -540,8 +540,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
   Keeper_waiting_inventory_broadcast.install_health_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
-  Schedule_store.install_change_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
+  Server_schedule_invalidation.start ~sw;
   Operator_pending_confirm.install_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Keeper_owner.install_state_change_observer

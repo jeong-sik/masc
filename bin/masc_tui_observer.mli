@@ -212,6 +212,8 @@ type event =
       (** An internal agent run registry -- verification, goal verification,
           exact lanes -- changed. A server push with no payload, named by
           {!Masc.Internal_agent_runs_event}. *)
+  | Schedule_store_invalidated
+      (** A schedule ledger write was attempted in the subscribed workspace. *)
   | Lane_resource of lane_resource
       (** A Lane Add-on container was acquired, failed to start, was removed,
           or could not be shown removed. It arrives in the agent-core family
@@ -261,7 +263,8 @@ val feed : t -> string -> delivery list
     not acknowledge an event.
 
     A frame whose first member is a [type] that decides the event by itself
-    -- a {!Snapshot}, {!Internal_agent_runs_changed} or {!Other} -- is
+    -- a {!Snapshot}, {!Internal_agent_runs_changed}, {!Schedule_store_invalidated}
+    or {!Other} -- is
     delivered as that event without the rest of the frame being read, so the
     rest is not checked either. Every other frame is parsed whole, and one
     that is not JSON is {!Undecodable}. *)

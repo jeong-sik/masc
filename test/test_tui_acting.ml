@@ -257,7 +257,12 @@ let test_the_internal_runs_push_is_not_a_keepers_act () =
   check bool "it is drawn quiet, not with the look-here mark" true
     (row.Acting.glyph = Acting.Quiet);
   check string "and it says what changed" "a run registry changed"
-    row.Acting.detail
+    row.Acting.detail;
+  let schedule_push = Observer.Schedule_store_invalidated in
+  check bool "schedule changes are not keeper actions" false
+    (Acting.visible Acting.Actions schedule_push);
+  check bool "schedule changes remain visible under everything" true
+    (Acting.visible Acting.Everything schedule_push)
 
 module Lane_events = Masc.Lane_addon_resource_events
 

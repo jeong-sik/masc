@@ -1119,6 +1119,9 @@ let broadcast_to target json =
   | All | Observers | Runtime_observers _ | Presence_only ->
       broadcast_impl target (Value json)
 
+let broadcast_to_sse_runtime_observers authority json =
+  broadcast_impl ~notify_external:false (Runtime_observers authority) (Value json)
+
 let broadcast_to_with_commit target ~on_committed json =
   match target with
   | Presence_only | Runtime_presence _ ->

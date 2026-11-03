@@ -569,6 +569,10 @@ let change_observer : (base_path:string -> unit) Atomic.t =
 
 let install_change_observer observer = Atomic.set change_observer observer
 
+let replace_change_observer_if_current ~current ~replacement =
+  Atomic.compare_and_set change_observer current replacement
+;;
+
 let notify_change_observer config =
   let base_path = config.Workspace_utils.base_path in
   let report exn =

@@ -286,9 +286,9 @@ let test_historical_sources_survive_narrowing_and_recovery () =
   let module H = Masc.Keeper_librarian_task_context in
   let module T = Masc.Keeper_turn_task_context in
   ignore (Masc.Workspace.init config ~agent_name:None);
-  let goal target_value = match Goal_store.upsert_goal config ~id:"goal-history"
+  let goal target_value = match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-history"
       ~title:"Historical goal" ~metric:"count" ~target_value () with
-    | Ok (goal, _) -> goal | Error e -> fail (Goal_store.write_error_to_string e) in
+    | Ok (goal, _, _) -> goal | Error e -> fail (Goal_store.write_error_to_string e) in
   let original = goal "1" in
   Workspace_goal_index.write_goal_task_links config [original.id, ["task-a"]];
   let capture name = T.capture ~config (Ok (Some (Keeper_id.Task_id.of_string name |> get))) in

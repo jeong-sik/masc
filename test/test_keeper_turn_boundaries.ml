@@ -909,9 +909,9 @@ let test_admission_context_survives_task_and_goal_changes () =
         last_updated = "2026-10-02T00:00:00Z"; version = 1 }
   in
   let goal target_value =
-    match Goal_store.upsert_goal config ~id:"goal-history" ~title:"Historical criterion"
+    match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-history" ~title:"Historical criterion"
       ~metric:"count" ~target_value () with
-    | Ok (goal, _) -> goal
+    | Ok (goal, _, _) -> goal
     | Error e -> fail (Goal_store.write_error_to_string e)
   in
   seed "task-a";

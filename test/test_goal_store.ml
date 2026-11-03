@@ -381,10 +381,10 @@ let test_status_field_no_longer_decodes () =
      the next upsert would overwrite goals.json AND its .last-good mirror with an
      empty state, turning one undecodable row into permanent loss. *)
   (match
-     Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
+     Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"phase only" ~metric:"m"
        ~target_value:"1" ()
    with
-   | Ok _ -> fail "upsert_goal wrote over an undecodable store"
+   | Ok _ -> fail "Goal upsert wrote over an undecodable store"
    | Error (Goal_store.Store_unavailable u) ->
        check string "refusal names the store path" (Goal_store.goals_path config) u.file
    | Error (Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _
@@ -401,11 +401,11 @@ let test_status_field_no_longer_decodes () =
 let test_serializer_omits_status () =
   with_workspace @@ fun config ->
   match
-    Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
+    Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"phase only" ~metric:"m"
       ~target_value:"1" ()
   with
   | Error error -> fail (write_error_msg error)
-  | Ok (goal, _) -> (
+  | Ok (goal, _, _) -> (
       match Goal_store.goal_to_yojson goal with
       | `Assoc fields ->
           check bool "serializer omits status" false (List.mem_assoc "status" fields)
@@ -446,8 +446,7 @@ let test_other_unknown_goal_field_still_fails () =
        "unexpected_assignment" mirror_field
    | u -> fail ("expected a schema rejection on both files: " ^ Goal_store.unavailable_to_string u));
   match
-    Goal_store.update_goal_if_phase config ~goal_id:goal.id
-      ~expected_phase:goal.phase Fun.id
+    Goal_store.transact_goal config ~goal_id:goal.id (fun current -> Ok (current, ()))
   with
   | Ok _ -> fail "unknown field licensed a write"
   | Error (Goal_store.Store_unavailable
@@ -558,7 +557,7 @@ let test_duplicate_document_members_refuse_writes () =
        | Ok _ -> fail "duplicate document licensed a write");
       check bool "writer callback not entered" false !called;
       check bool "writer effects not projected" false !projected;
-      (match Goal_store.upsert_goal config ~title:"new goal" ~metric:"m" ~target_value:"1" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new goal" ~metric:"m" ~target_value:"1" () with
        | Error (Goal_store.Store_unavailable _) -> ()
        | Error other -> fail ("wrong upsert refusal: " ^ write_error_msg other)
        | Ok _ -> fail "duplicate document licensed an upsert");
@@ -661,23 +660,16 @@ let test_priorityless_row_no_longer_decodes () =
   | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Nonregular _ | Goal_store.Not_json _ ->
     fail "a priority-less row must be a schema rejection"
 
-(* A goal in [phase], for fixtures. upsert_goal only creates Executing goals;
-   the phase is then moved with the store's compare-and-update, the same
-   primitive the lifecycle handlers write through. *)
+(* A goal in [phase], for fixtures. Creation makes Executing goals; the
+   phase is then seeded through a Goal transaction. *)
 let upsert_goal_in_phase config ~title phase =
-  match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
   | Error error -> Error error
-  | Ok (goal, _) when goal.Goal_store.phase = phase -> Ok goal
-  | Ok (goal, _) ->
-    (match
-       Goal_store.update_goal_if_phase config ~goal_id:goal.Goal_store.id
-         ~expected_phase:goal.Goal_store.phase
-         (fun current -> { current with Goal_store.phase })
-     with
-     | Ok (Goal_store.Goal_updated goal) -> Ok goal
-     | Ok (Goal_store.Goal_phase_mismatch actual) ->
-       failwith ("fixture goal moved to " ^ Goal_phase.to_string actual)
-     | Error error -> Error error)
+  | Ok (goal, _, _) when goal.Goal_store.phase = phase -> Ok goal
+  | Ok (goal, _, _) ->
+    Goal_store.transact_goal config ~goal_id:goal.Goal_store.id
+      (fun current -> Ok ({ current with Goal_store.phase }, ()))
+    |> Result.map fst
 ;;
 
 let test_dropped_phase_serializes_without_status () =
@@ -722,8 +714,7 @@ let test_update_missing_goal_does_not_bump () =
     { pending_events = []; pending_notifications = []; version = 9; updated_at = iso_now (); goals = [ goal ] };
   let before = available config in
   (match
-     Goal_store.update_goal_if_phase config ~goal_id:"ghost"
-       ~expected_phase:goal.phase Fun.id
+     Goal_store.transact_goal config ~goal_id:"ghost" (fun current -> Ok (current, ()))
    with
    | Error (Goal_store.Goal_not_found "ghost") -> ()
    | Error other -> fail ("expected Goal_not_found: " ^ write_error_msg other)
@@ -731,46 +722,6 @@ let test_update_missing_goal_does_not_bump () =
   let after = available config in
   check int "version unchanged on missing update" before.version after.version;
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
-
-let test_update_goal_if_phase_refuses_stale_phase () =
-  with_workspace @@ fun config ->
-  let goal = make_goal "cas" "concurrent transition refusal" in
-  Goal_store.write_state config
-    { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [ goal ] };
-  let before = available config in
-  (* A concurrent transition lands first: the goal leaves Executing. *)
-  (match
-     Goal_store.update_goal_if_phase config ~goal_id:goal.id
-       ~expected_phase:Goal_phase.Executing
-       (fun current -> { current with phase = Goal_phase.Dropped })
-   with
-   | Error error -> fail ("first transition failed: " ^ write_error_msg error)
-   | Ok (Goal_store.Goal_phase_mismatch _) ->
-     fail "first transition unexpectedly mismatched"
-   | Ok (Goal_store.Goal_updated _) -> (
-     (* The stale writer still believes the goal is Executing; its write must
-        refuse without touching the stored phase or bumping the version. *)
-     match
-       Goal_store.update_goal_if_phase config ~goal_id:goal.id
-         ~expected_phase:Goal_phase.Executing
-         (fun current -> { current with phase = Goal_phase.Completed })
-     with
-     | Ok (Goal_store.Goal_phase_mismatch actual) ->
-       check bool "stale write reports the actual phase" true
-         (actual = Goal_phase.Dropped);
-       let after = available config in
-       check int "version not bumped by refused write"
-         (before.version + 1) after.version;
-       (match Goal_store.find_goal config ~goal_id:goal.id with
-        | Goal_store.Goal_found stored ->
-          check bool "stored phase untouched by refused write" true
-            (stored.phase = Goal_phase.Dropped)
-        | Goal_store.Goal_absent -> fail "goal vanished after refused write"
-        | Goal_store.Store_unavailable u ->
-          fail ("store unreadable after refused write: " ^ Goal_store.unavailable_to_string u))
-     | Ok (Goal_store.Goal_updated _) -> fail "stale-phase write licensed a transition"
-     | Error error ->
-       fail ("stale write errored instead of refusing: " ^ write_error_msg error)))
 
 let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   with_workspace @@ fun config ->
@@ -918,8 +869,8 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails
   check_goal_filesystem_alias config
 
 let upsert_exn config ?id ?title ?metric ?target_value ?due_date ?priority () =
-  match Goal_store.upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () with
-  | Ok (goal, _) -> goal
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ?id ?title ?metric ?target_value ?due_date ?priority () with
+  | Ok (goal, _, _) -> goal
   | Error error -> fail (write_error_msg error)
 
 let test_blank_criterion_edits_preserve_store_and_outbox () =
@@ -978,7 +929,7 @@ let test_incomplete_historical_criterion_can_be_maintained_and_repaired () =
   check (option string) "existing goals may be overdue" (Some "2026-09-21") maintained.due_date;
   let primary = Goal_store.goals_path config in
   let before = Fs_compat.load_file primary in
-  (match Goal_store.upsert_goal config ~id:old.id ~title:"Renamed" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:old.id ~title:"Renamed" () with
    | Error (Goal_store.Rejected _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "partial edit left an incomplete effective criterion");
@@ -1042,7 +993,7 @@ let test_upsert_refuses_a_due_date_that_is_not_a_calendar_day () =
   List.iter
     (fun raw ->
       match
-        Goal_store.upsert_goal config ~title:"Dated" ~metric:"m"
+        Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Dated" ~metric:"m"
           ~target_value:"1" ~due_date:raw ()
       with
       | Error (Goal_store.Rejected message) ->
@@ -1086,20 +1037,20 @@ let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
   in
   (* A whitespace title states nothing, on the id-less path (refused before
      the lock, beside the pre-existing missing-title check) … *)
-  (match Goal_store.upsert_goal config ~title:"   " ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"   " ~metric:"m" ~target_value:"1" () with
    | Error (Goal_store.Rejected _) -> ()
    | Error other -> fail ("blank title was not Rejected: " ^ write_error_msg other)
    | Ok _ -> fail "a goal with a blank title was created");
   (* … and an explicit unknown id no longer defaults to "Untitled goal". *)
   rejected_naming "non-blank title"
-    (Goal_store.upsert_goal config ~id:"goal-explicit-no-title" ~metric:"m"
+    (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-explicit-no-title" ~metric:"m"
        ~target_value:"1" ());
   (* Blank or whitespace-padded Goal IDs are refused so Goal store rows and
      trimmed goal_task_links keys cannot diverge (#39964). *)
   List.iter
     (fun bad_id ->
        match
-         Goal_store.upsert_goal config ~id:bad_id ~title:"Padded id" ~metric:"m"
+         Goal_store.upsert_goal_with_events ~actor:"test" config ~id:bad_id ~title:"Padded id" ~metric:"m"
            ~target_value:"1" ()
        with
        | Error (Goal_store.Rejected _) -> ()
@@ -1109,7 +1060,7 @@ let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
     [ ""; "   "; " goal-x"; "goal-x "; "\tgoal-x\n" ];
   (* A past due date is unreachable by construction. *)
   rejected_naming "already past"
-    (Goal_store.upsert_goal config ~title:"Late" ~metric:"m" ~target_value:"1"
+    (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Late" ~metric:"m" ~target_value:"1"
        ~due_date:"2026-09-21" ());
   check bool "refused creates wrote no goals.json" false
     (Sys.file_exists (Goal_store.goals_path config));
@@ -1134,7 +1085,7 @@ let test_upsert_due_date_uses_the_utc_day_boundary () =
       (Some due_date) created.due_date)
     [ (0, 0, 0); (23, 59, 59) ];
   with_workspace ~now:(utc_time (2026, 9, 24) (0, 0, 0)) @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Due yesterday" ~metric:"m"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Due yesterday" ~metric:"m"
       ~target_value:"1" ~due_date () with
    | Error (Goal_store.Rejected _) -> ()
    | Error error -> fail (write_error_msg error)
@@ -1151,7 +1102,7 @@ let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
       ~due_date:"2026-09-23" ()
   in
   let before = available config in
-  (match Goal_store.upsert_goal config ~id:goal.id ~due_date:"TBD" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~due_date:"TBD" () with
    | Error (Goal_store.Rejected _) -> ()
    | Error other -> fail ("TBD refused as " ^ write_error_msg other)
    | Ok _ -> fail "an update to TBD was accepted");
@@ -1172,36 +1123,15 @@ let test_upsert_returns_the_row_as_it_was_before_an_update () =
       ~due_date:"2026-09-23" ~priority:2 ()
   in
   match
-    Goal_store.upsert_goal config ~id:created.id ~due_date:"2026-10-15" ~priority:5 ()
+    Goal_store.upsert_goal_with_events ~actor:"test" config ~id:created.id ~due_date:"2026-10-15" ~priority:5 ()
   with
-  | Ok (updated, `updated previous) ->
+  | Ok (updated, `updated previous, _) ->
     check (option string) "the due date it held" (Some "2026-09-23") previous.due_date;
     check int "the priority it held" 2 previous.priority;
     check (option string) "the due date now" (Some "2026-10-15") updated.due_date;
     check int "the priority now" 5 updated.priority
-  | Ok (_, `created) -> fail "an existing id must update, not create"
+  | Ok (_, `created, _) -> fail "an existing id must update, not create"
   | Error error -> fail (write_error_msg error)
-
-let test_upsert_revision_witness_survives_later_commits () =
-  with_workspace @@ fun config ->
-  let upsert ?id title =
-    match Goal_store.upsert_goal_with_revision config ?id ~title ~metric:"m" ~target_value:"1" () with
-    | Ok result -> result
-    | Error error -> fail (write_error_msg error) in
-  let created, _, created_version = upsert "created" in
-  check int "creation witness is the committed store version" (available config).version created_version;
-  let first, _, first_version = upsert ~id:created.id "first update" in
-  check int "first update has its own committed witness" (available config).version first_version;
-  ignore (upsert_exn config ~title:"another Goal" ~metric:"m" ~target_value:"1" ());
-  let last, action, last_version = upsert ~id:created.id "last update" in
-  check int "intervening Goal write is included in the final witness" (first_version + 2) last_version;
-  check int "returned final revision is authoritative" (available config).version last_version;
-  check bool "create and edit commit ordering is strict" true (created_version < first_version);
-  check string "earlier snapshot stays the exact earlier title" "first update" first.title;
-  check string "latest snapshot carries its own title" "last update" last.title;
-  match action with
-  | `updated previous -> check string "previous row comes from the same write" first.title previous.title
-  | `created -> fail "existing Goal must remain an update"
 
 let test_transact_goal_authoritative_and_noop () =
   with_workspace @@ fun config ->
@@ -1270,11 +1200,6 @@ let test_duplicate_identity_refuses_goal_writers () =
     (fun goal -> entered := true; Ok ({ goal with phase = Goal_phase.Dropped }, ())));
   check bool "transaction callbacks not entered" false !entered;
   check bool "transaction effects not projected" false !projected;
-  expect_ambiguous "duplicate beats phase mismatch" (Goal_store.update_goal_if_phase config ~goal_id:first.id
-    ~expected_phase:Goal_phase.Completed (fun goal -> entered := true; goal));
-  check bool "conditional callback not entered" false !entered;
-  expect_ambiguous "ordinary upsert rejects duplicate" (Goal_store.upsert_goal config ~id:first.id ~priority:1 ());
-  expect_ambiguous "revision upsert rejects duplicate" (Goal_store.upsert_goal_with_revision config ~id:first.id ~priority:1 ());
   expect_ambiguous "audited upsert rejects duplicate" (Goal_store.upsert_goal_with_events config ~actor:"tester" ~id:first.id ~priority:1 ());
   (match Goal_verification.bind_review config ~goal_id:first.id with
    | Error (Goal_verification.Binding_unavailable _) -> ()
@@ -1282,11 +1207,11 @@ let test_duplicate_identity_refuses_goal_writers () =
    | Ok _ -> fail "ambiguous Goal admitted a review");
   unchanged ();
   List.iter (fun target ->
-    match Goal_store.update_goal_if_phase config ~goal_id:other.id ~expected_phase:Goal_phase.Executing
-            (fun goal -> { goal with id = target }) with
+    match Goal_store.transact_goal config ~goal_id:other.id
+            (fun goal -> Ok ({ goal with id = target }, ())) with
     | Error (Goal_store.Rejected _) -> unchanged ()
     | Error error -> fail ("identity replacement returned wrong error: " ^ write_error_msg error)
-    | Ok _ -> fail "conditional update replaced Goal identity") [first.id; "missing-goal"];
+    | Ok _ -> fail "transaction replaced Goal identity") [first.id; "missing-goal"];
   let events = match Goal_store.upsert_goal_with_events config ~actor:"tester" ~id:other.id ~priority:1 () with
     | Ok (_, `updated _, events) -> events
     | Ok (_, `created, _) -> fail "independent Goal was recreated"
@@ -1465,7 +1390,7 @@ let fifo_primary_case dir =
     | u -> fail ("expected an unreadable FIFO: " ^ Goal_store.unavailable_to_string u)
   in
   expect_unavailable ();
-  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert accepted a FIFO primary");
@@ -1507,7 +1432,7 @@ let fifo_mirror_link_case dir =
        mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_fifo;
        reset_step = Goal_store.Inspect_path; _ } -> ()
    | u -> fail ("expected FIFO mirror inspection: " ^ Goal_store.unavailable_to_string u));
-  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert accepted a FIFO mirror");
@@ -1618,7 +1543,7 @@ let test_dangling_primary_is_not_uninitialized () =
    | { reason = Goal_store.Unreadable Unix.ENOENT; mirror = Goal_store.Mirror_absent;
        reset_step = Goal_store.Inspect_path; _ } -> ()
    | u -> fail ("expected unreadable dangling primary: " ^ Goal_store.unavailable_to_string u));
-  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert replaced a dangling primary link");
@@ -1634,7 +1559,7 @@ let test_dangling_mirror_is_evidence_of_prior_store () =
    | { reason = Goal_store.Missing_after_init;
        mirror = Goal_store.Mirror_unreadable Unix.ENOENT; reset_step = Goal_store.Inspect_path; _ } -> ()
    | u -> fail ("expected unreadable dangling mirror: " ^ Goal_store.unavailable_to_string u));
-  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert treated a dangling mirror as an absent store");
@@ -1657,7 +1582,7 @@ let test_store_root_symlink_paths () =
        | Goal_store.Uninitialized -> ()
        | Goal_store.Available _ -> fail "new linked workspace was already initialized"
        | Goal_store.Unavailable u -> fail (Goal_store.unavailable_to_string u));
-      (match Goal_store.upsert_goal config ~title:"linked root" ~metric:"count" ~target_value:"1" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"linked root" ~metric:"count" ~target_value:"1" () with
        | Ok _ -> () | Error error -> fail (write_error_msg error));
       check_goal_file_link root (Filename.basename saved);
       ignore (available config)))
@@ -1943,10 +1868,10 @@ let test_writers_refuse_unavailable_and_keep_bytes () =
         { reason = Goal_store.Schema_rejected { field = "criterion_revision"; _ }; _ } -> ()
     | other -> fail (label ^ ": refusal was not Store_unavailable: " ^ write_error_msg other)
   in
-  (match Goal_store.upsert_goal config ~title:"new" ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"m" ~target_value:"1" () with
    | Ok _ -> fail "upsert wrote over an unavailable store"
-   | Error error -> refused "upsert_goal" error);
-  unchanged "upsert_goal";
+   | Error error -> refused "upsert_goal_with_events" error);
+  unchanged "upsert_goal_with_events";
   let entered = ref false in
   (match Goal_store.transact_goal config ~goal_id:"goal-0"
            (fun goal -> entered := true; Ok (goal, ())) with
@@ -1954,11 +1879,6 @@ let test_writers_refuse_unavailable_and_keep_bytes () =
    | Error error -> refused "transact_goal" error);
   check bool "transact_goal callback not entered" false !entered;
   unchanged "transact_goal";
-  (match Goal_store.update_goal_if_phase config ~goal_id:"goal-0"
-           ~expected_phase:Goal_phase.Executing Fun.id with
-   | Ok _ -> fail "update_goal_if_phase wrote over an unavailable store"
-   | Error error -> refused "update_goal_if_phase" error);
-  unchanged "update_goal_if_phase";
   (match Goal_store.delete_goal config ~goal_id:"goal-0" with
    | Ok _ -> fail "delete_goal wrote over an unavailable store"
    | Error (Goal_store.Store_unavailable
@@ -2023,7 +1943,7 @@ let test_first_write_creates_the_store () =
   with_workspace @@ fun config ->
   let primary = Goal_store.goals_path config in
   (* A refused create commits nothing, so the source stays Uninitialized. *)
-  (match Goal_store.upsert_goal config ~title:"no condition" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"no condition" () with
    | Error (Goal_store.Rejected _) -> ()
    | Error other -> fail ("B1 refusal was not Rejected: " ^ write_error_msg other)
    | Ok _ -> fail "a goal without a success condition was created");
@@ -2043,9 +1963,9 @@ let test_first_write_creates_the_store () =
    | Error (Goal_store.Goal_lock_failed error) -> fail (Masc_domain.masc_error_to_string error)
    | Ok () -> fail "uninitialized store admitted a goal reference");
   check bool "refused writers created no goals.json" false (Sys.file_exists primary);
-  (match Goal_store.upsert_goal config ~title:"first" ~metric:"m" ~target_value:"1" () with
-   | Ok (_, `created) -> ()
-   | Ok (_, `updated _) -> fail "first write reported an update"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"first" ~metric:"m" ~target_value:"1" () with
+   | Ok (_, `created, _) -> ()
+   | Ok (_, `updated _, _) -> fail "first write reported an update"
    | Error error -> fail (write_error_msg error));
   let state = available config in
   check int "first write holds one goal" 1 (List.length state.goals);
@@ -2236,7 +2156,7 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
     (String.sub contents 0 (String.length prefix));
   let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
   check int "reader still reports malformed evidence" 1 malformed;
-  check int "both historical rows and both new events readable" 4 (List.length rows);
+  check int "historical rows and every new event readable" 5 (List.length rows);
   check int "creation delivered exactly once" 1
     (List.filter (fun row -> Json_util.get_string row "event_id" = Some event.event_id)
        rows |> List.length);
@@ -2273,9 +2193,8 @@ let test_pending_phase_precedes_drop_and_survives_retry () =
           (updated.phase = Goal_phase.Executing);
         events
     | Error error -> fail (write_error_msg error) in
-  (match Goal_store.update_goal_if_phase config ~goal_id:goal.id
-      ~expected_phase:Goal_phase.Executing (fun current ->
-        { current with phase = Goal_phase.Dropped }) with
+  (match Goal_store.transact_goal config ~goal_id:goal.id (fun current ->
+        Ok ({ current with phase = Goal_phase.Dropped }, ())) with
    | Ok _ -> () | Error error -> fail (write_error_msg error));
   let closed_at = "2026-10-01T12:00:00Z" in
   let dropped = `Assoc
@@ -2320,14 +2239,6 @@ let test_audit_intents_survive_other_goal_mutations () =
   let check_pending label =
     check (list string) label (List.map (fun e -> e.Goal_store.event_id) initial)
       (List.map (fun e -> e.Goal_store.event_id) (available config).pending_events) in
-  (match Goal_store.upsert_goal config ~id:goal.id ~priority:1 () with
-   | Ok _ -> () | Error error -> fail (write_error_msg error));
-  check_pending "ordinary upsert preserves audit intents";
-  (match Goal_store.update_goal_if_phase config ~goal_id:goal.id
-       ~expected_phase:Goal_phase.Executing (fun current ->
-         { current with phase = Goal_phase.Dropped }) with
-   | Ok _ -> () | Error error -> fail (write_error_msg error));
-  check_pending "conditional phase update preserves audit intents";
   (match Goal_store.transact_goal config ~goal_id:goal.id (fun current ->
        Ok ({ current with priority = 2 }, ())) with
    | Ok _ -> () | Error error -> fail (write_error_msg error));
@@ -2361,7 +2272,6 @@ let () =
           test_case "historical incomplete criteria remain maintainable and repairable" `Quick
             test_incomplete_historical_criterion_can_be_maintained_and_repaired;
           test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
-          test_case "upsert revision witness survives later commits" `Quick test_upsert_revision_witness_survives_later_commits;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
           test_case "duplicate identity refuses Goal writers and preserves independent work" `Quick test_duplicate_identity_refuses_goal_writers;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );
@@ -2414,8 +2324,6 @@ let () =
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
             test_update_missing_goal_does_not_bump;
-          test_case "stale expected_phase refuses to write" `Quick
-            test_update_goal_if_phase_refuses_stale_phase;
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
             test_case "local Goal publication uses FileSystem authority" `Quick

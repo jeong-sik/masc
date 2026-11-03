@@ -231,7 +231,7 @@ let test_schedule_workspace_read_h1_h2 () =
 let test_goal_planning_workspace_read_h1_h2 () =
   with_gateway (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
     let config = Masc.Workspace.default_config base_path in
-    let goal, _ = match Goal_store.upsert_goal config
+    let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config
       ~title:"Workspace-bound planning" ~metric:"proof" ~target_value:"1" () with
       | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
     let root = Filename.concat base_path ".masc" in
@@ -309,7 +309,7 @@ let test_goal_confirmation_h1_h2 () =
        An empty existing config directory makes this fixture deterministically Off. *)
     Masc_test_deps.with_process_env "MASC_CONFIG_DIR" (Some base_path) @@ fun () ->
     let config = Masc.Workspace.default_config base_path in
-    let goal, _ = match Goal_store.upsert_goal config
+    let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config
       ~title:"Transport parity" ~metric:"proof" ~target_value:"1" () with
       | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
     let ctx : Masc.Tool_workspace.context = {config; agent_name = "planner"} in

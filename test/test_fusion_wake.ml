@@ -1089,7 +1089,7 @@ let test_tool_handle_async_success_projects_running_then_completed ?(with_contex
     let config = Workspace.default_config base_dir in
     let source_context = if not with_context then None else (
       ignore (Workspace.init config ~agent_name:(Some keeper));
-      let goal, _ = Goal_store.upsert_goal config ~title:"Choose async delivery" ~metric:"durable replies" ~target_value:"1" () |> Result.get_ok in
+      let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose async delivery" ~metric:"durable replies" ~target_value:"1" () |> Result.get_ok in
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id
         ~title:"Compare paths" ~priority:2 ~description:"Keep the original request bound" |> Result.get_ok in
       Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id () |> Result.get_ok |> ignore;

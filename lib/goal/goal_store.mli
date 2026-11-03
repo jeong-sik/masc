@@ -25,11 +25,6 @@
     records by literal, pattern-match on every constructor and read record
     fields directly. *)
 
-(** {1 Parsers (string → variant option)} *)
-
-val parse_goal_phase : string option -> Goal_phase.t option
-(** Delegates to {!Goal_phase.parse}.  [None] passes through. *)
-
 type goal_id_error = Goal_id_blank | Goal_id_padded of string
 
 val goal_id_error_to_string : goal_id_error -> string
@@ -299,20 +294,6 @@ val transact_goal :
     intents are written atomically with that goal; no delivery runs under the
     lock. Unchanged/replayed transactions do not create new intents. *)
 
-type conditional_update =
-  | Goal_updated of goal
-  | Goal_phase_mismatch of Goal_phase.t
-
-val update_goal_if_phase :
-  Workspace_utils.config ->
-  goal_id:string ->
-  expected_phase:Goal_phase.t ->
-  (goal -> goal) ->
-  (conditional_update, write_error) result
-(** Atomic compare-and-update under the goals file lock. A duplicated decoded
-    ID is refused before checking the phase or calling the callback; a phase
-    mismatch writes nothing. A callback that changes the Goal ID is {!Rejected}. *)
-
 type delete_goal_outcome =
   | Deleted
   | Deleted_with_orphaned_links of string
@@ -337,71 +318,6 @@ val delete_goal :
     cleanup is best-effort across separate files; a cleanup failure returns
     [Ok (Deleted_with_orphaned_links _)] after the goal delete has already
     been committed. *)
-
-(** {1 Upsert} *)
-
-val upsert_goal_with_revision :
-  Workspace_utils.config ->
-  ?id:string ->
-  ?title:string ->
-  ?metric:string ->
-  ?target_value:string ->
-  ?due_date:string ->
-  ?priority:int ->
-  unit ->
-  (goal * [ `created | `updated of goal ] * int, write_error) result
-(** The upsert outcome with the exact committed store version from the same
-    locked write. Snapshot event readers use this witness to order commits
-    independently of event append order. It is never a later store read. *)
-
-val upsert_goal :
-  Workspace_utils.config ->
-  ?id:string ->
-  ?title:string ->
-  ?metric:string ->
-  ?target_value:string ->
-  ?due_date:string ->
-  ?priority:int ->
-  unit ->
-  (goal * [ `created | `updated of goal ], write_error) result
-(** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]
-    internally), updates the matched row otherwise. Returns the resolved goal
-    paired with [`created], or [`updated previous] carrying the row as it was
-    before this write, read inside the write lock. The caller records what
-    changed. Multiple decoded rows for the resolved ID return
-    {!Goal_identity_ambiguous} without a write. Every accepted upsert commits a new store version, including an
-    update whose editable fields are unchanged. An edit to the title,
-    [metric] or [target_value] moves a
-    [Verifying], [Awaiting_confirmation] or [Completed] goal back to
-    [Executing]. Suspended Goals stay suspended with restore target [Executing].
-    An edit to [due_date] or [priority] moves no phase.
-
-    {!Rejected}:
-    - [title] required for new goals (omit / blank on a new goal id).
-    - [due_date] that {!Goal_due.read} cannot read, on a create and on an
-      update alike. Nothing is written. [None] leaves the stored due date as
-      it is; there is no way to clear one here.
-    - RFC-0387 B1: [metric] and [target_value] are both required (non-blank)
-      whenever the upsert creates a new row — including an explicit
-      previously-unknown [id]. The create/update split is decided inside the
-      write lock on the freshly decoded state, so an undecodable store is
-      {!Store_unavailable}, never this one.
-    - An actual change to an existing row's [title], [metric] or
-      [target_value] requires all three effective fields to be non-blank.
-      Omitted fields retain their stored values. The merged criterion is
-      checked inside the write lock before minting its revision or writing
-      events. This is an input invariant, not semantic feasibility admission.
-      Unchanged historical criteria do not prevent priority/due-date updates
-      or lifecycle operations; a criterion edit must repair the whole
-      effective condition. Rejection preserves the store, proof identity and
-      pending events.
-    - Creation input check: a new row needs a
-      non-blank [title] on every create path (an explicit unknown [id]
-      without one no longer defaults to "Untitled goal"), and a [due_date]
-      already past is refused — a goal born overdue is unreachable by
-      construction. The date is a UTC calendar day and falls due at 23:59:59
-      UTC, independent of the operator's time zone. Updates may be overdue:
-      an existing goal's due date passing is ordinary life. *)
 
 (** Run a dependent mutation while all referenced Goals exist in the primary
     store. Lock order: Goal, backlog, goal-task links. The callback must not
@@ -453,7 +369,46 @@ val upsert_goal_with_events :
   ?metric:string -> ?target_value:string -> ?due_date:string -> ?priority:int ->
   ?precondition:upsert_precondition ->
   unit -> (goal * [ `created | `updated of goal ] * pending_event list, write_error) result
-(** [Require_absent] refuses an existing raw ID or its trimmed alias under the
+(** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]
+    internally), updates the matched row otherwise. Returns the resolved goal
+    paired with [`created], or [`updated previous] carrying the row as it was
+    before this write, read inside the write lock. The caller records what
+    changed. Multiple decoded rows for the resolved ID return
+    {!Goal_identity_ambiguous} without a write. Every accepted upsert commits a new store version, including an
+    update whose editable fields are unchanged. An edit to the title,
+    [metric] or [target_value] moves a
+    [Verifying], [Awaiting_confirmation] or [Completed] goal back to
+    [Executing]. Suspended Goals stay suspended with restore target [Executing].
+    An edit to [due_date] or [priority] moves no phase.
+
+    {!Rejected}:
+    - [title] required for new goals (omit / blank on a new goal id).
+    - [due_date] that {!Goal_due.read} cannot read, on a create and on an
+      update alike. Nothing is written. [None] leaves the stored due date as
+      it is; there is no way to clear one here.
+    - RFC-0387 B1: [metric] and [target_value] are both required (non-blank)
+      whenever the upsert creates a new row — including an explicit
+      previously-unknown [id]. The create/update split is decided inside the
+      write lock on the freshly decoded state, so an undecodable store is
+      {!Store_unavailable}, never this one.
+    - An actual change to an existing row's [title], [metric] or
+      [target_value] requires all three effective fields to be non-blank.
+      Omitted fields retain their stored values. The merged criterion is
+      checked inside the write lock before minting its revision or writing
+      events. This is an input invariant, not semantic feasibility admission.
+      Unchanged historical criteria do not prevent priority/due-date updates
+      or lifecycle operations; a criterion edit must repair the whole
+      effective condition. Rejection preserves the store, proof identity and
+      pending events.
+    - Creation input check: a new row needs a
+      non-blank [title] on every create path, including an explicit unknown
+      [id], and a [due_date]
+      already past is refused — a goal born overdue is unreachable by
+      construction. The date is a UTC calendar day and falls due at 23:59:59
+      UTC, independent of the operator's time zone. Updates may be overdue:
+      an existing goal's due date passing is ordinary life.
+
+    [Require_absent] refuses an existing raw ID or its trimmed alias under the
     Goal write lock. It never updates an existing Goal. *)
 
 (** Idempotently publish pending audit rows and acknowledge them under the Goal

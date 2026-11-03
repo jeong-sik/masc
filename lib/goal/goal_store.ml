@@ -28,10 +28,6 @@ type rollup = {
 }
 [@@deriving yojson]
 
-let parse_goal_phase = function
-  | Some s -> Goal_phase.parse s
-  | None -> None
-
 let goals_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goals.json"
 
@@ -600,39 +596,6 @@ let transact_goal ?effects config ~goal_id f =
            | Ok () -> Ok (updated, result)
            | Error detail -> Error (Persist_failed detail)))
 
-type conditional_update =
-  | Goal_updated of goal
-  | Goal_phase_mismatch of Goal_phase.t
-
-let update_goal_if_phase config ~goal_id ~expected_phase f
-    : (conditional_update, write_error) result =
-  Workspace_utils.with_file_lock config (goals_path config)
-    (fun () : (conditional_update, write_error) result ->
-      match load_source config with
-      | Unavailable u -> Error (Store_unavailable u)
-      | Uninitialized -> Error (Goal_not_found goal_id)
-      | Available state ->
-        (match unique_goal_in state.goals goal_id with
-         | Error error -> Error error
-         | Ok None -> Error (Goal_not_found goal_id)
-         | Ok (Some goal) when goal.phase <> expected_phase ->
-           Ok (Goal_phase_mismatch goal.phase)
-         | Ok (Some goal) ->
-           let now = Masc_domain.now_iso () in
-           let updated_goal = f { goal with updated_at = now } in
-           if not (String.equal updated_goal.id goal.id) then
-             Error (Rejected "goal phase update cannot replace goal identity")
-           else
-             let next_state =
-               { state with version = state.version + 1
-               ; updated_at = now
-               ; goals = replace_goal state.goals updated_goal
-               }
-             in
-             (match write_state_result config next_state with
-              | Ok () -> Ok (Goal_updated updated_goal)
-              | Error detail -> Error (Persist_failed detail))))
-
 let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) result =
   Workspace_utils.with_file_lock config (goals_path config)
     (fun () : (delete_goal_outcome, delete_goal_error) result ->
@@ -950,7 +913,7 @@ let resolve_goal_id = function
 
 type upsert_precondition = Unconditional | Require_absent
 
-let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
+let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date
     ?priority ?(precondition = Unconditional) () =
   let is_new_goal = id = None in
   if is_new_goal && blank_opt title then
@@ -1025,27 +988,13 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
           let goals = match action with
             | `created -> state.goals @ [goal]
             | `updated _ -> replace_goal state.goals goal in
-          let pending = match actor with
-            | None -> []
-            | Some actor -> upsert_event_intents ~actor ~revision goal action in
+          let pending = upsert_event_intents ~actor ~revision goal action in
           Ok {
             next_state =
               { state with version = revision; updated_at = now; goals;
                 pending_events = state.pending_events @ pending };
-            value = goal, action, revision, pending;
+            value = goal, action, pending;
           })
-
-let upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () =
-  upsert_goal_internal config ?id ?title ?metric ?target_value ?due_date ?priority ()
-  |> Result.map (fun (goal, action, _, _) -> goal, action)
-
-let upsert_goal_with_revision config ?id ?title ?metric ?target_value ?due_date ?priority () =
-  upsert_goal_internal config ?id ?title ?metric ?target_value ?due_date ?priority ()
-  |> Result.map (fun (goal, action, revision, _) -> goal, action, revision)
-
-let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ?precondition () =
-  upsert_goal_internal config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ?precondition ()
-  |> Result.map (fun (goal, action, _, events) -> goal, action, events)
 
 let compute_rollup goals =
   let count predicate =

@@ -329,10 +329,10 @@ let test_goal_tree_bound_read_bypasses_stale_cache () =
       check int "unbound cache can be primed" 200 code;
       check bool "unbound read does not claim a direct observation" false
         (List.mem Masc.Server_utils.goal_tree_direct_read_header headers);
-      let goal = match Goal_store.upsert_goal config ~title:"after cached tree"
+      let goal = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"after cached tree"
           ~metric:"measurement" ~target_value:"1" () with
-        | Ok (goal, `created) -> goal
-        | Ok (_, `updated _) -> fail "fixture unexpectedly updated a Goal"
+        | Ok (goal, `created, _) -> goal
+        | Ok (_, `updated _, _) -> fail "fixture unexpectedly updated a Goal"
         | Error error -> fail (Goal_store.write_error_to_string error) in
       let routes = match !captured_routes with Some routes -> routes | None -> fail "missing H1 routes" in
       let authority = match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with

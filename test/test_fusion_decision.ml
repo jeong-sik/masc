@@ -49,7 +49,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
       Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
-      let goal, _ = Goal_store.upsert_goal config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
+      let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
       let contract : Masc_domain.task_contract = {strict=true; completion_contract=["Decision must preserve measured behavior"];
         required_evidence=["artifact:expected-proof.json"]; inspect_gate_evidence=[]; verify_gate_evidence=["Run acceptance scenario"]} in
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id ~contract
@@ -338,7 +338,7 @@ let test_request_context_snapshot () = with_fixture (fun config task_id goal_id 
   let rendered_context = String.sub prompt (String.length marker) (String.length prompt - String.length marker) |> Yojson.Safe.from_string in
   check bool "question is not repeated in context JSON" true (Yojson.Safe.Util.member "question" rendered_context = `Null);
   check string "snapshot roundtrip preserves actual panel prompt" (Fusion_request_context.render snapshot) (Fusion_request_context.render restored);
-  Goal_store.upsert_goal config ~id:goal_id ~title:"Changed later" ~target_value:"9" () |> require "later update" |> ignore;
+  Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~title:"Changed later" ~target_value:"9" () |> require "later update" |> ignore;
   check bool "later Goal edit does not rewrite captured input" true (wire = Fusion_request_context.to_yojson restored);
   rejected (Fusion_request_context.capture ~current_task:None ~config ~keeper:"foreign" ~turn_ref:(Some turn_ref) ~args);
   rejected (Fusion_request_context.capture ~current_task:None ~config ~keeper:"fusion-keeper" ~turn_ref:None

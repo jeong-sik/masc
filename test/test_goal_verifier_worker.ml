@@ -38,10 +38,13 @@ let checked = function
   | Error (W.Store_unavailable detail | Original_invalid detail | Authority_changed detail | Execution_pending detail) ->
     Alcotest.fail detail
 let stored = function Ok value -> value | Error e -> Alcotest.fail (Goal_store.write_error_to_string e)
-let proof = function
-  | Ok value -> value
-  | Error (Workspace_goals.Store e) -> Alcotest.fail (Goal_store.write_error_to_string e)
-  | Error (Workspace_goals.Refused {message; _}) -> Alcotest.fail message
+let request_complete config goal_id =
+  match Tool_workspace.dispatch { Tool_workspace.config; agent_name = "planner" }
+          ~name:"masc_goal_transition"
+          ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "request_complete" ]) with
+  | Some result when Tool_result.is_success result -> ()
+  | Some result -> Alcotest.fail (Tool_result.message result)
+  | None -> Alcotest.fail "masc_goal_transition not handled"
 
 let with_workspace_directory f =
   let path = Filename.temp_dir "goal-worker-" "" in
@@ -85,10 +88,10 @@ let submit_measurement config goal_id value =
       ~submitted_evidence:[item] config ~goal_id ~criterion:(Goal_store.criterion_of_goal goal)))))
 
 let pending config =
-  let goal,_ = stored (Goal_store.upsert_goal config ~title:"Measure the original result"
+  let goal, _, _ = stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Measure the original result"
     ~metric:measurement_reference ~target_value:"100" ()) in
   submit_measurement config goal.id 100;
-  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
+  request_complete config goal.id;
   goal.id
 let prepared config store =
   let goal_id = pending config in

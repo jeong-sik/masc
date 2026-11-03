@@ -372,14 +372,8 @@ let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) r
             | Ok (Some content) -> Ok (Some content)))
   | None -> read_local ()
 
-(* An absent ledger is legitimately empty; a present-but-undecodable ledger
-   must not license a write. The recovery read below serves the mirror as
-   state, which RFC-0444 removed from the goal store; the ledger keeps it
-   until its own RFC (RFC-0444 §0 scopes the goal store only). *)
-type load_outcome =
-  | Loaded of prepared_state
-  | Undecodable of string
-
+(* An absent ledger reads as [Ok None]; a present ledger that does not decode
+   is an [Error] and never licenses a write. *)
 let read_state config path : (prepared_state option, string) result =
   match read_raw_doc config path with
   | Error error ->
@@ -428,26 +422,6 @@ let read_state config path : (prepared_state option, string) result =
                         (fun () ->
                           Hashtbl.replace verifications_cache path (content, prepared));
                       Ok (Some prepared)))
-
-let load_state config : load_outcome =
-  ensure_dirs config;
-  let recovery = verifications_recovery_path config in
-  let recovered ~primary_detail = function
-    | Ok (Some prepared) ->
-        Log.Misc.warn "goal_verification: historical recovery read (%s) from %s"
-          primary_detail recovery;
-        Loaded prepared
-    | Ok None -> Undecodable primary_detail
-    | Error detail -> Undecodable (primary_detail ^ "; recovery: " ^ detail)
-  in
-  match read_state config (verifications_path config) with
-  | Ok (Some prepared) -> Loaded prepared
-  | Error detail -> recovered ~primary_detail:detail (read_state config recovery)
-  | Ok None ->
-      (match read_state config recovery with
-       | Ok None -> Loaded (default_prepared_state ())
-       | (Ok (Some _) | Error _) as recovery_read ->
-           recovered ~primary_detail:"primary ledger is missing" recovery_read)
 
 (* When the primary is absent, an existing or uninspectable mirror cannot be
    treated as a new empty ledger. Inspect the entry itself so a dangling
@@ -583,27 +557,9 @@ let update_record config ~goal_id f =
 (* Read side: fail LOUD. An undecodable store is an [Error] for every
    consumer — rendering it as "not verified yet" would let a corrupt ledger
    masquerade as a clean one (P1-1). Consumers that show per-goal
-   verification state load once per request via {!load_records} and render
-   the error through {!ledger_error_to_yojson}. *)
-let load_records config : (record list, string) result =
-  match load_state config with
-  | Undecodable detail -> Error (undecodable_load_error config detail)
-  | Loaded prepared -> Ok prepared.state.records
-
-let load_records_by_goal_id config : (record Goal_store.Goal_id_map.t, string) result =
-  match load_state config with
-  | Undecodable detail -> Error (undecodable_load_error config detail)
-  | Loaded prepared -> Ok prepared.records_by_goal_id
-
-let get_record config ~goal_id : (record option, string) result =
-  let* records_by_goal_id = load_records_by_goal_id config in
-  Ok (Goal_store.Goal_id_map.find_opt goal_id records_by_goal_id)
-
-let load_records_authoritative config =
-  match load_primary_state config with
-  | Ok prepared -> Ok prepared.state.records
-  | Error unavailable -> Error (primary_unavailable_error config ~writing:false unavailable)
-
+   verification state load once per request via
+   {!load_records_by_goal_id_authoritative} and render the error through
+   {!ledger_error_to_yojson}. *)
 let load_records_by_goal_id_authoritative config =
   match load_primary_state config with
   | Ok prepared -> Ok prepared.records_by_goal_id

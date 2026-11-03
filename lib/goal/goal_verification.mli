@@ -105,27 +105,6 @@ val verifications_path : Workspace_utils.config -> string
     silent "not verified yet" — a corrupt ledger must be visible as a ledger
     error to every consumer. *)
 
-val load_records :
-  Workspace_utils.config -> (record list, string) result
-(** Loads every ledger row once. Bulk consumers (dashboard endpoints, goal
-    listings) call this once per request and join in memory rather than
-    re-decoding the store per goal. *)
-
-val load_records_by_goal_id :
-  Workspace_utils.config -> (record Goal_store.Goal_id_map.t, string) result
-(** Loads the immutable [goal_id -> record] index once for $O(\log G)$ joins. *)
-
-val get_record :
-  Workspace_utils.config ->
-  goal_id:string ->
-  (record option, string) result
-(** Single-row read: [Ok None] only when the store decoded and holds no row
-    for [goal_id]. *)
-
-val load_records_authoritative :
-  Workspace_utils.config -> (record list, string) result
-(** Bulk primary-only read for current Goal projections and mutation decisions. *)
-
 val load_records_by_goal_id_authoritative :
   Workspace_utils.config -> (record Goal_store.Goal_id_map.t, string) result
 (** Bulk primary-only immutable [goal_id -> record] index for current Goal

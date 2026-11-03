@@ -36,9 +36,9 @@ let state config = match Goal_store.load_source config with
   | Uninitialized -> fail "missing store"
   | Unavailable error -> fail (Goal_store.unavailable_to_string error)
 let create config =
-  match Goal_store.upsert_goal config ~title:"Suspension scenario"
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Suspension scenario"
       ~metric:"observed successful requests" ~target_value:"1" () with
-  | Ok (goal, _) -> goal
+  | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 let phase expected goal = check bool (GP.to_string expected) true (goal.Goal_store.phase = expected)
 let transition config id action =
@@ -218,7 +218,7 @@ let test_edit_suspended () = with_workspace @@ fun config _ ->
   List.iter (fun suspension ->
     let goal = create config in change config goal.id "request_complete";
     let request = pending config goal.id in change config goal.id suspension;
-    (match Goal_store.upsert_goal config ~id:goal.id ~target_value:"2" () with
+    (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~target_value:"2" () with
      | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
     phase (if suspension = "pause" then GP.Paused GP.Resume_executing else GP.Blocked GP.Resume_executing)
       (saved config goal.id);
@@ -303,8 +303,8 @@ let ordered_tasks config ids =
 let test_drop_cancels_left_over_todo () = with_workspace @@ fun config _ ->
   ignore (Masc.Workspace.init config ~agent_name:None);
   let goal = create config in
-  let live = match Goal_store.upsert_goal config ~title:"Still live" ~metric:"m" ~target_value:"1" () with
-    | Ok (goal, _) -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
+  let live = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Still live" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, _, _) -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
   let todo = add_task ~goal_id:goal.id config "orphaned todo" in
   let shared = add_task ~goal_id:goal.id config "also serves a live goal" in
   (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:live.id ~task_id:shared with
@@ -716,8 +716,8 @@ let test_drop_refuses_duplicate_task_rows ~claimed () = with_workspace @@ fun co
 let test_drop_refuses_duplicate_linked_goal ~claimed () = with_workspace @@ fun config _ ->
   ignore (Masc.Workspace.init config ~agent_name:None);
   let goal = create config in
-  let other = match Goal_store.upsert_goal config ~title:"Possibly live" ~metric:"m" ~target_value:"1" () with
-    | Ok (goal, _) -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
+  let other = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Possibly live" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, _, _) -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
   let id = add_task ~goal_id:goal.id config "possibly shared candidate" in
   let independent = add_task ~goal_id:goal.id config "independent candidate" in
   (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:other.id ~task_id:id with

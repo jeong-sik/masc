@@ -504,14 +504,14 @@ let test_goal_transition_uses_authenticated_actor () =
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   let goal =
     match
-      Goal_store.upsert_goal config
+      Goal_store.upsert_goal_with_events ~actor:"test" config
         ~title:"Canonical actor transition"
         ~metric:"transition"
         ~target_value:"recorded"
         ()
     with
-    | Ok (goal, `created) -> goal
-    | Ok (_, `updated _) -> fail "goal fixture unexpectedly updated an existing row"
+    | Ok (goal, `created, _) -> goal
+    | Ok (_, `updated _, _) -> fail "goal fixture unexpectedly updated an existing row"
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let workspace base root =
@@ -551,11 +551,13 @@ let test_goal_transition_uses_authenticated_actor () =
     |> List.filter_map (fun line ->
            let line = String.trim line in
            if String.equal line "" then None else Some (Yojson.Safe.from_string line))
+    |> List.filter (fun event ->
+           Yojson.Safe.equal (Yojson.Safe.Util.member "event_type" event) (`String "goal_phase"))
   in
   let event =
     match events with
     | [event] -> event
-    | [] | _ :: _ -> fail "goal transition must write one durable event"
+    | [] | _ :: _ -> fail "goal transition must write one durable phase event"
   in
   let open Yojson.Safe.Util in
   check string "goal event id" goal.id (event |> member "goal_id" |> to_string);

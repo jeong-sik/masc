@@ -31,6 +31,33 @@ let object_schema ~required properties =
     ]
 ;;
 
+(* The observations of this pass's input the claim relied on (RFC-0456
+   §4.1). Positions are the numbers the prompt shows: [turn=N] for a
+   conversation message, a tool observation's [index] for a tool. The decoder
+   checks them against the input. *)
+let librarian_evidence_schema =
+  let positions description =
+    `Assoc
+      [ "type", `String "array"
+      ; "items", `Assoc [ "type", `String "integer" ]
+      ; "description", `String description
+      ]
+  in
+  let flag description =
+    `Assoc [ "type", `String "boolean"; "description", `String description ]
+  in
+  object_schema ~required:Keeper_memory_os_types.wire_evidence_fields
+    [ Keeper_memory_os_types.wire_evidence_conversation, positions
+        "turn=N numbers of the conversation messages this claim relies on. Use [] when none."
+    ; Keeper_memory_os_types.wire_evidence_tools, positions
+        "index numbers of the tool observations this claim relies on. Use [] when none."
+    ; Keeper_memory_os_types.wire_evidence_counterpart, flag
+        "true when this claim relies on the counterpart observations."
+    ; Keeper_memory_os_types.wire_evidence_task_contexts, flag
+        "true when this claim relies on the past Task/Goal contexts."
+    ]
+;;
+
 (* The claim carries where it was read: a Board post id, optionally a
    comment id, or null for the keeper's own transcript; when it corrects a
    dropped memory, that memory's short id in [supersedes], null otherwise; and
@@ -55,6 +82,7 @@ let librarian_claim_schema =
         [ "type", `String "array"; "items", string_schema
         ; "description", `String
             "Short IDs of current memories whose still-valid knowledge this claim consolidates. Do not request separate deletion: never also list these IDs in dropped or supersedes. Each ID belongs to only one new claim. Use [] when consolidating none." ]
+    ; Keeper_memory_os_types.wire_field_evidence, librarian_evidence_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

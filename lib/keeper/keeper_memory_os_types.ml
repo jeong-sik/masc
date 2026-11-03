@@ -15,6 +15,11 @@ let wire_field_reason = "reason"
 let wire_field_basis = "basis"
 let wire_field_supersedes = "supersedes"
 let wire_field_absorbs = "absorbs"
+let wire_field_evidence = "evidence"
+let wire_evidence_conversation = "conversation"
+let wire_evidence_tools = "tools"
+let wire_evidence_counterpart = "counterpart"
+let wire_evidence_task_contexts = "task_contexts"
 let wire_field_kind = "kind"
 let wire_field_derivations = "derivations"
 let wire_field_board = "board"
@@ -270,6 +275,15 @@ let wire_librarian_claim_fields =
   ; wire_field_board_comment_id
   ; wire_field_supersedes
   ; wire_field_absorbs
+  ; wire_field_evidence
+  ]
+;;
+
+let wire_evidence_fields =
+  [ wire_evidence_conversation
+  ; wire_evidence_tools
+  ; wire_evidence_counterpart
+  ; wire_evidence_task_contexts
   ]
 ;;
 
@@ -286,6 +300,31 @@ type absorbed_statement =
   { absorbed : string
   ; into : string
   }
+
+type evidence =
+  { conversation : int list
+  ; tools : int list
+  ; counterpart : bool
+  ; task_contexts : bool
+  }
+
+let evidence ~conversation ~tools ~counterpart ~task_contexts =
+  { conversation = List.sort_uniq Int.compare conversation
+  ; tools = List.sort_uniq Int.compare tools
+  ; counterpart
+  ; task_contexts
+  }
+;;
+
+let no_evidence = evidence ~conversation:[] ~tools:[] ~counterpart:false ~task_contexts:false
+
+let union_evidence left right =
+  evidence
+    ~conversation:(left.conversation @ right.conversation)
+    ~tools:(left.tools @ right.tools)
+    ~counterpart:(left.counterpart || right.counterpart)
+    ~task_contexts:(left.task_contexts || right.task_contexts)
+;;
 
 type revision =
   { superseded : string

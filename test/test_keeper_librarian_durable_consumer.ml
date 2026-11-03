@@ -3739,7 +3739,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
       let variables = U.member "prompt_variables" stage.decision.input_evidence in
       check bool "joined successful tool evidence reaches the first accepted step exactly once" true
         (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string
-         =`List (if index=0 then [`Assoc ["tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
+         =`List (if index=0 then [`Assoc ["index",`Int 0;"tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
       check (list string) "the real external speaker reaches the first accepted step exactly once"
         (if index=0 then [counterpart_marker] else [])
         (U.member "counterpart_observations" variables |> U.to_string |> Yojson.Safe.from_string
@@ -4016,7 +4016,7 @@ let test_runtime_official_memory_floor ?native case () =
       let variables = U.member "prompt_variables" stage.decision.input_evidence in
       check bool "the actual original host tool observation is judged once, after skipped messages" true
         (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string =
-         `List (if index=0 then [`Assoc ["tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
+         `List (if index=0 then [`Assoc ["index",`Int 0;"tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
       check (list string) "the real external speaker is judged by the first accepted step only"
         (if index=0 then [counterpart_marker] else [])
         (U.member "counterpart_observations" variables |> U.to_string |> Yojson.Safe.from_string

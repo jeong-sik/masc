@@ -83,9 +83,16 @@ let warm_shell_cache (state : Mcp_server.server_state) =
          Log.Dashboard.warn "shell cache pre-warm failed: %s" (Printexc.to_string exn))
 ;;
 
-(* Delta push: the last payload text broadcast per event_type, to skip an
-   unchanged payload. *)
-let last_broadcast_payload : (string, string) Hashtbl.t = Hashtbl.create 8
+(* Delta push follows the replay commit, not the start or return of a
+   broadcast. Different domains and external subscribers can interleave
+   publications and callbacks for the same event type. *)
+type broadcast_payload_state =
+  { mutable fanout : (int * string) option
+  ; mutable committed_id : int option
+  }
+
+let last_broadcast_payload : (string, broadcast_payload_state) Hashtbl.t =
+  Hashtbl.create 8
 let broadcast_payload_mu = Stdlib.Mutex.create ()
 
 (* Where a surface payload is encoded. Either way it is encoded once, and the
@@ -96,10 +103,10 @@ let broadcast_payload_mu = Stdlib.Mutex.create ()
    refresh fiber's runs on the scheduler domain were 35-63 ms (2026-09-16).
 
    The pool hands the fiber back to the scheduler while it encodes, so only a
-   caller that may yield takes it. [still_current] is asked after the encoding
-   returns, and nothing between that answer and the broadcast yields, so a
-   payload another publication replaced meanwhile is not broadcast after the
-   newer one; [on_superseded] runs instead. *)
+   caller that may yield takes it. [still_current] is checked after encoding
+   and again after acquiring the publication lock, so waiting for an earlier
+   broadcast does not send a payload already superseded while it waited;
+   [on_superseded] runs instead. *)
 type surface_encoding =
   | Encode_inline
   | Encode_on_pool of
@@ -130,24 +137,61 @@ let broadcast_cached_surface ~encoding ~event_type (json : Yojson.Safe.t) : unit
   match payload with
   | None -> ()
   | Some payload ->
-    let should_broadcast =
-      Stdlib.Mutex.protect broadcast_payload_mu (fun () ->
-        match Hashtbl.find_opt last_broadcast_payload event_type with
-        | Some previous when String.equal previous payload.Sse_wire.text -> false
-        | Some _ | None ->
-          Hashtbl.replace last_broadcast_payload event_type payload.Sse_wire.text;
-          true)
+    Stdlib.Mutex.lock broadcast_payload_mu;
+    let locked = ref true in
+    let outcome =
+      Fun.protect
+        ~finally:(fun () -> if !locked then Stdlib.Mutex.unlock broadcast_payload_mu)
+        (fun () ->
+        let current = match encoding with
+          | Encode_inline -> true
+          | Encode_on_pool { still_current; _ } -> still_current () in
+        if not current then `Superseded else begin
+        let state =
+          match Hashtbl.find_opt last_broadcast_payload event_type with
+          | Some state -> state
+          | None ->
+              let state = { fanout = None; committed_id = None } in
+              Hashtbl.add last_broadcast_payload event_type state;
+              state
+        in
+        match state.fanout, state.committed_id with
+        | Some (fanout_id, previous), Some committed_id
+          when Int.equal fanout_id committed_id
+               && String.equal previous payload.Sse_wire.text ->
+            `Unchanged
+        | (None | Some _), (None | Some _) ->
+            let on_fanout event_id =
+              state.fanout <- Some (event_id, payload.Sse_wire.text);
+              locked := false;
+              Stdlib.Mutex.unlock broadcast_payload_mu
+            in
+            let on_committed event_id =
+              Stdlib.Mutex.protect broadcast_payload_mu (fun () ->
+                match state.committed_id with
+                | Some previous_id when previous_id >= event_id -> ()
+                | Some _ | None -> state.committed_id <- Some event_id)
+            in
+            let encoded =
+              Sse_wire.encoded_object
+                [ "type", Sse_wire.encode_json (`String event_type)
+                ; "payload", payload
+                ; "ts_unix", Sse_wire.encode_json (`Float (Time_compat.now ()))
+                ]
+            in
+            Sse.broadcast_encoded_to_with_receipts Observers ~on_fanout ~on_committed encoded;
+            `Published
+        end)
     in
-    if should_broadcast
-    then
-      Sse.broadcast_encoded_to
-        Observers
-        (Sse_wire.encoded_object
-           [ "type", Sse_wire.encode_json (`String event_type)
-           ; "payload", payload
-           ; "ts_unix", Sse_wire.encode_json (`Float (Time_compat.now ()))
-           ])
-    else Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
+    (match outcome with
+     | `Published -> ()
+     | `Unchanged ->
+         Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
+     | `Superseded ->
+         Log.Dashboard.routine "%s: payload superseded before broadcast" event_type;
+         (match encoding with
+          | Encode_inline -> ()
+          | Encode_on_pool { on_superseded; _ } -> on_superseded ()))
 ;;
 
 let execution_actor_for_request ~base_path request =

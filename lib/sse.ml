@@ -979,7 +979,7 @@ type broadcast_payload =
   | Value of Yojson.Safe.t
   | Encoded of Sse_wire.encoded_json
 
-let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target payload =
+let broadcast_deliver ~buffer ~notify_external ~event_type ~on_fanout ~on_committed target payload =
   let t0 = Time_compat.now () in
   let json =
     match payload with
@@ -1067,6 +1067,9 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
   ) clients_entries;
   delivery, !failed)
   in
+  (* This callback follows replay insertion and live queue attempts, before
+     disconnect hooks or external subscribers can re-enter a publisher. *)
+  Option.iter (fun notify -> notify delivery.event_id) on_fanout;
   List.iter
     (fun (session_id, _, failure) ->
        Transport_metrics.inc_broadcast_failure ~target:target_label ();
@@ -1086,7 +1089,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
   (* The replay buffer owns the delivery and every live queue was either
      enqueued or unregistered. Later metrics and external subscribers do not
      undo that publication. The callback is a non-yielding receipt. *)
-  Option.iter (fun notify -> notify ()) on_committed;
+  Option.iter (fun notify -> notify delivery.event_id) on_committed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
@@ -1102,10 +1105,10 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
       }
 
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
-    ?(event_type = "message") ?on_committed target payload =
+    ?(event_type = "message") ?on_fanout ?on_committed target payload =
   if broadcast_is_unobservable target ~buffer ~notify_external
   then Transport_metrics.inc_sse_broadcast_skipped_no_observer ()
-  else broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target payload
+  else broadcast_deliver ~buffer ~notify_external ~event_type ~on_fanout ~on_committed target payload
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All (Value json)
@@ -1127,7 +1130,7 @@ let broadcast_to_with_commit target ~on_committed json =
   | Presence_only | Runtime_presence _ ->
       invalid_arg "broadcast_to_with_commit: presence is not replayed"
   | All | Observers | Runtime_observers _ ->
-      broadcast_impl ~on_committed target (Value json)
+      broadcast_impl ~on_committed:(fun _ -> on_committed ()) target (Value json)
 
 let broadcast_encoded_to target encoded =
   match target with
@@ -1135,6 +1138,13 @@ let broadcast_encoded_to target encoded =
       invalid_arg "broadcast_encoded_to: use broadcast_presence_to_runtime"
   | All | Observers | Runtime_observers _ | Presence_only ->
       broadcast_impl target (Encoded encoded)
+
+let broadcast_encoded_to_with_receipts target ~on_fanout ~on_committed encoded =
+  match target with
+  | Presence_only | Runtime_presence _ ->
+      invalid_arg "broadcast_encoded_to_with_receipts: presence is not replayed"
+  | All | Observers | Runtime_observers _ ->
+      broadcast_impl ~on_fanout ~on_committed target (Encoded encoded)
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
     only: they are not replay-buffered and do not fan out through generic

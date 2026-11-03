@@ -12,6 +12,201 @@ let check_json msg expected actual =
     (Yojson.Safe.to_string expected)
     (Yojson.Safe.to_string actual)
 
+let test_failed_broadcast_does_not_suppress_retry () =
+  let before = Sse.current_id () in
+  let original_hook = Atomic.get Sse.buffer_commit_test_hook in
+  let payload = `Assoc [ "test_nonce", `Int (Random.bits ()) ] in
+  let deliveries () =
+    Sse.get_events_after_for_test before
+    |> List.filter (fun (delivery : Sse.delivery) ->
+      Json_util.assoc_member_opt "type" delivery.payload = Some (`String "operator_digest")
+      && Json_util.assoc_member_opt "payload" delivery.payload = Some payload)
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Sse.buffer_commit_test_hook original_hook)
+    (fun () ->
+      Atomic.set Sse.buffer_commit_test_hook (Some (fun () -> failwith "injected replay failure"));
+      let failed =
+        try
+          Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload;
+          false
+        with Failure detail when String.equal detail "injected replay failure" -> true
+           | exn -> raise exn
+      in
+      Alcotest.(check bool) "the replay commit failed" true failed;
+      Atomic.set Sse.buffer_commit_test_hook None;
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload;
+      Alcotest.(check int) "the same payload is committed by the retry" 1
+        (List.length (deliveries ()));
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload;
+      Alcotest.(check int) "a committed unchanged payload is still deduplicated" 1
+        (List.length (deliveries ())))
+
+let test_reentrant_broadcast_tracks_commit_order () =
+  let before = Sse.current_id () in
+  let nonce = Random.bits () in
+  let first = `Assoc [ "test_nonce", `Int nonce; "value", `String "first" ] in
+  let second = `Assoc [ "test_nonce", `Int nonce; "value", `String "second" ] in
+  let subscriber = "dashboard-cache-reentrant-" ^ string_of_int nonce in
+  let reentered = Atomic.make false in
+  Sse.subscribe_external ~id:subscriber ~callback:(fun event ->
+    if Json_util.assoc_member_opt "payload" event.Sse.ext_payload = Some first
+       && Atomic.compare_and_set reentered false true then
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest second) ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscriber) (fun () ->
+    Server_dashboard_http_execution_surfaces.broadcast_operator_digest first;
+    Server_dashboard_http_execution_surfaces.broadcast_operator_digest first;
+    let payloads =
+      Sse.get_events_after_for_test before
+      |> List.filter_map (fun (delivery : Sse.delivery) ->
+        match Json_util.assoc_member_opt "type" delivery.payload,
+              Json_util.assoc_member_opt "payload" delivery.payload with
+        | Some (`String "operator_digest"), Some payload
+          when payload = first || payload = second -> Some (Yojson.Safe.to_string payload)
+        | _ -> None)
+    in
+    Alcotest.(check (list string)) "a reentrant newer event is not overwritten"
+      (List.map Yojson.Safe.to_string [ first; second; first ]) payloads)
+
+let test_reentrant_unchanged_broadcast_is_deduplicated () =
+  let before = Sse.current_id () in
+  let nonce = Random.bits () in
+  let payload = `Assoc [ "test_nonce", `Int nonce; "value", `String "same" ] in
+  let subscriber = "dashboard-cache-echo-" ^ string_of_int nonce in
+  let calls = ref 0 in
+  Sse.subscribe_external ~id:subscriber ~callback:(fun event ->
+    if Json_util.assoc_member_opt "payload" event.Sse.ext_payload = Some payload then begin
+      incr calls;
+      if !calls < 4 then
+        Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload
+    end) ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscriber) (fun () ->
+    Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload;
+    let count =
+      Sse.get_events_after_for_test before
+      |> List.filter (fun (delivery : Sse.delivery) ->
+        Json_util.assoc_member_opt "payload" delivery.payload = Some payload)
+      |> List.length
+    in
+    Alcotest.(check int) "an echo cannot trigger repeated broadcasts" 1 count;
+    Alcotest.(check int) "the subscriber is called once" 1 !calls)
+
+let test_concurrent_failed_broadcast_can_be_retried () =
+  let before = Sse.current_id () in
+  let original_hook = Atomic.get Sse.buffer_commit_test_hook in
+  let payload = `Assoc [ "test_nonce", `Int (Random.bits ()) ] in
+  let gate = Stdlib.Mutex.create () and changed = Stdlib.Condition.create () in
+  let entered = ref false and second_started = ref false and released = ref false in
+  let claimed = Atomic.make false in
+  let under_gate f = Stdlib.Mutex.protect gate f in
+  let release () = under_gate (fun () -> released := true; Stdlib.Condition.broadcast changed) in
+  let wait_for predicate = under_gate (fun () ->
+    while not (predicate ()) do Stdlib.Condition.wait changed gate done) in
+  Atomic.set Sse.buffer_commit_test_hook (Some (fun () ->
+    if Atomic.compare_and_set claimed false true then begin
+      under_gate (fun () ->
+        entered := true;
+        Stdlib.Condition.broadcast changed;
+        while not !released do Stdlib.Condition.wait changed gate done);
+      failwith "injected concurrent replay failure"
+    end));
+  let first = Domain.spawn (fun () ->
+    try
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload;
+      Error "first publication unexpectedly succeeded"
+    with
+    | Failure detail when String.equal detail "injected concurrent replay failure" -> Ok ()
+    | exn -> Error (Printexc.to_string exn))
+  in
+  let first_joined = ref false in
+  let second = ref None in
+  Fun.protect ~finally:(fun () ->
+    release ();
+    if not !first_joined then ignore (Domain.join first);
+    Option.iter (fun (domain, joined) -> if not !joined then ignore (Domain.join domain)) !second;
+    Atomic.set Sse.buffer_commit_test_hook original_hook)
+    (fun () ->
+      wait_for (fun () -> !entered);
+      let joined = ref false in
+      let domain = Domain.spawn (fun () ->
+        under_gate (fun () -> second_started := true; Stdlib.Condition.broadcast changed);
+        try Server_dashboard_http_execution_surfaces.broadcast_operator_digest payload; Ok ()
+        with exn -> Error (Printexc.to_string exn))
+      in
+      second := Some (domain, joined);
+      wait_for (fun () -> !second_started);
+      release ();
+      let first_result = Domain.join first in
+      first_joined := true;
+      let second_result = Domain.join domain in
+      joined := true;
+      Alcotest.(check (result unit string)) "first call reports the injected failure" (Ok ()) first_result;
+      Alcotest.(check (result unit string)) "concurrent retry succeeds" (Ok ()) second_result;
+      let count =
+        Sse.get_events_after_for_test before
+        |> List.filter (fun (delivery : Sse.delivery) ->
+          Json_util.assoc_member_opt "payload" delivery.payload = Some payload)
+        |> List.length
+      in
+      Alcotest.(check int) "the successful concurrent call reaches replay" 1 count)
+
+let test_disconnect_reentry_preserves_latest_commit ~env () =
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () ->
+    Masc_test_deps.cleanup_test_workspace workspace;
+    match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+    (fun () ->
+  let nonce = string_of_int (Random.bits ()) in
+  let probe_session = "dashboard-capacity-probe-" ^ nonce in
+  let session = "dashboard-disconnect-reentry-" ^ nonce in
+  let auth = Masc_test_deps.make_sse_auth workspace "dashboard-cache-test" in
+  let register ?on_disconnect session_id =
+    ignore (Session.McpSessionStore.get_or_create ~id:session_id ());
+    match Sse.register ~kind:Observer ?on_disconnect ~auth session_id
+            ~last_event_id:(Sse.current_id ()) with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Sse.registration_error_to_string error)
+  in
+  let filler = `Assoc [ "type", `String "dashboard_cache_test_filler" ] in
+  let first = `Assoc [ "nonce", `String nonce; "value", `String "first" ] in
+  let second = `Assoc [ "nonce", `String nonce; "value", `String "second" ] in
+  Fun.protect ~finally:(fun () ->
+    Sse.unregister probe_session;
+    Sse.unregister session)
+    (fun () ->
+      (* Discover this process's configured queue capacity without assuming the
+         default or changing environment variables after SSE initialization. *)
+      register probe_session;
+      let sent = ref 0 in
+      while Sse.exists probe_session && !sent <= 1024 do
+        Sse.broadcast_to Observers filler;
+        incr sent
+      done;
+      Alcotest.(check bool) "the probe queue eventually overflowed" false
+        (Sse.exists probe_session);
+      let capacity = !sent - 1 in
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest first;
+      let disconnected = ref false in
+      register ~on_disconnect:(fun () ->
+        disconnected := true;
+        Server_dashboard_http_execution_surfaces.broadcast_operator_digest first) session;
+      for _ = 1 to capacity do Sse.broadcast_to Observers filler done;
+      let before = Sse.current_id () in
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest second;
+      Server_dashboard_http_execution_surfaces.broadcast_operator_digest first;
+      let payloads =
+        Sse.get_events_after_for_test before
+        |> List.filter_map (fun (delivery : Sse.delivery) ->
+          match Json_util.assoc_member_opt "payload" delivery.payload with
+          | Some payload when payload = first || payload = second ->
+              Some (Yojson.Safe.to_string payload)
+          | _ -> None)
+      in
+      Alcotest.(check bool) "overflow invoked the disconnect hook" true !disconnected;
+      Alcotest.(check (list string)) "the newer nested commit stays the deduplication basis"
+        (List.map Yojson.Safe.to_string [ second; first ]) payloads))
+
 let timeout_kind json =
   Yojson.Safe.Util.(member "timeout_kind" json |> to_string)
 
@@ -1952,6 +2147,16 @@ let () =
             (test_task_mutation_wakes_health_before_slow_subscriber ~clock);
           test_case "task mutation preserves health cancellation" `Quick
             test_task_mutation_preserves_health_cancellation;
+          test_case "failed SSE commit does not suppress a retry" `Quick
+            test_failed_broadcast_does_not_suppress_retry;
+          test_case "reentrant SSE publication preserves commit order" `Quick
+            test_reentrant_broadcast_tracks_commit_order;
+          test_case "reentrant unchanged SSE publication is deduplicated" `Quick
+            test_reentrant_unchanged_broadcast_is_deduplicated;
+          test_case "concurrent failed SSE publication can be retried" `Quick
+            test_concurrent_failed_broadcast_can_be_retried;
+          test_case "disconnect reentry preserves latest SSE commit" `Quick
+            (test_disconnect_reentry_preserves_latest_commit ~env);
           test_case "execution preparation reuse and request scope" `Quick
             test_execution_preparation_reuse_and_scope;
           test_case "execution preparation cannot undo invalidation" `Quick

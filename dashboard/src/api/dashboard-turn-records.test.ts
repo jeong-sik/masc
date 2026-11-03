@@ -290,6 +290,37 @@ describe('keeper turn record cache token counts', () => {
     expect(record?.cache_read_input_tokens).toBeUndefined()
   })
 
+  // #47694 added input_provenance to Turn_record.to_json. The decoder
+  // rejects keys it does not know, so a row carrying the new key must
+  // still decode, narrowed to the two wire tokens the OCaml writer emits.
+  it.each(['measured_request', 'context_estimate'])(
+    'carries the %s input provenance through the decoder',
+    async input_provenance => {
+      getMock.mockResolvedValue(payload(entry({ input_provenance })))
+
+      const response = await fetchKeeperTurnRecords('sangsu')
+
+      expect(response.entries).toHaveLength(1)
+      expect(response.entries[0]?.record).toMatchObject({ input_provenance })
+    },
+  )
+
+  it('leaves input provenance undefined when the row predates it', async () => {
+    getMock.mockResolvedValue(payload(entry()))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.input_provenance).toBeUndefined()
+  })
+
+  it('rejects a row with an unknown input provenance', async () => {
+    getMock.mockResolvedValue(payload(entry({ input_provenance: 'guessed' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
   it.each([
     'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'model_input_front',
   ])('rejects a missing top-level window field %s', async field => {

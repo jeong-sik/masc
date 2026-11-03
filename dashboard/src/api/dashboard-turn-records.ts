@@ -93,6 +93,11 @@ export type TurnRawTraceRunRef = {
 // Wire tokens owned by Runtime_usage_scope.to_string.
 export const TURN_USAGE_SCOPES = ['per_request', 'turn_total', 'conversation_cumulative', 'unavailable'] as const
 
+// Wire tokens owned by Turn_input_provenance.to_string.
+export const TURN_INPUT_PROVENANCES = ['measured_request', 'context_estimate'] as const
+
+export type TurnInputProvenance = (typeof TURN_INPUT_PROVENANCES)[number]
+
 type TurnModelInputMeasurement = 'wire_shape' | 'durable_shape'
 
 export type TurnModelInputFront =
@@ -136,6 +141,12 @@ export type TurnRecordEntry = {
   max_tokens?: number
   enable_thinking?: boolean
   usage_scope: (typeof TURN_USAGE_SCOPES)[number]
+  // lib/types/turn_record.ml writes input_provenance as an optional field
+  // (#47694): present on rows written after the provenance field landed,
+  // absent on older rows. Same absent-means-absent contract as the
+  // neighbours: the inspector renders absence rather than a fabricated
+  // provenance.
+  input_provenance?: TurnInputProvenance
   input_tokens?: number
   output_tokens?: number
   // The whole client turn's output, written apart from output_tokens when the
@@ -542,6 +553,12 @@ function decodeTurnResponseObservedModelInput(raw: unknown): TurnResponseObserve
   return runtime_profile === null || window === null ? null : { runtime_profile, ...window }
 }
 
+function decodeTurnInputProvenance(raw: unknown): TurnInputProvenance | null {
+  return (TURN_INPUT_PROVENANCES as readonly unknown[]).includes(raw)
+    ? (raw as TurnInputProvenance)
+    : null
+}
+
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'execution_ids',
@@ -580,6 +597,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'max_tokens',
     'enable_thinking',
     'usage_scope',
+    'input_provenance',
     'input_tokens',
     'cache_creation_input_tokens',
     'cache_read_input_tokens',
@@ -619,6 +637,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
         ? { request_runtime_profile: null, request_body_bytes: null }
         : null
   const usage_scope = TURN_USAGE_SCOPES.find(scope => scope === raw.usage_scope)
+  const input_provenance = decodeOptionalField(raw, 'input_provenance', decodeTurnInputProvenance)
   const tool_surface_ref = decodeOptionalField(raw, 'tool_surface_ref', decodeExactNonEmptyString)
   const selected_model = decodeOptionalField(raw, 'selected_model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
@@ -676,6 +695,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || !Array.isArray(raw.execution_ids)
     || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
     || usage_scope === undefined
+    || input_provenance === null
     || !Object.hasOwn(raw, 'response_observed_model_input')
     || (response_observed_model_input === null && raw.response_observed_model_input !== null)
     || tool_surface_ref === null
@@ -724,6 +744,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     max_tokens,
     enable_thinking,
     usage_scope,
+    input_provenance,
     response_observed_model_input,
     input_tokens,
     output_tokens,

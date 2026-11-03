@@ -21,17 +21,19 @@ def sha256(data):
 
 def generate(source_path, output_path, evidence_path):
     original = source_path.read_text()
-    start_marker = "let validate_stores base_path =\n"
+    start_marker = "let validate_stores ~jobs base_path =\n"
     end_marker = "let validate_stores_cmd =\n"
-    assert original.count(start_marker) == original.count(end_marker) == 1
+    assert original.count(start_marker) == original.count(end_marker) == 1, (
+        f"marker mismatch: start={original.count(start_marker)} "
+        f"end={original.count(end_marker)}; "
+        "bin/deployment_preflight_helper.ml changed shape, update the markers")
     start = original.index(start_marker)
     end = original.index(end_marker, start)
     body = original[start:end]
-    anchor = "      D.Id.all\n  in\n"
+    anchor = "      D.Id.all\n"
     assert body.count(anchor) == 1, "expected exactly one validate_stores enumeration"
     replacement = (
         "      (List.filter (fun id -> id <> D.Id.Keeper_event_queue) D.Id.all)\n"
-        "  in\n"
     )
     mutated = original[:start] + body.replace(anchor, replacement, 1) + original[end:]
     assert mutated.count(replacement) == 1

@@ -11,9 +11,6 @@ module Json = Yojson.Safe.Util
 
 type source = Current | Revised | Measurement_unavailable | Goal_unavailable | Empty
 
-let scheduled_admission_fixture_ref =
-  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
-
 let contains ~needle text = Astring.String.is_infix ~affix:needle text
 let owner_request = "Create a Task for the remaining result and inspect its evidence."
 let reported_value = "1/2 independently inspected results"
@@ -21,7 +18,6 @@ let model_id = "direct-goal-wire-fixture"
 
 let prepare config =
   Direct.prepare
-    ~turn_ref:scheduled_admission_fixture_ref
     ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"direct-goal-wire")
     ~current_task:Keeper_world_observation_inputs.No_current_task
     ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -211,7 +207,6 @@ let test_goal_survives_read_then_task_creation () =
   let measurement = observe config goal in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-goal-loop-wire" ~absolute_turn:1 in
   let prepared = Direct.prepare
-      ~turn_ref
       ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"goal-loop-wire")
       ~current_task:Keeper_world_observation_inputs.No_current_task ~held_task_skills:[]
       ~task_skill_surfaces:[] ~workspace_memory:Workspace_memory_ledger.Missing
@@ -224,7 +219,6 @@ let test_goal_survives_read_then_task_creation () =
   let dynamic = Keeper_context_layers.text partition in
   let existing_override = "EXISTING_BASE_OVERRIDE" in
   let previous = ref None in
-  let first_assembly = ref None in
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; messages; _} ->
       let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
@@ -237,7 +231,6 @@ let test_goal_survives_read_then_task_creation () =
           ~blocks:[Prompt_block_id.Dynamic_context, dynamic;
                    Prompt_block_id.Temporal_summary, "INITIAL_CLOCK"] in
       previous := Some issued;
-      if Option.is_none !first_assembly then first_assembly := Some issued;
       Keeper_prompt_capture.write ~config ~keeper:"goal-loop-wire" ~trace_id:"trace-goal-loop-wire"
         ~absolute_turn:1 ~blocks:((Prompt_block_id.Keeper_instructions, existing_override)
           :: Keeper_context_assembly.logical_blocks issued)
@@ -317,11 +310,6 @@ let test_goal_survives_read_then_task_creation () =
       (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
     check bool "Goal is not duplicated in the extra User carrier" false
       (List.exists (contains ~needle:goal.criterion_revision) contexts);
-    (if index = 0
-     then check bool "the first request carries the admission identity in its carrier" true
-       (List.exists (contains ~needle:"scheduled_admission_at_turn_entry") contexts)
-     else check bool "tool rounds drop the entry block; tool feedback stays newest" false
-       (List.exists (contains ~needle:"scheduled_admission_at_turn_entry") contexts));
     let extra = String.concat "" contexts in
     List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
       (contains ~needle extra)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
@@ -362,33 +350,9 @@ let test_goal_survives_read_then_task_creation () =
       (List.length (List.filter (fun (block : Keeper_prompt_capture.block) ->
         Prompt_block_id.equal block.id id) capture.blocks)))
     [Prompt_block_id.Keeper_instructions; Active_goals];
-  check bool "post-tool capture drops the entry block" false
-    (List.exists (fun (block : Keeper_prompt_capture.block) ->
-      Prompt_block_id.equal block.id Admitted_scheduled_input) capture.blocks);
-  let first = match !first_assembly with Some issued -> issued | None -> fail "first assembly missing" in
-  let _, admission_text = List.find (fun (id, _) ->
-      Prompt_block_id.equal id Admitted_scheduled_input)
-      (Keeper_context_assembly.logical_blocks first) in
-  let physical = match Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt) with
-    | Some issued -> issued | None -> fail "captured System issuer missing" in
-  check bool "admission leaves the cached System prefix untouched" false
-    (List.exists (fun (span : Keeper_context_assembly.span) ->
-      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) physical.partition.spans);
-  let carrier_text = match first.Keeper_context_assembly.extra_system_context with
-    | Some text -> text | None -> fail "first-round carrier missing" in
-  let carrier_partition = match first.Keeper_context_assembly.receipt with
-    | Some receipt -> receipt | None -> fail "first-round carrier receipt missing" in
-  (match List.filter (fun (span : Keeper_context_assembly.span) ->
-      span.kind = Keeper_context_assembly.Block Admitted_scheduled_input) carrier_partition.spans with
-   | [span] -> check string "first-round admission is the exact issued carrier span"
-       admission_text (String.sub carrier_text span.offset span.bytes)
-   | _ -> fail "one exact issued admission span required");
   let captured_turn = Ids.Turn_ref.make ~trace_id:capture.trace_id ~absolute_turn:capture.absolute_turn in
   check bool "capture and direct preparation identify the same actual fixture turn" true
     (Ids.Turn_ref.equal turn_ref captured_turn);
-  check bool "first-round direct admission is explicitly Unknown for the actual fixture turn" true
-    (contains ~needle:"availability=\"unknown\"" admission_text
-     && contains ~needle:(Ids.Turn_ref.to_string captured_turn) admission_text);
   check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
   check (option string) "capture records the physical stable system value"
     (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)
@@ -438,7 +402,7 @@ let test_completion_observation_survives_tool_reply approved () =
      backlog_revision=Some 1;running_keeper_fiber_count=0;connected_surfaces=[];
      connected_surface_failures=[];own_recent_board_posts=[];fleet_messages=[];own_recent_actions=Ok []} in
   let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
-  let rendered = Prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision
+  let rendered = Prompt.build_prompt ~turn_decision
       ~current_task:Keeper_world_observation_inputs.No_current_task ~observation () in
   let previous = ref None in
   let issued_requests = ref [] in

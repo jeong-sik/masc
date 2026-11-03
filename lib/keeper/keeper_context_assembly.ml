@@ -46,7 +46,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
         Issued (Keeper_context_layers.receipt_to_json rendered)
       | Block Prompt_block_id.Dynamic_context, _ -> Unavailable
       | ((Block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals
-          | Prompt_block_id.Completion_authority | Prompt_block_id.Admitted_scheduled_input) | Unattributed _), _)
+          | Prompt_block_id.Completion_authority) | Unattributed _), _)
       | (Block (Prompt_block_id.Temporal_summary), _)
       | (Block (Prompt_block_id.Memory_os_recall), _)
       | (Block (Prompt_block_id.Librarian_working_context), _)

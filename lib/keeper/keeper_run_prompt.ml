@@ -39,10 +39,13 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
 let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   (* The admission identity names the turn, so it changes on every turn. It
-     rides the tail carrier as its own retained block instead of the System
-     suffix, where any changed byte would invalidate the provider's cached
-     prefix over the whole history. A hook-recorded block wins when one is
-     already present. *)
+     rides the tail carrier as its own first-round block instead of the
+     System suffix, where any changed byte would invalidate the provider's
+     cached prefix over the whole history. Post-tool rounds carry no
+     admission block: like every other world-state block it is entry
+     context, and tool feedback stays the newest message. Resume composes
+     from the turn's first-round assembly, which always carries it. A
+     hook-recorded block wins when one is already present. *)
   let with_admission text blocks =
     if List.exists (fun (id, _) ->
         Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input) blocks
@@ -53,15 +56,6 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
       let observations = match Option.bind previous_assembly (fun previous ->
           previous.Keeper_context_assembly.system_prompt) with
         | None -> [] | Some issued -> issued.observations in
-      (* The post-tool partition is unattributed text without layer sections,
-         so the admission block cannot be re-derived here. Inherit the exact
-         issued bytes from the previous assembly, like the observations. *)
-      let blocks = match Option.bind previous_assembly (fun previous ->
-          List.find_opt (fun (id, _) ->
-            Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input)
-            previous.Keeper_context_assembly.blocks) with
-        | None -> blocks
-        | Some (_, text) -> with_admission text blocks in
       observations, blocks, dynamic_context_partition
     else
       match dynamic_context_partition,

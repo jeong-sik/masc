@@ -1740,7 +1740,9 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   let later = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:(Some issued_b) ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[] in
-  check string "post-tool round retains exact entry bytes" b_text (carrier_entry_text later);
+  check bool "post-tool round drops the entry block; tool feedback stays newest" false
+    (List.exists (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Admitted_scheduled_input)
+       later.Assembly.blocks);
   let missing = Masc.Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_ENTRY"
       ~post_tool_round:true ~previous_assembly:None ~dynamic_context_partition:None
       ~existing_extra_system_context:None ~blocks:[] in
@@ -1796,7 +1798,8 @@ let test_admitted_schedule_entry_survives_tools_and_official_resume () =
   let resume assembly held =
     let prepared = prepare assembly in
     Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
-  let repeated = resume later held in
+  (* Resume composes from the turn's first-round assembly, which always carries the entry. *)
+  let repeated = resume issued_b held in
   check bool "even held entry bytes reach Resume User" true
     (contains ~needle:(Ids.Turn_ref.to_string (turn 2)) repeated.prompt);
   let rebound = assemble (parts 3 (Fields.Known [a]) (observation a)).world_partition in

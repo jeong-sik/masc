@@ -121,9 +121,7 @@ let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
   | Runtime_agent.Completed _
   | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ -> true
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> true
   | Runtime_agent.InputRequired _ -> false
 ;;
 
@@ -155,7 +153,7 @@ let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
     , Keeper_tools_agent_core.Terminal_effect_completed _ ) ->
     Ok run_result
   | (Runtime_agent.Completed _, (Keeper_tools_agent_core.Terminal_effect_open | (Keeper_tools_agent_core.Deferred_tool_result | (Keeper_tools_agent_core.External_effect_deferred | Keeper_tools_agent_core.Terminal_effect_failed _))))
-  | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> Keeper_turn_driver_try_provider.apply_accept
+  | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _)), _) -> Keeper_turn_driver_try_provider.apply_accept
       ~runtime_id
       ~accept
       run_result
@@ -2768,8 +2766,6 @@ let run_named
                | ( Runtime_agent.Completed _
                  | Runtime_agent.Yielded_to_operation_queued _
                  | Runtime_agent.Yielded_to_durable_stimulus _
-                 | Runtime_agent.Yielded_after_repeated_tool_call _
-                 | Runtime_agent.Yielded_after_repeated_assistant_text _
                  | Runtime_agent.InputRequired _ ),
                  ([]
                  | Llm_provider.Types.Text _ :: _

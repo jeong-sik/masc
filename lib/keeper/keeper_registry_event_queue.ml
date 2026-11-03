@@ -638,25 +638,6 @@ let enqueue_hitl_resolution_durable_result
        Error (Hitl_enqueue_failed (durable_intake_error_to_string error)))
 ;;
 
-let drop_by_post_id ~base_path name ~post_id =
-  match
-    Keeper_event_queue_persistence.drop_by_post_id
-      ~base_path
-      ~keeper_name:name
-      ~post_id
-      ~after_commit:(publish_pending ~base_path name)
-      ()
-  with
-  | Error msg ->
-    Log.Keeper.warn
-      "registry: drop_by_post_id failed name=%s post_id=%s: %s"
-      name
-      post_id
-      msg;
-    Error msg
-  | Ok persisted_removed -> Ok persisted_removed
-;;
-
 let snapshot_result ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:name
@@ -684,15 +665,6 @@ let reprioritize_pending_result
     ()
 ;;
 
-let defer_pending_result ~base_path name ~selection =
-  Keeper_event_queue_persistence.defer_pending_result
-    ~base_path
-    ~keeper_name:name
-    ~selection
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-;;
-
 let retain_checkpoint_batch_result ~base_path name ~selections =
   Keeper_event_queue_persistence.retain_checkpoint_batch_result
     ~base_path ~keeper_name:name ~selections
@@ -704,17 +676,6 @@ let peek_when_result ~base_path name ~now ~ready =
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
   | Some _ ->
     Keeper_event_queue_persistence.peek_when_result
-      ~base_path
-      ~keeper_name:name
-      ~now
-      ~ready
-;;
-
-let select_when_result ~base_path name ~now ~ready =
-  match Keeper_registry.get ~base_path name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-  | Some _ ->
-    Keeper_event_queue_persistence.select_when_result
       ~base_path
       ~keeper_name:name
       ~now
@@ -734,13 +695,6 @@ let pending_selections_result ~base_path name =
   Result.map snd (pending_frontier_result ~base_path name)
 ;;
 
-let validate_pending_selection_result ~base_path name ~selection =
-  Keeper_event_queue_persistence.validate_pending_selection_result
-    ~base_path
-    ~keeper_name:name
-    ~selection
-;;
-
 let admitted_selection_standing_result ~base_path name ~selection =
   Keeper_event_queue_persistence.admitted_selection_standing_result
     ~base_path
@@ -750,15 +704,6 @@ let admitted_selection_standing_result ~base_path name ~selection =
 
 let ack_pending_result ~base_path name ~selection =
   Keeper_event_queue_persistence.ack_pending_result
-    ~base_path
-    ~keeper_name:name
-    ~selection
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-;;
-
-let note_checkpoint_retention_result ~base_path name ~selection () =
-  Keeper_event_queue_persistence.note_checkpoint_retention_result
     ~base_path
     ~keeper_name:name
     ~selection

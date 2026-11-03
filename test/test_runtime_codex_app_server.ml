@@ -573,7 +573,6 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff =
            Ok {Runtime_agent.stop_reason = Completed _; _} -> ()
          | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _},
            Ok {Runtime_agent.stop_reason = Yielded_to_durable_stimulus _; _} -> ()
-         | Repeated_tool_call _, Ok {Runtime_agent.stop_reason = Yielded_after_repeated_tool_call _; _} -> ()
          | _ -> fail "the actual Keeper consumer received the wrong authoritative outcome");
         check bool "the exact authoritative stop is preserved" true (actual = expected)
       | _, Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -608,11 +607,8 @@ let concurrent_handoff_stop_scenarios () =
     Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
   let completed : Runtime_codex_app_server.host_stop =
     Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
-  let repeated : Runtime_codex_app_server.host_stop =
-    Repeated_tool_call {tool_name="masc_probe";repeated_count=2} in
   let scenario first second expected = Some first, Some second, Some expected in
   [ scenario deferred completed completed; scenario completed deferred completed
-  ; scenario repeated completed completed; scenario completed repeated completed
   ; scenario deferred deferred deferred
   ; None, Some completed, None ]
   @ List.concat_map (fun effect_disposition ->
@@ -636,8 +632,7 @@ let outer_protocol_drain_scenarios () =
   let open Runtime_codex_app_server in
   let stops : Runtime_codex_app_server.host_stop list =
     [ Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed}
-    ; Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred}
-    ; Repeated_tool_call {tool_name="masc_probe";repeated_count=2} ]
+    ; Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} ]
     @ List.map (fun effect_disposition ->
         Runtime_codex_app_server.Terminal_tool_boundary
           {tool_name="masc_probe";outcome=Terminal_failed
@@ -1367,7 +1362,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
   let response_writes = ref 0 in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
-    ; description = "Abort a repeated provider loop"
+    ; description = "Abort the provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
@@ -1381,8 +1376,8 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           ; on_response_sent = Some (fun () -> incr response_writes)
           ; abort_turn =
               Some
-                (Repeated_tool_call
-                   { tool_name = "masc_probe"; repeated_count = 3 })
+                (Terminal_tool_boundary
+                   { tool_name = "masc_probe"; outcome = Terminal_completed })
           })
     }
   in
@@ -1392,10 +1387,9 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error
           (Runtime_codex_app_server.Stopped_by_host
-            (Repeated_tool_call { tool_name; repeated_count })) ->
+            (Terminal_tool_boundary { tool_name; _ })) ->
         check int "host stop follows complete response write" 1 !response_writes;
-        check string "tool" "masc_probe" tool_name;
-        check int "repeat count" 3 repeated_count
+        check string "tool" "masc_probe" tool_name
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Codex turn")
 ;;
@@ -7770,9 +7764,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
         | Error detail -> fail detail);
        let selection =
          match
-           Keeper_registry_event_queue.select_when_result
+           Keeper_event_queue_persistence.select_when_result
              ~base_path
-             keeper_name
+             ~keeper_name
              ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with
@@ -7792,9 +7786,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
             | Error _ -> ()
             | Ok _ -> fail "provider-rejected official-client turn completed");
        (match
-          Keeper_registry_event_queue.validate_pending_selection_result
+          Keeper_event_queue_persistence.validate_pending_selection_result
             ~base_path
-            keeper_name
+            ~keeper_name
             ~selection
         with
         | Ok () -> ()
@@ -7945,9 +7939,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
           |> to_string);
        let selected_after_resolution =
          match
-           Keeper_registry_event_queue.select_when_result
+           Keeper_event_queue_persistence.select_when_result
              ~base_path
-             keeper_name
+             ~keeper_name
              ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with

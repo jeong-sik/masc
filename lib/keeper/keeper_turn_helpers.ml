@@ -123,44 +123,6 @@ let record_execution_receipt_gap
       (Printexc.to_string exn)
 ;;
 
-(* -- Task-acquisition runtime guards ------------------------------------
-
-   Identity helpers carrying [@@fsm_guard] payloads, one per honest
-   task-acquisition action. Each helper is wrapped at the call site by
-   [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
-   PPX-injected guard increments the Otel_metric_store violation counter and
-   re-raises. [TaskRejected] is NOT instrumented -- it is the failure mode
-   these guards are designed to detect.
-
-   This pattern follows PR #11696, which introduced
-   [Keeper_fsm_guard_runtime]. *)
-
-(* AssignTask: the typed channel decision is the authority. Reactive stimuli
-   include event-queue triggers that need not appear in the observation. *)
-let post_assign_task ~(channel : string) =
-  ignore channel
-[@@fsm_guard "channel = \"turn\""]
-;;
-
-(* EmptyQueueSleep: complementary typed scheduled-autonomous branch. *)
-let post_empty_queue_sleep ~(channel : string) =
-  ignore channel
-[@@fsm_guard "channel = \"scheduled_autonomous\""]
-;;
-
-(* TurnComplete (follow-up to PR #11716): the [run_keeper_cycle] body has
-   produced an [Ok meta]
-   for this cycle. The post-action invariant pins that
-   [cycle_completed] is true before the result is returned -- catches
-   a regression where a future refactor splits the bottom of
-   [run_keeper_cycle] into branches that forget to record completion.
-   The immutable [turn_state] is single-fiber by construction: each
-   [run_keeper_cycle] invocation runs in its own fiber, and the state
-   is allocated fresh inside the function. *)
-let post_turn_complete_task ~(cycle_completed : bool) = ignore cycle_completed
-[@@fsm_guard "cycle_completed = true"]
-;;
-
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch }
 ;;

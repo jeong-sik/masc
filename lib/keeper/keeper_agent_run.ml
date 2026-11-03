@@ -118,8 +118,7 @@ let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
         Keeper_tooling.Response.quiet_final_shape
           ~policy:response_policy run_result.response
       | InputRequired _ | Yielded_to_operation_queued _
-      | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
-      | Yielded_after_repeated_assistant_text _ -> None
+      | Yielded_to_durable_stimulus _ -> None
     in
     (match quiet_shape with
      | None -> error

@@ -18,17 +18,6 @@ type stop_reason =
   | Completed of { provider_turn_ordinal : int }
   | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
-  | Yielded_after_repeated_tool_call of {
-      turns_used : int;
-      provider_turn_ordinal : int;
-      tool_name : string;
-      repeated_count : int;
-    }
-  | Yielded_after_repeated_assistant_text of {
-      turns_used : int;
-      provider_turn_ordinal : int;
-      repeated_count : int;
-    }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;

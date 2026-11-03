@@ -8,8 +8,6 @@ let normalize_response_text_for_finalization
   match run_result.stop_reason with
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _
   | Runtime_agent.Completed _
   | Runtime_agent.InputRequired _ ->
   if

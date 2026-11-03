@@ -133,7 +133,7 @@ let pending_entry_exn id =
 
 let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
-  match Registry_queue.drop_by_post_id ~base_path keeper_name ~post_id with
+  match Keeper_event_queue_persistence.drop_by_post_id ~base_path ~keeper_name ~post_id () with
   | Ok _ -> ()
   | Error reason -> Alcotest.fail reason
 ;;

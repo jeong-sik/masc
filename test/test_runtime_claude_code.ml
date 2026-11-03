@@ -2060,7 +2060,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
   let response_writes = ref 0 in
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
-    ; description = "Abort a repeated provider loop"
+    ; description = "Abort the provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
@@ -2074,8 +2074,8 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           ; on_response_sent = Some (fun () -> incr response_writes)
           ; abort_turn =
               Some
-                (Repeated_tool_call
-                   { tool_name = "masc_probe"; repeated_count = 3 })
+                (Terminal_tool_boundary
+                   { tool_name = "masc_probe"; outcome = Terminal_completed })
           })
     }
   in
@@ -2089,10 +2089,9 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error
           (Runtime_claude_code.Stopped_by_host
-            { stop = Repeated_tool_call { tool_name; repeated_count }; _ }) ->
+            { stop = Terminal_tool_boundary { tool_name; _ }; _ }) ->
         check int "host stop follows complete response write" 1 !response_writes;
-        check string "tool" "masc_probe" tool_name;
-        check int "repeat count" 3 repeated_count
+        check string "tool" "masc_probe" tool_name
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
@@ -2105,7 +2104,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
 let test_host_stop_carries_the_newest_request_input () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
-    ; description = "Abort a repeated provider loop"
+    ; description = "Abort the provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
@@ -2119,8 +2118,8 @@ let test_host_stop_carries_the_newest_request_input () =
           ; on_response_sent = None
           ; abort_turn =
               Some
-                (Repeated_tool_call
-                   { tool_name = "masc_probe"; repeated_count = 3 })
+                (Terminal_tool_boundary
+                   { tool_name = "masc_probe"; outcome = Terminal_completed })
           })
     }
   in

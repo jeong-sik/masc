@@ -127,8 +127,6 @@ let test_detailed_stop_reason_preserves_ordinal () =
       (Some ordinal) (Runtime_agent.final_provider_turn_ordinal stop_reason))
     [ Runtime_agent.Operation_queued
     ; Runtime_agent.Durable_stimulus_waiting
-    ; Runtime_agent.Repeated_tool_call { tool_name = "probe"; repeated_count = 4 }
-    ; Runtime_agent.Repeated_assistant_text { repeated_count = 4 }
     ; Runtime_agent.Terminal_tool_completed
     ];
   check (option int) "completed ordinal survives the public projection"

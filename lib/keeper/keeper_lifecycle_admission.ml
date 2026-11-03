@@ -13,15 +13,6 @@ let state ~paused ~latched_reason =
   | Some _ | None -> Active
 ;;
 
-type manual_one_shot_admission =
-  | Manual_admitted_active
-  | Manual_admitted_paused_recovery of paused_latch
-
-let admit_manual_one_shot = function
-  | Active -> Manual_admitted_active
-  | Paused latch -> Manual_admitted_paused_recovery latch
-;;
-
 type autonomous_denial =
   | Autonomous_paused of paused_latch
 

@@ -22,8 +22,7 @@ type runtime_attempt_error =
 (** Immutable per-turn accumulator that replaces the casual [ref] cells
     previously threaded through [run_keeper_cycle] and the retry loop. *)
 type turn_state =
-  { cycle_completed : bool
-  ; manifest_seq : int
+  { manifest_seq : int
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; degraded_retry_settled : Keeper_agent_result.turn_settlement option
     (** The verdict this turn's receipt recorded, carried up so the decision

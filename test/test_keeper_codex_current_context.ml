@@ -1424,7 +1424,7 @@ let test_argument_projection_keeps_exact_history_prefix_guards () =
   check bool "a mismatched history cannot borrow raw argument authority" true
     (argument_input "old" (read_requests capture)=old)
 
-let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool () =
+let test_checkpoint_preserves_receipt_across_session_replacement () =
   with_fixture ~checkpoint_tool:true @@ fun ~run ~capture ~reports:_ ->
   let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
   let config = Workspace.default_config base_path in
@@ -1462,18 +1462,15 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
         (fun _ -> incr calls; Ok {Agent_core.Types.content="independent-result";
                                  content_blocks=None;_meta=None}) in
       let stop : Keeper_official_client_host.host_stop =
-        if repeated_tool then Repeated_tool_call {tool_name="CheckpointFixture";repeated_count=2}
-        else Terminal_tool_boundary {tool_name="CheckpointFixture";outcome=Durable_stimulus_deferred} in
+        Terminal_tool_boundary {tool_name="CheckpointFixture";outcome=Durable_stimulus_deferred} in
       let attempt = run ~tools:[tool]
         ~on_official_client_tool_boundary:(fun ~tool_name:_ -> Ok (Some stop))
         ~instructions:"Read the original result without replaying its effect." ~world:"before checkpoint" () in
       let result = match attempt.Keeper_codex_runtime.result with
         | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
       (match result.stop_reason with
-       | Yielded_to_durable_stimulus _ when not repeated_tool -> ()
-       | Yielded_after_repeated_tool_call _ when repeated_tool -> ()
-       | Completed _ | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
-       | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
+       | Yielded_to_durable_stimulus _ -> ()
+       | Completed _ | Yielded_to_operation_queued _
        | InputRequired _ -> fail "the production adapter must project the checkpoint");
       check int "the independent tool ran once" 1 !calls;
       Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
@@ -1584,6 +1581,4 @@ let () = run "Keeper current Codex context" ["native requests",[
       test_completion_projection_failure_prevents_native_request];
   "async receipt continuation",[
     test_case "host checkpoint preserves result through fresh-session intake" `Quick
-      (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:false);
-    test_case "repeated-tool checkpoint preserves result through fresh-session intake" `Quick
-      (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:true)]]
+      test_checkpoint_preserves_receipt_across_session_replacement]]

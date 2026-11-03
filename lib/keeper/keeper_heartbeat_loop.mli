@@ -83,11 +83,6 @@ val decide_keepalive_scheduling :
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision
 
-val provider_timeout_observation_reasons : string list
-
-val record_provider_timeout_observation :
-  base_path:string -> keeper_name:string -> unit
-
 (** Closed accounting status for one keepalive cycle. Admission busy performs
     no turn accounting, crash accounting, or work-health refresh. *)
 type keepalive_cycle_status =
@@ -283,10 +278,6 @@ val run_keepalive_unified_turn :
   settle_deferred_runtime_lane:
     (Keeper_turn_driver.deferred_runtime_lane option -> unit) ->
   keepalive_turn_outcome
-(** Why the last turn that ran ended before completing is no longer this
-    loop's state: {!Keeper_heartbeat_loop_cycle.run_keeper_cycle} records it
-    into {!Keeper_last_turn_stop} after every cycle it runs, on every lane,
-    and reads it back for the next turn's prompt. *)
 
 val refresh_work_as_heartbeat :
   ctx:'a context ->

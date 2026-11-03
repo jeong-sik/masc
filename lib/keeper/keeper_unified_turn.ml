@@ -92,54 +92,26 @@ let execution_boundary_of_turn_failure error =
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
-type continuation_route_disposition =
-  | Continuation_route_addressed
-  | Continuation_route_mismatch
-  | Continuation_no_terminal_effect_receipt
-  | Continuation_route_not_applicable
-
-type checkpoint_reason = Keeper_turn_checkpoint_reason.t =
+type checkpoint_reason =
   | Operation_queued
   | Durable_stimulus_arrived
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
-  | Repeated_assistant_text of { repeated_count : int }
 
 type turn_success =
-  | Turn_completed of
-      { meta : keeper_meta
-      ; continuation_route : continuation_route_disposition
-      }
+  | Turn_completed of { meta : keeper_meta }
   | Turn_checkpointed of
       { meta : keeper_meta
       ; checkpoint_reason : checkpoint_reason
-      ; continuation_route : continuation_route_disposition
       }
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
-let turn_success_of_stop_reason ~meta ~continuation_route = function
-  | Runtime_agent.Completed _ -> Turn_completed { meta; continuation_route }
+let turn_success_of_stop_reason ~meta = function
+  | Runtime_agent.Completed _ -> Turn_completed { meta }
   | Runtime_agent.Yielded_to_operation_queued _ ->
-    Turn_checkpointed { meta; checkpoint_reason = Operation_queued; continuation_route }
+    Turn_checkpointed { meta; checkpoint_reason = Operation_queued }
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
-    Turn_checkpointed
-      { meta; checkpoint_reason = Durable_stimulus_arrived; continuation_route }
-  | Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ } ->
-    Turn_checkpointed
-      { meta
-      ; checkpoint_reason = Repeated_tool_call { tool_name; repeated_count }
-      ; continuation_route
-      }
-  | Runtime_agent.Yielded_after_repeated_assistant_text { repeated_count; _ } ->
-    Turn_checkpointed
-      { meta
-      ; checkpoint_reason = Repeated_assistant_text { repeated_count }
-      ; continuation_route
-      }
+    Turn_checkpointed { meta; checkpoint_reason = Durable_stimulus_arrived }
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
@@ -421,10 +393,7 @@ end
 (* RFC-0377 admits a whole conversation backlog as one wake: intake batches
    one connector conversation's pending rows together with every other ready
    payload (at most one HITL resolution), so a batch is not connector rows
-   only. A batch used to route as "not a continuation wake", so a reply to a
-   batched conversation could never be [Continuation_route_addressed], and
-   under the rule #34662 removed its rows could never settle (#34662 review).
-   The batch continues on one channel only when every member has a routable
+   only. The batch continues on one channel only when every member has a routable
    channel and all of them are the same conversation; one channel-less member
    ([Board_signal], [Bootstrap], ...) routes the batch nowhere. The chosen
    member is the last in the wake's order, which is intake's selection order
@@ -432,8 +401,7 @@ end
    members agree on the conversation, so the choice decides only the
    per-message stamps a reply inherits: Discord's [reply_to_message_id],
    which no sender reads, and Slack's [thread_ts], which
-   [Keeper_surface_post] threads under and
-   [Keeper_surface_post.matches_continuation_route] compares. *)
+   [Keeper_surface_post] threads under. *)
 let continuation_channel_of_wake = function
   | Keeper_registry.Woken (_ :: _ as payloads) ->
     let routable payload =
@@ -469,7 +437,6 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(turn_input : Keeper_heartbeat_source_batch.turn_input)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
-      ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
       ?shared_context
       ?event_bus
       ?hitl_resolution
@@ -521,10 +488,6 @@ let run_keeper_cycle
       }
   | Ok (entry_profile_defaults, meta) ->
   let channel = turn_decision.channel in
-  (* TurnComplete bracket — the cycle_completed flag is set to true on the
-     [Ok updated_meta] return at the end of this function; an [Error _]
-     branch leaves it false and skips the wrap, so completion is recorded
-     on success only. *)
   (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_runtime remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
@@ -551,8 +514,7 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
-    { cycle_completed = false
-    ; manifest_seq = 0
+    { manifest_seq = 0
     ; last_execution = None
     ; degraded_retry_settled = None
     ; deferred_runtime_lane = None
@@ -841,7 +803,6 @@ let run_keeper_cycle
                  Eio_guard.with_named_switch "turn:prompt" (fun () ->
                  let prepared = Keeper_unified_prompt.prepare_prompt
                      ~turn_decision
-                     ?previous_turn_stop
                      ~current_task
                      ~task_skill_surfaces
                      ~active_goal_summaries
@@ -1245,10 +1206,6 @@ let run_keeper_cycle
                           }
                       }
                   in
-                  let turn_state =
-                    { turn_state with cycle_completed = true }
-                  in
-                  post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
                   Ok (Turn_input_required committed), turn_state
                 | Error err ->
                   (match
@@ -1579,45 +1536,9 @@ let run_keeper_cycle
                   in
                   (match success with
                    | Keeper_unified_turn_success.Completed updated_meta ->
-                     (* TurnComplete post-action. *)
-                     let turn_state =
-                       { turn_state with cycle_completed = true }
-                     in
-                     post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                     let continuation_route =
-                       match
-                         ( continuation_channel_of_wake wake
-                         , result.Keeper_agent_run.terminal_effect_receipt )
-                       with
-                       | ( Some channel
-                         , Some
-                             (Keeper_tool_execution.Surface_post_completed
-                                target) )
-                         when Keeper_surface_post.matches_continuation_route
-                                target
-                                channel ->
-                         Continuation_route_addressed
-                       | ( Some _
-                         , Some
-                             (Keeper_tool_execution.Surface_post_completed _) ) ->
-                         (* A terminal surface post landed on a different channel
-                            than the one that woke this turn. Not a judgement to
-                            ignore; the batch is still acked on completion
-                            (#34662) and the route names what happened. *)
-                         Continuation_route_mismatch
-                       | ( Some _, None ) ->
-                         (* Absence of a receipt proves neither observation nor
-                            intent. Keep only the absence we actually saw. *)
-                         Continuation_no_terminal_effect_receipt
-                       | ( None, _ ) ->
-                         (* This turn has no continuation route against which a
-                            terminal effect can be compared. *)
-                         Continuation_route_not_applicable
-                     in
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
-                          ~continuation_route
                           result.Keeper_agent_run.stop_reason),
                      turn_state))))
                      )

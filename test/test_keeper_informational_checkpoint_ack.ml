@@ -438,9 +438,6 @@ data: [DONE]
     ~on_deferred_runtime_consumed:(fun () -> ())
     ~settle_deferred_runtime_lane:(function Some _ -> failwith "unexpected runtime failover" | None -> ()) in
   require (not outcome.stimuli_acked) "checkpoint prematurely ACKed informational results";
-  (match Keeper_last_turn_stop.get ~base_path ~keeper:keeper_name with
-   | Some Keeper_turn_checkpoint_reason.Operation_queued -> ()
-   | Some _ | None -> failwith "actual cycle did not checkpoint for queued person chat");
   require (Exact_output_fixture.post_count server=1) "expected one actual provider round";
   let request = match Exact_output_fixture.request_bodies server with
     | [body] -> body | _ -> failwith "expected one captured provider request" in
@@ -501,8 +498,6 @@ data: [DONE]
     ~on_deferred_runtime_consumed:(fun () -> ())
     ~settle_deferred_runtime_lane:(function Some _ -> failwith "unexpected runtime failover" | None -> ()) in
   require completed.stimuli_acked "actual completed continuation did not ACK its source batch";
-  require (Keeper_last_turn_stop.get ~base_path ~keeper:keeper_name=None)
-    "resumed cycle checkpointed instead of completing";
   require (Exact_output_fixture.post_count server=2) "continuation did not make exactly one new model request";
   let completed_body=match Exact_output_fixture.request_bodies server with
     | [_;body] -> body

@@ -380,8 +380,7 @@ let test_recorded_settlement_follows_the_batch_disposition () =
   (match
      Loop.continuation_settlement_of_cycle_outcome
        (Some
-          (Cycle.Completed
-             { meta; continuation_route = Turn.Continuation_route_addressed }))
+          (Cycle.Completed { meta }))
    with
    | Loop.Continuation_settled_recorded -> ()
    | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
@@ -394,7 +393,6 @@ let test_recorded_settlement_follows_the_batch_disposition () =
               (Cycle.Checkpointed
                  { meta
                  ; checkpoint_reason
-                 ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
                  }))
        with
        | Loop.Continuation_settled_recorded -> ()
@@ -431,9 +429,6 @@ let test_nonterminal_outcomes_preserve_batch () =
    2026-09-02: eight turns on one Execute over ten minutes). *)
 let every_checkpoint_reason =
   [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
-  ; "repeated assistant text", Turn.Repeated_assistant_text { repeated_count = 3 }
-  ; ( "repeated tool call"
-    , Turn.Repeated_tool_call { tool_name = "keeper_tasks_list"; repeated_count = 3 } )
   ; "operation queued", Turn.Operation_queued
   ]
 ;;
@@ -448,7 +443,6 @@ let test_every_checkpoint_reason_acks_admitted_attention () =
               (Cycle.Checkpointed
                  { meta
                  ; checkpoint_reason
-                 ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
                  }))
        with
        | Loop.Batch_ack_attention_only -> ()
@@ -472,7 +466,6 @@ let test_every_checkpoint_reason_records_hitl_continuation () =
                (Cycle.Checkpointed
                   { meta
                   ; checkpoint_reason
-                  ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
                   }))
           |> Loop.For_testing.batch_disposition_records_continuation))
     every_checkpoint_reason
@@ -486,7 +479,6 @@ let test_durable_stimulus_checkpoint_acks_admitted_batch () =
          (Cycle.Checkpointed
             { meta
             ; checkpoint_reason = Turn.Durable_stimulus_arrived
-            ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
             }))
   with
   | Loop.Batch_ack_attention_only -> ()
@@ -494,40 +486,6 @@ let test_durable_stimulus_checkpoint_acks_admitted_batch () =
     fail "a checkpoint was treated as a fully completed connector disposition"
   | Loop.Batch_no_action ->
     fail "a newer durable stimulus left the already-admitted batch pending"
-;;
-
-let test_repeated_assistant_checkpoint_acks_admitted_attention () =
-  let meta = test_meta () in
-  match
-    Loop.batch_disposition_of_cycle_outcome
-      (Some
-         (Cycle.Checkpointed
-            { meta
-            ; checkpoint_reason = Turn.Repeated_assistant_text { repeated_count = 3 }
-            ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
-            }))
-  with
-  | Loop.Batch_ack_attention_only -> ()
-  | Loop.Batch_ack_completed ->
-    fail "a loop-guard checkpoint was treated as a completed connector disposition"
-  | Loop.Batch_no_action ->
-    fail "a repeated-assistant checkpoint retained already-observed attention"
-;;
-
-let test_repeated_assistant_checkpoint_records_hitl_continuation () =
-  let meta = test_meta () in
-  let outcome =
-    Cycle.Checkpointed
-      { meta
-      ; checkpoint_reason = Turn.Repeated_assistant_text { repeated_count = 3 }
-      ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
-      }
-  in
-  check bool
-    "HITL continuation projection is required before ACK"
-    true
-    (Loop.batch_disposition_of_cycle_outcome (Some outcome)
-     |> Loop.For_testing.batch_disposition_records_continuation)
 ;;
 
 let () =
@@ -546,14 +504,6 @@ let () =
             "durable-stimulus yield advances the admitted batch"
             `Quick
             test_durable_stimulus_checkpoint_acks_admitted_batch
-        ; test_case
-            "repeated-assistant checkpoint advances admitted attention"
-            `Quick
-            test_repeated_assistant_checkpoint_acks_admitted_attention
-        ; test_case
-            "repeated-assistant checkpoint projects HITL continuation"
-            `Quick
-            test_repeated_assistant_checkpoint_records_hitl_continuation
         ; test_case
             "every checkpoint reason advances admitted attention"
             `Quick

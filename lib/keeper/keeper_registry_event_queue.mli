@@ -83,13 +83,6 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
-val select_when_result :
-  base_path:string ->
-  string ->
-  now:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  (Keeper_event_queue_state.pending_selection option, string) result
-
 val pending_frontier_result :
   base_path:string ->
   string ->
@@ -107,12 +100,6 @@ val pending_selections_result :
 (** Read every exact pending selection in durable queue order without
     consuming it. *)
 
-val validate_pending_selection_result :
-  base_path:string ->
-  string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  (unit, string) result
-
 val admitted_selection_standing_result :
   base_path:string ->
   string ->
@@ -127,16 +114,6 @@ val ack_pending_result :
   string ->
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
-
-val note_checkpoint_retention_result :
-  base_path:string ->
-  string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  unit ->
-  (Keeper_event_queue_state.pending_selection * int, string) result
-(** Durably count one checkpoint-yield retention of the selection. The
-    returned selection carries the new count and replaces the caller's
-    snapshot for any later ack of the same entry. *)
 
 val cancel_pending_accepted_result :
   base_path:string ->
@@ -386,13 +363,6 @@ val reprioritize_pending_result :
   urgency:Keeper_event_queue.urgency ->
   (int64, string) result
 
-val defer_pending_result :
-  base_path:string ->
-  string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  (int64, string) result
-(** Durable queue-tail rotation for a transiently blocked exact source. *)
-
 val retain_checkpoint_batch_result :
   base_path:string -> string ->
   selections:Keeper_event_queue_state.pending_selection list ->
@@ -402,12 +372,3 @@ val retain_checkpoint_batch_result :
     suffix in FIFO order. Publish only after durable confirmation; per-source
     failures remain explicit while independent valid work still progresses. *)
 
-val drop_by_post_id :
-  base_path:string
-  -> string
-  -> post_id:string
-  -> (Keeper_event_queue.stimulus list, string) result
-(** Remove matching stimuli from the live queue plus durable pending/in-flight
-    snapshots, returning the exact stimuli that were dropped. Returns [Error _]
-    when durable removal fails so callers do not clear recovery state while a
-    replayable stimulus remains on disk. *)

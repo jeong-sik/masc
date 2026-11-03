@@ -79,9 +79,6 @@ let () =
       (Receipt.stop_reason_to_string stop <> "checkpoint"))
     [ Runtime_agent.Yielded_to_operation_queued { turns_used = 53 ; provider_turn_ordinal = 17 }
     ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }
-    ; Runtime_agent.Yielded_after_repeated_tool_call
-        { turns_used = 3; tool_name = "fixture"; repeated_count = 3 ; provider_turn_ordinal = 17 }
-    ; Runtime_agent.Yielded_after_repeated_assistant_text { turns_used = 4; repeated_count = 4 ; provider_turn_ordinal = 17 }
     ];
   check "real input retains attention"
     (D.requires_attention (Receipt.disposition_of_stop_reason input_required_stop));

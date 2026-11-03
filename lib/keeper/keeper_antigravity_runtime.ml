@@ -1164,9 +1164,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
           (match stop, !terminal_error with
            | Host.Terminal_tool_boundary _, _
           when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), Some detail ->
+           | Host.Terminal_tool_boundary _, Some detail ->
              Error (internal_error detail)
-           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
+           | Host.Terminal_tool_boundary _, None ->
              settle_host_stop stop)
         | Ok (`Completed turn) ->
           natural_completion := true;

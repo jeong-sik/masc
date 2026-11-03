@@ -16,12 +16,6 @@ val state :
   latched_reason:Keeper_latched_reason.t option ->
   state
 
-type manual_one_shot_admission =
-  | Manual_admitted_active
-  | Manual_admitted_paused_recovery of paused_latch
-
-val admit_manual_one_shot : state -> manual_one_shot_admission
-
 type autonomous_denial = Autonomous_paused of paused_latch
 
 type autonomous_admission =

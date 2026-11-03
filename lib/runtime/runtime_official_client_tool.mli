@@ -20,10 +20,6 @@ type terminal_boundary_outcome =
       }
 
 type host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome

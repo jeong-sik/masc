@@ -101,18 +101,6 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }));
-  check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.Yielded_after_repeated_tool_call
-          { turns_used = 2
-          ; tool_name = "keeper_tasks_list"
-          ; repeated_count = 3
-          ; provider_turn_ordinal = 17 }));
-  check outcome "repeated assistant text yield -> checkpoint"
-    TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.Yielded_after_repeated_assistant_text
-          { turns_used = 2; repeated_count = 3 ; provider_turn_ordinal = 17 }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
@@ -142,10 +130,6 @@ let test_progress_post_keeps_typed_continuation () =
     | Error error -> fail (Agent_core.Error.to_string error))
     [ Runtime_agent.Yielded_to_operation_queued { turns_used = 1 ; provider_turn_ordinal = 17 }
     ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 ; provider_turn_ordinal = 17 }
-    ; Runtime_agent.Yielded_after_repeated_tool_call
-        { turns_used = 1; tool_name = "probe"; repeated_count = 3 ; provider_turn_ordinal = 17 }
-    ; Runtime_agent.Yielded_after_repeated_assistant_text
-        { turns_used = 1; repeated_count = 3 ; provider_turn_ordinal = 17 }
     ];
   (match finish (Runtime_agent.Completed { provider_turn_ordinal = 17 }) posted with
    | Ok (turn_outcome, retained_receipt) ->
@@ -351,8 +335,6 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
         (match actual with
          | Runtime_agent.Durable_stimulus_waiting -> "durable_stimulus_waiting"
          | Runtime_agent.Operation_queued -> "operation_queued"
-         | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
-         | Runtime_agent.Repeated_assistant_text _ -> "repeated_assistant_text"
          | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
     | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
     | Error error -> fail (label ^ ": " ^ Agent_core.Error.to_string error)
@@ -797,54 +779,13 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason chat with
     | Runtime_agent.Operation_queued -> ()
     | Runtime_agent.Durable_stimulus_waiting
-    | Runtime_agent.Repeated_tool_call _
-   | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
     | Runtime_agent.Durable_stimulus_waiting -> ()
     | Runtime_agent.Operation_queued
-   | Runtime_agent.Repeated_tool_call _
-   | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
      fail "durable request mapped to the chat reason");
-  check bool "repeated exact call yield preserves its evidence" true
-    (match
-       Runtime_agent.For_testing.stop_reason_of_cooperative_yield
-         ~provider_turn_ordinal:17 ~turns_used:8
-         (Runtime_agent.Repeated_tool_call
-            { tool_name = "keeper_tasks_list"; repeated_count = 3 })
-     with
-     | Runtime_agent.Yielded_after_repeated_tool_call
-         { turns_used = 8
-         ; provider_turn_ordinal = 17
-         ; tool_name = "keeper_tasks_list"
-         ; repeated_count = 3
-         } ->
-       true
-     | Runtime_agent.Completed _
-     | Runtime_agent.Yielded_to_operation_queued _
-     | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Yielded_after_repeated_tool_call _
-     | Runtime_agent.Yielded_after_repeated_assistant_text _
-     | Runtime_agent.InputRequired _ ->
-       false);
-  check bool "repeated assistant text yield preserves its evidence" true
-    (match
-       Runtime_agent.For_testing.stop_reason_of_cooperative_yield
-         ~provider_turn_ordinal:17 ~turns_used:8
-         (Runtime_agent.Repeated_assistant_text { repeated_count = 3 })
-     with
-     | Runtime_agent.Yielded_after_repeated_assistant_text
-         { turns_used = 8; provider_turn_ordinal = 17; repeated_count = 3 } ->
-       true
-     | Runtime_agent.Completed _
-     | Runtime_agent.Yielded_to_operation_queued _
-     | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Yielded_after_repeated_tool_call _
-     | Runtime_agent.Yielded_after_repeated_assistant_text _
-     | Runtime_agent.InputRequired _ ->
-       false);
   check bool "terminal tool yield settles as completion" true
     (match
        Runtime_agent.For_testing.stop_reason_of_cooperative_yield
@@ -855,8 +796,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed _ -> false
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Yielded_after_repeated_tool_call _
-     | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
 
 let test_terminal_externalization_failure_contract () =

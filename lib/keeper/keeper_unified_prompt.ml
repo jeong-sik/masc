@@ -1271,41 +1271,6 @@ let backlog_statement_of_observation
     else Backlog_readable_with_rows
 ;;
 
-(* The checkpoint carries the previous turn's calls; it does not carry the
-   reason the runtime ended that turn. Without the reason, a keeper whose turn
-   was cut by the repeated-call guard reads its own three identical calls as
-   unfinished work and makes them again. Measured 2026-09-01 from
-   turn-records: one live keeper ended 259 of 361 turns on the same
-   repeated query, lane-smith 136 of 342, polisher 84 of 424, and each next
-   turn repeated the call. The sentences live under [config/prompts] with the
-   other prompt text and name the tool and the count so the model can match
-   them against its history. A template that fails to render logs and
-   contributes no line: the checkpoint still carries the calls themselves.
-   The three yields that are not loop guards (a queued chat operation, a
-   newer durable stimulus, an awaited approval) explain themselves through
-   the stimulus that follows and render nothing here. *)
-let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
-    string list =
-  let line key vars =
-    match String.trim (observation_prose key vars ~fallback:"") with
-    | "" -> []
-    | text -> [ text ]
-  in
-  match stop with
-  | None -> []
-  | Some (Keeper_turn_checkpoint_reason.Repeated_tool_call { tool_name; repeated_count })
-    ->
-      line
-        Prompt_names.keeper_observation_previous_turn_stop_repeated_tool_call
-        [ "tool_name", tool_name; "repeated_count", string_of_int repeated_count ]
-  | Some (Keeper_turn_checkpoint_reason.Repeated_assistant_text { repeated_count }) ->
-      line
-        Prompt_names.keeper_observation_previous_turn_stop_repeated_assistant_text
-        [ "repeated_count", string_of_int repeated_count ]
-  | Some
-      ( Keeper_turn_checkpoint_reason.Operation_queued
-      | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
-
 let format_workspace_memory_observation ?access = function
   | Workspace_memory_ledger.Missing -> None
   | Workspace_memory_ledger.Unavailable _ ->
@@ -1472,7 +1437,6 @@ let format_recent_actions_section ~current_task_id own_recent_actions
 
 let prepare_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
-    ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
@@ -1514,7 +1478,6 @@ let prepare_prompt_internal
     (match turn_decision with
      | Some decision -> autonomous_trigger_lines ~decision
      | None -> [])
-    @ previous_turn_stop_lines previous_turn_stop
   in
   let current_task_id =
     match current_task with
@@ -2121,7 +2084,6 @@ let emit_prompt_metrics
 
 let prepare_prompt
       ~turn_decision
-      ?previous_turn_stop
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
@@ -2134,7 +2096,6 @@ let prepare_prompt
   =
   prepare_prompt_internal
     ~turn_decision:(Some turn_decision)
-    ?previous_turn_stop
     ~current_task
     ?task_skill_surfaces
     ?active_goal_summaries
@@ -2146,10 +2107,10 @@ let prepare_prompt
     ()
 ;;
 
-let build_prompt ~turn_decision ?previous_turn_stop ~current_task ?task_skill_surfaces
+let build_prompt ~turn_decision ~current_task ?task_skill_surfaces
     ?active_goal_summaries ?workspace_memory ?workspace_memory_access ?wiki_contents
     ?lane_updates ?repository_freshness ?recent_work ~observation () =
-  let prepared = prepare_prompt ~turn_decision ?previous_turn_stop ~current_task
+  let prepared = prepare_prompt ~turn_decision ~current_task
     ?task_skill_surfaces ?active_goal_summaries ?workspace_memory ?wiki_contents
     ?lane_updates ?repository_freshness ~observation () in
   project_prompt prepared ?workspace_memory_access ?recent_work ()

@@ -657,3 +657,200 @@ let parse_probe (s : string) : (probe, string) result =
     | Some _ | None -> None
   in
   Ok { name; version; capabilities; release; boot_id }
+
+module Relay = struct
+  let version = 1
+
+  type request_kind =
+    | Run
+    | Probe
+
+  let request_kind_byte = function
+    | Run -> 'R'
+    | Probe -> 'P'
+
+  let request_kind_of_byte = function
+    | 'R' -> Some Run
+    | 'P' -> Some Probe
+    | _ -> None
+
+  type exit_status =
+    | Exited of int
+    | Signaled of int
+
+  type hello =
+    { relay_version : int
+    ; root_read_only : bool
+    ; uid : int
+    ; gid : int
+    ; no_new_privs : bool
+    }
+
+  type chunk =
+    | Hello of hello
+    | Stdout of string
+    | Stderr of string
+    | Exit of exit_status
+
+  (* One read from a guest pipe is at most this much, so one read is one
+     chunk. *)
+  let max_payload_bytes = 65536
+  let header_bytes = 5
+
+  type kind =
+    | Kind_hello
+    | Kind_stdout
+    | Kind_stderr
+    | Kind_exit
+
+  let kind_byte = function
+    | Kind_hello -> '\001'
+    | Kind_stdout -> '\002'
+    | Kind_stderr -> '\003'
+    | Kind_exit -> '\004'
+
+  let kind_of_byte = function
+    | '\001' -> Some Kind_hello
+    | '\002' -> Some Kind_stdout
+    | '\003' -> Some Kind_stderr
+    | '\004' -> Some Kind_exit
+    | _ -> None
+
+  let exit_tag_exited = '\000'
+  let exit_tag_signaled = '\001'
+  let exit_payload_bytes = 5
+
+  let frame kind payload =
+    let length = String.length payload in
+    let bytes = Bytes.create (header_bytes + length) in
+    Bytes.set bytes 0 (kind_byte kind);
+    Bytes.set_int32_be bytes 1 (Int32.of_int length);
+    Bytes.blit_string payload 0 bytes header_bytes length;
+    Bytes.unsafe_to_string bytes
+
+  let rec frames kind payload =
+    let length = String.length payload in
+    if length <= max_payload_bytes
+    then [ frame kind payload ]
+    else
+      frame kind (String.sub payload 0 max_payload_bytes)
+      :: frames kind (String.sub payload max_payload_bytes (length - max_payload_bytes))
+
+  let hello_fields =
+    [ "relay_version"; "root_read_only"; "uid"; "gid"; "no_new_privs" ]
+
+  let hello_to_json (hello : hello) =
+    `Assoc
+      [ "relay_version", `Int hello.relay_version
+      ; "root_read_only", `Bool hello.root_read_only
+      ; "uid", `Int hello.uid
+      ; "gid", `Int hello.gid
+      ; "no_new_privs", `Bool hello.no_new_privs
+      ]
+
+  let exit_payload = function
+    | Exited code -> exit_tag_exited, code
+    | Signaled signal -> exit_tag_signaled, signal
+
+  let encode = function
+    | Hello hello ->
+      frame Kind_hello (Yojson.Safe.to_string (hello_to_json hello))
+    | Stdout bytes -> String.concat "" (frames Kind_stdout bytes)
+    | Stderr bytes -> String.concat "" (frames Kind_stderr bytes)
+    | Exit status ->
+      let tag, value = exit_payload status in
+      let payload = Bytes.create exit_payload_bytes in
+      Bytes.set payload 0 tag;
+      Bytes.set_int32_be payload 1 (Int32.of_int value);
+      frame Kind_exit (Bytes.unsafe_to_string payload)
+
+  type decode_error =
+    | Unknown_kind of int
+    | Oversized of { length : int }
+    | Malformed_hello of string
+    | Malformed_exit of string
+
+  type decoded =
+    | Need_more
+    | Chunk of { chunk : chunk; consumed : int }
+
+  let decode_hello payload =
+    let field fields name =
+      match List.filter (fun (key, _) -> String.equal key name) fields with
+      | [ (_, value) ] -> Ok value
+      | [] -> Error (Malformed_hello (Printf.sprintf "field %S is missing" name))
+      | _ :: _ :: _ -> Error (Malformed_hello (Printf.sprintf "field %S is repeated" name))
+    in
+    let int_field fields name =
+      match field fields name with
+      | Ok (`Int value) -> Ok value
+      | Ok _ -> Error (Malformed_hello (Printf.sprintf "field %S is not an integer" name))
+      | Error error -> Error error
+    in
+    let bool_field fields name =
+      match field fields name with
+      | Ok (`Bool value) -> Ok value
+      | Ok _ -> Error (Malformed_hello (Printf.sprintf "field %S is not a boolean" name))
+      | Error error -> Error error
+    in
+    match Yojson.Safe.from_string payload with
+    | exception Yojson.Json_error detail -> Error (Malformed_hello detail)
+    | `Assoc fields ->
+      (match
+         List.find_opt (fun (key, _) -> not (List.mem key hello_fields)) fields
+       with
+       | Some (key, _) ->
+         Error (Malformed_hello (Printf.sprintf "field %S is not a hello field" key))
+       | None ->
+         Result.bind (int_field fields "relay_version") (fun relay_version ->
+           Result.bind (bool_field fields "root_read_only") (fun root_read_only ->
+             Result.bind (int_field fields "uid") (fun uid ->
+               Result.bind (int_field fields "gid") (fun gid ->
+                 Result.map
+                   (fun no_new_privs ->
+                      Hello { relay_version; root_read_only; uid; gid; no_new_privs })
+                   (bool_field fields "no_new_privs"))))))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error (Malformed_hello "the hello is not a JSON object")
+
+  let decode_exit payload =
+    if String.length payload <> exit_payload_bytes
+    then
+      Error
+        (Malformed_exit
+           (Printf.sprintf "payload is %d bytes, not %d" (String.length payload)
+              exit_payload_bytes))
+    else
+      let value = Int32.to_int (String.get_int32_be payload 1) in
+      if Char.equal payload.[0] exit_tag_exited
+      then Ok (Exit (Exited value))
+      else if Char.equal payload.[0] exit_tag_signaled
+      then Ok (Exit (Signaled value))
+      else
+        Error (Malformed_exit (Printf.sprintf "unknown exit tag %d" (Char.code payload.[0])))
+
+  let decode buffer ~pos =
+    let available = String.length buffer - pos in
+    if available < header_bytes
+    then Ok Need_more
+    else
+      match kind_of_byte buffer.[pos] with
+      | None -> Error (Unknown_kind (Char.code buffer.[pos]))
+      | Some kind ->
+        let length = Int32.to_int (String.get_int32_be buffer (pos + 1)) in
+        if length < 0 || length > max_payload_bytes
+        then Error (Oversized { length })
+        else if available < header_bytes + length
+        then Ok Need_more
+        else
+          let payload = String.sub buffer (pos + header_bytes) length in
+          let consumed = header_bytes + length in
+          let chunk =
+            match kind with
+            | Kind_hello -> decode_hello payload
+            | Kind_stdout -> Ok (Stdout payload)
+            | Kind_stderr -> Ok (Stderr payload)
+            | Kind_exit -> decode_exit payload
+          in
+          Result.map (fun chunk -> Chunk { chunk; consumed }) chunk
+end

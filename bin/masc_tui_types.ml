@@ -1287,6 +1287,15 @@ type keeper_composite_owed = {
   kco_read : Masc_tui_owed_read.t;
 }
 
+(* The tool-call read the Keeper_calls surface owes the selected Keeper. The
+   calls slot is shared with the chat pane, which reads it on its own
+   triggers; this record is the surface's. *)
+type keeper_calls_owed = {
+  kclo_keeper : string;
+  kclo_reading : unit ref;
+  kclo_read : Masc_tui_owed_read.t;
+}
+
 type keeper_history_owed = {
   kho_keeper : string;
   kho_authority : workspace_authority;
@@ -10124,6 +10133,7 @@ type state = {
   mutable keeper_calls_keeper: string option;
   mutable keeper_calls_loading: bool;
   mutable keeper_calls_refresh_pending: bool;
+  mutable keeper_calls_owed: keeper_calls_owed option;
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
@@ -19469,6 +19479,7 @@ let create_state
   keeper_calls_keeper = None;
   keeper_calls_loading = false;
   keeper_calls_refresh_pending = false;
+  keeper_calls_owed = None;
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   keeper_logs = Masc_tui_fetched.initial;

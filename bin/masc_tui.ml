@@ -8427,6 +8427,59 @@ let owe_keeper_composite_read state ~mailbox ~keeper_name =
   update_composite_owed state ~keeper_name Masc_tui_owed_read.changed;
   launch_owed_keeper_composite state ~mailbox
 
+(* The Keeper_calls surface reads the selected Keeper's tool calls when it
+   opens or [r] asks, when [keeper_tool_call] names the Keeper, on a
+   revalidation, and again after a failed read (RFC-0480 §3.1). *)
+let current_calls_owed state ~keeper_name =
+  match state.keeper_calls_owed with
+  | Some owed
+    when String.equal owed.kclo_keeper keeper_name
+         && owed.kclo_reading == state.detail_read_authority ->
+      Some owed
+  | Some _ | None -> None
+
+let update_calls_owed state ~keeper_name transition =
+  let owed =
+    match current_calls_owed state ~keeper_name with
+    | Some owed -> owed
+    | None ->
+        { kclo_keeper = keeper_name
+        ; kclo_reading = state.detail_read_authority
+        ; kclo_read = Masc_tui_owed_read.settled }
+  in
+  state.keeper_calls_owed <- Some { owed with kclo_read = transition owed.kclo_read }
+
+let settle_calls_owed state ~keeper_name transition =
+  match current_calls_owed state ~keeper_name with
+  | Some owed ->
+      state.keeper_calls_owed <- Some { owed with kclo_read = transition owed.kclo_read }
+  | None -> ()
+
+(* Runs on every loop iteration. A read the chat pane started for the same
+   slot is let finish first, so this record moves only with its own read. *)
+let launch_owed_keeper_calls state ~mailbox =
+  match state.keeper_calls_owed with
+  | None -> ()
+  | Some owed ->
+      if owed.kclo_reading != state.detail_read_authority
+      then state.keeper_calls_owed <- None
+      else if
+        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.kclo_read
+        && state.view = Keepers Keeper_calls
+        && (match selected_keeper state with
+            | Some keeper -> String.equal keeper.k_name owed.kclo_keeper
+            | None -> false)
+        && server_authority_ready state
+        && not state.keeper_calls_loading
+      then begin
+        settle_calls_owed state ~keeper_name:owed.kclo_keeper Masc_tui_owed_read.started;
+        launch_keeper_calls_load ~force:true state ~mailbox owed.kclo_keeper
+      end
+
+let owe_keeper_calls_read state ~mailbox ~keeper_name =
+  update_calls_owed state ~keeper_name Masc_tui_owed_read.changed;
+  launch_owed_keeper_calls state ~mailbox
+
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
   if keeper_available_for_new_message state keeper_name then begin
@@ -13236,8 +13289,8 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           state.keeper_calls <- None;
           state.keeper_calls_error <- None;
           state.keeper_calls_scroll <- 0;
-          launch_keeper_calls_load state ~mailbox keeper_name;
-          transition_keeper_view state (Keepers Keeper_calls))
+          transition_keeper_view state (Keepers Keeper_calls);
+          owe_keeper_calls_read state ~mailbox ~keeper_name)
   | Masc_tui_acting_pane.Target_keeper keeper_name when acting_pane_source_current state -> (
       match select_activity_keeper state keeper_name with
       | Activity_keeper_missing | Activity_keeper_selected -> ()
@@ -17524,7 +17577,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          state.msg_target_keeper_name;
        Option.iter
          (fun (keeper : keeper) ->
-           owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name)
+           owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name;
+           owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
          (selected_keeper state)
    | Cadence -> ());
   scoped_refresh_followup :=
@@ -18005,7 +18059,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
          end
      | Keepers Keeper_runtime_pick -> launch_runtime_catalog_load state ~mailbox
      | Keepers Keeper_calls -> Option.iter (fun keeper ->
-         launch_keeper_calls_load ~force:true state ~mailbox keeper.Tui_decode.k_name) (selected_keeper state)
+         owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.Tui_decode.k_name) (selected_keeper state)
      | Verification ->
          (match state.verification, state.verification_detail_request_id with
           | Some snapshot, Some request_id ->
@@ -21491,6 +21545,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let open_chat_gained_turn = ref false in
       let open_chat_memory_grew = ref false in
       let selected_composite_changed = ref false in
+      let selected_tool_called = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
          frame clock: one follow-up read per operation per batch, decided
@@ -21567,6 +21622,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               (match Masc_tui_observer.composite_changed_keeper event, selected_keeper state with
                | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
                    selected_composite_changed := true
+               | Some _, (Some _ | None) | None, _ -> ());
+              (match Masc_tui_observer.tool_call_keeper event, selected_keeper state with
+               | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
+                   selected_tool_called := true
                | Some _, (Some _ | None) | None, _ -> ());
               (match event with
                | Masc_tui_observer.Keeper_chat_stream_frame { keeper; operation_id; seq; at; _ } ->
@@ -21707,10 +21766,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              if state.view = Keepers Keeper_message then
                launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name
          | None -> ());
-        (if state.view = Keepers Keeper_calls then
-           match selected_keeper state with
-           | Some keeper -> launch_keeper_calls_load ~force:true state ~mailbox keeper.k_name
-           | None -> ());
+        Option.iter
+          (fun (keeper : keeper) -> owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
+          (selected_keeper state);
         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -21749,6 +21807,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          Option.iter
            (fun (keeper : keeper) ->
              owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name)
+           (selected_keeper state));
+      (if !selected_tool_called && not !observer_source_loss_seen then
+         Option.iter
+           (fun (keeper : keeper) ->
+             owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
            (selected_keeper state));
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -22560,17 +22623,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let refresh_pending = state.keeper_calls_refresh_pending in
         state.keeper_calls_loading <- false;
         state.keeper_calls_refresh_pending <- false;
+        let failed =
+          Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+            ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+        in
         (match result with
          | Ok snapshot when String.equal snapshot.kcs_keeper keeper_name ->
              state.keeper_calls <- Some snapshot;
-             state.keeper_calls_error <- None
+             state.keeper_calls_error <- None;
+             settle_calls_owed state ~keeper_name Masc_tui_owed_read.succeeded
          | Ok snapshot ->
              state.keeper_calls_error <-
                Some
                  (Printf.sprintf
                     "tool-call response named keeper %s, expected %s"
-                    snapshot.kcs_keeper keeper_name)
-         | Error detail -> state.keeper_calls_error <- Some detail);
+                    snapshot.kcs_keeper keeper_name);
+             settle_calls_owed state ~keeper_name failed
+         | Error detail ->
+             state.keeper_calls_error <- Some detail;
+             settle_calls_owed state ~keeper_name failed);
         let still_visible =
           match state.view with
           | Keepers Keeper_message ->
@@ -22587,7 +22658,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Config | Resources | Tools | System_logs -> false
         in
         if refresh_pending && still_visible then
-          launch_keeper_calls_load ~force:true state ~mailbox keeper_name
+          launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
+        launch_owed_keeper_calls state ~mailbox
       end)
   | Keeper_settings_editor_loaded (request, result) ->
       if Masc_tui_types.take_keeper_settings_editor_read state request result then begin
@@ -30969,6 +31041,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_history state ~mailbox:async_messages;
       launch_owed_fusion state ~mailbox:async_messages;
       launch_owed_keeper_composite state ~mailbox:async_messages;
+      launch_owed_keeper_calls state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration
@@ -36900,9 +36973,8 @@ Use relative paths for resources already held in the package. -->
             | Keepers Keeper_calls ->
                 (match selected_keeper state with
                  | Some keeper ->
-                     launch_keeper_calls_load ~force:true state
-                       ~mailbox:async_messages
-                       keeper.k_name
+                     owe_keeper_calls_read state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name
                  | None -> ())
             | Keepers Keeper_detail ->
                 ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Refresh);
@@ -38517,9 +38589,9 @@ Use relative paths for resources already held in the package. -->
                      state.keeper_calls <- None;
                      state.keeper_calls_error <- None;
                      state.keeper_calls_scroll <- 0;
-                     launch_keeper_calls_load state ~mailbox:async_messages
-                       keeper.k_name;
-                     transition_keeper_view state (Keepers Keeper_calls)
+                     transition_keeper_view state (Keepers Keeper_calls);
+                     owe_keeper_calls_read state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name
                  | None -> ())
             | Overview | Acting | Metrics | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
@@ -39565,12 +39637,9 @@ Use relative paths for resources already held in the package. -->
                 [keeper_composite_changed] and retry a failed read
                 ([launch_owed_keeper_composite]). *)
              ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll)
-         | Keepers Keeper_calls ->
-             (match selected_keeper state with
-              | Some keeper ->
-                  launch_keeper_calls_load state ~mailbox:async_messages
-                    keeper.k_name
-              | None -> ())
+         (* Calls re-read on [keeper_tool_call] and retry a failed read
+            ([launch_owed_keeper_calls]). *)
+         | Keepers Keeper_calls -> ()
          | Board ->
              (match state.board_mode with
               | Board_read post_id ->

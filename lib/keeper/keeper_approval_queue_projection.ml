@@ -223,6 +223,10 @@ let resolve_entry
       ()
   in
   before_terminal_publish ();
+  (* The queue revision that keys the cached Gate snapshot moved before the
+     audit row above was written, so a Gate read in between may have kept a
+     snapshot without this resolution. *)
+  Keeper_gate_broadcast.before_gate_changed ~base_path;
   (try
      Sse.broadcast
        (`Assoc

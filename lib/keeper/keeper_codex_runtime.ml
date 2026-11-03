@@ -1316,6 +1316,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let recovery_failure =
       ref Keeper_official_client_session_store.Transport_interrupted
     in
+    (* Set when a thread request (thread/start, thread/resume) reaches Codex
+       stdin. Setup traffic (initialize, account) is not a context
+       submission, so a refusal with this unset never disturbed the vendor
+       thread: the claim is reverted instead of recovered. *)
+    let thread_request_transmitted = ref false in
     let update_session label transition =
       match transition !session_state with
       | Ok next ->
@@ -1563,6 +1568,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
          ~on_context_submission:(fun observation ->
+           (match observation.Runtime_codex_app_server.method_ with
+            | Thread_start | Thread_resume -> thread_request_transmitted := true
+            | Thread_inject_items | Turn_start | Turn_steer | Dynamic_tool_response -> ());
            let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              match observation.Runtime_codex_app_server.method_ with
              | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
@@ -1608,6 +1616,45 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           , Some detail ) -> Error (internal_error detail)
         | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
           , None ) -> settle_host_stop stop)
+     | Error (Runtime_codex_app_server.Rpc_error _ as error)
+       when not !thread_request_transmitted ->
+       (* Setup-stage refusal (initialize, account/read): no thread request
+          reached the vendor, so the settled session, ordinal and frontier
+          stay exactly as claimed-over. [release_transient] cannot restore
+          the claim frontier, hence the byte-exact revert instead. *)
+       observe_failed_dispatch ~observe_transport_uncertain error;
+       if Runtime_codex_app_server.refused_for_spent_usage error
+       then
+         read_usage_after_quota_refusal
+           ~keeper_name ~quota_scope ~clock
+           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+           config;
+       (match stored_session with
+        | Some restore ->
+          (match
+             Keeper_official_client_session_store.revert_claim
+               ~base_path
+               ~keeper_name
+               ~expected:!session_state
+               ~restore
+               ~reverted_at:(Time_compat.now ())
+           with
+           | Ok restored ->
+             session_state := restored;
+             recovery_failure := Keeper_official_client_session_store.Pre_dispatch_failed;
+             Error (codex_error_to_core_error error)
+           | Error detail ->
+             recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+             Error
+               (internal_error
+                  ("Codex session revert after setup refusal failed: "
+                   ^ detail
+                   ^ " (original: "
+                   ^ Agent_core.Error.to_string (codex_error_to_core_error error)
+                   ^ ")")))
+        | None ->
+          recovery_failure := Keeper_official_client_session_store.Pre_dispatch_failed;
+          Error (codex_error_to_core_error error))
      | Error
          (( Runtime_codex_app_server.Invalid_config _
           | Runtime_codex_app_server.Spawn_failed _

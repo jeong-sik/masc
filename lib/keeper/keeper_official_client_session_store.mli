@@ -568,6 +568,24 @@ val release_transient :
     it was reported; any other release, an owner stop among them, keeps
     [Unobserved_after]. A release to [Ready] is [Not_reported]. *)
 
+val revert_claim :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  restore:t ->
+  reverted_at:float ->
+  (t, string) result
+(** Restore the exact pre-claim binding when the claimed turn transmitted
+    nothing provider-visible. [expected] must be the incomplete claim this
+    owner holds, and [restore] the quiescent binding {!load} returned before
+    the claim. Only [updated_at] advances; phase, ordinal, frontier and host
+    counts come back byte-identical so the next turn resumes the original
+    conversation. It refuses a claim that is not incomplete, a restore target
+    that is itself an incomplete claim, and a store that moved under this
+    owner. Callers use it for setup-stage refusals (initialize, account) that
+    must not disturb a settled session; failures after a thread request keep
+    {!release_transient} or {!require_recovery}. *)
+
 val reconcile_process_restart :
   base_path:string ->
   keeper_name:string ->

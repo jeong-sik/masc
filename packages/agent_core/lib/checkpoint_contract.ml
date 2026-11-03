@@ -254,7 +254,7 @@ let validate_response_format ~scope = function
      | [ `String "off" ] | [ `String "json_mode" ] ->
        validate_object_shape ~scope ~required:[ "type" ] ~optional:[] json
        |> Result.map (fun _ -> ())
-     | [ `String "json_schema" ] ->
+     | [ `String "json_schema" ] | [ `String "raw_json_schema" ] | [ `String "named_json_schema" ] ->
        let* fields =
          validate_object_shape ~scope ~required:[ "type"; "schema" ] ~optional:[] json
        in

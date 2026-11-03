@@ -104,6 +104,20 @@ let test_recent_turns_carry_the_provider_counts () =
             (unavailable_row.Inspector.input_tokens = None)
       | _ -> fail "the page held four rows")
 
+(* The cursor a short list can hold: selection, rendered detail and Enter
+   read one normalized value, so a refresh that shortens the component
+   list under a cursor set against the old one leaves every reader naming
+   the same row. (#47714) *)
+let test_normalized_cursor_holds_the_list () =
+  check int "a cursor inside the list stays" 2
+    (Inspector.normalized_cursor ~count:5 2);
+  check int "a cursor past a shortened list clamps to its last row" 2
+    (Inspector.normalized_cursor ~count:3 4);
+  check int "an empty list holds cursor zero" 0
+    (Inspector.normalized_cursor ~count:0 4);
+  check int "a negative cursor never survives" 0
+    (Inspector.normalized_cursor ~count:5 (-2))
+
 let test_recent_input_trend_keeps_unavailable_and_zero () =
   let with_input input_tokens (record : Turn_record.t) =
     { record with usage = { record.usage with input_tokens } }
@@ -905,6 +919,8 @@ let () =
             test_client_context_sum_stays_representable
         ; test_case "recent input history marks estimates apart" `Quick
             test_recent_input_trend_marks_estimates_apart
+        ; test_case "normalized cursor holds the list" `Quick
+            test_normalized_cursor_holds_the_list
         ; test_case "recent page keeps skipped-count availability" `Quick
             test_recent_page_skipped_count_is_not_invented
         ; test_case "page failure is distinct from partial failures" `Quick

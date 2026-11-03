@@ -5308,8 +5308,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
-          min (max 0 (List.length items - 1))
-            (max 0 state.context_inspector_cursor)
+          Masc_tui_context_inspector.normalized_cursor
+            ~count:(List.length items)
+            state.context_inspector_cursor
         in
         let selected = List.nth_opt items cursor in
         (* The caret names the pane that hears j/k, the way the roster and
@@ -5521,8 +5522,9 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
-          min (max 0 (List.length rows - 1))
-            (max 0 state.context_inspector_cursor)
+          Masc_tui_context_inspector.normalized_cursor
+            ~count:(List.length rows)
+            state.context_inspector_cursor
         in
         let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
         let left =
@@ -5570,8 +5572,9 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
             ]
         in
         let cursor =
-          min (max 0 (List.length rows - 1))
-            (max 0 state.context_inspector_cursor)
+          Masc_tui_context_inspector.normalized_cursor
+            ~count:(List.length rows)
+            state.context_inspector_cursor
         in
         let body =
           match mapped (framed_inner_width cols) with

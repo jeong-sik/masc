@@ -105,6 +105,12 @@ val recent_input_trend : recent_turn list -> input_trend
     the page holds one. [recent] is every row on the page, newest first,
     with the figures a per-turn reading wants; the page is what the caller
     asked the server for, not a curated window. *)
+val normalized_cursor : count:int -> int -> int
+(** The cursor a list of [count] selectable rows actually holds: clamped
+    to the list, never negative. A refreshed reading can shorten the list
+    under a cursor set against the old one; drawing, selection and Enter
+    all read through this so they name the same row. *)
+
 type selection =
   { latest : Turn_record.t
   ; attributed : attributed_turn option

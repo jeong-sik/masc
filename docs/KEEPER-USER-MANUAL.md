@@ -591,8 +591,10 @@ they refuse it.
 To send one Keeper's requests through a guest agent instead of one
 `container exec` per request, add `microvm_delivery = "agent_socket"` to its
 `[keeper]` table ([RFC](rfc/RFC-microvm-guest-agent-over-socket.md); a
-per-Keeper canary for now). Only `microvm_backend = "apple_container"`
-accepts it. The Keeper's next turn replaces its guest with one whose first
+per-Keeper canary for now). It is accepted only beside
+`sandbox_profile = "microvm"` and `microvm_backend = "apple_container"` in the
+same file, as in the example above; values inherited from the workspace do not
+count. The Keeper's next turn replaces its guest with one whose first
 process is the shim's agent, and removing the line replaces it back on the
 turn after the change. The host end of the agent's socket is under
 `<base>/.masc/microvm/agent/`.

@@ -195,7 +195,11 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
 
 ## 6. 남은 질문
 
-1. **`--cap-add` 를 쓴 VM 에서 root 로 도는 masc 명령.** build 디렉터리 생성처럼 masc 가 uid 0 으로 `container exec` 하는 명령은 더한 capability 를 가져요. payload 는 `container exec` 를 부를 수 없어요. 그래도 그 명령 범위를 다시 확인해요.
+1. **`--cap-add` 를 쓴 VM 에서 masc 가 직접 하는 `container exec`.** 이 프로세스는 agent 를 거치지 않아서 NoNewPrivs 가 0 이에요. root 로 돌면 CapEff 가 `0x2000c0` 이고, Keeper uid 로 돌아도 bounding set 에 그 셋이 남아요(측정 기록의 `exec-caps-results.json`).
+   - 두 이미지에 `su`·`mount` 같은 setuid root 파일이 있어요. 이번 측정에서 uid 502 가 root 가 되는 길은 없었어요.
+   - ocaml 이미지의 `opam`(uid 1000)은 비밀번호 없는 sudo 를 가져요. 호스트 uid 가 1000 이면 그 Keeper 의 exec 프로세스가 root 가 되고, agent 모양에서는 SYS_ADMIN 도 가져요.
+   - 그래서 agent 모양 게스트에서 Keeper 명령은 agent 로만 보내요. payload 는 `container exec` 를 부를 수 없어요.
+   - masc 가 직접 하는 exec 는 일곱 곳이에요(빌드 스캔·링크·디렉터리, 작업 볼륨 권한, 작업 디렉터리 생성·마운트 확인·쓰기 확인). 그중 넷이 root 예요. 이 명령들이 Keeper 가 만든 파일에 휘둘리지 않는지는 6층에서 다시 봐요.
 2. **장시간 relay.** 이번 측정은 VM 하나에 몇 분이에요. 하루 부하에서 runtime 의 fd 가 늘지 않는지는 canary 에서 재요.
 3. **runtime 이 멈출 때.** #46602 처럼 게스트 runtime 이 멈추면 relay 도 멈출 수 있어요. 요청이 apiserver 전역 락을 지나지 않으니 다른 게스트로 번지지 않을 것으로 보지만, 재 보지 않았어요.
 4. **lane add-on.** `lane_addon_engine.ml` 도 Apple 컨테이너를 `--interactive` 로 만들고 `start --attach --interactive` 로 띄워요. 같은 누수 경로인지는 따로 재요.

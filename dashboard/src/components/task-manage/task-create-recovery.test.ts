@@ -10,6 +10,7 @@ vi.mock('../../api/tool-host-failure', () => ({ reportToolHostFailure: async () 
 
 import { clearStoredToken, currentDashboardActor, currentStoredTokenRevision, setStoredToken } from '../../api/core'
 import { resetMcpClientState } from '../../api/mcp'
+import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { DASHBOARD_AGENT_NAME_KEY, persistDashboardActorName } from '../../lib/dashboard-actor'
 import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 import * as store from '../../store'
@@ -43,11 +44,206 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   clearStoredToken()
   resetDashboardSessionActorForTests()
   window.localStorage.removeItem(DASHBOARD_AGENT_NAME_KEY)
 })
+
+it.each(['same-generation', 'token-aba', 'actor-aba', 'owner-retired', 'authority-aba', 'workspace-aba'])(
+  'handles health 401 after an initially absent owner becomes current: %s', async scenario => {
+    setStoredToken('actor-a-token', { source: 'manual' })
+    const attempt = (requestId: string, taskId: string) => ({ requestId, workspace: { basePath: '/a', mascRoot: '/a/.masc' },
+      goalId: null, createdAt: '2026-11-02T00:00:00.000Z', original: { kind: 'created', taskId }, presented: false, reads: [] })
+    sessionStorage.setItem(TASK_CREATE_RECEIPT_STORAGE_KEY, JSON.stringify({ schema: TASK_CREATE_RECEIPT_STORAGE_KEY,
+      attempts: [attempt('request-a', 'task-a'), attempt('request-b', 'task-b')] }))
+    _testResetTaskCreateState({ preserveStorage: true })
+    expect(taskCreateReceiptOwner.peek()).toBeNull()
+    let firstHealth = true
+    let denyB = false
+    let finishA!: (response: Response) => void
+    let markA!: () => void
+    const aStarted = new Promise<void>(resolve => { markA = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/health?full=1') {
+        if (firstHealth) { firstHealth = false; markA(); return new Promise<Response>(resolve => { finishA = resolve }) }
+        return json({ paths: { effective_base_path: '/a', effective_masc_root: '/a/.masc' } })
+      }
+      const request = JSON.parse(String(init?.body))
+      const id: string = request.params.arguments.creation_request_id
+      if (denyB && id === 'request-b') { denyB = false; return json({ error: 'denied' }, 401) }
+      const text = JSON.stringify({ ok: true, creation_request_id: id,
+        workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+        creation_receipt: { state: 'recorded', task_ids: [id === 'request-a' ? 'task-a' : 'task-b'] } })
+      return json({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text }] } })
+    }))
+    render(html`<${TaskCreateReceiptsPanel} />`)
+    const first = recheckTaskCreation('request-a')
+    await aStarted
+    await recheckTaskCreation('request-b')
+    const firstOwner = taskCreateReceiptOwner.peek()
+    expect(firstOwner).not.toBeNull()
+    expect(screen.getByText('task-b 생성 응답을 받았습니다.')).toBeTruthy()
+    if (scenario === 'token-aba') {
+      setStoredToken('actor-b-token', { source: 'manual' })
+      setStoredToken('actor-a-token', { source: 'manual' })
+    } else if (scenario === 'actor-aba') {
+      setCanonicalDashboardActor('other-actor')
+      setCanonicalDashboardActor(null)
+    } else if (scenario === 'owner-retired') {
+      denyB = true
+      await recheckTaskCreation('request-b')
+      expect(taskCreateReceiptOwner.peek()).toBeNull()
+    } else if (scenario === 'authority-aba') {
+      const revision = store.executionWorkspaceRevision.peek()
+      await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
+      expect(store.executionWorkspaceAuthority.peek()).toBeNull()
+      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+        status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
+      expect(store.executionWorkspaceRevision.peek()).toBe(revision)
+    } else if (scenario === 'workspace-aba') {
+      const revision = store.executionWorkspaceRevision.peek()
+      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+        status: { project: 'project-b', workspace_root: '/b' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
+      expect(store.hydrateExecutionSnapshot({ execution_publication_epoch: 'recovery-fixture', execution_publication_generation: 1,
+        status: { project: 'project-a', workspace_root: '/a' }, agents: [], tasks: [], messages: [], keepers: [] })).toBe(true)
+      expect(store.executionWorkspaceRevision.peek()).toBeGreaterThan(revision)
+    }
+    if (scenario !== 'same-generation') {
+      await recheckTaskCreation('request-b')
+      expect(taskCreateReceiptOwner.peek()).not.toBe(firstOwner)
+      expect(screen.getByText('task-b 생성 응답을 받았습니다.')).toBeTruthy()
+    }
+    const ownerBefore401 = taskCreateReceiptOwner.peek()
+    let finishBody!: (body: string) => void
+    let markBody!: () => void
+    const bodyStarted = new Promise<void>(resolve => { markBody = resolve })
+    const denied = new Response('', { status: 401 })
+    denied.text = () => { markBody(); return new Promise(resolve => { finishBody = resolve }) }
+    finishA(denied)
+    await bodyStarted
+    if (scenario === 'same-generation') {
+      expect(taskCreateReceiptOwner.peek()).toBeNull()
+      expect(screen.queryByText(/task-a|task-b/)).toBeNull()
+    } else {
+      expect(taskCreateReceiptOwner.peek()).toBe(ownerBefore401)
+      expect(screen.getByText('task-b 생성 응답을 받았습니다.')).toBeTruthy()
+    }
+    finishBody(JSON.stringify({ error: 'denied' }))
+    await first
+    expect(taskCreateReceiptOwner.peek()).toBe(scenario === 'same-generation' ? null : ownerBefore401)
+    expect(taskCreateReceipts.attempts.peek().map(item => item.original.kind)).toEqual(['created', 'created'])
+  },
+)
+
+it.each([
+  { scenario: '500', order: 'b-pending' }, { scenario: 'timeout', order: 'b-pending' },
+  { scenario: 'invalid-json', order: 'b-pending' }, { scenario: '500', order: 'b-first' },
+  { scenario: 'timeout', order: 'b-first' }, { scenario: 'invalid-json', order: 'b-first' },
+])(
+  'keeps a failed $scenario health check hidden with $order', async ({ scenario, order }) => {
+    setStoredToken('actor-a-token', { source: 'manual' })
+    const attempt = (requestId: string, taskId: string, presented: boolean) => ({ requestId,
+      workspace: { basePath: '/a', mascRoot: '/a/.masc' }, goalId: null, createdAt: '2026-11-02T00:00:00.000Z',
+      original: { kind: 'created', taskId }, presented, reads: [] })
+    const presentedA = order === 'b-pending'
+    sessionStorage.setItem(TASK_CREATE_RECEIPT_STORAGE_KEY, JSON.stringify({ schema: TASK_CREATE_RECEIPT_STORAGE_KEY,
+      attempts: [attempt('request-a', 'task-a', presentedA), attempt('request-b', 'task-b', false)] }))
+    _testResetTaskCreateState({ preserveStorage: true })
+    let phase: 'setup' | 'overlap' | 'recovery' = 'setup'
+    let overlapHealth = 0
+    let finishA!: (response: Response) => void
+    let finishB!: (response: Response) => void
+    let aSignal!: AbortSignal
+    let markA!: () => void
+    let markB!: () => void
+    const aStarted = new Promise<void>(resolve => { markA = resolve })
+    const bStarted = new Promise<void>(resolve => { markB = resolve })
+    const health = () => json({ paths: { effective_base_path: '/a', effective_masc_root: '/a/.masc' } })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/health?full=1') {
+        if (phase === 'overlap') {
+          overlapHealth++
+          if (overlapHealth === 1) {
+            aSignal = init?.signal as AbortSignal
+            markA()
+            return new Promise<Response>(resolve => { finishA = resolve })
+          }
+          if (overlapHealth === 2) { markB(); return new Promise<Response>(resolve => { finishB = resolve }) }
+        }
+        return health()
+      }
+      const request = JSON.parse(String(init?.body))
+      const id: string = request.params.arguments.creation_request_id
+      const text = JSON.stringify({ ok: true, creation_request_id: id,
+        workspace: { base_path: '/a', masc_root: '/a/.masc' }, backlog_version: 5,
+        creation_receipt: { state: 'recorded', task_ids: [id === 'request-a' ? 'task-a' : 'task-b'] } })
+      return json({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text }] } })
+    }))
+    render(html`<${TaskCreateReceiptsPanel} />`)
+    await recheckTaskCreation('request-a')
+    await recheckTaskCreation('request-b')
+    expect(screen.getByText('task-a 생성 응답을 받았습니다.')).toBeTruthy()
+    expect(screen.getByText('task-b 생성 응답을 받았습니다.')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '이 결과 확인' })).toHaveLength(presentedA ? 1 : 2)
+    const owner = taskCreateReceiptOwner.peek()
+    phase = 'overlap'
+    if (scenario === 'timeout') vi.useFakeTimers()
+    const first = recheckTaskCreation('request-a')
+    await aStarted
+    if (scenario === 'timeout') {
+      let markBody!: () => void
+      const bodyStarted = new Promise<void>(resolve => { markBody = resolve })
+      const response = new Response('', { status: 200 })
+      response.text = () => {
+        markBody()
+        return new Promise((_resolve, reject) => {
+          aSignal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+        })
+      }
+      finishA(response)
+      await bodyStarted
+      await vi.advanceTimersByTimeAsync(1_000)
+    }
+    const second = recheckTaskCreation('request-b')
+    await bStarted
+    if (order === 'b-first') {
+      finishB(health())
+      await second
+      expect(screen.getByText('task-b 생성 응답을 받았습니다.')).toBeTruthy()
+    }
+    if (scenario === '500') finishA(json({ error: 'failed' }, 500))
+    else if (scenario === 'invalid-json') finishA(new Response('{bad', { status: 200 }))
+    else await vi.advanceTimersByTimeAsync(DEFAULT_GET_TIMEOUT_MS - 1_000)
+    await first
+    expect(taskCreateReceiptOwner.peek()).toBe(owner)
+    expect(taskCreateReceipts.attempts.peek()[0]).toMatchObject({ checking: false, latestReadFailureCurrent: true })
+    expect(screen.queryByText(/task-a|request-a/)).toBeNull()
+    acknowledgeTaskCreateResult('request-a')
+    expect(taskCreateReceipts.attempts.peek()[0]?.presented).toBe(presentedA)
+    expect(taskCreateReceipts.compact()).toMatchObject({ removedAttempts: 0 })
+    if (order === 'b-pending') {
+      finishB(health())
+      await second
+    }
+    expect(screen.getByText('task-b 생성 응답을 받았습니다.')).toBeTruthy()
+    expect(screen.queryByText(/task-a|request-a/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: '이 결과 확인' })).toHaveLength(1)
+    expect(taskCreateReceipts.attempts.peek()[0]?.latestReadFailureCurrent).toBe(true)
+    expect(taskCreateReceipts.compact()).toMatchObject({ removedAttempts: 0 })
+    if (scenario === 'timeout') vi.useRealTimers()
+    phase = 'recovery'
+    await recheckTaskCreation('request-a')
+    expect(screen.getByText('task-a 생성 응답을 받았습니다.')).toBeTruthy()
+    if (presentedA) expect(taskCreateReceipts.compact()).toMatchObject({ removedAttempts: 1 })
+    else {
+      expect(screen.getAllByRole('button', { name: '이 결과 확인' })).toHaveLength(2)
+      acknowledgeTaskCreateResult('request-a')
+      expect(taskCreateReceipts.attempts.peek().map(item => item.requestId)).toEqual(['request-b'])
+    }
+  },
+)
 
 it.each(['recorded', 'denied', 'workspace-mismatch', 'workspace-change-after', 'workspace-aba', 'authority-aba',
   'token-aba', 'actor-aba', 'managed-hint'])(

@@ -137,7 +137,7 @@ effect(() => {
 })
 
 async function verifyReceiptOwner(expected?: ArtifactWorkspace, preflightCurrent: () => boolean = () => true,
-  onForbidden: () => void = () => {}):
+  onFailure: () => void = () => {}):
 Promise<{ owner: TaskReceiptOwner; ticket: number } | null> {
   const ticket = ++receiptHealthTicket
   const authority = executionWorkspaceAuthority.peek()
@@ -167,8 +167,13 @@ Promise<{ owner: TaskReceiptOwner; ticket: number } | null> {
   try {
     const workspace = await observeReceiptWorkspace(status => {
       healthStatus = status
-      if (status !== 401 || !current() || !ownerAtStart
-        || receiptOwner.peek() !== ownerAtStart || !ownerAtStart.isCurrent()) return
+      const owner = receiptOwner.peek()
+      if (status !== 401 || !current() || !owner || !owner.isCurrent()) return
+      // An owner first bound during this request still belongs to the same
+      // credential and workspace generation unless current() has retired it.
+      const matchingOwner = ownerAtStart ? owner === ownerAtStart : expected
+        && owner.workspace.basePath === expected.basePath && owner.workspace.mascRoot === expected.mascRoot
+      if (!matchingOwner) return
       latestReceiptHealth = { ticket: Math.max(ticket, latestReceiptHealth?.ticket ?? ticket), workspace: null }
       retireReceiptOwner()
       showToast('인증이 거부되어 이전 요청의 표시를 숨겼습니다.', 'warning')
@@ -212,8 +217,8 @@ Promise<{ owner: TaskReceiptOwner; ticket: number } | null> {
     return { owner, ticket }
   } catch {
     if (current()) {
-      if (healthStatus === 403) onForbidden()
-      if (healthStatus !== 401 && healthStatus !== 403 && ticket === receiptHealthTicket
+      onFailure()
+      if (current() && healthStatus !== 401 && healthStatus !== 403 && ticket === receiptHealthTicket
         && (!latestReceiptHealth || ticket >= latestReceiptHealth.ticket)) {
         latestReceiptHealth = { ticket, workspace: null }
         retireReceiptOwner()

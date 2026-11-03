@@ -2219,9 +2219,11 @@ let run_turn
                turn's spend records that request here: this record's readers
                ask what one request carried. Its output is there when the
                runtime reports that request's final count; the turn's output
-               goes to [turn_output_tokens] below, under its own scope. Its
-               cache split is absent when the runtime reports only an
-               estimate of the whole context, as it does after a compaction. *)
+               goes to [turn_output_tokens] below, under its own scope. After
+               a compaction Codex reports an estimate of the whole new
+               history instead, and [input_provenance] says so: the number
+               stays but no longer claims a request was dispatched at that
+               size. *)
             { input_tokens = Some context.input_tokens
             ; output_tokens = context.output_tokens
             ; cache_creation_input_tokens =
@@ -2235,6 +2237,7 @@ let run_turn
                      cache.cache_read_input_tokens)
                   context.cache
             ; scope = Runtime_usage_scope.Per_request
+            ; input_provenance = Some context.provenance
             }
           | Ok result when result.usage_reported ->
             (* Cache counts travel with the turn rather than being dropped: a large
@@ -2251,6 +2254,7 @@ let run_turn
             ; cache_creation_input_tokens = None
             ; cache_read_input_tokens = None
             ; scope = Runtime_usage_scope.Usage_scope_unavailable
+            ; input_provenance = None
             }
         in
         (* The turn's output rides apart from [usage] only when [usage] is

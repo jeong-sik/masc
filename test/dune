@@ -229,6 +229,12 @@
  (modules test_keeper_codex_current_context)
  (libraries masc_test_deps))
 
+(test
+ (name test_keeper_codex_request_provenance)
+ (modules test_keeper_codex_request_provenance)
+ (libraries masc_test_deps))
+
+
 ; Explicit minimal check for the real adapter's asynchronous receipt lifecycle.
 ; The ordinary suite continues to include the complete native context group.
 (rule

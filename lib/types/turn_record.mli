@@ -57,6 +57,12 @@ type usage =
        genuinely large prompts are different situations with the same numerator.
        [None] when the provider reported no cache usage. *)
   ; scope : Runtime_usage_scope.t
+  ; input_provenance : Turn_input_provenance.t option
+      (** What [input_tokens] counted when the runtime knew: a dispatched
+          request, or an estimate of the whole context after a compaction
+          ({!Turn_input_provenance.Context_estimate} -- no request exists at
+          that size). [None] on records written before the field existed:
+          a reader reports that doubt instead of guessing either way. *)
   }
 
 val usage_of_reported_counts

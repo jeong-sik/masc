@@ -20,6 +20,13 @@ type attempt_outcome =
     only proves that a handler returned a successful result and can therefore
     support accepting a tool-only terminal. *)
 
+val request_context_of_last_usage :
+  Runtime_codex_app_server.last_usage -> Runtime_observation.request_context
+(** The turn's newest occupancy reading as a runtime observation. A counted
+    request is a measured request; the post-compaction estimate carries
+    {!Runtime_observation.Context_estimate}, so a durable record or a reader
+    can tell the two apart. Pure: no I/O, no clock. *)
+
 val run :
   ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->

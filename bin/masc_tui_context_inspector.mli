@@ -55,6 +55,11 @@ type recent_turn =
             the provider reported a conversation-cumulative figure instead,
             which is a number about the whole conversation and not a fact
             about this turn. *)
+  ; input_provenance : Turn_input_provenance.t option
+        (** What [input_tokens] counted when the record says:
+            {!Turn_input_provenance.Measured_request}, or a whole-context
+            {!Turn_input_provenance.Context_estimate} after a compaction.
+            [None] on records written before provenance existed. *)
   ; provider_context_window : int option
         (** The model window an official client reported
             ({!Turn_record.t.provider_context_window}); the context it holds is
@@ -70,18 +75,23 @@ type recent_turn =
 type input_sample =
   | Input_unavailable
   | Input_invalid of int
+  | Input_estimate of int
+      (** The whole context as the runtime estimated it after a compaction:
+          a real occupancy size, but no request was dispatched at it. *)
   | Input_count of int
 
 type input_trend =
   { samples : input_sample list
-  ; valid_count : int
+  ; measured_count : int
+  ; estimate_count : int
   ; bounds : (int * int) option
   }
 
 val recent_input_trend : recent_turn list -> input_trend
-(** Project decoded turns from oldest to newest, keeping missing and invalid
-    observations distinct from valid counts. Only nonnegative counts set the
-    bounds; they may still include post-compaction estimates. *)
+(** Project decoded turns from oldest to newest, keeping missing, invalid,
+    estimated and measured observations distinct. Only nonnegative figures
+    set the bounds, estimates included; records without provenance are read
+    as ordinary counts. *)
 
 (** What one turn-records page yields.
 

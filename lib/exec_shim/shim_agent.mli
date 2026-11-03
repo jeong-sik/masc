@@ -45,6 +45,11 @@ val start : socket:string -> owner:owner -> (Unix.file_descr, start_error) resul
 (** The listening socket, close-on-exec, once every step has held. Refuses
     with [Not_root] before touching anything when the effective uid is not 0. *)
 
+val mark_inherited_descriptors_close_on_exec : unit -> unit
+(** Marks every descriptor above 2 close-on-exec, so nothing the VM runtime
+    left open in the first process reaches a relay's shim or payload.
+    {!main} does it first. Raises [Unix.Unix_error]. *)
+
 val hello : unit -> Exec_ssh_protocol.Relay.hello
 (** Read from the kernel when called: whether [/] is mounted read-only, the
     effective uid and gid, and [no_new_privs]. *)
@@ -60,11 +65,16 @@ val relay :
     the caller's working directory.
 
     A connection that ends before the kind byte, or sends an unknown one,
-    gets the hello and nothing else. When the connection ends early the
-    shim's stdin is closed — the shim reads that as a cancel — and its output
-    is still read to the end and dropped, so the shim never blocks on a full
-    pipe. [host_signal_number] turns an OCaml signal code into the guest OS
-    number the exit chunk carries. *)
+    gets the hello and nothing else. When the host ends its side, the bytes
+    it sent before still reach the shim and then the shim's stdin closes —
+    the shim reads that as a cancel. When the host goes away (a failed write
+    or a reset), its queued bytes are dropped, the shim's stdin closes, and
+    the shim's output is still read to the end and dropped, so the shim never
+    blocks on a full pipe. [host_signal_number] turns an OCaml signal code
+    into the guest OS number the exit chunk carries.
+
+    SIGPIPE must be ignored ({!main} does it), or a host that goes away kills
+    the relay instead of reaching those branches. *)
 
 val serve :
   listener:Unix.file_descr ->
@@ -82,7 +92,8 @@ val main :
   socket:string ->
   owner:string ->
   'a
-(** [masc-exec-shim --serve SOCKET UID:GID]. [argv0] must be absolute: it is
-    the shim the relays run, so a shim reinstalled at that path serves the
-    next request. Prints the reason and exits [1] when the owner, the path or
-    {!start} is refused. *)
+(** [masc-exec-shim --serve SOCKET UID:GID]. Ignores SIGPIPE, marks inherited
+    descriptors close-on-exec, then {!start} and {!serve}. [argv0] must be
+    absolute: it is the shim the relays run, so a shim reinstalled at that
+    path serves the next request. Prints the reason and exits [1] when the
+    owner, the path or {!start} is refused. *)

@@ -22,6 +22,13 @@
  * ocaml_shim_agent_no_new_privs : unit -> bool
  *   prctl(PR_GET_NO_NEW_PRIVS) is 1. Raises Unix_error.
  *
+ * ocaml_shim_agent_cloexec_inherited : unit -> unit
+ *   Marks every descriptor above 2 close-on-exec: close_range(3, ~0U,
+ *   CLOSE_RANGE_CLOEXEC) where the kernel has it (Linux 5.11), otherwise
+ *   fcntl on each descriptor below the open-files limit. A descriptor the VM
+ *   runtime left open in the first process then never reaches a relay's
+ *   shim or its payload. Raises Unix_error.
+ *
  * Off Linux the two actions raise Unix_error(ENOSYS) and no_new_privs is
  * false: the agent runs only as a Linux guest's first process, and the same
  * source has to build on macOS for development.
@@ -35,12 +42,25 @@
 #include <caml/unixsupport.h>
 #include <sys/statvfs.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #ifdef __linux__
 #include <grp.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
-#include <unistd.h>
+
+/* The same number on every architecture (the unified syscall table), as the
+   io_uring numbers in observe_stub.c; a C library too old to name it still
+   reaches it. */
+#ifndef SYS_close_range
+#define SYS_close_range 436
+#endif
+#ifndef CLOSE_RANGE_CLOEXEC
+#define CLOSE_RANGE_CLOEXEC (1U << 2)
+#endif
 #endif
 
 #ifdef __linux__
@@ -123,4 +143,25 @@ CAMLprim value ocaml_shim_agent_no_new_privs(value vunit)
 #else
   CAMLreturn(Val_false);
 #endif
+}
+
+CAMLprim value ocaml_shim_agent_cloexec_inherited(value vunit)
+{
+  CAMLparam1(vunit);
+  long limit;
+  int fd;
+#ifdef __linux__
+  if (syscall(SYS_close_range, 3U, ~0U, CLOSE_RANGE_CLOEXEC) == 0) CAMLreturn(Val_unit);
+  /* ENOSYS: a kernel before close_range; EINVAL: one before its CLOEXEC flag. */
+  if (errno != ENOSYS && errno != EINVAL) caml_uerror("close_range", Nothing);
+#endif
+  limit = sysconf(_SC_OPEN_MAX);
+  if (limit < 0) limit = getdtablesize();
+  for (fd = 3; fd < limit; fd++) {
+    int flags = fcntl(fd, F_GETFD);
+    if (flags < 0) continue; /* EBADF: not open */
+    if ((flags & FD_CLOEXEC) == 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0)
+      caml_uerror("fcntl(F_SETFD, FD_CLOEXEC)", Nothing);
+  }
+  CAMLreturn(Val_unit);
 }

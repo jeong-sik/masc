@@ -97,14 +97,25 @@ let read_until_eof fd =
   loop ();
   Buffer.contents out
 
-let rec read_exact fd count =
-  if count = 0
-  then ""
-  else (
-    let bytes = Bytes.create count in
-    match Unix.read fd bytes 0 count with
-    | 0 -> fail "the stream ended inside a chunk"
-    | read -> Bytes.sub_string bytes 0 read ^ read_exact fd (count - read))
+(* [count] bytes, or a failure when they do not arrive in time: a missing
+   hello fails the test rather than hanging it. *)
+let read_exact fd count =
+  let deadline = Unix.gettimeofday () +. deadline_sec in
+  let rec go count =
+    if count = 0
+    then ""
+    else (
+      let remaining = deadline -. Unix.gettimeofday () in
+      if remaining <= 0. then failf "%d bytes did not arrive within %.0fs" count deadline_sec;
+      match Unix.select [ fd ] [] [] remaining with
+      | [], _, _ -> go count
+      | _ :: _, _, _ ->
+        let bytes = Bytes.create count in
+        (match Unix.read fd bytes 0 count with
+         | 0 -> fail "the stream ended inside a chunk"
+         | read -> Bytes.sub_string bytes 0 read ^ go (count - read)))
+  in
+  go count
 
 let decode_all bytes =
   let rec go pos acc =
@@ -255,16 +266,17 @@ let check_refused ~what (status, stderr) ~needle =
 (* Through the binary, so the [--serve] argv reaches the agent. A root owner
    is refused before any root step, so this one runs as root too. *)
 let test_serve_argv_reaches_the_agent () =
+  (* As root a refusal the code under test failed to make would re-mount the
+     test host's /. *)
+  if Unix.geteuid () = 0 then skip ();
   with_temp_dir @@ fun dir ->
   let socket = Filename.concat (Filename.concat dir "agent") "agent.sock" in
   check_refused ~what:"a root owner"
     (run_binary [| "--serve"; socket; "0:0" |])
     ~needle:"names root";
-  if Unix.geteuid () <> 0
-  then
-    check_refused ~what:"a start without root"
-      (run_binary [| "--serve"; socket; "502:20" |])
-      ~needle:"effective uid"
+  check_refused ~what:"a start without root"
+    (run_binary [| "--serve"; socket; "502:20" |])
+    ~needle:"effective uid"
 
 let test_relay_runs_a_request () =
   with_temp_dir @@ fun dir ->
@@ -331,6 +343,57 @@ let test_relay_without_a_program_sends_no_exit () =
   let program = Filename.concat dir "absent" in
   let _, rest = split_hello (relay_to_end ~program ~env:base_env (kind_byte Relay.Run)) in
   check int "nothing after the hello" 0 (List.length rest)
+
+(* A host that ends its side right after the request: the bytes it sent
+   still reach the program, then its stdin closes. *)
+let test_bytes_before_the_hosts_end_reach_the_program () =
+  with_temp_dir @@ fun dir ->
+  let program = write_script dir "exec cat" in
+  let host, pid = start_relay ~program ~env:base_env in
+  send host (kind_byte Relay.Run ^ "hello\n");
+  Unix.shutdown host Unix.SHUTDOWN_SEND;
+  let chunks = decode_all (read_until_eof host) in
+  Unix.close host;
+  check_exit_zero ~what:"the relay" pid;
+  let _, rest = split_hello chunks in
+  let outcome = outcome_of rest in
+  check string "every byte reached the program" "hello\n" outcome.stdout;
+  check (list exit_status) "one exit" [ Relay.Exited 0 ] outcome.exits
+
+(* The program holds no socket: the relay's connection is close-on-exec, or a
+   payload could write chunks of its own to the host. *)
+let test_the_program_inherits_no_socket () =
+  if not (Sys.file_exists "/proc/self/fd") then skip ();
+  with_temp_dir @@ fun dir ->
+  let program = write_script dir "ls -l /proc/$$/fd" in
+  let _, rest = split_hello (relay_to_end ~program ~env:base_env (kind_byte Relay.Run)) in
+  let outcome = outcome_of rest in
+  check bool "the listing ran" true (contains ~needle:"->" outcome.stdout);
+  check bool
+    ("no socket among the program's descriptors: " ^ outcome.stdout)
+    false (contains ~needle:"socket:" outcome.stdout)
+
+(* A descriptor open without close-on-exec before the sweep does not reach a
+   program run after it. *)
+let test_inherited_descriptors_are_not_passed_on () =
+  if not (Sys.file_exists "/proc/self/fd") then skip ();
+  with_temp_dir @@ fun dir ->
+  let leaked = Filename.concat dir "leaked" in
+  let listing = Filename.concat dir "listing" in
+  match Unix.fork () with
+  | 0 ->
+    (try
+       let (_ : Unix.file_descr) = Unix.openfile leaked [ Unix.O_CREAT; Unix.O_RDWR ] 0o600 in
+       Shim_agent.mark_inherited_descriptors_close_on_exec ();
+       Unix.execv "/bin/sh" [| "sh"; "-c"; "ls -l /proc/$$/fd > " ^ Filename.quote listing |]
+     with
+     | _ -> Unix._exit 3)
+  | pid ->
+    check_exit_zero ~what:"the swept child" pid;
+    let text = read_file listing in
+    check bool "the listing ran" true (contains ~needle:"->" text);
+    check bool ("the leaked file is not open in the program: " ^ text) false
+      (contains ~needle:leaked text)
 
 (* The shim reads its stdin closing as a cancel; a connection that ends must
    reach it that way. *)
@@ -428,15 +491,36 @@ let test_serve_runs_the_real_shim () =
     Unix.close fd;
     outcome
   in
+  (* The slow payload waits on a FIFO the test opens only after the quick
+     one has finished, so the two overlap or the test fails on its deadline:
+     a serve that took connections one at a time never finishes the quick
+     one. *)
+  let gate = Filename.concat root "gate" in
+  Unix.mkfifo gate 0o600;
   let slow = connect () in
   let (_ : Relay.hello) = read_hello slow in
-  send slow (kind_byte Relay.Run ^ request ~root [ "sh"; "-c"; "sleep 1; echo slow" ]);
+  send slow
+    (kind_byte Relay.Run
+     ^ request ~root [ "sh"; "-c"; Printf.sprintf "read line < %s; echo slow" (Filename.quote gate) ]);
   let quick = connect () in
   let hello = read_hello quick in
   check int "hello uid" (Unix.geteuid ()) hello.Relay.uid;
   send quick
     (kind_byte Relay.Run ^ request ~root [ "sh"; "-c"; "echo quick; echo oops >&2; exit 4" ]);
   let quick = finish quick in
+  (* Opened without blocking: a FIFO with no reader yet refuses (ENXIO), so a
+     slow payload that never opened it fails the test instead of hanging it. *)
+  let deadline = Unix.gettimeofday () +. deadline_sec in
+  let rec open_gate () =
+    match Unix.openfile gate [ Unix.O_WRONLY; Unix.O_NONBLOCK ] 0 with
+    | fd -> fd
+    | exception Unix.Unix_error (Unix.ENXIO, _, _) when Unix.gettimeofday () < deadline ->
+      Unix.sleepf poll_interval_sec;
+      open_gate ()
+  in
+  let opener = open_gate () in
+  send opener "go\n";
+  Unix.close opener;
   let slow = finish slow in
   check string "the quick payload's stdout" "quick\n" quick.stdout;
   check (option int) "the quick payload's exit, from the trailer" (Some 4)
@@ -482,6 +566,12 @@ let () =
         ; test_case "refuses an unknown kind" `Quick test_relay_refuses_an_unknown_kind
         ; test_case "sends no exit without a program" `Quick
             test_relay_without_a_program_sends_no_exit
+        ; test_case "bytes before the host's end reach the program" `Quick
+            test_bytes_before_the_hosts_end_reach_the_program
+        ; test_case "the program inherits no socket" `Quick
+            test_the_program_inherits_no_socket
+        ; test_case "inherited descriptors are not passed on" `Quick
+            test_inherited_descriptors_are_not_passed_on
         ; test_case "a closed connection closes stdin" `Quick
             test_closing_the_connection_closes_stdin
         ; test_case "drains output after the host leaves" `Quick

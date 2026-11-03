@@ -10,6 +10,9 @@ external drop_privileges : int -> int -> unit = "ocaml_shim_agent_drop_privilege
 external root_read_only : unit -> bool = "ocaml_shim_agent_root_read_only"
 external no_new_privs : unit -> bool = "ocaml_shim_agent_no_new_privs"
 
+external mark_inherited_descriptors_close_on_exec : unit -> unit
+  = "ocaml_shim_agent_cloexec_inherited"
+
 type owner =
   { uid : int
   ; gid : int
@@ -307,8 +310,10 @@ let pump ~conn ~pid ~stdin_w ~outputs ~host_signal_number =
       then (
         match Unix.read conn buffer 0 (Bytes.length buffer) with
         | 0 ->
+          (* The host has said all it will. Bytes it sent before still go to
+             the shim; its stdin closes once they have. *)
           host_sending := false;
-          close_child_stdin ()
+          if Pending.is_empty to_child then close_child_stdin ()
         | read ->
           if Option.is_some !child_stdin
           then Pending.push to_child (Bytes.sub_string buffer 0 read)
@@ -318,7 +323,8 @@ let pump ~conn ~pid ~stdin_w ~outputs ~host_signal_number =
       (match !child_stdin with
        | Some fd when List.memq fd writable ->
          (match Pending.write_some to_child fd with
-          | () -> ()
+          | () ->
+            if (not !host_sending) && Pending.is_empty to_child then close_child_stdin ()
           | exception
               Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
           | exception Unix.Unix_error (Unix.EPIPE, _, _) -> close_child_stdin ())
@@ -480,6 +486,11 @@ let fail message =
 ;;
 
 let main ~host_signal_number ~argv0 ~socket ~owner =
+  (* Every EPIPE branch above depends on this: with SIGPIPE at its default, a
+     host that goes away would kill the relay writing to it. Forked relays
+     inherit the disposition. *)
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  mark_inherited_descriptors_close_on_exec ();
   match parse_owner owner with
   | Error message -> fail message
   | Ok owner ->

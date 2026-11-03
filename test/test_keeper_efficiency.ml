@@ -131,7 +131,7 @@ let month_tests =
           Dated_jsonl.append costs (`String "not-an-object");
           Dated_jsonl.append costs
             (CL.to_json
-               (cost_row ~agent:"sangsu" ~turn:7 ~input_tokens:1 ~output_tokens:2
+               (cost_row ~agent:"quiet-fixture" ~turn:7 ~input_tokens:1 ~output_tokens:2
                   ~cost_usd:0.0 Resolved));
           let tools = tool_store root in
           Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:100.0 ());
@@ -139,8 +139,8 @@ let month_tests =
             (tool_row ~keeper:"polisher" ~disposition:"failed" ~duration_ms:50.0 ());
           Dated_jsonl.append tools (tool_row ~record_kind:"composition_run" ~keeper:"polisher" ());
           Dated_jsonl.append tools (tool_row ~record_kind:"lifecycle_event" ~keeper:"polisher" ());
-          Dated_jsonl.append tools (tool_row ~keeper:"sangsu" ~disposition:"deferred" ());
-          Dated_jsonl.append tools (tool_row ~keeper:"sangsu" ~disposition:"none" ());
+          Dated_jsonl.append tools (tool_row ~keeper:"quiet-fixture" ~disposition:"deferred" ());
+          Dated_jsonl.append tools (tool_row ~keeper:"quiet-fixture" ~disposition:"none" ());
           let view = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           check int "days_covered" 1 view.KE.days_covered;
           let polisher = keeper_row view "polisher" |> Option.get in
@@ -152,10 +152,10 @@ let month_tests =
           check int "polisher failed" 1 polisher.KE.failed;
           check int "polisher deferred" 0 polisher.KE.deferred;
           near "polisher tool_ms" 150.0 polisher.KE.tool_ms;
-          let sangsu = keeper_row view "sangsu" |> Option.get in
-          check int "sangsu turns" 1 sangsu.KE.turns;
-          check int "sangsu calls" 2 sangsu.KE.calls;
-          check int "sangsu deferred" 1 sangsu.KE.deferred;
+          let quiet = keeper_row view "quiet-fixture" |> Option.get in
+          check int "quiet-fixture turns" 1 quiet.KE.turns;
+          check int "quiet-fixture calls" 2 quiet.KE.calls;
+          check int "quiet-fixture deferred" 1 quiet.KE.deferred;
           check int "fleet turns_total" 3 view.KE.fleet.KE.turns_total;
           near "fleet calls_per_turn" (4.0 /. 3.0) view.KE.fleet.KE.calls_per_turn) )
   ; ( "appended rows count once across calls; a shrunk day file rebuilds"

@@ -4835,7 +4835,7 @@ type early_asks_observation = {
 type keeper_roster_observation = {
   roster_request: Snapshot_read.request;
   roster_result:
-    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
+    (Masc_tui_keeper_control.roster * (Tui_decode.candle_reading, string) result,
      Masc_tui_keeper_control.roster_failure) result;
 }
 
@@ -4844,7 +4844,7 @@ type keeper_row_observation = {
   row_request: Snapshot_read.request;
   row_keeper: string;
   row_result:
-    (Masc_tui_keeper_control.row_reading * (Candle_observation.t, string) result,
+    (Masc_tui_keeper_control.row_reading * (Tui_decode.candle_reading, string) result,
      Masc_tui_keeper_control.roster_failure) result;
 }
 
@@ -9965,7 +9965,7 @@ type state = {
   mutable local_keeper_read_order: Local_read_order.t;
   mutable local_keeper_read_cancel: (unit ref * (unit -> unit)) option;
   mutable local_work_read_cancel: (unit ref * (unit -> unit)) option;
-  mutable candle_observation: (Candle_observation.t, string) result option;
+  mutable candle_observation: (Tui_decode.candle_reading, string) result option;
   mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;

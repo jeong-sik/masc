@@ -1906,7 +1906,7 @@ let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, str
     roster is never older than a row the TUI read before it (RFC-0481
     §3.3). *)
 let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
-    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
+    (Masc_tui_keeper_control.roster * (Tui_decode.candle_reading, string) result, Masc_tui_keeper_control.roster_failure)
     result =
   match fetch_keeper_runtimes ~host ~port ~expected_workspace with
   | Error transport ->
@@ -1928,7 +1928,7 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
 (** Load one Keeper's roster row (RFC-0481 §3.1). The answer must name the
     Keeper it was asked for, so it cannot be read as a whole roster. *)
 let load_keeper_row ~(host : string) ~(port : int) ~expected_workspace ~keeper_name :
-    (Masc_tui_keeper_control.row_reading * (Candle_observation.t, string) result,
+    (Masc_tui_keeper_control.row_reading * (Tui_decode.candle_reading, string) result,
      Masc_tui_keeper_control.roster_failure)
     result =
   match fetch_keeper_runtime ~host ~port ~expected_workspace ~keeper_name with

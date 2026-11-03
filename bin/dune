@@ -2406,7 +2406,7 @@
  (name masc_tui_candle)
  (wrapped false)
  (modules masc_tui_candle)
- (libraries masc.masc_candle))
+ (libraries masc masc.masc_candle ptime))
 
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.

@@ -742,7 +742,6 @@ type keeper_runtime = {
           or timestamp does not hide independently valid lifecycle controls.
           The metadata name must agree with [kr_name]. *)
   kr_portrait : keeper_portrait;
-  kr_candle_balance_milli : string option;
   kr_candle_account_revision : (string option, string) result;
   (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
@@ -782,12 +781,20 @@ val keeper_of_runtime : keeper_runtime -> keeper
 (** Project the public row into a remote Keeper. No local metadata, task or
     usage measurements are inferred from the runtime state. *)
 
+(** The roster's Candle reading (RFC-0481 §3.7). A ready reading carries the
+    fold's basis, and the TUI computes balances and supply from it when it
+    draws them. *)
+type candle_reading =
+  | Candle_off
+  | Candle_disabled of string
+  | Candle_ready of Candle_decay_basis.t
+
 val decode_keeper_runtime_list :
-  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (Candle_observation.t, string) result, string) result
+  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (candle_reading, string) result, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
     [(rows, configuration_errors, truncated, total, candle)]. Explicit metadata errors
     are retained per keeper without discarding readable rows. Malformed Candle
-    fields produce an [Error] observation and withdraw every balance while
+    fields produce an [Error] reading and withdraw every account revision while
     keeping the readable Keeper lifecycle rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph.

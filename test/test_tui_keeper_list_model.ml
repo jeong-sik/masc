@@ -6,7 +6,6 @@ let runtime health name : Decode.keeper_runtime =
   { kr_name = name
   ; kr_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-01-01T00:00:00Z"; k_updated_at = "2026-01-01T00:00:00Z" }
   ; kr_portrait = Decode.Unavailable "test"
-  ; kr_candle_balance_milli = None
   ; kr_candle_account_revision = Ok None
   ; kr_health = health
   ; kr_paused = false

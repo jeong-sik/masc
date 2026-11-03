@@ -1400,10 +1400,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  else Ansi.dim ^ "no" ^ Ansi.reset)
         @ row_lines ~width "Suggested action:"
             (keeper_suggested_action (keeper_reading state k))
-        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
-            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
-            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
-           match Masc_tui_candle.balance_text state.candle_observation amount with
+        @ (match Masc_tui_candle.balance_text ~now:(Unix.gettimeofday ())
+                   state.candle_observation ~keeper:k.k_name with
            | None -> []
            | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
       in

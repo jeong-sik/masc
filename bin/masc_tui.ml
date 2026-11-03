@@ -5338,9 +5338,9 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
 let visible_item_revision state =
   match state.view, state.detail_tab, selected_keeper state with
   | Keepers Keeper_detail, Detail_items, Some keeper ->
-      let balance = match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
-        | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
-        | Unobserved | Invalid _ | Absent -> None in
+      (* The Keeper's last balance event, not its balance: the balance falls
+         with time, and only a ledger change moves the Items account. *)
+      let balance = Masc_tui_candle.keeper_basis state.candle_observation ~keeper:keeper.k_name in
       Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance,
         Option.map (fun identity ->
           (identity.Tui_decode.sid_base_path, identity.sid_masc_root,

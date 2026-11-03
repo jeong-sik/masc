@@ -1102,22 +1102,26 @@ beanie = %d
     let roster = public_roster () in
     let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
+    (* The TUI computes every Candle amount from the roster's decay basis;
+       at the wallet's last event nothing has decayed yet. *)
     (match require_ok Fun.id candle with
-     | Candle_observation.Ready supply ->
-       check string "actual paid amount is issued" "1000" supply.issued_milli;
-       check string "purchase burns only its price" "200" supply.burned_milli;
-       check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
-     | Candle_observation.Off | Candle_observation.Disabled _ -> fail "paid ledger observation unavailable");
-    (match Candle_decay_basis.of_json (Yojson.Safe.Util.member "candle_decay" roster) with
-     | Ok { decay = Candle_decay_basis.Decaying { keepers; _ }; _ } ->
-       check (option int) "the decay basis holds the wallet from the same ledger reading" (Some 800)
-         (Option.map (fun (held : Candle_decay_basis.keeper) -> held.amount_milli)
-            (List.assoc_opt keeper keepers))
-     | Ok { decay = Candle_decay_basis.No_decaying_balance; _ } -> fail "the paid wallet has no decay basis"
-     | Error detail -> fail ("roster decay basis unreadable: " ^ detail));
+     | Tui_decode.Candle_ready ({ Candle_decay_basis.decay = Decaying { keepers; _ }; _ } as basis) -> (
+       match List.assoc_opt keeper keepers with
+       | Some held ->
+         check int "the decay basis holds the wallet from the same ledger reading" 800
+           held.Candle_decay_basis.amount_milli;
+         (match Candle_decay_basis.supply_at basis ~at:held.since with
+          | Ok supply ->
+            check string "actual paid amount is issued" "1000" supply.Candle_balance.issued_milli;
+            check string "purchase burns only its price" "200" supply.burned_milli;
+            check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
+          | Error error -> fail (Candle_decay.error_to_string error))
+       | None -> fail "the paid wallet has no decay basis")
+     | Tui_decode.Candle_ready { Candle_decay_basis.decay = No_decaying_balance; _ } ->
+       fail "the paid wallet has no decay basis"
+     | Tui_decode.Candle_off | Tui_decode.Candle_disabled _ -> fail "paid ledger observation unavailable");
     let reading = match runtime_rows with
       | [row] ->
-        check (option string) "remote wallet comes from the same ledger reading" (Some "800") row.Tui_decode.kr_candle_balance_milli;
         row.Tui_decode.kr_portrait
       | _ -> fail "expected one healthy decoded Keeper runtime row" in
     check bool "public roster and real TUI decoder preserve equipped input" true
@@ -1147,11 +1151,10 @@ beanie = %d
       (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
     check int "currency failure does not invent a Keeper metadata error" 0 (List.length errors);
     (match require_ok Fun.id damaged_candle with
-     | Candle_observation.Disabled {reason} -> check bool "ledger error is observable" true (String.length reason > 0)
-     | Candle_observation.Off | Candle_observation.Ready _ -> fail "damaged ledger concealed its failure");
+     | Tui_decode.Candle_disabled reason -> check bool "ledger error is observable" true (String.length reason > 0)
+     | Tui_decode.Candle_off | Tui_decode.Candle_ready _ -> fail "damaged ledger concealed its failure");
     (match runtime_rows, damaged_rows with
      | [before], [row] ->
-       check (option string) "damaged ledger withdraws prior balance" None row.Tui_decode.kr_candle_balance_milli;
        check bool "Keeper lifecycle reading survives currency failure" true
          (before.kr_phase = row.kr_phase && before.kr_health = row.kr_health && before.kr_keepalive_running = row.kr_keepalive_running)
      | _ -> fail "currency failure hid the healthy Keeper");

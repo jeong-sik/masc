@@ -3994,7 +3994,7 @@ let help_lines ~width (state : state) =
      own, so the head of this list is the most relevant thing either way and
      nothing has to look for it by name. *)
   let candle =
-    match Masc_tui_candle.summary_lines state.candle_observation with
+    match Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation with
     | [] -> []
     | lines ->
       (Ansi.bold ^ "Candle details" ^ Ansi.reset)

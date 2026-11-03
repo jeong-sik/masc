@@ -1423,7 +1423,7 @@ let usage_lines ~cols ~rows (state : state) =
   | Usage_plan -> selection_lines @ wrap_evidence (scopes ())
   | Usage_trend -> selection_lines @ wrap_evidence (provider_history_lines ~cols ~rows state)
   | Usage_keepers ->
-      let currency = match Masc_tui_candle.summary_lines state.candle_observation with
+      let currency = match Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation with
         | [] -> []
         | lines ->
             [ " " ^ Ansi.bold ^ "Candle · workspace supply" ^ Ansi.reset ]

@@ -21273,7 +21273,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* A change can land between the initial read and subscription, or
          during a disconnected interval. Read under the current authority. *)
       launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-      revalidate_visible_fusion state ~mailbox
+      revalidate_visible_fusion state ~mailbox;
+      (* The feed announces changes only while it is open. Unless this
+         connection replays every event since the last applied one, the
+         visible surfaces read once more (RFC-0480 §3.3). *)
+      if not (Masc_tui_types.observer_replay_is_complete handshake) then
+        start_http_refresh state ~host:server_peer_host ~port:state.port
+          ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox
   | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane

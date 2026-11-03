@@ -62,6 +62,7 @@ import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
+  SSE_APPROVAL_RULES_CHANGED_EVENT,
 } from './schemas/sse'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
@@ -697,6 +698,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
     event.type === SSE_APPROVAL_PENDING_EVENT
     || event.type === SSE_APPROVAL_RESOLVED_EVENT
     || event.type === SSE_APPROVAL_SUMMARY_UPDATED_EVENT
+    || event.type === SSE_APPROVAL_RULES_CHANGED_EVENT
 
   if (
     (event.type === SSE_APPROVAL_PENDING_EVENT

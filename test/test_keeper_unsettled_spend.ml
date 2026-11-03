@@ -19,6 +19,15 @@ let with_ledger f =
     (fun () -> f dir)
 ;;
 
+(* A fixture row the case needs in the ledger. *)
+let landed = function
+  | Ok () -> ()
+  | Error Keeper_hooks_agent_core.Append_declined ->
+    fail "the append guard declined a fixture row"
+  | Error (Keeper_hooks_agent_core.Append_raised detail) ->
+    failf "a fixture row was not written: %s" detail
+;;
+
 let sample ?cost_usd input : Keeper_usage_resolution.sample =
   { input_tokens = input
   ; output_tokens = 10
@@ -78,7 +87,8 @@ let raw
           } )
   in
   let spend_observation = if recorded then Some observation else None in
-  Keeper_hooks_agent_core.emit_cost_event
+  landed
+  @@ Keeper_hooks_agent_core.emit_cost_event
     ~masc_root
     ~agent_name:agent
     ~task_id:(Some "task-lost")
@@ -135,7 +145,8 @@ let undecodable_observation ~masc_root ~turn ~ordinal ~run () =
 
 (* What a commit writes for its turn: the resolved spend of its last reading. *)
 let committed ~masc_root ?(agent = keeper) ~turn ~ordinal ~input () =
-  Keeper_hooks_agent_core.emit_cost_event
+  landed
+  @@ Keeper_hooks_agent_core.emit_cost_event
     ~masc_root
     ~agent_name:agent
     ~task_id:None
@@ -539,6 +550,70 @@ let test_rows_above_the_newest_resolved_row () =
     (List.length (Keeper_unsettled_spend.unsettled_rows ~agent_name:keeper newest_first))
 ;;
 
+let created_at = "2020-01-01T00:00:00Z"
+
+let start_execution ?(created_at = created_at) masc_root =
+  Keeper_unsettled_spend.settle_before_execution ~masc_root ~agent_name:keeper ~created_at
+;;
+
+let started masc_root =
+  match start_execution masc_root with
+  | Some start -> start
+  | None -> fail "a settled ledger hands the execution a start"
+;;
+
+(* The raw row an execution that did not commit leaves: reading the ledger
+   before the next execution settles it as turn 1's reading. *)
+let leave_raw_row masc_root = raw ~masc_root ~turn:1 ~ordinal:1 ~run:"run-left" ~input:100 ()
+
+let left_row_settled = flatten [ 1, "run-left", 0, 0, 100, 50 ]
+
+(* An execution whose commit handed its start back left nothing to settle,
+   so the next execution does not read the ledger. That execution has not
+   handed its own start back, so the one after it reads the ledger again. *)
+let test_an_execution_after_a_handed_back_start_reads_nothing () =
+  with_ledger (fun masc_root ->
+    Keeper_unsettled_spend.record_committed (started masc_root);
+    leave_raw_row masc_root;
+    ignore (started masc_root : Keeper_unsettled_spend.settled_start);
+    check settled_entry "the ledger was not read" [] (flatten (settled masc_root));
+    ignore (started masc_root : Keeper_unsettled_spend.settled_start);
+    check settled_entry "the execution after it read the ledger" left_row_settled
+      (flatten (settled masc_root)))
+;;
+
+(* A start handed back by a Keeper the name no longer belongs to says nothing
+   about the Keeper created under it now. *)
+let test_a_keeper_created_again_under_the_name_reads_the_ledger () =
+  with_ledger (fun masc_root ->
+    Keeper_unsettled_spend.record_committed (started masc_root);
+    leave_raw_row masc_root;
+    ignore
+      (start_execution ~created_at:"2021-01-01T00:00:00Z" masc_root
+       : Keeper_unsettled_spend.settled_start option);
+    check settled_entry "the new Keeper read the ledger" left_row_settled
+      (flatten (settled masc_root)))
+;;
+
+let with_appends_declined f =
+  Dated_jsonl.set_append_guard (fun (_ : unit -> unit) -> ());
+  Fun.protect ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ())) f
+;;
+
+(* Rows the ledger did not take stay raw, so the execution gets no start and
+   the next one reads the ledger again. *)
+let test_a_settle_whose_rows_are_not_written_hands_out_no_start () =
+  with_ledger (fun masc_root ->
+    leave_raw_row masc_root;
+    (match with_appends_declined (fun () -> start_execution masc_root) with
+     | None -> ()
+     | Some _ -> fail "a start was handed out over rows the ledger does not have");
+    check settled_entry "no resolved row landed" [] (flatten (settled masc_root));
+    ignore (started masc_root : Keeper_unsettled_spend.settled_start);
+    check settled_entry "the next execution settled it" left_row_settled
+      (flatten (settled masc_root)))
+;;
+
 let () =
   run
     "keeper unsettled spend"
@@ -571,6 +646,14 @@ let () =
         ; test_case "observations round trip" `Quick test_observations_round_trip
         ; test_case "rows above the newest resolved row" `Quick
             test_rows_above_the_newest_resolved_row
+        ] )
+    ; ( "before an execution"
+      , [ test_case "an execution after a handed-back start reads nothing" `Quick
+            test_an_execution_after_a_handed_back_start_reads_nothing
+        ; test_case "a Keeper created again under the name reads the ledger" `Quick
+            test_a_keeper_created_again_under_the_name_reads_the_ledger
+        ; test_case "a settle whose rows are not written hands out no start" `Quick
+            test_a_settle_whose_rows_are_not_written_hands_out_no_start
         ] )
     ]
 ;;

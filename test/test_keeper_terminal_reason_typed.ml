@@ -1229,7 +1229,8 @@ max-concurrent = 1
              Masc.Keeper_unified_turn_success.handle ~config ~meta
                ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
                ~observation ~latency_ms:1 ~degraded_retry_applied:None
-               ~degraded_retry_deferred:None ~keeper_turn_id:1 ~spend:[] execution in
+               ~degraded_retry_deferred:None ~keeper_turn_id:1 ~spend:[]
+               ~settled_start:None execution in
            let metrics_store = Masc.Keeper_types_support.keeper_metrics_store config name in
            let metrics_row =
              match Dated_jsonl.read_recent_result metrics_store 1 with
@@ -1301,6 +1302,132 @@ max-concurrent = 1
                 created_at = 1000. } },
             "input_required", `String "provide_input_or_decline"
         ];
+      (* A success whose rows land hands the execution's start back, so the
+         Keeper's next execution does not read the ledger and the raw row left
+         after it stays unsettled. A success whose rows the ledger declines
+         keeps the start, so the next execution reads the ledger and settles
+         that row. So does a success no provider turn ended: no turn row holds
+         its reading, and the next execution's read settles the reading's raw
+         row. *)
+      let input_required = Runtime_agent.InputRequired
+        { turns_used = 1; request =
+          { request_id = "input-fixture"; participant_name = None;
+            question = "Choose the fixture"; schema = None; timeout_s = None;
+            created_at = 1000. } } in
+      List.iter
+        (fun (name, stop_reason, turn_reads, appends_declined, expected_resolved_rows) ->
+           with_temp_dir ("keeper-success-start-" ^ name) @@ fun base_path ->
+           let config = Masc.Workspace.default_config base_path in
+           ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
+           let meta = meta_fixture_exn
+             (`Assoc ["name", `String name; "trace_id", `String ("trace-" ^ name)]) in
+           write_meta_exn config meta;
+           Eio.Switch.run @@ fun sw ->
+           (match Masc.Keeper_owner_registry.install_from_store ~sw
+                    ~operation_runner:None ~on_turn_slot_released:None config with
+            | Ok _ -> ()
+            | Error error -> failwith (Masc.Keeper_owner_registry.install_error_to_string error));
+           let entry = Masc.Keeper_registry.For_testing.register
+             ~base_path:config.base_path meta.name meta in
+           Fun.protect
+             ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+           @@ fun () ->
+           let masc_root = Common.masc_dir_from_base_path ~base_path:config.base_path in
+           let start_execution () =
+             Masc.Keeper_unsettled_spend.settle_before_execution
+               ~masc_root ~agent_name:meta.name ~created_at:meta.created_at in
+           let settled_start =
+             match start_execution () with
+             | Some start -> start
+             | None -> failwith "a settled ledger hands the execution a start"
+           in
+           let leave_raw_row ~keeper_turn_id =
+             match
+               Masc.Keeper_hooks_agent_core.emit_cost_event ~masc_root ~agent_name:meta.name
+                 ~task_id:None ~trace_id:("trace-" ^ name) ~keeper_turn_id
+                 ~agent_core_turn_ordinal:1 ~model:"test-model" ~input_tokens:50
+                 ~output_tokens:5 ~cost_usd:0.0
+                 ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+                 ~spend_observation:
+                   (Masc.Keeper_spend_observation.Agent_core_response
+                      { response_id = ""
+                      ; ordinal = 1
+                      ; model = "test-model"
+                      ; usage =
+                          Some
+                            { Masc.Keeper_usage_resolution.input_tokens = 50
+                            ; output_tokens = 5
+                            ; cache_creation_input_tokens = 0
+                            ; cache_read_input_tokens = 0
+                            ; cost_usd = None
+                            }
+                      })
+                 ~runtime_attempt:("run-left", "test_provider.test_model", 0) ()
+             with
+             | Ok () -> ()
+             | Error (_ : Masc.Keeper_hooks_agent_core.append_failure) ->
+               failwith "the raw row was not written"
+           in
+           let spend =
+             if not turn_reads
+             then []
+             else (
+               (* AfterTurn writes the reading's raw row as the spend takes it. *)
+               leave_raw_row ~keeper_turn_id:1;
+               match
+                 Masc.Keeper_turn_spend.observe_agent_core_response
+                   (Masc.Keeper_turn_spend.start_attempt Masc.Keeper_turn_spend.empty
+                      ~routing_run_id:"run-left" ~runtime_id:"test_provider.test_model"
+                      ~lane_attempt_index:0)
+                   ~response_id:"" ~ordinal:1 ~model:"test-model"
+                   (Some { Agent_core.Types.zero_api_usage with input_tokens = 50; output_tokens = 5 })
+               with
+               | Ok spend -> Masc.Keeper_turn_spend.attempts spend
+               | Error Masc.Keeper_turn_spend.No_attempt_started ->
+                 failwith "the reading found no attempt")
+           in
+           let observation = Masc.Keeper_world_observation.observe
+             ~pending_board_events:(Some []) ~config ~meta in
+           let usage = { Agent_core.Types.zero_api_usage with input_tokens = 100; output_tokens = 10 } in
+           let result = { (run_result ~stop_reason ~usage ()) with
+             runtime_id = "test_provider.test_model";
+             turn_outcome = Masc.Keeper_turn_outcome.of_stop_reason stop_reason } in
+           let execution = Masc.Keeper_execution_outcome.create
+             ~lane:Masc.Keeper_execution_outcome.Direct result in
+           let handle () =
+             let (Masc.Keeper_unified_turn_success.Completed (_ : KMC.keeper_meta)) =
+               Masc.Keeper_unified_turn_success.handle ~config ~meta
+                 ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+                 ~observation ~latency_ms:1 ~degraded_retry_applied:None
+                 ~degraded_retry_deferred:None ~keeper_turn_id:1 ~spend
+                 ~settled_start:(Some settled_start) execution
+             in
+             ()
+           in
+           if appends_declined
+           then (
+             Dated_jsonl.set_append_guard (fun (_ : unit -> unit) -> ());
+             Fun.protect
+               ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ()))
+               handle)
+           else handle ();
+           if not turn_reads then leave_raw_row ~keeper_turn_id:2;
+           ignore (start_execution () : Masc.Keeper_unsettled_spend.settled_start option);
+           let resolved_rows =
+             Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10
+             |> List.filter (fun json ->
+               match Cost_ledger.of_json json with
+               | Ok { Cost_ledger.usage_projection = Cost_ledger.Raw_observation _; _ } -> false
+               | Ok { usage_projection = Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _; _ } -> true
+               | Error error -> failwith (Cost_ledger.decode_error_to_string error))
+           in
+           check (name ^ " leaves the expected resolved rows after the next execution starts")
+             (List.length resolved_rows = expected_resolved_rows))
+        (let completed = Runtime_agent.Completed { provider_turn_ordinal = 1 } in
+         [ "rows-written", completed, false, false, 1
+         ; "rows-declined", completed, false, true, 1
+         ; "input-required-reading", input_required, true, false, 1
+         ]);
       let meta =
         { meta with runtime =
             { meta.runtime with usage =
@@ -1322,6 +1449,7 @@ max-concurrent = 1
         ; degraded_retry_applied = Some applied_lane
         ; degraded_retry_deferred = None
         ; spend = []
+        ; settled_start = None
         }
       in
       let observation = Masc.Keeper_world_observation.observe

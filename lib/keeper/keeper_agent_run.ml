@@ -986,11 +986,15 @@ let run_turn
       | None, _ -> Ok () in
   (* An execution that ended without committing -- a server stop, a Keeper
      stopped mid-turn -- left its readings as raw ledger rows only. They are
-     settled under their own turn before this execution starts counting. *)
-  Keeper_unsettled_spend.settle_before_execution
-    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.base_path)
-    ~agent_name:meta.name
-    ~created_at:meta.created_at;
+     settled under their own turn before this execution starts counting. The
+     settlement carries what this returns to the commit, which hands it back
+     when every row is in the file. *)
+  let settled_start =
+    Keeper_unsettled_spend.settle_before_execution
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.base_path)
+      ~agent_name:meta.name
+      ~created_at:meta.created_at
+  in
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_turn_preview.with_preparation_result
@@ -2186,6 +2190,7 @@ let run_turn
               else None)
            ~receipt_response_text_present_ref
            ~spend:(s.Keeper_run_tools.spend_attempts ())
+           ~settled_start
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the

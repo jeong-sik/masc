@@ -23,7 +23,12 @@ let count_turn (meta : Keeper_meta_contract.keeper_meta) =
   }
 ;;
 
-let commit ~config ~keeper_turn_id ~(before : Keeper_meta_contract.keeper_meta) ~attempt_spend
+let commit
+      ~config
+      ~keeper_turn_id
+      ~(before : Keeper_meta_contract.keeper_meta)
+      ~attempt_spend
+      ~settled_start
       after
   =
   let resolved, usage_cursor =
@@ -53,12 +58,21 @@ let commit ~config ~keeper_turn_id ~(before : Keeper_meta_contract.keeper_meta) 
     Keeper_unified_metrics_support.record_keeper_total_cost_usd
       ~keeper_name:committed.name
       ~total_cost_usd:committed.runtime.usage.total_cost_usd.known_cost_usd;
-    Keeper_turn_spend_ledger.write
-      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
-      ~agent_name:before.name
-      ~task_id:(Option.map Keeper_id.Task_id.to_string before.current_task_id)
-      ~trace_id:(Keeper_id.Trace_id.to_string before.runtime.trace_id)
-      ~keeper_turn_id
-      resolved;
+    let written =
+      Keeper_turn_spend_ledger.write
+        ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+        ~agent_name:before.name
+        ~task_id:(Option.map Keeper_id.Task_id.to_string before.current_task_id)
+        ~trace_id:(Keeper_id.Trace_id.to_string before.runtime.trace_id)
+        ~keeper_turn_id
+        resolved
+    in
+    (* The start goes back only when every resolved row is in the file.
+       Otherwise the next execution reads the ledger. That read settles raw
+       rows only above the Keeper's newest resolved row, so a reading whose
+       row failed beside one that landed stays unsettled (#47973). *)
+    (match written, settled_start with
+     | Ok (), Some start -> Keeper_unsettled_spend.record_committed start
+     | Ok (), None | Error (_ : Keeper_hooks_agent_core.append_failure), _ -> ());
     Ok committed
 ;;

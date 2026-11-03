@@ -8113,6 +8113,146 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
+let with_settled_codex_thread f =
+  let module Store = Keeper_official_client_session_store in
+  let base_path = temp_workspace "masc-codex-setup-refusal-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Ok result -> check int "seeded completed turn" 1 result.turns
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let load () =
+      match Store.load ~base_path ~keeper_name:"codex-fixture"
+        |> Result.map_error Store.read_error_to_string with
+      | Ok (Some binding) -> binding
+      | Ok None -> fail "the completed native session disappeared"
+      | Error detail -> fail detail
+    in
+    let before = load () in
+    let settled = match before.phase with
+      | Store.Settled settled -> settled
+      | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+        fail "the first real Keeper turn did not settle"
+    in
+    let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Codex; runtime_id = before.runtime_id
+      ; session_id = settled.session_id; turn_id = settled.turn_id
+      ; tool_surface_sha256 = before.tool_surface_sha256
+      ; frame = Keeper_repetition_snapshot.empty }
+    in
+    f ~base_path ~load ~before ~checkpoint)
+;;
+
+let fixture_rpc_refusal id =
+  Printf.sprintf
+    {|{"id":%d,"error":{"code":-32603,"message":"opaque fixture refusal","data":{"fixture":"identical"}}}|}
+    id
+;;
+
+let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~detail () =
+  let module Store = Keeper_official_client_session_store in
+  with_settled_codex_thread (fun ~base_path ~load ~before ~checkpoint ->
+    let capture = Filename.concat base_path "setup-refusal.jsonl" in
+    let reports = ref 0 in
+    with_fixture ~capture_path:capture responses (fun cli_path ->
+      match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
+        ~system_prompt:"Unsent System context from the refused setup attempt."
+        ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
+      | Error error ->
+        let expected = Agent_core.Error.Provider
+          (Llm_provider.Error.ProviderReportedError
+            { provider = "codex_app_server"; error_type = Some "rpc_error"; detail }) in
+        check string "original RPC error remains visible"
+          (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error)
+      | Ok _ -> fail "setup RPC refusal completed a Keeper turn");
+    check (list string) "setup refusal sent no thread, input or tool request" methods
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
+        (captured_requests capture));
+    check int "setup refusal reports no transmitted input" 0 !reports;
+    let after = load () in
+    check bool "setup refusal preserves the exact settled native turn" true
+      (after.phase = before.phase);
+    check int "setup refusal consumes no provider ordinal" before.turn_count after.turn_count;
+    check bool "unsent changed System context cannot replace acknowledged context" true
+      (after.context_frontier = before.context_frontier);
+    check bool "setup refusal preserves the host's observed turn count" true
+      (after.host_turns = before.host_turns);
+    check bool "the original exact-session continuation remains admissible" true
+      (Store.validate_continuation ~checkpoint ~expected:(Some after)
+        ~client_kind:Codex ~runtime_id:before.runtime_id
+        ~tool_surface_sha256:before.tool_surface_sha256 = Ok ());
+    let resumed_capture = Filename.concat base_path "after-setup-refusal.jsonl" in
+    with_fixture ~capture_path:resumed_capture
+      [ init_result; account_chatgpt; thread_result; resumed_turn_result
+      ; resumed_item_completed; resumed_turn_completed ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok result ->
+          check string "next request actually resumes the original thread" checkpoint.session_id result.session_id;
+          check int "only the next successful turn advances the ordinal" 2 result.turns;
+          check string "resumed response" "MASC_RESUMED_OK" (keeper_response_text result));
+    let open Yojson.Safe.Util in
+    let requests = captured_requests resumed_capture in
+    check (list string) "next wire resumes without a replacement or unsent-context receipt"
+      ["initialize"; "initialized"; "account/read"; "thread/resume"; "turn/start"]
+      (List.map (fun row -> row |> member "method" |> to_string) requests);
+    let resume = List.find (fun row -> member "method" row = `String "thread/resume") requests in
+    check string "resume names the original thread on the wire" checkpoint.session_id
+      (resume |> member "params" |> member "threadId" |> to_string);
+    check int "the next completed ordinal is durable" 2 (load ()).turn_count)
+;;
+
+let test_keeper_resume_rpc_refusal_keeps_fresh_recovery () =
+  let module Store = Keeper_official_client_session_store in
+  with_settled_codex_thread (fun ~base_path ~load ~before ~checkpoint ->
+    let capture = Filename.concat base_path "resume-refusal.jsonl" in
+    with_fixture ~capture_path:capture
+      [init_result; account_chatgpt; fixture_rpc_refusal 3]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Error error ->
+          let expected = Agent_core.Error.Provider
+            (Llm_provider.Error.ProviderReportedError
+              { provider = "codex_app_server"; error_type = Some "rpc_error"
+              ; detail = "thread/resume (code -32603): opaque fixture refusal" }) in
+          check string "the same opaque refusal remains a resume RPC error"
+            (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error)
+        | Ok _ -> fail "refused thread/resume completed a Keeper turn");
+    check (list string) "the refused resume really wrote its context request"
+      ["initialize"; "initialized"; "account/read"; "thread/resume"]
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
+        (captured_requests capture));
+    let after = load () in
+    (match after.phase with
+     | Store.Recovery_required recovery ->
+       check bool "resume refusal retains protocol recovery" true (recovery.failure = Protocol_failed)
+     | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+       fail "a rejected native thread was restored as resumable");
+    check bool "the refused original continuation remains unavailable" true
+      (Result.is_error (Store.validate_continuation ~checkpoint ~expected:(Some after)
+        ~client_kind:Codex ~runtime_id:before.runtime_id
+        ~tool_surface_sha256:before.tool_surface_sha256));
+    let fresh_capture = Filename.concat base_path "after-resume-refusal.jsonl" in
+    let fresh_responses = List.map
+      (String_util.replace_substring ~needle:"thread-1" ~by:"replacement-thread")
+      [thread_result; turn_result; item_completed; turn_completed] in
+    with_fixture ~capture_path:fresh_capture ([init_result; account_chatgpt] @ fresh_responses)
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok result ->
+          check string "resume refusal still recovers into a replacement thread"
+            "replacement-thread" result.session_id;
+          check int "replacement thread starts at its own first turn" 1 result.turns);
+    check (list string) "next wire starts fresh after a rejected resume"
+      ["initialize"; "initialized"; "account/read"; "thread/start"; "turn/start"]
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
+        (captured_requests fresh_capture)))
+;;
+
 let test_keeper_resume_sends_changed_working_state_once () =
   let base_path = temp_workspace "masc-codex-held-working-state-" in
   let captures =
@@ -10376,6 +10516,24 @@ let () =
             "Keeper resumes persisted Codex thread"
             `Quick
             test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper initialize RPC refusal preserves the native session"
+            `Quick
+            (test_keeper_setup_rpc_refusal_preserves_session
+              ~responses:[fixture_rpc_refusal 1; account_chatgpt; thread_result]
+              ~methods:["initialize"]
+              ~detail:"initialize (code -32603): opaque fixture refusal")
+        ; test_case
+            "Keeper account RPC refusal preserves the native session"
+            `Quick
+            (test_keeper_setup_rpc_refusal_preserves_session
+              ~responses:[init_result; fixture_rpc_refusal 2; thread_result]
+              ~methods:["initialize"; "initialized"; "account/read"]
+              ~detail:"account/read (code -32603): opaque fixture refusal")
+        ; test_case
+            "Keeper resume RPC refusal keeps fresh recovery"
+            `Quick
+            test_keeper_resume_rpc_refusal_keeps_fresh_recovery
         ; test_case
             "Keeper Resume sends changed Librarian working state once"
             `Quick

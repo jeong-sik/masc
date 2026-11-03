@@ -1936,6 +1936,32 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
   Ok released
 ;;
 
+let revert_claim ~base_path ~keeper_name ~expected ~restore ~reverted_at =
+  let* owner_epoch, _previous_settlement =
+    match incomplete_claim expected.phase with
+    | Some claim -> Ok claim
+    | None -> Error "official-client session has no incomplete claim to revert"
+  in
+  let* () =
+    match restore.phase with
+    | Ready | Recovery_required _ | Settled _ -> Ok ()
+    | Start _ | Active _ | Turn_inflight _ ->
+      Error "official-client revert target is not a quiescent binding"
+  in
+  let* restored =
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { restore with updated_at = reverted_at }
+  in
+  Log.Keeper.info
+    ~keeper_name
+    "reverted untransmitted official-client claim owner_epoch=%s"
+    owner_epoch;
+  Ok restored
+;;
+
 let reconcile_process_restart ~base_path ~keeper_name ~expected
     ~current_owner_epoch ~required_at =
   let* () = validate_uuid "current_owner_epoch" current_owner_epoch in

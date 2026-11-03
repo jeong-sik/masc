@@ -251,6 +251,11 @@ val chat_appended_keeper : event -> string option
     {!Keeper_chat_appended}. The chat pane reloads its history on this
     and reads its call details again. *)
 
+val composite_changed_keeper : event -> string option
+(** The keeper whose composite just changed — [Some] only for
+    {!Keeper_composite_changed}. The Keeper detail reads that Keeper's
+    composite again on this. *)
+
 val memory_journal_appended_keeper : event -> string option
 (** The keeper whose memory journal just gained a row — [Some] only for
     {!Keeper_memory_journal_appended}. The chat pane reloads its history,

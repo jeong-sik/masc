@@ -13,6 +13,16 @@ type published_socket =
   ; guest_path : string
   }
 
+type capability =
+  | Cap_setuid
+  | Cap_setgid
+  | Cap_sys_admin
+
+let capability_to_string = function
+  | Cap_setuid -> "CAP_SETUID"
+  | Cap_setgid -> "CAP_SETGID"
+  | Cap_sys_admin -> "CAP_SYS_ADMIN"
+
 type t =
   { image : string
   ; guest_size : Keeper_microvm_guest_size.t
@@ -21,7 +31,7 @@ type t =
   ; command : string list
   ; mounts : guest_mount list
   ; isolation : Keeper_microvm_backend.guest_constraint list
-  ; capabilities_added : string list
+  ; capabilities_added : capability list
   ; published_sockets : published_socket list
   ; network : network
   ; environment : (string * string) list
@@ -78,7 +88,8 @@ let digest (plan : t) =
          plan.isolation |> List.sort String.compare)
      ]
      @ unless_empty "capabilities_added"
-         (strings (List.sort String.compare plan.capabilities_added))
+         (strings (List.map capability_to_string plan.capabilities_added
+                   |> List.sort String.compare))
          plan.capabilities_added
      @ unless_empty "published_sockets" (pairs (canonical_sockets plan.published_sockets))
          plan.published_sockets
@@ -94,14 +105,40 @@ let expected_mounts (plan : t) =
     Tmpfs {destination = Keeper_microvm_backend.scratch_guest_root} :: plan.mounts
   else plan.mounts
 
+type socket_path_problem =
+  | Not_absolute
+  | Contains_colon
+  | Too_long of
+      { bytes : int
+      ; limit : int
+      }
+
+(* [sun_path] holds the path and its terminating NUL: 104 bytes on macOS,
+   108 on Linux. container 1.6.1 accepted a 112-byte host path and then failed
+   at bootstrap (docs/evidence/2026-11-03-microvm-request-transport,
+   agent-boot-flags-results.json), so the limit is checked here instead. *)
+let host_socket_path_limit = 103
+let guest_socket_path_limit = 107
+
+let socket_path_problems ~limit path =
+  (if Filename.is_relative path then [Not_absolute] else [])
+  @ (if String.contains path ':' then [Contains_colon] else [])
+  @ (let bytes = String.length path in
+     if bytes > limit then [Too_long {bytes; limit}] else [])
+
 type invalid_plan =
   | Missing_executable
   | Duplicate_environment_key of string
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
   | Duplicate_constraint of Keeper_microvm_backend.guest_constraint
-  | Duplicate_capability of string
+  | Duplicate_capability of capability
+  | Capabilities_without_drop_all
   | Duplicate_published_socket of string
+  | Invalid_published_socket of
+      { path : string
+      ; problem : socket_path_problem
+      }
   | Invalid_environment_key of string
   | Invalid_label_key of string
   | Reserved_plan_label of string
@@ -141,6 +178,17 @@ let plan_errors (plan : t) =
   @ duplicate_errors (fun destination -> Duplicate_mount_destination destination) destinations
   @ duplicate_errors (fun constraint_ -> Duplicate_constraint constraint_) plan.isolation
   @ duplicate_errors (fun capability -> Duplicate_capability capability) plan.capabilities_added
+  @ (match plan.capabilities_added with
+     | [] -> []
+     | _ :: _ ->
+       if List.mem Keeper_microvm_backend.Drop_all_capabilities plan.isolation then []
+       else [Capabilities_without_drop_all])
+  @ List.concat_map (fun {host_path; guest_path} ->
+      List.map (fun problem -> Invalid_published_socket {path = host_path; problem})
+        (socket_path_problems ~limit:host_socket_path_limit host_path)
+      @ List.map (fun problem -> Invalid_published_socket {path = guest_path; problem})
+          (socket_path_problems ~limit:guest_socket_path_limit guest_path))
+      plan.published_sockets
   @ duplicate_errors (fun path -> Duplicate_published_socket path)
       (List.map (fun socket -> socket.host_path) plan.published_sockets)
   @ duplicate_errors (fun path -> Duplicate_published_socket path)
@@ -172,8 +220,17 @@ let invalid_plan_message = function
   | Duplicate_mount_destination destination -> Printf.sprintf "duplicate mount destination %S" destination
   | Duplicate_constraint constraint_ ->
     "duplicate constraint " ^ Keeper_microvm_backend.guest_constraint_to_string constraint_
-  | Duplicate_capability capability -> Printf.sprintf "duplicate added capability %S" capability
+  | Duplicate_capability capability ->
+    Printf.sprintf "duplicate added capability %s" (capability_to_string capability)
+  | Capabilities_without_drop_all ->
+    "capabilities are given back only after drop_all_capabilities"
   | Duplicate_published_socket path -> Printf.sprintf "duplicate published socket path %S" path
+  | Invalid_published_socket {path; problem} ->
+    Printf.sprintf "published socket path %S %s" path
+      (match problem with
+       | Not_absolute -> "is not absolute"
+       | Contains_colon -> "contains ':'"
+       | Too_long {bytes; limit} -> Printf.sprintf "is %d bytes, over %d" bytes limit)
   | Invalid_environment_key key -> Printf.sprintf "invalid environment key %S" key
   | Invalid_label_key key -> Printf.sprintf "invalid label key %S" key
   | Reserved_plan_label key -> Printf.sprintf "reserved stable-plan label %S" key
@@ -278,7 +335,7 @@ let observed_differences ~image_difference ~command_difference (plan : t) (facts
     ; different (canonical_mounts (expected_mounts plan) <> canonical_mounts facts.mounts) Mounts
     ; different (read_only <> facts.read_only) Root_filesystem
     ; different (List.sort String.compare cap_drop <> List.sort String.compare facts.cap_drop
-        || List.sort String.compare plan.capabilities_added
+        || List.sort String.compare (List.map capability_to_string plan.capabilities_added)
            <> List.sort String.compare facts.cap_add) Capabilities
     ; different (canonical_sockets plan.published_sockets
         <> canonical_sockets facts.published_sockets) Published_sockets

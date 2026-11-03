@@ -18,6 +18,18 @@ type published_socket =
   }
 (** One [container run --publish-socket host_path:guest_path]. *)
 
+(** A capability given back after [Drop_all_capabilities]: the three a guest
+    agent needs to bind its socket as root, remount [/] read-only and drop to
+    the Keeper's ids (RFC microvm-guest-agent-over-socket 3.2). *)
+type capability =
+  | Cap_setuid
+  | Cap_setgid
+  | Cap_sys_admin
+
+val capability_to_string : capability -> string
+(** The name [container run --cap-add] takes and [container inspect] reports
+    back ([capAdd]), e.g. ["CAP_SYS_ADMIN"]. *)
+
 type t =
   { image : string
   ; guest_size : Keeper_microvm_guest_size.t
@@ -26,7 +38,7 @@ type t =
   ; command : string list
   ; mounts : guest_mount list
   ; isolation : Keeper_microvm_backend.guest_constraint list
-  ; capabilities_added : string list
+  ; capabilities_added : capability list
   ; published_sockets : published_socket list
   ; network : network
   ; environment : (string * string) list
@@ -37,10 +49,17 @@ type t =
     not to the plan. Credential mount paths are those of the guest snapshot.
     [command] is the exact init process: a nonempty executable followed by its
     arguments. Boot overrides the image entrypoint with that executable.
-    [capabilities_added] are given back after [Drop_all_capabilities], by the
-    names [container run --cap-add] takes (["CAP_SYS_ADMIN"]). *)
+    [capabilities_added] are given back after [Drop_all_capabilities]. *)
 
 val label_key : string
+
+type socket_path_problem =
+  | Not_absolute
+  | Contains_colon  (** [--publish-socket] separates the two paths with [:] *)
+  | Too_long of
+      { bytes : int
+      ; limit : int
+      }  (** over the unix socket path limit of the side that binds it *)
 
 type invalid_plan =
   | Missing_executable
@@ -48,8 +67,13 @@ type invalid_plan =
   | Duplicate_label_key of string
   | Duplicate_mount_destination of string
   | Duplicate_constraint of Keeper_microvm_backend.guest_constraint
-  | Duplicate_capability of string
+  | Duplicate_capability of capability
+  | Capabilities_without_drop_all
   | Duplicate_published_socket of string
+  | Invalid_published_socket of
+      { path : string
+      ; problem : socket_path_problem
+      }
   | Invalid_environment_key of string
   | Invalid_label_key of string
   | Reserved_plan_label of string
@@ -61,7 +85,11 @@ val validate : t -> (unit, invalid_plan list) result
 (** Pure admission before canonical identity or argv can be used as authority.
     Rejects duplicate keys/destinations/constraints, including collisions with
     constraint-provided scratch mounts. Stable labels cannot contain the plan
-    digest, owner PID or start time. Error lists are nonempty. *)
+    digest, owner PID or start time. Capabilities are given back only after
+    [Drop_all_capabilities]. A published socket's paths are absolute, carry no
+    [:], and fit the unix socket path limit of the side that binds them: 103
+    bytes on the macOS host, 107 in the Linux guest. Error lists are
+    nonempty. *)
 
 val validate_boot :
   plan:t -> lifecycle_labels:(string * string) list ->

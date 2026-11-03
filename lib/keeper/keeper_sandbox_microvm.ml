@@ -943,7 +943,8 @@ let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
       (fun (key, value) -> ["--label"; key ^ "=" ^ value])
       (plan.labels @ lifecycle_labels @ [Plan.label_key, Plan.digest plan]) in
     let grant_args =
-      List.concat_map (fun capability -> ["--cap-add"; capability]) plan.capabilities_added
+      List.concat_map (fun capability -> ["--cap-add"; Plan.capability_to_string capability])
+        plan.capabilities_added
       @ List.concat_map (fun {Plan.host_path; guest_path} ->
           ["--publish-socket"; host_path ^ ":" ^ guest_path]) plan.published_sockets in
     render_turn_start_argv_for Backend.Apple_container ~container_name ~label_args

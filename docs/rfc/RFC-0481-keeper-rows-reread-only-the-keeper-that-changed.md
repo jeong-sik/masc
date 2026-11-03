@@ -160,7 +160,7 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 |---|---|
 | 턴 자리 | `Keeper_owner.publish_turn_in_flight`(채팅 시작, 자율·정비 턴 시작, 끝) |
 | turn ref | `Keeper_autonomous_stream.create`·`finish`, current 표를 바꾼 뒤 |
-| chat control token | `Pause_and_interrupt` 회전, Owner 생성 |
+| chat control token | 멈춤 상태(`paused`, `latched_reason`)가 바뀌는 전이, `Pause_and_interrupt` 회전. 키퍼 meta 가 생기거나 지워지는 전이도 멈춤 상태가 없음↔있음으로 바뀌어 여기에 든다(commit 뒤) |
 | shutdown operation id | `Keeper_owner.publish_shutdown_operation_id` |
 | Owner 를 쓸 수 있는지 | Owner pool 이 Owner 를 열거나 열지 못함(`keeper_owner_registry.ml`) |
 

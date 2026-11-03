@@ -497,22 +497,22 @@ let classify ~guidance ~cited_observations ~facts ~new_claims ~absorbed =
     | Some _ as claim -> claim
     | None -> claim_of into facts
   in
-  List.map
+  let classified =
+    List.map
     (fun (into, members) ->
-       let observations =
-         match List.assoc_opt into cited_observations with
-         | Some observations -> observations
-         | None -> []
-       in
        match claim_of_into into with
        | None ->
-         { into; claim = None; observations; unjudged = members; unjudgeable = []; judgeable = [] }
-       | Some claim when String.length claim > state_bytes_limit ->
+         Ok { into; claim = None; observations = []; unjudged = members; unjudgeable = []
+            ; judgeable = [] }
+       | Some claim ->
+       match List.assoc_opt into cited_observations with
+       | None -> Error (Printf.sprintf "Absorbing claim %s has no cited observations entry" into)
+       | Some observations when String.length claim > state_bytes_limit ->
          (* The claim does not fit the state: nothing it absorbs can be judged
             against it, and nothing it absorbs is absorbed. *)
-         { into; claim = Some claim; observations; unjudged = []; unjudgeable = members
-         ; judgeable = [] }
-       | Some claim ->
+         Ok { into; claim = Some claim; observations; unjudged = []; unjudgeable = members
+            ; judgeable = [] }
+       | Some observations ->
          let judgeable, unjudged =
            List.partition_map
              (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
@@ -547,8 +547,15 @@ let classify ~guidance ~cited_observations ~facts ~new_claims ~absorbed =
                 | None -> Either.Right statement)
              judgeable
          in
-         { into; claim = Some claim; observations; unjudged; unjudgeable; judgeable })
+         Ok { into; claim = Some claim; observations; unjudged; unjudgeable; judgeable })
     by_into
+  in
+  let rec collect groups = function
+    | [] -> Ok (List.rev groups)
+    | Ok group :: rest -> collect (group :: groups) rest
+    | Error reason :: _ -> Error reason
+  in
+  collect [] classified
 ;;
 
 let judge ~guidance ~evaluate ~cited_observations ~facts ~new_claims ~absorbed =
@@ -556,7 +563,10 @@ let judge ~guidance ~evaluate ~cited_observations ~facts ~new_claims ~absorbed =
   | Error reason -> Failed {reason;absorbed=[];left=[];conveyed=[];
       unjudged=absorbed;unjudgeable=[]}
   | Ok () ->
-  let groups = classify ~guidance ~cited_observations ~facts ~new_claims ~absorbed in
+  match classify ~guidance ~cited_observations ~facts ~new_claims ~absorbed with
+  | Error reason -> Failed {reason;absorbed=[];left=[];conveyed=[];
+      unjudged=absorbed;unjudgeable=[]}
+  | Ok groups ->
   let same
         (a : Keeper_memory_os_types.absorbed_statement)
         (b : Keeper_memory_os_types.absorbed_statement)

@@ -54,8 +54,9 @@ type evaluate =
 
 type cited_observations = (string * Yojson.Safe.t list) list
 (** The observations each absorbing claim cites, by the claim's identity (the
-    [into] its absorptions name), in the pass's input order. A claim the list
-    does not name cites nothing. *)
+    [into] its absorptions name), in the pass's input order. Every absorbing
+    claim has an entry, empty when it cites nothing; {!judge} fails on an
+    absorbing claim without one. *)
 
 type guidance
 (** Immutable common policies and both forward context prompts (the pair

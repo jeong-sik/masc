@@ -35,7 +35,8 @@ type palette = {
   link_target : span;
   rule : span;
   bullet : string;  (** Drawn in place of the source's [-], [*] or [+]. *)
-  code_gutter : string;  (** Drawn left of every fenced-code row. *)
+  code_gutter : string;
+      (** Drawn left of a fenced-code row when its text fits beside it. *)
   code_header : span;
       (** Style for the width-filling header of a language-tagged fence. *)
   code_border : span;  (** Style for that fence's closing border. *)
@@ -221,7 +222,7 @@ val render_table_with_spans : palette:palette -> width:int -> string -> table_re
 val render_lexed_line_with_spans :
   palette:palette -> width:int -> (string * string) list -> inline_render
 (** Render one lexer-owned code line, retaining exact byte ranges through hard
-    wrapping, diff bands and repeated gutters. Input pieces are unstyled text
+    wrapping, diff bands and gutters where they fit. Input pieces are unstyled text
     paired with lexer kinds, as in the existing fenced-code renderer. Generated
     gutters, styling and band padding have no semantic range. The document
     caller retains the source fence and logical-line identity. *)

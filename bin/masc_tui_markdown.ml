@@ -578,7 +578,7 @@ let styled_piece palette (text, kind) =
 let wrap_pieces ~max_cells pieces =
   let rows = ref [] and row = ref [] and used = ref 0 in
   let flush () =
-    if !row <> [] then rows := List.rev !row :: !rows;
+    if !row <> [] then rows := (List.rev !row, !used) :: !rows;
     row := [];
     used := 0
   in
@@ -604,27 +604,31 @@ let wrap_pieces ~max_cells pieces =
                next row whole. Cutting by cells here would give it up and pad
                its columns, which holds the alignment and loses the letter --
                and a wrapped line of Korean is where that shows. *)
-            let head, remaining =
-              match Layout.split_cells_after_prefix ~prefix_cells:room
+            let head, head_cells, remaining =
+              match Layout.split_cells_after_prefix_with_widths ~prefix_cells:room
                       ~max_cells text with
-              | "", chunk :: rest when !row = [] ->
+              | "", _, (chunk, cells) :: rest when !row = [] ->
                   (* A grapheme wider than the row itself. [split_cells] takes
                      one piece whatever the width, which is the only rule that
                      ends here; a row one cell over beats never finishing. *)
-                  (chunk, rest)
+                  (chunk, cells, rest)
               | split -> split
             in
-            if String.length head > 0 then row := (head, kind) :: !row;
+            if String.length head > 0 then begin
+              row := (head, kind) :: !row;
+              used := !used + head_cells
+            end;
             flush ();
             (* The remaining rows are full-width. Segment their text once,
                rather than measuring and splitting every shrinking suffix. *)
             let rec place_chunks = function
               | [] -> ()
-              | [last] ->
+              | [last, cells] ->
                   row := [(last, kind)];
-                  used := Layout.display_width_for_wrapping last
-              | chunk :: rest ->
+                  used := cells
+              | (chunk, cells) :: rest ->
                   row := [(chunk, kind)];
+                  used := cells;
                   flush ();
                   place_chunks rest
             in
@@ -663,6 +667,23 @@ let diff_mixed_kind pieces =
       Some kind
   | _ -> None
 
+(* Wrapping keeps an indivisible grapheme even when it is wider than the
+   body budget. Let that row use the gutter's cells before the enclosing pane
+   fits it: otherwise a grapheme that fits the pane is replaced by a cut mark.
+   The source range still belongs to the text, not to the optional gutter. *)
+let code_row_gutter ~width ~gutter ~gutter_cells content_cells =
+  if content_cells <= width - gutter_cells then gutter else ""
+
+(* Lexer boundaries can divide one grapheme. Most wrapped rows contain one
+   piece and already carry their width; a multi-piece non-ASCII row needs to
+   include the actual styling in its measurement, since ANSI spans can also
+   separate graphemes. *)
+let code_piece_row_cells content styled row cells =
+  match row with
+  | [] | [_] -> cells
+  | _ when String.length content <= cells -> cells
+  | _ -> Layout.display_width_for_wrapping styled
+
 (* Close each token before restoring the enclosing diff band. The close may
    reset the background as well as bold/italic; reopening the row span before
    any next visible cell keeps the band continuous without leaking token
@@ -671,15 +692,15 @@ let diff_mixed_kind pieces =
    are added after the cut, as in [wrap_pieces]. *)
 let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
   let gutter = palette.code_gutter in
-  let body_width = max 1 (width - Layout.display_width gutter) in
+  let gutter_cells = Layout.display_width gutter in
+  let body_width = max 1 (width - gutter_cells) in
   let opening, closing = span_of_palette palette kind in
   let source_byte = ref 0 in
   wrap_pieces ~max_cells:body_width pieces
-  |> List.map (fun row ->
-         let plain = gutter ^ String.concat "" (List.map fst row) in
+  |> List.map (fun (row, cells) ->
+         let content = String.concat "" (List.map fst row) in
          let styled =
-           gutter
-           ^ String.concat ""
+           String.concat ""
                (List.map
                   (fun (text, piece_kind) ->
                     if String.length text = 0 then ""
@@ -690,8 +711,10 @@ let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
                       piece_opening ^ text ^ piece_closing ^ opening)
                   row)
          in
-         let remaining = max 0 (width - Layout.display_width_for_wrapping plain) in
-         let text = opening ^ styled ^ String.make remaining ' ' ^ closing in
+         let cells = code_piece_row_cells content styled row cells in
+         let gutter = code_row_gutter ~width ~gutter ~gutter_cells cells in
+         let remaining = max 0 (width - Layout.display_width gutter - cells) in
+         let text = opening ^ gutter ^ styled ^ String.make remaining ' ' ^ closing in
          let length = List.fold_left (fun total (text, _) -> total + String.length text) 0 row in
          Option.iter (fun emit -> emit {text;
            source_ranges=[{start_byte= !source_byte; end_byte= !source_byte + length}]}) on_row;
@@ -714,7 +737,8 @@ let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
    single-span cell split. *)
 let styled_code_rows ?on_row palette ~width pieces =
   let gutter = palette.code_gutter in
-  let body_width = max 1 (width - Layout.display_width gutter) in
+  let gutter_cells = Layout.display_width gutter in
+  let body_width = max 1 (width - gutter_cells) in
   let source_byte = ref 0 in
   let mapped plain text =
     let length = String.length plain in
@@ -728,18 +752,24 @@ let styled_code_rows ?on_row palette ~width pieces =
       let plain = String.concat "" (List.map fst pieces) in
       let cells = Layout.display_width_for_wrapping plain in
       let chunks =
-        if cells <= body_width then [ plain ]
-        else snd (Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:body_width plain)
+        if cells <= body_width then [ plain, cells ]
+        else let _, _, chunks = Layout.split_cells_after_prefix_with_widths
+            ~prefix_cells:0 ~max_cells:body_width plain in chunks
       in
-      List.map (fun chunk -> mapped chunk (fill_styled_row ~width span (gutter ^ chunk))) chunks
+      List.map (fun (chunk, cells) ->
+        let gutter = code_row_gutter ~width ~gutter ~gutter_cells cells in
+        mapped chunk (fill_styled_row ~width span (gutter ^ chunk))) chunks
   | None -> (
       match diff_mixed_kind pieces with
       | Some kind -> styled_diff_mixed_rows ?on_row palette ~width kind pieces
       | None ->
           wrap_pieces ~max_cells:body_width pieces
-          |> List.map (fun row ->
-               mapped (String.concat "" (List.map fst row))
-                 (gutter ^ String.concat "" (List.map (styled_piece palette) row)))
+          |> List.map (fun (row, cells) ->
+               let content = String.concat "" (List.map fst row) in
+               let styled = String.concat "" (List.map (styled_piece palette) row) in
+               let cells = code_piece_row_cells content styled row cells in
+               let gutter = code_row_gutter ~width ~gutter ~gutter_cells cells in
+               mapped content (gutter ^ styled))
       )
 
 let render_lexed_line_with_spans ~palette ~width pieces =
@@ -806,18 +836,21 @@ let code_footer palette ~width =
    fenced. A line wider than the row is split where the row ends. *)
 let code_rows ?on_row palette ~width line =
   let gutter = palette.code_gutter in
-  let body_width = max 1 (width - Layout.display_width gutter) in
+  let gutter_cells = Layout.display_width gutter in
+  let body_width = max 1 (width - gutter_cells) in
   let opening, closing = palette.code in
   let source_byte = ref 0 in
-  let mapped chunk =
+  let mapped (chunk, cells) =
+    let gutter = code_row_gutter ~width ~gutter ~gutter_cells cells in
     let text = opening ^ gutter ^ chunk ^ closing in
     let end_byte = !source_byte + String.length chunk in
     Option.iter (fun emit -> emit {text; source_ranges=[{start_byte= !source_byte; end_byte}]}) on_row;
     source_byte := end_byte;
     text in
-  if String.length line = 0 then [mapped ""]
+  if String.length line = 0 then [mapped ("", 0)]
   else
-    let _, chunks = Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:body_width line in
+    let _, _, chunks = Layout.split_cells_after_prefix_with_widths
+        ~prefix_cells:0 ~max_cells:body_width line in
     List.map mapped chunks
 
 (* {1 Tables} *)

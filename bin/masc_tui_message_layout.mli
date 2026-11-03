@@ -632,6 +632,12 @@ val split_cells_after_prefix :
 (** The same prefix as {!split_at_cells}, followed by any nonempty remaining
     text split as {!split_cells}. Reuses one grapheme walk for valid UTF-8. *)
 
+val split_cells_after_prefix_with_widths :
+  prefix_cells:int -> max_cells:int -> string -> string * int * (string * int) list
+(** The same split with the prefix and chunk widths. For invalid UTF-8 the
+    emitted chunks are measured separately. An indivisible grapheme can make a
+    chunk wider than [max_cells]. *)
+
 val split_styled_cells : max_cells:int -> string -> string list
 (** Preserve cell padding and prefer space boundaries for renderer-owned SGR text. Each row
     restores its inherited style and closes it, so rows can scroll separately. *)

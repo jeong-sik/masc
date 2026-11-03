@@ -467,7 +467,7 @@ let test_history_guidance_is_required_only_for_actual_absorptions () =
       let parent,capture=only_original fixture in
       let owner=Capture.physical_owner capture in
       let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
-      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority ~new_observations:[] authority with
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
         | Error detail -> detail | Ok _ -> fail "enabled guidance must remain explicitly unavailable" in
       if absorbing then (
         let proposal=answered_proposal parent (Capture.request capture |> get) in
@@ -491,7 +491,7 @@ let test_history_guidance_is_required_only_for_actual_absorptions () =
         let result=match result with Gate.Complete (result,_) -> result | Pending _ -> fail "empty history must complete locally" in
         check bool "empty history replays as No_absorptions" true
           (match result with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true | _ -> false);
-        let replayed=io (fun () -> Gate.restore_size_evidence ~store:fixture.store ~owner ~parent_execution:capture
+        let replayed=io (fun () -> Gate.restore_latest_result ~store:fixture.store ~owner ~parent_execution:capture
           ~gate_request_id:gate.request_id) |> get in
         check json "empty history survives strict replay" (Keeper_librarian_absorb_gate.run_result_to_yojson result)
           (Keeper_librarian_absorb_gate.run_result_to_yojson replayed));
@@ -2391,7 +2391,7 @@ let test_floor_guidance_is_required_only_for_actual_absorptions () =
       check int "each source message has exactly its original provider answer" (if absorbing then 1 else 2)
         (F.post_count fixture.server-posts);
       let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
-      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority ~new_observations:[] authority with
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
         | Error detail -> detail | Ok _ -> fail "enabled floor guidance must remain explicitly unavailable" in
       List.iter (fun ((parent:Owner.retained),_) ->
         let step=io (fun () -> Step.restore ~owner parent) |> get in
@@ -2418,7 +2418,7 @@ let test_floor_guidance_is_required_only_for_actual_absorptions () =
           let result=match result with Journal.Complete (result,_) -> result | Pending _ -> fail "empty floor must complete locally" in
           check bool "empty floor replays as No_absorptions" true
             (match result with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true | _ -> false);
-          let replayed=io (fun () -> Journal.restore_size_evidence ~store:fixture.store ~owner ~parent_execution:step
+          let replayed=io (fun () -> Journal.restore_latest_result ~store:fixture.store ~owner ~parent_execution:step
             ~gate_request_id:gate.request_id) |> get in
           check json "empty floor survives strict replay" (Keeper_librarian_absorb_gate.run_result_to_yojson result)
             (Keeper_librarian_absorb_gate.run_result_to_yojson replayed))) steps;

@@ -119,7 +119,9 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
       (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
 
-let test_absorb_evidence_capacity_recovers ~base_path () =
+(* A pass of 1,000 turns: the absorb gate carries only the turn the claim
+   cites, so the pass is judged and committed on its first run. *)
+let test_a_large_pass_is_judged_with_the_turn_its_claim_cites ~base_path () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -139,12 +141,14 @@ let test_absorb_evidence_capacity_recovers ~base_path () =
   let before = Fs_compat.load_file path in
   let output = `Assoc ["new_claims", `List [`Assoc [
       "claim", `String "A17 was investigated and then resolved.";
-      "category", `String "fact"; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
+      "category", `String "fact"; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [`Int 999];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
       "dropped", `List []; "working_contexts", `List []] in
   let librarian = Fixture.start_server ~sw ~net ~clock
     (Fixture.Reply (Fixture.openai_response output)) in
-  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply
-    {|{"model":"fixture","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":1.0,"probabilities":{"mergeable":1.0,"different_context":0.0,"loses_knowledge":0.0,"uncertain":0.0}}}}|}) in
+  let judged = ref [] in
+  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply_with (fun _ body ->
+    judged := Yojson.Safe.from_string body :: !judged;
+    `OK, {|{"model":"fixture","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":1.0,"probabilities":{"mergeable":1.0,"different_context":0.0,"loses_knowledge":0.0,"uncertain":0.0}}}}|})) in
   let resolver = Fixture.resolver_snapshot ~source:"absorb-capacity"
     [{Fixture.id="absorb-capacity-librarian"; base_url=librarian.base_url}] in
   (match Runtime_exact_output_registry.publish
@@ -173,14 +177,15 @@ let test_absorb_evidence_capacity_recovers ~base_path () =
     ~on_memory_committed:(fun () -> incr commits)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
   run input;
-  Alcotest.(check (option bool)) "real runtime reports capacity to source narrowing" (Some true) !size;
-  Alcotest.(check int) "capacity failure cannot commit candidate" 0 !commits;
-  Alcotest.(check string) "source snapshot unchanged" before (Fs_compat.load_file path);
-  Alcotest.(check int) "oversized evidence never dispatched" 0 (Fixture.post_count jev);
-  (* The caller can retry a smaller selected range against the unchanged snapshot. *)
-  run {input with messages=[observation]};
-  Alcotest.(check int) "smaller range commits once" 1 !commits;
-  Alcotest.(check int) "smaller evidence reaches the judge" 1 (Fixture.post_count jev);
+  Alcotest.(check (option bool)) "the large pass is not refused" None !size;
+  Alcotest.(check int) "the large pass commits on its first run" 1 !commits;
+  Alcotest.(check int) "one judgment request" 1 (Fixture.post_count jev);
+  (match !judged with
+   | [request] ->
+     let observations = Yojson.Safe.Util.(member "state" request |> member "new_observations" |> to_list) in
+     Alcotest.(check (list int)) "the request carries only the cited turn" [999]
+       (List.map (fun o -> Yojson.Safe.Util.(member "local_position" o |> to_int)) observations)
+   | _ -> Alcotest.fail "expected one judgment request");
   Alcotest.(check bool) "actual memory snapshot advances" true (before <> Fs_compat.load_file path)
 ;;
 
@@ -904,8 +909,8 @@ let () =
      "actual HTTP outcomes", [
       Alcotest.test_case "durable runtime preserves refusal reports without publishing Memory" `Quick
         (test_durable_runtime_returns_refusal_reports ~base_path);
-      Alcotest.test_case "absorb evidence capacity preserves and recovers memory" `Quick
-        (test_absorb_evidence_capacity_recovers ~base_path);
+      Alcotest.test_case "a large pass is judged with the turn its claim cites" `Quick
+        (test_a_large_pass_is_judged_with_the_turn_its_claim_cites ~base_path);
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass does
          not need one: a size refusal is evidence enough to read less. *)

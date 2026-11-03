@@ -1,6 +1,5 @@
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
-module Gate = Keeper_librarian_admission_gate
 module Owner = Lane_addon_tool_request_owner
 module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
@@ -13,7 +12,7 @@ let discover_parts ~store ~parts_by_owner owner =
   match List.assoc_opt owner !parts_by_owner with
   | Some result -> result
   | None ->
-    let result=Parts.discover ~store ~owner ~restore_gate:(Gate.restore_size_evidence ~store ~owner) in
+    let result=Parts.discover ~store ~owner in
     parts_by_owner:=(owner,result):: !parts_by_owner;
     result
 let admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original =

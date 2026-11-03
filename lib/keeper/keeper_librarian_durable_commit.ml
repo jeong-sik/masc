@@ -203,7 +203,7 @@ let settle_positions request =
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
     "Original history read-position settlement remains unconfirmed"
 type frontier = Unfinished | Settled
-let validate_with ~validate_chain ~validate_preparation ~root ~latest ~size_evidence
+let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_result
     ~store ~request ~(record : Owner.retained) =
   let* ()=Request.confirm_record request record in
   let* ()=validate_chain () in
@@ -231,7 +231,7 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~size_evid
      | Progress.Finished _ | Conflicted _ ->
        let* latest=latest () in
        let* latest=Option.to_result ~none:"Terminal history gate chain is absent" latest in
-       let* gate=size_evidence ~gate_request_id:latest.Owner.request_id in
+       let* gate=latest_result ~gate_request_id:latest.Owner.request_id in
        (match Gate.failure_detail ~absorbed:proposal.accepted.selection.absorbed gate with
         | None -> Ok Settled | Some detail -> Error detail)
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -256,7 +256,7 @@ let validate ~store ~request ~record =
     ~validate_preparation:(fun () -> Journal.validate_root_preparation ~store ~owner ~capture:request)
     ~root:(fun () -> Journal.root ~store ~owner ~capture:request)
     ~latest:(fun () -> Journal.latest ~store ~owner ~capture:request)
-    ~size_evidence:(fun ~gate_request_id -> Journal.restore_size_evidence ~store ~owner
+    ~latest_result:(fun ~gate_request_id -> Journal.restore_latest_result ~store ~owner
       ~parent_execution:request ~gate_request_id)
 let validate_inventory ~inventory ~store ~request ~record =
   let* chain=Journal.Inventory.validate inventory ~capture:request ~parent:record in
@@ -265,7 +265,7 @@ let validate_inventory ~inventory ~store ~request ~record =
     ~validate_preparation:(fun () -> Journal.Inventory.validate_root_preparation chain)
     ~root:(fun () -> Ok (Journal.Inventory.root chain))
     ~latest:(fun () -> Journal.Inventory.latest chain)
-    ~size_evidence:(fun ~gate_request_id -> Journal.Inventory.restore_size_evidence chain ~gate_request_id)
+    ~latest_result:(fun ~gate_request_id -> Journal.Inventory.restore_latest_result chain ~gate_request_id)
 
 type preparation = Ready of Owner.retained | Unavailable of string
 let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.retained) ~proposal:_ ~fresh_authority =
@@ -337,7 +337,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
     let* proved=io (fun () -> receipt_state request) in
     let* result=match Progress.phase current.progress with
       | Progress.Committing _ | Commit_unknown _ | Finished _ ->
-        let* gate=io (fun () -> Journal.restore_size_evidence ~store ~owner
+        let* gate=io (fun () -> Journal.restore_latest_result ~store ~owner
           ~parent_execution:request ~gate_request_id:latest.Owner.request_id) in
         Ok (Journal.Complete (gate,latest))
       | Judged _ ->
@@ -348,7 +348,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
             | Error _ -> None in
           let* prior_complete=match Progress.phase latest.progress with
             | Progress.Judged _ | Rejected {stage=Progress.Execution;_} ->
-              let* gate=io (fun () -> Journal.restore_size_evidence ~store ~owner
+              let* gate=io (fun () -> Journal.restore_latest_result ~store ~owner
                 ~parent_execution:request ~gate_request_id:latest.request_id) in Ok (Some gate)
             | Captured | Dispatch_pending _ -> Ok None
             | Admission_wait _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
@@ -356,15 +356,13 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
               Error "Original history gate has an unsupported runnable phase" in
           let* next=match prior_complete,live_authority with
             | Some gate,Some authority ->
-              (match Gate.failure_detail ~absorbed:proposal.Keeper_librarian_runtime.accepted.selection.absorbed gate,
-                Gate.failure_kind gate with
-               | Some _,(Some Gate.Evaluation_failed | None) ->
+              (match Gate.failure_detail ~absorbed:proposal.Keeper_librarian_runtime.accepted.selection.absorbed gate with
+               | Some _ ->
                  let* ()=fresh_authority () in
                  io (fun () -> Journal.retain ~store ~owner ~capture:request ~parent:current
                    ~proposal:raw ~request_id:(Random_id.uuid_v7 ()) ~authority
                    ~predecessor:(Some latest.request_id))
-               | Some _,Some Input_capacity_exceeded | None,(Some Input_capacity_exceeded | Some Evaluation_failed | None) ->
-                 Ok latest)
+               | None -> Ok latest)
             | None,(None | Some _) | Some _,None -> Ok latest in
           Journal.resume ~request_clock:Eio_context.get_clock
             ~store ~owner ~capture:request ~record:next ~live_authority

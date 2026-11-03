@@ -1,6 +1,5 @@
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
-module Gate = Keeper_librarian_admission_gate
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
 module History = Keeper_librarian_durable_request
@@ -121,9 +120,7 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
       let restore () =
       let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
       let* owner=Capture.observe_record_owner ~base_path ~keepers_dir record in
-      let restore_gate ~parent_execution ~gate_request_id =
-        Gate.restore_size_evidence ~store ~owner ~parent_execution ~gate_request_id in
-      let* inventory=Parts.discover ~store ~owner ~restore_gate in
+      let* inventory=Parts.discover ~store ~owner in
       let* capture=Capture.restore ~owner
         ~load_parent:(Parts.load_parent inventory) record in
       let destination=Capture.destination capture in

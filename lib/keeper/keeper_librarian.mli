@@ -77,6 +77,11 @@ val observations_for_absorption : input -> Yojson.Safe.t list
     Missing individual turn attribution remains missing; no turn is inferred.
     Counterpart content remains untrusted. These are data, not memory proposals. *)
 
+val observations_cited : input -> Keeper_memory_os_types.evidence -> Yojson.Safe.t list
+(** The entries of {!observations_for_absorption} that [evidence] cites, in the
+    same order and with the same fields. The absorb gate carries these, and
+    only these, beside a pair whose claim cites them. *)
+
 (** A new claim that continues a dropped memory, both by exact memory id.
     The librarian named the old one with [supersedes]; the parser checked
     that it exists and is in [dropped]. Recorded as a [Revised] event on the

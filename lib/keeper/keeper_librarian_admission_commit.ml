@@ -100,7 +100,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
      | Progress.Finished _ ->
        let* latest=Gate_journal.latest ~store ~owner ~capture in
        let* latest=Option.to_result ~none:"Finished original gate chain is absent" latest in
-       let* gate=Gate_journal.restore_size_evidence ~store ~owner ~parent_execution:capture
+       let* gate=Gate_journal.restore_latest_result ~store ~owner ~parent_execution:capture
          ~gate_request_id:latest.request_id in
        let* ()=match Gate.failure_detail ~absorbed:proposal.selection.absorbed gate with
          | None -> Ok () | Some detail -> Error detail in
@@ -164,7 +164,7 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     | Ok (Keeper_librarian_runtime.Accepted accepted) -> Ok accepted
     | Ok Deferred -> Error "A semantic deferred admission cannot commit"
     | Error detail -> Error detail in
-  let* gate=io (fun () -> Gate_journal.restore_size_evidence ~store ~owner
+  let* gate=io (fun () -> Gate_journal.restore_latest_result ~store ~owner
     ~parent_execution:capture ~gate_request_id) in
   let* ()=match Gate.failure_detail ~absorbed:accepted.selection.absorbed gate with
     | Some detail -> Error detail | None -> Ok () in

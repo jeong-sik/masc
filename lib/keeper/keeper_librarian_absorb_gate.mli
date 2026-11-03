@@ -52,24 +52,37 @@ type evaluate =
 (** One evaluation request. {!run} installs {!Typesafeai_client.evaluate};
     a test installs a function that answers from a table. *)
 
+type cited_observations = (string * Yojson.Safe.t list) list
+(** The observations each absorbing claim cites, by the claim's identity (the
+    [into] its absorptions name), in the pass's input order. A claim the list
+    does not name cites nothing. *)
+
 type guidance
-(** Immutable common policies and the one forward context selected by the
-    original observations from the managed Librarian prompt. *)
-val resolve_guidance : new_observations:Yojson.Safe.t list -> unit -> (guidance, string) result
+(** Immutable common policies and both forward context prompts (the pair
+    alone, and the pair with cited observations) from the managed Librarian
+    prompt. *)
+val resolve_guidance : unit -> (guidance, string) result
 val guidance_to_yojson : guidance -> Yojson.Safe.t
 val guidance_of_yojson : Yojson.Safe.t -> (guidance, string) result
-(** Strict version 2 codec. Requires every nonempty captured resolution and
+(** Strict version 3 codec. Requires every nonempty captured resolution and
     renders them without consulting current prompt metadata or overrides. *)
-val validate_guidance_for_input : new_observations:Yojson.Safe.t list -> guidance -> (unit, string) result
-(** Pure check that the captured context matches the original observation
-    presence; a wire context tag alone supplies no input authority. *)
 
 type consolidation = Mergeable | Different_context | Loses_knowledge | Uncertain
+
+type pair_only_reason =
+  | Nothing_cited  (** the claim cites no observation *)
+  | Citations_exceed_boundary
+      (** the claim's cited observations do not fit a request beside the pair *)
+
+type asked =
+  | With_cited_observations  (** the pair was asked with its claim's cited observations *)
+  | Without_observations of pair_only_reason  (** the pair was asked alone *)
 
 type source_verdict =
   { memory_id : string
   ; into : string
   ; decision : consolidation
+  ; asked : asked
   }
 
 type judged =
@@ -88,12 +101,9 @@ type judged =
   ; requests : int  (** evaluation requests made *)
   }
 
-type failure_kind = Evaluation_failed | Input_capacity_exceeded
-
 type outcome =
   | Failed of
       { reason : string
-      ; kind : failure_kind
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
       ; conveyed : source_verdict list
@@ -134,7 +144,7 @@ val request_bytes_limit : int
 val judge
   :  guidance:guidance
   -> evaluate:evaluate
-  -> new_observations:Yojson.Safe.t list
+  -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
@@ -143,14 +153,13 @@ val judge
     absorbed memories; [new_claims] the claims the answer adds; [absorbed] the
     absorptions it states. An absorption whose [into] is a current memory the
     answer restated is judged against that memory's text. Each complete source
-    and proposed claim are sent with nonempty [new_observations] in one judgment
-    request. Empty observations retain the original pair-only instruction and
-    two-field state; both paths budget the question actually dispatched.
-    The observations are source data from the selected pass, not the proposed
-    claim. Their serialized bytes count toward the provider request boundary;
-    an oversized request with new observations fails the pass before dispatch,
-    keeping the whole range pending without truncating evidence or adding a
-    partially grounded candidate beside its original. *)
+    and proposed claim are sent in one judgment request with the observations
+    its claim cites in [cited_observations], when they fit beside the pair.
+    A pair whose claim cites nothing, or whose citations do not fit, is asked
+    alone with the pair-only instruction and two-field state; its verdict says
+    which ({!asked}). Every path budgets the question actually dispatched. A
+    pair that does not fit even alone is unjudgeable and its memory stays
+    current. No pass fails for size. *)
 
 (** {1 The reverse question} *)
 
@@ -274,8 +283,8 @@ type replay_authority =
 
 type live_authority
 (** An original Keeper identity and the once-resolved gate availability and
-    armed destinations, plus independent resolved guidance results for both
-    forward contexts. Unavailable authority captures no guidance.
+    armed destinations, plus the resolved guidance result. Unavailable
+    authority captures no guidance.
     Credentials remain private in memory; this handle
     has no decoder and cannot be reconstructed from replay evidence. *)
 
@@ -287,11 +296,10 @@ val resolve : keeper_id:string -> live_authority
 val keeper_of_authority : live_authority -> string
 (** The original Keeper bound to this live handle; exposes no credentials. *)
 
-val guidance_of_authority : new_observations:Yojson.Safe.t list -> live_authority -> (guidance option, string) result
-(** Pure selection from once-resolved guidance, including the selected setup failure. Unavailable
+val guidance_of_authority : live_authority -> (guidance option, string) result
+(** The once-resolved guidance, including its setup failure. Unavailable
     authority has [None] and performs no prompt lookup; an armed evaluation
-    requires [Some guidance] before publishing any request intent. The unused
-    context's resolution failure never blocks this input. *)
+    requires [Some guidance] before publishing any request intent. *)
 
 val replay_authority : live_authority -> replay_authority
 (** Credential-free availability and ordered destination identities from the
@@ -329,7 +337,7 @@ val evaluation_evidence_to_yojson : evaluation -> Yojson.Safe.t
 val restore
   :  guidance:guidance option
   -> authority:replay_authority
-  -> new_observations:Yojson.Safe.t list
+  -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> superseding:string list
@@ -374,12 +382,6 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     the existing [actual_input]. The existing exact-run HTTP detail requires
     CanAdmin; this payload is not a public or secret-free projection. *)
 
-val failure_kind : run_result -> failure_kind option
-(** The kind of a failed judgment, [None] when the run judged or skipped.
-    [Input_capacity_exceeded] is the typed pre-dispatch refusal the runtime
-    reads as input-capacity evidence for the admission batch and as its
-    source-range narrowing hint. *)
-
 val failure_detail
   :  absorbed:Keeper_memory_os_types.absorbed_statement list
   -> run_result
@@ -407,7 +409,7 @@ val run_captured
   -> ?on_evaluation_aborted:
        (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
   -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
-  -> new_observations:Yojson.Safe.t list
+  -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> superseding:string list
@@ -439,7 +441,7 @@ val continue_captured
        -> questions:(string * Typesafeai_types.question) list -> 'evaluation_id)
   -> after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
   -> on_evaluation_aborted:(evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
-  -> new_observations:Yojson.Safe.t list
+  -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> superseding:string list
@@ -471,7 +473,7 @@ val run
        (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
   -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
-  -> new_observations:Yojson.Safe.t list
+  -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> superseding:string list

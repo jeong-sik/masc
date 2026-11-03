@@ -57,11 +57,6 @@ val profile_defaults_of_toml :
 
 val detect_unknown_keeper_toml_keys : Keeper_toml_loader.toml_doc -> string list
 
-val merge_keeper_profile_defaults :
-  base:keeper_profile_defaults ->
-  overlay:keeper_profile_defaults ->
-  keeper_profile_defaults
-
 type keeper_toml_error_kind =
   Keeper_types_profile_toml.keeper_toml_error_kind =
   | Read_error

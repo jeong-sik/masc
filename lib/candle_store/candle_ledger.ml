@@ -264,6 +264,10 @@ let encode ~preceding events =
 
 type 'a update_attempt = Updated of 'a | Changed
 
+let append_observer : (base_path:string -> Candle_event.t list -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ _ -> ())
+let install_append_observer observer = Atomic.set append_observer observer
+
 let update_once ~base_path decide =
   let path = path ~base_path in
   match view_of_outcome ~path (read_outcome ~path) with
@@ -276,11 +280,15 @@ let update_once ~base_path decide =
        (match encode ~preceding:view.events events with
         | Error detail -> Error (Event_unwritable detail)
         | Ok suffix ->
+          (* A failed durable append can still have reached the file, so its
+             readers are told as for a committed one. Another writer's append
+             and a held lock wrote nothing of these events. *)
+          let observe () = (Atomic.get append_observer) ~base_path events in
           (match append ~path view.cursor suffix with
-           | Appended -> Ok (Updated result)
+           | Appended -> observe (); Ok (Updated result)
            | Appended_after_another_writer -> Ok Changed
            | Append_locked -> Error (Write_locked { path })
-           | Append_failed detail -> Error (Write_failed { path; detail }))))
+           | Append_failed detail -> observe (); Error (Write_failed { path; detail }))))
 ;;
 
 let rec update ~base_path decide =

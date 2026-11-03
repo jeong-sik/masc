@@ -546,6 +546,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Server_schedule_broadcast.install_store_announcer ~sw;
   Server_runtime_assignment_broadcast.install ~sw ~base_path;
+  Server_candle_broadcast.install ();
   Operator_pending_confirm.install_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Keeper_owner.install_state_change_observer

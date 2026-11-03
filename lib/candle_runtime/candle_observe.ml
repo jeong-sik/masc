@@ -67,6 +67,40 @@ let event_is_relevant_to_keeper ~keeper (event : Candle_event.t) =
   | Candle_event.Unattributed _
   | Candle_event.Payout_failed _ -> false
 
+type touched =
+  | Every_keeper
+  | Keepers of string list
+
+(* The same Keepers [event_is_relevant_to_keeper] answers true for, listed. *)
+let event_touches (event : Candle_event.t) =
+  match event.body with
+  | Candle_event.Half_life_set _ -> Every_keeper
+  | Candle_event.Paid payment ->
+    Keepers (List.map (fun (allocation : Candle_payment.allocation) -> allocation.keeper)
+               payment.allocations)
+  | Candle_event.Purchased purchase -> Keepers [ purchase.keeper ]
+  | Candle_event.Granted granted -> Keepers [ granted.keeper ]
+  | Candle_event.Gifted gift -> Keepers [ gift.from_keeper; gift.to_keeper ]
+  | Candle_event.Gifted_item gift -> Keepers [ gift.from_keeper; gift.to_keeper ]
+  | Candle_event.Equipped choice -> Keepers [ choice.keeper ]
+  | Candle_event.Snapshot _
+  | Candle_event.Payout_owed _
+  | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+  | Candle_event.Candidate_window_held _
+  | Candle_event.Unattributed _
+  | Candle_event.Payout_failed _ -> Keepers []
+
+let keepers_touched events =
+  List.fold_left
+    (fun touched event ->
+       match touched, event_touches event with
+       | Every_keeper, (Every_keeper | Keepers _) | Keepers _, Every_keeper -> Every_keeper
+       | Keepers held, Keepers more -> Keepers (more @ held))
+    (Keepers []) events
+  |> function
+  | Every_keeper -> Every_keeper
+  | Keepers keepers -> Keepers (List.sort_uniq String.compare keepers)
+
 let ready_account_revision_reader ~events ~policy ~balance =
   let encoded_events =
     events

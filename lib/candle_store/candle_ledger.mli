@@ -70,6 +70,14 @@ val update_error_to_string : ('error -> string) -> 'error update_error -> string
 
 type 'a update_attempt = Updated of 'a | Changed
 
+val install_append_observer : (base_path:string -> Candle_event.t list -> unit) -> unit
+(** Called with the events {!update_once} appended, once the append returns
+    and the ledger's lock is released. A failed append is reported too,
+    because a failed durable write can still have reached the file; another
+    writer's append and a held lock report nothing. Appends made by another
+    process are not seen. The observer must not raise or yield; the server
+    installs one that tells roster readers which Keepers' rows moved. *)
+
 val update_once :
   base_path:string
   -> (view -> (Candle_event.t list * 'result, 'error) result)

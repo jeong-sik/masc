@@ -101,8 +101,8 @@ let cache_rank = function
    inheriting either class silently. *)
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
-  | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
-  | Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Operator_note -> true
+  | Recalled_memory | Recalled_memory_status | Skill_compositions | Admitted_scheduled_input -> false
+  | Keeper_instructions | Active_goals | Completion_authority | Operator_note -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly

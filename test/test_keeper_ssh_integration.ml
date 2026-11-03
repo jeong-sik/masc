@@ -126,9 +126,9 @@ let test_exit_signal_and_fast_exit_sigpipe_regression () =
 ;;
 
 let direct_ssh_argv ssh command =
-  match List.rev (Keeper_sandbox_remote.transport_argv ssh) with
-  | _fixed :: rest -> List.rev (command :: rest)
-  | [] -> fail "empty SSH argv"
+  match Option.map List.rev (Keeper_sandbox_remote.transport_argv ssh) with
+  | Some (_fixed :: rest) -> List.rev (command :: rest)
+  | Some [] | None -> fail "empty SSH argv"
 ;;
 
 let direct_status ssh command =

@@ -5501,6 +5501,16 @@
  (action
   (setenv EIO_BACKEND posix (run %{test} %{dep:../bin/masc_exec_shim.exe}))))
 
+; The Agent_socket delivery of Keeper_sandbox_remote: runner and probe
+; through the guest agent relay to the real shim.
+(test
+ (name test_keeper_sandbox_remote_agent_socket)
+ (modules test_keeper_sandbox_remote_agent_socket)
+ (libraries masc_test_deps shim_agent exec_shim exec_ssh_protocol eio_main cstruct unix)
+ (deps ../bin/masc_exec_shim.exe)
+ (action
+  (setenv EIO_BACKEND posix (run %{test} %{dep:../bin/masc_exec_shim.exe}))))
+
 (test
  (name test_shim_clock)
  (modules test_shim_clock)

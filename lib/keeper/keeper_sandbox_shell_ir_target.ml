@@ -206,10 +206,10 @@ let observe_route_for_endpoint ?on_receipt ~run ~timeout_sec ~target_of_runner e
          declared.Exec_ssh_endpoint.name)
   | Keeper_types_profile_sandbox.Guest_local, Keeper_sandbox_remote.Docker_exec _ ->
     No_box "docker_guest_local_unavailable: Docker mounts may write through to the host; Observe is required"
-  | Keeper_types_profile_sandbox.Guest_local, Keeper_sandbox_remote.Container_exec _ ->
+  | Keeper_types_profile_sandbox.Guest_local, Keeper_sandbox_remote.Microvm _ ->
     No_box Keeper_sandbox_remote.microvm_guest_local_unavailable_reason
   | Keeper_types_profile_sandbox.Observe, Keeper_sandbox_remote.Docker_exec _
-  | Keeper_types_profile_sandbox.Observe, Keeper_sandbox_remote.Container_exec _
+  | Keeper_types_profile_sandbox.Observe, Keeper_sandbox_remote.Microvm _
   | ( (Keeper_types_profile_sandbox.Observe | Keeper_types_profile_sandbox.Guest_local)
     , Keeper_sandbox_remote.Openssh _ ) ->
     if Keeper_sandbox_remote.observe_supported endpoint

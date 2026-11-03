@@ -48,8 +48,6 @@ export type SSEEventType =
   | 'keeper_asks_changed'
   | 'lane_addon_asks_changed'
   | 'keeper_async_requests_changed'
-  | 'pending_confirms_changed'
-  | 'schedules_changed'
   | 'keeper_native_tasks_appended'
   | 'keeper_child_content_appended'
   | 'keeper_row_changed'

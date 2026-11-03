@@ -158,9 +158,14 @@ let test_a_confirmation_announcement_drops_the_cache () =
     ignore (get_or_compute key ~ttl:60.0 compute);
     Alcotest.(check bool) "the snapshot is cached" true
       (Option.is_some (Operator_control_snapshot_cache.peek key));
-    Operator_pending_confirm_broadcast.changed ~base_path:"confirm-announce";
-    Alcotest.(check bool) "the announcement dropped it" true
-      (Option.is_none (Operator_control_snapshot_cache.peek key)))
+    let cached_when_published = ref None in
+    Server_pending_confirm_expiry.For_testing.invalidate_with
+      ~enqueue:(fun ~base_path:_ ->
+        cached_when_published := Some (Option.is_some (Operator_control_snapshot_cache.peek key)))
+      ~restore:(fun ~base_path:_ -> ())
+      ~base_path:"confirm-announce";
+    Alcotest.(check (option bool)) "the publication found it dropped" (Some false)
+      !cached_when_published)
 ;;
 
 let () =

@@ -29,7 +29,7 @@ let with_workspace f =
             let state = Masc.Mcp_server.For_testing.create_state ~base_path in
             let config = Masc.Mcp_server.workspace_config state in
             ignore (Workspace_core.init config ~agent_name:(Some "test"));
-            Server_schedule_broadcast.install_store_announcer ~sw;
+            Server_schedule_invalidation.start ~sw ~mono_clock:(Eio.Stdenv.mono_clock env);
             f (Eio.Stdenv.clock env) config))))
 
 let is_change frame =
@@ -38,15 +38,18 @@ let is_change frame =
   | Ok payload ->
     (match Yojson.Safe.from_string payload with
      | `Assoc fields ->
-       List.assoc_opt "type" fields = Some (`String Masc.Schedules_changed_event.event_type)
+       List.assoc_opt "type" fields = Some (`String Masc.Schedule_invalidation_event.event_type)
      | _ -> false
      | exception Yojson.Json_error _ -> false)
 
-(* Calls [f] with a list that gains [read ()] each time a change is heard. *)
-let hearing ~read f =
+(* Calls [f] with a list that gains [read ()] each time a change is heard.
+   The invalidation goes to the workspace's observers, so the listener holds
+   the workspace's authority. *)
+let hearing ~(config : Masc.Workspace.config) ~read f =
   let id = Printf.sprintf "schedules-announce-%d" (Unix.getpid ()) in
   let heard = ref [] in
-  Masc.Sse.subscribe_external ~id
+  Masc.Sse.subscribe_external
+    ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path:config.base_path) ~id
     ~callback:(fun (ev : Masc.Sse.external_event) ->
       if is_change ev.Masc.Sse.ext_frame then heard := read () :: !heard)
     ();
@@ -88,7 +91,7 @@ let await_heard clock heard =
 let test_each_write_is_announced_and_read () =
   with_workspace (fun clock config ->
     check (list string) "the cached list starts empty" [] (listed_ids config);
-    hearing ~read:(fun () -> listed_ids config) (fun heard ->
+    hearing ~config ~read:(fun () -> listed_ids config) (fun heard ->
       insert config "announced-first";
       await_heard clock heard;
       check (list (list string)) "the first write is on the list read when heard"
@@ -118,7 +121,7 @@ let test_a_tick_is_announced_after_its_record () =
     Fun.protect ~finally:Schedule_runner_status.reset_for_test (fun () ->
       check string "the cached list is from before any tick"
         (word Schedule_contract_values.Runner_not_started) (runner_word config);
-      hearing ~read:(fun () -> runner_word config) (fun heard ->
+      hearing ~config ~read:(fun () -> runner_word config) (fun heard ->
         ignore
           (Server_bootstrap_maintenance.run_schedule_runner_tick ~clock:Unix.gettimeofday
              config ~state:Server_bootstrap_maintenance.initial_schedule_runner_state
@@ -140,7 +143,7 @@ let test_a_tick_that_changes_nothing_is_not_announced () =
       let first = tick Server_bootstrap_maintenance.initial_schedule_runner_state in
       (* Lets a store write of the first tick be announced before listening. *)
       Eio.Time.sleep clock 0.05;
-      hearing ~read:(fun () -> runner_word config) (fun heard ->
+      hearing ~config ~read:(fun () -> runner_word config) (fun heard ->
         ignore (tick first : Server_bootstrap_maintenance.schedule_runner_state);
         check int "an idle tick leaves the list as it was, unannounced" 0
           (List.length !heard))))
@@ -155,7 +158,7 @@ let test_a_tick_read_while_it_ran_is_announced () =
       in
       let first = tick Server_bootstrap_maintenance.initial_schedule_runner_state in
       Eio.Time.sleep clock 0.05;
-      hearing ~read:(fun () -> runner_word config) (fun heard ->
+      hearing ~config ~read:(fun () -> runner_word config) (fun heard ->
         let finished = ref false in
         Eio.Fiber.both
           (fun () ->
@@ -167,7 +170,7 @@ let test_a_tick_read_while_it_ran_is_announced () =
             while not ((Schedule_runner_status.snapshot ()).tick_in_flight || !finished) do
               Eio.Fiber.yield ()
             done;
-            if not !finished then Server_schedule_broadcast.changed ~base_path:config.base_path);
+            if not !finished then Server_schedule_invalidation.announce ~base_path:config.base_path);
         check bool "a reader read the list while the tick ran" true
           (List.mem (word Schedule_contract_values.Runner_running) !heard);
         match !heard with

@@ -2290,7 +2290,9 @@ let test_acting_evidence_footer_hints_and_help_section () =
   state.acting_detail <-
     Some
       { Masc_tui_acting.ae_at = 1.0
-      ; ae_event = Masc_tui_observer.Internal_agent_runs_changed
+      ; ae_event =
+          Masc_tui_observer.Internal_agent_runs_changed
+            Masc.Internal_agent_runs_event.Exact_lane
       };
   match Masc_tui_keys.help_sections_for_state ~cols:120 state with
   | (title, entries) :: _ ->

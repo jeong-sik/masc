@@ -175,9 +175,9 @@ type event =
      carries no [at]: nothing computes a duration from it. *)
   | Fusion_run_status of
       { keeper : string; run_id : string; status : string }
-  (* Server push with no payload: a run registry changed, and a reader that
-     shows internal runs re-fetches them. *)
-  | Internal_agent_runs_changed
+  (* Server push: the named run registry changed, and a reader that shows
+     that registry's runs re-fetches them. *)
+  | Internal_agent_runs_changed of Masc.Internal_agent_runs_event.registry
   | Schedule_store_invalidated
   | Pending_confirm_invalidated
   (* Server push with no payload: the workspace's verification request store
@@ -235,7 +235,7 @@ let chat_appended_keeper = function
   | Keeper_composite_changed _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -246,7 +246,7 @@ let composite_changed_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -257,7 +257,7 @@ let tool_call_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -270,7 +270,7 @@ let memory_journal_appended_keeper = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -286,7 +286,7 @@ let held_calls_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -302,7 +302,7 @@ let tool_modes_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -313,7 +313,7 @@ let async_requests_changed = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -325,13 +325,16 @@ let repositories_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Keeper_event_queue_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
 let verification_requests_changed = function
-  | Verification_requests_changed | Internal_agent_runs_changed -> true
+  | Verification_requests_changed
+  | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification -> true
+  | Internal_agent_runs_changed
+      (Masc.Internal_agent_runs_event.Goal_verification | Masc.Internal_agent_runs_event.Exact_lane)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -350,7 +353,7 @@ let roster_change = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_turn_changed _ | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -362,7 +365,7 @@ let turn_change = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_roster_change _ | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -374,7 +377,7 @@ let runtime_journal_appended = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -386,7 +389,7 @@ let schedules_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -398,7 +401,7 @@ let event_queue_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -414,7 +417,7 @@ let pending_confirms_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -430,7 +433,7 @@ let asks_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -442,7 +445,7 @@ let board_changed_post = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Approval_change _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Approval_change _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -460,7 +463,7 @@ let gate_snapshot_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Schedules_changed | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -844,7 +847,14 @@ let reading_of_type type_name =
                   Error detail)
           | None -> Error "fusion_run_status carries no run object")
   | type_name when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
-      Named Internal_agent_runs_changed
+      From_fields
+        (fun fields ->
+          match required string_field fields "registry" ~event:type_name with
+          | Error detail -> Error detail
+          | Ok wire ->
+              (match Masc.Internal_agent_runs_event.registry_of_wire wire with
+               | Some registry -> Ok (Internal_agent_runs_changed registry)
+               | None -> Error (type_name ^ " names an unknown registry " ^ wire)))
   | type_name when String.equal type_name Masc.Schedule_invalidation_event.event_type ->
       Named Schedule_store_invalidated
   | type_name when String.equal type_name Masc.Pending_confirm_invalidation_event.event_type ->

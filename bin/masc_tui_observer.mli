@@ -268,9 +268,9 @@ type event =
           a keeper act: the Fusion surface re-fetches the run on it instead of
           reading the payload as data, so only the identity strings are kept
           and, unlike the keeper events, it carries no [at]. *)
-  | Internal_agent_runs_changed
-      (** An internal agent run registry -- verification, goal verification,
-          exact lanes -- changed. A server push with no payload, named by
+  | Internal_agent_runs_changed of Masc.Internal_agent_runs_event.registry
+      (** The named internal agent run registry -- verification, goal
+          verification or exact lanes -- changed. A server push named by
           {!Masc.Internal_agent_runs_event}. *)
   | Schedule_store_invalidated
       (** A schedule ledger write was attempted in the subscribed workspace. *)
@@ -365,9 +365,10 @@ val repositories_changed : event -> bool
 (** The repository catalog changed. *)
 
 val verification_requests_changed : event -> bool
-(** The verification request store, or a run registry a request row reads
-    its review from, changed. A backlog commit arrives as the execution
-    {!Snapshot}. *)
+(** The verification request store, or the verification run registry a
+    request row reads its review from, changed. The goal-verification and
+    exact-lane registries do not count. A backlog commit arrives as the
+    execution {!Snapshot}. *)
 
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)

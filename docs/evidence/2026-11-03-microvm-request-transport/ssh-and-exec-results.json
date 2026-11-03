@@ -1,0 +1,152 @@
+{
+  "started_at": "2026-11-03T11:01:19+0900",
+  "runtime_pid": 81582,
+  "pipes_at_ready": [
+    0,
+    0
+  ],
+  "phases": [
+    {
+      "phase": "ssh_true",
+      "pipes_before": [
+        0,
+        0
+      ],
+      "pipes_after": [
+        0,
+        0
+      ],
+      "orphan_delta": 0,
+      "failures": 0,
+      "notes": [],
+      "n": 100,
+      "p50_ms": 98,
+      "p90_ms": 129,
+      "max_ms": 171
+    },
+    {
+      "phase": "ssh_stdin_2k",
+      "pipes_before": [
+        0,
+        0
+      ],
+      "pipes_after": [
+        0,
+        0
+      ],
+      "orphan_delta": 0,
+      "failures": 0,
+      "notes": [],
+      "n": 100,
+      "p50_ms": 94,
+      "p90_ms": 121,
+      "max_ms": 172
+    },
+    {
+      "phase": "ssh_stdout_70k",
+      "pipes_before": [
+        0,
+        0
+      ],
+      "pipes_after": [
+        0,
+        0
+      ],
+      "orphan_delta": 0,
+      "failures": 0,
+      "notes": [],
+      "n": 30,
+      "p50_ms": 117,
+      "p90_ms": 167,
+      "max_ms": 195
+    },
+    {
+      "phase": "exec_plain",
+      "pipes_before": [
+        0,
+        0
+      ],
+      "pipes_after": [
+        0,
+        0
+      ],
+      "orphan_delta": 0,
+      "failures": 0,
+      "notes": [],
+      "n": 50,
+      "p50_ms": 195,
+      "p90_ms": 369,
+      "max_ms": 541
+    },
+    {
+      "phase": "exec_i_control",
+      "pipes_before": [
+        0,
+        0
+      ],
+      "pipes_after": [
+        20,
+        0
+      ],
+      "orphan_delta": 20,
+      "failures": 0,
+      "notes": [],
+      "n": 20,
+      "p50_ms": 173,
+      "p90_ms": 294,
+      "max_ms": 308
+    },
+    {
+      "phase": "ssh_parallel_20",
+      "failures": 0,
+      "notes": [],
+      "pipes_before": [
+        20,
+        0
+      ],
+      "pipes_after": [
+        20,
+        0
+      ],
+      "orphan_delta": 0,
+      "n": 20,
+      "p50_ms": 345,
+      "p90_ms": 370,
+      "max_ms": 379
+    },
+    {
+      "phase": "cancel_sigkill",
+      "calls": 10,
+      "guest_saw_eof": "10",
+      "guest_cat_still_running": "0",
+      "pipes_before": [
+        20,
+        0
+      ],
+      "pipes_after": [
+        20,
+        0
+      ],
+      "orphan_delta": 0
+    },
+    {
+      "phase": "cancel_sigterm",
+      "calls": 10,
+      "guest_saw_eof": "10",
+      "guest_cat_still_running": "0",
+      "pipes_before": [
+        20,
+        0
+      ],
+      "pipes_after": [
+        20,
+        0
+      ],
+      "orphan_delta": 0
+    }
+  ],
+  "pipes_at_end": [
+    20,
+    0
+  ]
+}

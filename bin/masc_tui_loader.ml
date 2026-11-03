@@ -1952,7 +1952,9 @@ let load_keeper_row ~(host : string) ~(port : int) ~expected_workspace ~keeper_n
             | named ->
                 Error (Masc_tui_keeper_control.Roster_malformed
                          (Printf.sprintf "the row read for %s named %s" keeper_name
-                            (Yojson.Safe.to_string named)))))
+                            (Yojson.Safe.to_string named)))
+            | exception Yojson.Safe.Util.Type_error (detail, _) ->
+                Error (Masc_tui_keeper_control.Roster_malformed detail)))
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =

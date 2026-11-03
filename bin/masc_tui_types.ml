@@ -3119,6 +3119,26 @@ let chat_schedule_proximity ~now = function
       if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
       else Schedule_later
 
+(* The Keepers whose event queue a schedule row reads: its target, the
+   Keeper its reaction names, and the one a transferred occurrence waits
+   with. A queue or reaction write for any other Keeper leaves the row as it
+   is. *)
+let schedule_row_queue_keepers row =
+  let holder =
+    match row.sch_occurrence.Tui_schedule_observation.stage with
+    | Tui_schedule_observation.Queued_at owner -> Some owner
+    | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
+    | Missing | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+    | Settling | Transferring | Unknown _ ->
+        None
+  in
+  List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name; holder ]
+
+let schedule_rows_read_queue_of ~keepers rows =
+  List.exists
+    (fun row -> List.exists (fun keeper -> List.mem keeper keepers) (schedule_row_queue_keepers row))
+    rows
+
 (* The declaration's next firing and its last delivered occurrence are
    separate clocks. A one-shot marked Succeeded can still be queued. *)
 let chat_schedule_entries ~keeper_name snapshot =

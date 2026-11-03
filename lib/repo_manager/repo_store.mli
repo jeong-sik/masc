@@ -1,5 +1,12 @@
 open Repo_manager_types
 
+val install_written_observer : (base_path:string -> unit) -> unit
+(** Install the process-wide observer every catalog write calls after it
+    attempts to write [.masc/config/repositories.toml] (RFC-0480 §3.4). A
+    write that reports an error may already have replaced the file, so the
+    attempt is reported however it ends. The observer runs under the catalog
+    file lock: it must not yield and must not raise. *)
+
 val load_all : base_path:string -> (repository list, string) result
 (** [load_all ~base_path] reads [.masc/config/repositories.toml] and returns
     all registered repositories. Returns [Ok []] if the file does not exist. *)

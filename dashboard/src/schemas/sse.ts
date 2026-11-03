@@ -131,6 +131,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // A workspace's verification request store was written
   // (lib/verification_request_broadcast.ml). A request reader re-reads on it.
   'verification_requests_changed',
+  // A workspace's repository catalog was written
+  // (lib/repository_catalog_broadcast.ml). A repository reader re-reads on it.
+  'repositories_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

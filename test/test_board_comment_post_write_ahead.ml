@@ -679,11 +679,12 @@ let check_denied_policy failure =
     Alcotest.fail (Board.Post_publication_failure.to_string failure)
 
 let fanout_counts () =
-  let signals = ref 0 and sse = ref 0 and writes = ref 0 in
+  let signals = ref 0 and sse = ref 0 and changes = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
-  Board_dispatch.set_board_sse_hook (fun _ -> incr sse);
-  Board_dispatch.set_board_write_hook (fun () -> incr writes);
-  fun () -> [!signals; !sse; !writes]
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Post_changed _ -> incr changes
+    | _ -> incr sse);
+  fun () -> [!signals; !sse; !changes]
 
 let check_no_posts () =
   Alcotest.(check int) "no post reached memory" 0

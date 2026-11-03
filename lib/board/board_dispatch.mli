@@ -87,6 +87,20 @@ type addressed_board_signal = {
 (** Signal payload paired with the audience fixed before the originating Board
     mutation. The hook must consume this authority, not parse mutable text. *)
 
+(** What an edit, a thread change, a pin, a close, a reopen or a delete did to
+    one post. [Post_changed] carries it. *)
+type post_change =
+  | Post_edited
+  | Post_thread_set
+  | Post_pinned
+  | Post_unpinned
+  | Post_closed
+  | Post_reopened
+  | Post_deleted
+
+val post_change_to_string : post_change -> string
+(** The [change] field of a [post_changed] board notification. *)
+
 type board_sse_event =
   | Post_created of {
       post_id : string;
@@ -118,6 +132,10 @@ type board_sse_event =
       emoji : string;
       reacted : bool;
     }
+  | Post_changed of {
+      post_id : string;
+      change : post_change;
+    }
 
 val set_board_signal_hook : (addressed_board_signal -> unit) -> unit
 (** Replace the in-process hook invoked from {!create_post}, {!add_comment},
@@ -125,20 +143,15 @@ val set_board_signal_hook : (addressed_board_signal -> unit) -> unit
 
 val set_board_sse_hook : (board_sse_event -> unit) -> unit
 (** Replace the in-process SSE hook invoked from every mutating
-    operation. *)
+    operation. {!update_post}, {!set_thread_id}, {!set_pinned},
+    {!set_closed}, {!reopen} and {!delete_post} raise [Post_changed] once the
+    store took the write, including an applied deletion whose snapshot
+    persistence remains pending. A write the store refuses raises nothing. *)
 
 val emit_board_sse_event : board_sse_event -> unit
 (** Direct emission entry point for callers that want to broadcast
     a synthetic event without going through one of the typed
     operations. *)
-
-val set_board_write_hook : (unit -> unit) -> unit
-(** Replace the in-process hook invoked after a board write that raises no
-    {!board_sse_event}: {!update_post}, {!set_thread_id}, {!set_pinned},
-    {!set_closed}, {!reopen} and {!delete_post}. A write the store refuses does
-    not invoke it. An applied deletion invokes it even when snapshot
-    persistence remains pending. The server drops its cached projections here,
-    so a read after the write is not answered from the page it changed. *)
 
 (** {1 Backend lifecycle} *)
 

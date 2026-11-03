@@ -609,7 +609,9 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   in
   let post_id = create "delete with a failed snapshot" in
   let writes = ref 0 in
-  Masc.Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  Masc.Board_dispatch.set_board_sse_hook (function
+    | Masc.Board_dispatch.Post_changed _ -> incr writes
+    | _ -> ());
   let path = Masc.Board.reactions_path (Masc.Board.global ()) in
   let had_snapshot = Sys.file_exists path in
   let backup = path ^ ".before-delete" in
@@ -629,12 +631,12 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
         (receipt |> member "applied" |> to_bool);
       check string "persistence remains pending" "pending"
         (receipt |> member "persistence" |> to_string);
-      check int "applied pending deletion invalidates projections" 1 !writes;
+      check int "applied pending deletion is announced" 1 !writes;
       check bool "post is absent from memory" true
         (Result.is_error (Masc.Board_dispatch.get_post ~post_id));
       let retry_status, _ = delete post_id in
       check int "repeating the applied deletion is a lookup miss" 404 retry_status;
-      check int "refused retry does not invalidate again" 1 !writes);
+      check int "refused retry is not announced again" 1 !writes);
   let store =
     match Masc.Board_dispatch.backend () with Masc.Board_dispatch.Jsonl store -> store
   in

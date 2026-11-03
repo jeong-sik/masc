@@ -98,21 +98,28 @@ let providers_loaded (state : state) request ~report ~attempts result =
     Masc_tui_types.finish_detail_read state request
     && Masc_tui_types.server_authority_ready state
   in
+  let providers_result = Result.map fst result in
   if current
   then (
     match result with
-    | Ok providers -> retire_identity_logins state ~keeper_name ~providers
-    | Error _ -> ());
+    | Ok (providers, callback) ->
+      retire_identity_logins state ~keeper_name ~providers;
+      state.identity_callback <- callback
+    | Error _ ->
+      (* A failed read says nothing about the callback either; keeping the
+         previous one would show a value this reading never saw. *)
+      state.identity_callback <- None);
   if current && keeper_detail_target_matches state keeper_name
   then (
-    match result with
+    match providers_result with
     | Ok providers ->
       state.identity_view <- Some (keeper_name, providers);
       state.identity_view_error <- None
     | Error detail -> state.identity_view_error <- Some detail);
   if current then List.iter (fun (expectation, status) ->
     if String.equal expectation.ile_keeper keeper_name then
-      apply_login_status state ~report ~catalog:(Result.to_option result) expectation status) attempts
+      apply_login_status state ~report ~catalog:(Result.to_option providers_result)
+        expectation status) attempts
 ;;
 
 let login_started (state : state) request ~now ~report ~notice result =

@@ -9821,6 +9821,9 @@ type state = {
      out of one list -- see [identity_connectable]. *)
   mutable identity_view: (string * identity_provider list) option;
   mutable identity_view_error: string option;
+  (* The callback the server would name for a login started now. Not tied to
+     a Keeper: it is the server's own address. *)
+  mutable identity_callback: identity_callback option;
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
@@ -14578,6 +14581,7 @@ let withdraw_identity_readings (state : state) =
   state.identity_logins <- [];
   state.identity_view <- None;
   state.identity_view_error <- None;
+  state.identity_callback <- None;
   state.identity_attempt_error <- None;
   state.identity_app_form <- None;
   state.github_identity_view <- None;
@@ -19223,6 +19227,7 @@ let create_state
   github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
+  identity_callback = None;
   identity_logins = [];
   identity_login_expectations = [];
   identity_login_requests = [];

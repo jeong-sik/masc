@@ -10,6 +10,7 @@ type view =
   ; logins : Masc_tui_identity_model.identity_login_started list
   ; attempt_error : (Masc_tui_identity_model.identity_notice_kind * string) option
   ; app_form : Masc_tui_identity_model.identity_app_form option
+  ; callback : Masc_tui_identity_model.identity_callback option
   }
 
 (* The Identity tab's body. Numbering comes from
@@ -47,6 +48,18 @@ let lines ~cols (view : view) =
         | Masc_tui_identity_model.Identity_unreadable _ -> None)
       providers
     |> Option.value ~default:[]
+  in
+  (* Whether an app the operator made is on file. Said on the row because it
+     changes what Enter does: with an app the login uses it, without one a
+     service that registers no client refuses until one is entered. *)
+  let app_of id =
+    List.find_map
+      (function
+        | Masc_tui_identity_model.Identity_declared { idp_id; idp_app; _ }
+          when String.equal idp_id id -> idp_app
+        | Masc_tui_identity_model.Identity_declared _
+        | Masc_tui_identity_model.Identity_unreadable _ -> None)
+      providers
   in
   let numbered =
     List.mapi
@@ -89,7 +102,15 @@ let lines ~cols (view : view) =
            | [] -> ""
            | names -> Ansi.dim ^ "  · also " ^ String.concat ", " names ^ Ansi.reset
          in
-         Printf.sprintf "%s %2d  %s %s%s" marker (index + 1) shown row_state elsewhere)
+         let app =
+           match app_of id with
+           | Some Masc_tui_identity_model.App_on_file ->
+             Ansi.dim ^ "  · your app" ^ Ansi.reset
+           | Some (Masc_tui_identity_model.App_problem _) ->
+             Theme.bad () ^ "  · app unreadable" ^ Ansi.reset
+           | Some Masc_tui_identity_model.App_none | None -> ""
+         in
+         Printf.sprintf "%s %2d  %s %s%s%s" marker (index + 1) shown row_state app elsewhere)
       connectable
   in
   let attached_tool_lines =
@@ -117,37 +138,19 @@ let lines ~cols (view : view) =
       providers
   in
   let started =
-    List.concat_map
-      (fun (login : Masc_tui_identity_model.identity_login_started) ->
-         (* Wrapped, not truncated. The URL is about nine hundred characters
-           and a pane cuts it at its own width; a cut URL cannot be selected
-           or copied, so the login stopped there. The TUI opens it as well --
-           this is what is left when the machine has no opener. *)
-         let url = Terminal_text.single_line login.ils_url in
-         let width = max 20 (framed_inner_width cols - 2) in
-         let rec fold at acc =
-           if at >= String.length url
-           then List.rev acc
-           else (
-             let take = min width (String.length url - at) in
-             fold (at + take) (("    " ^ String.sub url at take) :: acc))
-         in
-         (""
-          :: (Ansi.bold
-              ^ "  A browser should have opened to consent as "
-              ^ Terminal_text.single_line login.ils_label
-              ^ "."
-              ^ Ansi.reset)
-          :: (Ansi.dim ^ "  If it did not, the URL is here:" ^ Ansi.reset)
-          :: fold 0 [])
-         @ [ Ansi.dim
-             ^ "  Nothing is written to this keeper until you come back."
-             ^ Ansi.reset
-           ])
-      (List.filter
-         (fun (login : Masc_tui_identity_model.identity_login_started) ->
-            String.equal login.ils_keeper view.keeper_name)
-         view.logins)
+    Masc_tui_identity_model.identity_started_rows ~cols ~keeper_name:view.keeper_name
+      view.logins
+  in
+  (* The callback the server will name, coloured as a fact when it is known
+     and as a problem when it is not: a login cannot start without it. *)
+  let callback =
+    let rows = Masc_tui_identity_model.identity_callback_rows view.callback in
+    match view.callback with
+    | Some (Masc_tui_identity_model.Callback_url _) ->
+      List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset) rows
+    | Some (Masc_tui_identity_model.Callback_unknown _) ->
+      List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) rows
+    | None -> rows
   in
   (* What one attempt answered. Wrapped, because the message that matters
      most here is the long one: a provider that registers no client says what
@@ -194,6 +197,7 @@ let lines ~cols (view : view) =
   then
     Masc_tui_identity_model.identity_preamble
       ~summary:(Masc_tui_identity_model.identity_summary ~providers ~query)
+      ~callback
       ~notice:
         (attempt
          @ started
@@ -205,6 +209,7 @@ let lines ~cols (view : view) =
   else
     Masc_tui_identity_model.identity_preamble
       ~summary:(Masc_tui_identity_model.identity_summary ~providers ~query)
+      ~callback
       ~notice:
         (attempt
          @ started

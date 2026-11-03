@@ -1,5 +1,17 @@
 (** Identity data and pure projections shared by input, rendering, and responses. *)
 
+(** Whether an operator app is on file for a service. *)
+type identity_app =
+  | App_on_file
+  | App_none
+  | App_problem of string
+
+(** The callback a login started now would name. An operator who makes their
+    own app registers exactly this URL as its redirect URI. *)
+type identity_callback =
+  | Callback_url of string
+  | Callback_unknown of string (** why the server does not know it *)
+
 (** One line of the Identity tab. A declaration nobody can read is carried
     rather than dropped: an operator who came looking for a provider needs to
     see why it is not on offer, not a shorter list. *)
@@ -24,6 +36,9 @@ type identity_provider =
             not show a guess for either. *)
       ; idp_switch_problem : string option
         (** Why the switch state is unknown, when it is. *)
+      ; idp_app : identity_app option
+        (** Whether an app the operator made is on file for this service.
+            [None] when the server did not say. *)
       }
   | Identity_unreadable of
       { idp_id : string
@@ -230,7 +245,18 @@ let identity_filter_rows ~providers filter =
     [identity_connectable] and then scrolls the pane's lines so that row
     stays visible. A header written in the renderer and counted in the key
     handler is two numbers that drift the first time a line is added. *)
-let identity_preamble ~summary ~notice = summary :: "" :: notice
+let identity_preamble ~summary ~callback ~notice = (summary :: callback) @ ("" :: notice)
+
+(** The callback line under the summary. The value comes from the server,
+    which follows [MASC_HTTP_BASE_URL] or the address it bound, so this is
+    the line that says where providers will send the browser back to. *)
+let identity_callback_rows = function
+  | None -> []
+  | Some (Callback_url url) ->
+    [ "  callback  " ^ Masc_tui_ansi.Terminal_text.single_line url ]
+  | Some (Callback_unknown why) ->
+    [ "  callback  unknown: " ^ Masc_tui_ansi.Terminal_text.single_line why ]
+;;
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -238,8 +264,8 @@ let identity_preamble ~summary ~notice = summary :: "" :: notice
     just made belongs where the operator is looking rather than below
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
-let identity_provider_line ~summary ~notice ~index =
-  List.length (identity_preamble ~summary ~notice) + index
+let identity_provider_line ~summary ~callback ~notice ~index =
+  List.length (identity_preamble ~summary ~callback ~notice) + index
 ;;
 
 (** The cursor held inside the list it names. A cursor left behind by a
@@ -309,6 +335,36 @@ type identity_login_started =
   ; ils_expires_at : float
   ; ils_attempt_id : string
   }
+
+(** The consent prompt for each login this Keeper started and has not
+    finished. Wrapped, not truncated: the URL is about nine hundred characters
+    and a pane cuts it at its own width; a cut URL cannot be selected or
+    copied. The TUI opens it as well -- this is what is left when the machine
+    has no opener. *)
+let identity_started_rows ~cols ~keeper_name logins =
+  let open Masc_tui_ansi in
+  List.concat_map
+    (fun login ->
+       let url = Terminal_text.single_line login.ils_url in
+       let width = max 20 (framed_inner_width cols - 2) in
+       let rec fold at acc =
+         if at >= String.length url
+         then List.rev acc
+         else (
+           let take = min width (String.length url - at) in
+           fold (at + take) (("    " ^ String.sub url at take) :: acc))
+       in
+       (""
+        :: (Ansi.bold
+            ^ "  A browser should have opened to consent as "
+            ^ Terminal_text.single_line login.ils_label
+            ^ "."
+            ^ Ansi.reset)
+        :: (Ansi.dim ^ "  If it did not, the URL is here:" ^ Ansi.reset)
+        :: fold 0 [])
+       @ [ Ansi.dim ^ "  Nothing is written to this keeper until you come back." ^ Ansi.reset ])
+    (List.filter (fun login -> String.equal login.ils_keeper keeper_name) logins)
+;;
 
 (** Whether the login [login] started has landed: the service it was for now
     reports tools for this Keeper.
@@ -466,3 +522,103 @@ let disconnect_receipt_text ~provider_id json =
   in
   Printf.sprintf "%s: %s; %s" provider_id removed revoke
 ;;
+
+(** The Identity tab's reading of [/api/v1/keepers/oauth/attached-tools]: the
+    rows, and the callback the server would name. A callback object of any
+    other shape is not read as either a URL or a problem, and an [app_state]
+    of an unknown kind is not read as any app state. *)
+let decode_identity_providers (json : Yojson.Safe.t)
+  : ( identity_provider list
+      * identity_callback option
+    , string )
+    result
+  =
+    let rows =
+      match json with
+      | `Assoc fields -> (
+        match List.assoc_opt "providers" fields with
+        | Some (`List rows) -> Some rows
+        | Some _ | None -> None)
+      | _ -> None
+    in
+    (* The server's own callback, or why it has none. Anything else is not
+       read as either. *)
+    let callback =
+      match json with
+      | `Assoc fields -> (
+        match List.assoc_opt "callback" fields with
+        | Some (`Assoc [ ("url", `String url) ]) ->
+          Some (Callback_url url)
+        | Some (`Assoc [ ("problem", `String why) ]) ->
+          Some (Callback_unknown why)
+        | Some _ | None -> None)
+      | _ -> None
+    in
+    (match rows with
+     | None -> Error "identity providers response carries no providers list"
+     | Some rows ->
+       Ok
+         (List.filter_map
+            (fun row ->
+              let field key =
+                match row with
+                | `Assoc fields -> List.assoc_opt key fields
+                | _ -> None
+              in
+              let string_field key =
+                match field key with
+                | Some (`String value) -> Some value
+                | Some _ | None -> None
+              in
+              match string_field "provider", string_field "problem" with
+              | Some idp_id, Some idp_problem ->
+                Some (Identity_unreadable { idp_id; idp_problem })
+              | Some idp_id, None ->
+                let idp_label =
+                  Option.value ~default:idp_id (string_field "provider_label")
+                in
+                let idp_tools =
+                  match field "tools" with
+                  | Some (`List names) ->
+                    Some
+                      (List.filter_map
+                         (function `String name -> Some name | _ -> None)
+                         names)
+                  (* No tools key means the server said this one is not
+                     attached; an empty list would mean attached and
+                     offering nothing. *)
+                  | Some _ | None -> None
+                in
+                let idp_also_on =
+                  match field "also_on" with
+                  | Some (`List names) ->
+                    List.filter_map
+                      (function `String name -> Some name | _ -> None)
+                      names
+                  | Some _ | None -> []
+                in
+                let idp_enabled =
+                  match field "enabled" with
+                  | Some (`Bool value) -> Some value
+                  | Some _ | None -> None
+                in
+                let idp_switch_problem = string_field "switch_problem" in
+                let idp_app =
+                  match field "app_state" with
+                  | Some (`Assoc state) -> (
+                    match List.assoc_opt "kind" state with
+                    | Some (`String "on_file") -> Some App_on_file
+                    | Some (`String "none") -> Some App_none
+                    | Some (`String "problem") ->
+                      (match List.assoc_opt "problem" state with
+                       | Some (`String why) -> Some (App_problem why)
+                       | Some _ | None -> None)
+                    | Some _ | None -> None)
+                  | Some _ | None -> None
+                in
+                Some
+                  (Identity_declared
+                     { idp_id; idp_label; idp_tools; idp_also_on
+                     ; idp_enabled; idp_switch_problem; idp_app })
+              | None, _ -> None)
+            rows, callback))

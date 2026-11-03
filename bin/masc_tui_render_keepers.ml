@@ -2509,6 +2509,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      ; logins = state.identity_logins
                      ; attempt_error = state.identity_attempt_error
                      ; app_form = state.identity_app_form
+                     ; callback = state.identity_callback
                      } ))
                state.identity_view)
             state.identity_view_error

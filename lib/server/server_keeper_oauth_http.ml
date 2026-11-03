@@ -103,6 +103,7 @@ let handle_providers = (fun state req reqd ->
             , Server_keeper_oauth.declarations_json
                 ~base_path:
                   (Mcp_server.workspace_config state).Workspace.base_path )
+          ; "callback", Server_keeper_oauth.callback_json ()
           ])
         reqd)
 ;;
@@ -122,6 +123,7 @@ let handle_attached_tools = (fun state req reqd ->
           (`Assoc
             [ "keeper", `String keeper
             ; "providers", Server_keeper_oauth.attached_tools_json ~base_path ~keeper
+            ; "callback", Server_keeper_oauth.callback_json ()
             ])
           reqd)
 ;;

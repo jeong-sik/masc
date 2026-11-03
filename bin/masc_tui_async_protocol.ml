@@ -764,7 +764,11 @@ type async_msg =
       * Masc_tui_types.resource_share_journal_observation
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
+      Masc_tui_types.detail_read_request
+      * ( Masc_tui_identity_model.identity_provider list
+          * Masc_tui_identity_model.identity_callback option
+        , string )
+        result
       * (identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   | Identity_switch_set of
       string * string * bool * (unit, string) result

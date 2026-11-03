@@ -10240,6 +10240,9 @@ type state = {
      since the last turns read began. Opening a surface that draws one owes
      the turns a read (RFC-0481 §3.5). *)
   mutable keeper_previews_unread: string list;
+  (* A failed waiting read, read again after a growing wait (RFC-0481 §3.4).
+     A change is read at once by the waiting read itself. *)
+  mutable keeper_waiting_owed: Masc_tui_owed_read.t;
   mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
@@ -14508,6 +14511,7 @@ let suspend_workspace_readings state =
   state.keeper_turns_inflight <- false;
   state.keeper_turns_owed <- Masc_tui_owed_read.settled;
   state.keeper_previews_unread <- [];
+  state.keeper_waiting_owed <- Masc_tui_owed_read.settled;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
   state.keeper_calls_refresh_pending <- false;
@@ -19513,6 +19517,7 @@ let create_state
   keeper_turns_inflight = false;
   keeper_turns_owed = Masc_tui_owed_read.settled;
   keeper_previews_unread = [];
+  keeper_waiting_owed = Masc_tui_owed_read.settled;
   keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];

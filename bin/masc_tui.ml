@@ -3459,6 +3459,7 @@ let launch_keeper_waiting_load ?change ?(exclusive = false) state ~mailbox =
     let reading, request = Keeper_waiting_read.start state.keeper_waiting_read in
     state.keeper_waiting_read <- reading;
     Option.iter (fun request ->
+      state.keeper_waiting_owed <- Masc_tui_owed_read.started state.keeper_waiting_owed;
       let host = server_peer_host and port = state.port in
       let snapshot = capture_keeper_waiting_snapshot state in
       Masc_tui_async_read.launch ~source:Masc_tui_async_read.Keeper_turns
@@ -8707,6 +8708,18 @@ let launch_owed_keeper_turns state ~mailbox =
   state.keeper_turns_owed <- read;
   if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
     launch_keeper_turns_load state ~mailbox
+
+(* Runs on every loop iteration. A waiting read that failed is read again
+   after a growing wait; one in flight is let finish first. *)
+let launch_owed_keeper_waiting state ~mailbox =
+  let reading = Keeper_waiting_read.in_flight state.keeper_waiting_read in
+  let read =
+    if reading then state.keeper_waiting_owed
+    else Masc_tui_owed_read.abandoned state.keeper_waiting_owed
+  in
+  state.keeper_waiting_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    launch_keeper_waiting_load state ~mailbox
 
 (* Runs on every loop iteration. The modes are not read while an operator's
    own mode press is in flight: the answer would be the stance from before
@@ -16133,6 +16146,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turns_inflight <- false;
   state.keeper_turns_owed <- Masc_tui_owed_read.settled;
   state.keeper_previews_unread <- [];
+  state.keeper_waiting_owed <- Masc_tui_owed_read.settled;
   state.keeper_turns <- [];
   state.keeper_waiting <- [];
   state.keeper_waiting_failure <- None;
@@ -17371,11 +17385,7 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   |> List.iter (fun keeper_name ->
        if identity_login_recovery_poll_ready state ~now:login_now keeper_name then
          Masc_tui_identity_requests.launch_view state ~host:server_peer_host
-           ~deliver:(workspace_enqueue state mailbox) keeper_name);
-  (* The "answering now" badge rides every tick for the same reason as the
-     held approvals: it is drawn from every surface, and its whole point is
-     the operator who walked away from the chat pane. *)
-  launch_keeper_turns_load state ~mailbox
+           ~deliver:(workspace_enqueue state mailbox) keeper_name)
   end
 ;;
 
@@ -25233,6 +25243,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some (reading, follow_up) ->
            state.keeper_waiting_read <-
              Keeper_waiting_read.publish_event reading ~observed:(usable && Result.is_ok result);
+           state.keeper_waiting_owed <-
+             (if complete then Masc_tui_owed_read.succeeded state.keeper_waiting_owed
+              else failed_read state.keeper_waiting_owed);
            if usable then (match result with
              | Ok { rows; waiting } ->
                  state.keeper_waiting_unverified <- unverified;
@@ -31641,6 +31654,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_gate_snapshot state ~mailbox:async_messages;
       launch_owed_held_calls state ~mailbox:async_messages;
       launch_owed_keeper_turns state ~mailbox:async_messages;
+      launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
       launch_owed_async_requests state ~mailbox:async_messages;

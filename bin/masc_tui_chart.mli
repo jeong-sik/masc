@@ -1,8 +1,7 @@
 (** Visual charting and graphing primitives for the MASC TUI.
 
-    Provides UTF-8 block sparklines, context and resource gauges, activity
-    heatmaps, tool distribution bars, and high-resolution 2x4 Braille
-    time-series plots.
+    Provides UTF-8 block sparklines, context and resource gauges, tool
+    distribution bars, and the 2x4 Braille cell.
 
     Pure by construction: no terminal I/O, no mutation, no unhandled exceptions.
     Safe across wide/narrow widths, non-ASCII multi-byte text, and empty/negative inputs. *)
@@ -30,15 +29,6 @@ val gauge :
     bounded strictly within [width] display cells. The bar carries no level
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
-
-(** {1 Activity Heatmaps} *)
-
-val heatmap_24h :
-  ?label:string ->
-  int list ->
-  string list
-(** [heatmap_24h ?label hours] renders a 2-line 24-hour activity widget normalized across
-    the entire 24-hour peak. *)
 
 (** {1 Distribution Bars} *)
 
@@ -72,13 +62,3 @@ val distribution_bars :
 
 val braille_cell : mask:int -> string
 (** Encodes a Braille pattern (0x2800 + mask) to UTF-8. *)
-
-val braille_plot :
-  width:int ->
-  height:int ->
-  ?min_val:float ->
-  ?max_val:float ->
-  float list ->
-  string list
-(** [braille_plot ~width ~height points] renders a continuous, linearly interpolated
-    high-resolution 2x4 dot matrix curve of [height] terminal rows and [width] columns. *)

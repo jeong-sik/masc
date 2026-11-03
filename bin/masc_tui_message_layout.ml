@@ -2474,23 +2474,6 @@ let scroll_for_body_row ?markdown ?(origin = Origin_row) ~inner_width
     in
     locate 0 0 rows
 
-let last_page_start ~height row_costs =
-  let costs = Array.of_list row_costs in
-  let count = Array.length costs in
-  if count = 0 then 0
-  else begin
-    let height = Int.max 1 height in
-    let rec walk index used =
-      if index < 0 then 0
-      else
-        (* A row is the least an item can cost; a zero would let the walk
-           claim the whole list fits in any height. *)
-        let cost = Int.max 1 costs.(index) in
-        if used + cost > height then index + 1 else walk (index - 1) (used + cost)
-    in
-    Int.min (count - 1) (walk (count - 1) 0)
-  end
-
 (* One span, in the largest unit that still carries a remainder. Every reading
    is at most six cells wide, so a column sized for the longest span holds
    every shorter one.

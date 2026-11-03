@@ -418,11 +418,6 @@ val write_list_sidebar_selection :
 
 val data_unreliable_row : cols:int -> string -> string
 
-val overview_pulse_text : Masc_tui_types.state -> now:float -> string
-(** The Overview's Pulse: a sparkline of Keeper turns finished in the last eight
-    fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
-    any keeper-turn reading has come back. *)
-
 val fenced_document_text : language:string -> string -> string
 
 val lexed_span : string * String.t -> string
@@ -671,8 +666,6 @@ val render_repository_changes_diff :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val runtime_quota_badge : Masc.Tui_decode.runtime_option -> string option
-
-val runtime_rate_limit_badge : Masc.Tui_decode.runtime_option -> string option
 
 (** The lanes that list a runtime among their candidates, in resolved order.
     Both doors into the runtime detail read it, so neither can answer with a

@@ -4,8 +4,6 @@ module Terminal_text = Masc_tui_ansi.Terminal_text
 
 (* The field is one wider than the longest label ("reviewed:") so every value
    keeps one gap after its colon. *)
-let timestamp_line ~label value =
-  Printf.sprintf "  %-10s%s" (label ^ ":") value
 
 type tone =
   | Proven

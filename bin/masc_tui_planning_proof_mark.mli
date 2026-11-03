@@ -14,11 +14,6 @@ val legend : (string * string) list
 (** Every mark that is not a blank, paired with its word, in the order a goal
     travels: asked, approved, refused, outrun by its own criterion, unreadable. *)
 
-val legend_for : Masc.Tui_decode.goal_proof list -> (string * string) list
-(** The rows of {!legend} these verdicts need. A mark an operator can see is
-    explained; one no goal carries does not spend the line. The order follows
-    {!legend}. *)
-
 val legend_rows :
   ?ko:bool -> max_cells:int -> max_rows:int -> Masc.Tui_decode.goal_proof list -> string list
 (** Complete, uncoloured legend rows, including the JUDGE label and continuation

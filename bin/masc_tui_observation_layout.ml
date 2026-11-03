@@ -17,12 +17,9 @@ type context_summary =
 
 type log_cells = {
   kind : string;
-  channel : string;
   messages : string;
   usage : string;
   latency : string;
-  cost : string;
-  work : string;
 }
 
 (* Cells, not bytes. [String.length] counts bytes, and a Korean label spends
@@ -61,25 +58,6 @@ let log_channel_label = function
   | Tui_decode.Log_channel_scheduled_autonomous -> "sched"
   | Tui_decode.Log_channel_heartbeat -> "hb"
 
-(* Two of the three channels say the same word as the kind they belong to, so
-   the CHANNEL column mostly repeated KIND -- sixteen of sixteen rows in a live
-   keeper's log. Drawing the agreement gave the one channel that disagrees,
-   [sched], no more weight than the rest of the column.
-
-   Every pair is named rather than matched with a wildcard: a channel added to
-   the wire has to be decided here before this compiles, which is the whole
-   point of asking the question of the variants instead of the two labels. *)
-let channel_repeats_kind ~(kind : Tui_decode.log_kind)
-    ~(channel : Tui_decode.log_channel) =
-  match kind, channel with
-  | Tui_decode.Log_turn, Tui_decode.Log_channel_turn -> true
-  | Tui_decode.Log_heartbeat, Tui_decode.Log_channel_heartbeat -> true
-  | Tui_decode.Log_turn, Tui_decode.Log_channel_scheduled_autonomous -> false
-  | Tui_decode.Log_turn, Tui_decode.Log_channel_heartbeat -> false
-  | Tui_decode.Log_heartbeat, Tui_decode.Log_channel_turn -> false
-  | Tui_decode.Log_heartbeat, Tui_decode.Log_channel_scheduled_autonomous ->
-      false
-
 let message_count_label = function
   | Some count -> string_of_int count
   | None -> "--"
@@ -113,66 +91,13 @@ let cost_label = function
    the last named column and the tools that ran follow it, unbounded, which is
    why nothing after it can be pushed. *)
 
-let log_time_width = 8
-let log_kind_width = 4
-let log_channel_width = 8
-let log_messages_width = 5
-let log_usage_width = 13
-let log_latency_width = 9
-let log_cost_width = 9
-let log_work_width = 10
-let log_row_indent = "  "
-
 let log_cells (entry : Tui_decode.log_entry) =
   { kind = log_kind_label entry.le_kind;
-    channel =
-      (if channel_repeats_kind ~kind:entry.le_kind ~channel:entry.le_channel
-       then ""
-       else log_channel_label entry.le_channel);
     messages = message_count_label entry.le_message_count;
     usage =
       usage_label ~input:entry.le_input_tokens ~output:entry.le_output_tokens;
     latency = latency_label entry.le_latency_ms;
-    cost = cost_label entry.le_cost_usd;
-    work = Option.value ~default:"" entry.le_work_kind;
   }
-
-let log_table_cells ~time cells =
-  let right = Masc_tui_table.Right in
-  [ Masc_tui_table.cell ~header:"TIME" ~width:log_time_width time
-  ; Masc_tui_table.cell ~header:"KIND" ~width:log_kind_width cells.kind
-  ; Masc_tui_table.cell ~header:"CHANNEL" ~width:log_channel_width
-      cells.channel
-  ; Masc_tui_table.cell ~align:right ~header:"MSGS" ~width:log_messages_width
-      cells.messages
-  ; Masc_tui_table.cell ~align:right ~header:"IN/OUT" ~width:log_usage_width
-      cells.usage
-  ; Masc_tui_table.cell ~align:right ~header:"LAT" ~width:log_latency_width
-      cells.latency
-  ; Masc_tui_table.cell ~align:right ~header:"COST" ~width:log_cost_width
-      cells.cost
-  ; Masc_tui_table.cell ~header:"WORK" ~width:log_work_width cells.work
-  ]
-
-let empty_log_cells =
-  { kind = ""
-  ; channel = ""
-  ; messages = ""
-  ; usage = ""
-  ; latency = ""
-  ; cost = ""
-  ; work = ""
-  }
-
-let plain_log_header =
-  log_row_indent
-  ^ Masc_tui_table.header_row
-      (log_table_cells ~time:"" empty_log_cells)
-
-let plain_log_row ~time entry =
-  log_row_indent
-  ^ Masc_tui_table.row
-      (log_table_cells ~time (log_cells entry))
 
 let log_entry_rows ~width ~time (entry : Tui_decode.log_entry) =
   let wrap text =

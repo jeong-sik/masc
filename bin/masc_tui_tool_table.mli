@@ -29,13 +29,6 @@ val catalog_tool_line :
     the tool rather than the name being answered about: a tool on no surface is
     unreachable, and [surfaces] is the column that says so. *)
 
-val skill_usage_name_indent : string
-(** Skill usage stacks rather than columns: a skill's keepers do not fit beside
-    its name, so they are on the lines below at {!skill_usage_keeper_indent},
-    one keeper each. The header names each reading where the reading stands. *)
-
-val skill_usage_keeper_indent : string
-
 val skill_usage_keeper_header : string
 (** The column names over the keeper rows below one skill. *)
 

@@ -839,20 +839,6 @@ let composer_row state ~rows ~cols =
    successive keeper-turn readings, so until one reading has come back there is
    nothing to count -- and eight flat bars said "nothing finished" for a read
    that had not been made or had been refused. The shared words say which. *)
-let overview_pulse_text (state : state) ~now =
-  match state.keeper_turns_observed_at with
-  (* The row draws this behind "Pulse:", so the label already says these
-     words are the state of a reading rather than a count. *)
-  | None -> field_missing_reading ~error:state.keeper_turns_error
-  | Some _ ->
-      let buckets = Array.make 8 0 in
-      List.iter
-        (fun (_, ts) ->
-          let idx = min 7 (int_of_float (Float.max 0.0 (now -. ts) /. 15.0)) in
-          let slot = 7 - idx in
-          buckets.(slot) <- buckets.(slot) + 1)
-        state.keeper_turn_finishes;
-      Chart.sparkline (Array.to_list buckets)
 
 (* The gap between the last ring entry and the waiting badge. *)
 let waiting_badge_gap_cells = 3
@@ -3633,9 +3619,6 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
    It is a different fact from the quota
    window above, so a runtime can carry both. [resets_at] is the provider's
    own Retry-After and is present only while it is still ahead. *)
-let runtime_rate_limit_badge (runtime : Masc.Tui_decode.runtime_option) =
-  Option.map (fun label -> Theme.warn () ^ label ^ Ansi.reset)
-    (runtime_rate_limit_label runtime)
 
 
 (* Which lanes list this runtime among their candidates, in the order the

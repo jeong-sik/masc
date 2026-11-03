@@ -8,7 +8,6 @@ type entry = {
 
 val witness : entry -> entry list -> entry list
 val resolve : entry -> entry list -> entry list
-val for_resource : entry -> entry list -> entry list
 (** Preserve distinct observed tuples, and retire only an exact tuple. *)
 
 type cursor

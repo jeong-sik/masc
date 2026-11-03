@@ -170,8 +170,6 @@ let pulse_line ~cols (state : state) kpis =
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in
   Layout.take_cells text inner_width ^ Ansi.reset
 
-let overview_pulse_line ~cols state = pulse_line ~cols state (calculate_kpis state)
-
 (* The three sections as a tab strip, drawn the way the surface strip above
    every screen is: a mark on the one being read, the names beside it. It was
    "Sections [1-3 / s]: [1 ● Engine & Scheduler] [2 ○ Work & Outcomes] ...",

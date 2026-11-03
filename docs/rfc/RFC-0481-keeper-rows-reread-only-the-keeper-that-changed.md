@@ -126,7 +126,7 @@ roster 경로에 `name=<키퍼>` 를 더한다. 그 키퍼의 행 하나(또는 
 | 키퍼 TOML 을 keeper_up 밖에서 바꿈(직접 편집, git) | 키퍼 설정 디렉터리 감시. 그 전까지는 Revalidate·`r` 로만 맞는다 |
 | registry 항목 commit(단계, 실패 이유와 시각, keepalive). 맵을 바꾸는 곳은 `swap_in`·`swap_out` 둘뿐이다 | 그 키퍼. 행이 읽는 값이 바뀔 때만 |
 | registry 에 항목이 들어오고 나감 | 그 키퍼 |
-| `runtime.toml` 배정 트랜잭션, 기본 경로 변경, 설정 다시 읽기 | 배정이 닿는 키퍼마다. 기본 경로는 모든 키퍼 |
+| `runtime.toml` 배정 트랜잭션, 기본 경로 변경, 설정 다시 읽기(catalogue publication 하나하나) | 모든 행(`keeper_roster_changed`). 행의 provider 쉼이 lane 후보, runtime, binding 까지 catalogue 전체를 읽어서, 배정 id 만 비교하면 놓친다 |
 | 실행 영수증 쓰기 | 그 키퍼 |
 | `Candle_ledger.update`, Candle 설정 변경 | 원장 쓰기가 닿는 키퍼마다. 설정은 모든 키퍼 |
 | `Keeper_autonomous_stream.create`·`finish` | 그 키퍼 |

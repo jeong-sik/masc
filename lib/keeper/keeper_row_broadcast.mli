@@ -34,6 +34,6 @@ val roster_changed_event : string
 val roster_changed : base_path:string -> unit
 (** [{"type":"keeper_roster_changed","ts_unix":...}]: a value every row of
     [base_path]'s roster reads changed, so a reader rereads the whole roster
-    with [fresh=true]. {!Server_runtime_assignment_broadcast} sends it when the
-    default runtime route moves. It goes to the same observers as {!changed}
-    and fails the same way. *)
+    with [fresh=true]. {!Server_runtime_assignment_broadcast} sends it on
+    each runtime catalogue publication. It goes to the same observers as
+    {!changed} and fails the same way. *)

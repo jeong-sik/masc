@@ -1,11 +1,9 @@
-(* RFC-0481 §3.2: a roster row shows the Keeper's runtime id, so a runtime
-   catalogue that moves a Keeper's route announces that row, and one that moves
-   the default route announces every row. *)
+(* RFC-0481 §3.2: every runtime catalogue publication tells the workspace's
+   roster readers that every row may have moved. The fiber starts before any
+   runtime is loaded, as the server bootstrap installs it. *)
 
 open Alcotest
 open Masc
-
-module Broadcast = Server_runtime_assignment_broadcast
 
 let runtime_toml ~default ~assignments =
   Printf.sprintf
@@ -54,69 +52,53 @@ let load ~base_path ~default ~assignments =
   | Error error -> failf "runtime.toml did not load: %s" error
 ;;
 
-let announcement = testable (fun ppf -> function
-  | Broadcast.Every_row -> Format.pp_print_string ppf "every row"
-  | Broadcast.Rows keepers -> Format.fprintf ppf "rows %s" (String.concat "," keepers))
-  ( = )
-;;
+(* Long enough for the daemon to wake on an idle machine; a signal that does
+   not come in this time is reported as missing. *)
+let signal_wait_s = 5.0
 
-let test_announcement_names_moved_rows () =
-  let routes default_route assignments = { Broadcast.default_route; assignments } in
-  let before = routes "p.m1" [ "alpha", "p.m2"; "gamma", "p.m2" ] in
-  check announcement "moved, added and dropped assignments are those rows"
-    (Broadcast.Rows [ "alpha"; "beta"; "gamma" ])
-    (Broadcast.announcement ~before
-       ~after:(routes "p.m1" [ "alpha", "p.m1"; "beta", "p.m2" ]));
-  check announcement "an unchanged catalogue moves no row" (Broadcast.Rows [])
-    (Broadcast.announcement ~before ~after:before);
-  check announcement "a moved default route is every row" Broadcast.Every_row
-    (Broadcast.announcement ~before ~after:(routes "p.m2" before.assignments))
-;;
-
-let test_reloads_announce_moved_rows () =
+let test_each_publication_announces_every_row () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
   let base_path = Filename.temp_dir "runtime-assignment-announce-" "" in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
-    load ~base_path ~default:"p.m1" ~assignments:[ "alpha", "p.m2" ];
-    let heard = ref [] in
-    let id = "runtime-assignment-announce" in
-    Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
-      ~callback:(fun (event : Sse.external_event) ->
-        match
-          Json_util.assoc_string_opt "type" event.ext_payload,
-          Json_util.assoc_string_opt "name" event.ext_payload
-        with
-        | Some kind, Some name when String.equal kind Keeper_row_broadcast.row_changed_event ->
-          heard := ("row", name) :: !heard
-        | Some kind, None when String.equal kind Keeper_row_broadcast.roster_changed_event ->
-          heard := ("roster", "") :: !heard
-        | (Some _ | None), (Some _ | None) -> ())
-      ();
-    Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
-      Eio.Switch.run @@ fun sw ->
-      Broadcast.install ~sw ~base_path;
-      let settle () =
-        for _ = 1 to 20 do Eio.Fiber.yield () done;
-        let taken = List.rev !heard in
-        heard := [];
-        taken
-      in
-      let signals = list (pair string string) in
-      load ~base_path ~default:"p.m1" ~assignments:[ "alpha", "p.m1"; "beta", "p.m2" ];
-      check signals "a reload that moves two routes announces those rows"
-        [ "row", "alpha"; "row", "beta" ] (settle ());
-      load ~base_path ~default:"p.m1" ~assignments:[ "alpha", "p.m1"; "beta", "p.m2" ];
-      check signals "a reload that moves nothing announces nothing" [] (settle ());
-      load ~base_path ~default:"p.m2" ~assignments:[ "alpha", "p.m1"; "beta", "p.m2" ];
-      check signals "a moved default route is a roster change" [ "roster", "" ] (settle ())))
+  let original = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore original;
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+      let heard = Eio.Stream.create max_int in
+      let id = "runtime-assignment-announce" in
+      Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+        ~callback:(fun (event : Sse.external_event) ->
+          match Json_util.assoc_string_opt "type" event.ext_payload with
+          | Some kind when String.equal kind Keeper_row_broadcast.roster_changed_event ->
+            Eio.Stream.add heard ()
+          | Some _ | None -> ())
+        ();
+      Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+        Eio.Switch.run @@ fun sw ->
+        Server_runtime_assignment_broadcast.install ~sw ~base_path;
+        let expect_roster_change label =
+          match Eio.Time.with_timeout clock signal_wait_s (fun () -> Ok (Eio.Stream.take heard)) with
+          | Ok () -> ()
+          | Error `Timeout -> failf "%s: no roster change" label
+        in
+        load ~base_path ~default:"p.m1" ~assignments:[ "alpha", "p.m2" ];
+        expect_roster_change "the first load, with nothing loaded before it";
+        load ~base_path ~default:"p.m1" ~assignments:[ "alpha", "p.m2" ];
+        expect_roster_change "a reload with the same routes, since lane walks may move";
+        Runtime.enter_setup_required ~reason:Runtime_startup_state.Config_missing ();
+        expect_roster_change "entering setup-required";
+        load ~base_path ~default:"p.m2" ~assignments:[];
+        expect_roster_change "a load after setup-required, so the fiber outlived it";
+        check int "one signal per publication" 0 (Eio.Stream.length heard)))
 ;;
 
 let () =
   run "runtime_assignment_announce"
-    [ ( "announcement"
-      , [ test_case "names the rows a catalogue moved" `Quick test_announcement_names_moved_rows ] )
-    ; ( "reload"
-      , [ test_case "reloads announce the moved rows" `Quick test_reloads_announce_moved_rows ] )
+    [ ( "publication"
+      , [ test_case "each publication announces every row" `Quick
+            test_each_publication_announces_every_row ] )
     ]
 ;;

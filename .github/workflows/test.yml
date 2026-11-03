@@ -399,15 +399,42 @@ jobs:
             --color B60205 \
             --description "야간 테스트 레인이 실패한 실행" \
             --force
+          # Failing suites first: per-suite verdicts live only in the runner
+          # log, and an issue that only links the run leaves the next reader
+          # downloading artifacts to learn which suite broke. Then Dune
+          # errors for the compile-break case. Every extraction is guarded:
+          # a digest that finds nothing says so instead of failing the step
+          # or printing a misleading empty block.
+          runner_log="${RUNNER_TEMP}/ci-run-tests.log"
+          dune_log="${RUNNER_TEMP}/test-suite.log"
+          failing='(no failing-suite lines extracted; see the suite-runner-log artifact.)'
+          if [ -s "$runner_log" ]; then
+            suites=$(grep -a -E '\[test-suite\] FAIL|\[FAIL\]|FAIL native\.fixture' "$runner_log" | head -n 30 || true)
+            [ -n "$suites" ] && failing="$suites"
+          fi
+          errors='(no Dune error block extracted.)'
+          if [ -s "$dune_log" ]; then
+            hits=$(grep -a -B4 -A8 '^Error' "$dune_log" | awk 'BEGIN{RS="--\n"; ORS=""} !/failed to delete sandbox/ {print $0 "--\n"}' | grep -av '^--$' | head -n 60 || true)
+            [ -n "$hits" ] && errors="$hits"
+          fi
+          last_green=$(gh run list --workflow test.yml --event schedule --branch main --status success --limit 1 --json headSha,url --jq '"\(.[0].headSha[0:9]) \(.[0].url)"' 2>/dev/null || true)
+          [ -z "$last_green" ] && last_green='(no successful scheduled run found)'
           # The taxonomy workflow comments on any issue with no declaration
           # block, so this body carries one. A red lane is a ci defect that
           # degrades and whose root is that nothing said so.
-          body=$(printf '%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+          body=$(printf '%s\n\n%s\n%s\n%s\n\n%s\n\n%s\n%s\n%s\n\n%s\n\n%s\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
             "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
             "- 실행: ${RUN_URL}" \
             "- 커밋: \`${GITHUB_SHA}\`" \
-            "스위트별 판정은 그 실행의 \`suite-runner-log\` 아티팩트에 있습니다." \
-            "단계 출력에는 마지막 120줄만 남습니다." \
+            "- 마지막 green nightly: ${last_green}" \
+            "실패 스위트:" \
+            '```' \
+            "${failing}" \
+            '```' \
+            "Dune 에러:" \
+            '```' \
+            "${errors}" \
+            '```' \
             '```masc-triage' \
             "kind: defect" \
             "area: ci" \

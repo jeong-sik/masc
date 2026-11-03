@@ -1,18 +1,28 @@
 name: Main minimal build
 
 on:
+  # A red main must surface on the push that broke it, not at the next
+  # half-hour tick: with no push signal, suite results vanish behind a
+  # broken build and pre-existing suite regressions stay hidden.
+  push:
+    branches: [main]
   schedule:
     - cron: '7,37 * * * *'
   workflow_dispatch: {}
 
 permissions:
   contents: read
+  # The failure step below files or updates the fixed main-health issue.
+  # Successful runs never reach it, so this scope is unused on green paths.
+  issues: write
 
 # Serialize before the receipt lookup. A queued run rechecks the successful
-# receipt after the previous build finishes; never cancel a working build.
+# receipt after the previous build finishes. Push runs cancel their
+# predecessors: only the latest main matters, and intermediate mains are
+# stale signal. Scheduled runs never cancel a working build.
 concurrency:
-  group: main-minimal-build
-  cancel-in-progress: false
+  group: main-minimal-build-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   build:
@@ -89,9 +99,11 @@ jobs:
         if: steps.receipt.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          # pipefail keeps Dune's exit status through tee; the log feeds
+          # the failure digest and the fixed issue below.
           opam exec -- dune build --root . \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
-            bin/deployment_preflight_helper.exe
+            bin/deployment_preflight_helper.exe 2>&1 | tee "$RUNNER_TEMP/main-build.log"
 
       # Type-check the whole tree, tests included, so a broken test tree is
       # caught on main instead of at release-candidate time. It also runs
@@ -101,7 +113,7 @@ jobs:
         if: (success() || failure()) && steps.receipt.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          opam exec -- dune build --root . @check
+          opam exec -- dune build --root . @check 2>&1 | tee -a "$RUNNER_TEMP/main-build.log"
 
       - name: Write the receipt
         if: success() && steps.receipt.outputs.cache-hit != 'true'
@@ -136,3 +148,81 @@ jobs:
               echo "Type-check of the whole tree (dune build @check; tests compiled, not run): $CHECK_OUTCOME"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # A red build used to surface only as a red job in the Actions tab:
+      # the nightly suite lane files an issue, but nothing did for the
+      # build lane, so a broken build silently masked every suite result
+      # behind it. Extract the Dune errors here and file them below.
+      # Every extraction is guarded: a digest that finds nothing says so
+      # instead of failing the step or printing a misleading empty block.
+      - name: Summarize the build failure
+        if: always() && steps.receipt.outputs.cache-hit != 'true'
+        run: |
+          {
+            echo "## Build failure digest"
+            log="$RUNNER_TEMP/main-build.log"
+            if [ ! -s "$log" ]; then
+              echo 'extraction unavailable: no build log (setup failure or cache hit); see the step output above.'
+            else
+              # Drop whole blocks about sandbox deletion: runner-hygiene noise
+              # (see #45218), not build signal. Verified against real logs.
+              hits=$(grep -a -B4 -A8 '^Error' "$log" | awk 'BEGIN{RS="--\n"; ORS=""} !/failed to delete sandbox/ {print $0 "--\n"}' | grep -av '^--$' | head -n 80 || true)
+              if [ -z "$hits" ]; then
+                echo "extraction found no '^Error' block; see the full step output above."
+              else
+                printf '```\n%s\n```\n' "$hits"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File or update the main-build-health issue
+        if: (failure() || cancelled()) && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+          PRODUCT_OUTCOME: ${{ steps.product.outcome }}
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+        run: |
+          set -euo pipefail
+          label=main-health
+          gh label create "${label}" \
+            --color d93f0b \
+            --description "Nightly main health report" \
+            --force
+          log="$RUNNER_TEMP/main-build.log"
+          digest='(digest unavailable; see the run step summary and full logs.)'
+          if [ -s "$log" ]; then
+            hits=$(grep -a -B4 -A8 '^Error' "$log" | awk 'BEGIN{RS="--\n"; ORS=""} !/failed to delete sandbox/ {print $0 "--\n"}' | grep -av '^--$' | head -n 60 || true)
+            [ -n "$hits" ] && digest="$hits"
+          fi
+          last_green=$(gh run list --workflow main-minimal-build.yml --branch main --status success --limit 1 --json headSha,url --jq '"\(.[0].headSha[0:9]) \(.[0].url)"' 2>/dev/null || true)
+          [ -z "$last_green" ] && last_green='(no successful run found)'
+          # The taxonomy workflow comments on any issue with no declaration
+          # block, so this body carries one, copied from the nightly lane.
+          body=$(printf '%s\n\n%s\n%s\n%s\n%s\n\n%s\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+            "main 최소 빌드가 \`${JOB_STATUS}\` 로 끝났습니다." \
+            "- 실행: ${RUN_URL}" \
+            "- 커밋: \`${GITHUB_SHA}\`" \
+            "- operator exes: \`${PRODUCT_OUTCOME}\` / @check: \`${CHECK_OUTCOME}\`" \
+            "- 마지막 green: ${last_green}" \
+            '```' \
+            "${digest}" \
+            '```' \
+            '```masc-triage' \
+            "kind: defect" \
+            "area: ci" \
+            "impact: degrades" \
+            "must-do: false" \
+            '```')
+          existing=$(gh issue list --state open --label "${label}" \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+            echo "commented on #${existing}"
+          else
+            gh issue create --label "${label}" \
+              --title "main 빌드가 빨갛습니다" \
+              --body "${body}"
+          fi

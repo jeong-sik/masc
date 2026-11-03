@@ -2,6 +2,441 @@
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-11-03
+
+### Known issues
+
+- 64 pull requests merged to main after the 0.67.0 candidate base
+  (0d587ddad3b) carry no changelog entry, so this section does not describe
+  them: #47185, #47206, #47210, #47219, #47243, #47250, #47269, #47284,
+  #47297, #47299, #47304, #47306, #47320, #47325, #47344, #47355, #47364,
+  #47387, #47408, #47410, #47416, #47420, #47441, #47451, #47455, #47460,
+  #47468, #47500, #47510, #47517, #47521, #47526, #47530, #47535, #47557,
+  #47570, #47594, #47595, #47596, #47650, #47653, #47664, #47675, #47676,
+  #47677, #47728, #47779, #47781, #47802, #47817, #47848, #47856, #47858,
+  #47862, #47874, #47877, #47885, #47894, #47910, #47915, #47916, #47953,
+  #47954, #47955.
+
+### Upgrade notes
+
+- Update Dashboard and TUI clients with the server for the `inspect_path`, `nonregular` and `mirror_nonregular` tokens. Older binaries cannot decode new values recorded in Goal verification, Keeper turn-boundary or dependent Librarian evidence; review “Goal store path failures and rollback” in `docs/guides/DURABLE-STORE-HARD-CUT.md` before rolling back (#47613).
+- Docker, Kata and SSH Keeper proof scripts require a pinned `masc` binary
+  with `inspect-checkpoint`; an older binary is refused before the Keeper
+  workflow starts. (#47665)
+
+### Fresh state required
+
+- Operator apps move to `.masc/identity/apps/<client_group>.json`; enter them
+  again with `A` on the Identity tab or `POST /api/v1/keepers/oauth/client`.
+  The old `.masc/identity/<client_group>/` files are not read. A Keeper
+  attached before this change has no record of its login's client, so its
+  next renewal asks it to be attached again. (#47658)
+- Keeper turn records and official-client sessions that name the `admitted_scheduled_input` prompt block are not read, and the deploy preflight refuses the install while a turn record names it. Stop the server, delete `<base-path>/.masc/keepers/*/turn-records` and every official-client `session.json` that names the block, then install (#47806).
+
+### Added
+
+- Record a per-workspace claim on an Apple keeper's work volume. Dissolution
+  releases its claim and always keeps the work and build volumes: the last
+  recorded claim plus an empty owner listing cannot prove that no legacy,
+  adopted, or paused-unrecorded owner in another workspace needs them.
+  Fresh Apple provisioning stops if the claim helper fails or returns an
+  unexpected report. Dissolution refuses single-line release reports with
+  extra output (#47267, issue #47237).
+- Refuse claims markers outside the supported line format before adding or
+  releasing a claim. The helper requires `cmp` to detect changed bytes,
+  including embedded NULs, and refuses if that check is unavailable (#47267).
+- Refuse malformed or contradictory Apple volume inventory rows rather than
+  treating an unidentified volume as absent (#47267).
+- Add the `masc_sandbox_volume_gc` admin tool: it reports retired keepers'
+  Apple work and build volumes with a per-keeper reason (a container still
+  referencing the keeper, remaining claims-marker claimants, a local
+  registration), and with `execute` can reclaim build-only volumes with no
+  observed reference. Missing or empty markers keep work volumes because they cannot
+  exclude unrecorded owners; unreadable listings, markers, or a run without
+  an image also keep the affected volumes. A delete re-reads the inventory
+  at delete time and preserves a keeper whose shape changed, and past that
+  confirmation the platform's refusal to delete a referenced volume plus
+  the absence check settle the removal (#47276, issue #47237).
+- Add an offline Board posts inspection and explicit bootstrap/adoption library. Bind operator intent to physical workspace identity and complete raw content; preserve actual posts and guard publication receipts, uncertainty and reserved settlement exceptions. Live startup guard enforcement remains separate. (#47302)
+- Add `workspace-upgrade board-posts inspect`, `bootstrap` and `adopt`. Mutations require an explicit root/content intent and the configured host BasePath lease, with structured publication outcomes and attempted lease release. Inspection creates no files or lease. (#47303)
+- Preview remote images with colour cells when the terminal cannot display native graphics. (#47569)
+- The Keeper Turn Inspector has an **입력과 실행** tab linking the selected turn's intake, runtime choices, prompt views, Skill calls and tool results. Missing records, repeated attempts and incomplete scans remain visible. Skill observations retain their original trace scope and distinguish physical async actions from causal links. Guide: docs/KEEPER-USER-MANUAL.md, "Follow an input through a turn" (#47625).
+- Query Skill activity by the exact receiving Keeper turn across retained origin traces. The read-only projection keeps original activation frames, ledger revisions, physical result handoffs, causal actions and incomplete-read diagnostics together. Guide: docs/KEEPER-USER-MANUAL.md, "Follow an input through a turn" (#47639).
+- The Keeper Identity tab shows the OAuth callback the server would send
+  providers to, following `MASC_HTTP_BASE_URL` or the bound address, and
+  marks services with an operator app on file. Pending-login prompt rows are
+  now counted when the tab scrolls to the cursor row
+  ([usage guide](https://github.com/jeong-sik/masc/blob/main/docs/KEEPER-IDENTITY-MANUAL.md)) (#47659).
+- `masc inspect-checkpoint --base-path PATH --keeper NAME` prints a decoded
+  canonical checkpoint and its closed-message boundary. Its output can contain
+  conversation context and tool results. See the [SSH Keeper proof guide](docs/evidence/2026-10-24-remote-ssh-keeper/README.md). (#47665)
+- Turn Inspector joins queue outcomes to exact turn-entry source snapshots and admission revisions, preserving failed attempts, partial reads and unresolved receipts. Guide: `docs/KEEPER-USER-MANUAL.md`, "Follow an input through a turn" (#47674).
+- Report a refused ego task space in the browser lane connection inventory as an `ego_user_owned_space` issue with the Space name, its user-owned ids and the observation time, instead of a silent empty client list. (#47695)
+- Reclaim an ego task space whose task ended while the operator held it with `take_over` on the live lane without a client id: the worker claims the space through the SDK claim call and reconnects without a restart, answering with a `reclaimed` receipt. (#47696)
+- Support generation-bound SSE Observer delivery and replay. (#47722)
+- A microVM keeper's TOML can set `microvm_delivery = "agent_socket"`
+  (default `exec_per_request`; Apple `container` only). Its guest then boots
+  with the shim's agent as the first process, publishes the agent's socket at
+  `<base>/.masc/microvm/agent/`, and receives the keeper's requests through
+  that socket instead of one `container exec` per request. Before an agent
+  guest that matches its plan is adopted, one probe goes through the socket;
+  a guest whose agent does not answer is replaced. Guide:
+  `docs/KEEPER-USER-MANUAL.md`, "One isolated Apple microVM Keeper" (#47919,
+  #47939).
+
+### Changed
+
+- Extract private Board voting and vote-log effects from the aggregate module,
+  preserving public APIs, write-ahead ordering and snapshot settlement policy. (#47378)
+- Board persistence and Keeper/schedule fixtures explicitly initialize each fresh Board-writing root before its first store or live owner. Restarts, malformed-source checks, deletion retries, vote ledgers and replay assertions retain the same initialized source without preparing again. (#47458)
+- The transferred schedule retry assertion includes the runner's existing due-for-retry disposition while still checking the exact resolved Keeper and shutdown operation. (#47458)
+- Direct Board producer and healthy reader fixtures explicitly initialize their fresh source before the first store or live owner. Pure and negative subjects retain their setup, restarts reuse the initialized source, and the MSX fixture declares the existing shared preparation dependency. (#47466)
+- The standalone Keeper Board ACK probe installs the actual native execution journal runtime under its root switch before driving native requests, matching server ownership and the existing checkpoint probe. (#47466)
+- Goal verification can retry a matching pending request or reconcile its verdict while preserving submitted evidence; changed evidence is refused while verification is active (#47185, #47612).
+- Refresh Keeper waiting inventory when schedule changes are published. (#47635)
+- Revalidate pending confirmations on changes and expiry deadlines. (#47636)
+- Keeper Turn Inspector follows asynchronous Skill results across original traces using the physical receiving turn, preserving original activation frames, ledger provenance and incomplete-scan gaps (#47649).
+- The TUI no longer re-reads the open Keeper chat history on the 2s cadence; appended turns and revalidations owe the chat one read instead (#47654).
+- CI의 Dune alias 검사에서 실행 명령을 로그에 남겨 빌드와 테스트 실행 단계를 확인할 수 있게 해요. (#47666)
+- Keeper review guidance in `config/prompts/keeper.md` now carries the operator's 2026-11-02 review text, so the live `keeper` prompt override can be cleared and the file is the only source of the Keeper preamble again. (#47667)
+- The TUI Fusion view no longer re-reads on the 2s cadence; it re-reads on `fusion_run_status` and retries a failed read with backoff (#47668).
+- A lane fact the worker answered whole no longer blocks automatic browser selection: with the refusal alone automatic browse answers `no_available_browser`, and a healthy client of another transport on the same worker is still chosen with the refusal listed beside it. (#47695)
+- The Identity tab marks each service as attached (filled) or not (hollow),
+  lists attached services first with a blank row before the rest, and
+  takes `v` to show all, attached or unattached services and `o` to switch
+  between attached-first and declared order. The cursor stays on its
+  service when a reading, view or order moves its row. (#47795)
+- `docs/rfc/RFC-librarian-lifecycle.md` section 4.10 says how Muse follows the
+  boundary rule. A fresh session the provider refused leaves the refusal in
+  that turn's record, and the next fresh session on the same runtime starts
+  strictly past the refused start: at this turn's boundary, else at the newest
+  atom. The implementation-state notes there and in the window RFC now match
+  the code, including where the two lanes still differ. (#47801)
+- A Keeper woken by a Board event or scope message is still told it cannot end the turn silently, but the wake clause no longer offers "leave the reason in one line if you do not handle it" as the way out (#47807).
+- `docs/rfc/RFC-deferred-contextual-memory.md` and
+  `docs/rfc/RFC-0456-librarian-output-contract.md` say that each Librarian
+  claim cites the observations it relied on (`evidence`), and the absorb gate
+  asks each pair with only those observations. A pass no longer fails as a
+  whole for size; a pair whose cited observations do not fit is asked the
+  pair-only question and recorded as such. (#47847)
+- 백로그 RFC 문서에서 도구 실행 뒤 요청에 다시 싣는 블록 목록을 지금 코드에 맞춰 네 종류(`Keeper_instructions`, `Active_goals`, `Completion_authority`, `Operator_note`)로 고쳤어요. (#47850)
+- When the deployment store check refuses stored state, the guide `docs/guides/DURABLE-STORE-HARD-CUT.md`, the preflight helper and `install-local-build.sh` give the fresh-state steps as: stop the server, delete what the change names, run the check again, install. Lane Add-on `fresh state` lines say delete, and a refused tool request owner names its whole scope: the owner record directory and the request body directory (#47866).
+- Librarian claims answer `evidence`: the conversation positions shown as
+  `turn=N`, the tool observation indexes the prompt now prints, and whether
+  the counterpart block or the historical task contexts were used. An answer
+  citing an observation its input does not have is refused. Fresh state: this
+  binary reads no Librarian request record stored before it (the
+  `keeper-librarian` scopes in `lane-addons/tool-request-owners`); stop the
+  server, delete those records, and install. (#47873)
+- Keeper prompts list each Active Goal's latest review, latest measurement
+  and `[yours]` or link-unreadable marker under a new `### Goal Observations`
+  section instead of on the Active Goals rows. The Active Goals block in the
+  System prompt now changes only when a Goal is created, updated or changes
+  phase, so a measurement or a Task claim no longer sends the whole history
+  uncached on the next turn's first request for agent-core Keepers. Requests
+  after a tool call on OpenAI-compatible providers no longer carry the
+  latest review or measurement; the Goal list and criteria stay. (#47879)
+- `validate-stores` proves a Librarian payload forest once per scan instead of once for every tool request owner record. Only a proof that passed is kept, so a record that depends on a broken forest is still refused for the same reason (#47889).
+- `deployment_preflight_helper.exe validate-stores` gains `--jobs N`, which reads up to N stores at once, each in its own process. The default stays 1, reading one store after another as before. The report prints in store order for every N (#47890).
+- The Librarian absorb gate asks each pair with only the observations its
+  claim cites. A claim that cites nothing, or whose citations do not fit the
+  request boundary, is asked the pair-only question, and every verdict records
+  how it was asked. A pass no longer fails as a whole for size. Fresh state:
+  this binary reads no Librarian request record stored before it (the
+  `keeper-librarian` scopes in `lane-addons/tool-request-owners`); stop the
+  server, delete those records, and install. (#47904)
+
+### Removed
+
+- Remove TUI values that nothing called, and the private helpers only they used (#47682).
+- Autonomous Keeper turns no longer carry the turn-entry scheduled admission block, and the wake text, `keeper.md`, `pr-review-routing.md` and the sample reviewer config lose the six sentences that told the model not to widen, merge or resume scheduled work. The wake text returns to its wording from before the scheduled-scope change. Schedule request text still arrives through the scheduled wake rows (#47806).
+
+### Fixed
+
+- Restrict comment discovery and durable attention candidate consumption to
+  public and internal Board threads, and preserve the recorded audience during
+  comment routing and Keeper input assembly. Queued post creation events retain
+  their original content when a later edit changes the audience; comment,
+  reaction and vote notifications omit parent content without a recipient
+  binding. Retain queued Board stimuli and judged comment candidates when the
+  posts source cannot establish visibility or absence, and refuse a comment
+  append when its parent source is known to be unavailable. (#46949)
+- Read independent counterpart observations before advancing past untagged
+  official client turns, and report the boundary and cursor coordinates when
+  a non-monotone counterpart interval stops a pass. (#46950)
+- Explicitly refuse capacity-limited counterpart-only input while retaining
+  the complete source, progress and external acknowledgements. (#46950)
+- Keep non-capacity failures from every executed walk visit when diagnosing
+  counterpart-only input refusals. A later input-capacity refusal cannot hide
+  an earlier timeout, output limit or incomplete answer. (#46950)
+- Refuse new history and floor preparations with counterpart input when their
+  resolved Librarian prompt omits its substitution, while preserving strict
+  restoration of earlier captured prompts. (#46950)
+- Apply the same input check to fresh direct continuity and volatile Memory
+  questions without changing Context-only or prompt-sizing paths. (#46950)
+- Retain definite counterpart-only capacity refusals across ticks and restart
+  instead of reminting the same model request. Explicit semantic reconfiguration
+  permits another attempt while preserving refused configurations and source;
+  release also requires the later frontier and external ACK to pass, and a
+  validated completed request selecting the same original counterpart sources
+  and projections in order. Keep that request and its Gate until the refusal
+  leaves the live inventory, even if a later request replaces its range receipt.
+  Also retain finished requests and their Gates when their selected sources
+  may overlap only part of that refused input; this does not prove coverage.
+  If no completed request provides that evidence, the refusal remains; this
+  change does not provide a separate recovery path for it. (#46950)
+- Block unfinished retained history/floor effects whose frozen question omitted
+  counterpart input, including receipt-proved publication with an unsettled ACK.
+  Preserve historical restoration and pending/unknown observation without
+  rewriting or replaying the original question. (#46950)
+- Stop the rest of a Librarian wake after an error classified as
+  `External_cursor_failed`, leaving continuity and cleanup for a later wake
+  instead of immediately rereading an uncertain cursor. (#46950)
+- Scale auxiliary counterpart deduplication keys with the smaller chat or
+  external input; the complete log read and durable snapshot remain. (#46950)
+- Reject backwards or identity-free advancing external cursor preparations
+  before recovering a pending acknowledgement. If a pending preparation
+  exists, also reject a range observed as already committed before recovering
+  that pending cursor. (#46950)
+- Check ordinary Board post policy and sub-board slug uniqueness before appending, serialized with same-store policy mutations, so a refused creation needs no orphan cleanup. (#47178)
+- Refuse hearth-dependent post and comment publication with an I/O error when the sub-board policy source loaded partially; unscoped posts remain independent. (#47178)
+- Keep all Board persistence files and per-write Keeper recipient reads in their captured workspace after an ambient base-path change; refuse server startup against a different retained Board workspace. (#47192)
+- Anchor relative workspace paths before resolving missing directories so later cwd changes cannot redirect persistence or reject same-root initialization. (#47192)
+- Refuse Board posts writes before an explicit complete load or after stale, partial, missing-after-present or unsettled source observations. Bind every posts append and replacement to the exact captured source snapshot. (#47224)
+- Preserve known posts success and remaining snapshot obligations when descriptor cleanup fails, and propagate reserved cleanup exceptions after Board state, persistence and Fusion locks are released. (#47224)
+- Preserve Fusion replay and later creation when a persistence observer raises a reserved exception after commit. (#47224)
+- Retain the successful Missing read's cleanup diagnostic when a previously observed posts source disappears, and rethrow reserved cleanup after releasing Board locks. (#47224)
+- Let pending posts deletion retry after a temporary nonregular-file obstruction is removed, while still rejecting changed source bytes through exact snapshot comparison. (#47224)
+- Inspect Board posts during Keeper preflight without creating workspace directories or sibling lock metadata. Refuse aliases, multiple hard links, observed source drift and torn rows while preserving separate descriptor-settlement diagnostics. (#47268)
+- Require actual leaf absence before stable JSONL transactions accept a Missing precondition. Refuse dangling data symlinks without replacing the link during append, rewrite, recovery or purge, retaining primary refusal and descriptor-settlement evidence. (#47282)
+- Bind Board stores and initialization to an explicit existing BasePath. Reject foreign `.masc` aliases before installing recipient lookup or starting a flusher, while allowing aliases of the same physical BasePath. (#47388)
+- Retain physical workspace observations across reloads and persistence retries. Refuse replaced roots and state directories in posts, auxiliary loaders and directory preparation; preserve original reserved read-cleanup failures after a Missing-source refusal. (#47388)
+- Capture the indexed sort fixture's owned BasePath while keeping its index-only lifecycle free of persisted-source initialization. (#47388)
+- Require a real initialized guard and complete Present posts source before live Board posts writes; retain accepted guard history across failed reads and revalidate it for posts and auxiliary writers. (#47511)
+- Preserve unadmitted rows for display, rebuild both feed indexes after complete/partial projection, and keep unknown posts effects unsettled without further source IO. (#47511)
+- Retain ordered filesystem diagnostics and reserved cleanup causes across Board locks; report the actual built-in live policy in offline tooling. (#47511)
+- Preserve state-mutex poisoning for uncertain model projection, count observed reserved diagnostics before propagation, and stop snapshot batches at the first reserved settlement while retaining unattempted retry work. (#47511)
+- Keep exact Fusion-row recognition available from unadmitted display data without granting source authority or a new publication receipt. (#47511)
+- Bind Board detail and comment-page reads to the observed server workspace so a different workspace cannot replace their content. 가이드 없음(문서 없음) (#47518)
+- Redraw open colour-cell image previews after terminal resize and preserve their observed source across partial refreshes. (#47560)
+- Let deployment preflight inspect a retained Librarian answer using its original consumer shape when strict decoding rejects an extra working-context field, while still requiring the gate proposal to match (#47567).
+- Keep workspace admission for HTTP/2 artifact-byte reads after the shared helper is renamed. (#47574)
+- Update SSE queue transport metrics as deliveries are enqueued and drained. (#47576)
+- Read named model declarations from the published catalog snapshot in runtime discovery and setup, restoring compilation after removal of the old global catalog API. (#47577)
+- Correct Ego connection documentation to distinguish name and numeric Space references, SDK-session retirement, and explicit task completion with native retention receipts (#47578).
+- Deliver changed Keeper System instructions to resumed Codex threads before the next turn, preserving the conversation and completed effects. (#47580)
+- Restore compilation of Goal verification, Candle payout, and Exact output paths after the Goal stack changes. (#47585)
+- Restore compilation of Goal retry error handling and the confirmation screen after the Goal stack changes. (#47588)
+- Allow explicit Goal Space unbinding after the Goal is deleted, so its Space can be assigned again. Unbinding still takes the Goal lock before the binding-store lock, refuses unreadable source data and preserves committed mirror warnings. Usage: call `masc_browser_session` with `action=unbind_goal` and the original `goalId`; this changes only binding metadata. (#47591)
+- Fix fragile TUI Goal confirmation and Candle payout matches, and server identity field typing (#47592).
+- Restore TUI Goal confirmation compilation with exhaustive revalidation matches and an explicit unknown runtime identity during Observer recovery (#47596, #47597).
+- Keep host-generated unchanged-section notices from making official-client context attribution appear partial. (#47599)
+- Preserve unrelated TUI session events across identical Observer connection failures while retaining changed failures and reconnects. (#47604)
+- Preserve whitespace and complete control/JSON escapes in wrapped TUI approval details, and disclose when the actual pane is too narrow. (#47605)
+- Show colour-cell image previews inside tmux when graphics passthrough is disabled, including after terminal resize. (#47608)
+- Preserve Keeper wake signals received during an active turn so pending scheduled work can run after that turn finishes (#47611).
+- Report dangling Goal store paths as unavailable rather than treating them as an empty store, and leave an observed recovery-mirror symlink in place after a primary write (#47613).
+- Report nonregular Goal paths observed while reading as unavailable without reading them, including a FIFO reached through a recovery-mirror link (#47613).
+- Keep exact turn-entry stimulus references and the selected channel visible in Keeper runtime traces. Source kinds are recorded without copying input payloads. The public projection exposes only the source identity, snapshot, admission revision and admission clock; intake remains distinct from dispatch and acknowledgement (#47614).
+- `keeper_lane_status` tells a microVM Keeper whose guest the runtime observes as not running that its next Execute tries to start the guest, with no operator action, so a Keeper whose guest is gone can start it again. Other microVM attach failures and an undeclared OpenSSH endpoint keep an operator action. (#47616)
+- Preserve incremental build output after local installation instead of automatically cleaning it, and remove an unused deployment preflight helper probe. Build retention is now the default; remove `--keep-build` from existing commands (#47617).
+- Reuse verified original request body decoding within each deployment preflight scope after freshly read bytes match exactly, while preserving missing, changed and unreadable body refusals. Report each store's scan start and elapsed time (#47618).
+- Report an unavailable Muse process exit status without inferring that the process was not reaped, including host-synthesized failed terminals. (#47622)
+- Make Goal Candle payout records easier to reach and refresh Work after Goal commits. (#47623)
+- Bound remote colour-cell image preparation and offer recovery of received originals when preparation fails. (#47624)
+- 서버 종료 hook의 제한 시간이 Keeper의 원래 결과 기록 시도를 중단해 Owner가 먼저 닫히던 경로를 고쳐요. (#47629)
+- The TUI re-reads its visible surfaces when the observer feed reopens without a complete replay (fresh, reset, resumed after a gap, or unscoped), instead of waiting for the next cadence tick (#47631).
+- Board 변경 뒤 Keeper 관측 코드가 컴파일되지 않던 오류를 고쳐요. 저장된 수신자 목록을 같은 공개 codec으로 읽고 쓰며, 잘못된 ID와 원본 읽기 실패를 구분해요. (#47634)
+- Revalidate stale schedule agendas and report lost relay events to workspace observers. (#47637)
+- Refuse malformed Apple network listing rows before deciding whether to create a Keeper policy network. (#47640)
+- `keeper_lane_status` no longer tells a microVM Keeper that its next Execute starts the guest when the guest is running, belongs to another workspace, or cannot be observed; those keep an operator action. The note stays for a guest the runtime observes as not running. (#47643)
+- Close endpoint group handles after a failed removal while preserving the original failure and notifying waiters. (#47645)
+- Show exact decoded bytes for approval input keys that can look alike. (#47648)
+- The open Keeper chat reads its history once more after a turn appended while a read was in flight, while it was scrolled into older rows or off screen, or after workspace identity recovery, and retries a failed history read with backoff instead of waiting for the cadence (#47651).
+- Keepers can discover delegation targets through the read-only roster tool, including coverage metadata for truncated listings (#47652).
+- Recover confirmation expiry observation after transient read or deadline failures. (#47655)
+- Preserve retries of dashboard SSE updates when replay publication fails. (#47656)
+- A Keeper OAuth login without an operator app registers a fresh client for
+  the callback the server answers at right then, so a login works after the
+  server's base URL changes or after the provider deletes an earlier client.
+  Renewal and revocation use the client that Keeper's login used, recorded
+  at `.masc/identity/clients/<keeper>/<provider>.json`. (#47658)
+- Disconnecting a Keeper whose login's client cannot be named (no record, or
+  one that cannot be read or used) sends no revoke request and records the
+  reason as `revocation.kind = "not_sent"`, instead of sending an empty
+  `client_id`. The TUI shows that outcome, and an unknown kind as unreadable.
+  (#47658)
+- Bound MCP catalog discovery and explicit tool continuations by one shared deadline, preserving fractional transport budgets. (#47661)
+- Bind installed Keeper smoke proofs to the pinned binary's canonical reader,
+  the exact successful tool result, a closed turn and a completed chat stream.
+  SSH restart evidence also checks that the earlier turn remains on the same
+  trace. (#47665)
+- Owner 입력 대기 테스트의 실행 예외를 테스트 부모에게도 전달해, 실패한 자식을 기다리며 멈추지 않게 해요. (#47669)
+- Let Gate approval details show decoded top-level string bytes and page through long inputs. (#47670)
+- Settle unknown Board posts writes in-process instead of trapping the store until restart: retain the pending write evidence and re-verify guard, path and cursor under the stable lock, proving landed bytes durable before admitting them (#47672).
+- Ten identity providers that accept only an RFC 8252 loopback redirect
+  (Asana, Canva, CircleCI, Prismic, RudderStack, Shortcut, Square,
+  Storyblok, Turso, Vercel) now get `http://127.0.0.1:<bound port>/api/v1/keepers/oauth/callback`
+  instead of the public base URL, which they refused at registration or at
+  the authorize step. A declaration says so with `callback = "loopback"`,
+  and the Identity tab tags those services. (#47680)
+- Report unavailable confirmation deadline observations instead of treating them as current. (#47684)
+- Preserve a grapheme that fits a narrow Markdown code row when its gutter would otherwise hide it (#47685).
+- Keep Memory publication and wake recovery with its owner during deployment preflight, including when the first snapshot is not yet present. Report a pending publication separately from rejected data (#47686).
+- custom action이 있는 OCaml 테스트의 실행파일을 alias 실행 전에 빌드해요. (#47688)
+- Owner 입력 대기 테스트에서 Timeout 메시지의 출처를 Agent Core의 `Recovery_instruction`과 맞춰요. (#47688)
+- Keep tool result text when malformed media is refused, and append the media diagnostic. (#47689)
+- Refresh dashboard waiting inventories after WebSocket readiness and workspace invalidations. (#47690)
+- Keeper chat rows are announced by the chat store that appends them, so queued HTTP user rows reach open transcripts and retries that append nothing are not announced; the chat-appended event no longer carries unused `blocks` (#47692).
+- A Keeper memory journal row is announced as `keeper_memory_journal_appended` once it is durable, so readers of the memory journal no longer wait for polling (#47699).
+- Keep missing, zero and invalid input observations distinct in the Context
+  inspector trend, and make page errors readable on narrow terminals. (#47702)
+- Bind dashboard waiting inventories to scoped SSE observations and report disconnected or retired state. (#47703)
+- The TUI reads the open chat again when its Keeper's memory journal gains a row, instead of waiting for the next refresh (#47704).
+- Refuse unavailable Memory snapshots and publication recovery failures during boot, even when quarantine is accepted. (#47711)
+- Retire TUI workspace authority when the Observer reconnects to a different server generation. (#47712)
+- Refuse unidentified Microsandbox volume-list rows before provisioning, preserving probe failure instead of treating a partial inventory as absence (#47713).
+- Keep Context explanations and forecast failures readable on narrow terminals,
+  and allow scrolling the missing-composition message in Proof. (#47716)
+- Keep missing Runtime costs, tokens and latency readings distinct from reported zero, and avoid incomplete lane totals in the cost dashboard (#47721).
+- TUI 가 메시지에서 PNG 경로를 찾을 때 `/tmp/화면1.png` 같은 한글 경로를 중간에서 자르지 않아요. 잘린 경로로 다른 파일을 열던 문제를 고쳤어요. 띄어쓰기 없이 낱말이 이름에 붙은 경우(`결과는/tmp/a.png`, `画像はscreenshot.png`)와 제어·서식 문자가 든 경로는 짧게 자르거나 합치지 않고 목록에서 빼요. URL 의 query·fragment 안 경로도 로컬 경로로 보지 않아요. (#47757)
+- The checkpoint contract accepts `raw_json_schema` and `named_json_schema` response formats, restoring checkpoint persistence and resume for structured-output sessions (#47778).
+- Sequence diagrams using `actor` declarations, left/right notes, `and`/`option` branches, or activation markers render again instead of falling back to raw source (#47780).
+- The TUI Identity tab keeps the cursor in view while the arrow keys move
+  it; the follow never ran on the Keeper detail surface. (#47795)
+- Settling a cancelled execution's spend reads only the cost ledger day files since the Keeper was created, so a new Keeper's first turn no longer reads the whole ledger before it dispatches (#47803).
+- Keep install-local-build temporary files cleaned up when the script receives HUP, INT or TERM, and align install/scripts tests with the current log wording and read-only build copies (#47804).
+- A Claude Code lane candidate whose host-side `auth status` probe cannot be
+  read, does not start, or does not answer in time now hands the turn to the
+  next candidate as a refusal before dispatch. The lane no longer ends on a
+  parse error, and the probe failure leaves no timeout or server-error mark on
+  the candidate for later turns (#47805).
+- The Observe box refuses io_uring_setup, io_uring_enter and
+  io_uring_register as it refuses socket(2), so IORING_OP_SOCKET no longer
+  opens a socket inside it. The supervised filter records each attempt in
+  the trailer's `observed_syscalls` (#47849).
+- PageUp/PageDown and Home/End on the TUI Identity tab move the cursor a
+  page or to the first and last service; they scrolled a pane the drawing
+  pulled straight back to the cursor. (#47861)
+- Drop a duplicated `libraries` line in `bin/dune` that broke Dune
+  parsing on main (`unclosed parenthesis at end of input`) (#47896).
+- Finish the install-local-build HUP/INT/TERM cleanup (trap is now installed and cleared for all four events) and make the runtime-install test fixture owner-writable on read-only build copies (#47905).
+- Atlassian logins now use the RFC 8252 loopback callback
+  `http://127.0.0.1:<bound port>/api/v1/keepers/oauth/callback`. An
+  organization's Atlassian admin keeps the list of redirect domains its MCP
+  server accepts, and the list Atlassian ships has 127.0.0.1 and localhost
+  but not this server's public host, so a login through the public callback
+  ended on "Your admin has blocked this domain" after consent. (#47907)
+- Datadog logins now use the RFC 8252 loopback callback
+  `http://127.0.0.1:<bound port>/api/v1/keepers/oauth/callback`. Datadog
+  registered a client that named this server's public callback and then
+  refused it at the authorize step after sign-in with "Mismatching redirect
+  URI", while logins through a loopback client completed. (#47925)
+- Nineteen identity providers whose authorize step sends the browser to
+  sign-in before it checks the redirect (Airtable, Algolia, Apify, Better
+  Stack, Braze, Flagsmith, incident.io, Make, Mintlify, Mixpanel, monday.com,
+  Netlify, PostHog, Prisma, Ramp, Rootly, Stripe, Upstash, Webflow) now use
+  the RFC 8252 loopback callback. Atlassian and Datadog behave the same way
+  and refused this server's public callback only after sign-in, while
+  loopback logins completed. Calendly, which behaves the same way, refuses a
+  loopback client at registration and keeps the public callback. (#47930)
+- `Main minimal build` compiles `bin/masc_tui_observer.ml` again: `chat_appended_keeper` names `Schedule_store_invalidated` and `Pending_confirm_invalidated` (#47951).
+- Add `Schedule_store_invalidated` and `Pending_confirm_invalidated` to the
+  exhaustive match in `chat_appended_keeper` (`bin/masc_tui_observer.ml`) so
+  `masc_tui` compiles on main again (#47952).
+- Fill the `input_provenance`/`provenance` fields #47874 added in 8 test
+  fixtures so `dune build @check` passes on main again (#47958).
+
+### Performance
+
+- Server startup no longer reads the settled owner archive to count live
+  original request bodies that no live record names. On a 16 GB archive that
+  read took 117 s per start whenever one such body existed. The
+  `original request body inventory` startup log line drops `archive=`, and a
+  live body that only a settled record names is now counted as unprotected
+  (#47950).
+
+### Documentation
+
+- Update Ego SDK coverage to describe the shared native typing producer and same-command completion verification, while keeping historical SDK captures and installed-runtime limits separate. (#47602)
+- RFC-0480 inventories the TUI reads that still poll on the 2s cadence, the observer events the TUI ignores, and the layers that move each surface to reads triggered by server change events (#47630).
+- An RFC proposes sending Apple microVM tool requests to a resident guest
+  agent over a `--publish-socket` unix socket instead of `container exec -i`,
+  with 2026-11-03 measurements of each transport (#47809).
+- RFC `goal-observations-leave-the-system-prompt`: the Active Goals block in
+  the System prompt keeps each Goal's id, title, criterion and verifying
+  marker, and its latest review, latest measurement and held-Task link marker
+  move to a new `Goal_observations` section in the first request's trailing
+  context, so a measurement or a claim no longer changes the System prompt
+  ahead of the history. (#47878)
+
+### Internal
+
+- Move sub-board CRUD into a private owner, remove the unused post-cleanup rewrite helper, and add seven real producer concurrency/reload scenarios. (#47178)
+- Require an explicit immutable Board state directory, thread stores through every persistence helper, and migrate test fixtures with five workspace isolation and startup scenarios. (#47192)
+- Bind the indexed sort fixture to its own temporary workspace without initializing a persisted posts source. (#47192)
+- Give persisted Board post, comment and audience JSON one private pure codec owner, retaining public decoders and existing validation diagnostics at the outer boundary. (#47212)
+- Add public codec scenarios for nested rejection stages, first-invalid-target handling and canonical audience sorting. (#47212)
+- Give posts persistence one private source owner, closed observation/outcome types and opaque captured snapshots; keep the existing row format and other file protocols. Exact append rereads prior bytes and makes no performance improvement claim. (#47224)
+- Share a pure persisted posts row decoder and one private diagnostic interpreter between the live loader and observational preflight. Keep inspection distinct from stable source snapshots and write admission. (#47268)
+- Share one closed absence classifier between stable transactions and the unique-regular observational reader; cover real Missing receipts and public Board publication refusal. (#47282)
+- Keep guard decoding, noncreating inspection and stable-snapshot publication in private owners behind an opaque interface, with real-file observation and explicit-effect contracts. (#47302)
+- Share the actual Cmdliner leaf with real command tests and exercise interrupted posts/guard publication, original reserved settlement exceptions, and same-process, alias and fresh-process lease contention. Live startup guard enforcement remains disabled. (#47303)
+- Separate Board persisted vote decoding, startup loading/count rebuilding and protected lazy-store lifecycle into three private owners. Reduce `Board_votes` from 1,196 to 930 lines while retaining public type identity, ordered partial-load handling and force-time workspace capture. (#47339)
+- Extend the existing persistence fixture to verify that reset defers root selection until first force and later root changes retain the same singleton. (#47339)
+- Move Board reaction queries, summaries and durable toggle staging into one private `Board_reactions` owner. Reduce `Board_core` from 708 to 442 lines while retaining its public API and the existing ordering, validation, persistence and rollback behavior. (#47351)
+- Move Board comment queries, write-ahead mutations and shared thread ordering into private `Board_comments`. Reduce `Board_core` from 442 to 166 lines while retaining its public signatures and existing validation, admission, append/commit and orphan-cleanup order. (#47362)
+- Remove the unused result-syntax import and replace stale fixed-size ownership prose with the actual private-module responsibilities. (#47362)
+- Move the opaque posts initialization guard codec into the existing Board
+  types library so live source types and offline initialization can share one
+  pure schema owner. JSONL framing and file effects remain with their callers. (#47428)
+- Add explicit test fixture preparation through the real offline Board
+  bootstrap or adoption operation, requiring that invocation to complete
+  before a store is constructed. Existing generic fixtures stay unchanged. (#47435)
+- Separate initialization guard row accumulation, framing validation and
+  diagnostic projection into one private pure module. Offline inspection keeps
+  its existing reads, hashing, decisions and exception settlement order. (#47440)
+- Initialize the isolated wire producers in Board initialization, offline and
+  preflight tests through explicit bootstrap before constructing their stores.
+  The observation, malformed-source and fault subjects retain their setup. (#47445)
+- Explicitly bootstrap schema writer and TTL post fixtures before their first
+  store, while retaining pure decoder cases and memory-only scheduler fixtures.
+  Reloads reuse the same initialized source and keep their existing assertions. (#47450)
+- test(board): Explicitly Bootstrap the real fresh Board source before consumer fixtures install live owners, bind HTTP/TUI readers, or publish verification notices. Keep generic helpers, malformed/foreign source subjects and retained reloads unchanged; scope notification fixtures to their own root and detach globals before cleanup. (#47478)
+- test(board): Split app transport checks into their own gateway fixture, seed reachable Fusion provenance through public author transfer, and wait for the actual upstream TUI response. Install the trial driver's captured Keeper recipients and native runtime, and verify informational results survive their checkpoint until a subsequent heartbeat completes and records durable ACKs. (#47478)
+- Isolate actual guard transactions from pure guard-row validation, use distinct immutable guard/posts IO seams, and exercise public admission, diagnostic and uncertainty boundaries with explicitly prepared positive fixtures. (#47511)
+- Update runtime and Keeper test fixtures for the current catalog, account and Antigravity interfaces, and link the required test helper. (#47582)
+- Repair the Kimi replay fixture and scope catalog test helpers to inline tests so development and release builds can compile (#47583).
+- Prepare an isolated Board in Goal verifier tests so stalled-review notices can be verified. (#47590)
+- Update Goal, TUI, HTTP and lock tests to use the current typed interfaces. (#47601)
+- Use typed Planning selection and canonical workspace binding for Goal confirmation (#47603).
+- Remove obsolete review guard code and guidance from the review workflow. (#47610)
+- Remove outdated review workflow requirements from draft RFCs. (#47615)
+- Merge compile run titles keep the PR number, the dispatched ref and the actor: the `run-name` value is quoted so YAML no longer reads ` #` as the start of a comment. (#47620)
+- `Exec_ssh_protocol.Relay` encodes and strictly decodes the chunks a
+  microVM guest agent sends over its published socket: hello, output and
+  exit, with a closed error type (#47851).
+- `masc-exec-shim --serve SOCKET UID:GID` runs the microVM guest agent: it
+  binds its socket in a root-only directory, re-mounts `/` read-only, drops
+  to the Keeper's uid and gid with `no_new_privs`, and serves one shim
+  request per connection with a hello read from the kernel (#47863).
+- `Keeper_guest_socket.run` connects to a microVM guest agent's published
+  socket, writes nothing until the agent's hello is accepted, replaces a
+  connection that ends or stays silent before its hello, and returns a typed
+  outcome (not sent, exited, timed out, broken) (#47867).
+- `Keeper_sandbox_remote` gives the microVM lane a delivery: `Exec_per_request`
+  (one `container exec` per request, the default) or `Agent_socket`, which
+  sends requests and probes through `Keeper_guest_socket.run`. A request the
+  agent never received records `Request_not_sent` (#47883).
+- `Keeper_microvm_boot_plan` carries `capabilities_added` and
+  `published_sockets`, renders them as `--cap-add` and `--publish-socket`,
+  and compares them with `container inspect` (`capAdd`, `publishedSockets`,
+  `useInit`). Empty lists leave the plan digest unchanged, so running Apple
+  guests are not replaced (#47899).
+- `test_keeper_microvm_boot_plan` reads the `container inspect` of a guest
+  that Apple container 1.6.1 booted from an agent plan's rendered argv, and
+  checks that the boot plan assessment reads it as `Matches_plan` (#47912).
+
 ## [0.67.0] - 2026-11-02
 
 - Require explicit JSON provider connection, auth and capability declarations.

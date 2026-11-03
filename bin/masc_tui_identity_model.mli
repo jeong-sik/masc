@@ -102,22 +102,53 @@ type identity_login_result =
 
 val identity_names : query:string -> string * string -> bool
 
-val identity_connectable
-  :  ?query:string
-  -> identity_provider list
-  -> (string * string) list
-
 val identity_row_state
   :  providers:identity_provider list
   -> id:string
   -> identity_row_state
 
-val identity_summary : providers:identity_provider list -> query:string -> string
+val identity_attached : identity_row_state -> bool
+(** Whether this Keeper holds a token for the service, whatever it offers or
+    its switch says. *)
+
+(** How the list is ordered: services this Keeper holds first, or as
+    declared under config/identity/. *)
+type identity_order =
+  | Identity_attached_first
+  | Identity_declared_order
+
+(** Which services the list shows. *)
+type identity_show =
+  | Identity_show_all
+  | Identity_show_attached
+  | Identity_show_not_attached
+
+(** What the list is showing: the typed query, the order and the view. *)
+type identity_listing =
+  { query : string
+  ; order : identity_order
+  ; show : identity_show
+  }
+
+val identity_listing_default : identity_listing
+(** No query, attached first, everything shown. *)
+
+val identity_next_order : identity_order -> identity_order
+val identity_next_show : identity_show -> identity_show
+
+val identity_connectable
+  :  listing:identity_listing
+  -> identity_provider list
+  -> (string * string) list
+
+val identity_summary :
+  providers:identity_provider list -> listing:identity_listing -> string
 val identity_field_paste : string -> string
 val identity_notice : cols:int -> (identity_notice_kind * string) option -> string list
 
 val identity_filter_rows
   :  providers:identity_provider list
+  -> listing:identity_listing
   -> string option
   -> string list
 
@@ -129,32 +160,33 @@ val identity_loopback_callback_rows : identity_provider list -> string list
 (** The loopback callback line, when any service names one, so the URL a
     loopback-only service sends the browser to is on screen. *)
 
-val identity_callback_rows :
-  providers:identity_provider list -> identity_callback option -> string list
-(** Both of the above, in order. Shared by the renderer and the key handler so
-    both count the same lines. *)
-
 val identity_started_rows :
   cols:int -> keeper_name:string -> identity_login_started list -> string list
 (** The consent prompt and wrapped URL for each login this Keeper started and
-    has not finished. Shared for the same reason as the callback rows. *)
+    has not finished. *)
 
 val identity_preamble :
   summary:string -> callback:string list -> notice:string list -> string list
-val identity_provider_line :
-  summary:string -> callback:string list -> notice:string list -> index:int -> int
 
 val identity_cursor_clamped
-  :  query:string
+  :  listing:identity_listing
   -> providers:identity_provider list
   -> int
   -> int
 
 val identity_cursor_provider
-  :  query:string
+  :  listing:identity_listing
   -> providers:identity_provider list
   -> int
   -> (string * string) option
+
+val identity_cursor_following
+  :  before:identity_listing * identity_provider list
+  -> after:identity_listing * identity_provider list
+  -> int
+  -> int
+(** Where the cursor lands once the list changes under it: on the provider it
+    was on when that one is still listed, else clamped to the new list. *)
 
 val identity_app_form_rows : identity_app_form option -> string list
 

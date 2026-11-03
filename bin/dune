@@ -1991,7 +1991,7 @@
  (name masc_tui_identity_updates)
  (wrapped false)
  (modules masc_tui_identity_updates)
- (libraries masc_tui_identity_model masc_tui_types))
+ (libraries masc_tui_identity_input masc_tui_identity_model masc_tui_types))
 
 (library
  (name masc_tui_resources_updates)

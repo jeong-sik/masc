@@ -1,6 +1,14 @@
 (** Identity key and paste transitions on the UI owner fiber. *)
 
-val current_query : Masc_tui_types.state -> string
+val current_listing : Masc_tui_types.state -> Masc_tui_identity_model.identity_listing
+
+val next_order : Masc_tui_types.state -> unit
+(** [o]: switch between attached-first and declared order, keeping the cursor
+    on the provider it was on. *)
+
+val next_show : Masc_tui_types.state -> unit
+(** [v]: show everything, then only attached services, then only the others,
+    keeping the cursor on the provider it was on while it is listed. *)
 
 val app_form_key
   :  Masc_tui_types.state

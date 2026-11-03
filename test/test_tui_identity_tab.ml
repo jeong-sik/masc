@@ -34,8 +34,11 @@ let reading providers = Result.map (fun providers -> providers, None) providers
 let unreadable id problem =
   Masc_tui_identity_model.Identity_unreadable { idp_id = id; idp_problem = problem }
 
+(* The listing the tab opens with, narrowed to [query]. *)
+let listing query = { Masc_tui_identity_model.identity_listing_default with query }
+
 let ids providers =
-  List.map fst (Masc_tui_identity_model.identity_connectable providers)
+  List.map fst (Masc_tui_identity_model.identity_connectable ~listing:(listing "") providers)
 
 let test_a_broken_declaration_does_not_take_a_number () =
   (* It is still shown -- an operator has to see why the provider they came
@@ -875,25 +878,25 @@ let test_the_cursor_names_a_provider () =
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "the second connectable one"
     (Some ("slack", "Slack"))
-    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 1)
+    (Masc_tui_identity_model.identity_cursor_provider ~listing:(listing "") ~providers 1)
 
 let test_a_cursor_past_the_end_names_the_last_row () =
   (* A list that shrank under a cursor -- a declaration stopped reading, say
      -- answers from a row that is there rather than from none at all. *)
   let providers = [ declared "atlassian" "Atlassian" ] in
   check Alcotest.int "clamped" 0
-    (Masc_tui_identity_model.identity_cursor_clamped ~query:"" ~providers 7);
+    (Masc_tui_identity_model.identity_cursor_clamped ~listing:(listing "") ~providers 7);
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "still names something" (Some ("atlassian", "Atlassian"))
-    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 7)
+    (Masc_tui_identity_model.identity_cursor_provider ~listing:(listing "") ~providers 7)
 
 let test_nothing_connectable_names_nothing () =
   let providers = [ unreadable "jira" "unreadable" ] in
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "no row to start" None
-    (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 0)
+    (Masc_tui_identity_model.identity_cursor_provider ~listing:(listing "") ~providers 0)
 
 let test_a_row_state_is_what_the_tally_counts () =
   let providers =
@@ -923,7 +926,7 @@ let sample =
     unreadable "broken" "unreadable" ]
 
 let matched query =
-  List.map fst (Masc_tui_identity_model.identity_connectable ~query sample)
+  List.map fst (Masc_tui_identity_model.identity_connectable ~listing:(listing query) sample)
 
 let test_a_query_narrows_to_what_it_names () =
   check (Alcotest.list Alcotest.string) "both Google rows"
@@ -955,7 +958,7 @@ let test_the_cursor_indexes_what_is_left () =
      second overall. *)
   let at ~query index =
     Option.map fst
-      (Masc_tui_identity_model.identity_cursor_provider ~query ~providers:sample index)
+      (Masc_tui_identity_model.identity_cursor_provider ~listing:(listing query) ~providers:sample index)
   in
   (* Row three is Linear with no filter, and does not exist under "g" -- so
      the same index has to answer differently, and the filtered one clamps
@@ -1235,6 +1238,134 @@ let test_the_arm_belongs_to_the_keeper_it_was_made_on () =
   check Alcotest.(option (pair string string)) "it is B's slack that is armed now"
     (Some ("B", "slack")) state.identity_disconnect_armed
 
+(* ── order and view ───────────────────────────────────────────────── *)
+
+let mixed =
+  [ declared "airtable" "Airtable";
+    declared ~tools:[ "a" ] "cloudflare" "Cloudflare";
+    declared "datadog" "Datadog";
+    declared ~tools:[ "a"; "b" ] "railway" "Railway";
+    declared ~tools:[ "a" ] ~enabled:false "supabase" "Supabase" ]
+
+let listed ~order ~show =
+  List.map fst
+    (Masc_tui_identity_model.identity_connectable
+       ~listing:{ Masc_tui_identity_model.identity_listing_default with order; show }
+       mixed)
+
+let sorted = List.sort String.compare
+
+let test_a_view_shows_only_its_services () =
+  let order = Masc_tui_identity_model.Identity_declared_order in
+  check (Alcotest.list Alcotest.string) "attached ones, a switched-off one included"
+    [ "cloudflare"; "railway"; "supabase" ]
+    (sorted (listed ~order ~show:Masc_tui_identity_model.Identity_show_attached));
+  check (Alcotest.list Alcotest.string) "the others"
+    [ "airtable"; "datadog" ]
+    (sorted (listed ~order ~show:Masc_tui_identity_model.Identity_show_not_attached));
+  check (Alcotest.list Alcotest.string) "every order shows the same set"
+    (sorted (listed ~order ~show:Masc_tui_identity_model.Identity_show_all))
+    (sorted
+       (listed ~order:Masc_tui_identity_model.Identity_attached_first
+          ~show:Masc_tui_identity_model.Identity_show_all))
+
+let at_cursor ~listing ~providers cursor =
+  Option.map fst
+    (Masc_tui_identity_model.identity_cursor_provider ~listing ~providers cursor)
+
+let test_another_order_keeps_the_cursor_on_its_service () =
+  let declared_order =
+    { Masc_tui_identity_model.identity_listing_default with
+      order = Masc_tui_identity_model.Identity_declared_order }
+  in
+  let attached_first = Masc_tui_identity_model.identity_listing_default in
+  List.iteri
+    (fun cursor _ ->
+       let before = at_cursor ~listing:declared_order ~providers:mixed cursor in
+       let landed =
+         Masc_tui_identity_model.identity_cursor_following
+           ~before:(declared_order, mixed) ~after:(attached_first, mixed) cursor
+       in
+       check (Alcotest.option Alcotest.string) "the same service"
+         before (at_cursor ~listing:attached_first ~providers:mixed landed))
+    mixed
+
+let test_a_login_that_lands_keeps_the_cursor_on_its_service () =
+  let listing = Masc_tui_identity_model.identity_listing_default in
+  let before = [ declared "airtable" "Airtable"; declared "box" "Box"; declared "canva" "Canva" ] in
+  let after = [ declared "airtable" "Airtable"; declared "box" "Box";
+                declared ~tools:[ "a" ] "canva" "Canva" ] in
+  let landed =
+    Masc_tui_identity_model.identity_cursor_following ~before:(listing, before)
+      ~after:(listing, after) 2
+  in
+  check (Alcotest.option Alcotest.string) "still on the service that attached"
+    (Some "canva") (at_cursor ~listing ~providers:after landed)
+
+let test_a_reading_keeps_the_cursor_on_its_service () =
+  let state = identity_state () in
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
+  state.keepers <- [ keeper_fixture "A" ];
+  state.keeper_cursor <- 0;
+  let load providers =
+    let read = Masc_tui_types.mark_detail_read_started state
+      ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
+    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+      (reading (Ok providers))
+  in
+  load [ declared "airtable" "Airtable"; declared "box" "Box"; declared "canva" "Canva" ];
+  state.identity_cursor <- 2;
+  load [ declared "airtable" "Airtable"; declared "box" "Box";
+         declared ~tools:[ "a" ] "canva" "Canva" ];
+  let providers = match state.identity_view with Some (_, p) -> p | None -> [] in
+  check (Alcotest.option Alcotest.string) "the cursor followed canva"
+    (Some "canva")
+    (at_cursor ~listing:(Masc_tui_identity_input.current_listing state) ~providers
+       state.identity_cursor)
+
+let test_a_view_that_hides_the_cursor_clamps_it () =
+  let all = Masc_tui_identity_model.identity_listing_default in
+  let attached =
+    { all with show = Masc_tui_identity_model.Identity_show_attached }
+  in
+  (* Airtable is not attached, so the attached view does not list it. *)
+  let landed =
+    Masc_tui_identity_model.identity_cursor_following ~before:(all, mixed)
+      ~after:(attached, mixed) 4
+  in
+  check Alcotest.bool "inside the shorter list" true
+    (landed >= 0 && landed < List.length (listed ~order:attached.order ~show:attached.show))
+
+let test_the_cursor_row_is_the_cursor_provider_row () =
+  (* The pane scrolls to [cursor_row], so it has to be the row of the
+     provider under the cursor in either order, the gap between the
+     attached services and the rest included. *)
+  List.iter
+    (fun order ->
+       let listing =
+         { Masc_tui_identity_model.identity_listing_default with order }
+       in
+       List.iteri
+         (fun cursor _ ->
+            let drawn =
+              Masc_tui_render_identity.draw ~cols:120
+                { keeper_name = "A"; providers = mixed; filter = None; cursor;
+                  logins = []; attempt_error = None; app_form = None;
+                  callback = None; order; show = listing.show }
+            in
+            match drawn.cursor_row, at_cursor ~listing ~providers:mixed cursor with
+            | Some row, Some id ->
+              let label =
+                List.assoc id
+                  (Masc_tui_identity_model.identity_connectable ~listing mixed)
+              in
+              check Alcotest.bool ("the row of " ^ id) true
+                (contains label (List.nth drawn.rows row))
+            | None, _ | _, None -> Alcotest.fail "no cursor row")
+         mixed)
+    [ Masc_tui_identity_model.Identity_attached_first;
+      Masc_tui_identity_model.Identity_declared_order ]
+
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "callback and apps",
@@ -1244,6 +1375,20 @@ let () =
             test_a_read_keeps_the_servers_callback;
           Alcotest.test_case "a failed read forgets the previous callback" `Quick
             test_failed_read_forgets_the_previous_callback;
+        ] );
+      ( "order and view",
+        [ Alcotest.test_case "a view shows only its services" `Quick
+            test_a_view_shows_only_its_services;
+          Alcotest.test_case "another order keeps the cursor on its service" `Quick
+            test_another_order_keeps_the_cursor_on_its_service;
+          Alcotest.test_case "a login that lands keeps the cursor on its service" `Quick
+            test_a_login_that_lands_keeps_the_cursor_on_its_service;
+          Alcotest.test_case "a reading keeps the cursor on its service" `Quick
+            test_a_reading_keeps_the_cursor_on_its_service;
+          Alcotest.test_case "a view that hides the cursor clamps it" `Quick
+            test_a_view_that_hides_the_cursor_clamps_it;
+          Alcotest.test_case "the cursor row is the cursor provider's row" `Quick
+            test_the_cursor_row_is_the_cursor_provider_row;
         ] );
       ( "numbering",
         [ Alcotest.test_case "a broken declaration does not take a number"

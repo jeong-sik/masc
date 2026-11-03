@@ -2426,6 +2426,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Masc_tui_fetched.Ready runs -> listing runs
     in
     let terminal = lazy (terminal_drawing state ~width:inner) in
+    (* Drawn once, read twice: for the rows, and for the row the cursor is
+       on, which the scroll below keeps in view. *)
+    let identity_drawn =
+      lazy
+        (Option.map
+           (fun (stamp, providers) ->
+             ( stamp
+             , Masc_tui_render_identity.draw ~cols
+                 { keeper_name = k.k_name
+                 ; providers
+                 ; filter = state.identity_filter
+                 ; cursor = state.identity_cursor
+                 ; logins = state.identity_logins
+                 ; attempt_error = state.identity_attempt_error
+                 ; app_form = state.identity_app_form
+                 ; callback = state.identity_callback
+                 ; order = state.identity_order
+                 ; show = state.identity_show
+                 } ))
+           state.identity_view)
+    in
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines ()
@@ -2499,19 +2520,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_identity ->
           stamped_or
             (Option.map
-               (fun (stamp, providers) ->
-                 ( stamp
-                 , Masc_tui_render_identity.lines ~cols
-                     { keeper_name = k.k_name
-                     ; providers
-                     ; filter = state.identity_filter
-                     ; cursor = state.identity_cursor
-                     ; logins = state.identity_logins
-                     ; attempt_error = state.identity_attempt_error
-                     ; app_form = state.identity_app_form
-                     ; callback = state.identity_callback
-                     } ))
-               state.identity_view)
+               (fun (stamp, (drawn : Masc_tui_render_identity.drawn)) ->
+                 stamp, drawn.rows)
+               (Lazy.force identity_drawn))
             state.identity_view_error
       | Detail_channels ->
           channel_lines ()
@@ -2520,6 +2531,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_terminal -> (Lazy.force terminal).terminal_rows
     in
     let total_lines = List.length all_lines in
+    (* [stamped_or] puts this Keeper's rows last, after whatever failure,
+       progress or "Last observation" lines it says above them, so the
+       cursor's line is counted back from the end. *)
+    let identity_cursor_line =
+      match state.detail_tab with
+      | Detail_identity ->
+        (match Lazy.force identity_drawn with
+         | Some (stamp, (drawn : Masc_tui_render_identity.drawn))
+           when String.equal stamp k.k_name ->
+           Option.map
+             (fun row -> total_lines - List.length drawn.rows + row)
+             drawn.cursor_row
+         | Some _ | None -> None)
+      | Detail_info | Detail_items | Detail_sandbox | Detail_instructions
+      | Detail_secrets | Detail_github | Detail_channels | Detail_automation
+      | Detail_runs | Detail_terminal -> None
+    in
 
     (* Top border *)
     box_top buf cols;
@@ -2589,7 +2617,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
                   ~height:(max 1 content_height) scroll)
               (Masc_tui_fusion_model.selected_keeper_run state)
-          else scroll
+          else
+            Option.fold ~none:scroll
+              ~some:(fun cursor ->
+                Masc_tui_scroll.ensure_visible ~cursor
+                  ~height:(max 1 content_height) scroll)
+              identity_cursor_line
     in
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
 

@@ -9,8 +9,18 @@ type view =
   ; attempt_error : (Masc_tui_identity_model.identity_notice_kind * string) option
   ; app_form : Masc_tui_identity_model.identity_app_form option
   ; callback : Masc_tui_identity_model.identity_callback option
+  ; order : Masc_tui_identity_model.identity_order
+  ; show : Masc_tui_identity_model.identity_show
+  }
+
+type drawn =
+  { rows : string list
+  ; cursor_row : int option
+      (** The index in [rows] of the provider the cursor is on, for the pane
+          that scrolls these rows to keep it in view; [None] when no provider
+          row is drawn. *)
   }
 
 (** Preserve provider numbering, notices, filtered-empty readings and login URL
     wrapping. Styling uses the current terminal theme; no UI state is mutated. *)
-val lines : cols:int -> view -> string list
+val draw : cols:int -> view -> drawn

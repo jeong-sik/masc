@@ -66,20 +66,6 @@ let identity_names ~query (id, label) =
   || Masc_tui_pick_list.lowercase_contains ~needle:query id
 ;;
 
-(** The providers a key can act on, in the order the screen numbers them.
-    Both the renderer and the key handler read this, so the number an
-    operator sees and the provider a keypress starts cannot drift apart. *)
-let identity_connectable ?(query = "") providers =
-  List.filter_map
-    (function
-      | Identity_declared { idp_id; idp_label; _ } ->
-        if identity_names ~query (idp_id, idp_label)
-        then Some (idp_id, idp_label)
-        else None
-      | Identity_unreadable _ -> None)
-    providers
-;;
-
 (** What the Identity pane says about one service.
 
     The rows and the summary above them read this one function, so the line
@@ -112,13 +98,81 @@ let identity_row_state ~providers ~id =
   | Some (Some tools, (Some true | None), None) -> Identity_attached (List.length tools)
 ;;
 
+(** Whether this Keeper holds a token for the service, whatever it offers or
+    its switch says. *)
+let identity_attached = function
+  | Identity_not_attached -> false
+  | Identity_attached _ | Identity_attached_without_tools | Identity_switch_unreadable
+  | Identity_switched_off -> true
+;;
+
+type identity_order =
+  | Identity_attached_first
+  | Identity_declared_order
+
+type identity_show =
+  | Identity_show_all
+  | Identity_show_attached
+  | Identity_show_not_attached
+
+type identity_listing =
+  { query : string
+  ; order : identity_order
+  ; show : identity_show
+  }
+
+let identity_listing_default =
+  { query = ""; order = Identity_attached_first; show = Identity_show_all }
+;;
+
+let identity_next_order = function
+  | Identity_attached_first -> Identity_declared_order
+  | Identity_declared_order -> Identity_attached_first
+;;
+
+let identity_next_show = function
+  | Identity_show_all -> Identity_show_attached
+  | Identity_show_attached -> Identity_show_not_attached
+  | Identity_show_not_attached -> Identity_show_all
+;;
+
+(** The providers a key can act on, in the order the screen numbers them.
+    Both the renderer and the key handler read this, so the number an
+    operator sees and the provider a keypress starts cannot drift apart. *)
+let identity_connectable ~listing providers =
+  let named =
+    List.filter_map
+      (function
+        | Identity_declared { idp_id; idp_label; _ } ->
+          if identity_names ~query:listing.query (idp_id, idp_label)
+          then Some (idp_id, idp_label)
+          else None
+        | Identity_unreadable _ -> None)
+      providers
+  in
+  let attached (id, _) = identity_attached (identity_row_state ~providers ~id) in
+  let shown =
+    match listing.show with
+    | Identity_show_all -> named
+    | Identity_show_attached -> List.filter attached named
+    | Identity_show_not_attached -> List.filter (fun row -> not (attached row)) named
+  in
+  match listing.order with
+  | Identity_declared_order -> shown
+  | Identity_attached_first ->
+    let held, rest = List.partition attached shown in
+    held @ rest
+;;
+
 (** The line above the provider list: how many services it draws, out of how
     many this Keeper has, and what the drawn ones report. The states a row
     already spells one by one are summed here only where one holds: a pane of
     nothing but unattached services says so by having no tally to print. *)
-let identity_summary ~providers ~query =
-  let shown = identity_connectable ~query providers in
-  let total = List.length (identity_connectable ~query:"" providers) in
+let identity_summary ~providers ~listing =
+  let shown = identity_connectable ~listing providers in
+  let total =
+    List.length (identity_connectable ~listing:identity_listing_default providers)
+  in
   let states = List.map (fun (id, _) -> identity_row_state ~providers ~id) shown in
   let count wanted = List.length (List.filter (fun state -> state = wanted) states) in
   let attached =
@@ -130,10 +184,10 @@ let identity_summary ~providers ~query =
            | Identity_switched_off -> false)
          states)
   in
+  (* These are states, not nouns: "3 attached", not "3 attacheds". *)
   let parts =
     List.filter_map
-      (fun (label, n) ->
-         if n > 0 then Some (Masc_tui_message_layout.count_noun n label) else None)
+      (fun (label, n) -> if n > 0 then Some (Printf.sprintf "%d %s" n label) else None)
       [ "attached", attached
       ; "switched off", count Identity_switched_off
       ; "attached with no tools", count Identity_attached_without_tools
@@ -224,15 +278,15 @@ let identity_notice ~cols detail =
     left. Built here for the same reason the notice is -- the key handler
     counts these to know where the list starts, and a count that disagreed
     with what is drawn would scroll the cursor to the wrong row. *)
-let identity_filter_rows ~providers filter =
+let identity_filter_rows ~providers ~listing filter =
   match filter with
   | None -> []
   | Some typed ->
     [ Printf.sprintf
         "  /%s   %d of %d"
         typed
-        (List.length (identity_connectable ~query:typed providers))
-        (List.length (identity_connectable providers))
+        (List.length (identity_connectable ~listing:{ listing with query = typed } providers))
+        (List.length (identity_connectable ~listing:{ listing with query = "" } providers))
     ; ""
     ]
 ;;
@@ -292,33 +346,45 @@ let identity_loopback_callback_rows providers =
     named
 ;;
 
-let identity_callback_rows ~providers callback =
-  identity_server_callback_rows callback @ identity_loopback_callback_rows providers
-;;
 
-(** Which pane line the provider at [index] is drawn on.
-
-    [notice] is what the preamble is carrying: a message about the attempt
-    just made belongs where the operator is looking rather than below
-    fifty-odd rows they would have to scroll past. It moves the list down,
-    so the row a keypress scrolls to moves with it. *)
-let identity_provider_line ~summary ~callback ~notice ~index =
-  List.length (identity_preamble ~summary ~callback ~notice) + index
-;;
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no
     longer there. *)
-let identity_cursor_clamped ~query ~providers cursor =
-  let count = List.length (identity_connectable ~query providers) in
+let identity_cursor_clamped ~listing ~providers cursor =
+  let count = List.length (identity_connectable ~listing providers) in
   if count = 0 then 0 else max 0 (min cursor (count - 1))
 ;;
 
 (** The provider a keypress on the cursor would start, if any. *)
-let identity_cursor_provider ~query ~providers cursor =
+let identity_cursor_provider ~listing ~providers cursor =
   List.nth_opt
-    (identity_connectable ~query providers)
-    (identity_cursor_clamped ~query ~providers cursor)
+    (identity_connectable ~listing providers)
+    (identity_cursor_clamped ~listing ~providers cursor)
+;;
+
+(** Where the cursor lands once the list changes under it -- a new reading,
+    another order, another view: on the provider it was on when that one is
+    still listed, so a login that moves its row up does not leave the marker
+    on whichever service slid into the old position. *)
+let identity_cursor_following ~before:(before_listing, before_providers)
+    ~after:(after_listing, after_providers) cursor =
+  let landing =
+    match
+      identity_cursor_provider ~listing:before_listing ~providers:before_providers cursor
+    with
+    | None -> None
+    | Some (id, _) ->
+      let rec index_of position = function
+        | [] -> None
+        | (candidate, _) :: rest ->
+          if String.equal candidate id then Some position else index_of (position + 1) rest
+      in
+      index_of 0 (identity_connectable ~listing:after_listing after_providers)
+  in
+  match landing with
+  | Some position -> position
+  | None -> identity_cursor_clamped ~listing:after_listing ~providers:after_providers cursor
 ;;
 
 (** Which of the three fields is taking keys. Sequential rather than

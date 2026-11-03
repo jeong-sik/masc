@@ -12666,7 +12666,13 @@ type keeper_waiting_snapshot = {
   kws_pending_controls : string list;
 }
 
-type keeper_waiting_change = Waiting_all | Waiting_keepers of string list
+(* [Waiting_unattributed] is a change the event names no Keeper for (a
+   schedule or a confirmation). It owes the waiting list a read but marks no
+   Keeper unverified: the rows on screen stay until the read answers. *)
+type keeper_waiting_change =
+  | Waiting_all
+  | Waiting_keepers of string list
+  | Waiting_unattributed
 
 let note_keeper_waiting_change state change =
   let names = match change with
@@ -12680,7 +12686,8 @@ let note_keeper_waiting_change state change =
           let version = Option.value ~default:0 (List.assoc_opt name state.keeper_waiting_versions) in
           state.keeper_waiting_versions <- (name, version + 1) ::
             List.remove_assoc name state.keeper_waiting_versions) names;
-        names in
+        names
+    | Waiting_unattributed -> [] in
   state.keeper_waiting_unverified <-
     List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
   state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read

@@ -22414,13 +22414,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
       (* Schedules and confirmations are items of the waiting list that
-         announce through their own events and name no Keeper, so they read
-         every Keeper's waiting list (RFC-0481 §3.4). *)
-      if !pending_confirms_changed || !schedules_changed then
-        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox
-      else if !waiting_inventory_changed <> [] then
-        launch_keeper_waiting_load
-          ~change:(Waiting_keepers (List.sort_uniq String.compare !waiting_inventory_changed)) state ~mailbox;
+         announce through their own events and name no Keeper (RFC-0481
+         §3.4). They owe the list a read without marking every Keeper
+         unverified, which would blank the whole waiting column for a read
+         on each of them; a held schedule announces every runner tick. *)
+      let waiting_keepers = List.sort_uniq String.compare !waiting_inventory_changed in
+      let waiting_unattributed = !pending_confirms_changed || !schedules_changed in
+      if waiting_keepers <> [] then
+        note_keeper_waiting_change state (Waiting_keepers waiting_keepers);
+      if waiting_unattributed then note_keeper_waiting_change state Waiting_unattributed;
+      if waiting_keepers <> [] || waiting_unattributed then
+        launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (* The pane otherwise reloads only on open and on its own sends — a
          turn appended from anywhere else (API chat, another operator, a

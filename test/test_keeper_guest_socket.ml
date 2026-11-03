@@ -107,6 +107,8 @@ let describe = function
     Printf.sprintf "unreachable after %d attempts: %s" attempts last
   | Guest.Not_sent (Guest.Refused refusal) -> "refused: " ^ Guest.refusal_to_string refusal
   | Guest.Not_sent (Guest.Incompatible detail) -> "incompatible: " ^ detail
+  | Guest.Not_sent (Guest.Bad_budget { connect_budget_sec; budget_sec }) ->
+    Printf.sprintf "bad budget: %g / %g" connect_budget_sec budget_sec
   | Guest.Exited { code; _ } -> Printf.sprintf "exited %d" code
   | Guest.Timed_out _ -> "timed out"
   | Guest.Broken { reason; _ } -> "broken: " ^ reason
@@ -517,7 +519,7 @@ let test_a_budget_that_is_not_a_number_tries_nothing () =
     Guest.run ~net ~clock ~accept:version_only ~socket:(Filename.concat dir "any.sock")
       ~connect_budget_sec ~budget_sec:Float.nan (Guest.Run { frame = "unused" })
   with
-  | Guest.Not_sent (Guest.Unreachable { attempts = 0; _ }) -> ()
+  | Guest.Not_sent (Guest.Bad_budget _) -> ()
   | outcome -> fail (describe outcome)
 
 let () =

@@ -50,6 +50,10 @@ type not_sent =
       }
   | Refused of refusal
   | Incompatible of string
+  | Bad_budget of
+      { connect_budget_sec : float
+      ; budget_sec : float
+      }
 
 type outcome =
   | Not_sent of not_sent
@@ -141,15 +145,7 @@ let finite_and_positive seconds = Float.is_finite seconds && seconds > 0.
 let run ~net ~clock ?on_stdout_chunk ?on_stderr_chunk ~accept ~socket ~connect_budget_sec
       ~budget_sec request =
   if not (finite_and_positive connect_budget_sec && finite_and_positive budget_sec)
-  then
-    Not_sent
-      (Unreachable
-         { attempts = 0
-         ; last =
-             Printf.sprintf
-               "the connect budget (%g) and the budget (%g) must be finite and positive"
-               connect_budget_sec budget_sec
-         })
+  then Not_sent (Bad_budget { connect_budget_sec; budget_sec })
   else (
     let started = Eio.Time.now clock in
     let deadline = started +. budget_sec in

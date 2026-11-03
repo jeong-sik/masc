@@ -9,8 +9,8 @@
     chunk.
 
     Nothing is written before a hello is accepted. A connection made before
-    the agent listens may end at once or stay silent (measured: 9 boots gave 5
-    hellos, 3 immediate ends and one connection silent for 12 minutes), so a
+    the agent listens may end at once or stay silent (one stayed silent for 12
+    minutes; docs/evidence/2026-11-03-microvm-request-transport), so a
     connection that ends or gives no hello within {!hello_wait_sec} is closed
     and a new one is made, until the connect budget runs out. Giving up on a
     connection before the request was written cannot have started anything.
@@ -61,6 +61,10 @@ type not_sent =
   | Incompatible of string
       (** an agent answered with a first chunk this host cannot read, or one
           that is not a hello *)
+  | Bad_budget of
+      { connect_budget_sec : float
+      ; budget_sec : float
+      }  (** a caller passed a budget that is not finite and positive *)
 
 type outcome =
   | Not_sent of not_sent  (** nothing was written to the agent *)
@@ -98,7 +102,8 @@ val run :
   outcome
 (** [budget_sec] bounds the whole call; [connect_budget_sec] bounds the part
     before a hello is accepted. A budget that is not finite and positive ends
-    the call as [Unreachable] with no attempt. The chunk callbacks get the
+    the call as [Bad_budget] with no attempt: a caller's mistake, never read
+    as an agent that is missing. The chunk callbacks get the
     shim's stdout and stderr bytes as they arrive; the outcome keeps them
     bounded as above. [accept] is {!refusal} with the Keeper's [expected] ids
     in production. *)

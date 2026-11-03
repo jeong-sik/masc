@@ -165,7 +165,9 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 | Owner 를 쓸 수 있는지 | Owner pool 이 Owner 를 열거나 열지 못함(`keeper_owner_registry.ml`) |
 
 - `keeper_turn_stream_event` 는 턴 자리와 turn ref 가 바뀌기 전에 나갈 수 있다. 그래서 turns 읽기의 신호로 쓰지 않는다.
-- TUI 는 `keeper_turn_changed` 를 받으면 turns 전체를 읽을 빚을 남긴다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다. 다시 읽기, 권한 회복, turns 를 그리는 화면에 들어올 때도 빚을 남긴다. 실패하면 늘어나는 간격으로 다시 읽는다. 2초 turns 읽기는 지운다.
+- TUI 는 `keeper_turn_changed` 를 받으면 turns 전체를 읽을 빚을 남긴다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다. 다시 읽기와 권한 회복 때도 빚을 남긴다. 답변 중 배지는 모든 화면이 그리므로 화면에 들어올 때 따로 읽지 않는다. 어느 turns 읽기든 실패하면 늘어나는 간격으로 다시 읽는다.
+- 2초 turns 읽기는 미리보기 알림(§3.5) 뒤에 지운다. 답변 중 배지와 채팅 화면의 준비 단계 읽기(`launch_selected_preparation_operation_read`)가 지금은 2초 turns 읽기로 미리보기를 따라간다.
+- 실패한 대기 목록 읽기는 지금 다음 2초 turns 읽기가 대신 맞춘다(`Keeper_waiting_read.settle_poll`). 2초 읽기를 지울 때 대기 목록 읽기도 실패하면 늘어나는 간격으로 다시 읽게 한다.
 - 대기 목록은 `keeper_waiting_inventory_changed` 로 읽는다. 일정(`schedules_changed`), 확인 대기(`pending_confirms_changed`), fusion(`fusion_run_status`) 알림도 대기 목록을 읽을 빚을 남긴다. 셋 다 이미 나가는 알림이라 서버는 바꾸지 않는다. 대기 목록 읽기는 대기 상태만 바꾸고, turns 행·토큰·끝난 턴 표시는 turns 읽기가 바꾼다.
 - turns 읽기 결과를 다루는 곳(§1.8: 대기 영수증, control generation, 끝난 턴 표시, `launch_waiting_keeper_input`, 기록·준비 단계 읽기, Metrics)은 읽기가 신호로 일어나도 그대로 돈다. 끝난 턴 표시는 두 읽기 사이의 running→idle 로 정해진다. 시작 신호의 읽기가 끝나기 전에 턴이 끝나면 표시되지 않는 것은 2초 읽기와 같다.
 - 웹 대시보드는 turns 응답 모양이 그대로라 바뀌지 않는다.
@@ -208,7 +210,8 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 | L2f | provider 쉼 신호: 여섯 쓰기 함수의 hook, 서버 fiber 의 다시 계산과 비교, 가장 이른 `Rest_dated` 시각에 깨기(§3.2, §3.7) | 쓰기·시각마다 값이 바뀐 키퍼에게만 신호, 바뀌지 않으면 없음 |
 | L3 | TUI roster: 키퍼 하나 읽기(L3a), 키퍼별 빚 읽기와 목록 변화 전체 읽기(L3b), 2초 roster 읽기 삭제(L3c, L6·L6b 뒤) | 신호 하나 → 요청 하나, 실패 재시도 |
 | L4a | `keeper_turn_changed`: 턴 자리, turn ref, chat control token, shutdown id, Owner 사용 가능 여부의 쓰기 뒤 신호(§3.4) | 쓰기마다 신호가 한 번, 값이 바뀐 뒤에 나가는지 |
-| L4b | TUI turns 빚 읽기(신호, 다시 읽기, 권한 회복, 화면 진입, 실패 재시도), 일정·확인 대기·fusion 알림의 대기 목록 빚, 2초 turns 읽기 삭제 | §1.8 의 일들이 신호 뒤에 도는지 |
+| L4b | TUI turns 빚 읽기(신호, 다시 읽기, 권한 회복, 실패 재시도), 일정·확인 대기·fusion 알림의 대기 목록 빚 | §1.8 의 일들이 신호 뒤에 도는지 |
+| L4c | 2초 turns 읽기 삭제, 대기 목록 읽기 실패 재시도(L5 뒤) | 화면 하나의 turns 요청 수, 실패한 대기 목록 읽기를 기다린 뒤 다시 읽는지 |
 | L5 | 미리보기 알림과 그 화면의 읽기, 목록 활동 시각 | 간격 안의 여러 쓰기 → 알림 하나 |
 | L6 | `next_action` 시각 읽기 | 120초 뒤 읽기 하나 |
 | L6b | roster 응답의 `candle_decay`(서버), TUI 가 그릴 때 잔액·`burned`·`circulating` 계산(§3.7) | 같은 원장에서 기준으로 계산한 값 = 같은 시각의 `of_events` 값 |

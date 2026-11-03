@@ -87,6 +87,27 @@ let schedule_form_row : schedule_row =
 
 (* The wire carries both an encoded target and a display name. When the
    latter is absent, an older server's target stays intact. *)
+(* A queue or reaction write owes the schedule list a read only for a Keeper
+   a drawn row reads: its target, the Keeper its reaction names, or the one a
+   transferred occurrence waits with. *)
+let test_a_schedule_row_reads_only_its_keepers_queues () =
+  let reads keepers row = Masc_tui_types.schedule_rows_read_queue_of ~keepers [ row ] in
+  Alcotest.(check bool) "its target's queue" true (reads [ "edgar.a.poe" ] schedule_form_row);
+  Alcotest.(check bool) "another Keeper's queue" false
+    (reads [ "someone.else" ] schedule_form_row);
+  Alcotest.(check bool) "the Keeper its reaction names" true
+    (reads [ "reactor" ]
+       { schedule_form_row with
+         sch_payload_keeper_name = None
+       ; sch_reaction_keeper_name = Some "reactor" });
+  Alcotest.(check bool) "the Keeper a transferred occurrence waits with" true
+    (reads [ "holder" ]
+       { schedule_form_row with
+         sch_occurrence =
+           { Masc.Tui_schedule_observation.stage = Queued_at "holder"; due_at_iso = None } });
+  Alcotest.(check bool) "no drawn row" false
+    (Masc_tui_types.schedule_rows_read_queue_of ~keepers:[ "edgar.a.poe" ] [])
+
 let test_schedule_who_uses_the_named_field () =
   let who row = Masc_tui_types.schedule_row_who row in
   Alcotest.(check (option string)) "the bare name wins" (Some "edgar.a.poe")
@@ -2393,6 +2414,8 @@ let () =
     ; ( "projections"
       , [ Alcotest.test_case "schedule display name uses the named field" `Quick
             test_schedule_who_uses_the_named_field
+        ; Alcotest.test_case "a schedule row reads only its Keepers' queues" `Quick
+            test_a_schedule_row_reads_only_its_keepers_queues
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
         ; Alcotest.test_case

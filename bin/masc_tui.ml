@@ -8929,6 +8929,23 @@ let owe_keeper_schedules_read state =
         Some { kso_keeper = keeper; kso_read = Masc_tui_owed_read.changed read })
     (keeper_schedules_on_screen state)
 
+(* A queue or reaction write owes a schedule list a read only where a drawn
+   row reads that Keeper's queue (RFC-0480 §7: filter by the name first). *)
+let owe_schedule_reads_for_queue_writes state ~keepers =
+  (match state.view, state.schedules with
+   | Schedules, Some snapshot when schedule_rows_read_queue_of ~keepers snapshot.scs_rows ->
+       owe_schedules_read state
+   | Schedules, (Some _ | None) | (Overview | Acting | Metrics | Memory | Lanes | Clients | Board
+     | Approvals | Planning | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+     | Runtime | Config | Resources | Tools | System_logs | Keepers _), _ ->
+       ());
+  match keeper_schedules_on_screen state, state.keeper_schedules with
+  | Some keeper, Some (listed, snapshot)
+    when String.equal keeper listed && schedule_rows_read_queue_of ~keepers snapshot.scs_rows ->
+      owe_keeper_schedules_read state
+  | Some keeper, (Some _ | None) when List.mem keeper keepers -> owe_keeper_schedules_read state
+  | Some _, (Some _ | None) | None, (Some _ | None) -> ()
+
 let settle_keeper_schedules_read state ~keeper result =
   match state.keeper_schedules_owed with
   | Some owed when String.equal owed.kso_keeper keeper ->
@@ -22325,6 +22342,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let async_requests_changed = ref false in
       let pending_confirms_changed = ref false in
       let schedules_changed = ref false in
+      let event_queue_keepers = ref [] in
       let runtime_journals = ref [] in
       let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
@@ -22430,6 +22448,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | None -> ());
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
               if Masc_tui_observer.schedules_changed event then schedules_changed := true;
+              Option.iter (fun keeper -> event_queue_keepers := keeper :: !event_queue_keepers)
+                (Masc_tui_observer.event_queue_changed event);
               Option.iter (fun appended -> runtime_journals := appended :: !runtime_journals)
                 (Masc_tui_observer.runtime_journal_appended event);
               if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
@@ -22453,7 +22473,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ ->
                    ());
@@ -22511,7 +22531,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Schedules_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22656,6 +22676,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_schedules_read state;
          owe_keeper_schedules_read state
        end);
+      (if !event_queue_keepers <> [] && not !observer_source_loss_seen then
+         owe_schedule_reads_for_queue_writes state ~keepers:!event_queue_keepers);
       (if not !observer_source_loss_seen then
          List.iter
            (fun (keeper, journal) ->
@@ -40609,11 +40631,11 @@ Use relative paths for resources already held in the package. -->
                 an MCP session every two seconds for an inventory that moves
                 at human speed. *)
              ()
-         | Schedules ->
-             (* A row's own changes are announced ([schedules_changed]), but
-                each row also carries its Keeper's queue and reaction
-                evidence, and those stores announce nothing yet. *)
-             launch_schedules_load state ~mailbox:async_messages
+         (* The schedule list re-reads on [schedules_changed] (a row's own
+            change, a runner tick or its staleness), on
+            [keeper_event_queue_changed] for a Keeper a drawn row reads, and
+            retries a failed read ([launch_owed_schedules]). *)
+         | Schedules -> ()
          (* Changes is not on the timer. The read parses every row in the
             window's date files -- seconds, not milliseconds -- and the answer
             only moves when the keeper takes a turn. [r] asks for it. *)

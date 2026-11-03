@@ -22493,7 +22493,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                       agenda alone does not move a paged list. *)
                    schedules_changed := true
                | Masc_tui_observer.Pending_confirm_invalidated ->
-                   waiting_sources_invalidated := true
+                   waiting_sources_invalidated := true;
+                   (* Same reach for the confirmations list: [waiting_...]
+                      only reloads the waiting column, while the owed
+                      [Pending_confirms_changed] read below is what reloads
+                      the confirmations the operator acts on. *)
+                   pending_confirms_changed := true
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change
                | Masc_tui_observer.Execution_snapshot -> execution_snapshot_seen := true

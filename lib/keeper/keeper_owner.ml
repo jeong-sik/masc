@@ -865,8 +865,8 @@ let set_metadata_fault t detail =
       "keeper Owner metadata store fenced: %s" detail;
     (* A failed durable replace or remove can still have changed the file
        before its durability became uncertain. Revalidate that observation. *)
-    notify_state_change_observer ~keeper_name:t.keeper_name;
-    Keeper_row_broadcast.changed ~keeper_name:t.keeper_name
+    Keeper_row_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
+    notify_state_change_observer ~keeper_name:t.keeper_name
 ;;
 
 let set_operation_fault t fault =
@@ -919,14 +919,16 @@ let health_metadata_equal before after =
 ;;
 
 (* A write that raised may have taken effect, so its readers are told as if
-   it had. *)
-let observe_uncertain_write ~keeper_name () =
-  notify_state_change_observer ~keeper_name;
-  Keeper_row_broadcast.changed ~keeper_name
+   it had. The row is announced first: the observer may re-raise a
+   cancellation of this fiber, and the row's readers must still hear. *)
+let observe_uncertain_write ~base_path ~keeper_name () =
+  Keeper_row_broadcast.changed ~base_path ~keeper_name;
+  notify_state_change_observer ~keeper_name
 ;;
 
 let apply_transition t store old_state transition =
-  match commit ~on_uncertain:(observe_uncertain_write ~keeper_name:t.keeper_name)
+  match commit
+    ~on_uncertain:(observe_uncertain_write ~base_path:t.base_path ~keeper_name:t.keeper_name)
     store transition with
   | Error (Store_unavailable detail as error) ->
     set_metadata_fault t detail;
@@ -940,12 +942,12 @@ let apply_transition t store old_state transition =
     if pause_identity before <> pause_identity transition.projection.meta then
       Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
     Atomic.set t.projection transition.projection;
-    if not (health_metadata_equal before transition.projection.meta) then
-      notify_state_change_observer ~keeper_name:t.keeper_name;
     (match transition.persistence with
      | Keeper_owner_reducer.No_persistence -> ()
      | Keeper_owner_reducer.Replace_snapshot _ | Keeper_owner_reducer.Remove_snapshot _ ->
-       Keeper_row_broadcast.changed ~keeper_name:t.keeper_name);
+       Keeper_row_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name);
+    if not (health_metadata_equal before transition.projection.meta) then
+      notify_state_change_observer ~keeper_name:t.keeper_name;
     Ok state
 ;;
 
@@ -3378,8 +3380,8 @@ let begin_stopping t = request t Begin_stopping
 module For_testing = struct
   let mailbox_depth t = Eio.Stream.length t.mailbox
   let enqueue_unless_closed = enqueue_unless_closed
-  let commit_metadata_transition ~keeper_name store transition =
-    commit ~on_uncertain:(observe_uncertain_write ~keeper_name) store transition
+  let commit_metadata_transition ~base_path ~keeper_name store transition =
+    commit ~on_uncertain:(observe_uncertain_write ~base_path ~keeper_name) store transition
 
   let observe_state_changes ~sw observer =
     let previous = Atomic.get state_change_observer in

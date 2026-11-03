@@ -62,10 +62,10 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 | 마지막 실패 | `keeper_registry_setup.ml:268~330` | observer. 이유가 달라질 때만이라 시각만 바뀌면 없다(`:40~41`) |
 | 키퍼가 생기고 없어짐 | `keeper_registry_setup.ml:641`, `:898`, `:970`, `:973`, `:979`, `:1095` | observer. 이름이 없다(`:27`). 디스크에만 생긴 키퍼는 없음 |
 | runtime id | `runtime.toml` 배정과 기본 경로(`keeper_meta_contract.ml:409~418`, `runtime.ml:1137`) | 없음 |
-| sandbox profile, identity | meta·TOML. meta 를 쓰는 곳은 Owner 하나다(`keeper_meta_store.ml:193~196`) | 위 Owner 와 같음 |
+| activation mode, sandbox profile 등 설정 필드 | 키퍼 TOML. 행은 TOML 값을 meta 위에 덮어 읽고(`keeper_meta_contract.ml:331`, `:343`), meta 파일에는 이 필드를 쓰지 않는다(`keeper_meta_json_parse.ml:318~324`). keeper_up 은 TOML 을 쓴 뒤 Owner `Update_profile` 을 commit 한다 | keeper_up 경로는 위 Owner 와 같음. 파일을 직접 고치거나 git 으로 바꾸면 없음 |
 | lane 관찰 | 실행 영수증 쓰기(`keeper_execution_receipt.ml:544`) | 일부 영수증만 Activity_graph 이벤트(`:521`) |
 | 초상, Candle 잔액 | Candle 원장(`Candle_ledger.update`)과 Candle 설정(`candle_observe.ml:6~27`). 원장 쓰기 하나가 여러 키퍼에 닿을 수 있다(선물) | 없음(`lib/candle*` 에 `Sse.` 호출 없음) |
-| 턴 자리, chat control token | `publish_turn_in_flight`(`keeper_owner.ml:610~615`), pause 전이(`:931~933`) | Owner observer 만 |
+| 턴 자리, chat control token | 턴 자리는 `publish_turn_in_flight`(`keeper_owner.ml:610~615`)가 Atomic 으로 바꾸고 meta 를 쓰지 않는다. token 은 pause 전이(`:931~933`)와 `Pause_and_interrupt`(`:2529`)에서 바뀐다 | pause 전이만 Owner observer |
 | turn ref | `Keeper_autonomous_stream.create`(`:82`)·`finish`(`:195`). Owner 가 턴 자리를 알린 뒤에 생긴다(`keeper_unified_turn_execution.ml:176`, `keeper_owner.ml:2917`) | 없음 |
 
 지금은 2초 읽기가 이 빈틈을 가린다. 신호로 바꾸면 빈틈마다 화면이 멈춘다.
@@ -122,7 +122,8 @@ roster 경로에 `name=<키퍼>` 를 더한다. 그 키퍼의 행 하나(또는 
 
 | 쓰기 | 신호 |
 |---|---|
-| Owner commit(meta 저장소 `replace`·`remove`). paused, activation, 사용 카운터, `updated_at`, sandbox profile, 턴 자리, chat control token 이 모두 여기를 지난다. 예외를 낸 쓰기와 저장소를 막은 첫 실패도 파일을 바꿨을 수 있어서 같이 알린다 | 그 키퍼 `keeper_row_changed` |
+| Owner commit(meta 저장소 `replace`·`remove`). paused, latched reason, 사용 카운터, `updated_at` 이 여기를 지난다. keeper_up 의 설정 변경도 `Update_profile` 로 여기를 지난다. 예외를 낸 쓰기와 저장소를 막은 첫 실패도 파일을 바꿨을 수 있어서 같이 알린다 | 그 키퍼 `keeper_row_changed` |
+| 키퍼 TOML 을 keeper_up 밖에서 바꿈(직접 편집, git) | 키퍼 설정 디렉터리 감시. 그 전까지는 Revalidate·`r` 로만 맞는다 |
 | registry 항목 commit(단계, 실패 이유와 시각, keepalive) | 그 키퍼 |
 | registry 목록 변화 | `keeper_roster_changed` |
 | `runtime.toml` 배정 트랜잭션, 기본 경로 변경, 설정 다시 읽기 | 배정이 닿는 키퍼마다. 기본 경로는 모든 키퍼 |
@@ -141,7 +142,7 @@ Owner observer 는 지금 "non-yielding, Owner fiber 에서 돈다"(`keeper_owne
 
 ### 3.4 turns
 
-- 턴 자리와 chat control token 은 Owner commit 의 `keeper_row_changed` 가 알린다. turns 는 지금처럼 전체를 읽는다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다.
+- 턴 자리(`publish_turn_in_flight`)와 chat control token 회전(`Pause_and_interrupt`)은 meta 를 쓰지 않아서 Owner commit 신호가 덮지 못한다. 이 둘을 바꾸는 곳에서 그 키퍼 신호를 낸다(L4). turns 는 지금처럼 전체를 읽는다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다.
 - 대기 목록은 `keeper_waiting_inventory_changed` 로 읽는다. 일정, 확인 대기, fusion 대기에 같은 알림을 더한다.
 - 2초 turns 읽기에 기대던 일(§1.8)은 turns 읽기 결과를 다루는 곳에서 돈다. 읽기가 신호로 일어나도 그대로 돈다. 층마다 이 일들이 신호 뒤에도 일어나는지 시험한다.
 - 웹 대시보드는 turns 응답 모양이 그대로라 바뀌지 않는다.

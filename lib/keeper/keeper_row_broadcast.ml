@@ -1,6 +1,6 @@
 let row_changed_event = "keeper_row_changed"
 
-let changed ~keeper_name =
+let changed ~base_path ~keeper_name =
   let report exn =
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SseBroadcastFailures)
@@ -13,7 +13,8 @@ let changed ~keeper_name =
       (Printexc.to_string exn)
   in
   match
-    Sse.broadcast
+    let authority = Sse.runtime_authority_exn ~base_path in
+    Sse.broadcast_to (Sse.Runtime_observers authority)
       (`Assoc
         [ "type", `String row_changed_event
         ; "name", `String keeper_name

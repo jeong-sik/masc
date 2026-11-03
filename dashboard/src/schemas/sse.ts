@@ -115,7 +115,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_native_tasks_appended',
   'keeper_child_content_appended',
   // One Keeper's roster row may have changed (lib/keeper/keeper_row_broadcast.ml).
-  // The TUI re-reads that Keeper's row on it.
+  // A roster reader re-reads that Keeper's row on it.
   'keeper_row_changed',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.

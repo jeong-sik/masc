@@ -79,3 +79,5 @@ let () =
             test_this_turn_outranks_the_page
         ] )
     ]
+
+(* pr-type-check canary pair (task-3166): run 41690763456 failed on the removed unbound line; this commit is the repaired head. *)

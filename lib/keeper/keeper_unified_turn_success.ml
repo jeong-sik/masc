@@ -397,7 +397,7 @@ let emit_resolved_cost_event
       ~usage_trust
   =
   match result.Keeper_agent_run.final_agent_core_turn_ordinal with
-  | None -> ()
+  | None -> Ok ()
   | Some agent_core_turn_ordinal ->
   let usage, usage_missing =
     match usage_resolution.delta with
@@ -573,6 +573,7 @@ let handle
       ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
       ~keeper_turn_id
       ~(spend : Keeper_turn_spend.attempt list)
+      ~(settled_start : Keeper_unsettled_spend.settled_start option)
       execution_outcome
   =
   (* Named so post-turn work (checkpoint, metrics, memory, projections)
@@ -780,23 +781,41 @@ let handle
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd.known_cost_usd;
   (* The spend rows follow the commit that moved the cursor. Written before
      it, a failed commit left rows whose spend the next turn resolved again
-     from the old cursor. *)
-  run_projection KTP.Usage_metrics (fun () ->
-    emit_resolved_cost_event
-      ~config
-      ~meta
-      ~keeper_turn_id
-      ~result
-      ~usage_resolution
-      ~usage_trust);
-  run_projection KTP.Usage_metrics (fun () ->
-    Keeper_turn_spend_ledger.write
-      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
-      ~agent_name:meta.name
-      ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
-      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~keeper_turn_id
-      turn_spend.other_readings);
+     from the old cursor. A row that is not in the file -- its append failed,
+     or the projection raised -- keeps the turn's start, so the next
+     execution reads the ledger and settles what the raw rows still hold. *)
+  let row_written write =
+    let written = ref false in
+    run_projection KTP.Usage_metrics (fun () ->
+      match write () with
+      | Ok () -> written := true
+      | Error (_ : Keeper_hooks_agent_core.append_failure) -> ());
+    !written
+  in
+  let turn_row_written =
+    row_written (fun () ->
+      emit_resolved_cost_event
+        ~config
+        ~meta
+        ~keeper_turn_id
+        ~result
+        ~usage_resolution
+        ~usage_trust)
+  in
+  let other_rows_written =
+    row_written (fun () ->
+      Keeper_turn_spend_ledger.write
+        ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+        ~agent_name:meta.name
+        ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~keeper_turn_id
+        turn_spend.other_readings)
+  in
+  (match settled_start with
+   | Some start when turn_row_written && other_rows_written ->
+     Keeper_unsettled_spend.record_committed start
+   | Some _ | None -> ());
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)

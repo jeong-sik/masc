@@ -89,6 +89,11 @@ type turn_settlement =
   ; spend : Keeper_turn_spend.attempt list
         (** What each dispatched attempt reported about its spend, on either
             outcome: a failed turn and a lost attempt spent too. *)
+  ; settled_start : Keeper_unsettled_spend.settled_start option
+        (** Present when the turn started with nothing of its Keeper left to
+            settle in the ledger. The commit of [spend] hands it to
+            {!Keeper_unsettled_spend.record_committed} once every resolved
+            row is in the file. *)
   }
 
 (** The settlement of a turn that ended before

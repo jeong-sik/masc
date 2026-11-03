@@ -893,6 +893,7 @@ let run_keeper_invocation_turn_admitted_inner
                       ~keeper_turn_id
                       ~before:meta
                       ~attempt_spend:settlement.Keeper_agent_run.spend
+                      ~settled_start:settlement.Keeper_agent_run.settled_start
                       (Keeper_turn_spend_commit.count_turn meta)
                   with
                   | Ok (_ : Keeper_meta_contract.keeper_meta) -> ()
@@ -1045,6 +1046,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~degraded_retry_deferred:settlement.Keeper_agent_run.degraded_retry_deferred
                     ~keeper_turn_id
                     ~spend:settlement.Keeper_agent_run.spend
+                    ~settled_start:settlement.Keeper_agent_run.settled_start
                     execution_outcome
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta

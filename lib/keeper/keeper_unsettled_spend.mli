@@ -21,7 +21,19 @@
 
     A conversation-cumulative report is not settled: it is read against the
     Keeper's committed cursor, so the next count of the same conversation
-    already covers it, and settling it here as well would count it twice. *)
+    already covers it, and settling it here as well would count it twice.
+
+    An execution whose commit holds and writes every resolved row leaves no
+    raw row of its Keeper that is not settled, so the Keeper's next execution
+    in the same process has nothing to read the ledger for.
+    {!settle_before_execution} hands an execution a {!settled_start} when it
+    starts from a settled ledger, and the commit hands it back through
+    {!record_committed} once every row it wrote is in the file. The next
+    execution then starts without reading the ledger. An execution that ends
+    any other way -- cancelled, raised, its commit rejected, a row not in the
+    file -- hands nothing back, and the next one reads the ledger as before.
+    So does the first execution of every Keeper in a process: nothing of this
+    is stored. *)
 
 type outcome =
   { scanned_rows : int
@@ -35,6 +47,8 @@ type outcome =
         (** Why each raw row after the newest resolved row that does not
             decode -- as a cost row or as its observation -- was not settled,
             oldest first. *)
+  ; unwritten_turns : int
+        (** Settled turns with a resolved row that is not in the file. *)
   }
 
 (** The Keeper's raw rows after its newest resolved row, oldest first, from
@@ -60,13 +74,27 @@ val settle
   -> observed_at:float
   -> (outcome, Dated_jsonl.read_error) result
 
-(** {!settle} before an execution starts, from the Keeper's [created_at]
-    (ISO 8601). Failures are logged and the execution goes on: what could not
-    be settled stays in the ledger as raw rows and is settled before a later
-    execution. Rows that do not decode are logged as a warning with the oldest
-    one's reason. *)
+(** An execution that started with nothing of its Keeper left to settle in
+    the ledger. Only {!settle_before_execution} makes one. *)
+type settled_start
+
+(** Before an execution starts. When the Keeper's previous execution in this
+    process handed its {!settled_start} back, nothing is read. Otherwise
+    {!settle} runs from the Keeper's [created_at] (ISO 8601), and the result is
+    [Some] when it read the ledger and every row it settled is in the file.
+
+    Failures are logged and the execution goes on with [None]: what could not
+    be settled stays in the ledger as raw rows, and the next execution reads
+    the ledger again. Rows that do not decode or name no attempt cannot be
+    settled by reading again, so they do not withhold the result; they are
+    logged, the undecodable ones with the oldest one's reason. *)
 val settle_before_execution
   :  masc_root:string
   -> agent_name:string
   -> created_at:string
-  -> unit
+  -> settled_start option
+
+(** The execution that [settled_start] started committed its spend and every
+    resolved row it wrote is in the file, so its Keeper's next execution in
+    this process starts without reading the ledger. *)
+val record_committed : settled_start -> unit

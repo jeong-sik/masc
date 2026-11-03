@@ -4,6 +4,7 @@ type outcome =
   ; settled_readings : int
   ; unplaced_rows : int
   ; undecodable : string list
+  ; unwritten_turns : int
   }
 
 (* A ledger line can be any JSON value; only an object has fields. *)
@@ -167,9 +168,9 @@ let settle_rows ~masc_root ~agent_name ~observed_at rows =
       placements
   in
   let turns = group_in_order (fun placed -> placed.turn) placed in
-  let settled_readings =
+  let settled_readings, unwritten_turns =
     List.fold_left
-      (fun settled ((trace_id, keeper_turn_id), turn_rows) ->
+      (fun (settled, unwritten) ((trace_id, keeper_turn_id), turn_rows) ->
          let attempts = group_in_order (fun placed -> placed.attempt) turn_rows in
          let resolved, (_ : Keeper_usage_resolution.cursor option) =
            Keeper_turn_spend.resolve
@@ -178,15 +179,20 @@ let settle_rows ~masc_root ~agent_name ~observed_at rows =
              (Keeper_turn_spend.attempts (spend_of_attempts attempts))
          in
          let task_id = List.find_map (fun placed -> placed.task_id) turn_rows in
-         Keeper_turn_spend_ledger.write
-           ~masc_root
-           ~agent_name
-           ~task_id
-           ~trace_id
-           ~keeper_turn_id
-           resolved;
-         settled + List.length resolved)
-      0
+         let written =
+           Keeper_turn_spend_ledger.write
+             ~masc_root
+             ~agent_name
+             ~task_id
+             ~trace_id
+             ~keeper_turn_id
+             resolved
+         in
+         ( settled + List.length resolved
+         , match written with
+           | Ok () -> unwritten
+           | Error (_ : Keeper_hooks_agent_core.append_failure) -> unwritten + 1 ))
+      (0, 0)
       turns
   in
   { scanned_rows = List.length rows
@@ -194,6 +200,7 @@ let settle_rows ~masc_root ~agent_name ~observed_at rows =
   ; settled_readings
   ; unplaced_rows = List.length rows - List.length placed - List.length undecodable
   ; undecodable
+  ; unwritten_turns
   }
 ;;
 
@@ -241,18 +248,46 @@ let settle ~masc_root ~agent_name ~born_at ~observed_at =
        Ok { outcome with scanned_rows = !scanned })
 ;;
 
-let settle_before_execution ~masc_root ~agent_name ~created_at =
+(* The Keepers whose newest execution in this process handed its
+   [settled_start] back, by masc root and name, holding the [created_at] of
+   the Keeper that did. A Keeper re-created under the same name has another
+   [created_at], so it reads the ledger again. An entry is taken out when an
+   execution starts: the execution writes raw rows from then on, and only its
+   own commit puts the entry back. *)
+let committed_keepers : (string * string, string) Hashtbl.t = Hashtbl.create 64
+let committed_keepers_lock = Mutex.create ()
+
+type settled_start =
+  { keeper : string * string
+  ; created_at : string
+  }
+
+let take_committed keeper =
+  Mutex.protect committed_keepers_lock (fun () ->
+    let committed = Hashtbl.find_opt committed_keepers keeper in
+    Hashtbl.remove committed_keepers keeper;
+    committed)
+;;
+
+let record_committed { keeper; created_at } =
+  Mutex.protect committed_keepers_lock (fun () ->
+    Hashtbl.replace committed_keepers keeper created_at)
+;;
+
+let read_and_settle ~masc_root ~agent_name ~created_at start =
   match Workspace_resilience.Time.parse_iso8601_opt created_at with
   | None ->
     Log.Keeper.warn ~keeper_name:agent_name
       "spend a cancelled execution left out is not settled: created_at %S is not an ISO 8601 time"
-      created_at
+      created_at;
+    None
   | Some born_at ->
   match settle ~masc_root ~agent_name ~born_at ~observed_at:(Time_compat.now ()) with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Log.Keeper.warn ~keeper_name:agent_name
-      "settling a cancelled execution's spend raised: %s" (Printexc.to_string exn)
+      "settling a cancelled execution's spend raised: %s" (Printexc.to_string exn);
+    None
   | Ok outcome ->
     if outcome.settled_readings > 0 || outcome.unplaced_rows > 0
     then
@@ -264,9 +299,26 @@ let settle_before_execution ~masc_root ~agent_name ~created_at =
      | oldest :: _ ->
        Log.Keeper.warn ~keeper_name:agent_name
          "%d raw cost rows a cancelled execution left do not decode and were not settled; oldest: %s"
-         (List.length outcome.undecodable) oldest)
+         (List.length outcome.undecodable) oldest);
+    if outcome.unwritten_turns > 0
+    then (
+      Log.Keeper.warn ~keeper_name:agent_name
+        "settling a cancelled execution's spend left a resolved row of %d turns out of the ledger; the next execution reads the ledger again"
+        outcome.unwritten_turns;
+      None)
+    else Some start
   | Error error ->
     Log.Keeper.warn ~keeper_name:agent_name
       "could not read the cost ledger to settle a cancelled execution's spend: %s"
-      (Dated_jsonl.read_error_to_string error)
+      (Dated_jsonl.read_error_to_string error);
+    None
+;;
+
+let settle_before_execution ~masc_root ~agent_name ~created_at =
+  let keeper = masc_root, agent_name in
+  let start = { keeper; created_at } in
+  match take_committed keeper with
+  | Some committed_created_at when String.equal committed_created_at created_at ->
+    Some start
+  | Some _ | None -> read_and_settle ~masc_root ~agent_name ~created_at start
 ;;

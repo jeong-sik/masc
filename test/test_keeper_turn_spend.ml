@@ -470,13 +470,17 @@ let test_attempt_rows_decode_under_distinct_keys () =
         ]
     in
     let resolved, _ = resolve t in
-    Keeper_turn_spend_ledger.write
-      ~masc_root
-      ~agent_name:"spend-keeper"
-      ~task_id:None
-      ~trace_id:"trace-spend"
-      ~keeper_turn_id:7
-      resolved;
+    (match
+       Keeper_turn_spend_ledger.write
+         ~masc_root
+         ~agent_name:"spend-keeper"
+         ~task_id:None
+         ~trace_id:"trace-spend"
+         ~keeper_turn_id:7
+         resolved
+     with
+     | Ok () -> ()
+     | Error (_ : Keeper_hooks_agent_core.append_failure) -> fail "resolved rows not written");
     let jsons = Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10 in
     let rows =
       List.map
@@ -576,6 +580,7 @@ let test_an_ended_turn_counts_itself_and_its_spend () =
         ~keeper_turn_id
         ~before:meta
         ~attempt_spend:(Keeper_turn_spend.attempts t)
+        ~settled_start:None
         (Keeper_turn_spend_commit.count_turn meta)
     with
     | Error error -> fail (Keeper_turn_spend_commit.error_to_string error)
@@ -623,6 +628,7 @@ let test_a_refused_commit_writes_no_rows () =
          ~keeper_turn_id:1
          ~before:unowned
          ~attempt_spend:(Keeper_turn_spend.attempts t)
+         ~settled_start:None
          (Keeper_turn_spend_commit.count_turn unowned)
      with
      | Ok _ -> fail "a Keeper without an Owner committed"
@@ -632,6 +638,101 @@ let test_a_refused_commit_writes_no_rows () =
      | Error Keeper_turn_spend_commit.Keeper_removed ->
        fail "an unknown Keeper read as removed");
     check int "no rows" 0 (List.length (spend_rows config)))
+;;
+
+let created_at = "2020-01-01T00:00:00Z"
+
+let start_execution config (meta : Keeper_meta_contract.keeper_meta) =
+  Keeper_unsettled_spend.settle_before_execution
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+    ~agent_name:meta.name
+    ~created_at
+;;
+
+(* The raw row an execution that did not commit leaves: reading the ledger
+   before the next execution settles it. *)
+let leave_raw_row config (meta : Keeper_meta_contract.keeper_meta) =
+  match
+    Keeper_hooks_agent_core.emit_cost_event
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+      ~agent_name:meta.name
+      ~task_id:None
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~keeper_turn_id:(meta.runtime.usage.total_turns + 2)
+      ~agent_core_turn_ordinal:1
+      ~model:"fixture-model"
+      ~input_tokens:50
+      ~output_tokens:5
+      ~cost_usd:0.0
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~spend_observation:
+        (Keeper_spend_observation.Agent_core_response
+           { response_id = ""
+           ; ordinal = 1
+           ; model = "fixture-model"
+           ; usage =
+               Some
+                 { Keeper_usage_resolution.input_tokens = 50
+                 ; output_tokens = 5
+                 ; cache_creation_input_tokens = 0
+                 ; cache_read_input_tokens = 0
+                 ; cost_usd = None
+                 }
+           })
+      ~runtime_attempt:("run-left", "fixture.runtime", 0)
+      ()
+  with
+  | Ok () -> ()
+  | Error (_ : Keeper_hooks_agent_core.append_failure) -> fail "the raw row was not written"
+;;
+
+let resolved_rows config =
+  List.filter
+    (fun (row : Cost_ledger.t) ->
+       match row.usage_projection with
+       | Cost_ledger.Raw_observation _ -> false
+       | Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _ -> true)
+    (spend_rows config)
+;;
+
+let commit_ended_turn config (meta : Keeper_meta_contract.keeper_meta) settled_start =
+  let t = observe started (report (counted ~input:100 ~output:10)) in
+  match
+    Keeper_turn_spend_commit.commit
+      ~config
+      ~keeper_turn_id:(meta.runtime.usage.total_turns + 1)
+      ~before:meta
+      ~attempt_spend:(Keeper_turn_spend.attempts t)
+      ~settled_start
+      (Keeper_turn_spend_commit.count_turn meta)
+  with
+  | Ok (_ : Keeper_meta_contract.keeper_meta) -> ()
+  | Error error -> fail (Keeper_turn_spend_commit.error_to_string error)
+;;
+
+(* A commit that holds and writes every row hands the turn's start back, so
+   the Keeper's next execution does not read the ledger. *)
+let test_a_commit_that_writes_every_row_hands_the_start_back () =
+  with_owned_keeper (fun config meta ->
+    commit_ended_turn config meta (start_execution config meta);
+    leave_raw_row config meta;
+    ignore (start_execution config meta : Keeper_unsettled_spend.settled_start option);
+    check int "the ledger was not read" 1 (List.length (resolved_rows config)))
+;;
+
+(* Rows the ledger did not take keep the start, so the next execution reads
+   the ledger and settles what the raw rows hold. *)
+let test_a_commit_whose_rows_are_not_written_keeps_the_start () =
+  with_owned_keeper (fun config meta ->
+    let settled_start = start_execution config meta in
+    Dated_jsonl.set_append_guard (fun (_ : unit -> unit) -> ());
+    Fun.protect
+      ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ()))
+      (fun () -> commit_ended_turn config meta settled_start);
+    check int "no resolved row landed" 0 (List.length (resolved_rows config));
+    leave_raw_row config meta;
+    ignore (start_execution config meta : Keeper_unsettled_spend.settled_start option);
+    check int "the next execution settled the raw row" 1 (List.length (resolved_rows config)))
 ;;
 
 let resolve_turn t =
@@ -752,6 +853,10 @@ let () =
             test_an_ended_turn_counts_itself_and_its_spend
         ; test_case "a refused commit writes no rows" `Quick
             test_a_refused_commit_writes_no_rows
+        ; test_case "a commit that writes every row hands the start back" `Quick
+            test_a_commit_that_writes_every_row_hands_the_start_back
+        ; test_case "a commit whose rows are not written keeps the start" `Quick
+            test_a_commit_whose_rows_are_not_written_keeps_the_start
         ] )
     ]
 ;;

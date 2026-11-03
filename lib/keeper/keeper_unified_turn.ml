@@ -31,9 +31,17 @@ exception Owner_meta_commit_failed of string
 
 (* A commit that fails leaves the Keeper's durable state behind the turn it
    just ran; the cycle stops here rather than run on from it. *)
-let commit_turn_with_attempt_spend ~config ~keeper_turn_id ~before ~attempt_spend after =
+let commit_turn_with_attempt_spend
+      ~config
+      ~keeper_turn_id
+      ~before
+      ~attempt_spend
+      ~settled_start
+      after
+  =
   match
-    Keeper_turn_spend_commit.commit ~config ~keeper_turn_id ~before ~attempt_spend after
+    Keeper_turn_spend_commit.commit
+      ~config ~keeper_turn_id ~before ~attempt_spend ~settled_start after
   with
   | Ok committed -> committed
   | Error error ->
@@ -1201,13 +1209,14 @@ let run_keeper_cycle
                   [Keeper_agent_run_receipt.finalize] -- a phase-gate or
                   pre-dispatch end -- and then no lane was run or left behind
                   either. *)
-               let degraded_retry_applied, degraded_retry_deferred, attempt_spend =
+               let degraded_retry_applied, degraded_retry_deferred, attempt_spend, settled_start =
                  match turn_state.degraded_retry_settled with
                  | Some (settled : Keeper_agent_run.turn_settlement) ->
                    ( settled.degraded_retry_applied
                    , settled.degraded_retry_deferred
-                   , settled.spend )
-                 | None -> None, None, []
+                   , settled.spend
+                   , settled.settled_start )
+                 | None -> None, None, [], None
                in
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
@@ -1233,6 +1242,7 @@ let run_keeper_cycle
                       ~keeper_turn_id
                       ~before:meta
                       ~attempt_spend
+                      ~settled_start
                       { meta with
                         updated_at = now_iso ()
                       ; runtime =
@@ -1486,6 +1496,7 @@ let run_keeper_cycle
                     ~keeper_turn_id
                     ~before:meta
                     ~attempt_spend
+                    ~settled_start
                     updated_meta
                   |> ignore;
                   Otel_metric_store.inc_counter
@@ -1575,6 +1586,7 @@ let run_keeper_cycle
                       ~degraded_retry_deferred
                       ~keeper_turn_id
                       ~spend:attempt_spend
+                      ~settled_start
                       execution_outcome
                   in
                   (match success with

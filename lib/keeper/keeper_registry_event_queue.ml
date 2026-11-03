@@ -682,17 +682,13 @@ let peek_when_result ~base_path name ~now ~ready =
       ~ready
 ;;
 
-let pending_frontier_result ~base_path name =
+let pending_selections_result ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
   | Some _ ->
-    Keeper_event_queue_persistence.pending_frontier_result
+    Keeper_event_queue_persistence.pending_selections_result
       ~base_path
       ~keeper_name:name
-;;
-
-let pending_selections_result ~base_path name =
-  Result.map snd (pending_frontier_result ~base_path name)
 ;;
 
 let admitted_selection_standing_result ~base_path name ~selection =

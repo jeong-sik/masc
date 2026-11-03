@@ -1,16 +1,8 @@
-type t =
-  { admitted : Keeper_event_queue_state.pending_selection list
-  ; frontier : Keeper_event_queue_state.frontier
-  }
+type t = { admitted : Keeper_event_queue_state.pending_selection list }
 
-let empty =
-  { admitted = []; frontier = Keeper_event_queue_state.unobserved_frontier }
-let of_intake ~frontier ~admitted = { admitted; frontier }
-let of_selections admitted =
-  of_intake ~frontier:Keeper_event_queue_state.unobserved_frontier ~admitted
+let empty = { admitted = [] }
+let of_selections admitted = { admitted }
 let selections batch = batch.admitted
-let arrived_since_intake batch selection =
-  Keeper_event_queue_state.arrived_since batch.frontier selection
 let stimuli batch =
   List.map (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source)
     (selections batch)
@@ -56,7 +48,7 @@ let validate ~diagnostic ~standing batch =
   | Ok (kept, withdrawn) ->
     (match batch.admitted with
      | [] -> Ok (batch, withdrawn)
-     | _ :: _ -> Ok ({ batch with admitted = kept }, withdrawn))
+     | _ :: _ -> Ok ({ admitted = kept }, withdrawn))
 
 type turn_input = { batch : t; reactive : bool }
 let for_turn ~reactive batch = { batch; reactive }

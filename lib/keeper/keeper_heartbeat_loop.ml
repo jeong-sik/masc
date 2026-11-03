@@ -877,17 +877,7 @@ let run_cycle_and_settle_lane ~run ~settle ~lane_of_outcome =
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
-let release_scheduled_handoff ~base_path ~keeper_name handoff =
-  Option.iter (fun handoff ->
-    match Keeper_owner_registry.release_scheduled_turn ~base_path ~keeper_name ~handoff with
-    | Ok () -> ()
-    | Error error -> Log.Keeper.warn ~keeper_name
-        "scheduled source slot release failed: %s"
-        (Keeper_owner_registry.command_error_to_string error)) handoff
-
 let run_keepalive_unified_turn
-      ~scheduled_handoff
-      ~on_handoff_observed
       ~wake
       ~(ctx : _ context)
       ~(registry_entry : Keeper_registry.registry_entry)
@@ -908,44 +898,20 @@ let run_keepalive_unified_turn
       | Error detail -> Log.Keeper.warn "Gate continuation reconciliation: %s" detail in
   if not proactive_warmup_elapsed
   then (
-    release_scheduled_handoff ~base_path:ctx.config.base_path
-      ~keeper_name:meta_after_triage.name scheduled_handoff;
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
     ; after_failure = None
     })
   else
-    let scheduled_sources = Keeper_scheduled_turn_handoff.pending
-      ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name in
-    let scheduled_handoff = match scheduled_sources with
-     | Error detail ->
-       Log.Keeper.error ~keeper_name:meta_after_triage.name
-         "scheduled source handoff read unavailable: %s" detail;
-       scheduled_handoff
-     | Ok sources ->
-       (match Keeper_owner_registry.observe_scheduled_turn
-          ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name sources with
-        | Ok observed ->
-          on_handoff_observed observed;
-          observed
-        | Error error ->
-          Log.Keeper.warn ~keeper_name:meta_after_triage.name
-            "scheduled source observation unavailable: %s"
-            (Keeper_owner_registry.command_error_to_string error);
-          scheduled_handoff)
-    in
     match
-      Keeper_owner_registry.run_scheduled_if_idle
-        ~handoff:scheduled_handoff ~sources:scheduled_sources
+      Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         (* Keep the caller's Tool/HTTP observer bindings captured before the
-           Owner forks its child. The Owner supplies priority only at admission. *)
-        (let admitted_sources = ref [] in
-         let captured = Keeper_tool_call_log.capture_commit_observer
+           Owner forks its child. *)
+        (Keeper_tool_call_log.capture_commit_observer
          @@ Llm_provider.Http_request_observer.capture (fun () ->
-           let priority_sources = !admitted_sources in
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
     let diagnostic_selection = ref None in
@@ -996,8 +962,7 @@ let run_keepalive_unified_turn
            meta_after_triage.name
            candidate_id);
       let event_intake =
-        Stimulus_intake.heartbeat_event_intake_with_priority
-          ~priority_sources
+        Stimulus_intake.heartbeat_event_intake
           ~ctx
           ~meta_after_triage
           ~pending_board_events
@@ -1470,8 +1435,7 @@ let run_keepalive_unified_turn
       handle_cycle_exception
         ~registry_entry
         ~meta:meta_after_triage
-        exn)) in
-         fun sources -> admitted_sources := sources; captured ())
+        exn)))
     with
   | Ok (`Ran outcome) -> outcome
   | Ok `Interrupted -> interrupted_cycle_outcome ~meta:meta_after_triage
@@ -1607,7 +1571,6 @@ let run_heartbeat_loop
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
   let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
       (float_of_int (max 0 proactive_warmup_sec))) in
-  let captured_handoff = ref None in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1616,12 +1579,6 @@ let run_heartbeat_loop
                from monopolizing the Eio scheduler during CPU-bound phases
                (tool filtering, snapshot construction, prompt building). *)
       Eio_guard.fair_yield ();
-      (match Keeper_owner_registry.scheduled_turn_handoff
-         ~base_path:ctx.config.base_path ~keeper_name:m.name with
-       | Ok handoff -> captured_handoff := handoff
-       | Error error -> Log.Keeper.warn ~keeper_name:m.name
-           "scheduled source slot observation failed: %s"
-           (Keeper_owner_registry.command_error_to_string error));
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let owner_meta =
@@ -1765,8 +1722,6 @@ let run_heartbeat_loop
         let turn_outcome =
           if not admitted_turn
           then (
-            release_scheduled_handoff ~base_path:ctx.config.base_path
-              ~keeper_name:m.name !captured_handoff;
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
@@ -1793,8 +1748,7 @@ let run_heartbeat_loop
                 deferred_runtime_lane
             in
             let r =
-              run_keepalive_unified_turn ~wake ~scheduled_handoff:!captured_handoff
-                ~on_handoff_observed:(fun handoff -> captured_handoff := handoff)
+              run_keepalive_unified_turn ~wake
                 ~ctx
                 ~registry_entry
                 ~meta_after_triage
@@ -1989,26 +1943,7 @@ let run_heartbeat_loop
         then Deferred_lane_slot.invalidate deferred_runtime_lane_slot;
       if Atomic.get stop then () else loop ())
   in
-  Eio.Switch.run (fun sw ->
-    let consumer = ref None in
-    Eio.Switch.on_release sw (fun () ->
-      Option.iter (fun consumer ->
-        match Keeper_owner_registry.end_scheduled_turn_consumer
-          ~base_path:ctx.config.base_path ~keeper_name:m.name ~consumer with
-        | Ok () -> ()
-        | Error error -> Log.Keeper.warn ~keeper_name:m.name
-            "scheduled source consumer release failed: %s"
-            (Keeper_owner_registry.command_error_to_string error)) !consumer);
-    (* Install cleanup before the protected, bounded mailbox registration.
-       Cancellation cannot retire an untracked accepted consumer. *)
-    Eio.Cancel.protect (fun () ->
-      match Keeper_owner_registry.begin_scheduled_turn_consumer
-        ~base_path:ctx.config.base_path ~keeper_name:m.name with
-      | Ok active -> consumer := Some active
-      | Error error ->
-        Log.Keeper.warn ~keeper_name:m.name "scheduled source consumer unavailable: %s"
-          (Keeper_owner_registry.command_error_to_string error));
-    loop ())
+  loop ()
 ;;
 
 module For_testing = struct

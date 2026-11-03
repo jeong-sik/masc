@@ -334,7 +334,7 @@ let test_repeated_browser_input_remains_deliverable () =
         let scope, _, target = prepare_direct_execution () in
         let on_tool_boundary = if with_boundary then
             Some (fun ~tool_name -> Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-              ~repetition_execution:(Some scope) ~yield_requested:None ~tool_name) else None in
+              ~repetition_execution:(Some scope) ~tool_name) else None in
         let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"BrowserInteract"
           ?on_tool_boundary
           ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
@@ -372,7 +372,7 @@ let test_scoped_boundary_spans_official_attempts () =
         ~on_tool_boundary:(fun ~tool_name ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~yield_requested:None ~tool_name)
+            ~repetition_execution:(Some execution) ~tool_name)
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
@@ -396,7 +396,7 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun ~tool_name ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~yield_requested:None ~tool_name)
+            ~repetition_execution:(Some execution) ~tool_name)
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -549,57 +549,7 @@ let test_dynamic_tool_failures_do_not_invent_a_host_stop () =
     check (option string) "tool result does not synthesize a terminal stop" None !terminal_error)
 ;;
 
-(* Official tools settle once before a queued input asks the host loop to
-   checkpoint. Codex's dynamic-call workers inherit the Owner child binding. *)
-let test_queued_input_yields_after_official_tool_handoff () =
-  List.iter (fun runtime_label ->
-    with_active_raw_trace (fun ~path:_ ~active ->
-      let executed = ref 0 and handed_off = ref false and checks = ref 0 in
-      let owner = Keeper_interrupt_token.fresh () in
-      let observation = Keeper_turn_preview_owner.create_turn_observation () in
-      Keeper_turn_preview_owner.with_owner ~interrupt_token:owner ~observation (fun () ->
-        let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"queued_effect"
-          ~on_result_handoff:(fun ~invocation:_ ~content ->
-            check string "the original result is handed off" "committed once" content;
-            handed_off := true)
-          ~on_tool_boundary:(fun ~tool_name ->
-            Keeper_agent_run.For_testing.official_client_tool_boundary
-              ~repetition_execution:None ~tool_name
-              ~yield_requested:(Some (fun () ->
-                incr checks;
-                check bool "handoff precedes scheduling" true !handed_off;
-                check bool "tool worker inherits the exact Owner token" true
-                  (Option.fold ~none:false ~some:(Keeper_interrupt_token.equal owner)
-                     (Keeper_turn_preview_owner.current ()));
-                Ok (Some { Keeper_agent_run.reason = Operation_queued }))))
-          (fun _ -> incr executed;
-            Ok { Agent_core.Types.content = "committed once"; content_blocks = None; _meta = None }) in
-        Eio.Switch.run (fun sw ->
-          Eio.Fiber.fork ~sw (fun () ->
-            Eio.Fiber.yield ();
-            let result = tool.call ~call_id:"queued-effect-call" (`Assoc []) in
-            check bool "yield preserves tool success" true result.success;
-            check string "yield preserves the result" "committed once" result.content;
-            match result.abort_turn with
-            | Some (Terminal_tool_boundary {tool_name = "queued_effect";
-                outcome = Durable_stimulus_deferred} as stop) ->
-              (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
-                ~session_id:"original-session" ~turn_id:"original-turn"
-                ~provider_turn_ordinal:23 ~turns_used:4 ~latency_ms:None
-                ~request_context:None stop with
-               | Ok { Runtime_agent.stop_reason = Yielded_to_durable_stimulus
-                   {turns_used = 4; provider_turn_ordinal = 23};
-                   session_id = "original-session"; _ } -> ()
-               | Ok _ -> fail "queued input lost the resumable official checkpoint"
-               | Error error -> fail (Agent_core.Error.to_string error))
-            | _ -> fail "queued input did not yield with its actual tool name"));
-        check int "the effect executes once" 1 !executed;
-        check int "the settled tool has one scheduling decision" 1 !checks;
-        check (option string) "yield is not terminal failure" None !terminal_error)))
-    ["Codex"; "Claude Code"]
-;;
-
-let test_queued_input_preserves_explicit_terminal_outcomes () =
+let test_boundary_preserves_explicit_terminal_outcomes () =
   let module Tools = Keeper_tools_agent_core in
   List.iter (fun terminal -> with_active_raw_trace (fun ~path:_ ~active ->
     let tool, _ = one_dynamic_tool ~active
@@ -607,16 +557,15 @@ let test_queued_input_preserves_explicit_terminal_outcomes () =
       ~terminal_effect_state:(fun () -> terminal)
       ~on_tool_boundary:(fun ~tool_name ->
         Keeper_agent_run.For_testing.official_client_tool_boundary
-          ~repetition_execution:None ~tool_name
-          ~yield_requested:(Some (fun () ->
-            Ok (Some {Keeper_agent_run.reason = Operation_queued}))))
+          ~repetition_execution:None ~tool_name)
       (fun _ -> Ok {Agent_core.Types.content = "settled"; content_blocks = None; _meta = None}) in
-    let result = tool.call ~call_id:"terminal-before-queue" (`Assoc []) in
+    let result = tool.call ~call_id:"terminal-effect" (`Assoc []) in
     match terminal, result.abort_turn with
     | Tools.Terminal_effect_completed _, Some (Terminal_tool_boundary {outcome = Terminal_completed; _})
-    | (Tools.Deferred_tool_result | Tools.External_effect_deferred), Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | Tools.Deferred_tool_result, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | Tools.External_effect_deferred, None -> ()
     | Tools.Terminal_effect_failed _, Some (Terminal_tool_boundary {outcome = Terminal_failed _; _}) -> ()
-    | _ -> fail "queued input replaced an explicit terminal outcome"))
+    | _ -> fail "the boundary replaced an explicit terminal outcome"))
     [ Tools.Terminal_effect_completed
         (Keeper_tool_execution.Surface_post_completed
           (Keeper_surface_post.To_discord {channel_id = "fixture-destination"}))
@@ -640,7 +589,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~yield_requested:None ~tool_name)
+            ~repetition_execution:None ~tool_name)
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
@@ -3558,10 +3507,8 @@ let () =
             "dynamic tool failures do not invent a host stop"
             `Quick
             test_dynamic_tool_failures_do_not_invent_a_host_stop
-        ; test_case "queued input yields after official tool result handoff" `Quick
-            test_queued_input_yields_after_official_tool_handoff
-        ; test_case "queued input preserves explicit terminal outcomes" `Quick
-            test_queued_input_preserves_explicit_terminal_outcomes
+        ; test_case "the boundary preserves explicit terminal outcomes" `Quick
+            test_boundary_preserves_explicit_terminal_outcomes
         ; test_case
             "settled official tool keeps turn running"
             `Quick

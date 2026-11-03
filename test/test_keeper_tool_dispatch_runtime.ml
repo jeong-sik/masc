@@ -5033,7 +5033,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
             Runtime_agent.run_blocks ~sw ~net ~config ~agent_ref:attempt_agent_ref
               ~cooperative_yield_probe:(fun boundary ->
                 observed_boundary := Some boundary;
-                Ok (Runtime_agent.Yield Runtime_agent.Operation_queued))
+                Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting))
               [Agent_core.Types.Text "run probe"])
       in
       check int "one actual provider call" 1 provider_calls;

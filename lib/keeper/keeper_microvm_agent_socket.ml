@@ -38,9 +38,8 @@ let plan ~uid ~gid ~host_socket (exec_plan : Plan.t) : Plan.t =
   ; published_sockets = [ { Plan.host_path = host_socket; guest_path } ]
   ; environment =
       exec_plan.environment
-      @ [ "HOME", Keeper_microvm_backend.scratch_guest_root
-        ; Exec_ssh_protocol.shim_config_env_var, Keeper_sandbox_microvm.shim_config_guest_path
-        ]
+      @ Keeper_sandbox_microvm.request_environment
+          ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path
   ; labels = exec_plan.labels @ [ relay_label ]
   }
 ;;

@@ -32,8 +32,9 @@ val plan :
     plan leaves out [Read_only_rootfs], gives back [CAP_SETUID], [CAP_SETGID]
     and [CAP_SYS_ADMIN] after dropping all, and publishes the socket at
     [host_socket]. The agent hands its own environment and working directory
-    to every request, so [HOME] and the shim config path that an exec request
-    sets are in the plan's environment. Everything else is the exec plan's. *)
+    to every request, so {!Keeper_sandbox_microvm.request_environment}, which
+    an exec request gets as [--env], is in the plan's environment. Everything
+    else is the exec plan's. *)
 
 type preparation_error =
   | Directory_unusable of

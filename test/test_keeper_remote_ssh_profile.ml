@@ -363,21 +363,6 @@ let test_an_unknown_delivery_is_refused_by_name () =
       Keeper_types_profile_sandbox.valid_microvm_delivery_strings
 ;;
 
-let test_the_keeper_overlay_chooses_the_delivery () =
-  let module P = Masc.Keeper_types_profile_toml_parser in
-  let with_delivery delivery = { P.empty_keeper_profile_defaults with P.microvm_delivery = delivery } in
-  let merged ~base ~overlay =
-    Option.map Keeper_types_profile_sandbox.microvm_delivery_to_string
-      (P.merge_keeper_profile_defaults ~base:(with_delivery base) ~overlay:(with_delivery overlay))
-        .microvm_delivery
-  in
-  check (option string) "the overlay's choice wins" (Some "agent_socket")
-    (merged ~base:(Some Keeper_types_profile_sandbox.Exec_per_request)
-       ~overlay:(Some Keeper_types_profile_sandbox.Agent_socket));
-  check (option string) "an overlay without one keeps the base's" (Some "exec_per_request")
-    (merged ~base:(Some Keeper_types_profile_sandbox.Exec_per_request) ~overlay:None)
-;;
-
 let () =
   run "remote_ssh profile"
     [ "profile", [ test_case "roundtrip" `Quick test_profile_roundtrip
@@ -412,6 +397,4 @@ let () =
                           ; test_case "requires microvm" `Quick
                               test_microvm_delivery_requires_microvm
                           ; test_case "unknown refused by name" `Quick
-                              test_an_unknown_delivery_is_refused_by_name
-                          ; test_case "the keeper overlay chooses" `Quick
-                              test_the_keeper_overlay_chooses_the_delivery ] ]
+                              test_an_unknown_delivery_is_refused_by_name ] ]

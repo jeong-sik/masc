@@ -83,17 +83,31 @@ let test_the_agent_plan_starts_the_agent_as_root () =
   check bool "the socket is published" true
     (agent_plan.published_sockets = [{Plan.host_path = host_socket; guest_path = Agent.guest_path}])
 
-(* The agent hands its own environment and working directory to every
-   request; an exec request sets these per call. *)
+(* The agent hands its own environment, working directory and the keeper's
+   ids to every request; an exec request is given the same on each call. *)
 let test_the_agent_carries_what_an_exec_request_sets () =
-  check string "requests run from the work volume" Sandbox.work_volume_guest_root
-    agent_plan.working_directory;
-  check (option string) "HOME is the scratch" (Some Backend.scratch_guest_root)
-    (List.assoc_opt "HOME" agent_plan.environment);
-  check (option string) "the shim config" (Some Sandbox.shim_config_guest_path)
-    (List.assoc_opt Exec_ssh_protocol.shim_config_env_var agent_plan.environment);
-  check bool "the identity wiring stays" true
-    (List.for_all (fun pair -> List.mem pair agent_plan.environment) exec_plan.environment)
+  let exec_prefix =
+    value
+      (Sandbox.shim_exec_prefix_for Backend.Apple_container ~container_name:"fixture"
+         ~uid:502 ~gid:20 ~remote_root:Sandbox.work_volume_guest_root
+         ~shim_config_path:Sandbox.shim_config_guest_path) in
+  let rec flag_values name = function
+    | flag :: value :: rest when String.equal flag name -> value :: flag_values name rest
+    | _ :: rest -> flag_values name rest
+    | [] -> [] in
+  let inherited = List.length exec_plan.environment in
+  let added = List.filteri (fun index _ -> index >= inherited) agent_plan.environment in
+  check (list string) "the environment an exec sets"
+    (flag_values "--env" exec_prefix)
+    (List.map (fun (key, value) -> key ^ "=" ^ value) added);
+  check (list string) "the working directory an exec sets"
+    (flag_values "-w" exec_prefix) [agent_plan.working_directory];
+  (match agent_plan.command with
+   | [_shim; _serve; _socket; ids] ->
+     check (list string) "the ids an exec runs as" (flag_values "--user" exec_prefix) [ids]
+   | _ -> fail "the agent command ends with the keeper's ids");
+  check bool "the identity wiring comes first, unchanged" true
+    (List.filteri (fun index _ -> index < inherited) agent_plan.environment = exec_plan.environment)
 
 let test_the_relay_version_is_part_of_the_plan () =
   check (pair string string) "the relay label"
@@ -179,6 +193,31 @@ let test_what_is_not_a_socket_is_left_alone () =
      | Ok () | Error _ -> fail "a regular file is not removed");
     check bool "still there" true (kind path = Unix.S_REG))
 
+(* Kinds come from lstat: a linked directory is not used, and a link where
+   the socket goes is left in place even when its target is a socket. *)
+let test_links_are_not_followed () =
+  with_base (fun directory ->
+    let elsewhere = Filename.concat (Filename.dirname directory) "elsewhere" in
+    Unix.mkdir (Filename.dirname directory) 0o700;
+    Unix.mkdir elsewhere 0o700;
+    Unix.symlink elsewhere directory;
+    let path = Filename.concat directory "a.sock" in
+    let prepare () = Agent.prepare_host_socket ~guest_presence:(presence (Ok Inventory.Absent)) path in
+    (match prepare () with
+     | Error (Agent.Directory_unusable {path = refused; _}) ->
+       check string "the linked directory is named" directory refused
+     | Ok () | Error _ -> fail "a linked directory is refused");
+    Unix.unlink directory;
+    check bool "a real directory" true (prepare () = Ok ());
+    let target = Filename.concat elsewhere "b.sock" in
+    leave_a_socket target;
+    Unix.symlink target path;
+    (match prepare () with
+     | Error (Agent.Path_occupied {path = occupied}) -> check string "named" path occupied
+     | Ok () | Error _ -> fail "a link where the socket goes is not removed");
+    check bool "the link stays" true (kind path = Unix.S_LNK);
+    check bool "and its target" true (kind target = Unix.S_SOCK))
+
 let test_a_directory_that_is_a_file_is_refused () =
   with_base (fun directory ->
     Unix.mkdir (Filename.dirname directory) 0o700;
@@ -204,4 +243,5 @@ let () =
       ; test_case "an open directory is closed" `Quick test_an_open_directory_is_closed
       ; test_case "a left socket goes only with its guest" `Quick test_a_left_socket_goes_only_with_its_guest
       ; test_case "what is not a socket is left alone" `Quick test_what_is_not_a_socket_is_left_alone
+      ; test_case "links are not followed" `Quick test_links_are_not_followed
       ; test_case "a directory that is a file is refused" `Quick test_a_directory_that_is_a_file_is_refused ] ]

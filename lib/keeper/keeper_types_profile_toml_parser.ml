@@ -312,14 +312,17 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | Some Micro_vm, (None | Some (Nerdctl_kata | Microsandbox)), Some Agent_socket ->
         Error
           "microvm_delivery_requires_apple_container: keeper.microvm_delivery \
-           = \"agent_socket\" needs microvm_backend = \"apple_container\", the \
-           runtime that publishes the agent's socket to the host"
+           = \"agent_socket\" needs microvm_backend = \"apple_container\" in \
+           the same keeper file, the runtime that publishes the agent's socket \
+           to the host; write it there, or remove microvm_delivery"
     | ( (None | Some (Docker | Remote_ssh))
       , (None | Some (Apple_container | Nerdctl_kata | Microsandbox))
       , Some (Exec_per_request | Agent_socket) ) ->
         Error
           "microvm_delivery_requires_microvm: keeper.microvm_delivery is only \
-           valid with sandbox_profile = \"microvm\""
+           valid with sandbox_profile = \"microvm\" written in the same \
+           keeper file, not inherited from the workspace; write it there, or \
+           remove microvm_delivery"
   in
   (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
      before the judge is asked. The spelling is checked whether or not a

@@ -113,7 +113,7 @@ agent 소켓은 root 전용 디렉터리에 있어서 Keeper uid 는 경로로 �
 ### 3.9 옮기는 순서
 
 1. `Agent_socket` 전달 방식을 Keeper 별 선택으로 더해요. canary 동안에만 두 경로가 같이 있어요. 되돌리기는 그 Keeper 의 선택을 원래대로 바꾸는 거예요.
-   - 선택은 Keeper TOML 의 `microvm_delivery` 예요(`exec_per_request` 가 기본, `agent_socket`). `sandbox_profile = "microvm"` 이고 `microvm_backend = "apple_container"` 일 때만 `agent_socket` 을 받아요.
+   - 선택은 Keeper TOML 의 `microvm_delivery` 예요(`exec_per_request` 가 기본, `agent_socket`). `sandbox_profile = "microvm"` 이고 `microvm_backend = "apple_container"` 일 때만 `agent_socket` 을 받아요. 두 값은 같은 Keeper 파일에 적혀 있어야 해요. 워크스페이스 기본값으로 물려받은 값은 보지 않아요(`microvm_backend` 와 같은 규칙).
    - 턴마다 게스트를 다시 판정하면서 TOML 을 읽어요. 값을 바꾸면 다음 턴에 plan 이 달라져 게스트가 교체돼요.
 2. canary 기준(7절)을 넘으면 나머지 Apple Keeper 를 옮겨요.
 3. 모두 옮기면 `Exec_per_request` 전달 방식과 선택 값을 한 PR 에서 지워요. 그 뒤 되돌리기는 그 PR 의 revert 예요.

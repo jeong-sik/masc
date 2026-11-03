@@ -6,7 +6,6 @@
 
 type observation =
   { palette : Masc_tui_terminal_palette.t option
-  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
   ; graphics : Masc_tui_graphics.query_reply option
   ; cell_pixels : (int * int) option
   }
@@ -15,11 +14,6 @@ type observation =
 
 type result =
   { palette : Masc_tui_terminal_palette.t option
-  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
-        (** What the terminal said about its own page, and [None] where it
-            said nothing. Separate from [palette] because it survives where
-            the palette does not: a multiplexer passes DECSET 996 and 2031
-            through and answers no OSC colour query. *)
   ; graphics : Masc_tui_graphics.query_reply option
   ; cell_pixels : (int * int) option
         (** Width and height of one character cell in pixels, from the
@@ -52,18 +46,12 @@ val startup_status : decoder -> startup_status
 val observation : decoder -> observation
 val observe_palette : decoder -> Masc_tui_terminal_palette.slot ->
   Masc_tui_terminal_palette.rgb option -> unit
-val observe_theme_mode : decoder -> Masc_tui_terminal_palette.theme_mode -> unit
 val observe_graphics : decoder -> Masc_tui_graphics.query_reply -> unit
 val observe_cell_pixels : decoder -> int * int -> unit
 (** Consume typed replies from the normal input decoder after startup's byte
     filter completes. Palette collection retains its requested-slot/first-answer
-    policy; graphics and cell size retain their first valid answer. Theme mode
-    follows actual later notices. These grant no terminal input/effect authority. *)
-
-val theme_mode : decoder -> Masc_tui_terminal_palette.theme_mode option
-(** What the terminal has said about its own page so far. Read while the
-    decoder is still live, because DECSET 2031 reports again whenever the
-    reader switches theme and there is no one moment the answer is final. *)
+    policy; graphics and cell size retain their first valid answer. These grant
+    no terminal input/effect authority. *)
 
 val palette : decoder -> Masc_tui_terminal_palette.t option
 (** The complete palette available now, if any. O(1) and does not materialize

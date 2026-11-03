@@ -98,10 +98,8 @@ def conditions(value):
 
 
 def replies(value):
-    keys(value, {"palette_known", "theme_mode", "graphics", "cell_pixels"}, "invalid reply availability")
+    keys(value, {"palette_known", "graphics", "cell_pixels"}, "invalid reply availability")
     require(type(value["palette_known"]) is bool, "invalid palette availability")
-    if value["theme_mode"] is not None:
-        member(value["theme_mode"], {"dark", "light"})
     member(value["graphics"], {"unknown", "supported", "refused"})
     if value["cell_pixels"] is not None:
         keys(value["cell_pixels"], {"width", "height"}, "invalid cell dimensions")
@@ -128,7 +126,6 @@ def capabilities_follow(old, new):
     require(not old["palette_known"] or new["palette_known"], "palette availability regressed")
     for key, unknown in (("graphics", "unknown"), ("cell_pixels", None)):
         require(old[key] == unknown or old[key] == new[key], "first-answer capability changed")
-    require(old["theme_mode"] is None or new["theme_mode"] is not None, "theme availability regressed")
 
 
 def timed(value, parse):

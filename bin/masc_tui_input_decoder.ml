@@ -1,6 +1,5 @@
 type reply =
   | Palette of Masc_tui_terminal_palette.slot * Masc_tui_terminal_palette.rgb option
-  | Theme_mode of Masc_tui_terminal_palette.theme_mode
   | Cell_pixels of int * int
   | Graphics of string
 
@@ -74,7 +73,6 @@ let escape = '\x1b'
 let bell = '\x07'
 let string_terminator_final = '\\'
 let paste_start_parameters = "200"
-let theme_mode_final = 'n'
 let cell_size_final = 't'
 let cell_size_report_code = "6"
 let x10_parameters = ""
@@ -126,10 +124,6 @@ let complete_csi t parameters final =
                 match Masc.Tui_mouse_protocol.sgr_left_release parameters final with
                 | Some (row, column) -> [ Mouse_left_release (row, column) ]
                 | None -> key "unknown-esc")))
-  else if final = theme_mode_final then
-    match Masc_tui_terminal_palette.parse_theme_mode_parameters parameters with
-    | Some mode -> [ Reply (Theme_mode mode) ]
-    | None -> csi_key parameters final
   else if final = cell_size_final then
     match parse_cell_size parameters with
     | Some (width, height) -> [ Reply (Cell_pixels (width, height)) ]

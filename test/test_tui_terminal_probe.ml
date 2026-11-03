@@ -175,44 +175,8 @@ let test_bracketed_paste_is_opaque () =
   ignore (palette result)
 ;;
 
-(* DECSET 996 asks and 2031 reports again on a theme switch, both replying as
-   [CSI ? 997 ; n n]. A multiplexer passes these through where it answers no
-   OSC colour query, so this is the only thing that ever arrives there. *)
-let theme_mode_reply parameter = Printf.sprintf "\x1b[?997;%dn" parameter
-
-let mode_to_string = function
-  | Masc_tui_terminal_palette.Dark -> "dark"
-  | Masc_tui_terminal_palette.Light -> "light"
-;;
-
-let theme_mode result =
-  match result.Masc_tui_terminal_probe.theme_mode with
-  | None -> "none"
-  | Some mode -> mode_to_string mode
-;;
-
-let test_a_theme_mode_reply_is_read_and_not_typed () =
-  let result =
-    Masc_tui_terminal_probe.decode ~palette_requested:true
-      ("a" ^ theme_mode_reply 1 ^ "b")
-  in
-  check string "the page is read" "dark" (theme_mode result);
-  check string "the reply never reaches the composer" "ab" result.replay;
-  let light =
-    Masc_tui_terminal_probe.decode ~palette_requested:true
-      (theme_mode_reply 2)
-  in
-  check string "light too" "light" (theme_mode light);
-  (* A parameter this does not know is not a dark page. *)
-  let unknown =
-    Masc_tui_terminal_probe.decode ~palette_requested:true
-      (theme_mode_reply 9)
-  in
-  check string "an unknown parameter says nothing" "none" (theme_mode unknown)
-;;
-
-(* Every other private-parameter sequence is the reader's, and holding one
-   while it might have been the reply must not eat it. *)
+(* Every private-parameter sequence is the reader's: nothing here waits on
+   one, so no byte of the reader's input may be eaten. *)
 let test_other_private_sequences_replay_whole () =
   List.iter
     (fun sequence ->
@@ -223,11 +187,11 @@ let test_other_private_sequences_replay_whole () =
       check string
         (Printf.sprintf "%S survives" sequence)
         ("x" ^ sequence ^ "y")
-        result.replay;
-      check string "and says nothing about the page" "none" (theme_mode result))
+        result.replay)
     [ "\x1b[?1h"          (* an application-cursor-keys set *)
     ; "\x1b[?2004l"       (* bracketed paste off *)
-    ; "\x1b[?997;1m"      (* right parameters, wrong final byte *)
+    ; "\x1b[?997;1n"      (* a private report this never asked for *)
+    ; "\x1b[?997;1m"      (* a private set, right after a report-shaped one *)
     ; "\x1b[?6n"          (* a cursor position request *)
     ]
 ;;
@@ -238,21 +202,19 @@ let test_an_unfinished_private_sequence_is_not_swallowed () =
     Masc_tui_terminal_probe.decode ~palette_requested:true "before\x1b[?997;1"
   in
   check string "the unfinished bytes come back" "before\x1b[?997;1"
-    result.replay;
-  check string "and no page was read" "none" (theme_mode result)
+    result.replay
 ;;
 
 (* Paste keeps the first claim on every byte it wants, even when what is
-   pasted looks exactly like the reply. *)
-let test_a_pasted_theme_reply_stays_pasted_text () =
-  let paste = "\x1b[200~" ^ theme_mode_reply 2 ^ "\x1b[201~" in
+   pasted looks exactly like a report. *)
+let test_a_pasted_report_stays_pasted_text () =
+  let paste = "\x1b[200~" ^ "\x1b[?997;2n" ^ "\x1b[201~" in
   let result =
     Masc_tui_terminal_probe.decode ~palette_requested:true
       ("before" ^ paste ^ "after")
   in
   check string "pasted bytes survive" ("before" ^ paste ^ "after")
-    result.replay;
-  check string "and are not read as the page" "none" (theme_mode result)
+    result.replay
 ;;
 
 let test_unknown_and_incomplete_sequences_replay () =
@@ -438,7 +400,6 @@ let test_hold_states_are_reported () =
          (fed ~palette_requested text))
   in
   holds "OSC reply candidate" true "\x1b]10;rgb:" true;
-  holds "private CSI (theme reply)" true "\x1b[?99" true;
   holds "cell-size reply or PageDown" false "\x1b[6" true;
   holds "APC prefix" false "\x1b_" true;
   holds "graphics APC body" false "\x1b_Gi=31" true;
@@ -509,19 +470,18 @@ let test_early_key_handoff_keeps_split_replies_and_paste () =
   let first = read_through decoder
       (String.sub key 1 (String.length key-1) ^ "\x1b]10;rgb:") in
   let paste = "\x1b[200~" ^ graphics_ok ^ foreground ^ "\x1b[201~" in
+  let unasked_report = "\x1b[?997;1n" in
   let rest = read_through decoder
-      ("12/ab/00\x07" ^ background ^ theme_mode_reply 1
+      ("12/ab/00\x07" ^ background ^ unasked_report
        ^ "\x1b[6;34;15t" ^ paste ^ graphics_ok ^ "\x1b[6~") in
   check string "same decoder preserves UTF-8, paste and later key bytes"
-    (key ^ paste ^ "\x1b[6~") (first ^ rest);
+    (key ^ unasked_report ^ paste ^ "\x1b[6~") (first ^ rest);
   let observed = Probe.observation decoder in
   check bool "late requested replies complete" true (Probe.complete decoder);
   check (option (pair int int)) "actual cell answer survives handoff"
     (Some (15,34)) observed.cell_pixels;
   check bool "pasted graphics did not substitute for the real answer" true
     (observed.graphics = Some Masc_tui_graphics.Supported);
-  check bool "theme arrives independently of the partial palette" true
-    (observed.theme_mode = Some Masc_tui_terminal_palette.Dark);
   ignore (palette (Probe.snapshot decoder))
 ;;
 
@@ -555,13 +515,10 @@ let test_late_decoded_replies_keep_the_original_observation_owner () =
     ~publish:(fun value -> other_observations := value :: !other_observations);
   let other_original = !other_observations in
   check (list string) "only actual user input becomes keys" ["x"]
-    (deliver_decoded_replies reader ("\x1b[6;34;15t" ^ osc_st "4;3;rgb:f7/ca/88"
-      ^ theme_mode_reply 1 ^ theme_mode_reply 2 ^ "x"));
+    (deliver_decoded_replies reader ("\x1b[6;34;15t" ^ osc_st "4;3;rgb:f7/ca/88" ^ "x"));
   let current = Probe.observation decoder in
   check (option (pair int int)) "late normal-decoder cell reply reaches original owner"
     (Some (15,34)) current.cell_pixels;
-  check bool "later theme notice replaces the prior mode" true
-    (current.theme_mode = Some Masc_tui_terminal_palette.Light);
   check (option (pair int int)) "retained initial observation is immutable" None original.cell_pixels;
   let initial_palette = Option.get original.palette and current_palette = Option.get current.palette in
   check bool "retained palette did not borrow mutable slots" true
@@ -572,7 +529,7 @@ let test_late_decoded_replies_keep_the_original_observation_owner () =
   check bool "other decoder has no borrowed cell reply" true
     (Option.is_none (Probe.observation other_decoder).cell_pixels);
   let published = !observations in
-  ignore (deliver_decoded_replies reader (theme_mode_reply 2 ^ "\x1b[6;40;20t" ^ graphics_ok));
+  ignore (deliver_decoded_replies reader ("\x1b[6;40;20t" ^ graphics_ok));
   check bool "duplicate notices and later first-answer slots do not republish" true
     (!observations == published)
 ;;
@@ -588,7 +545,7 @@ let test_no_color_handoff_retains_refusal_and_late_geometry () =
   let reader = Reader.create_input_reader () and observations = ref [] in
   Reader.install_terminal_probe reader decoder;
   Reader.install_terminal_probe_publisher reader ~publish:(fun value -> observations := value :: !observations);
-  ignore (deliver_decoded_replies reader (foreground ^ background ^ "\x1b[6;34;15t" ^ theme_mode_reply 1));
+  ignore (deliver_decoded_replies reader (foreground ^ background ^ "\x1b[6;34;15t"));
   let observed = Probe.observation decoder in
   check bool "unrequested colours grant no palette" true (Option.is_none observed.palette);
   check bool "real refusal remains refusal" true
@@ -778,15 +735,13 @@ let () =
         ; test_case "process authority preserves None" `Quick
             test_process_palette_preserves_none
         ] )
-    ; ( "theme mode"
-      , [ test_case "a reply is read and not typed" `Quick
-            test_a_theme_mode_reply_is_read_and_not_typed
-        ; test_case "other private sequences replay whole" `Quick
+    ; ( "private sequences"
+      , [ test_case "other private sequences replay whole" `Quick
             test_other_private_sequences_replay_whole
         ; test_case "an unfinished one is not swallowed" `Quick
             test_an_unfinished_private_sequence_is_not_swallowed
-        ; test_case "a pasted reply stays pasted text" `Quick
-            test_a_pasted_theme_reply_stays_pasted_text
+        ; test_case "a pasted report stays pasted text" `Quick
+            test_a_pasted_report_stays_pasted_text
         ] )
     ; ( "replay"
       , [ test_case "ASCII UTF-8 and ESC replay exactly" `Quick

@@ -255,7 +255,6 @@ let observe_terminal_reply reader reply =
     (match reply with
      | Masc_tui_input_decoder.Palette (slot,color) ->
        Masc_tui_terminal_probe.observe_palette decoder slot color
-     | Theme_mode mode -> Masc_tui_terminal_probe.observe_theme_mode decoder mode
      | Cell_pixels (width,height) -> Masc_tui_terminal_probe.observe_cell_pixels decoder (width,height)
      | Graphics body ->
        Option.iter (Masc_tui_terminal_probe.observe_graphics decoder)
@@ -437,8 +436,7 @@ let input_event_of_decoded reader = function
       observe_terminal_reply reader (Masc_tui_input_decoder.Graphics body);
       Some (Graphics_reply body)
   | Masc_tui_input_decoder.Reply
-      (( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Theme_mode _
-       | Masc_tui_input_decoder.Cell_pixels _ ) as reply) ->
+      (( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Cell_pixels _ ) as reply) ->
       observe_terminal_reply reader reply;
       None
 

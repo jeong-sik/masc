@@ -1,13 +1,11 @@
 type observation =
   { palette : Masc_tui_terminal_palette.t option
-  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
   ; graphics : Masc_tui_graphics.query_reply option
   ; cell_pixels : (int * int) option
   }
 
 type result =
   { palette : Masc_tui_terminal_palette.t option
-  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
   ; graphics : Masc_tui_graphics.query_reply option
   ; cell_pixels : (int * int) option
   ; replay : string
@@ -41,10 +39,6 @@ type mode =
   | Paste of int
   | Osc_candidate of bool * int
   | Osc_passthrough of bool
-  | Csi_private
-        (** [ESC \[ ?] and onward. Only reached when the bracketed-paste
-            matcher has already ruled the sequence out, so the paste path
-            keeps the first claim on every byte it wants. *)
   | Csi_window
         (** [ESC \[ 6] and onward: the head of the cell-size reply, and also
             of PageDown. Which one it is shows at the final byte, so the
@@ -80,7 +74,7 @@ let create ~palette_requested =
   ; background = None
   ; ansi =
       Array.make Masc_tui_terminal_palette.ansi_slot_count None
-  ; observed = {palette=None; theme_mode=None; graphics=None; cell_pixels=None}
+  ; observed = {palette=None; graphics=None; cell_pixels=None}
   }
 ;;
 
@@ -126,11 +120,6 @@ let observe_palette decoder slot color =
   end
 ;;
 
-let observe_theme_mode decoder mode =
-  if decoder.observed.theme_mode <> Some mode then
-    decoder.observed <- {decoder.observed with theme_mode=Some mode}
-;;
-
 let observe_graphics decoder reply =
   if Option.is_none decoder.observed.graphics then
     decoder.observed <- {decoder.observed with graphics=Some reply}
@@ -144,14 +133,11 @@ let observe_cell_pixels decoder ((width,height) as size) =
 let observation decoder = decoder.observed
 
 (* [ESC \[] is two bytes, and the paste matcher counts them before it starts
-   comparing. A private-parameter reply puts [?] at exactly that point. *)
+   comparing. *)
 let csi_introducer_length = 2
-let private_parameter_marker = '?'
 
-(* CSI ends at the first byte in 0x40..0x7E. The theme-mode reply ends at [n];
-   anything else ending here is a sequence this did not ask for. *)
+(* CSI ends at the first byte in 0x40..0x7E. *)
 let is_csi_final byte = byte >= '\x40' && byte <= '\x7e'
-let theme_mode_final = 'n'
 
 let window_report_final = 't'
 let cell_size_report_code = "6"
@@ -184,27 +170,6 @@ let finish_csi_window decoder =
    | None ->
      (* PageDown, or a report this did not ask for. It was held while it might
         have been the reply, so it goes on whole rather than being dropped. *)
-     flush_pending decoder);
-  Buffer.clear decoder.pending;
-  decoder.mode <- Normal
-;;
-
-let finish_csi_private decoder =
-  let sequence = Buffer.contents decoder.pending in
-  let length = String.length sequence in
-  let mode =
-    if length > csi_introducer_length && Char.equal sequence.[length - 1] theme_mode_final
-    then
-      Masc_tui_terminal_palette.parse_theme_mode_parameters
-        (String.sub sequence csi_introducer_length
-           (length - csi_introducer_length - 1))
-    else None
-  in
-  (match mode with
-   | Some mode -> observe_theme_mode decoder mode
-   | None ->
-     (* Not the reply. It was held while it might have been, so it goes on
-        whole rather than being dropped. *)
      flush_pending decoder);
   Buffer.clear decoder.pending;
   decoder.mode <- Normal
@@ -302,18 +267,6 @@ let rec feed decoder byte =
       Buffer.add_char decoder.pending byte;
       decoder.mode <- Csi_window
     end
-    else if
-      matched = csi_introducer_length
-      && Char.equal byte private_parameter_marker
-      && decoder.palette_requested
-    then begin
-      (* [ESC \[ ?] is not the start of a paste, and it is the start of the
-         theme-mode reply. Held rather than replayed so the reply does not
-         reach the composer as typed text; a sequence that turns out to be
-         something else is replayed whole when its final byte arrives. *)
-      Buffer.add_char decoder.pending byte;
-      decoder.mode <- Csi_private
-    end
     else begin
       flush_pending decoder;
       decoder.mode <- Normal;
@@ -323,16 +276,6 @@ let rec feed decoder byte =
     Buffer.add_char decoder.pending byte;
     if is_csi_final byte then finish_csi_window decoder
     else if Buffer.length decoder.pending > response_max_bytes then begin
-      flush_pending decoder;
-      decoder.mode <- Normal
-    end
-  | Csi_private ->
-    Buffer.add_char decoder.pending byte;
-    if is_csi_final byte then finish_csi_private decoder
-    else if Buffer.length decoder.pending > response_max_bytes then begin
-      (* No final byte within a reply's worth of bytes. Whatever this is, it
-         is not the one being waited for, and holding more of the reader's
-         input than that would be worse than passing it on. *)
       flush_pending decoder;
       decoder.mode <- Normal
     end
@@ -385,8 +328,6 @@ let rec feed decoder byte =
     else decoder.mode <- Apc_passthrough (byte = escape)
 ;;
 
-let theme_mode decoder = decoder.observed.theme_mode
-
 let palette decoder = decoder.observed.palette
 ;;
 
@@ -401,7 +342,7 @@ let holds_incomplete_sequence decoder =
   match decoder.mode with
   (* Bytes sit in [pending] across an idle read, waiting for the rest of a
      sequence that may be a reply or a paste start. *)
-  | Paste_prefix _ | Osc_candidate _ | Csi_private | Csi_window | Apc_prefix
+  | Paste_prefix _ | Osc_candidate _ | Csi_window | Apc_prefix
   | Apc _ -> true
   (* [Escape] is flushed by [next] as soon as input runs dry, and the
      passthrough states replay each byte as it arrives: nothing is held. *)
@@ -423,7 +364,6 @@ let unread_replay decoder =
 
 let snapshot decoder : result =
   { palette = palette decoder
-  ; theme_mode = decoder.observed.theme_mode
   ; graphics = decoder.observed.graphics
   ; cell_pixels = decoder.observed.cell_pixels
   ; replay = unread_replay decoder
@@ -472,10 +412,9 @@ let rec next decoder ~next_raw =
           take_replay decoder
         (* [Escape] alone is a key the reader pressed; every other held
            state is a sequence still arriving, and input running dry is not
-           the end of it. [Csi_private] holds with them: the reply's final
-           byte may be in the next read. *)
+           the end of it. *)
         | Normal | Paste_prefix _ | Paste _ | Osc_candidate _
-        | Osc_passthrough _ | Csi_private | Csi_window | Apc_prefix
+        | Osc_passthrough _ | Csi_window | Apc_prefix
         | Apc _ | Apc_passthrough _ ->
           None)
      | Some byte ->
@@ -489,9 +428,9 @@ let finish decoder =
       byte as it arrived. *)
    | Normal | Paste _ | Osc_passthrough _ | Apc_passthrough _ -> ()
    (* These are holding bytes that turned out not to be the sequence they
-      might have been, and the reader typed them. [Csi_private] among them:
-      an unfinished reply is the reader's input, not ours to swallow. *)
-   | Escape | Paste_prefix _ | Osc_candidate _ | Csi_private | Csi_window
+      might have been, and the reader typed them: an unfinished reply is the
+      reader's input, not ours to swallow. *)
+   | Escape | Paste_prefix _ | Osc_candidate _ | Csi_window
    | Apc_prefix | Apc _ ->
      flush_pending decoder);
   decoder.mode <- Normal;

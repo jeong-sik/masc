@@ -31,7 +31,7 @@ TUI는 터미널에서 받은 바이트를 지금 세 곳에서 따로 해석한
 
 | 위치 | 상태 | 무엇을 기다리나 |
 |---|---|---|
-| probe `decoder.mode` + `pending` | `Escape`, `Paste_prefix n`, `Paste n`, `Osc_candidate`, `Osc_passthrough`, `Csi_private`, `Csi_window`, `Apc_prefix`, `Apc`, `Apc_passthrough` | 터미널 답의 끝, 붙여넣기 시작 표시의 나머지 |
+| probe `decoder.mode` + `pending` | `Escape`, `Paste_prefix n`, `Paste n`, `Osc_candidate`, `Osc_passthrough`, `Csi_window`, `Apc_prefix`, `Apc`, `Apc_passthrough` | 터미널 답의 끝, 붙여넣기 시작 표시의 나머지 |
 | probe `replay` + `replay_position` | 답이 아니라고 판명된 바이트 | 입력 읽기가 가져가기 |
 | `input_reader.csi_parameters` | CSI 인자 | 끝 바이트 |
 | `input_reader.paste_phase` | `Pasting` / `Draining_tail` | `ESC [201~` |
@@ -69,11 +69,10 @@ TUI는 터미널에서 받은 바이트를 지금 세 곳에서 따로 해석한
   읽기의 `csi_parameters`가 같은 바이트를 동시에 들게 만든다.
 - probe는 그래픽 답을 받고, 팔레트를 요청했다면 글자색·바탕색 답까지 받아야
   끝난다. 끝나면 `take_input_byte`가 probe를 떼어 낸다(`terminal_probe <- None`).
-  그 뒤에 오는 테마 변경 알림(DECSET 2031)은 `read_input`이 CSI 키로 읽고
-  `unknown-esc`가 된다. 끝나지 않는 터미널에서는 probe가 세션 내내 모든 바이트
-  앞에 서 있다. 두 경우의 동작이 다르다.
+  끝나지 않는 터미널에서는 probe가 세션 내내 모든 바이트 앞에 서 있다.
+  두 경우의 동작이 다르다.
 - probe가 붙잡는 상태에는 조건이 붙어 있다. `Csi_window`는 셀 크기를 아직 모를
-  때만, `Csi_private`와 `Osc_candidate`는 팔레트를 요청했을 때만 들어간다.
+  때만, `Osc_candidate`는 팔레트를 요청했을 때만 들어간다.
   `Escape`는 입력이 비면 바로 키로 내보낸다.
 
 ## 2. 설계
@@ -85,7 +84,6 @@ TUI는 터미널에서 받은 바이트를 지금 세 곳에서 따로 해석한
 ```ocaml
 type reply =
   | Palette of slot * rgb option             (* OSC 4 / 10 / 11 *)
-  | Theme_mode of theme_mode                 (* ?997 답, 2031 알림 *)
   | Cell_pixels of int * int                 (* CSI 6 ; h ; w t *)
   | Graphics of string                       (* ESC _ G 뒤 본문 원문 *)
 
@@ -197,8 +195,8 @@ probe는 시작할 때 질의를 쓰고, 정해진 시간 동안 `Reply` 이벤�
   - 새 터미널 답을 추가할 때 `reply`에 경우를 하나 더하면, 컴파일러가 처리하지
     않은 곳을 알려 준다.
 - **단점과 위험**
-  - probe에는 터미널별 예외 처리가 쌓여 있다(`Csi_private`가 붙여넣기 판정 뒤에만
-    오는 순서, OSC 종료 문자 BEL/ST 두 가지, 최대 길이 제한). 빠짐없이 옮기지
+  - probe에는 터미널별 예외 처리가 쌓여 있다(OSC 종료 문자 BEL/ST 두 가지,
+    최대 길이 제한). 빠짐없이 옮기지
     않으면 회귀가 생긴다. 1단계에서 기존 테스트 입력을 전부 옮기는 이유다.
   - 2단계는 `bin/masc_tui.ml`의 입력 경로 수백 줄을 한 번에 바꾼다. PTY
     시나리오 여러 개가 함께 깨질 수 있다.

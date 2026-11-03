@@ -384,6 +384,23 @@ describe('Task creation draft ownership', () => {
     expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledTimes(2)
   })
 
+  it('starts a separate draft from an empty form while the first request is unconfirmed', async () => {
+    mocks.callMcpToolAtIdentity.mockImplementation(() => new Promise<string>(() => {}))
+    const dispatch = { workspace: { basePath: '/a', mascRoot: '/a/.masc' }, identity: identity(), isCurrent: () => true }
+    render(html`<div><${TaskCreateForm} goalId="goal-a" goalDispatch=${dispatch} /><${TaskCreateReceiptsPanel} /></div>`)
+    fireEvent.click(screen.getByRole('button', { name: '태스크 추가' }))
+    inputDraft('First request', 'First detail', '1')
+    fireEvent.click(screen.getByRole('button', { name: 'backlog에 추가' }))
+    await waitFor(() => expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce())
+
+    fireEvent.click(screen.getByRole('button', { name: '별도 새 태스크 작성' }))
+
+    expect((screen.getByPlaceholderText('예: runtime config introspection 정리') as HTMLInputElement).value).toBe('')
+    expect((screen.getByPlaceholderText(/배경, 재현 조건/) as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('3')
+    expect(mocks.callMcpToolAtIdentity).toHaveBeenCalledOnce()
+  })
+
   it('restores a late success and its Goal identity after reload until the user sees it', async () => {
     let resolveCreate!: (value: string) => void
     mocks.callMcpToolAtIdentity.mockImplementationOnce(() => new Promise<string>(resolve => { resolveCreate = resolve }))

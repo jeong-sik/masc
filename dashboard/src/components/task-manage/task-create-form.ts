@@ -122,7 +122,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           ${taskDraftHasUnconfirmedRequest.value ? html`
             <div role="status" class="w-full text-xs text-text-muted">
               이 초안으로 이미 생성 요청을 보냈습니다. 이전 요청을 확인하거나 별도 새 태스크를 작성해 주세요.
-              <${ActionButton} variant="ghost" size="sm" onClick=${() => { beginSeparateTaskDraft(); draftRevision++ }}>
+              <${ActionButton} variant="ghost" size="sm" onClick=${() => { beginSeparateTaskDraft(); resetForm() }}>
                 별도 새 태스크 작성
               <//>
             </div>` : null}

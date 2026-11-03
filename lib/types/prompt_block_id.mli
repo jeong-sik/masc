@@ -10,8 +10,6 @@
     per-turn world context, including current criterion and measurement.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
-    [Admitted_scheduled_input] is an exact turn-entry admission observation,
-    including known-empty or unknown source data. It is not a permission grant.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
@@ -42,7 +40,6 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
-  | Admitted_scheduled_input
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -100,11 +97,8 @@ val injected_on_post_tool_round : t -> bool
     this turn's approval/rejection correlation keys. Both remain in the System
     carrier after tools without rebroadcasting Task, Gate, Lane or other inbox
     state. Operator
-    speech remains [Operator_note] (RFC-0366). [Admitted_scheduled_input]
-    answers [false]: the entry identity is first-round context, and
-    re-injecting it would end tool rounds with a User message again. A new
-    constructor must declare its class here before it can ride a post-tool
-    round.
+    speech remains [Operator_note] (RFC-0366). A new constructor must declare
+    its class here before it can ride a post-tool round.
 
     [Recalled_memory] and [Recalled_memory_status] are first-round blocks as
     well: the judgment is made once, before the turn's first request.
@@ -128,10 +122,9 @@ val resent_when_held : t -> bool
     words is a new utterance, not a copy of the earlier one. A new constructor
     must declare its class here.
 
-    [Completion_authority] and [Admitted_scheduled_input] also answer [true],
-    preserving their producer layers' [Sent_every_resume] semantics even when
-    the session saw identical bytes. Entry facts name their own exact turn;
-    later empty/unknown observations do not erase historical transcript rows.
+    [Completion_authority] also answers [true], preserving its producer
+    layer's [Sent_every_resume] semantics even when the session saw identical
+    bytes.
 
     [Recalled_memory_status] answers [true]: each turn's line names its own
     turn, so an unchanged copy is still a new line, and the session reads the

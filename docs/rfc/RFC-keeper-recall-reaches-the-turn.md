@@ -191,7 +191,7 @@ recall 이 실어 줄 수 있는 기억은 쓰기를 통과한 것뿐이다.
 | `Recalled_memory_status` | 상태 한 줄과 선택한 id 목록 | false | true | `Dynamic_context` 와 `Temporal_summary` 사이 |
 | `Recalled_memory` | 고른 기억 본문 | false | false | `Dynamic_context` 앞 |
 
-순위는 두 블록의 내용 변화 빈도를 층 1c 에서 잰 뒤 확정한다(`cache_rank` 문서의 방식). 상태 줄 블록은 `Admitted_scheduled_input` 처럼 세션을 이어 갈 때마다 간다. 본문 블록은 세션이 같은 바이트를 이미 가졌으면 건너뛴다.
+순위는 두 블록의 내용 변화 빈도를 층 1c 에서 잰 뒤 확정한다(`cache_rank` 문서의 방식). 상태 줄 블록은 `Completion_authority` 처럼 세션을 이어 갈 때마다 간다. 본문 블록은 세션이 같은 바이트를 이미 가졌으면 건너뛴다.
 
 상태 줄은 아래 넷 중 하나다. 줄마다 `turn_ref` 가 있다. 세션 기록에 여러 턴의 줄이 쌓여도 어느 턴의 판정인지 알 수 있어야 한다.
 

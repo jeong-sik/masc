@@ -50,19 +50,12 @@ val assemble_request_context :
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
 (** Split uniquely renderer-attributed Active Goals and Completion Authority
-    into a stable system suffix. The turn-entry admission identity is split
-    out of the dynamic context too, but rides the tail carrier as its own
-    first-round block: it names the turn and changes on every turn, so
-    issuing it as a System observation would invalidate the provider's
-    cached System prefix on every turn. Missing, stale or duplicate
-    renderer sections do not acquire an observation identity.
+    into a stable system suffix. Missing, stale or duplicate renderer sections
+    do not acquire an observation identity.
     [base_system_prompt] is the pre-existing override when present, otherwise
-    the original turn system prompt. Later tool rounds retain that exact
-    issued observations and keep permitted extra blocks, but carry no
-    admission block: entry context stays first-round only, like every other
-    world-state block, so tool feedback stays the newest message. Resume
-    composes from the turn's first-round assembly, which always carries it.
-    No store read or conversation-history write. *)
+    the original turn system prompt. Later tool rounds retain only that exact
+    issued observations and permitted extra blocks. Other world state stays
+    first-round only. No store read or conversation-history write. *)
 
 val ends_with_tool_results : Agent_core.Types.message list -> bool
 

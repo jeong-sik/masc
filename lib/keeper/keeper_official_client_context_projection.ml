@@ -128,8 +128,7 @@ let history_role_label = function
 
 (* A vendor may keep its first System for the whole session. Keep Goal's
    existing Start/held policy, but deliver a current Completion Authority event
-   in User only; the turn-entry admission identity rides the carrier blocks
-   and is resent from there. Select the closed observation from the exact issuer; never
+   in User only. Select the closed observation from the exact issuer; never
    search the selected text or borrow a receipt from another composition. *)
 let project_start_system ~system_prompt ~composed_context =
   match Option.bind composed_context (fun assembly ->
@@ -285,7 +284,7 @@ let block_body assembly = function
      | Some sections -> World_state_sections (List.map world_state_section sections)
      | None -> Whole_text)
   | Prompt_block_id.(
-      Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
+      Keeper_instructions | Active_goals | Completion_authority | Temporal_summary | Memory_os_recall
       | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions) -> Whole_text
 ;;
 
@@ -751,7 +750,7 @@ let resume_prompt ~goal ~held ?composed_context messages =
     | World_state_sections _,
       ( Session_store.Context_block
           Prompt_block_id.(
-            Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
+            Keeper_instructions | Active_goals | Completion_authority | Temporal_summary | Memory_os_recall
             | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread

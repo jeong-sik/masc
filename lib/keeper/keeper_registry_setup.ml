@@ -1188,7 +1188,6 @@ let set_last_correlation_id ~base_path name cid =
   Error_tracking.set_last_correlation_id ~base_path name cid ~update_entry:update_entry_unit
 ;;
 
-(* SSE broadcast helpers (broadcast_composite_changed / record_phase_broadcast_failure) moved to Keeper_registry_broadcast. *)
 let broadcast_composite_changed = Keeper_registry_broadcast.composite_changed
 let record_phase_broadcast_failure = Keeper_registry_broadcast.record_phase_failure
 

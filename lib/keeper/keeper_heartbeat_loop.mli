@@ -128,23 +128,14 @@ val owner_turn_rejection_cycle_status :
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)
-(** What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
-    belongs to the path that received the rate limit or quota answer; the
-    keeper waits only while the path it would send next rests.
+(** What a failed cycle leaves the next one (RFC-provider-path-rest).
     [Continue_on_deferred_lane] names the walk head of the deferred suffix,
     which is not resting; a pending input runs on it without a sleep. The
     failed lane is removed before the suffix is recorded, so consecutive
     immediate cycles walk a finite candidate set and end when it is empty.
-    [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
-    runtime or assignment whose release that is. A wakeup does not cut it
-    short (#34653). *)
+    Any other failed cycle keeps the ordinary cadence. *)
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
-  | Wait_for_path_release of
-      { release_at : float
-      ; waiting_on : string
-      ; basis : Keeper_turn_driver.wait_basis
-      }
 
 type keepalive_turn_outcome = {
   meta : keeper_meta;
@@ -322,14 +313,6 @@ module For_testing : sig
     ctx:'a context -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
   (** Production turn-entry recording for the admitted source batch. *)
 
-  val provider_wait_interrupt :
-    keeper_name:string ->
-    dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
-    assignment_id:string ->
-    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
-    basis:Keeper_turn_driver.wait_basis ->
-    (now:float -> bool)
-  (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production checkpoint retention pass. Counts are observations only.
       Connector conversations rotate with their entire pending suffix in FIFO
       order. Messages, producer/decision outcomes and scheduled occurrences

@@ -699,20 +699,6 @@ let all =
       ~consumers:[ "Keeper gRPC heartbeat client" ]
       ~category:Transport
       "Backoff between keeper gRPC reconnect attempts"
-  ; setting
-      ~range:(int_range ~min:1 ~max:256 ())
-      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperAdmissionBounds.max_events ())))
-      ~env_name:"MASC_KEEPER_ADMISSION_MAX_EVENTS"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"32"
-      ~reload_class:Next_turn
-      ~consumers:
-        [ "Env_config_keeper.KeeperAdmissionBounds"
-        ; "Keeper_heartbeat_stimulus_intake ready_batch"
-        ]
-      ~category:Turn
-      "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
   ; (* The workspace default for a microVM guest's size. A keeper's own
        [microvm_memory] / [microvm_cpus] wins per dimension. runtime.toml is
        the only input and the process environment is not read: [masc restart]

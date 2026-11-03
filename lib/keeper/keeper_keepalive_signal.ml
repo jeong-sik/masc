@@ -234,24 +234,10 @@ type sleep_outcome =
   | Woken
   | Timeout
 
-(* Whether a wakeup may end the sleep early. A provider that rate-limited or
-   exhausted the lane is not served by waking sooner: every stimulus that cut
-   the backoff short re-ran the same failing call (183 failed turns in 41
-   minutes across seven keepers, median 30 s apart against a declared 600 s,
-   2026-09-09, #34653). Under [Serve_wakeup_after_duration] the sleep runs to
-   its end and a wakeup raised meanwhile is consumed then, so the
-   HeartbeatTick of KeeperHeartbeat.tla still happens once per signal, only
-   later. [stop] ends either policy at once. *)
-type wake_policy =
-  | Interrupt_on_wakeup
-  | Serve_wakeup_after_duration
-
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep
       ?cadence_sleeping
-      ?(wake_policy = Interrupt_on_wakeup)
-      ?(interrupt_when = fun () -> false)
       ~clock
       ~stop
       ~wakeup
@@ -259,11 +245,6 @@ let interruptible_sleep
   : sleep_outcome
   =
   let chunk_sec = (Env_config.KeeperKeepalive.sleep_chunk_sec ()) in
-  let wakeup_may_interrupt =
-    match wake_policy with
-    | Interrupt_on_wakeup -> true
-    | Serve_wakeup_after_duration -> false
-  in
   let set_cadence_sleeping value =
     Option.iter
       (fun sleeping ->
@@ -276,25 +257,17 @@ let interruptible_sleep
     if Atomic.get stop
     then Stopped
     else
-    let dependency_changed = interrupt_when () in
     if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
               consumed (TRUE -> FALSE) and the caller's next loop iteration
-              dispatches the exact Keeper lane. Under
-              [Serve_wakeup_after_duration] the tick is taken only once the
-              duration has elapsed. *)
-            (wakeup_may_interrupt || dependency_changed || remaining <= 0.0)
-            && Atomic.compare_and_set wakeup true false
+              dispatches the exact Keeper lane. *)
+            Atomic.compare_and_set wakeup true false
     then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
          FALSE] postcondition. The [@@fsm_guard] PPX routes the
          assertion through [wrap_unit ~stage:"guard"] automatically. *)
       post_heartbeat_tick ~wakeup;
       Woken)
-    else if dependency_changed
-    then Woken
-    else if
-      wakeup_may_interrupt
-      && Option.exists (fun sleeping -> not (Atomic.get sleeping)) cadence_sleeping
+    else if Option.exists (fun sleeping -> not (Atomic.get sleeping)) cadence_sleeping
     then Woken
     else if remaining <= 0.0
     then (

@@ -83,14 +83,6 @@ let event_queue_intake_error_reason_label = function
   | Addon_result_unavailable _ -> "event_queue_addon_result_unavailable"
 ;;
 
-let event_queue_intake_error_counts_as_cycle_failure = function
-  | Pending_selection_failed _ -> true
-  | Connector_read_failed _ | Connector_item_missing _
-  | Board_unavailable _ | Ask_read_failed _
-  | Completion_rejection_read_failed _
-  | Job_result_unavailable _ | Addon_result_unavailable _ -> false
-;;
-
 let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
   | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
@@ -935,7 +927,6 @@ let heartbeat_event_intake
     in
     admitted
   in
-  let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
   let is_board_source (selection : Keeper_event_queue_state.pending_selection) =
     match selection.source.payload with
     | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ -> true
@@ -1004,34 +995,33 @@ let heartbeat_event_intake
         selected, !first_missing
     in
     let rec loop
-          remaining
           observations_rev
           selections_rev
           first_withdrawn
           selections
       =
-      match remaining, selections with
-      | 0, _ | _, [] ->
+      match selections with
+      | [] ->
         ( List.rev observations_rev
         , List.rev selections_rev
         , first_withdrawn
         , None )
-      | _, (selection : Keeper_event_queue_state.pending_selection) :: rest
+      | (selection : Keeper_event_queue_state.pending_selection) :: rest
         when (match !admitted_scope with
           | None -> false
           | Some scope -> not (same_source_scope scope (source_scope selection))) ->
         (* Another invocation/conversation, or a channel-less general source,
            stays durable for its own turn. Skipping does not ACK it or spend
            this batch's existing admission allowance. *)
-        loop remaining observations_rev selections_rev first_withdrawn rest
-      | _, (selection : Keeper_event_queue_state.pending_selection) :: _
+        loop observations_rev selections_rev first_withdrawn rest
+      | (selection : Keeper_event_queue_state.pending_selection) :: _
         when Option.is_none !connector_snapshot
              && Option.is_some (connector_attention_event_id selection.source) ->
         let selections, missing = prepare_connectors selections in
         let first_withdrawn = match first_withdrawn with
           | None -> missing | Some _ as kept -> kept in
-        loop remaining observations_rev selections_rev first_withdrawn selections
-      | _, selection :: rest ->
+        loop observations_rev selections_rev first_withdrawn selections
+      | selection :: rest ->
         (match
            reconcile_spent_selection
              ~config:ctx.config
@@ -1048,10 +1038,10 @@ let heartbeat_event_intake
              "turn entry: acknowledged spent Gate grant replay without a turn \
               keeper=%s"
              keeper_name;
-           loop remaining observations_rev selections_rev first_withdrawn rest
+           loop observations_rev selections_rev first_withdrawn rest
          | Ok Tool_result_hint_retired ->
            Log.Keeper.info "turn entry: retired inactive tool result hint keeper=%s" keeper_name;
-           loop remaining observations_rev selections_rev first_withdrawn rest
+           loop observations_rev selections_rev first_withdrawn rest
          | Ok (Absent_grant_retired { approval_id; absence }) ->
            Log.Keeper.warn
              "turn entry: retired approved Gate resolution without a durable \
@@ -1059,7 +1049,7 @@ let heartbeat_event_intake
              keeper_name
              approval_id
              (Keeper_approval_queue_result.resolution_absence_to_string absence);
-           loop remaining observations_rev selections_rev first_withdrawn rest
+           loop observations_rev selections_rev first_withdrawn rest
          | Ok Selection_actionable ->
            let connector_attention_items =
              match connector_attention_event_id selection.source with
@@ -1077,7 +1067,7 @@ let heartbeat_event_intake
                | None -> Some (selection, error)
                | Some _ as kept -> kept
              in
-             loop remaining observations_rev selections_rev first_withdrawn rest
+             loop observations_rev selections_rev first_withdrawn rest
            in
            let ack_terminal_ask detail =
              (* The canonical Ask log is append-only, so a missing log, an
@@ -1100,7 +1090,7 @@ let heartbeat_event_intake
                   "turn entry: acknowledged terminal ask answer keeper=%s: %s"
                   keeper_name
                   detail;
-                loop remaining observations_rev selections_rev first_withdrawn rest
+                loop observations_rev selections_rev first_withdrawn rest
               | Error message ->
                 let failure_detail =
                   "failed to acknowledge terminal ask answer source ("
@@ -1146,7 +1136,7 @@ let heartbeat_event_intake
                 | None -> Some (selection, Connector_item_missing event_id)
                 | Some _ as kept -> kept
               in
-              loop remaining observations_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_connector_retry_later error ->
               Log.Keeper.warn
                 "turn entry: retaining unread connector attention keeper=%s: %s"
@@ -1160,7 +1150,7 @@ let heartbeat_event_intake
                  independent source kinds can still fill the admission batch. *)
               let rest = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
                 Option.is_none (connector_attention_event_id selection.source)) rest in
-              loop remaining observations_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_ask_retry_later error -> retain_ask (Ask_read_failed error)
             | Stimulus_ask_missing ask_id ->
               ack_terminal_ask ("ask answer source missing: " ^ ask_id)
@@ -1172,12 +1162,12 @@ let heartbeat_event_intake
                 keeper_name detail;
               let first_withdrawn = match first_withdrawn with
                 | None -> Some (selection,error) | Some _ as kept -> kept in
-              loop remaining observations_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_completion_rejection_obsolete ->
               (match Keeper_registry_event_queue.ack_pending_result
                  ~base_path keeper_name ~selection with
                | Ok () ->
-                 loop remaining observations_rev selections_rev first_withdrawn rest
+                 loop observations_rev selections_rev first_withdrawn rest
                | Error message ->
                  ( List.rev observations_rev
                  , List.rev selections_rev
@@ -1190,21 +1180,21 @@ let heartbeat_event_intake
                 keeper_name (event_queue_intake_error_to_string error);
               let first_withdrawn=match first_withdrawn with
                 | None -> Some (selection,error) | Some _ as kept -> kept in
-              loop remaining observations_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_job_unavailable (job_id,error) ->
               let error = Job_result_unavailable (job_id,error) in
               Log.Keeper.warn "turn entry: retaining unavailable job result keeper=%s: %s"
                 keeper_name (event_queue_intake_error_to_string error);
               let first_withdrawn = match first_withdrawn with
                 | None -> Some (selection,error) | Some _ as kept -> kept in
-              loop remaining observations_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_board_unavailable unavailable ->
               let error = Board_unavailable unavailable in
               Log.Keeper.warn "turn entry: retaining unavailable Board stimulus keeper=%s: %s"
                 keeper_name (event_queue_intake_error_to_string error);
               let first_withdrawn = match first_withdrawn with
                 | None -> Some (selection, error) | Some _ as kept -> kept in
-              loop remaining observations_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable
@@ -1222,7 +1212,7 @@ let heartbeat_event_intake
                     observation stimulus_id=%s keeper=%s"
                    selection.source.post_id
                    keeper_name;
-                 loop remaining observations_rev selections_rev first_withdrawn rest
+                 loop observations_rev selections_rev first_withdrawn rest
                | Error message ->
                  let detail =
                    "failed to acknowledge Board stimulus with no remaining \
@@ -1240,13 +1230,12 @@ let heartbeat_event_intake
                | None -> admitted_scope:=Some (source_scope selection)
                | Some _ -> ());
               loop
-                (remaining - 1)
                 (List.rev_append observations observations_rev)
                 (selection :: selections_rev)
                 first_withdrawn
                 rest))
     in
-    loop max_events [] [] None selections
+    loop [] [] None selections
   in
   let ( queued_observations
       , consumed_selections

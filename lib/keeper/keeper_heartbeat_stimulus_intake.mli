@@ -89,18 +89,6 @@ val event_queue_trigger_of_stimulus :
 val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
-(** Only durable selection corruption/read failures count as a crashed cycle.
-    Connector, unread-Ask, job result and completion rejection authority reads
-    retain their source for retry. An unknown Board audience remains pending
-    without claiming automatic recovery. These conditions retain
-    the exact source without advancing Keeper failure state. A missing or
-    unanswered Ask source is not a retry: the heartbeat loop acknowledges it
-    as terminal, so it never surfaces here. A Board read that answers no row
-    is not: the source is consumed. Other admitted sources may still dispatch
-    in the same turn. *)
-val event_queue_intake_error_counts_as_cycle_failure :
-  event_queue_intake_error -> bool
-
 (** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
     a generic [Turn_started] reaction for an event-queue stimulus after the
     heartbeat scheduler has admitted a real keeper turn. Logs and swallows

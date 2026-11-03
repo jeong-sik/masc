@@ -286,12 +286,9 @@ let task_op_of_name name =
   | None -> None
 ;;
 
-(* Entry VALIDITY is an objective parse fact and stays rejected here; a
-   count floor is not. RFC-0337 (Withdrawn) removed the mandatory
-   evidence floor: "local evidence shape can reject work before the
-   configured judge evaluates the actual Task" is the hierarchy it
-   withdrew. Completion is decided by the Task transition, so a
-   missing or empty evidence_refs list proceeds to that judgment. *)
+(* Entry validity is a parse fact and is rejected here. A missing or empty
+   evidence_refs list proceeds to the Task transition, which decides
+   completion. *)
 let parse_keeper_task_done_evidence_refs args =
   match args with
   | `Assoc fields ->
@@ -325,15 +322,6 @@ let parse_keeper_task_done_evidence_refs args =
   | _ -> Error "keeper_task_done arguments must be an object."
 ;;
 
-(* task-540: total-size pre-check on artifact: evidence at the
-   keeper_task_done boundary. Oversized artifacts snapshot as truncated
-   prefixes the completion authority cannot act on, and four tasks stalled
-   8-16h in evaluator_unavailable before anyone saw why. Refusing here names
-   the byte count and the note: escape hatch while the caller can still fix
-   the call. Unmeasurable references (missing file, unreadable, non-artifact)
-   pass through untouched: the snapshot layer reports those as typed
-   unreadable reasons at review time, and restating that taxonomy here would
-   drift. *)
 (* Where an evidence artifact lives depends on the producer's sandbox
    profile, and that policy sits above the store's library. An
    endpoint-owned tree (microvm, remote-ssh) keeps its files inside the

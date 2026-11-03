@@ -13,8 +13,7 @@ unreadable or truncated artifacts; submission success is not capture success. \
 Files and collaboration sources are captured at submission; \
 Board/Fusion/Task reads during review use those frozen bytes, including comments, \
 original Fusion producer identity and primary Task completion state. Task state \
-is not complete approval history or external acceptance. A note is narrative, not captured proof. \
-Pure-placeholder results ('done', 'ok', etc.) are rejected."""
+is not complete approval history or external acceptance. A note is narrative, not captured proof."""
 
 [[params]]
 name = "task_id"

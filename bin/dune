@@ -3012,7 +3012,8 @@
 (library
  (name masc_tui_image_ref)
  (wrapped false)
- (modules masc_tui_image_ref))
+ (modules masc_tui_image_ref)
+ (libraries uucp))
 
 (library
  (name masc_tui_image_payload)

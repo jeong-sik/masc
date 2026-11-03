@@ -28,9 +28,20 @@ let history_owner record = let* json=owner_json record in History.owner_of_json 
 let parent ~read ~scope ~request_id =
   let* record=read ~scope ~request_id in
   Option.to_result ~none:("Original Librarian source parent is absent: " ^ request_id) record
-let admission_capture ~read ~read_scope ~owner record =
-  let* ()=Parts.validate_payload_forest ~read_scope ~owner in
-  Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record
+(* The forest is every part and partition one owner has, read from that
+   owner's two whole scopes, and it is the same for each record that names the
+   owner. An owner has dozens of such records, so proving it again for each one
+   read those scopes dozens of times. A passed proof is kept for the rest of the
+   scan. A failed one is not: each record that names the owner proves it again
+   and is refused exactly as it was before. *)
+let forest_proof () =
+  let proved=Hashtbl.create 16 in
+  fun ~read_scope ~owner ->
+    let key=Yojson.Safe.to_string (Admission.owner_to_json owner) in
+    if Hashtbl.mem proved key then Ok ()
+    else
+      let+ ()=Parts.validate_payload_forest ~read_scope ~owner in
+      Hashtbl.replace proved key ()
 let history_capture ~read ~owner (record:Owner.retained) =
   let* capture=History.restore_payload ~owner record in
   let+ ()=History.validate_predecessor_payload ~read
@@ -39,7 +50,12 @@ let floor_capture ~read ~owner record =
   let* capture=Floor.restore ~owner record in
   let+ ()=Floor.validate_ancestry_payload ~read capture in capture
 
-let validate ~read ~read_scope ~read_body (record:Owner.retained) =
+let validator () =
+  let forest=forest_proof () in
+  let admission_capture ~read ~read_scope ~owner record =
+    let* ()=forest ~read_scope ~owner in
+    Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
+  fun ~read ~read_scope ~read_body (record:Owner.retained) ->
   match purpose record.scope with
   | None -> Ok ()
   | Some Admission_execution ->
@@ -49,11 +65,11 @@ let validate ~read ~read_scope ~read_body (record:Owner.retained) =
   | Some Admission_part ->
     let* owner=admission_owner record in
     let* ()=Parts.validate_part_payload ~owner record in
-    Parts.validate_payload_forest ~read_scope ~owner
+    forest ~read_scope ~owner
   | Some Admission_partition ->
     let* owner=admission_owner record in
     let* ()=Parts.validate_partition_payload ~owner record in
-    Parts.validate_payload_forest ~read_scope ~owner
+    forest ~read_scope ~owner
   | Some History_execution ->
     let* owner=history_owner record in
     let* capture=history_capture ~read ~owner record in

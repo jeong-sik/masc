@@ -942,7 +942,7 @@ let validate_stores base_path =
     List.map
       (fun store ->
          let result = timed_scan (L.name store) (fun () ->
-           L.scan ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validate store ~base_path) in
+           L.scan ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validator store ~base_path) in
          let report = L.name store, L.on_refusal store, result in
          print_lane_addon report;
          report)

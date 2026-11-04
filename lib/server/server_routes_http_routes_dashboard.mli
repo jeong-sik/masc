@@ -60,6 +60,16 @@ module For_testing : sig
     unit
   (** The raw-source POST after authentication, including its revision guard. *)
 
+  val handle_tui_preference_post :
+    Mcp_server.server_state ->
+    string ->
+    Httpun.Request.t ->
+    Httpun.Reqd.t ->
+    string ->
+    unit
+  (** The [tui] table POST after authentication: one parsed change, written
+      through Runtime's config commit (RFC-0482 §3.1). *)
+
   val handle_runtime_assignment_post_with :
     set_assignment:
       (runtime_config_path:string ->

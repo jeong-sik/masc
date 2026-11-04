@@ -665,6 +665,7 @@ type runtime_config_write_operation =
   | Runtime_config_assignment of string * string option
   | Runtime_config_fusion of string
   | Runtime_config_account_removal of string
+  | Runtime_config_tui_preference of Tui_preference.change
 
 let runtime_config_write_operation_details =
   let open Runtime_request in
@@ -754,6 +755,8 @@ let runtime_config_write_operation_details =
     [ ("operation", `String "fusion"); ("edit", `String edit) ]
   | Runtime_config_account_removal integration_id ->
     [ ("operation", `String "account_removal"); ("integration_id", `String integration_id) ]
+  | Runtime_config_tui_preference change ->
+    [ ("operation", `String "tui_preference"); ("change", Tui_preference.change_to_yojson change) ]
 
 let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
@@ -765,6 +768,7 @@ let runtime_config_write_operation_label = function
   | Runtime_config_assignment _ -> "assignment"
   | Runtime_config_fusion _ -> "fusion"
   | Runtime_config_account_removal _ -> "account_removal"
+  | Runtime_config_tui_preference _ -> "tui_preference"
 ;;
 
 (* 409 while the file is not the one the preview read, or no longer allows
@@ -1087,6 +1091,45 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
         ~keeper_name ~runtime_id ~expected ())
     state agent_name req reqd body_str
 
+(* POST /api/v1/tui/preferences, after authentication: one change to the
+   [tui] table of runtime.toml, parsed at the door (RFC-0482 §3.1). The edit
+   goes through Runtime's config write lock and commit, so the commit
+   announces runtime_config_changed like every other save. The [tui] keys
+   are not read by the Skill catalog, so, as when the terminal wrote them
+   itself, the commit does not republish it. The answer carries the commit
+   receipt and not the file: the reader already holds its choice. *)
+let handle_tui_preference_post state agent_name req reqd body_str =
+  match
+    match Yojson.Safe.from_string body_str with
+    | json -> Tui_preference.change_of_yojson json
+    | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+  with
+  | Error msg -> respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+  | Ok change ->
+    let operation = Runtime_config_tui_preference change in
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    (match
+       Runtime.edit_config_text
+         ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+         (Tui_preference.edit change)
+     with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       let observation = receipt.Runtime.observation in
+       Eio.Cancel.protect (fun () ->
+         audit_runtime_config_write state agent_name ~path:observation.path ~receipt ~operation
+           ~text:observation.source_text ~outcome:Audit_log.Success ());
+       Http.Response.json_value ~request:req
+         (`Assoc
+            [ "ok", `Bool true
+            ; "change", Tui_preference.change_to_yojson change
+            ; "commit", Runtime.config_commit_receipt_to_yojson receipt
+            ])
+         reqd)
+
 (* POST /api/v1/runtime/config/routing, after authentication: one routing
    body, parsed to a variant, answered by the Runtime writer it names. *)
 let handle_runtime_routing_post state agent_name req reqd body_str =
@@ -1385,6 +1428,7 @@ module For_testing = struct
   let handle_runtime_assignment_post_with = handle_runtime_assignment_post_with
   let handle_runtime_routing_post = handle_runtime_routing_post
   let handle_runtime_config_raw_post = handle_runtime_config_raw_post
+  let handle_tui_preference_post = handle_tui_preference_post
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
   let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome
@@ -2778,6 +2822,9 @@ let add_routes ~sw ~clock router =
              handle_runtime_assignment_post state agent_name req reqd body_str
            )
          )
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/tui/preferences" (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             handle_tui_preference_post state agent_name req reqd body_str))
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and
      timeout-circuit-open counts so operators can correlate slow endpoints

@@ -419,7 +419,7 @@ Lease_state =
 
 - 발급은 `with_lease` 범위 안에서만 한다. attempt 종료·fiber 취소·executor teardown 중 어느 경로로 나가도 범위 출구에서 `Issued`는 `Revoked`로, `Lease_dispatched`는 종단 기록이 있으면 `Completed`(효과가 나갔으면 `Effected`, 나가기 전에 실패했거나 취소됐으면 `Not_started`), 없으면 `Outcome_unknown`으로 닫는다. 종단 기록이 실패하면 삼키지 않고 `Outcome_unknown`으로 올린다. `Revoked`의 하위 값은 닫은 원인이 정한다. attempt 종료·fiber 취소·`Effect_cancel`은 `Cancelled`, `Executor_teardown`과 재기동은 `Teardown`, scoped epoch 회수(§8.1)는 `Grant_revoked`다. 효과가 시작되지 않은 `Issued` lease는 어느 경로로 닫혀도 `Outcome_unknown`이 되지 않고 reconciliation 질문도 만들지 않는다.
 - 효과는 `consume`으로만 일으킨다. `consume`은 `Issued`에서 한 번만 성공하고 `Lease_dispatched`를 동기 commit한 뒤에 효과를 낸다. 같은 lease의 두 번째 `consume`과 `Revoked` lease의 `consume`은 거부하고 audit record를 남긴다.
-- 재기동 때 `Issued`로 남은 lease는 질문 없이 `Revoked(Teardown)`로 닫는다. `Lease_dispatched`로 남은 lease만 `Outcome_unknown`이 되어 §9의 확인 대상이 된다.
+- 재기동 때 `Issued`로 남은 lease는 질문 없이 `Revoked(Teardown)`로 닫는다. `Lease_dispatched`로 남은 lease만 `Outcome_unknown`이 되어 §9-5의 reconciliation 질문 대상이 된다.
 
 도구 registry의 효과 분류는 닫힌 `Read_only | Effecting`이다. 분류가 없는 새 tool은 Effecting이다.
 
@@ -502,7 +502,7 @@ Committed {
 
 이 절은 `Fresh_bootstrap`을 실행하는 경우와 마지막 모드 사건이 있는 설치에 적용한다. 모드 사건이 없는 `Single_user` 설치는 외부 저장소가 없는 것이 정상이고 그대로 시작한다(§5.1 표 첫 행). 외부 저장소가 없을 때(`ENOENT`, 부모 경로 부재) 새로 시작할 수 있는 것은 명시적 `Fresh_bootstrap`뿐이다. §5.1이 `없음`으로 읽는 저장소도 같다.
 
-외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없거나 상대 경로면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. 기록 안에도 canonical base path를 적어 읽을 때 대조한다. 설치 기록은 임시 파일에 쓰고 fsync한 뒤 rename하고 부모 디렉터리를 fsync한다. 그래서 읽는 쪽이 보는 파일은 없거나 온전하고, 온전하지 않은 기록은 손상이다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. `Fresh_bootstrap`은 외부 고수위가 `없음`일 때만 열리므로 설치 기록이 이미 있어도 그 기록이 가리키는 저장소는 `없음`이다. 이때는 기록을 같은 방식으로 새 경로로 교체한다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 부팅은 외부 고수위를 `없음`으로 읽는다(§5.1). 단, 설정 디렉터리가 이 프로세스의 uid 것이 아니거나 그룹·다른 사용자가 쓸 수 있으면 기록이 없어도 `읽지 못함`이다. 그 디렉터리에 쓸 수 있는 쪽이 기록을 지웠을 수 있어서다. 부팅은 매번 설치 기록을 읽으므로(§5.1의 둘째 행), 이 검사에 걸린 설정 디렉터리는 모든 부팅을 막는다. 설정 디렉터리를 알 수 없으면(`XDG_CONFIG_HOME`과 `HOME`이 모두 없다) 설치 기록이 없는 것이고, 이때 `Fresh_bootstrap`은 기록을 쓸 수 없어 거부한다. 설치 기록이 없는데 `Fresh_bootstrap`이 외부 저장소를 만들 경로에 파일이 이미 있으면 그 파일을 열지 않고 실패한다. 기록 없이 옛 저장소를 덮거나 잇지 않기 위해서다. 설치 기록과 외부 저장소는 백업 복원이 되돌린 것을 알아채려는 장치다. 설정 디렉터리와 base path에 모두 쓸 수 있는 쪽은 막지 못한다.
+외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없거나 상대 경로면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. 기록 안에도 canonical base path를 적어 읽을 때 대조한다. 설치 기록은 임시 파일에 쓰고 fsync한 뒤 rename하고 부모 디렉터리를 fsync한다. 그래서 읽는 쪽이 보는 파일은 없거나 온전하고, 온전하지 않은 기록은 손상이다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. `Fresh_bootstrap`은 외부 고수위가 `없음`일 때만 열리므로 설치 기록이 이미 있어도 그 기록이 가리키는 저장소는 `없음`이다. 이때는 기록을 같은 방식으로 새 경로로 교체한다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 부팅은 외부 고수위를 `없음`으로 읽는다(§5.1). 단, **설정 디렉터리 소유자 검사**에 걸리면 — 설정 디렉터리가 이 프로세스의 uid 것이 아니거나 그룹·다른 사용자가 쓸 수 있으면 — 기록이 없어도 `읽지 못함`이다. 그 디렉터리에 쓸 수 있는 쪽이 기록을 지웠을 수 있어서다. 부팅은 매번 설치 기록을 읽으므로(§5.1의 둘째 행), 이 검사에 걸린 설정 디렉터리는 모든 부팅을 막는다. 설정 디렉터리를 알 수 없으면(`XDG_CONFIG_HOME`과 `HOME`이 모두 없다) 설치 기록이 없는 것이고, 이때 `Fresh_bootstrap`은 기록을 쓸 수 없어 거부한다. 설치 기록이 없는데 `Fresh_bootstrap`이 외부 저장소를 만들 경로에 파일이 이미 있으면 그 파일을 열지 않고 실패한다. 기록 없이 옛 저장소를 덮거나 잇지 않기 위해서다. 설치 기록과 외부 저장소는 백업 복원이 되돌린 것을 알아채려는 장치다. 설정 디렉터리와 base path에 모두 쓸 수 있는 쪽은 막지 못한다.
 
 `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 `account_mode`(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 `account_mode`는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
 
@@ -512,7 +512,7 @@ Committed {
 
 ### 8.5 purge의 지정과 삭제
 
-purge는 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·prompt·output(§3-11)과 Quarantined 자산의 credential(§10.4)에 같은 규칙을 쓴다.
+purge는 **두 단계**(`Purge_pending`, 삭제 뒤 `Purged`)로 나뉜다 — 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·prompt·output(§3-11)과 Quarantined 자산의 credential(§10.4)에 같은 규칙을 쓴다.
 
 1. 지정은 authz append 하나로 `Purge_pending {target}`을 기록한다(initiator 삭제이면 삭제와 같은 append다). 이 append는 §8.2의 `Purge` 사건(initiator 삭제이면 `Delete` 사건)이므로 Intent/Committed 규칙을 따른다. 대상은 지정 시점의 ID 목록이 아니라 initiator(또는 자산) 표시로 정한다. 지정 뒤 그 initiator의 새 shard 쓰기는 §6.2 판정에서 거부된다.
 2. `Purge_pending`인 대상은 삭제가 끝나기 전에도 읽을 수 없다.

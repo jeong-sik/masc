@@ -1,23 +1,18 @@
-let changed_event = "gate_connector_changed"
-
 let announce ~base_path connector_id =
   match
     let authority = Sse.runtime_authority_exn ~base_path in
     Sse.broadcast_to (Sse.Runtime_observers authority)
-      (`Assoc
-        [ "type", `String changed_event
-        ; "connector", `String connector_id
-        ; "ts_unix", `Float (Time_compat.now ())
-        ])
+      (Gate_connector_changed_event.json ~connector:connector_id ~ts_unix:(Time_compat.now ()))
   with
   | () -> ()
   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
   | exception exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SseBroadcastFailures)
-      ~labels:[ "site", changed_event ]
+      ~labels:[ "site", Gate_connector_changed_event.event_type ]
       ();
-    Log.Server.warn "gate connector: broadcast %s for %s failed: %s" changed_event
+    Log.Server.warn "gate connector: broadcast %s for %s failed: %s"
+      Gate_connector_changed_event.event_type
       connector_id (Printexc.to_string exn)
 ;;
 

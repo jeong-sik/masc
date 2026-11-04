@@ -33,107 +33,6 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
-let response_policy_for_turn ~turn_kind ~input_speaker
-    ~(world_observation : Keeper_world_observation.world_observation option)
-    ~hitl_resolution ~history_assistant_source =
-  let open Keeper_tooling.Response in
-  match turn_kind, input_speaker, hitl_resolution, world_observation with
-  | Turn_record.Autonomous,
-    Keeper_input_speaker.Host_prompt (Autonomous_wake { answered_asks = [] }),
-    None, Some observation
-    (* Silence is allowed only on a turn whose replay keeps none of its reply:
-       an internal turn (RFC-0385), read with the predicate finalization uses
-       for [exclude_thought_from_replay]. A thinking lane's silence is
-       reasoning with no text, and a turn that replayed its reply would carry
-       that reasoning into the next request (#41925). *)
-    when Keeper_types_support.is_internal_history_source history_assistant_source ->
-    (* Only a schedule without an authorized result delivery may end quietly.
-       Its substantive instructions still reach the model; this permits a
-       model-chosen no-update result, not skipping scheduled work. Every other
-       delivered event, unacknowledged message, and Gate/Ask answer keeps the
-       response contract. A pending Ask is not an input here and never disables
-       other work or changes its wake schedule. *)
-    let reminder_only (event : Keeper_world_observation.pending_board_event) =
-      match event.event_kind with
-      | Schedule_due wake -> Option.is_none wake.result_delivery
-      | Board_post_created | Board_post_updated | Board_comment_added _
-      | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-      | Delegate_completed _ | Ask_answered_row _ | Composition_completed | Owned_job_completed _ | Addon_operation_changed _
-      | External_attention _ | Completion_authority_rejected _
-      | Task_outcome _ | Task_cancelled _ -> false in
-    if observation.pending_messages = []
-       && List.for_all reminder_only observation.pending_board_events
-    then Allow_quiet_final
-    else Require_progress
-  | ( (Direct | Autonomous)
-    , Keeper_input_speaker.Host_prompt
-        (Keeper_input_speaker.Autonomous_wake _ | Keeper_input_speaker.Official_client_resume)
-    , _
-    , _ )
-  | ((Direct | Autonomous), Keeper_input_speaker.Person _, _, _) -> Require_progress
-;;
-
-(* The wake text cannot tell whether this turn may end in silence: the policy
-   above decides that from pending inputs, answered Asks and a HITL
-   resolution. The line it selects is appended to the wake input, so the model
-   reads the decision the accept check applies. Silence arrives as a blank
-   text block, no content, or reasoning with no text on a thinking lane
-   (#41925). A render failure is placed in the line rather than dropped,
-   because a missing line reads as an absent condition. *)
-let with_completion_clause ~input_speaker ~response_policy user_message =
-  match (input_speaker : Keeper_input_speaker.t) with
-  | Host_prompt (Autonomous_wake _) ->
-    let key =
-      match (response_policy : Keeper_tooling.Response.completion_policy) with
-      | Allow_quiet_final -> Prompt_names.keeper_wake_completion_quiet_final_allowed
-      | Require_progress -> Prompt_names.keeper_wake_completion_progress_required
-    in
-    let clause =
-      match Prompt_registry.render_prompt_template key [] with
-      | Ok text -> text
-      | Error detail -> key ^ ": " ^ detail
-    in
-    user_message ^ "\n\n" ^ clause
-  | Host_prompt Official_client_resume | Person _ -> user_message
-;;
-
-(* Accept lets a quiet final through; finalization must agree or the turn
-   settles a typed no-progress error after the runtime already accepted the
-   response. The quiet fallback below is the one place a quiet final becomes
-   the settlement, and it is also where the quiet-final counter fires, so the
-   metric counts accepted-and-settled quiet turns exactly once. Its [shape]
-   label keeps a blank text block, a turn that carried no content and a
-   reasoning-only turn apart. *)
-let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
-    ~(run_result : Runtime_agent.run_result) ~text ~tool_names () =
-  match
-    Keeper_turn_response_contract.normalize_response_text_for_finalization
-      ~runtime_id ~run_result ~text ~tool_names ()
-  with
-  | Ok response_text -> Ok response_text
-  | Error _ as error ->
-    let quiet_shape =
-      match run_result.stop_reason with
-      | Runtime_agent.Completed _ ->
-        Keeper_tooling.Response.quiet_final_shape
-          ~policy:response_policy run_result.response
-      | InputRequired _ | Yielded_to_operation_queued _
-      | Yielded_to_durable_stimulus _ -> None
-    in
-    (match quiet_shape with
-     | None -> error
-     | Some shape ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string QuietFinals)
-         ~labels:
-           [ "keeper", keeper_name
-           ; "runtime", runtime_id
-           ; "shape", Keeper_tooling.Response.quiet_final_shape_label shape
-           ]
-         ();
-       Ok "")
-;;
-
 (* AGENT_CORE raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
    Tool_execution / Run_finished records written to a fresh per-turn JSONL
    under [Keeper_types_support.keeper_raw_trace_dir]. Passing the sink into
@@ -441,9 +340,6 @@ module For_testing = struct
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
-  let response_policy_for_turn = response_policy_for_turn
-  let with_completion_clause = with_completion_clause
-  let normalize_final_response_text = normalize_final_response_text
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
@@ -587,9 +483,6 @@ let run_turn
   (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
      where that message is born and never changed afterwards. *)
   let input_metadata = Keeper_input_speaker.metadata input_speaker in
-  let response_policy = response_policy_for_turn
-      ~turn_kind ~input_speaker ~world_observation ~hitl_resolution
-      ~history_assistant_source in
   let deferred_runtime_lane_ref = ref None in
   let runtime_failures_rev = ref [] in
   let runtime_terminal = ref Keeper_runtime_walk_evidence.Terminal_not_observed in
@@ -616,7 +509,6 @@ let run_turn
   in
   let user_message =
     Keeper_run_prompt.sanitize_user_message user_message
-    |> with_completion_clause ~input_speaker ~response_policy
   in
   Masc_runtime_events.emit_turn_start ();
   (* Cancel-safe cleanup (#9747): [Eio_guard.protect] already uses
@@ -916,7 +808,8 @@ let run_turn
             | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
             | Delegate_completed _ | Composition_completed | Owned_job_completed _ | Addon_operation_changed _
             | Schedule_due _ | External_attention _ | Completion_authority_rejected _
-            | Task_outcome _ | Task_cancelled _ -> None) observation.pending_board_events)
+            | Task_outcome _ | Task_cancelled _ -> None)
+            observation.Keeper_world_observation.pending_board_events)
       ?preview
       ?observation_token
       ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools
@@ -1579,9 +1472,7 @@ let run_turn
                       ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
                       ~temperature
-                      ~accept:
-                        (Keeper_tooling.Response.accepts_response
-                           ~policy:response_policy)
+                      ~accept:Keeper_tooling.Response.accepts_response
                       ?on_event
                       ~on_yield
                       ~on_resume
@@ -1952,18 +1843,11 @@ let run_turn
                        Keeper_contract_classifier.classify_actionable_signal
                          (Keeper_contract_classifier.of_keeper_world_observation obs))
                      world_observation;
-                     (match
-                        normalize_final_response_text
-                          ~response_policy
-                          ~keeper_name:meta.name
-                          ~runtime_id:selected_runtime_id
+                     (let response_text =
+                        Keeper_turn_response_contract.normalize_response_text_for_finalization
                           ~run_result:result
                           ~text
-                          ~tool_names:actual_keeper_tool_names
-                          ()
-                      with
-                      | Error e -> Error e
-                      | Ok response_text ->
+                      in
                         let terminal_effect_state = s.terminal_effect_state () in
                         let turn_outcome =
                           finalize_turn_surface ~response_text

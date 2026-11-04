@@ -5792,7 +5792,7 @@ let test_tool_outbox_acknowledges_only_its_snapshot () =
     | _ -> fail "ACK deleted a receipt outside its original snapshot")
 ;;
 
-let test_blank_completion_rejected_without_losing_session () =
+let test_blank_completion_completes_and_keeps_session () =
   let blank_item =
     {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"blank","text":"","phase":"final_answer"}}}|} in
   let empty_terminal =
@@ -5809,13 +5809,11 @@ let test_blank_completion_rejected_without_losing_session () =
     Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
       with_fixture (handshake @ frames) (fun cli_path ->
         (match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
-            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+            ~accept:Keeper_tooling.Response.accepts_response () with
+         | Ok _ -> ()
          | Error error ->
-             (match Keeper_internal_error.classify_masc_internal_error error with
-              | Some (Keeper_internal_error.Accept_rejected _) -> ()
-              | _ -> fail ("blank completion was not an acceptance rejection: "
-                           ^ Agent_core.Error.to_string error))
-         | Ok _ -> fail "blank completion was accepted as progress");
+           fail ("a blank completion did not complete the turn: "
+                 ^ Agent_core.Error.to_string error));
         let module Store = Keeper_official_client_session_store in
         let binding = match Store.load ~base_path ~keeper_name:"codex-fixture" with
           | Ok (Some binding) -> binding
@@ -5828,22 +5826,17 @@ let test_blank_completion_rejected_without_losing_session () =
         | Ok {previous_settlement = Some {session_id = "thread-1"; _}; _} -> ()
         | _ -> fail "next turn would abandon the resumable thread")))
     [[blank_terminal]; [blank_item; empty_terminal]; [narration; empty_terminal]];
-  (* After a native command the same rejection is fenced: the command was an
-     attempted effect, so the turn is not replayed. *)
+  (* After a native command the turn completes the same way. *)
   let base_path = temp_workspace "masc-codex-commentary-settlement-" in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture (handshake @ [narration; native_command_started; native_command_completed;
                                empty_terminal]) (fun cli_path ->
       (match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
-          ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+          ~accept:Keeper_tooling.Response.accepts_response () with
+       | Ok _ -> ()
        | Error error ->
-           (match Keeper_internal_error.classify_masc_internal_error error with
-            | Some (Keeper_internal_error.Provider_attempt_effect_fenced
-                { cause = Fenced_masc (Accept_rejected
-                    { reason_kind = Some Accept_no_usable_progress; _ }); _ }) -> ()
-            | _ -> fail ("commentary after a native command was not a fenced no-progress \
-                          rejection: " ^ Agent_core.Error.to_string error))
-       | Ok _ -> fail "commentary after a native command was accepted as the reply");
+         fail ("commentary after a native command did not complete the turn: "
+               ^ Agent_core.Error.to_string error));
       match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
       | Ok (Some { phase = Settled { session_id = "thread-1"; turn_id = "turn-1" }; _ }) -> ()
       | Ok _ -> fail "commentary after a native command lost its settled session"
@@ -9022,61 +9015,6 @@ let run_cost_ledger_turn ?(after_turn = ignore) ~base_path ~trace_id ~cli_path (
     ~turn_instructions:None
 ;;
 
-(* The production Keeper turn appends the clause its response policy chose to
-   an autonomous wake input. Without a world observation the policy requires
-   progress, so the Codex turn input ends with that clause. *)
-let test_production_wake_input_carries_the_completion_clause () =
-  let base_path = temp_workspace "masc-codex-production-wake-clause-" in
-  let capture_path = Filename.concat base_path "codex-requests.jsonl" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_tree base_path)
-    (fun () ->
-       with_fixture ~capture_path
-         [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
-         (fun cli_path ->
-            (match
-               run_production_keeper_turn_as
-                 ~input_speaker:
-                   (Keeper_input_speaker.Host_prompt
-                      (Keeper_input_speaker.Autonomous_wake { answered_asks = [] }))
-                 ~turn_kind:Turn_record.Autonomous
-                 ~write_cost_ledger:false
-                 ~after_turn:ignore
-                 ~dynamic_context_for_tools:None
-                 ~http_fixture:None
-                 ~base_path
-                 ~trace_id:"codex-production-wake-clause"
-                 ~user_message:"Autonomous wake."
-                 ~cli_path
-                 ~model:"gpt-fixture"
-                 ~turn_instructions:None
-             with
-             | Ok _ -> ()
-             | Error error -> fail (Agent_core.Error.to_string error));
-            let clause =
-              match
-                Prompt_registry.render_prompt_template
-                  Prompt_names.keeper_wake_completion_progress_required
-                  []
-              with
-              | Ok text -> text
-              | Error detail -> failf "the clause should render: %s" detail
-            in
-            let open Yojson.Safe.Util in
-            let turn_input =
-              In_channel.with_open_bin capture_path In_channel.input_all
-              |> String.split_on_char '\n'
-              |> List.filter (fun line -> line <> "")
-              |> List.map Yojson.Safe.from_string
-              |> List.find (fun json -> member "method" json = `String "turn/start")
-              |> member "params" |> member "input" |> to_list
-              |> List.filter_map (fun item -> member "text" item |> to_string_option)
-              |> String.concat "\n"
-            in
-            check bool "the Codex turn input ends with the clause" true
-              (String.ends_with ~suffix:clause turn_input)))
-;;
-
 (* The turn ended on a compaction estimate (8 of 2,709 completed Codex
    turns, 2026-09-23..25). Its occupancy is the estimate with no cache split
    and no output, not a request of zero input; the spend is still the
@@ -10454,8 +10392,8 @@ let () =
             "Keeper maps official context error to typed core error"
             `Quick
             test_keeper_maps_official_context_error_to_typed_core_error
-        ; test_case "blank completion rejects progress but preserves session" `Quick
-            test_blank_completion_rejected_without_losing_session
+        ; test_case "blank completion completes and keeps the session" `Quick
+            test_blank_completion_completes_and_keeps_session
         ; test_case
             "Keeper does not retry context error after tool effect"
             `Quick
@@ -10552,10 +10490,6 @@ let () =
             "production Keeper records the newest Codex request context"
             `Quick
             test_production_keeper_records_newest_codex_request_context
-        ; test_case
-            "production wake input carries the completion clause"
-            `Quick
-            test_production_wake_input_carries_the_completion_clause
         ; test_case
             "production Keeper takes a compaction estimate as occupancy"
             `Quick

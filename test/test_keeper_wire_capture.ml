@@ -533,19 +533,7 @@ let response_capture_matches_replayed_history_text () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_history_match" "" in
     let raw_response = "   " in
-    let tool_names = [ "keeper_web_fetch"; "keeper_file_read" ] in
-    let history_text =
-      match
-        Keeper_tooling.Response.normalize_response_text
-          ~text:raw_response
-          ~tool_names
-          ()
-      with
-      | Ok t -> t
-      | Error _ ->
-        Alcotest.fail "tool-only normalization should preserve an empty reply"
-    in
-    Alcotest.(check string) "tool-only reply stays empty" "" history_text;
+    let history_text = "" in
     Wire.capture_response
       ~base_path:base
       ~keeper_name:"history_keeper"

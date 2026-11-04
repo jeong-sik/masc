@@ -5939,7 +5939,7 @@ let guarded_accept_rejection ?(content = []) stop_reason =
   | Error _ -> Alcotest.fail "SDK guard erased the typed terminal"
   | Ok response ->
     (match Try_provider.apply_accept ~runtime_id:"only"
-        ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+        ~accept:Keeper_tooling.Response.accepts_response
         { result with response } with
      | Error error -> error
      | Ok _ -> Alcotest.fail "the rejected terminal became a successful answer")

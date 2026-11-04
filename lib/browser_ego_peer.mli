@@ -278,8 +278,10 @@ val with_input_state
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 (** What leaves the peer. Every object result and every failure receipt
     carries [inputReadiness]; while input is held it also carries [inputLock]
-    ({!Browser_ego_input.lock_report}, with the ownership of the last Space
-    observation). A [Before_effect] or [Outcome_unknown] failure becomes the
+    ({!Browser_ego_input.lock_report} with no claimed owner, so its release
+    path asks for [space_status]). An answer that already carries [inputLock]
+    from an ownership observation ([space_status], [release_input]) keeps it.
+    A [Before_effect] or [Outcome_unknown] failure becomes the
     [Observed_failure] with the same effect phase so its receipt can carry
     them. [dispatch] keeps its own failure classification. *)
 

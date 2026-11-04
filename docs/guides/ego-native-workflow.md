@@ -685,9 +685,11 @@ including the refusal of the next input and any other failure, carries
 `inputReadiness` and `inputLock`; a failure that had only a message keeps its
 effect phase and gains a receipt for them. `BrowserAct action: "space_status"`
 (live lane, exact `clientId`) carries `inputLock` too, with freshly observed
-ownership. Other answers use the last observation, taken when the Space opened
-or by `space_status` and dropped by control actions; without one,
-`keeperCallable` is false and `blockedBy` asks for `space_status`.
+ownership, and that lock is kept as it is. Other answers do not claim
+ownership: their `keeperCallable` is false and `blockedBy` asks for
+`space_status`. A failure the server reports on its own (it stopped waiting,
+the lane is absent) does not pass through the connection and carries neither
+field.
 `inputLock` has:
 
 - `state`: `release_uncertain`, `operator_asserted`, `keeper_asserted` or

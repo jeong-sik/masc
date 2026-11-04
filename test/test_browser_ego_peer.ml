@@ -1247,7 +1247,9 @@ let test_every_answer_carries_the_input_state () =
     check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt));
     check string (label ^ ": lock state") "release_uncertain" (text (field "state" (field "inputLock" receipt)));
     check string (label ^ ": lock generation") pending.generation
-      (text (field "generation" (field "pending" (field "inputLock" receipt)))) in
+      (text (field "generation" (field "pending" (field "inputLock" receipt))));
+    check bool (label ^ ": ownership is not claimed without an observation") false
+      (Yojson.Safe.Util.to_bool (field "keeperCallable" (field "releasePath" (field "inputLock" receipt)))) in
   let refusal=Peer.with_input_state peer (dispatch peer Live.Page_interact gesture) in
   check string "the refusal of the next input stays before any effect" "before effect" (failure_kind refusal);
   held "the refusal" (receipt_of "the refusal" refusal);
@@ -1257,6 +1259,14 @@ let test_every_answer_carries_the_input_state () =
   (match Peer.with_input_state peer (dispatch peer Live.Browser_info (obj [])) with
    | Ok value -> held "a read while held" value
    | Error _ -> fail "a read while input is held was not served");
+  let partial=receipt_of "a partial failure"
+    (Peer.with_input_state peer (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
+  held "a partial failure" partial;
+  check int "a partial receipt keeps its own fields" 1 (Yojson.Safe.Util.to_int (field "step" partial));
+  (match Peer.with_input_state peer (Ok (obj ["inputLock",str "observed by the producer"])) with
+   | Ok value -> check string "a lock the answer already carries is kept" "observed by the producer"
+       (text (field "inputLock" value))
+   | Error _ -> fail "an answer carrying its own lock failed");
   (match dispatch peer Live.Page_act (obj ["action",str "release_input";
       "generation",str pending.generation;"confirmation",str "checked_and_released"]) with
    | Ok _ -> ()

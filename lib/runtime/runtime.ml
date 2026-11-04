@@ -772,6 +772,22 @@ let await_catalogue_change ~after =
     let current = catalogue_revision () in
     if current > after then Some current else None)
 
+(* Moves once each time a committed runtime.toml text becomes visible on disk,
+   apart from catalogue publications that write no text (startup,
+   setup-required). *)
+let config_text_revision_ref = Atomic.make 0
+let config_text_changed = Eio.Condition.create ()
+let config_text_revision () = Atomic.get config_text_revision_ref
+
+let note_config_text_visible () =
+  ignore (Atomic.fetch_and_add config_text_revision_ref 1);
+  Eio.Condition.broadcast config_text_changed
+
+let await_config_text_change ~after =
+  Eio.Condition.loop_no_mutex config_text_changed (fun () ->
+    let current = config_text_revision () in
+    if current > after then Some current else None)
+
 let enter_setup_required ~reason () =
   publish_loaded_state empty_loaded_state;
   Runtime_startup_state.set (Setup_required reason)
@@ -2526,7 +2542,12 @@ let commit_config_text_locked
   in
   let previous_view = exact_output_report_view () in
   let committed = record_exact_output_commit ~path ~previous_view in
+  (* Every branch below that leaves the new text visible calls this, a
+     failure after the rename included. The text is on disk before the
+     catalogue is published, so it is noted first: a raise from [set_loaded]
+     cannot leave a visible text unannounced. *)
   let publish_runtimes () =
+    note_config_text_visible ();
     set_loaded
       ?startup_degradation
       ~declared_media_failover

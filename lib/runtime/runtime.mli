@@ -471,6 +471,15 @@ val await_catalogue_change : after:int -> int
 (** Wait for a publication newer than [after], without polling. A publication
     that precedes the wait is returned immediately. *)
 
+val config_text_revision : unit -> int
+(** Monotonic revision of the runtime.toml text this process committed. It
+    moves when a committed text becomes visible on disk, a failure after the
+    rename included, and not on catalogue publications that write no text. *)
+
+val await_config_text_change : after:int -> int
+(** Wait for a committed text newer than [after], without polling. One that
+    precedes the wait is returned immediately. *)
+
 val get_default_route_and_runtimes : unit -> string option * t option * t list
 (** The configured default route, its entry runtime and the runtime list from
     one read of the loaded state. [None] means no default is initialized. *)

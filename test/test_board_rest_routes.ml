@@ -264,7 +264,32 @@ let dispatch_json ?meth ?token ~router ~path ~extra_headers ~body () =
   status, Yojson.Safe.from_string body
 ;;
 
+(* [Server_auth.http_auth_strict_enabled] reads these variables, and a shell
+   that exports a public [MASC_HTTP_BASE_URL] (the Cloudflare tunnel a live
+   install runs behind) turns strict auth on by itself. Strict mode refuses the
+   deliberately tokenless same-origin dashboard write these routes must keep
+   serving, so the fixture pins all three to loopback. A variable that was
+   unset cannot be unset again, so it is left empty, which every reader treats
+   as unset (#47727). *)
+let with_loopback_http_environment f =
+  let bindings =
+    [ "MASC_HTTP_AUTH_STRICT", "false"
+    ; "MASC_HOST", "127.0.0.1"
+    ; "MASC_HTTP_BASE_URL", "http://127.0.0.1:8935"
+    ]
+  in
+  let previous = List.map (fun (name, _) -> name, Sys.getenv_opt name) bindings in
+  List.iter (fun (name, value) -> Unix.putenv name value) bindings;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (name, old) -> Unix.putenv name (Option.value old ~default:""))
+        previous)
+    f
+;;
+
 let with_authenticated_activity_router ~prefix ~agent_name f =
+  with_loopback_http_environment @@ fun () ->
   let base_path = Filename.temp_dir prefix "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect

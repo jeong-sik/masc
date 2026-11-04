@@ -873,12 +873,16 @@ let reload t id =
    answered "Not attached to an active page" once on a move back to
    chrome://new-tab-page/, and the next read was on the entry); such a
    failure says nothing about the move, so the wait goes on, within the
-   run's window. *)
+   run's window. The load wait names that window too, so the run's own stop
+   is its only bound: a load that outlasts it ends as an unknown outcome, as
+   any step past its window does. *)
 let history_poll_ms = 50
 let traverse t id ~action ~delta ~side interaction =
   let* label = label_of t id in
-  settled ~id ~action (run_step t ~window_s:(tab_window id interaction)
-    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms])
+  let window_s = tab_window id interaction in
+  settled ~id ~action (run_step t ~window_s
+    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms;
+      "timeoutMs",`Int (Float.to_int (window_s *. 1000.))])
     (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_managed_page;
@@ -896,7 +900,7 @@ let traverse t id ~action ~delta ~side interaction =
       "        await page.cdp(\"Page.navigateToHistoryEntry\", {entryId: entry.id});";
       "        const landed = async () => { try { return (await page.cdp(\"Page.getNavigationHistory\", {})).currentIndex === target; } catch (error) { return false; } };";
       "        while (!(await landed())) await page.waitForTimeout(args.pollMs);";
-      "        await page.waitForLoadState();";
+      "        await page.waitForLoadState(undefined, {timeout: args.timeoutMs});";
       "      } catch (error) { failure = reason(error); }";
       moved_page_answer;
       "    }";

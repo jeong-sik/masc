@@ -1420,7 +1420,8 @@ const entries = [{id: 11, url: "https://a.test/", title: "A"}, {id: 12, url: "%s
 let current = %d;
 let detached = false;
 const seen = [];
-process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const loads = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen) + "\nloads " + JSON.stringify(loads)));
 const page = {
   cdp: async (method, params) => {
     seen.push(method);
@@ -1436,7 +1437,7 @@ const page = {
   reload: async () => { seen.push("reload"); },
   info: async () => ({url: entries[current].url, title: entries[current].title, w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
   waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  waitForLoadState: async () => { seen.push("load at " + current); %s },
+  waitForLoadState: async (state, options) => { seen.push("load at " + current); loads.push({state: state ?? null, options: options ?? null}); %s },
 };
 const taskSpace = async () => ({
   ownership: "agent",
@@ -2145,6 +2146,12 @@ let test_history_moves_one_entry () =
   check string "and waited for the load once the tab was on it" "load at 0" (List.hd (List.rev (seen ())));
   check bool "back runs within the action window" true ((List.hd !steps).window_s
     < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})));
+  let loads () = match List.find_opt (String.starts_with ~prefix:"loads ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.to_string (Yojson.Safe.from_string (after ~prefix:"loads " line))
+    | None -> fail "the stand-in did not say how it waited for the load" in
+  check string "the load wait takes the run's window, not ego's own"
+    (Printf.sprintf {|[{"state":null,"options":{"timeout":%d}}]|} (Float.to_int ((List.hd !steps).window_s *. 1000.)))
+    (loads ());
   current := 0;
   check string "no earlier page" "tab 1 has no earlier page in its history"
     (before_effect "back from the first entry" (on_tab Lane.Action.Back));

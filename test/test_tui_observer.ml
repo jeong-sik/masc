@@ -160,7 +160,6 @@ let summary = function
          | Masc.Workspace_dataset_event.Provider_usage
          | Masc.Workspace_dataset_event.Provider_standing
          | Masc.Workspace_dataset_event.Keeper_costs
-         | Masc.Workspace_dataset_event.Workspace_health -> "")
          | Masc.Workspace_dataset_event.Workspace_health
          | Masc.Workspace_dataset_event.Runtime_probe -> "")
       ^ ")"

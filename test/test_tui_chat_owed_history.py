@@ -209,14 +209,31 @@ class ChatOwedHistoryTest(unittest.TestCase):
                         except OSError:
                             return
 
+            def emit_diag(label: str) -> None:
+                """Diagnostic only (task-3233): the TUI points fd 2 at a per-PID
+                log under the base path. Print its "[diag task-3231]" lines so a
+                passing run also shows how many agenda reads answered, not only
+                a failing one."""
+                if os.environ.get("MASC_TUI_DIAG") != "1":
+                    return
+                lines: list[str] = []
+                for log in sorted(pathlib.Path(base).glob(".masc/logs/masc-tui-*.log")):
+                    for line in log.read_text(errors="replace").splitlines():
+                        if "[diag task-3231]" in line:
+                            lines.append(line)
+                for line in lines[-4000:]:
+                    print(f"[{label}] {line}", file=sys.stderr, flush=True)
+
             def wait_until(predicate: Callable[[], bool], label: str) -> None:
                 deadline = time.monotonic() + WAIT_SECONDS
                 while time.monotonic() < deadline:
                     if predicate():
+                        emit_diag(label)
                         return
                     if process.poll() is not None:
                         break
                     drain_for(0.05)
+                emit_diag(label)
                 self.fail(f"{label}; exit={process.poll()}, requests={server.requests!r}")
 
             def keys(text: str) -> None:

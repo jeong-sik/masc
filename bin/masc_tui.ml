@@ -9332,6 +9332,19 @@ let launch_owed_tools state ~mailbox =
    (RFC-0480 §3.1). Entering Schedules and [r] read them directly. Each owes
    its own read: the two can be in flight at once, and one answering says
    nothing of the other. *)
+(* task-3233 diagnostic only: stderr lines that say which owed state a failed
+   schedules answer left behind. No behaviour depends on them. *)
+let diag_task_3233 fmt =
+  Printf.ksprintf (fun line -> prerr_endline ("[diag task-3231] " ^ line)) fmt
+
+let diag_owed_string = function
+  | Masc_tui_owed_read.Settled -> "Settled"
+  | Masc_tui_owed_read.Owed { failures } -> Printf.sprintf "Owed{failures=%d}" failures
+  | Masc_tui_owed_read.Reading { failures; changed_since } ->
+      Printf.sprintf "Reading{failures=%d;changed_since=%b}" failures changed_since
+  | Masc_tui_owed_read.Waiting { failures; retry_at } ->
+      Printf.sprintf "Waiting{failures=%d;retry_at=%.3f}" failures retry_at
+
 let owe_schedules_read state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.changed state.schedules_agenda_owed;
   state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed
@@ -25355,8 +25368,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
-      if current then
-        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
+      if current then begin
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
+        diag_task_3233 "Schedule_agenda_read answered ok=%b current=true agenda_owed=%s"
+          (Result.is_ok result) (diag_owed_string state.schedules_agenda_owed)
+      end
   | Schedules_loaded (Schedule_page_read request, result) ->
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)

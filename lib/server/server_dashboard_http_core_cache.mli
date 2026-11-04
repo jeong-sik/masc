@@ -36,8 +36,9 @@ val invalidate_scheduled_automation : base_path:string -> unit
     after every tick it records, so the list's runner status and holds are the
     newest tick's rather than up to {!live_cache_ttl_s} older. While no tick is
     recorded, a hung one included, the list can still trail the runner by that
-    long. The schedule store's change observer calls it after each write, so
-    a reader that answers [schedules_changed] reads the write. *)
+    long. The schedule store's change observer calls it before it enqueues
+    each write's invalidation, so a reader that answers
+    [schedule_store_invalidated] reads the write. *)
 val dashboard_briefing_timeout_s : float
 
 val with_projection_diagnostics :

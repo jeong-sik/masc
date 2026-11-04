@@ -149,13 +149,13 @@ let run_schedule_runner_tick ~clock (config : Workspace.config) ~state =
       (Schedule_runner_status.snapshot ())
   in
   let view_before = runner_view () in
-  let announced_before = Server_schedule_broadcast.announcements () in
+  let announced_before = Server_schedule_invalidation.notices () in
   let announce_if_changed () =
     if Yojson.Safe.equal view_before (runner_view ())
-       && Server_schedule_broadcast.announcements () = announced_before
+       && Server_schedule_invalidation.notices () = announced_before
     then Server_dashboard_http_core_cache.invalidate_scheduled_automation
         ~base_path:config.base_path
-    else Server_schedule_broadcast.runner_changed ~base_path:config.base_path
+    else Server_schedule_invalidation.announce ~base_path:config.base_path
   in
   let last_observed_at = ref started_at in
   let observe_clock () =
@@ -615,7 +615,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ~finished_at:(fun () ->
           (Schedule_runner_status.snapshot ()).last_tick_finished_at)
         ~on_deadline:(fun () ->
-          Server_schedule_broadcast.runner_changed
+          Server_schedule_invalidation.announce
             ~base_path:(Mcp_server.workspace_config state).base_path));
   (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init

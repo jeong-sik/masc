@@ -156,7 +156,6 @@ type t =
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
-  | DockerRuntimeDiscarded
   | ProactiveSkip
   | NoProgressStreak
   | UsageTrust

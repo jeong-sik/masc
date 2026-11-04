@@ -446,14 +446,6 @@ val run_exec_pipeline_with_status :
     container. Each stage is a separate [docker exec -i] process and adjacent
     stages are connected by host-side process pipes. *)
 
-val run_bash_with_status :
-  timeout_sec:float ->
-  t ->
-  cwd:string ->
-  cmd:string ->
-  unit ->
-  (Unix.process_status * string, string) result
-
 val teardown_keeper_sandbox_by_name :
   ?timeout_sec:float ->
   config:Workspace.config ->

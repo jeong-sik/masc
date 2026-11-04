@@ -77,9 +77,6 @@ function actionIdentityLabel(action: DashboardSkillActivation['actions'][number]
 }
 
 function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface }) {
-  if (surface.status === 'warming') {
-    return html`<div class="text-xs text-[var(--color-fg-muted)]">Keeper surface warming</div>`
-  }
   if (surface.status === 'unavailable') {
     return html`
       <div class="text-xs text-[var(--color-status-bad)]" data-testid="skill-surface-unavailable">

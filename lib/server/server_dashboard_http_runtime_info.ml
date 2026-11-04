@@ -2320,11 +2320,9 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
     let keeper_waiting_inventory =
       run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
-    (* Resolved on every request, never from the cache: a Keeper whose
-       metadata does not exist answers [keeper_not_found] here, where the
-       cold-cache placeholder used to answer "warming" for it -- a keeper
-       taken down by an admin shutdown looked, to every single read, like
-       one the server had not looked at yet. *)
+    (* Resolved on every request, never from the cache, so the first read
+       of a Keeper whose metadata does not exist, or no longer exists,
+       answers [keeper_not_found]. *)
     let effective_keeper_surface =
       match keeper with
       | None -> `Null

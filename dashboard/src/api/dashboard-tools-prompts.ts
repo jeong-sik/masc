@@ -598,10 +598,6 @@ export type DashboardEffectiveKeeperSurface =
       reason: string
       detail: string
     }
-  | {
-      status: 'warming'
-      keeper_name: string
-    }
 
 export type DashboardSkillInstructionOrigin =
   | { kind: 'task_instruction'; task_ids: string[] }

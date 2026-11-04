@@ -9131,6 +9131,11 @@ let harness_on_screen state =
 let launch_owed_harness state ~mailbox =
   if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
   else begin
+    (match state.harness_stale_at with
+     | Some stale_at when Unix.gettimeofday () >= stale_at ->
+         state.harness_stale_at <- None;
+         owe_harness_read state
+     | Some _ | None -> ());
     let reading = state.harness_inflight in
     let read =
       if reading then state.harness_owed
@@ -25473,8 +25478,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       match result with
       | Ok message ->
           report_action state "system" ("Harness: " ^ message);
-          (* The server announces the label too; owing the read folds that
-             announcement into one read instead of a second. *)
+          (* The server announces the label before it answers, so this owed
+             read usually follows the announced one; it is the read when the
+             feed is down. *)
           owe_harness_read state
       | Error err -> report_action state "error" ("Harness label: " ^ err))
   | Approval_decision_done (approval, decision, result, generation, approvals) ->
@@ -27785,6 +27791,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match result with
       | Ok snapshot ->
           state.harness_owed <- Masc_tui_owed_read.succeeded state.harness_owed;
+          state.harness_stale_at <-
+            Option.bind snapshot.Masc.Tui_decode.hs_overview (fun overview ->
+              overview.Masc.Tui_decode.hov_stale_at);
           state.harness <- Some snapshot;
           state.harness_error <- None;
           (match state.harness_detail with

@@ -40,6 +40,9 @@ type waiting_source =
   | Schedule_waiting
   | Owner_shutdown
   | Operator_pending_confirm
+  | Runtime_quota_spent
+      (** Every candidate of the Keeper's route has spent its quota window, so
+          the Keeper cannot dispatch until the earliest reset (RFC-0484). *)
   | Read_error
   | Observation_unavailable
 

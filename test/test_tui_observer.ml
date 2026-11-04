@@ -135,7 +135,8 @@ let summary = function
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
-  | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Internal_agent_runs_changed registry) ->
+      "internal_runs(" ^ Masc.Internal_agent_runs_event.registry_to_wire registry ^ ")"
   | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
   | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
@@ -802,13 +803,23 @@ let verification_frames =
   [ {|data: {"type":"verification_requests_changed","ts_unix":100.0}
 
 |}
-  ; {|data: {"type":"internal_agent_runs_changed","ts_unix":100.0}
+  ; {|data: {"type":"internal_agent_runs_changed","registry":"verification","ts_unix":100.0}
+
+|}
+  ]
+
+let other_run_registry_frames =
+  [ {|data: {"type":"internal_agent_runs_changed","registry":"goal_verification"}
+
+|}
+  ; {|data: {"type":"internal_agent_runs_changed","registry":"exact_lane"}
 
 |}
   ]
 
 let test_a_verification_or_run_push_reads_the_requests () =
-  check (list string) "both decode without a payload" [ "verification_requests"; "internal_runs" ]
+  check (list string) "both decode with what changed"
+    [ "verification_requests"; "internal_runs(verification)" ]
     (List.map summary (decode_all verification_frames));
   let count frames =
     decode_all frames
@@ -818,7 +829,22 @@ let test_a_verification_or_run_push_reads_the_requests () =
     |> List.length
   in
   check int "both owe the verification requests a read" 2 (count verification_frames);
-  check int "no roster or turns push does" 0 (count (turn_frame :: roster_frames))
+  check int "no roster or turns push does" 0 (count (turn_frame :: roster_frames));
+  check (list string) "the other registries decode by name"
+    [ "internal_runs(goal_verification)"; "internal_runs(exact_lane)" ]
+    (List.map summary (decode_all other_run_registry_frames));
+  check int "and owe the verification requests nothing" 0 (count other_run_registry_frames);
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a run push without a known registry was read: "
+              ^ String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
+    ; "data: {\"type\":\"internal_agent_runs_changed\",\"registry\":\"elsewhere\"}\n\n"
+    ]
 
 let event_queue_frame =
   {|data: {"type":"keeper_event_queue_changed","keeper":"alpha"}
@@ -967,14 +993,20 @@ let untaught_agent_core_frame =
 (* The run registries' change push is read by the name the server broadcasts
    it under, so the two cannot drift apart. *)
 let test_the_internal_runs_push_is_read_by_the_servers_name () =
-  check (list string) "the frame the server broadcasts decodes to the push"
-    [ "internal_runs" ]
+  let registries =
+    Masc.Internal_agent_runs_event.[ Verification; Goal_verification; Exact_lane ]
+  in
+  check (list string) "the frames the server broadcasts decode to the push"
+    [ "internal_runs(verification)"; "internal_runs(goal_verification)"
+    ; "internal_runs(exact_lane)" ]
     (List.map summary
        (decode_all
-          [ "data: "
-            ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json ())
-            ^ "\n\n"
-          ]))
+          (List.map
+             (fun registry ->
+                "data: "
+                ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json registry)
+                ^ "\n\n")
+             registries)))
 
 let test_schedule_change_is_read_by_the_servers_name () =
   check (list string) "the schedule invalidation has a typed event"

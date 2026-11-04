@@ -10,8 +10,9 @@
 
     The caller selects the conversation range and verified completed boundary.
     Substitution reduces body bytes inside that range without adding or removing
-    atoms. Small Keeper input policy uses this with Librarian continuity; spare
-    capacity is not a reason to widen the conversation range.
+    atoms. Every substitution rewrites a message a provider may already hold in
+    its prompt cache, so the keeper's agent_core assembly calls this only for the
+    resend that answers a size refusal (RFC-0363 §3.4.1).
 
     Durable state is untouched. This runs on the provider-bound copy, like the
     window, so a blob written here has no durable referrer — see
@@ -23,8 +24,8 @@
     transmitted list is rebuilt from durable state every turn, so demoting
     everything eagerly would re-store thousands of blobs per turn. Instead
     the unmodified history first chooses the authoritative window cut. {!plan}
-    substitutes a marker with the store's exact preview below the caller's age boundary (the
-    keeper's assembly uses the current turn, see {!plan}), the window cuts
+    substitutes a marker with the store's exact preview below the caller's boundary (the
+    keeper's assembly uses the refused request's end, see {!plan}), the window cuts
     again against the smaller messages, and {!materialize} stores only the
     messages that survived. The real marker is never larger than the
     placeholder, so a request that fit the plan still fits after
@@ -89,7 +90,6 @@ type plan_result =
 
 val plan
   :  ?completed_arguments:completed_arguments
-  -> ?demote_from:int
   -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> demote_before:int
   -> Agent_core.Types.message list
@@ -109,20 +109,16 @@ val plan
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
       make a corrupt payload content-addressed and permanent.
-    - its atom index is at or above [demote_from] (default 0) and below
-      [demote_before], atom indices into this same unmodified message list.
-      [demote_from] lets a size refusal demote one turn's atoms without
-      touching the earlier turns a policy keeps verbatim. The caller owns where that boundary sits and
-      owns the consequence: a boundary that moves on every message rewrites the
-      transmitted prefix on every request and costs the provider's prompt
-      cache, so callers pick one that moves at the rate the conversation
-      itself does. The keeper's assembly uses the turn — results the current
-      turn produced are what it is reasoning over, results from earlier turns
-      were already reported elsewhere — which moves once per turn. One
-      exception: after a size refusal the assembly resends once with the
-      current turn's atoms, from the turn boundary to the refused request's
-      end, as the range ([demote_from] to [demote_before]), so the turn's own results leave as markers rather than failing
-      the turn (#28845).
+    - its atom index is below [demote_before], an atom index into this same
+      unmodified message list. The caller owns where that boundary sits and
+      owns the consequence: a boundary that moves while the range's front stays
+      rewrites a message the provider already holds and costs its prompt cache
+      from that message on. A boundary at the current turn moves once per turn,
+      so it costs the cache on the first request of every turn. The keeper's
+      agent_core assembly passes 0 until a size refusal, then the refused
+      request's atom count for the one resend that answers it, so every result
+      in the refused request leaves as a marker rather than failing the turn
+      (#28845).
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because
@@ -138,8 +134,7 @@ val plan
     and every other block. Original arguments are stored as [application/json]
     bytes using [Yojson.Safe.to_string]. Existing or invalid normalized
     references are left verbatim. Argument eligibility is independent of the
-    ToolResult [demote_from]/[demote_before] range, including a current-turn
-    result resend after capacity refusal. The same per-message encoded-size
+    ToolResult [demote_before] range. The same per-message encoded-size
     comparison and two-phase materialization apply. Omitting the frozen set
     preserves all arguments. *)
 

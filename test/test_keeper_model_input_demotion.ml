@@ -770,14 +770,14 @@ let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~confi
       (Demotion.materialize ~store ~addresses ~pending projected).messages in
   match Signed_provider.For_testing.request_view
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
-    ~input_policy:Masc.Keeper_input_policy.Small ?completed_arguments
+    ?completed_arguments
     ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
     ~front:(Some { Masc.Keeper_carried_front.first_atom = 0
       ; front = Model_input_front.At_atom first_digest
       ; source = Masc.Keeper_carried_front.Ledger })
     ~accepted:None ~history_digest_at:(Window.atom_opening_digest messages)
-    ~current_turn_results:Signed_provider.Current_turn_verbatim
-    ~base_path ~demote_before:atom_count
+    ~current_turn_results:(Signed_provider.Current_turn_demoted { refused_atom_count = atom_count })
+    ~base_path
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary {end_atom = atom_count})
     ~materialize
     messages
@@ -1342,7 +1342,7 @@ let demoted_after_refusal messages =
    §10.4), never refuses, and measures the request against nothing;
    [front] is the oldest atom the range starts at and [current_turn_results]
    is what the refusal path decided. *)
-let compose ~base_path ~front ~current_turn_results ~demote_before messages =
+let compose ~base_path ~front ~current_turn_results ~turn_end messages =
   let front_digest =
     match Window.atom_opening_digest messages front with
     | Some digest -> digest
@@ -1359,8 +1359,7 @@ let compose ~base_path ~front ~current_turn_results ~demote_before messages =
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results
     ~base_path
-    ~demote_before
-    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = demote_before })
+    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = turn_end })
     messages
 ;;
 
@@ -1370,14 +1369,14 @@ let bytes_of messages =
 
 (* What the refusal path asks of the refused range: would demoting its tool
    results change it. *)
-let demotion_after_refusal ~base_path ~front ~demote_before messages =
+let demotion_after_refusal ~base_path ~front ~turn_end messages =
   Try_provider.For_testing.current_turn_demotion
     ~refused:
       (compose ~base_path ~front ~current_turn_results:Try_provider.Current_turn_verbatim
-         ~demote_before messages)
+         ~turn_end messages)
     ~demoted:
       (compose ~base_path ~front ~current_turn_results:(demoted_after_refusal messages)
-         ~demote_before messages)
+         ~turn_end messages)
 ;;
 
 let newest_bodies = [ 24_000; 31_000; 47_000; 7_000 ]
@@ -1401,7 +1400,7 @@ let oversized_newest_history () =
 
 let oversized_newest_atom_is_demoted_after_refusal () =
   let earlier, messages, _ = oversized_newest_history () in
-  let demote_before =
+  let turn_end =
     Window.first_atom_at_or_after
       messages
       ~message_index:(List.length earlier)
@@ -1409,12 +1408,12 @@ let oversized_newest_atom_is_demoted_after_refusal () =
   let base_path = Filename.temp_dir "demote" "" in
   let store = Tool_blob_store.create ~base_path in
   Alcotest.(check (option int)) "the refused range carries demotable results" (Some 3)
-    (demotion_after_refusal ~base_path ~front:2 ~demote_before messages);
+    (demotion_after_refusal ~base_path ~front:2 ~turn_end messages);
   (* The range is the newest atom alone, as a walk that evicted every older
      block and a halving that reached one atom leave it. *)
   let composed =
     compose ~base_path ~front:2 ~current_turn_results:(demoted_after_refusal messages)
-      ~demote_before messages
+      ~turn_end messages
   in
   Alcotest.(check int)
     "each of the newest atom's results is demoted"
@@ -1447,18 +1446,18 @@ let oversized_newest_atom_is_demoted_after_refusal () =
     (List.length (List.filter Tool_output.is_marker transmitted))
 ;;
 
-(* Without a refusal, the current turn's own results stay verbatim whatever
-   their size: the boundary excludes them (RFC-0351 §4). *)
-let an_ordinary_composition_keeps_the_current_turn_verbatim () =
+(* Without a refusal nothing the range carries is demoted, whatever its size
+   (RFC-0363 §3.4.1). *)
+let an_ordinary_composition_demotes_nothing () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
-  let demote_before =
+  let turn_end =
     Window.first_atom_at_or_after
       messages
       ~message_index:(List.length earlier)
   in
   let composed =
     compose ~base_path:(Filename.temp_dir "demote" "") ~front:2
-      ~current_turn_results:Try_provider.Current_turn_verbatim ~demote_before messages
+      ~current_turn_results:Try_provider.Current_turn_verbatim ~turn_end messages
   in
   Alcotest.(check int) "nothing is demoted" 0
     (List.length composed.Try_provider.planned.Demotion.pending);
@@ -1481,10 +1480,10 @@ let an_atom_without_demotable_body_demotes_nothing () =
   let messages = history_with_tool_bodies [ "tick" ] @ newest in
   let base_path = Filename.temp_dir "demote" "" in
   Alcotest.(check (option int)) "nothing to demote" None
-    (demotion_after_refusal ~base_path ~front:1 ~demote_before:1 messages);
+    (demotion_after_refusal ~base_path ~front:1 ~turn_end:1 messages);
   let composed =
     compose ~base_path ~front:1 ~current_turn_results:(demoted_after_refusal messages)
-      ~demote_before:1 messages
+      ~turn_end:1 messages
   in
   Alcotest.(check int) "and a demoting composition plans nothing" 0
     (List.length composed.Try_provider.planned.Demotion.pending);
@@ -1498,10 +1497,10 @@ let an_atom_without_demotable_body_demotes_nothing () =
 let demotion_after_refusal_requires_a_blob_store () =
   let _, messages, _ = oversized_newest_history () in
   Alcotest.(check (option int)) "nothing to demote without a store" None
-    (demotion_after_refusal ~base_path:"" ~front:2 ~demote_before:2 messages);
+    (demotion_after_refusal ~base_path:"" ~front:2 ~turn_end:2 messages);
   let composed =
     compose ~base_path:"" ~front:2 ~current_turn_results:(demoted_after_refusal messages)
-      ~demote_before:2 messages
+      ~turn_end:2 messages
   in
   Alcotest.(check int) "nothing is planned without a store" 0
     (List.length composed.Try_provider.planned.Demotion.pending)
@@ -1518,7 +1517,7 @@ type sent =
   ; mutable demoted_through : int list
   }
 
-let drive ?(gate = fun () -> true) ?(refuse_resend = false) ~base_path ~front ~demote_before
+let drive ?(gate = fun () -> true) ?(refuse_resend = false) ~base_path ~front ~turn_end
       ~window messages =
   let results = ref Try_provider.Current_turn_verbatim in
   let sent = { compositions = []; demoted_through = [] } in
@@ -1528,7 +1527,7 @@ let drive ?(gate = fun () -> true) ?(refuse_resend = false) ~base_path ~front ~d
   in
   let attempt () =
     let composed =
-      compose ~base_path ~front ~current_turn_results:!results ~demote_before messages
+      compose ~base_path ~front ~current_turn_results:!results ~turn_end messages
     in
     sent.compositions <- composed :: sent.compositions;
     let refused_after_demotion = refuse_resend && List.length sent.compositions > 1 in
@@ -1539,7 +1538,7 @@ let drive ?(gate = fun () -> true) ?(refuse_resend = false) ~base_path ~front ~d
   let outcome =
     Try_provider.current_turn_demotion_sequence
       ~same_run_retry_authorized:gate
-      ~demotable:(fun () -> demotion_after_refusal ~base_path ~front ~demote_before messages)
+      ~demotable:(fun () -> demotion_after_refusal ~base_path ~front ~turn_end messages)
       ~demote:(fun _error ~refused_atom_count ->
         sent.demoted_through <- refused_atom_count :: sent.demoted_through;
         results := Try_provider.Current_turn_demoted { refused_atom_count })
@@ -1552,16 +1551,16 @@ let drive ?(gate = fun () -> true) ?(refuse_resend = false) ~base_path ~front ~d
 
 let current_turn_setup () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
-  let demote_before =
+  let turn_end =
     Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
   in
-  messages, demote_before, newest_bytes / 2
+  messages, turn_end, newest_bytes / 2
 ;;
 
 let a_refused_turn_resends_its_results_as_markers_once () =
-  let messages, demote_before, window = current_turn_setup () in
+  let messages, turn_end, window = current_turn_setup () in
   let base_path = Filename.temp_dir "demote" "" in
-  let outcome, sent = drive ~base_path ~front:0 ~demote_before ~window messages in
+  let outcome, sent = drive ~base_path ~front:0 ~turn_end ~window messages in
   Alcotest.(check int) "refused, then resent once" 2 (List.length sent.compositions);
   Alcotest.(check (list int)) "demoted through the refused request's atoms" [ 3 ]
     sent.demoted_through;
@@ -1603,27 +1602,27 @@ let a_refused_turn_with_nothing_to_demote_is_not_resent () =
   let newest = [ assistant (String.make 50_000 'x') ] in
   let messages = history_with_tool_bodies [ "tick" ] @ newest in
   let base_path = Filename.temp_dir "demote" "" in
-  let outcome, sent = drive ~base_path ~front:0 ~demote_before:1 ~window:25_000 messages in
+  let outcome, sent = drive ~base_path ~front:0 ~turn_end:1 ~window:25_000 messages in
   Alcotest.(check bool) "the refusal is returned" true (Result.is_error outcome);
   Alcotest.(check int) "asked once" 1 (List.length sent.compositions);
   Alcotest.(check (list int)) "nothing demoted" [] sent.demoted_through
 ;;
 
 let a_refused_resend_returns_the_refusal () =
-  let messages, demote_before, window = current_turn_setup () in
+  let messages, turn_end, window = current_turn_setup () in
   let base_path = Filename.temp_dir "demote" "" in
   let outcome, sent =
-    drive ~refuse_resend:true ~base_path ~front:0 ~demote_before ~window messages
+    drive ~refuse_resend:true ~base_path ~front:0 ~turn_end ~window messages
   in
   Alcotest.(check bool) "the resend's refusal is returned" true (Result.is_error outcome);
   Alcotest.(check int) "asked twice, never a third time" 2 (List.length sent.compositions)
 ;;
 
 let no_resend_after_a_checkpoint_or_another_error () =
-  let messages, demote_before, window = current_turn_setup () in
+  let messages, turn_end, window = current_turn_setup () in
   let base_path = Filename.temp_dir "demote" "" in
   let outcome, sent =
-    drive ~gate:(fun () -> false) ~base_path ~front:0 ~demote_before ~window messages
+    drive ~gate:(fun () -> false) ~base_path ~front:0 ~turn_end ~window messages
   in
   Alcotest.(check bool) "the refusal is returned" true (Result.is_error outcome);
   Alcotest.(check int) "asked once after a durable checkpoint" 1 (List.length sent.compositions);
@@ -1645,74 +1644,113 @@ let no_resend_after_a_checkpoint_or_another_error () =
   Alcotest.(check int) "asked once" 1 !asked
 ;;
 
-(* A Wide keeper keeps earlier turns verbatim: its ordinary boundary is 0.
-   A refused request that carried earlier-turn and current-turn tool results
-   demotes only the current turn's: from the turn boundary, or the newest atom
-   alone when the boundary could not be read. *)
-let only_the_current_turn_is_demoted () =
+let current_batch ~id_prefix ~fill sizes =
+  assistant (id_prefix ^ " batch")
+  :: List.mapi
+       (fun i size ->
+          tool_message ~id:(Printf.sprintf "%s-%d" id_prefix i) (String.make size (fill i)))
+       sizes
+;;
+
+let compose_from_the_oldest_atom ~base_path ~current_turn_results ~turn_boundary messages =
+  Try_provider.For_testing.compose_carried_model_input
+    ~measure_message_bytes
+    ~accepted:None ~front:
+      (Some
+         { Masc.Keeper_carried_front.first_atom = 0
+         ; front = Model_input_front.At_atom (Option.get (Window.atom_opening_digest messages 0))
+         ; source = Masc.Keeper_carried_front.Ledger
+         })
+    ~history_digest_at:(Window.atom_opening_digest messages)
+    ~current_turn_results
+    ~base_path
+    ~turn_boundary
+    messages
+;;
+
+let letter i = Char.chr (Char.code 'a' + i)
+
+(* A refused request goes again with every result it carried as a marker,
+   earlier turns' included: the resend is the smallest this range can carry,
+   whichever turn boundary the history reports. *)
+let a_refusal_demotes_every_result_it_carried () =
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
   let earlier = history_with_tool_bodies earlier_bodies in
-  let current =
-    assistant "search batch"
-    :: List.mapi
-         (fun i size ->
-            tool_message
-              ~id:(Printf.sprintf "search-%d" i)
-              (String.make size (Char.chr (Char.code 'a' + i))))
-         newest_bodies
-  in
-  let messages = earlier @ current in
+  let messages = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
   let turn_start =
     Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
   in
   let base_path = Filename.temp_dir "demote" "" in
   let compose_with turn_boundary =
-    Try_provider.For_testing.compose_carried_model_input
-      ~input_policy:Masc.Keeper_input_policy.Wide
-      ~measure_message_bytes
-      ~accepted:None ~front:
-        (Some
-           { Masc.Keeper_carried_front.first_atom = 0
-           ; front = Model_input_front.At_atom (Option.get (Window.atom_opening_digest messages 0))
-           ; source = Masc.Keeper_carried_front.Ledger
-           })
-      ~history_digest_at:(Window.atom_opening_digest messages)
-      ~current_turn_results:(demoted_after_refusal messages)
-      ~base_path
-      ~demote_before:0
-      ~turn_boundary
-      messages
+    compose_from_the_oldest_atom ~base_path
+      ~current_turn_results:(demoted_after_refusal messages) ~turn_boundary messages
   in
   let composed =
     compose_with (Masc.Keeper_carried_front.Turn_boundary { end_atom = turn_start })
   in
   Alcotest.(check int) "the range still opens on the earlier turns" 0
     composed.Try_provider.projection.Window.dropped_atoms;
-  Alcotest.(check int) "the demotion starts at the turn boundary" turn_start
-    composed.Try_provider.demote_from;
-  Alcotest.(check int) "only the current turn's results are planned"
-    (List.length newest_bodies)
+  Alcotest.(check int) "the demotion reaches the refused request's end"
+    (snd (Window.annotate messages)) composed.Try_provider.demote_before;
+  Alcotest.(check int) "every result of the refused request is planned"
+    (List.length earlier_bodies + List.length newest_bodies)
     (List.length composed.Try_provider.planned.Demotion.pending);
   let carried = markers composed.Try_provider.projection.Window.messages in
   List.iter
     (fun body ->
-       Alcotest.(check bool) "an earlier-turn body goes verbatim" true
+       Alcotest.(check bool) "an earlier-turn body leaves" false
          (List.exists (String.equal body) carried))
     earlier_bodies;
   List.iteri
     (fun i size ->
-       let body = String.make size (Char.chr (Char.code 'a' + i)) in
        Alcotest.(check bool)
          (Printf.sprintf "current-turn body %d leaves" i)
          false
-         (List.exists (String.equal body) carried))
+         (List.exists (String.equal (String.make size (letter i))) carried))
     newest_bodies;
   let unknown =
     compose_with (Masc.Keeper_carried_front.Turn_boundary_unknown { reason = "unreadable" })
   in
-  Alcotest.(check int) "an unknown boundary demotes the newest atom alone"
-    (snd (Window.annotate messages) - 1)
-    unknown.Try_provider.demote_from
+  Alcotest.(check int) "an unknown boundary plans the same demotions"
+    (List.length composed.Try_provider.planned.Demotion.pending)
+    (List.length unknown.Try_provider.planned.Demotion.pending)
+;;
+
+(* RFC-0363 §6 test 1 across a turn boundary: the next turn's first request
+   carries every message the last one sent, unchanged, ahead of the new atoms.
+   The bodies are large enough that a marker would shorten each of them, so a
+   boundary that demoted completed turns would rewrite them here. *)
+let a_sent_result_stays_as_sent_when_the_turn_boundary_moves () =
+  let earlier = history_with_tool_bodies [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let this_turn = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
+  let next_turn =
+    this_turn @ current_batch ~id_prefix:"next" ~fill:(fun _ -> 'n') [ 9_000 ]
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let compose_at messages ~completed_before =
+    compose_from_the_oldest_atom ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_before })
+      messages
+  in
+  let last =
+    compose_at this_turn
+      ~completed_before:(Window.first_atom_at_or_after this_turn ~message_index:(List.length earlier))
+  in
+  let next =
+    compose_at next_turn
+      ~completed_before:(Window.first_atom_at_or_after next_turn ~message_index:(List.length this_turn))
+  in
+  Alcotest.(check int) "the last request demoted nothing" 0
+    (List.length last.Try_provider.planned.Demotion.pending);
+  Alcotest.(check int) "the next request demotes nothing" 0
+    (List.length next.Try_provider.planned.Demotion.pending);
+  let sent = last.Try_provider.projection.Window.messages in
+  let carried = next.Try_provider.projection.Window.messages in
+  Alcotest.(check bool) "the next request opens with exactly what the last one sent" true
+    (List.filteri (fun index _ -> index < List.length sent) carried = sent);
+  Alcotest.(check int) "and carries the new atom after it"
+    (List.length sent + 2) (List.length carried)
 ;;
 
 (* Demotion can shrink an atom only down to its non-demotable residue. The
@@ -1729,7 +1767,7 @@ let still_oversized_after_demotion_is_transmitted_demoted () =
   let messages = earlier @ newest in
   let composed =
     compose ~base_path:(Filename.temp_dir "demote" "") ~front:1
-      ~current_turn_results:(demoted_after_refusal messages) ~demote_before:1 messages
+      ~current_turn_results:(demoted_after_refusal messages) ~turn_end:1 messages
   in
   Alcotest.(check int) "both results were demoted" 2
     (List.length composed.Try_provider.planned.Demotion.pending);
@@ -1754,7 +1792,6 @@ let a_front_the_history_shrank_under_starts_over () =
       ~history_digest_at:(Window.atom_opening_digest messages)
       ~current_turn_results:Try_provider.Current_turn_verbatim
       ~base_path:""
-      ~demote_before:0
       ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
   in
@@ -1784,7 +1821,6 @@ let a_front_that_opens_with_another_message_starts_over () =
       ~history_digest_at:(Window.atom_opening_digest messages)
       ~current_turn_results:Try_provider.Current_turn_verbatim
       ~base_path:""
-      ~demote_before:0
       ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
   in
@@ -1864,9 +1900,13 @@ let () =
             `Quick
             a_refused_turn_resends_its_results_as_markers_once
         ; Alcotest.test_case
-            "only the current turn is demoted"
+            "a refusal demotes every result it carried"
             `Quick
-            only_the_current_turn_is_demoted
+            a_refusal_demotes_every_result_it_carried
+        ; Alcotest.test_case
+            "a sent result stays as sent when the turn boundary moves"
+            `Quick
+            a_sent_result_stays_as_sent_when_the_turn_boundary_moves
         ; Alcotest.test_case
             "a refused turn with nothing to demote is not resent"
             `Quick
@@ -1880,9 +1920,9 @@ let () =
             `Quick
             no_resend_after_a_checkpoint_or_another_error
         ; Alcotest.test_case
-            "an ordinary composition keeps the current turn verbatim"
+            "an ordinary composition demotes nothing"
             `Quick
-            an_ordinary_composition_keeps_the_current_turn_verbatim
+            an_ordinary_composition_demotes_nothing
         ; Alcotest.test_case
             "an atom without a demotable body demotes nothing"
             `Quick

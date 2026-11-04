@@ -3,13 +3,13 @@ module Driver = Masc.Keeper_turn_driver_try_provider
 
 (* [Driver.For_testing.request_view] over a store that holds no media: these
    histories carry text and tool blocks only. *)
-let request_view ?input_policy ?continuity ?completed_arguments ?tools ~provider_config
+let request_view ?continuity ?completed_arguments ?tools ~provider_config
     ~measure_message_bytes ~front ~accepted ~history_digest_at ~current_turn_results
-    ~base_path ~demote_before ~turn_boundary ~materialize messages =
+    ~base_path ~turn_boundary ~materialize messages =
   match
-    Driver.For_testing.request_view ?input_policy ?continuity ?completed_arguments ?tools
+    Driver.For_testing.request_view ?continuity ?completed_arguments ?tools
       ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
-      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize
+      ~current_turn_results ~base_path ~turn_boundary ~materialize
       ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ())) messages
   with
   | Ok view -> view
@@ -54,7 +54,7 @@ let view ?front snapshot messages =
     ~measure_message_bytes:measure ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim
-    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
+    ~base_path:(Filename.get_temp_dir_name ())
     ~turn_boundary:(Front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom })
     ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered tool demotion") messages
 ;;
@@ -95,11 +95,11 @@ let tool_pair () =
        outcome = T.Tool_succeeded; json = None; content_blocks = None}]) with tool_call_id = Some "read-1" }]
 ;;
 
-(* A seed range reaches behind this turn, so an earlier turn's tool body in
-   it goes out as a marker at the turn boundary, as it does with no
-   continuity. Before, a turn with no Librarian point sent those bodies raw
-   every time its range grew back over them. *)
-let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
+(* A seed range reaches behind this turn, and an earlier turn's tool body in
+   it goes out exactly as the range first sent it: rewriting it when the turn
+   boundary moves would change the prefix the provider cached (RFC-0363
+   §3.4.1). *)
+let test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent () =
   let earlier_body = String.make 4_000 'o' in
   let earlier =
     [ pinned; text T.User "Read the old log.";
@@ -119,16 +119,19 @@ let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
     request_view ~continuity:Driver.without_snapshot
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:(Some front)
       ~history_digest_at ~current_turn_results:Driver.Current_turn_verbatim
-      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end
+      ~base_path:(Filename.get_temp_dir_name ())
       ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
       ~materialize:(fun ~pending messages -> planned := List.length pending; messages)
       messages in
   (match seeded.composed.origin with
    | Front.Carried Front.Ledger -> ()
    | _ -> fail "the range did not open on the seed");
-  check int "the seed range demotes at the turn boundary" completed_end
-    seeded.composed.demote_before;
-  check int "the earlier turn's tool body is planned as a marker" 1 !planned
+  check int "nothing is demoted at the turn boundary" 0 seeded.composed.demote_before;
+  check int "no tool body is planned as a marker" 0 !planned;
+  check bool "the earlier turn's tool body goes raw" true
+    (List.exists (fun (m : T.message) -> List.exists (function
+       | T.ToolResult result -> String.equal result.content earlier_body
+       | _ -> false) m.content) (wire seeded))
 ;;
 
 let test_actual_wire_and_tool_append () =
@@ -210,7 +213,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
     request_view ~continuity:Driver.without_snapshot
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
-      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end ~turn_boundary
+      ~base_path:(Filename.get_temp_dir_name ()) ~turn_boundary
       ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered demotion") messages in
   (* A seed older than the turn boundary: the earlier turn's assistant atom
      goes out with this turn, and the origin names the seed's source. *)
@@ -224,7 +227,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
   check string "the earlier turn's atom reaches the wire with this turn"
     (encode (pinned :: text T.Assistant "The build passed." :: this_turn))
     (encode (without_preamble (wire seeded)));
-  check int "a seed range demotes at the turn boundary, not past it" completed_end
+  check int "a seed range demotes nothing at the turn boundary" 0
     seeded.composed.demote_before;
   (match seeded.composed.origin with
    | Front.Carried Front.Ledger -> ()
@@ -352,7 +355,7 @@ let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
 let absorbed_view continuity messages =
   request_view ~continuity ~provider_config ~measure_message_bytes:measure
     ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
-    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
+    ~base_path:(Filename.get_temp_dir_name ())
     (* Unread under a position: the range starts at the position itself. *)
     ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
     ~materialize:(fun ~pending:_ _ -> fail "absorbed history entered demotion") messages
@@ -461,7 +464,7 @@ let test_the_forecast_takes_the_drivers_start () =
       request_view ~continuity ~provider_config
         ~measure_message_bytes:measure ~accepted ~front ~history_digest_at:digest_at
         ~current_turn_results:Driver.Current_turn_verbatim
-        ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
+        ~base_path:(Filename.get_temp_dir_name ()) ~turn_boundary
         ~materialize:(fun ~pending:_ messages -> messages) messages in
     let forecast =
       Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted ~front
@@ -496,7 +499,7 @@ let test_a_start_past_the_snapshot_keeps_the_working_state () =
     request_view ~continuity:summarized ~provider_config
       ~measure_message_bytes:measure ~accepted:(Some accepted) ~front:None
       ~history_digest_at:digest_at ~current_turn_results:Driver.Current_turn_verbatim
-      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0
+      ~base_path:(Filename.get_temp_dir_name ())
       ~turn_boundary:(Front.Turn_boundary { end_atom = 4 })
       ~materialize:(fun ~pending:_ messages -> messages) messages in
   (match projected.composed.origin with
@@ -539,7 +542,11 @@ let body_for id messages =
     | _ -> None) m.content) messages |> Option.get
 ;;
 
-let test_small_externalizes_only_completed_bodies () =
+(* A completed exchange still in the range goes out raw on every ordinary
+   request; only the resend that answers a size refusal sends the refused
+   request's bodies as markers, the unfinished exchange's included (#28845,
+   RFC-0363 §3.4.1). *)
+let test_completed_bodies_go_raw_until_a_size_refusal () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "input-policy-" "" in
@@ -553,51 +560,50 @@ let test_small_externalizes_only_completed_bodies () =
   let original = encode messages in
   let completed_end = snd (Window.annotate completed) in
   (* The Librarian is one turn behind: its snapshot covers [source], so the
-     request carries the completed "older" exchange and this turn. That is
-     where a completed body is still on the wire to demote. *)
+     request carries the completed "older" exchange and this turn. *)
   let behind =
     let snapshot, lines = capture_source source in
     match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let carried = pinned :: (older @ current) in
-  let project ?(base_path = base_path) ?(continuity = Some behind) policy =
-    request_view ~input_policy:policy ?continuity
+  let refused = Driver.Current_turn_demoted { refused_atom_count = snd (Window.annotate messages) } in
+  let project ?(base_path = base_path) ?(continuity = Some behind)
+      ?(current_turn_results = Driver.Current_turn_verbatim) () =
+    request_view ?continuity
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:None
-      ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
-      ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
+      ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results
+      ~base_path ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
       ~materialize:(fun ~pending messages ->
         (Masc.Keeper_model_input_demotion.materialize ~store
           ~addresses:(Masc.Keeper_model_input_demotion.create_address_memo ())
           ~pending messages).messages) messages |> wire in
-  let small = project Small |> without_working_state in
+  let ordinary = project () |> without_working_state in
   check bool "a range opening on the older exchange's assistant carries the preamble" true
-    (List.exists Window.is_synthetic_preamble small);
-  let small = without_preamble small in
-  check string "Small without continuity also protects unfinished work" current_body
-    (body_for "unfinished" (project ~continuity:None Small));
-  check int "externalization does not omit messages" (List.length carried) (List.length small);
-  check string "unfinished tool body remains raw" current_body
-    (body_for "unfinished" small);
-  check bool "non-tool obligations are unchanged" true
-    (List.mem (List.hd current) small);
-  (match Tool_output.decode_from_agent_core (body_for "older" small) with
-   | Tool_output.Decoded reference ->
-     (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
-      | Ok (Some bytes) -> check string "reference retrieves exact original" older_body bytes
-      | _ -> fail "materialized reference is not readable")
-   | _ -> fail "small policy did not externalize completed tool body");
-  check string "wide keeps exact raw source" (encode carried)
-    (encode (project Wide |> without_working_state |> without_preamble));
-  check string "disabled store/reader path keeps exact raw source" (encode carried)
-    (encode (project ~base_path:"" Small |> without_working_state |> without_preamble));
+    (List.exists Window.is_synthetic_preamble ordinary);
+  check string "an ordinary request carries the completed exchange raw" (encode carried)
+    (encode (without_preamble ordinary));
+  let resent = project ~current_turn_results:refused () |> without_working_state |> without_preamble in
+  check int "the resend omits no message" (List.length carried) (List.length resent);
+  check bool "non-tool obligations are unchanged" true (List.mem (List.hd current) resent);
+  List.iter (fun (id, body) ->
+    match Tool_output.decode_from_agent_core (body_for id resent) with
+    | Tool_output.Decoded reference ->
+      (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+       | Ok (Some bytes) -> check string (id ^ ": the reference retrieves the exact original") body bytes
+       | _ -> fail (id ^ ": the materialized reference is not readable"))
+    | _ -> fail (id ^ ": the refused request's body did not leave as a marker"))
+    ["older", older_body; "unfinished", current_body];
+  check string "a resend with no store keeps the exact raw source" (encode carried)
+    (encode (project ~base_path:"" ~current_turn_results:refused ()
+             |> without_working_state |> without_preamble));
   (* No snapshot and no seed: the range starts at the completed boundary, so
-     this turn goes raw and there is no completed body left to demote. *)
+     this turn goes raw. *)
   check string "without a snapshot only this turn goes, raw" (encode (pinned :: current))
-    (encode (project ~continuity:(Some Driver.without_snapshot) Small));
+    (encode (project ~continuity:(Some Driver.without_snapshot) ()));
   let snapshot, lines = capture_source completed in
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
-  let summarized = project ~continuity:(Some continuity) Small |> without_working_state in
+  let summarized = project ~continuity:(Some continuity) () |> without_working_state in
   check string "covered prefix excluded, unfinished suffix intact" (encode (pinned :: current))
     (encode summarized);
   check string "durable source values unchanged" original (encode messages)
@@ -619,10 +625,11 @@ let test_failed_externalization_keeps_raw_body () =
     match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let reverted = ref 0 in
-  let projected = request_view ~input_policy:Small
+  let projected = request_view
     ~continuity:behind ~provider_config ~measure_message_bytes:measure
     ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
-    ~current_turn_results:Driver.Current_turn_verbatim ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
+    ~current_turn_results:(Driver.Current_turn_demoted { refused_atom_count = snd (Window.annotate messages) })
+    ~base_path ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending messages ->
       let outcome = Masc.Keeper_model_input_demotion.materialize
         ~store:(Tool_blob_store.create ~base_path)
@@ -922,14 +929,14 @@ let test_summarized_request_carries_exact_unread_markers () =
 let () = run "continuity request projection"
   ["request", [test_case "summarized request carries exact unread markers" `Quick test_summarized_request_carries_exact_unread_markers;
         test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
-        test_case "small and wide actual body projection" `Quick test_small_externalizes_only_completed_bodies;
+        test_case "completed bodies go raw until a size refusal" `Quick test_completed_bodies_go_raw_until_a_size_refusal;
         test_case "failed blob write retains raw body" `Quick test_failed_externalization_keeps_raw_body;
         test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;
         test_case "old front" `Quick test_an_old_front_does_not_drop_unread;
         test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
         test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
         test_case "without a snapshot the range starts at the seed, else the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
-        test_case "without a snapshot a seed range demotes earlier tool bodies" `Quick test_without_snapshot_seed_demotes_earlier_tool_bodies;
+        test_case "without a snapshot a seed range sends earlier tool bodies as sent" `Quick test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent;
         test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
         test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
         test_case "absorbed history starts at the Librarian's position" `Quick

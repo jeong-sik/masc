@@ -43,7 +43,7 @@ let compose ?accepted continuity history =
   Driver.For_testing.compose_carried_model_input ~continuity ~measure_message_bytes:measure
     ~front:None ~accepted ~history_digest_at:(Window.atom_opening_digest history)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path:(Filename.get_temp_dir_name ())
-    ~demote_before:0 ~turn_boundary:(Front.Turn_boundary {end_atom=2}) history
+    ~turn_boundary:(Front.Turn_boundary {end_atom=2}) history
 
 let test_absorbed_freeze_and_forecast () =
   let ledger=ref [] and reads=ref 0 in

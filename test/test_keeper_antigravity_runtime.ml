@@ -1911,7 +1911,6 @@ let agent_core_range ?(turn_start = Keeper_carried_front.Turn_boundary { end_ato
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
      ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
      ~base_path:""
-     ~demote_before:0
      ~turn_boundary:turn_start
      messages)
     .Keeper_turn_driver_try_provider.projection

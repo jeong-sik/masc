@@ -201,10 +201,12 @@ candidates = ["overflow.sample", "fixture.sample"]
       latest.Turn_record.runtime_profile
   | [] -> fail "the fallback response observation is missing"
 
-type argument_seed = Completed_seed | Open_seed | No_seed
-
-let test_historical_tool_results ?(argument_seed = Completed_seed)
-    ?(input_policy = Keeper_input_policy.Small) ~completed ~reader_available () =
+(* Every condition under which a completed turn's tool results and arguments
+   once left as markers holds here: Small policy, a recorded turn boundary, a
+   Librarian behind on that turn, the canonical reader, and a completed raw
+   seed. The second request still carries them exactly as the first one sent
+   them (RFC-0363 §3.4.1). *)
+let test_historical_tool_results_go_as_first_sent () =
   let module Observation = Agent_core.Base.Schema_observation in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -319,15 +321,9 @@ streaming = false
       }
     ]
   in
-  let argument_demotion_seed = match argument_seed with
-    | Completed_seed -> Some initial_messages
-    | No_seed -> None
-    | Open_seed ->
-      (* The dispatch view already has a closer, but the raw pre-admission
-         seed ends at the call. That closer cannot grant argument authority. *)
-      Some (List.take 2 initial_messages) in
+  let argument_demotion_seed = Some initial_messages in
   let trace_id = "demote-proof-trace-" ^ Filename.basename base_path in
-  if completed then (
+  (
     let position = match Keeper_turn_boundaries.position_of_messages initial_messages with
       | Ok position -> position | Error detail -> fail detail in
     let record : Keeper_turn_boundaries.record =
@@ -365,13 +361,9 @@ streaming = false
               ~start_time:(Tool_timing.start ()) execution.raw_output
           | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
   in
-  let tools = if reader_available then [active_tool; reader] else [active_tool] in
-  check bool "only the canonical offered reader grants retrieval" reader_available
+  let tools = [active_tool; reader] in
+  check bool "the canonical offered reader grants retrieval" true
     (Result.is_ok (Keeper_recovery_transmission.require_reader tools));
-  let expect_demoted = completed && reader_available
-    && (match input_policy with Keeper_input_policy.Small -> true | Wide -> false) in
-  let expect_arguments_demoted = expect_demoted
-    && (match argument_seed with Completed_seed -> true | Open_seed | No_seed -> false) in
   let system_prompt = "Demotion fixture: \"quoted\"\nUTF-8 관측\\suffix." in
   let manifest_config = Workspace.default_config base_path in
   let manifest_context : Keeper_runtime_manifest.turn_context =
@@ -389,7 +381,7 @@ streaming = false
     Observation.with_wake ~keeper:"demote-proof" ~trace_id ~absolute_turn:2
       ~execution_scope:None ~cause:None (fun () ->
     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
-      ~input_policy ?argument_demotion_seed
+      ~input_policy:Keeper_input_policy.Small ?argument_demotion_seed
 
       ~system_prompt
       ~runtime_id:"fixture.sample"
@@ -494,7 +486,7 @@ streaming = false
     (List.exists (fun event ->
        is_span "span_finished" "sdk_byte_count_publication" event && in_reserve event) events);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
-  check bool "historical body is replaced only with completion and reader" (not expect_demoted)
+  check bool "the historical body goes raw on the second HTTP request" true
     (String_util.contains_substring second_body historical_payload);
   check bool "current-turn tool body remained verbatim inline" true
     (String_util.contains_substring second_body active_payload);
@@ -508,91 +500,47 @@ streaming = false
     let call = List.find (fun call -> Yojson.Safe.Util.member "id" call = `String id) calls in
     Yojson.Safe.Util.(member "function" call |> member "arguments" |> to_string)
     |> Yojson.Safe.from_string in
-  let historical_arguments = wire_arguments messages "call-demote-1" in
   check bool "current-turn arguments remain exact on the second HTTP request" true
     (wire_arguments messages "active-call-1" = active_input);
+  check bool "historical arguments go as the original JSON" true
+    (wire_arguments messages "call-demote-1" = historical_input);
   let first_messages = Yojson.Safe.Util.(
     List.hd (Exact_output_fixture.request_bodies server)
     |> Yojson.Safe.from_string |> member "messages" |> to_list) in
-  check bool "historical argument binding remains frozen across actual requests" true
-    (wire_arguments first_messages "call-demote-1" = historical_arguments);
-  (match Tool_output.normalized_artifact_ref_of_json historical_arguments with
-   | Tool_output.Not_normalized_artifact_ref
-   | Tool_output.Invalid_normalized_artifact_ref _ ->
-     check bool "unproven or unreadable historical arguments stay exact" false expect_arguments_demoted;
-     check bool "historical original JSON remains inline" true
-       (historical_arguments = historical_input)
-   | Tool_output.Decoded_normalized_artifact_ref reference ->
-     check bool "only proven completed arguments become references" true expect_arguments_demoted;
-     check string "argument artifact MIME" "application/json" reference.mime;
-     let page = match Agent_core.Tool.execute reader
-         (`Assoc ["sha256", `String reference.sha256]) with
-       | Error error -> fail error.Agent_core.Types.message
-       | Ok result -> Yojson.Safe.from_string result.content in
-     check bool "canonical bridged reader returns the complete argument artifact" true
-       Yojson.Safe.Util.(member "eof" page |> to_bool);
-     let fetched = Yojson.Safe.Util.(member "content" page |> to_string) in
-     check string "canonical reader restores exact original argument bytes"
-       (Yojson.Safe.to_string historical_input) fetched;
-     check bool "the retrieved argument JSON is reusable without loss" true
-       (Yojson.Safe.from_string fetched = historical_input));
+  let tool_message messages id =
+    List.find
+      (fun msg ->
+         Yojson.Safe.Util.member "role" msg = `String "tool"
+         && Yojson.Safe.Util.member "tool_call_id" msg = `String id)
+      messages
+  in
+  check bool "the historical tool message is the same on both HTTP requests" true
+    (tool_message first_messages "call-demote-1" = tool_message messages "call-demote-1");
+  check bool "the historical tool call is the same on both HTTP requests" true
+    (wire_arguments first_messages "call-demote-1" = wire_arguments messages "call-demote-1");
   let tool_messages =
     List.filter
       (fun msg -> Yojson.Safe.Util.member "role" msg = `String "tool")
       messages
   in
   check int "exactly 2 tool messages on the wire" 2 (List.length tool_messages);
-  let historical_msg =
-    List.find
-      (fun msg -> Yojson.Safe.Util.member "tool_call_id" msg = `String "call-demote-1")
-      tool_messages
-  in
-  let historical_content = Yojson.Safe.Util.(member "content" historical_msg |> to_string) in
-  check bool "historical tool message carries a retrievable reference only when safe" expect_demoted
-    (Tool_output.is_marker historical_content);
-  let active_msg =
-    List.find
-      (fun msg -> Yojson.Safe.Util.member "tool_call_id" msg = `String "active-call-1")
-      tool_messages
-  in
-  let active_content = Yojson.Safe.Util.(member "content" active_msg |> to_string) in
+  let historical_content =
+    Yojson.Safe.Util.(member "content" (tool_message messages "call-demote-1") |> to_string) in
+  check string "the historical tool result is verbatim" historical_payload historical_content;
+  let active_content =
+    Yojson.Safe.Util.(member "content" (tool_message messages "active-call-1") |> to_string) in
   check bool "current turn tool message is not a marker" false
     (Tool_output.is_marker active_content);
   check string "current turn tool result is verbatim"
     active_payload
-    active_content;
-  if not expect_demoted then
-    check string "unproven or unreadable historical body stays verbatim"
-      historical_payload historical_content
-  else
-  let store = Tool_blob_store.create ~base_path in
-  (match Tool_output.decode_from_agent_core historical_content with
-   | Tool_output.Decoded artifact_ref ->
-     (match Tool_blob_store.fetch store ~sha256:artifact_ref.sha256 with
-      | Ok (Some fetched) ->
-        check string "fetched blob matches historical payload" historical_payload fetched
-      | Ok None ->
-        fail "historical blob was not found in blob store"
-      | Error err ->
-        failf "failed to fetch stored blob: %s" (Tool_blob_store.fetch_error_to_string err))
-   | _ -> fail "expected decoded artifact reference for historical tool message")
+    active_content
 
 let () =
   Alcotest.run "keeper_no_request_body_gate"
     [ "actual-dispatch",
       [ test_case "a large request reaches the peer and a refusal moves the lane" `Quick
           test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane
-      ; test_case "the runtime demotes historical tool results" `Quick
-          (test_historical_tool_results ~completed:true ~reader_available:true)
-      ; test_case "without completion evidence historical bodies stay inline" `Quick
-          (test_historical_tool_results ~completed:false ~reader_available:true)
-      ; test_case "without a reader historical bodies stay inline" `Quick
-          (test_historical_tool_results ~completed:true ~reader_available:false)
-      ; test_case "without a raw seed historical arguments stay inline" `Quick
-          (test_historical_tool_results ~argument_seed:No_seed ~completed:true ~reader_available:true)
-      ; test_case "a dispatch closer cannot complete raw open arguments" `Quick
-          (test_historical_tool_results ~argument_seed:Open_seed ~completed:true ~reader_available:true)
-      ; test_case "Wide keeps historical arguments and results inline" `Quick
-          (test_historical_tool_results ~input_policy:Keeper_input_policy.Wide ~completed:true ~reader_available:true)
+      ; test_case "historical tool results and arguments go as first sent" `Quick
+          test_historical_tool_results_go_as_first_sent
       ]
     ]

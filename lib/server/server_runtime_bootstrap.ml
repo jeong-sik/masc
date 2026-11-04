@@ -571,6 +571,9 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
+  Runtime.install_config_commit_observer (fun ~runtime_config_path:_ ->
+    Workspace_dataset_event.announce ~base_path:config.base_path
+      Workspace_dataset_event.Runtime_config);
   (* The harness health read is cached per workspace and query window, and
      the verdict store is process-wide, so every cached window goes before
      the announcement. *)

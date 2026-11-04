@@ -4944,6 +4944,7 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
       (* Cadence ticks share a single read. Only an explicit new intent or a
          write queues another read, whose source must be newer than this one. *)
       state.runtime_config_read <- `Loading false;
+      state.runtime_config_owed <- Masc_tui_owed_read.started state.runtime_config_owed;
       state.runtime_config_generation <- state.runtime_config_generation + 1;
       let generation = state.runtime_config_generation in
       let requested_model = state.runtime_model_jump in
@@ -8101,12 +8102,19 @@ let owe_connectors_read state =
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
+(* runtime.toml reads when the server says it committed the file, on a
+   revalidation, and again after a failed read (RFC-0480 §3.4). A CLI or a
+   hand edit shows on arrival or [r]. *)
+let owe_runtime_config_read state =
+  state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
+  | Masc.Workspace_dataset_event.Runtime_config -> owe_runtime_config_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -9077,6 +9085,37 @@ let launch_owed_harness state ~mailbox =
     state.harness_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_harness_load state ~mailbox
+  end
+
+let runtime_config_on_screen state =
+  match state.view with
+  | Config ->
+      (match state.config_pane with
+       | Config_runtime | Config_models | Config_themes -> true
+       | Config_prompts | Config_presets | Config_params | Config_voice -> false)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Repositories | Fusion | Code | Changes | Connectors
+  | Runtime | Resources | Tools | System_logs | Keepers _ ->
+      false
+
+(* Runs on every loop iteration. Off screen nothing is owed: arriving on the
+   pane reads it. A read already in flight is let finish first. *)
+let launch_owed_runtime_config state ~mailbox =
+  if not (runtime_config_on_screen state) then
+    state.runtime_config_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading =
+      match state.runtime_config_read with
+      | `Loading _ -> true
+      | `Idle -> false
+    in
+    let read =
+      if reading then state.runtime_config_owed
+      else Masc_tui_owed_read.abandoned state.runtime_config_owed
+    in
+    state.runtime_config_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_runtime_config_load state ~mailbox
   end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
@@ -18806,6 +18845,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_repositories_read state;
        owe_connectors_read state;
        owe_harness_read state;
+       owe_runtime_config_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
        owe_tools_async_task_read state;
@@ -24768,7 +24808,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | `Loading pending -> pending
         | `Idle -> false in
       state.runtime_config_read <- `Idle;
-      if pending then launch_runtime_config_load state ~mailbox else
+      if pending then launch_runtime_config_load state ~mailbox else begin
+      state.runtime_config_owed <-
+        (match result with
+         | Ok _ -> Masc_tui_owed_read.succeeded state.runtime_config_owed
+         | Error _ -> failed_read state.runtime_config_owed);
       match result with
       | Ok (snapshot : Masc_tui_runtime_config_snapshot.t) ->
           let reading = snapshot.reading in
@@ -24837,7 +24881,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
-          state.runtime_config_view_error <- Some detail)
+          state.runtime_config_view_error <- Some detail
+      end)
   | Code_catalog_loaded (request, result) ->
       Code_results.apply_catalog state request result
   | Code_finder_file_loaded (request, result) ->
@@ -32725,6 +32770,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
+      launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -41415,9 +41461,6 @@ Use relative paths for resources already held in the package. -->
                           (fun request -> List.mem Tools_inventory_read request.tri_pending)
                           state.tools_read_inflight)
              then launch_tools_parts state ~mailbox:async_messages [ Tools_inventory_read ]
-         | Config ->
-             (* The file moves under hot-reload edits from other agents. *)
-             launch_runtime_config_load state ~mailbox:async_messages
          | Resources ->
              (* Loaded on arrival and on r. A tick-cadence relist would open
                 an MCP session every two seconds for an inventory that moves

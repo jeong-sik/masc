@@ -16,6 +16,10 @@ type dataset =
   | Harness_verdicts
       (** The judge verdicts and operator labels [Eval_calibration] records,
           read by [GET /api/v1/dashboard/harness-health]. *)
+  | Runtime_config
+      (** The server committed runtime.toml, read by
+          [GET /api/v1/runtime/config/raw]. A CLI or a hand edit is not
+          announced. *)
 
 val event_type : string
 

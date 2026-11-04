@@ -493,6 +493,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
   | Observer.Gate_connector_changed _ -> "connector"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> "harness"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config -> "runtime config"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -655,6 +656,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "connector " ^ connector ^ " changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a judge verdict or label was recorded" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "runtime.toml was committed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

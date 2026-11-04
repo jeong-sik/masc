@@ -9867,6 +9867,8 @@ type state = {
   mutable runtime_config_edits: runtime_config_edit_session list;
   mutable runtime_config_generation: int;
   mutable runtime_config_read: [ `Idle | `Loading of bool ];
+  (* The read runtime.toml owes while a pane that draws it is on screen. *)
+  mutable runtime_config_owed: Masc_tui_owed_read.t;
   (* Loading carries an explicit refresh queued behind the current read. *)
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
@@ -14812,6 +14814,7 @@ let suspend_workspace_readings state =
   state.memory_health_inflight <- false;
   suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
+  state.runtime_config_owed <- Masc_tui_owed_read.settled;
   state.runtime_params_loading <- false;
   state.standalone_lanes_inflight <- false;
   state.standalone_lanes_reread_pending <- false;
@@ -19665,6 +19668,7 @@ let create_state
   runtime_config_edits = [];
   runtime_config_generation = 0;
   runtime_config_read = `Idle;
+  runtime_config_owed = Masc_tui_owed_read.settled;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;

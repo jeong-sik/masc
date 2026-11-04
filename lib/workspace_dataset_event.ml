@@ -4,17 +4,20 @@ type dataset =
   | Repositories
   | Verification_requests
   | Harness_verdicts
+  | Runtime_config
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
   | Verification_requests -> "verification_requests"
   | Harness_verdicts -> "harness_verdicts"
+  | Runtime_config -> "runtime_config"
 ;;
 
 let dataset_of_wire = function
   | "repositories" -> Some Repositories
   | "verification_requests" -> Some Verification_requests
   | "harness_verdicts" -> Some Harness_verdicts
+  | "runtime_config" -> Some Runtime_config
   | _ -> None
 ;;
 

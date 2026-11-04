@@ -149,7 +149,10 @@ type sequence_event =
   | Block_close
 
 (** A diagram participant. [alias] is what the box says. *)
-type participant = Masc_tui_mermaid_grammar.participant
+type participant = Masc_tui_mermaid_grammar.participant = {
+  pid : string;
+  alias : string;  (** what the box says *)
+}
 
 type sequence = {
   participants : participant list;  (** in order of first appearance *)

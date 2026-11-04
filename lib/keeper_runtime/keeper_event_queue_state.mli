@@ -15,7 +15,7 @@ type accepted_cancellation =
     [source_incarnation] fences the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
-type accepted_transfer =
+type accepted_transfer = Keeper_event_queue_state_core.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
   ; operator_operation_id : string
@@ -72,7 +72,7 @@ type projected_disposition_kind =
   | Projected_turn_completed
   | Projected_turn_attempt_terminal
 
-type projected_source_kind =
+type projected_source_kind = Keeper_event_queue_state_core.projected_source_kind =
   | Source_board_signal
   | Source_board_attention
   | Source_bootstrap
@@ -125,7 +125,7 @@ type outbox_entry =
 
 type t
 
-type pending_selection =
+type pending_selection = Keeper_event_queue_state_core.pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
   ; arrival : int64

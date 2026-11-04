@@ -7,7 +7,7 @@
     @since 2.259.0
     Extended with cost/tool/error metrics: @since 2.270.0 *)
 
-type recent_entry = {
+type recent_entry = Model_inference_metrics_entry.recent_entry = {
   re_ts_unix : float;
   re_outcome : string;
   re_stop_reason : string option;
@@ -32,12 +32,12 @@ type recent_entry = {
   re_streaming_inter_chunk_avg_ms : float option;
 }
 
-type coverage_reason_count = {
+type coverage_reason_count = Model_inference_metrics_entry.coverage_reason_count = {
   crc_reason : string;
   crc_count : int;
 }
 
-type bucket_metric = {
+type bucket_metric = Model_inference_metrics_entry.bucket_metric = {
   b_ts_start : float;
     (** Unix seconds at the floor of the bucket (inclusive start). *)
   b_entry_count : int;
@@ -61,7 +61,7 @@ type model_bucketed = {
     (** Ordered oldest-first; only non-empty buckets are emitted. *)
 }
 
-type latency_bucket = {
+type latency_bucket = Model_inference_metrics_entry.latency_bucket = {
   lo_ms : int;
   hi_ms : int option;
   count : int;
@@ -69,7 +69,7 @@ type latency_bucket = {
 
 (** Cache totals from the same successful calls with reported, valid input/cache pairs.
     Cache reads are a subset of inclusive input tokens. *)
-type cached_input = {
+type cached_input = Model_inference_metrics_entry.cached_input = {
   ci_input_tokens : int;
   ci_cache_read_tokens : int;
   ci_sample_count : int;
@@ -130,7 +130,7 @@ type model_stats = {
   buckets : bucket_metric list;
 }
 
-type cost_read_diagnostics = {
+type cost_read_diagnostics = Model_inference_metrics_entry.cost_read_diagnostics = {
   malformed_rows : int;
   schema_violation_rows : int;
   identity_conflict_rows : int;

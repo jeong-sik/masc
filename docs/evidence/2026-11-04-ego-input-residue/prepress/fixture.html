@@ -1,0 +1,18 @@
+<!doctype html><title>pre-press refusal probe</title>
+<style>#cover{position:relative}#cover::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.01)}#overlay{position:fixed;left:0;top:200px;width:400px;height:80px;background:rgba(0,0,0,.05)}</style>
+<div id="dup">
+  <span class="ch">dev-frontend</span><span class="ch">dev-frontend</span><span class="ch">dev-frontend</span>
+  <p class="ch">dev-frontend</p><span class="ch">dev-frontend</span><span class="ch">dev-frontend</span>
+  <span class="ch">dev-frontend</span><span class="ch">dev-frontend</span>
+</div>
+<button id="ok">ok</button>
+<button id="hidden" style="display:none">hidden</button>
+<button id="disabled" disabled>disabled</button>
+<div style="position:absolute;left:10px;top:210px"><button id="covered">covered</button></div>
+<div id="overlay"></div>
+<div id="src" draggable="true">drag me</div><div id="dst">drop here</div>
+<script>
+window.log=[];
+for (const type of ['pointerdown','pointerup','mousedown','mouseup','click','dblclick','keydown','keyup','dragstart','drop'])
+  document.addEventListener(type,e=>log.push({type,id:e.target&&e.target.id||e.target.className||e.target.tagName,buttons:e.buttons}),true);
+</script>

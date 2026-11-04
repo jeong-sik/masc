@@ -21,7 +21,7 @@ let usage_json ~(config : Workspace.config) = function
     (match Server_skill_snapshot_runtime.lookup ~base_path:config.base_path with
      | Ok (Server_skill_snapshot_runtime.Ready { snapshot; config_path = _ }) ->
        let catalog, _diagnostics = Keeper_skill_catalog.all_entries_of_snapshot snapshot in
-       `Assoc [ "state", `String "ready"; "rows", `List (usage_rows catalog ledger) ]
+       `Assoc [ "state", `String "ready"; "rows", `List (usage_rows (Keeper_skill_catalog.skills catalog) ledger) ]
      | Ok (Server_skill_snapshot_runtime.Not_registered | Server_skill_snapshot_runtime.Uninitialized)
      | Error (Server_skill_snapshot_runtime.Invalid_workspace _) ->
        `Assoc [ "state", `String "no_catalog" ])

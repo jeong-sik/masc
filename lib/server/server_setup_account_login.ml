@@ -151,6 +151,10 @@ let start ~actor ~base_path ~body request reqd =
                    | Ok () -> ()
                    | Error _ -> Log.Server.warn "Setup login interruption receipt could not be saved"));
               raise exn in
+          (* The official client rewrote its credential file however the login
+             ended, and the Config panes list the account emails those files
+             hold. *)
+          Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Runtime_config;
           (match !receipt.status, completed with
            | Receipt.Complete _, _ ->
              Log.Server.info "Setup login %s completed" (Session.id session);

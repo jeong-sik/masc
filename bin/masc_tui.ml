@@ -8881,23 +8881,28 @@ let launch_owed_harness state ~mailbox =
       launch_harness_load state ~mailbox
   end
 
+(* Whether the Config view is open, and whether its pane draws runtime.toml.
+   A change owed while another Config pane is open is kept for the pane that
+   draws it. *)
 let runtime_config_on_screen state =
   match state.view with
   | Config ->
       (match state.config_pane with
-       | Config_runtime | Config_models | Config_themes -> true
-       | Config_prompts | Config_presets | Config_params | Config_voice -> false)
+       | Config_runtime | Config_models -> `Drawn
+       | Config_themes | Config_prompts | Config_presets | Config_params | Config_voice ->
+           `Config_elsewhere)
   | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
   | Schedules | Verification | Harness | Repositories | Fusion | Code | Changes | Connectors
   | Runtime | Resources | Tools | System_logs | Keepers _ ->
-      false
+      `Off_config
 
-(* Runs on every loop iteration. Off screen nothing is owed: arriving on the
-   pane reads it. A read already in flight is let finish first. *)
+(* Runs on every loop iteration. Off the Config view nothing is owed:
+   arriving reads it. A read already in flight is let finish first. *)
 let launch_owed_runtime_config state ~mailbox =
-  if not (runtime_config_on_screen state) then
-    state.runtime_config_owed <- Masc_tui_owed_read.settled
-  else begin
+  match runtime_config_on_screen state with
+  | `Off_config -> state.runtime_config_owed <- Masc_tui_owed_read.settled
+  | `Config_elsewhere -> ()
+  | `Drawn -> begin
     let reading =
       match state.runtime_config_read with
       | `Loading _ -> true
@@ -8910,7 +8915,7 @@ let launch_owed_runtime_config state ~mailbox =
     state.runtime_config_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_runtime_config_load state ~mailbox
-  end
+    end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -17739,6 +17744,11 @@ let enter_config_pane state ~mailbox pane =
   (* Leaving the themes pane ends the preview the same way Esc does.
      A scheme the reader never picked must not follow them out. *)
   cancel_theme_preview state;
+  (* The runtime.toml panes read on the way in; a push that came while
+     another pane was open is folded into that read. *)
+  (match pane with
+   | Config_runtime | Config_models -> owe_runtime_config_read state
+   | Config_themes | Config_prompts | Config_presets | Config_params | Config_voice -> ());
   match state.config_pane with
   | Config_prompts ->
     (* [start] answers Already_loading for a read in flight, so the
@@ -27882,6 +27892,10 @@ let main
   in
   state.observation_store <- Result.to_option observation_store;
   state.view <- Overview;
+  (* This process writes runtime.toml too (language, theme, candle, Board
+     sort, the help hint); each commit owes the Config panes a read. *)
+  Runtime.install_config_commit_observer (fun ~runtime_config_path:_ ->
+    owe_runtime_config_read state);
 
   let tui_settings_read = Masc_tui_config.prepare_startup_read
       ~sw:(Eio_context.get_switch_opt ()) ~base_path in

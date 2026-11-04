@@ -172,6 +172,10 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
 (* Record writing                                                    *)
 (* ================================================================ *)
 
+let written_observer : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
+
+let install_written_observer observer = Atomic.set written_observer observer
+
 let identity_matching predicate identity =
   Option.bind identity (fun identity -> if predicate identity then Some identity else None)
 
@@ -203,7 +207,8 @@ let record_verdict
       ; timestamp = Unix.gettimeofday ()
       }
     in
-    Dated_jsonl.append (get_store ()) (verdict_record_to_json record)
+    Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
+    (Atomic.get written_observer) ()
 
 let record_human_label
     ~(notes_hash : string)
@@ -218,7 +223,8 @@ let record_human_label
     reason;
     timestamp = Unix.gettimeofday ();
   } in
-  Dated_jsonl.append (get_store ()) (label_record_to_json record)
+  Dated_jsonl.append (get_store ()) (label_record_to_json record);
+  (Atomic.get written_observer) ()
 
 (* ================================================================ *)
 (* JSON deserialization (for analysis)                                *)

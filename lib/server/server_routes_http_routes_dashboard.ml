@@ -3504,7 +3504,7 @@ let add_routes ~sw ~clock router =
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
          let cache_key =
-           Printf.sprintf "harness_health:%s:%s:%s"
+           Printf.sprintf "%s%s:%s:%s" Dashboard_harness_health.cache_key_prefix
              (Mcp_server.workspace_config state).base_path
              (Option.value ~default:"-" since)
              (Option.value ~default:"-" until)

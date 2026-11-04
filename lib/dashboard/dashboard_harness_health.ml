@@ -565,6 +565,8 @@ let reset_runtime_stores_for_testing () =
   Atomic.set wake_payload_store_ref None
 ;;
 
+let cache_key_prefix = "harness_health:"
+
 let json ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in

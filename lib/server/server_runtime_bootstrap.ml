@@ -567,6 +567,13 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
+  (* The harness health read is cached per workspace and query window, and
+     the verdict store is process-wide, so every cached window goes before
+     the announcement. *)
+  Eval_calibration.install_written_observer (fun () ->
+    Dashboard_cache.invalidate_prefix Dashboard_harness_health.cache_key_prefix;
+    Workspace_dataset_event.announce ~base_path:config.base_path
+      Workspace_dataset_event.Harness_verdicts);
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path

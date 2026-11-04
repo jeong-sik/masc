@@ -18,6 +18,9 @@ type dataset =
       (** [keeper]'s date-split metrics ledger
           ([.masc/keepers/<keeper>/metrics/]), whose tail the Keeper logs
           view reads. *)
+  | Harness_verdicts
+      (** The judge verdicts and operator labels [Eval_calibration] records,
+          read by [GET /api/v1/dashboard/harness-health]. *)
 
 val event_type : string
 

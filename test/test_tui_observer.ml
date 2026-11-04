@@ -144,7 +144,8 @@ let summary = function
       ^ (match dataset with
          | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
-         | Masc.Workspace_dataset_event.Verification_requests -> "")
+         | Masc.Workspace_dataset_event.Verification_requests
+         | Masc.Workspace_dataset_event.Harness_verdicts -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -840,7 +841,8 @@ let test_a_verification_or_run_push_reads_the_requests () =
               | Some Masc.Workspace_dataset_event.Verification_requests -> true
               | Some
                   ( Masc.Workspace_dataset_event.Repositories
-                  | Masc.Workspace_dataset_event.Keeper_metrics _ )
+                  | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Harness_verdicts )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -902,7 +904,8 @@ let test_a_repository_push_reads_the_list () =
               | Some Masc.Workspace_dataset_event.Repositories -> true
               | Some
                   ( Masc.Workspace_dataset_event.Verification_requests
-                  | Masc.Workspace_dataset_event.Keeper_metrics _ )
+                  | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Harness_verdicts )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -915,7 +918,8 @@ let test_a_repository_push_reads_the_list () =
           | Some Masc.Workspace_dataset_event.Verification_requests -> false
           | Some
               ( Masc.Workspace_dataset_event.Repositories
-              | Masc.Workspace_dataset_event.Keeper_metrics _ )
+              | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Harness_verdicts )
           | None -> true)
      | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);
@@ -932,6 +936,11 @@ let test_a_repository_push_reads_the_list () =
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"\"}\n\n"
     ];
+  check (list string) "a harness push decodes by name"
+    [ "dataset(harness_verdicts)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]));
   check (list string) "a Keeper's metrics push names its Keeper"
     [ "dataset(keeper_metrics:alpha)" ]
     (List.map summary

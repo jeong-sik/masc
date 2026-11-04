@@ -66,7 +66,7 @@ let visible filter (event : Observer.event) =
               | Observer.Agent_core_other _ )
           ; _
           } -> true
-      | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
+      | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
       | Observer.Snapshot _ | Observer.Execution_snapshot
       (* A reply sends one stream frame per token, and a queue-size change is
          state rather than something a keeper did. Both belong with the
@@ -117,7 +117,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_turn_observation _ -> true
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
-  | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
@@ -422,6 +422,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_turn_complete t -> t.Observer.tc_keeper
   | Observer.Keeper_turn_observation o -> o.Observer.to_keeper
   | Observer.Keeper_composite_changed { keeper; _ }
+  | Observer.Keeper_metrics_appended { keeper; _ }
   | Observer.Keeper_chat_appended { keeper; _ }
   | Observer.Keeper_memory_journal_appended { keeper; _ }
   | Observer.Keeper_runtime_journal_appended { keeper; _ }
@@ -462,6 +463,7 @@ let label_of_event (event : Observer.event) =
       | None -> if skill then "skill call" else "tool call")
   | Observer.Keeper_turn_complete _ -> "turn done"
   | Observer.Keeper_composite_changed _ -> "composite"
+  | Observer.Keeper_metrics_appended _ -> "metrics"
   | Observer.Keeper_turn_observation _ -> "call"
   | Observer.Keeper_chat_appended _ -> "chat"
   | Observer.Keeper_memory_journal_appended _ -> "memory"
@@ -554,7 +556,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
           |> List.filter (fun part -> part <> "")
           |> String.concat " \xc2\xb7 "
       }
-  | Observer.Keeper_composite_changed { keeper; _ } ->
+  | Observer.Keeper_composite_changed { keeper; _ }
+  | Observer.Keeper_metrics_appended { keeper; _ } ->
       { at; keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_turn_observation o ->
       { at
@@ -838,7 +841,7 @@ let member_of_event (event : Observer.event) =
   (* Identity for the fold's session table, read before members are filed
      ([fold_chunks]); not a member itself. *)
   | Observer.Keeper_turn_observation _
-  | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
+  | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Snapshot _ | Observer.Execution_snapshot
@@ -1012,7 +1015,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_turn_observation o -> Some o
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
-  | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
@@ -1156,7 +1159,7 @@ let lane_fold_key (event : Observer.event) =
       Some (r.Observer.lr_package, r.Observer.lr_lifecycle, r.Observer.lr_detail)
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
-  | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
+  | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _
@@ -1336,7 +1339,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_heartbeat _
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
-          | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+          | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
           | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
@@ -1417,7 +1420,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed _ | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Verification_requests_changed | Observer.Repositories_changed | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed _ | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Verification_requests_changed | Observer.Repositories_changed | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

@@ -76,7 +76,6 @@ let tag_of_runtime_handler
   | Tool_masc_control_dispatch -> Mod_control
   | Tool_masc_agent_timeline_dispatch -> Mod_agent_timeline
   | Tool_masc_schedule_dispatch -> Mod_schedule
-  | Tool_keeper_spawn_dispatch -> Mod_spawn
   | Tool_keeper_code_query_dispatch -> Mod_code_query
   | Tool_masc_misc_dispatch
   | Tool_web_search
@@ -205,7 +204,6 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_browser_instruct | Keeper_tool_descriptor.Tool_browser_interact
     | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
     | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
-    | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
     | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
     | Keeper_tool_descriptor.Tool_keeper_job_dispatch

@@ -15,11 +15,9 @@ type capability_availability =
       (** A model-visible Tool the Keeper profile's [tool_deny] names. It is
           not in {!descriptors}; the row says why. *)
   | Refused_by_sandbox of { detail : string }
-      (** A model-visible Tool the Keeper's sandbox profile cannot run. [detail]
-          is the start refusal {!Keeper_spawn_boundary.of_sandbox_profile}
-          gives: the handler's own answer for [keeper_spawn], and for
-          [keeper_spawn_read]/[_wait]/[_stop] the reason no handle can exist
-          for them to address. It is not in {!descriptors}. *)
+      (** A model-visible Tool the Keeper's sandbox profile cannot run.
+          [detail] says why the profile cannot run it. It is not in
+          {!descriptors}. *)
   | Node_tools_outside_surface of { tools : string list }
       (** A composition Skill whose plan runs node tools this surface does not
           admit, named by their model names. The composition is withheld from
@@ -69,7 +67,7 @@ val create
   -> task_skills:Keeper_skill_catalog.skill list
   -> t
 (** [tool_deny] holds model-visible tool names (e.g.
-    ["keeper_spawn"; "masc_keeper_delegate"]) the keeper's profile
+    ["keeper_job_start"; "masc_keeper_delegate"]) the keeper's profile
     refuses; matching descriptors are neither listed to the model nor present
     in the dispatch bundle built from {!descriptors}, and their inventory row
     reads [Denied_by_profile]. A name that matches no model-visible descriptor
@@ -77,12 +75,10 @@ val create
     [[]]: the argument is mandatory because an optional here would sit in
     front of only labelled arguments, which OCaml never erases.
 
-    [sandbox_profile] is the Keeper's profile. The four spawn tools leave
-    {!descriptors} the same way when {!Keeper_spawn_boundary.of_sandbox_profile}
-    refuses a start for it, their rows read [Refused_by_sandbox], and a
-    composition that runs one is then withheld. The three owned-job tools
-    require the exact [Docker] profile; the other profiles retain refused
-    inventory rows and cannot dispatch them through this frozen surface. *)
+    [sandbox_profile] is the Keeper's profile. The three owned-job tools
+    require the exact [Docker] profile; on the other profiles their
+    inventory rows read [Refused_by_sandbox], this frozen surface cannot
+    dispatch them, and a composition that runs one is withheld. *)
 
 val create_with_descriptors
   :  tool_descriptors:Keeper_tool_descriptor.t list

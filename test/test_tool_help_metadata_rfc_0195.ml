@@ -259,9 +259,9 @@ let test_entry_json_includes_populated_fields () =
    file list, not composed from the name, so a tool with no shipped definition
    says so instead of naming a path that is not there. *)
 let test_definition_source_names_the_shipped_file () =
-  match Registry.definition_source "keeper_spawn" with
+  match Registry.definition_source "keeper_code_query" with
   | Some rel ->
-    Alcotest.(check string) "shipped definition path" "tools/keeper_spawn.toml" rel
+    Alcotest.(check string) "shipped definition path" "tools/keeper_code_query.toml" rel
   | None -> Alcotest.fail "a shipped tool must name its definition"
 ;;
 

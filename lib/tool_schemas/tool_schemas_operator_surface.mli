@@ -10,10 +10,9 @@
     [test_operator_surface_toml_parity] pins all 14 against the literals the
     generator emitted, reaching them through the values below rather than by
     filename so that a value bound to the wrong declaration fails there. It
-    also carries the three invariants that suite held which had nothing to do
+    also carries the two invariants that suite held which had nothing to do
     with code generation: the masc_config category enum matching its owner,
-    keeper_spawn staying unpublished, and the Operator_only control trio staying
-    off the Keeper-visible list. *)
+    and the Operator_only control trio staying off the Keeper-visible list. *)
 
 val ask : Masc_domain.tool_schema
 val ask_status : Masc_domain.tool_schema

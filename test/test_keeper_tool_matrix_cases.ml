@@ -536,10 +536,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("line", `Int 1);
           ("symbol", `String "sample");
         ]
-  | "keeper_spawn" ->
-      (* [pwd] exits immediately, so the case leaves no process behind. This
-         mirrors the [tool_execute] case above, which runs the same command. *)
-      `Assoc [ ("argv", `List [ `String "pwd" ]) ]
   | "keeper_composition_result" ->
       (* A well-formed binding for a request this workspace never accepted.
          The reader has to look the request up and refuse it; a malformed
@@ -584,19 +580,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* A job id that was never issued: the reader has to look it up and
          refuse, which says more than an argument-parse rejection would. *)
       `Assoc [ ("job_id", `String "matrix-no-such-job") ]
-  | "keeper_spawn_read" ->
-      `Assoc [ ("handle", `String "matrix-no-such-handle") ]
-  | "keeper_spawn_stop" ->
-      `Assoc [ ("handle", `String "matrix-no-such-handle") ]
-  | "keeper_spawn_wait" ->
-      (* A handle that was never issued refuses without waiting; the short
-         timeout bounds the case even if an implementation waits first. *)
-      `Assoc
-        [
-          ("handle", `String "matrix-no-such-handle");
-          ("until", `String "exit");
-          ("timeout_sec", `Float 0.1);
-        ]
   | "keeper_task_cancel" ->
       (* Deliberately not [Generic.ensure_task]: cancelling or releasing the
          shared fixture task would decide the outcome of [keeper_task_done],
@@ -691,7 +674,7 @@ let keeper_expectation_for_name name =
   | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"
   | "keeper_constitution_read"
   | "tool_execute" | "tool_search_files" | "tool_read_file"
-  | "tool_write_file" | "keeper_ide_annotate" | "keeper_spawn" -> Expect_success
+  | "tool_write_file" | "keeper_ide_annotate" -> Expect_success
   | _ -> Expect_success_or_refusal
 
 let case_for_name name =

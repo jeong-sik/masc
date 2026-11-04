@@ -76,19 +76,15 @@ TASK_SKILL_SOURCE_ID = "terminal-bench-task"
 TASK_SKILLS_CONFIG_DIR = "task-skills"
 TASK_SKILLS_RUNTIME_PATH = ".masc/task-skills"
 
-# spawn/delegate 게이트 (masc v0.35.6+, #35169): keeper TOML tools.deny는
+# delegate 게이트 (masc v0.35.6+, #35169): keeper TOML tools.deny는
 # model-visible 이름의 built-in tool을 capability surface에서 완전 제거한다
 # (dispatch bundle에도 없고 frozen-surface admission이 호출을 거부).
-# spawn = parallel 실행 기구라 parallel=False arm(b, c, d)에서 deny.
 # delegate = 다른 keeper에게 위임이라 keeper가 1개인 arm(b-e)에서 deny.
-SPAWN_TOOLS = ["keeper_spawn", "keeper_spawn_read", "keeper_spawn_wait", "keeper_spawn_stop"]
 DELEGATE_TOOLS = ["masc_keeper_delegate", "masc_keeper_delegate_status", "masc_keeper_delegate_cancel"]
 
 
 def denied_tools(spec: dict) -> list[str]:
     denied = []
-    if not spec["parallel"]:
-        denied += SPAWN_TOOLS
     if spec["keepers"] == 1:
         denied += DELEGATE_TOOLS
     return denied

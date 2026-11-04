@@ -155,7 +155,6 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
-  | Tool_keeper_spawn_dispatch
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
@@ -245,7 +244,6 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
-  | Tool_keeper_spawn_dispatch
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
@@ -554,14 +552,6 @@ let handle_in_process ctx descriptor args =
       ~owned_job_replay:ctx.owned_job_replay
       ~source_context:ctx.source_context ~tool_use_id:ctx.tool_use_id
       ~turn_ref:ctx.turn_ref ~trace_id:ctx.trace_id ~name ~args)
-  | Tool_keeper_spawn_dispatch ->
-    Some
-      (Keeper_tool_in_process_runtime.handle_keeper_spawn_with_outcome
-         ~config:ctx.config
-         ~meta:ctx.meta
-         ~turn_sandbox_factory:ctx.turn_sandbox_factory
-         ~name
-         ~args)
   | Tool_keeper_composition_result_dispatch ->
     Some (Keeper_composition_dependency_result.handle ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_keeper_code_query_dispatch ->

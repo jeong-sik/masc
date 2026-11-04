@@ -67,7 +67,7 @@ let with_definition descriptor operation =
         | Tool_browser_read | Tool_browser_session | Tool_browser_goto | Tool_browser_act
         | Tool_browser_instruct | Tool_browser_interact | Tool_masc_control_dispatch
         | Tool_masc_agent_timeline_dispatch | Tool_masc_schedule_dispatch
-        | Tool_keeper_spawn_dispatch | Tool_keeper_job_dispatch
+        | Tool_keeper_job_dispatch
         | Tool_keeper_composition_result_dispatch | Tool_keeper_code_query_dispatch
         | Tool_keeper_webmcp_dispatch | Tool_masc_keeper_dispatch | Tool_masc_fusion_dispatch
         | Tool_masc_fusion_status | Tool_masc_fusion_decision | Tool_masc_file_dispatch

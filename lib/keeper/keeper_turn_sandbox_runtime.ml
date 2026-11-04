@@ -3951,11 +3951,8 @@ let prepare_github_identity_secret_files ?timeout_sec t =
        | Ok (Some dir) -> Ok [ Filename.concat dir "hosts.yml" ])
 ;;
 
-(* The argv assembly [run_exec_with_status_split_once] used to carry inline.
-   Named because a second caller needs the same argv without the running: a
-   command that must not block the turn is spawned rather than awaited, and it
-   has to land inside the same container, as the same uid, under the same
-   rewritten paths. Two constructions of that would be two boundaries. *)
+(* The argv [run_exec_with_status_split_once] runs: the turn-scoped
+   container, the same uid, the rewritten paths. *)
 let exec_argv ?stdin ?timeout_sec ~validate_cached_container (t : t) ~cwd ~command_argv =
   match
     Result.bind (docker_exec_only t) (fun () ->

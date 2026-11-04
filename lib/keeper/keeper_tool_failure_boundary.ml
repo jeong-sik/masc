@@ -9,13 +9,9 @@ type boundary =
 
 let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
   match handler with
-  (* A spawn that started leaves a process running with no
-     handle in the caller's hands if the call then fails, which
-     is the same shape of loss Execute has. *)
   | Keeper_tool_descriptor.Tool_lane_addon _
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_browser_instruct
-  | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
   (* An unconfirmed owned-job launch may have started its process. A failed
      call cannot authorize issuing a replacement command in this turn. *)
   | Keeper_tool_descriptor.Tool_keeper_job_dispatch

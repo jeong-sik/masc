@@ -160,8 +160,7 @@ MASC arm의 이미지 입력은 선택한 provider/model의 저장소 `config/ru
 설치 및 비대화형 실행 계약: [공식 설치 안내](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started),
 [CLI 옵션](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command).
 
-spawn 도구는 parallel 이 꺼진 arm(b, c, d)에서, delegate 도구는 keeper 1 인 arm(b–e, l)에서
-keeper TOML `tools.deny` 로 막는다.
+delegate 도구는 keeper 1 인 arm(b–e, l)에서 keeper TOML `tools.deny` 로 막는다.
 
 HTTP 레인의 b·c·d는 runtime binding(`[<provider>.<model>]`)에
 `disable-parallel-tool-use = true`를 적는다. e 이후는 `false`다.
@@ -172,8 +171,8 @@ OpenRouter·Z.ai·일반 호환 endpoint는 같은 HTTP 프로토콜을 써도 �
 Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청에서는
 `parallel_tool_calls = false`로 전달된다. `false`는 카탈로그가 허용한 병렬 호출을
 억제하지 않는다는 뜻이다. 실제로 몇 개를 호출했는지는 실행 기록으로 확인한다.
-`max-concurrent`는 동시 모델 요청 수, spawn은 별도 에이전트 실행이므로
-둘 중 하나를 제한했다고 한 응답의 병렬 도구 호출까지 꺼지는 것은 아니다.
+`max-concurrent`는 동시 모델 요청 수라서, 이것을 제한했다고 한 응답의 병렬 도구
+호출까지 꺼지는 것은 아니다.
 이 binding 키를 모르는 구버전 MASC는 설정을 거절하므로 새 빌드가 필요하다.
 
 ## 모델 레인
@@ -250,7 +249,7 @@ keeper 의 모델 런타임을 수정하지 않은 공식 CLI 로 쓴다(masc pr
     BENCH_MODEL=codex_subscription/gpt-6-luna CONCURRENCY=1 ./run_matrix.sh a,e 1
 
 - b·c·d는 설정 생성 단계에서 거절한다. MASC의 공식 CLI 경로에는 한 응답의 병렬
-  도구 호출을 끄는 요청 제어가 없다. spawn 도구 제한으로 이 조건을 대신하지 않는다.
+  도구 호출을 끄는 요청 제어가 없다.
 - effort 는 `--ak effort=high|max` 로 준다(CLI 의 --effort; minimal 은 거부).
 - `claude_code` 는 bootstrap.sh 가 native 설치본을 깔고 `claude auth status --json` 이
   `oauth_token` 을 보고할 때만 서버를 띄운다.

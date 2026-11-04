@@ -738,7 +738,7 @@ let test_skill_source_ignores_other_tools () =
       match Catalog.skill_source_of_tool_name name with
       | None -> ()
       | Some rel -> Alcotest.failf "%s is not a composition tool, got %s" name rel)
-    [ "keeper_spawn"; "Execute"; Catalog.status_tool_name; "keeper_compose_" ]
+    [ "keeper_lane_status"; "Execute"; Catalog.status_tool_name; "keeper_compose_" ]
 ;;
 
 

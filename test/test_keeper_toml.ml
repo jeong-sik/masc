@@ -765,12 +765,12 @@ let test_tool_deny_parses_absent_empty_and_exact_values () =
   check (list string) "explicit empty denies nothing" [] empty.KTP.tool_deny;
   let exact =
     parse
-      "[keeper.tools]\ndeny = [\"keeper_spawn\", \"masc_keeper_delegate\", \"keeper_spawn\"]\n"
+      "[keeper.tools]\ndeny = [\"keeper_job_start\", \"masc_keeper_delegate\", \"keeper_job_start\"]\n"
   in
   check
     (list string)
     "values are deduplicated in order"
-    [ "keeper_spawn"; "masc_keeper_delegate" ]
+    [ "keeper_job_start"; "masc_keeper_delegate" ]
     exact.KTP.tool_deny
 ;;
 

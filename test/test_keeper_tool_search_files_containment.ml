@@ -582,45 +582,6 @@ let test_read_cwds_follow_the_tree () =
     Alcotest.(check bool) "the caller named the missing search cwd" true
       (e.Keeper_alerting_path.failure_class = Tool_result.Policy_rejection)
 
-(* Containment held for the read tools and did not hold for spawn: it ran
-   [Eio.Process.spawn] on the host whatever profile the keeper was declared
-   under. Measured 2026-09-01 -- a [remote_ssh] keeper built and ran OCaml on
-   the host while its endpoint container sat empty.
-
-   A start goes through the container now, so the profiles that have a
-   container no longer refuse. [remote_ssh] still does: the exec shim speaks a
-   framed protocol over one connection, so there is no argv to hand a spawner,
-   and going around the shim would go around its path jail with it.
-
-   What is pinned is the refusal itself -- that it is a policy rejection and
-   that it proves nothing started. A refusal that read as a runtime failure
-   would tell a caller to retry a call that can never work. *)
-let test_a_start_it_cannot_place_refuses_without_starting () =
-  let result =
-    Masc.Keeper_tool_in_process_runtime.spawn_outside_boundary
-      ~name:"keeper_spawn"
-      ~profile:Keeper_types_profile_sandbox.Remote_ssh
-      ~detail:"no argv to background"
-  in
-  let payload = result.Masc.Keeper_tool_execution.raw_output in
-  Alcotest.(check bool)
-    "it is a refusal, not a runtime failure"
-    true
-    (match result.Masc.Keeper_tool_execution.disposition with
-     | Tool_result.Failed Tool_result.Policy_rejection -> true
-     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
-       false);
-  Alcotest.(check bool)
-    "it proves no process began"
-    true
-    (result.Masc.Keeper_tool_execution.failure_effect_disposition
-     = Tool_result.Proven_pre_effect);
-  Alcotest.(check bool)
-    "it names the profile it could not place the start under"
-    true
-    (String_util.contains_substring payload "remote_ssh")
-;;
-
 let () =
   Alcotest.run "Keeper_tool_search_files_containment"
     [
@@ -652,9 +613,6 @@ let () =
             `Quick test_container_file_path_is_not_rewritten;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
-          Alcotest.test_case
-            "a start it cannot place refuses without starting"
-            `Quick test_a_start_it_cannot_place_refuses_without_starting;
           Alcotest.test_case
             "read-only Execute omitted cwd does not create write root"
             `Quick

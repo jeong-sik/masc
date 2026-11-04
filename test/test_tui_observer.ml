@@ -855,21 +855,9 @@ let test_a_verification_or_run_push_reads_the_requests () =
     [ "internal_runs(goal_verification)"; "internal_runs(exact_lane)" ]
     (List.map summary (decode_all other_run_registry_frames));
   check int "and owe the verification requests nothing" 0 (count other_run_registry_frames);
-  check (list bool) "the goal verifier's runs owe the Goal projection"
-    [ true; false ]
-    (List.map
-       (function
-         | Observer.Event event ->
-             (match Observer.dataset_owed event with
-              | Some Masc.Workspace_dataset_event.Goals -> true
-              | Some
-                  ( Masc.Workspace_dataset_event.Repositories
-                  | Masc.Workspace_dataset_event.Verification_requests
-                  | Masc.Workspace_dataset_event.Keeper_metrics _
-                  | Masc.Workspace_dataset_event.Harness_verdicts )
-              | None -> false)
-         | Observer.Undecodable _ -> false)
-       (decode_all other_run_registry_frames));
+  check (list string) "a Goal projection push decodes by name" [ "dataset(goals)" ]
+    (List.map summary
+       (decode_all [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"goals\"}\n\n" ]));
   List.iter
     (fun frame ->
        match decode_all [ frame ] with

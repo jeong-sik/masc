@@ -213,6 +213,8 @@ let publish_unreconciled config failures =
     if not (Atomic.compare_and_set observations current next) then publish ()
   in
   publish ();
+  (* The planning projection draws these observations beside each Goal. *)
+  Goal_store.notify_projection_change config;
   List.iter
     (fun { failed_goal_id; step; failure } ->
        Log.Misc.error
@@ -377,6 +379,9 @@ let original_read_binding config ~goal_id =
 
 let observe_original_read config ~goal_id read =
   let observed = Option.map begin_original_read (original_read_binding config ~goal_id) in
+  (* What the read settles is drawn beside the Goal in the planning
+     projection, so its end tells the projection observer. *)
+  let settled =
   Fun.protect ~finally:(fun () -> Option.iter abandon_original_read observed) (fun () ->
     match read () with
     | Ok _ as result ->
@@ -395,6 +400,9 @@ let observe_original_read config ~goal_id read =
               (Proof_lookup_unavailable {detail=worker_detail error})
           | Some _ | None -> ()) observed;
       result)
+  in
+  Goal_store.notify_projection_change config;
+  settled
 
 (* A review that raised stalls the request the way a deferral does, under the
    gate the Task verifier uses for the same event. Nothing arms a retry: the
@@ -1036,6 +1044,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
         (* No scan runs after this, so its last list would read as current. *)
         Atomic.set runtime.scheduling {ready=[]; in_flight=[]; retries=[]};
         retire_observations snapshot ~root:(Workspace.masc_dir config);
+        Goal_store.notify_projection_change config;
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;

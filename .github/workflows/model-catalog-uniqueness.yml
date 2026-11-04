@@ -1,0 +1,44 @@
+name: Model catalog uniqueness
+
+# The catalog's key uniqueness is a load contract: Model_catalog.reject_duplicate_rows
+# refuses a file that declares the same provider id, or the same
+# (provider_name, model_id) pair, twice — and the server dies at boot when it
+# does (2026-11-04 opencode_go duplicate, repaired in #48151).  This check
+# mirrors that rule on the TOML bytes so a merge-time race between two pull
+# requests is caught before it lands, not after.
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "packages/agent_core/models.toml"
+      - "scripts/check-model-catalog-uniqueness.py"
+      - "scripts/fixtures/model-catalog-duplicate-model-fixture.toml"
+      - "scripts/fixtures/model-catalog-duplicate-provider-fixture.toml"
+      - ".github/workflows/model-catalog-uniqueness.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Model catalog keys unique
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The live catalog parses with unique keys
+        run: python3 scripts/check-model-catalog-uniqueness.py packages/agent_core/models.toml
+      - name: The duplicate fixtures are refused
+        run: |
+          set -euo pipefail
+          for fixture in \
+            scripts/fixtures/model-catalog-duplicate-model-fixture.toml \
+            scripts/fixtures/model-catalog-duplicate-provider-fixture.toml
+          do
+            if python3 scripts/check-model-catalog-uniqueness.py "$fixture"; then
+              echo "$fixture should have been refused" >&2
+              exit 1
+            fi
+            echo "correctly refused: $fixture"
+          done

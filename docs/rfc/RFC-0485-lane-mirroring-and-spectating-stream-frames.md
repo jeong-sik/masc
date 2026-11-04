@@ -1,5 +1,11 @@
 ---
+<<<<<<<< HEAD:docs/rfc/RFC-0485-lane-mirroring-and-spectating-stream-frames.md
 rfc: "0485"
+|||||||| parent of 3917a516618 (docs(rfc): renumber lane-mirroring draft 0482 -> 0486 (fixes #48072 CR P2)):docs/rfc/RFC-0482-lane-mirroring-and-spectating-stream-frames.md
+rfc: "0482"
+========
+rfc: "0486"
+>>>>>>>> 3917a516618 (docs(rfc): renumber lane-mirroring draft 0482 -> 0486 (fixes #48072 CR P2)):docs/rfc/RFC-0486-lane-mirroring-and-spectating-stream-frames.md
 title: "브라우저 lane 미러링과 MSX·DOS 관전은 TUI 가 당겨 오지 않고 서버가 프레임을 보낸다"
 status: Draft
 created: 2026-11-04
@@ -10,7 +16,13 @@ superseded_by: null
 related: ["0480", "msx-surface-focus-mode"]
 ---
 
+<<<<<<<< HEAD:docs/rfc/RFC-0485-lane-mirroring-and-spectating-stream-frames.md
 # RFC-0485 — 미러링과 관전은 서버가 프레임을 보낸다
+|||||||| parent of 3917a516618 (docs(rfc): renumber lane-mirroring draft 0482 -> 0486 (fixes #48072 CR P2)):docs/rfc/RFC-0482-lane-mirroring-and-spectating-stream-frames.md
+# RFC-0482 — 미러링과 관전은 서버가 프레임을 보낸다
+========
+# RFC-0486 — 미러링과 관전은 서버가 프레임을 보낸다
+>>>>>>>> 3917a516618 (docs(rfc): renumber lane-mirroring draft 0482 -> 0486 (fixes #48072 CR P2)):docs/rfc/RFC-0486-lane-mirroring-and-spectating-stream-frames.md
 
 ## 0. 요약
 

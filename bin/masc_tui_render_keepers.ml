@@ -546,14 +546,40 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Inactive -> Theme.recede ()
   | Keeper_list_model.Unobserved -> Theme.warn ()
 
-let keeper_view_summary rows layout sort =
+(* The frame cuts a row from the right. The counts are what a narrow screen
+   needs, so they lead and the layout and sort name trail. An item that does
+   not fit whole is left out, because "0 inactiv…" reads as a number. *)
+let keeper_view_summary ~cells rows layout sort =
   let mode = Keeper_list_model.layout_label layout ^ " · " ^ Keeper_list_model.sort_label sort in
-  match layout with
-  | Keeper_list_model.Grouped -> "  " ^ mode
-  | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
-      let attention, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
-      Printf.sprintf "  %s   ! %d attention   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive   ? %d unknown"
-        mode attention active waiting inactive unobserved
+  let items =
+    match layout with
+    | Keeper_list_model.Grouped -> [ mode ]
+    | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
+        let attention, active, waiting, inactive, unobserved =
+          Keeper_list_model.group_counts rows
+        in
+        [ Printf.sprintf "! %d attention" attention
+        ; Printf.sprintf "\xe2\x96\xb6 %d active" active
+        ; Printf.sprintf "\xe2\x97\x8c %d waiting" waiting
+        ; Printf.sprintf "\xe2\x97\x8b %d inactive" inactive
+        ; Printf.sprintf "? %d unknown" unobserved
+        ; mode
+        ]
+  in
+  let lead = "  " and gap = "   " in
+  let width = Message_layout.display_width in
+  (* The first item always stays. Without it the row would be blank, and the
+     frame can still cut it. *)
+  let rec fit used = function
+    | [] -> []
+    | item :: rest ->
+        let used = used + width gap + width item in
+        if used > cells then [] else item :: fit used rest
+  in
+  match items with
+  | [] -> lead
+  | first :: rest ->
+      lead ^ String.concat gap (first :: fit (width lead + width first) rest)
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -600,7 +626,7 @@ let render_keeper_list (state : state) =
   box_line buf cols (heading ^ String.make gap ' ' ^ badge);
   box_line buf cols
     (Theme.recede ()
-     ^ keeper_view_summary model_rows state.keeper_list_layout state.keeper_list_sort
+     ^ keeper_view_summary ~cells:inner model_rows state.keeper_list_layout state.keeper_list_sort
      ^ Ansi.reset);
   Option.iter
     (fun message -> box_line buf cols

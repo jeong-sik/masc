@@ -4363,7 +4363,7 @@ type identity_login_request = {
 
 (* Login-completion expectation, held across a transient authority loss.
    Where [identity_login_started] is the consent the pane presents, this is
-   only what the tick polls on: the workspace that admitted the login and
+   only what an owed attempt read waits on: the workspace that admitted the login and
    which Keeper/provider/attempt is still waiting. No URL is carried, so an old
    consent is never resurrected, and the expectation alone cannot attach
    anyone to anything. *)
@@ -4372,6 +4372,10 @@ type identity_login_expectation = {
   ile_keeper: string;
   ile_provider: string;
   ile_attempt_id: string;
+  ile_expires_at: float;
+      (** The consent deadline the server gave the attempt when it began.
+          The server applies it when the attempt is next read and announces
+          nothing when it passes. *)
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -9913,6 +9917,10 @@ type state = {
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
   mutable identity_login_expectations: identity_login_expectation list;
+  (* What each Keeper with an expectation owes its attempt reads, and the
+     attempts whose passed consent deadline already owed one. *)
+  mutable identity_login_reads: (string * Masc_tui_owed_read.t) list;
+  mutable identity_deadline_reads: string list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -14772,6 +14780,45 @@ let identity_login_pending_keepers (state : state) ~now =
        else None)
   |> List.sort_uniq String.compare
 
+let identity_login_read (state : state) keeper_name =
+  Option.value ~default:Masc_tui_owed_read.settled
+    (List.assoc_opt keeper_name state.identity_login_reads)
+
+(* Only a Keeper this workspace waits on a login for holds a read record:
+   the record of a Keeper whose last expectation retired is dropped. *)
+let update_identity_login_read (state : state) keeper_name f =
+  let waited =
+    List.exists (fun expectation -> String.equal expectation.ile_keeper keeper_name)
+      state.identity_login_expectations
+  in
+  let others = List.remove_assoc keeper_name state.identity_login_reads in
+  state.identity_login_reads <-
+    (if waited then (keeper_name, f (identity_login_read state keeper_name)) :: others
+     else others)
+
+(* A Keeper whose login this workspace waits on reads its attempts again when
+   the server says they changed, on a revalidation, once an attempt's consent
+   deadline passes, and after a failed read (RFC-0480 §3.4). *)
+let owe_identity_login_read (state : state) keeper_name =
+  update_identity_login_read state keeper_name Masc_tui_owed_read.changed
+
+(* The server reports a passed deadline only when the attempt is read, so
+   each attempt still waited on owes its Keeper one read once [now] is past
+   its deadline. A server whose clock has not reached the deadline answers
+   that the consent still waits, which fails that read and retries it. *)
+let owe_identity_deadline_reads (state : state) ~now =
+  let waited = List.map (fun expectation -> expectation.ile_attempt_id)
+      state.identity_login_expectations in
+  state.identity_deadline_reads <-
+    List.filter (fun attempt_id -> List.mem attempt_id waited) state.identity_deadline_reads;
+  List.iter (fun expectation ->
+    if expectation.ile_expires_at <= now
+       && not (List.mem expectation.ile_attempt_id state.identity_deadline_reads)
+    then begin
+      state.identity_deadline_reads <- expectation.ile_attempt_id :: state.identity_deadline_reads;
+      owe_identity_login_read state expectation.ile_keeper
+    end) state.identity_login_expectations
+
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
 let start_identity_login_request (state : state) ~keeper_name ~provider_id =
@@ -14829,7 +14876,7 @@ let remember_identity_login (state : state) login =
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
          { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
-           ile_attempt_id=login.ils_attempt_id }
+           ile_attempt_id=login.ils_attempt_id; ile_expires_at=login.ils_expires_at }
    | _ -> ())
 
 (* A terminal observation retires both the browser URL and its background
@@ -14887,10 +14934,12 @@ let expire_identity_logins state ~now =
 
 (* A workspace rework rerun keeps the workspace but ends every login it had
    admitted, so every expectation retires with it. Nothing here runs for a
-   transient authority loss — that path must keep the expectations so the
-   recovery tick can reopen the poll for logins still being completed. *)
+   transient authority loss — that path must keep the expectations so an
+   owed read can still observe logins being completed. *)
 let retire_identity_login_expectations (state : state) =
-  state.identity_login_expectations <- []
+  state.identity_login_expectations <- [];
+  state.identity_login_reads <- [];
+  state.identity_deadline_reads <- []
 
 let roster_pane_hidden (state : state) =
   not state.keeper_navigation_open
@@ -16842,10 +16891,10 @@ let pending_detail_read (state : state) ~tab ~keeper =
     (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
     state.detail_reads
 
-(* The tick may reopen a provider read only after the old response settles and
+(* An owed attempt read may start only after the old response settles and
    the same workspace confirms the waiting Keeper's login. The expectation
    carries no consent URL or authorization; it only keeps the read alive. *)
-let identity_login_recovery_poll_ready (state : state) ~now keeper_name =
+let identity_login_read_ready (state : state) ~now keeper_name =
   identity_login_pending_for_keeper state ~now keeper_name
   && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
 
@@ -19441,6 +19490,8 @@ let create_state
   identity_callback = None;
   identity_logins = [];
   identity_login_expectations = [];
+  identity_login_reads = [];
+  identity_deadline_reads = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;

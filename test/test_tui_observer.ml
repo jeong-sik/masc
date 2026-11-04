@@ -142,7 +142,8 @@ let summary = function
   | Observer.Event (Observer.Dataset_changed dataset) ->
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_name dataset
       ^ (match dataset with
-         | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Keeper_metrics { keeper }
+         | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -845,6 +846,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
               | Some
                   ( Masc.Workspace_dataset_event.Repositories
                   | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -914,6 +916,7 @@ let test_a_repository_push_reads_the_list () =
               | Some
                   ( Masc.Workspace_dataset_event.Verification_requests
                   | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -931,6 +934,7 @@ let test_a_repository_push_reads_the_list () =
           | Some
               ( Masc.Workspace_dataset_event.Repositories
               | Masc.Workspace_dataset_event.Keeper_metrics _
+              | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config

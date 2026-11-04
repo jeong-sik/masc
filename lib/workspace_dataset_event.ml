@@ -8,6 +8,7 @@ type dataset =
   | Goals
   | Runtime_config
   | Connectors
+  | Keeper_oauth_attempts of { keeper : string }
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -16,6 +17,7 @@ let harness_verdicts_name = "harness_verdicts"
 let goals_name = "goals"
 let runtime_config_name = "runtime_config"
 let connectors_name = "connectors"
+let keeper_oauth_attempts_name = "keeper_oauth_attempts"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -25,12 +27,19 @@ let dataset_name = function
   | Goals -> goals_name
   | Runtime_config -> runtime_config_name
   | Connectors -> connectors_name
+  | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
 ;;
 
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors ->
     []
-  | Keeper_metrics { keeper } -> [ "keeper", `String keeper ]
+  | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } -> [ "keeper", `String keeper ]
+;;
+
+let keeper_of_fields name fields =
+  match List.assoc_opt "keeper" fields with
+  | Some (`String keeper) when not (String.equal keeper "") -> Ok keeper
+  | Some _ | None -> Error (event_type ^ " " ^ name ^ " names no keeper")
 ;;
 
 let of_fields fields =
@@ -43,9 +52,9 @@ let of_fields fields =
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
   | Some (`String name) when String.equal name connectors_name -> Ok Connectors
   | Some (`String name) when String.equal name keeper_metrics_name ->
-    (match List.assoc_opt "keeper" fields with
-     | Some (`String keeper) when not (String.equal keeper "") -> Ok (Keeper_metrics { keeper })
-     | Some _ | None -> Error (event_type ^ " " ^ name ^ " names no keeper"))
+    Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
+  | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
+    Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)
   | Some _ | None -> Error (event_type ^ " carries no dataset name")
 ;;
@@ -71,5 +80,7 @@ let announce ~base_path dataset =
 ;;
 
 let install_store_observers () =
-  Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories)
+  Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories);
+  Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
+    announce ~base_path (Keeper_oauth_attempts { keeper }))
 ;;

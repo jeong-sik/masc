@@ -33,6 +33,10 @@ type dataset =
       (** What [GET /api/v1/gate/connectors] and the connector name pages
           project: gateway and poll states, ready records, startup errors,
           directories, bindings, learned names and trigger policies. *)
+  | Keeper_oauth_attempts of { keeper : string }
+      (** The OAuth login attempts {!Keeper_oauth_pending} holds for
+          [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads. The event names the Keeper only: no provider, attempt id,
+          state, code or consent URL. *)
 
 val event_type : string
 
@@ -55,4 +59,5 @@ val announce : base_path:string -> dataset -> unit
 val install_store_observers : unit -> unit
 (** Make the stores that live in libraries below this one report their writes
     to {!announce}. {!Repo_store} reports every catalog write attempt, under
-    the catalog file lock. *)
+    the catalog file lock. {!Keeper_oauth_pending} reports each attempt
+    change, under its table lock, as {!Keeper_oauth_attempts}. *)

@@ -8003,6 +8003,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Goals -> owe_goal_projection_reads state
   | Masc.Workspace_dataset_event.Runtime_config -> owe_runtime_config_read state
   | Masc.Workspace_dataset_event.Connectors -> owe_connectors_read state
+  | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
+      Masc_tui_types.owe_identity_login_read state keeper
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -17727,24 +17729,34 @@ let launch_ask_followup_load state ~mailbox =
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
   if server_authority_ready state then begin
-  launch_ask_followup_load state ~mailbox;
-  (* An operator who consented in a browser is standing in front of a tab
-     that does not know it happened: the callback lands on the server, not
-     here. So while a login this TUI started is still outstanding, the tick
-     asks again, for every Keeper that waits and from any surface: the
-     operator may have left the Identity tab or opened another Keeper. It
-     stops as soon as the answer says attached, or that the provider is gone,
-     so this is not a poll that runs forever -- it runs exactly as long as
-     somebody is waiting for it. Same shape as the chat reload above, and for
-     the same reason: a pane that read once on open showed a fact that had
-     since changed. *)
-  let login_now = Unix.gettimeofday () in
-  Masc_tui_types.identity_login_pending_keepers state ~now:login_now
-  |> List.iter (fun keeper_name ->
-       if identity_login_recovery_poll_ready state ~now:login_now keeper_name then
-         Masc_tui_identity_requests.launch_view state ~host:server_peer_host
-           ~deliver:(workspace_enqueue state mailbox) keeper_name)
+  launch_ask_followup_load state ~mailbox
   end
+;;
+
+(* An operator who consented in a browser is standing in front of a tab that
+   does not know it happened: the callback lands on the server, not here. So
+   every Keeper a login of this TUI still waits on, from any surface, reads
+   its attempts and providers when its read is owed: the server announced
+   that Keeper's attempts changed, a revalidation, a consent deadline passed,
+   or the last read failed. Runs on every loop iteration. A read in flight is
+   let finish first. *)
+let launch_owed_identity_logins state ~mailbox =
+  let now = Unix.gettimeofday () in
+  Masc_tui_types.owe_identity_deadline_reads state ~now;
+  if server_authority_ready state then
+    Masc_tui_types.identity_login_pending_keepers state ~now
+    |> List.iter (fun keeper_name ->
+         let ready = Masc_tui_types.identity_login_read_ready state ~now keeper_name in
+         if ready then
+           Masc_tui_types.update_identity_login_read state keeper_name
+             Masc_tui_owed_read.abandoned;
+         let read = Masc_tui_types.identity_login_read state keeper_name in
+         if ready && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read then begin
+           Masc_tui_types.update_identity_login_read state keeper_name
+             Masc_tui_owed_read.started;
+           Masc_tui_identity_requests.launch_view state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state mailbox) keeper_name
+         end)
 ;;
 
 
@@ -18527,6 +18539,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_harness_read state;
        owe_runtime_config_read state;
        owe_connectors_read state;
+       List.iter (Masc_tui_types.owe_identity_login_read state)
+         (Masc_tui_types.identity_login_pending_keepers state ~now:(Unix.gettimeofday ()));
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -24669,7 +24683,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | Identity_providers_loaded (request, result, attempts) ->
-      Masc_tui_identity_updates.providers_loaded state request
+      Masc_tui_identity_updates.providers_loaded state request ~now:(Unix.gettimeofday ())
+        ~settle:(function
+          | Masc_tui_identity_updates.Reading_succeeded ->
+              Masc_tui_types.update_identity_login_read state request.drr_keeper
+                Masc_tui_owed_read.succeeded
+          | Masc_tui_identity_updates.Reading_failed ->
+              Masc_tui_types.update_identity_login_read state request.drr_keeper failed_read
+          | Masc_tui_identity_updates.Reading_superseded -> ())
         ~report:(report_action state "error") ~attempts result
   | Identity_login_started (request, result) ->
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
@@ -32285,6 +32306,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_harness state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
+      launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;

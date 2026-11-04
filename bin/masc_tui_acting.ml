@@ -433,6 +433,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
   | Observer.Keeper_turn_changed { keeper; _ }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper })
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper })
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Approval_change change -> approval_change_keeper change
@@ -495,6 +496,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals -> "goals"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config -> "runtime config"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors -> "connectors"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -657,6 +659,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime.toml commit was attempted" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a connector's status changed" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
+      { at; keeper; glyph = Quiet; label; detail = "an OAuth login attempt changed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

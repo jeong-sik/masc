@@ -3289,6 +3289,7 @@
 (include stanzas/test_verification_request_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_metrics_announce.inc)
+(include stanzas/test_keeper_oauth_attempts_announce.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
 (include stanzas/test_runtime_config_commit_announce.inc)
 (include stanzas/test_gate_change_notify.inc)
@@ -5459,7 +5460,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity))
+ (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_owed_read masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity))
 
 (test
  (name test_tui_loading_notice)

@@ -3287,6 +3287,7 @@
 (include stanzas/test_verification_request_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
+(include stanzas/test_keeper_metrics_appended_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

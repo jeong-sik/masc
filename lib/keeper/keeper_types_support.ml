@@ -45,7 +45,8 @@ let keeper_metrics_store config name : Dated_jsonl.t =
   Keeper_metrics_storage.read_store (keeper_metrics_storage config name)
 
 let append_keeper_metrics config name json =
-  Keeper_metrics_storage.append (keeper_metrics_storage config name) json
+  Keeper_metrics_storage.append (keeper_metrics_storage config name) json;
+  Keeper_metrics_broadcast.appended ~base_path:config.Workspace.base_path ~name
 
 let keeper_metrics_dir config name =
   Dated_jsonl.base_dir (keeper_metrics_store config name)

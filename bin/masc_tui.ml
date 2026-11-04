@@ -11825,13 +11825,15 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
-(* Whether a copy can go to a desktop clipboard tool on this host, read once:
-   the environment that says so does not change under a running TUI. *)
+(* Read once: these variables describe where this process started and do not
+   change under it. An operator who attaches to its tmux pane from elsewhere
+   later is why a tmux session also sends the text to the terminal. *)
 let copy_session = Masc_tui_clipboard.copy_session Sys.getenv_opt
 
 (* Copied text goes to the desktop clipboard when a tool here can take it, and
-   to the terminal as OSC 52 otherwise. Only the OSC 52 write lands on the
-   terminal, so only it marks the presented frame as damaged. *)
+   to the terminal as OSC 52 when none can or the session needs both. Only the
+   OSC 52 write lands on the terminal, so only it marks the presented frame as
+   damaged. *)
 let copy_text_out text =
   Masc_tui_clipboard.copy_text copy_session text ~write_osc52:(fun text ->
     Terminal_write_repair.note ();
@@ -33726,13 +33728,10 @@ Use relative paths for resources already held in the package. -->
                   state.runtime_account_form <- None; state.runtime_form_save_focus <- None
               | Masc_tui_runtime_account_form.Copy (form, command) ->
                   state.runtime_account_form <- Some form;
-                  (match copy_reference render_schedule command with
-                   | Masc_tui_clipboard.Copied_by tool ->
-                       report_action state "system"
-                         (Printf.sprintf "로그인 명령을 %s로 복사했습니다" tool)
-                   | Masc_tui_clipboard.Sent_to_terminal _ ->
-                       report_action state "system"
-                         "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)")
+                  report_action state "system"
+                    ("로그인 명령을 "
+                     ^ Masc_tui_clipboard.copy_outcome_text_korean
+                         (copy_reference render_schedule command))
               | Masc_tui_runtime_account_form.Submitted form ->
                   (match begin_runtime_form_save state ~draft:(Account_form_draft form)
                       ~started_ns:(Mtime_clock.elapsed_ns ()) with
@@ -37952,14 +37951,12 @@ Use relative paths for resources already held in the package. -->
               let outcome = copy_reference render_schedule input in
               state.preset_save_copy_cursor <- (index + 1) mod List.length commands;
               report_action state "system"
-                (match outcome, state.ui_language = Lang_ko with
-                 | Masc_tui_clipboard.Copied_by tool, true ->
-                     Printf.sprintf "%s 명령을 %s로 복사했습니다"
-                       (Terminal_text.single_line name) tool
-                 | Masc_tui_clipboard.Sent_to_terminal _, true ->
-                     Printf.sprintf "%s 명령 복사 요청 · 터미널 지원 여부는 미확인"
+                (match state.ui_language with
+                 | Lang_ko ->
+                     Printf.sprintf "%s 명령을 %s"
                        (Terminal_text.single_line name)
-                 | (Masc_tui_clipboard.Copied_by _ | Masc_tui_clipboard.Sent_to_terminal _), false ->
+                       (Masc_tui_clipboard.copy_outcome_text_korean outcome)
+                 | Lang_en ->
                      Printf.sprintf "%s command %s"
                        (Terminal_text.single_line name)
                        (Masc_tui_clipboard.copy_outcome_text outcome)))

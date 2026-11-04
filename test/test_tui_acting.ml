@@ -662,6 +662,22 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
   check string "a keeper-named event keeps its keeper" "bandleader"
     (Acting.keeper_of_event ~traces (heartbeat "bandleader"))
 
+let test_lane_dataset_rows_are_server_activity () =
+  List.iter
+    (fun dataset ->
+      let event = Observer.Dataset_changed dataset in
+      let row = Acting.row_of_event ~at:100. ~duration_ms:None event in
+      check bool "a Lane commit is not a Keeper action" false
+        (Acting.visible Acting.Actions event);
+      check bool "the Everything feed retains a Lane commit" true
+        (Acting.visible Acting.Everything event);
+      check string "the server owns the activity row" "server" row.Acting.keeper;
+      check bool "a committed dataset does not need operator attention" true
+        (row.Acting.glyph = Acting.Quiet))
+    [ Masc.Workspace_dataset_event.Lanes
+    ; Masc.Workspace_dataset_event.Lane_addons { instance_id = "quiz-1" }
+    ]
+
 let test_elapsed_text_picks_a_unit () =
   check (list (option string)) "ms, seconds, minutes"
     [ Some "32ms"; Some "1.2s"; Some "2m05s" ]

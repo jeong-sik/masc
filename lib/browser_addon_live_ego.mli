@@ -47,7 +47,10 @@ val end_session : session -> unit
     cannot start fails this worker's start, as the owned BiDi Firefox does,
     except when the space is configured by name and a read-only listing
     confirms a user-owned space with that name. Then the space is untouched
-    and Ego is published as unavailable.
+    and Ego is published as unavailable. A connection whose bound Space ego
+    no longer lists ends after that answer and is published as missing; a
+    clientId-less take_over then opens a Space configured by name again,
+    never one configured by number.
     Screenshots pass through a private directory this run creates and
     removes. Downloads its agent pages start are saved under [downloads],
     the worker's download folder, and published through [owner]. [input_store]

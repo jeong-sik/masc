@@ -168,6 +168,26 @@ let unavailable_reads_back () =
     (* An empty id list stays readable: the worker observed the name without
        deciding an id, and the owner refuses to claim on it. *)
     [[`Int 0];[`Int (-1)];[`Int 36;`Int 36];[`String "36"]]
+(* A connection that ended because ego no longer lists its Space names that
+   Space; a record that mixes both kinds' fields is neither. *)
+let missing_space_reads_back () =
+  let missing = Observation.Ego_space_missing {space="masc";space_id=12;observed_at=42.} in
+  let published record = match serving [] with
+    | `Assoc fields -> Observation.decode_snapshot (`Assoc (("unavailable",`List [record]) :: fields))
+    | _ -> assert false in
+  let encoded = Observation.unavailable_to_json missing in
+  check bool "the missing Space survives publication" true
+    (match published encoded with Ok value -> value.unavailable=[missing] | Error _ -> false);
+  let with_field key value = match encoded with
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | other -> other in
+  List.iter (fun (name,record) ->
+    check bool name true (Result.is_error (published record)))
+    ["a Space number that is not positive", with_field "spaceId" (`Int 0);
+     "a Space number that is text", with_field "spaceId" (`String "12");
+     "a missing Space with refused ids", with_field "ids" (`List [`Int 12]);
+     "a missing Space without its name", with_field "space" (`String "");
+     "an unknown reason", with_field "reason" (`String "space_gone")]
 (* Distinct live workers retain their source observations. *)
 let merge_keeps_the_live_workers_unavailability () =
   let unavailable = Observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
@@ -189,6 +209,7 @@ let ()=run "browser addon observation" ["publication",[
   test_case "retired worker is not connected" `Quick retired_is_not_connected;
   test_case "duplicate client refused" `Quick duplicate_client;
   test_case "unavailable backend reads back" `Quick unavailable_reads_back;
+  test_case "a missing Space reads back" `Quick missing_space_reads_back;
   test_case "merge keeps the live worker's unavailability" `Quick merge_keeps_the_live_workers_unavailability;
   test_case "live and retained observations agree" `Quick roundtrip;
   test_case "duplicate snapshot fields" `Quick duplicate;

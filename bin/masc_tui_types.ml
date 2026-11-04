@@ -6433,16 +6433,19 @@ module Browser_lane_view = struct
     | (Idle | No_browser | Failed _), Some _, _ -> Reload_picker
     | (Idle | No_browser | Failed _), None, Some _ -> Close_url_draft_then_open
     | (Idle | No_browser | Failed _), None, None -> Open_browser_list
-  let unavailable_notice t = match t.unavailable with
+  let unavailable_notice t =
+    let reload () = match list_reload t with
+      | Wait_until_idle -> "When ready"
+      | Reload_picker -> "r:list"
+      | Close_url_draft_then_open -> "Esc→b:list"
+      | Open_browser_list -> "b:list" in
+    match t.unavailable with
     | Backends_not_reported | Backends_unavailable [] -> None
     | Backends_unreadable _ -> Some "Browser backend status unreadable; refresh the connection list"
     | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name _ :: _) ->
-        let reload = match list_reload t with
-          | Wait_until_idle -> "When ready"
-          | Reload_picker -> "r:list"
-          | Close_url_draft_then_open -> "Esc→b:list"
-          | Open_browser_list -> "b:list" in
-        Some (reload ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
+        Some (reload () ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
+    | Backends_unavailable (Masc.Browser_addon_observation.Ego_space_missing _ :: _) ->
+        Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens")
   let prepare_open t =
     match t.selection, t.source with
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session

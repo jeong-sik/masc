@@ -3,9 +3,13 @@
 val of_snapshot : observed_at:float -> Yojson.Safe.t ->
   (Lane_addon_types.output, string) result
 
-(** A backend that could not start while the rest of the worker serves. The
-    ids are the user-owned Spaces that matched the refused name. *)
-type unavailable = Ego_user_owned_name of { space : string; ids : int list; observed_at : float }
+(** A backend that does not serve while the rest of the worker does: a name
+    refused at startup, whose ids are the user-owned Spaces that matched it,
+    or a connection that ended because ego no longer lists the Space it was
+    bound to, named by that Space's number and name. *)
+type unavailable =
+  | Ego_user_owned_name of { space : string; ids : int list; observed_at : float }
+  | Ego_space_missing of { space : string; space_id : int; observed_at : float }
 val unavailable_to_json : unavailable -> Yojson.Safe.t
 val unavailable_of_json : Yojson.Safe.t -> (unavailable, string) result
 

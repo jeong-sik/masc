@@ -2154,7 +2154,7 @@ let test_observer_retry_retires_with_workspace_read_authority () =
   let reading = Some state.workspace_read_authority in
   let closed = Observer_closed_before_answer { reason = "closed"; at = 1. } in
   let owner = ref () in
-  let retry = Masc_tui_async_protocol.Observer_retry_due (authority, owner) in
+  let retry = Masc_tui_async_protocol.Retry_due (Masc_tui_async_protocol.Observer_retry (authority, owner)) in
   state.observer <- closed;
   state.observer_retry_owner <- Some owner;
   Alcotest.(check bool) "closed stream owns its retry" true

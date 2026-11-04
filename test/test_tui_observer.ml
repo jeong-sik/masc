@@ -1483,7 +1483,8 @@ let test_lane_inventory_pushes_decode_with_their_scope () =
            check string "the Add-on dataset name" "lane_addons"
              (Masc.Workspace_dataset_event.dataset_name dataset);
            check (option string) "the open instance is preserved" (Some "inst-7")
-             (Json_util.assoc_string_opt "instance_id" fields)
+             (Option.bind (List.assoc_opt "instance_id" fields)
+               Yojson.Safe.Util.to_string_option)
        | Error detail -> fail detail)
   | _ -> fail "the Add-on fixture is not an object";
   List.iter

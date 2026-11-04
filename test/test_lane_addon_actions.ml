@@ -768,7 +768,9 @@ let test_observation_commit_announces_lane_inventory () = with_fixture (fun cloc
           (match Workspace_dataset_event.of_fields fields with
            | Ok dataset ->
                let instance = match Workspace_dataset_event.dataset_name dataset with
-                 | "lane_addons" -> Json_util.assoc_string_opt "instance_id" event.ext_payload
+                 | "lane_addons" ->
+                     Option.bind (List.assoc_opt "instance_id" fields)
+                       Yojson.Safe.Util.to_string_option
                  | _ -> None in
                heard := (Workspace_dataset_event.dataset_name dataset, instance) :: !heard
            | Error _ -> ())

@@ -214,6 +214,15 @@ error that looks like "the log is unreadable" but is only the cache path. Set
 `XDG_CACHE_HOME=/tmp/ghcache gh run view RUN --log`. A review that says a log line
 could not be read should name which of the two failed: the fetch or the cache.
 
+Reading one source file needs the same care. The Contents API returns an empty
+`content` with `encoding: "none"` for a file above roughly 1 MB, so
+`gh api .../contents/PATH --jq .content | base64 -d | grep -c SYMBOL` answers
+`0` for a file it never read. `bin/masc_tui.ml` is 2.27 MB (41,703 lines), so
+that path always reports zero there. Read the raw URL or `git show REF:PATH`,
+and quote the input size beside any count — `lines=41703 grep=0` means the
+symbol is absent, `lines=0 grep=0` means the read failed. A count on an empty
+input is not evidence of absence.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

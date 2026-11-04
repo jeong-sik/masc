@@ -1597,6 +1597,19 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        )
 
+  (* RFC-0483 L2: one Keeper's activations and usage, from its ledger alone. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-activations" (fun state request reqd ->
+         match Server_utils.query_param request "keeper" with
+         | Some keeper_name when not (String.equal (String.trim keeper_name) "") ->
+           let config = Mcp_server.workspace_config state in
+           Http.Response.json_value
+             (Server_keeper_skill_activations_read.json ~config ~keeper_name:(String.trim keeper_name))
+             reqd
+         | Some _ | None ->
+           respond_json_value_with_cors ~status:`Bad_request request reqd
+             (`Assoc [ "error", `String "keeper is required" ])
+       )
+
   |> Server_route.post (Server_route.Tool { tool_name = "masc_prompt_override" }) "/api/v1/prompts" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match Server_prompt_override_request.decode body_str with

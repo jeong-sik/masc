@@ -8943,6 +8943,14 @@ type home_chat_receipt =
   | Unobserved_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
 
+(* A start-up settings read that failed is read once more when a server is
+   first reached: a server this session starts itself comes up after the
+   start-up read (RFC-0482 §3.1). *)
+type settings_reread =
+  | Reread_settled
+  | Reread_due
+  | Reread_running of (Masc.Tui_preference.settings, string) result Eio.Promise.or_exn
+
 type voice_capture_phase =
   | Voice_calibrating
   | Voice_starting
@@ -9371,6 +9379,11 @@ type state = {
   mutable preference_refusal_said : bool;
   (* A terminal whose credential may not write runtime.toml is told once,
      not on every pick. *)
+  preference_read : unit -> (Masc.Tui_preference.settings, string) result;
+  mutable settings_reread : settings_reread;
+  mutable session_picks : Masc.Tui_preference.Key.t list;
+  (* The settings this session has picked itself. A settings read that lands
+     later leaves them as picked. *)
   mutable metrics_scroll: int;
   mutable metrics_content_height: int;
   mutable metrics_scroll_card_rows: int option;
@@ -15401,18 +15414,21 @@ let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
-(* A Home visit edits this TUI's local config. A Keeper name from a remote or
-   unconfirmed workspace must not become the local workspace's last chat.
-   Keep an earlier admitted visit and its receipt while declining a new one. *)
+let note_session_pick (state : state) change =
+  state.session_picks <- Masc.Tui_preference.key_of_change change :: state.session_picks
+
+(* A Home visit becomes this workspace's last chat. A Keeper name from a
+   remote or unconfirmed workspace must not become the local workspace's last
+   chat. Keep an earlier admitted visit and its receipt while declining a new
+   one. *)
 let remember_local_chat_visit (state : state) ~sw keeper =
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some identity
     when workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
            (Ok identity) = Workspace_identity_match ->
-      let request =
-        Masc_tui_preference_writer.submit state.preference_writer ~sw
-          (Masc.Tui_preference.Chat_visited keeper)
-      in
+      let change = Masc.Tui_preference.Chat_visited keeper in
+      note_session_pick state change;
+      let request = Masc_tui_preference_writer.submit state.preference_writer ~sw change in
       state.home_chat_visit <- Some request;
       state.home_last_chat <- Saving_chat keeper;
       true
@@ -19390,6 +19406,7 @@ let create_state
     ?(preference_send =
       fun (_ : Masc.Tui_preference.change) ->
         Error (Masc_tui_preference_writer.Not_started "This session has no server to store picks"))
+    ?(preference_read = fun () -> Error "This session has no server to read settings from")
     ~port
     ~refresh_interval
     ()
@@ -19410,6 +19427,9 @@ let create_state
   credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
   preference_refusal_said = false;
+  preference_read;
+  settings_reread = Reread_settled;
+  session_picks = [];
   metrics_scroll = 0;
   metrics_content_height = 0;
   metrics_scroll_card_rows = None;

@@ -203,6 +203,14 @@ let kind_of_change = function
 let kind_field_name = "change"
 let change_kind change = kind_name (kind_of_change change)
 
+let key_of_change = function
+  | Chat_visited _ -> Key.Last_chat_keeper
+  | Theme_chosen _ -> Key.Theme
+  | Language_chosen _ -> Key.Language
+  | Board_sort_chosen _ -> Key.Board_sort
+  | Candle_chosen _ -> Key.Candle
+  | Help_hint_retired -> Key.Help_hint_shown
+
 let optional_string = function
   | None -> `Null
   | Some value -> `String value

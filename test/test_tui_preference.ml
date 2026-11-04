@@ -35,6 +35,21 @@ let test_every_change_reads_back_as_written () =
          (P.change_of_yojson (P.change_to_yojson written)))
     every_change
 
+(* A settings read that lands after the reader picked something leaves that
+   setting as picked; this is the setting each pick counts as. *)
+let test_each_change_names_the_setting_it_moves () =
+  List.iter
+    (fun (change, key) ->
+       check bool (P.change_kind change) true (P.key_of_change change = key))
+    [ P.Chat_visited (keeper "analyst"), P.Key.Last_chat_keeper
+    ; P.Theme_chosen (Some "ayu-dark"), P.Key.Theme
+    ; P.Theme_chosen None, P.Key.Theme
+    ; P.Language_chosen P.Lang_en, P.Key.Language
+    ; P.Board_sort_chosen Masc.Board_dispatch.Discussed, P.Key.Board_sort
+    ; P.Candle_chosen P.Dotted, P.Key.Candle
+    ; P.Help_hint_retired, P.Key.Help_hint_shown
+    ]
+
 let test_a_change_outside_the_shape_is_refused () =
   let refused label text =
     match parse text with
@@ -202,6 +217,8 @@ let () =
             test_every_change_reads_back_as_written
         ; test_case "a change outside the shape is refused" `Quick
             test_a_change_outside_the_shape_is_refused
+        ; test_case "each change names the setting it moves" `Quick
+            test_each_change_names_the_setting_it_moves
         ] )
     ; ( "settings"
       , [ test_case "settings read as the terminal read them" `Quick

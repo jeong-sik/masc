@@ -171,10 +171,10 @@ let settings_cases =
         with_temp_base (fun ~base ~config:_ ->
           let read = Config.of_settings ~base_path:base (Error "connection refused") in
           check_opt "the reason is kept" (Some "connection refused") read.settings_unread;
-          check_opt "no theme" None read.theme;
-          Alcotest.(check bool) "the overview opens" true (read.opening = Ok Config.Overview);
+          check_opt "no theme" None read.stored.theme;
+          Alcotest.(check bool) "the overview opens" true (read.stored.opening = Ok Config.Overview);
           Alcotest.(check bool) "the last conversation stays unread, not none" true
-            (read.last_chat_keeper = Error "connection refused")))
+            (read.stored.last_chat_keeper = Error "connection refused")))
   ; Alcotest.test_case "the server's settings are what the snapshot holds" `Quick (fun () ->
         with_temp_base (fun ~base ~config:_ ->
           let settings =
@@ -183,9 +183,9 @@ let settings_cases =
           in
           let read = Config.of_settings ~base_path:base (Ok settings) in
           check_opt "nothing unread" None read.settings_unread;
-          check_opt "theme" (Some "monokai") read.theme;
+          check_opt "theme" (Some "monokai") read.stored.theme;
           Alcotest.(check bool) "opening" true
-            (read.opening = Ok (Config.Last (Some (keeper "alpha"))))))
+            (read.stored.opening = Ok (Config.Last (Some (keeper "alpha"))))))
   ; Alcotest.test_case "the start-up read asks the server once" `Quick (fun () ->
         with_temp_base (fun ~base ~config:_ ->
           Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
@@ -197,7 +197,7 @@ let settings_cases =
             let startup = Config.prepare_startup_read ~sw:(Some sw) ~base_path:base ~read_settings in
             let snapshot = Eio.Promise.await_exn startup.result in
             Alcotest.(check int) "one read" 1 !asked;
-            check_opt "candle" (Some "dotted") snapshot.settings.candle))))
+            check_opt "candle" (Some "dotted") snapshot.settings.stored.candle))))
   ]
 
 (* The server's answer to a stored pick. A body of another shape is an unread
@@ -340,6 +340,8 @@ let test_home_visit_stays_with_local_workspace () =
       Writer.close state.preference_writer;
       Alcotest.(check bool) "only alpha was sent" true
         (!sent = [ P.Chat_visited alpha ]);
+      Alcotest.(check bool) "the admitted visit is this session's pick, the declined ones are not" true
+        (state.session_picks = [ P.Key.Last_chat_keeper ]);
       let settled = ref 0 in
       Writer.drain_completed state.preference_writer ~can_take:(fun () -> true)
         ~apply:(fun (completion : Writer.completion) ->

@@ -26,7 +26,7 @@ let keeper name : Tui_types.keeper =
         ; k_total_turns = 0
         ; k_total_tokens = 0
         ; k_total_cost_usd = Keeper_cost_coverage.empty
-        ; k_last_turn_ts = ""
+        ; k_last_turn_at = None
         ; k_last_proactive_outcome = None
         }
   }

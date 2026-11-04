@@ -12425,8 +12425,7 @@ let keeper_reading (state : state) (keeper : keeper) :
   }
 
 let keeper_last_turn_at (keeper : keeper) =
-  Option.bind keeper.k_activity (fun activity ->
-    Masc_domain.parse_iso8601_opt activity.Tui_decode.k_last_turn_ts)
+  Option.bind keeper.k_activity (fun activity -> activity.Tui_decode.k_last_turn_at)
 
 let latest_timestamp left right =
   match left, right with

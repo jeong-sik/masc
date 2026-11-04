@@ -449,24 +449,23 @@ let test_decode_keeper_projects_current_schema () =
         identity.k_updated_at
   | Error err -> Alcotest.fail err
 
-let test_decode_keeper_formats_last_turn_timestamp () =
+let test_decode_keeper_keeps_last_turn_seconds () =
   let timestamp = 1700000000.9 in
   match
     Tui_decode.decode_keeper (current_keeper_json ~last_turn_ts:timestamp ())
   with
   | Ok keeper ->
       let activity = Option.get keeper.k_activity in
-      Alcotest.(check string) "timestamp uses canonical ISO formatter"
-        (Masc_domain.iso8601_of_unix_seconds timestamp)
-        activity.k_last_turn_ts
+      Alcotest.(check (option (float 0.))) "the runtime's seconds are kept as they are"
+        (Some timestamp) activity.k_last_turn_at
   | Error err -> Alcotest.fail err
 
-let test_decode_keeper_zero_last_turn_is_empty () =
+let test_decode_keeper_zero_last_turn_is_none () =
   match Tui_decode.decode_keeper (current_keeper_json ()) with
   | Ok keeper ->
       let activity = Option.get keeper.k_activity in
-      Alcotest.(check string) "zero timestamp becomes empty" ""
-        activity.k_last_turn_ts
+      Alcotest.(check (option (float 0.))) "a zero timestamp is no last turn" None
+        activity.k_last_turn_at
   | Error err -> Alcotest.fail err
 
 let test_terminal_lines_source_mapping () =
@@ -14383,10 +14382,10 @@ let () =
       [
         Alcotest.test_case "projects current schema" `Quick
           test_decode_keeper_projects_current_schema;
-        Alcotest.test_case "formats last turn timestamp" `Quick
-          test_decode_keeper_formats_last_turn_timestamp;
-        Alcotest.test_case "zero last turn is empty" `Quick
-          test_decode_keeper_zero_last_turn_is_empty;
+        Alcotest.test_case "keeps last turn seconds" `Quick
+          test_decode_keeper_keeps_last_turn_seconds;
+        Alcotest.test_case "zero last turn is none" `Quick
+          test_decode_keeper_zero_last_turn_is_none;
         Alcotest.test_case "rejects retired fields" `Quick
           test_decode_keeper_rejects_retired_fields;
         Alcotest.test_case "preserves dotted metadata name" `Quick

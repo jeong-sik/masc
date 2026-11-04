@@ -37,7 +37,9 @@ type keeper_activity = {
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : Keeper_cost_coverage.t;
-  k_last_turn_ts : string;
+  k_last_turn_at : float option;
+      (** Unix seconds of the Keeper's last turn as the runtime recorded it;
+          [None] before its first. *)
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
       (** What the last proactive cycle came to, as the contract types it.
           Kept typed so

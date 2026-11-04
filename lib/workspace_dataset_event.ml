@@ -19,6 +19,7 @@ type dataset =
   | Runtime_probe
   | Runtime_metrics
   | Lanes
+  | Memory_health of { keeper : string }
   | Lane_addons of { instance_id : string }
 
 let repositories_name = "repositories"
@@ -39,6 +40,7 @@ let workspace_health_name = "workspace_health"
 let runtime_probe_name = "runtime_probe"
 let runtime_metrics_name = "runtime_metrics"
 let lanes_name = "lanes"
+let memory_health_name = "memory_health"
 let lane_addons_name = "lane_addons"
 
 let dataset_name = function
@@ -60,6 +62,7 @@ let dataset_name = function
   | Runtime_probe -> runtime_probe_name
   | Runtime_metrics -> runtime_metrics_name
   | Lanes -> lanes_name
+  | Memory_health _ -> memory_health_name
   | Lane_addons _ -> lane_addons_name
 ;;
 
@@ -68,6 +71,7 @@ let keeper_field = function
   | Skill_catalog | Clients | Provider_usage | Provider_standing | Keeper_costs
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
   | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
+  | Memory_health { keeper }
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
     [ "keeper", `String keeper ]
 ;;
@@ -104,6 +108,8 @@ let of_fields fields =
   | Some (`String name) when String.equal name lanes_name -> Ok Lanes
   | Some (`String name) when String.equal name lane_addons_name ->
     Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
+  | Some (`String name) when String.equal name memory_health_name ->
+    Result.map (fun keeper -> Memory_health { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_metrics_name ->
     Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->

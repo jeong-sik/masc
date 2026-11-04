@@ -82,6 +82,8 @@ module For_testing : sig
     declarations:Lane_addon_config.snapshot -> inventory:Lane_addon_runtime.inventory ->
     browser_observations:Lane_addon_runtime.browser_observation list -> t
   val publish_if_changed : base_path:string -> t option -> t -> bool
+  val merge_inventory : live:Lane_addon_runtime.inventory ->
+    retained:Lane_addon_runtime.inventory -> Lane_addon_runtime.inventory
   val machine_publication :
     (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication
   val browser_state : Browser_addon_presence.t -> Browser_lane.Lane_name.t -> state

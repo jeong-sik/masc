@@ -8,6 +8,7 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
   | Addons (Some open_id), Masc.Workspace_dataset_event.Lane_addons { instance_id }
     when String.equal open_id instance_id -> Read_addon instance_id
   | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Lanes
+    | Masc.Workspace_dataset_event.Memory_health _
     | Masc.Workspace_dataset_event.Lane_addons _) -> Ignore
   | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Repositories
     | Masc.Workspace_dataset_event.Verification_requests
@@ -28,6 +29,6 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
     | Masc.Workspace_dataset_event.Runtime_metrics) -> Ignore
 
 let of_views ~lanes ~addon dataset =
-  match addon with
-  | Some instance_id -> of_dataset ~view:(Addons (Some instance_id)) dataset
-  | None -> of_dataset ~view:(if lanes then Lanes else Addons None) dataset
+  match of_dataset ~view:(Addons addon) dataset with
+  | (Read_lanes | Read_addon _) as read -> read
+  | Ignore -> of_dataset ~view:(if lanes then Lanes else Overview) dataset

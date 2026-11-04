@@ -519,6 +519,12 @@ let update_locked ?clock ~keepers_dir ~keeper_id ~on_commit build =
     else Ok (next, outcome))
 ;;
 
+let health_commit_observer = ref (fun ~keepers_dir:_ ~keeper_id:_ -> ())
+let install_commit_observer observer =
+  let previous = !health_commit_observer in
+  health_commit_observer := observer;
+  fun () -> health_commit_observer := previous
+
 let with_commit_notification ~keepers_dir ~keeper_id write =
   Fs_compat.mkdir_p keepers_dir;
   let notification_keepers_dir = Unix.realpath keepers_dir in
@@ -531,10 +537,14 @@ let with_commit_notification ~keepers_dir ~keeper_id write =
   (* Mark the authoritative write inside the transaction; dispatch only after
      its locks unwind, including an exception raised by lock cleanup. *)
   match write (fun snapshot -> committed := Some snapshot.revision) with
-  | result -> notify (); result
+  | result ->
+      notify ();
+      !health_commit_observer ~keepers_dir:notification_keepers_dir ~keeper_id;
+      result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
     notify ();
+    !health_commit_observer ~keepers_dir:notification_keepers_dir ~keeper_id;
     Printexc.raise_with_backtrace exn backtrace
 ;;
 

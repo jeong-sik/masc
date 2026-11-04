@@ -79,6 +79,9 @@ type dataset =
       (** The operator Lane inventory, [GET /api/v1/lanes]: the displayed
           instance phase, presence, revision, application, or browser/machine
           summary changed. *)
+  | Memory_health of { keeper : string }
+      (** The Memory health projection of [keeper] changed after a durable
+          memory, continuity or progress write. *)
   | Lane_addons of { instance_id : string }
       (** The open Add-on Inspect of [instance_id] has a newly committed
           observation. The event carries the instance only, never its rows. *)

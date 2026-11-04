@@ -6391,6 +6391,7 @@ let launch_memory_health_load state ~mailbox =
      || not (same_workspace_identity state.server_identity state.server_identity) then ()
   else begin
     state.memory_health_inflight <- true;
+    state.memory_health_owed <- Masc_tui_owed_read.started state.memory_health_owed;
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -8156,6 +8157,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Workspace_health -> owe_overview_read state
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
+  | Masc.Workspace_dataset_event.Memory_health _ ->
+      state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
   | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
       let module Decision = Masc_tui_lane_read_decision in
       let addon = Option.bind state.lane_addons (fun (view : Masc_tui_lane_addons.t) ->
@@ -9193,6 +9196,19 @@ let launch_owed_lane_addons state ~mailbox =
                         Masc_tui_lane_addons.Inspect
                   end
                 end))
+
+let owe_memory_health_read state =
+  state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
+
+let launch_owed_memory_health state ~mailbox =
+  if state.view <> Memory then
+    state.memory_health_owed <- Masc_tui_owed_read.settled
+  else begin
+    if not state.memory_health_inflight then
+      state.memory_health_owed <- Masc_tui_owed_read.abandoned state.memory_health_owed;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.memory_health_owed then
+      launch_memory_health_load state ~mailbox
+  end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -16593,6 +16609,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
+  state.memory_health_owed <- Masc_tui_owed_read.settled;
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.task_detail_id <- None;
@@ -16638,6 +16655,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
+  state.memory_health_owed <- Masc_tui_owed_read.settled;
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
@@ -23094,6 +23112,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            connection replays every event since the last applied one, the
            visible surfaces read once more (RFC-0480 §3.3). *)
         if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+          if state.view = Memory then owe_memory_health_read state;
           if state.view = Lanes then
             owe_dataset_read state Masc.Workspace_dataset_event.Lanes;
           Option.iter (fun (view : Masc_tui_lane_addons.t) ->
@@ -27432,8 +27451,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.memory_health_inflight <- false;
       (match result with
       | Ok snapshot ->
+          state.memory_health_owed <- Masc_tui_owed_read.succeeded state.memory_health_owed;
           apply_memory_health_snapshot state snapshot
-      | Error detail -> state.memory_health_error <- Some detail);
+      | Error detail ->
+          state.memory_health_owed <- failed_read state.memory_health_owed;
+          state.memory_health_error <- Some detail);
       launch_memory_input_load state ~mailbox ~refresh:true
   | Memory_input_loaded (request, result) ->
       state.memory_input <-
@@ -32892,6 +32914,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_held_calls state ~mailbox:async_messages;
       launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_verification state ~mailbox:async_messages;
+      launch_owed_memory_health state ~mailbox:async_messages;
       launch_owed_lanes state ~mailbox:async_messages;
       launch_owed_lane_addons state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;

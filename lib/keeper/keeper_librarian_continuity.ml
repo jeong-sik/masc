@@ -432,8 +432,18 @@ let unchanged_snapshot ~config ~keeper_name ~prepared =
   let* current = load ~config ~keeper_name in
   if current = prepared.previous then Ok ()
   else Error "continuity snapshot changed during generation"
+let commit_observer = ref (fun ~config:_ ~keeper_name:_ -> ())
+let install_commit_observer observer =
+  let previous = !commit_observer in
+  commit_observer := observer;
+  fun () -> commit_observer := previous
+
 let save_snapshot ~config ~keeper_name snapshot =
-  S.save ~path:(path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string
+  match S.save ~path:(path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string with
+  | Ok snapshot ->
+      !commit_observer ~config ~keeper_name;
+      Ok snapshot
+  | Error _ as error -> error
 let with_original_source ~config ~keeper_name ~prepared publish =
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) prepared.trace_id in
   let locked = C.with_agent_core_exact_snapshot_since ~session_dir ~known:prepared.source

@@ -145,7 +145,8 @@ let summary = function
       ^ (match dataset with
          | Masc.Workspace_dataset_event.Keeper_metrics { keeper }
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
-         | Masc.Workspace_dataset_event.Skill_activations { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Skill_activations { keeper }
+         | Masc.Workspace_dataset_event.Memory_health { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -1505,6 +1506,22 @@ let test_lane_inventory_pushes_decode_with_their_scope () =
     [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"\"}\n\n" ]
 
+let test_memory_health_pushes_require_their_keeper () =
+  let fields = [ "type", `String "workspace_dataset_changed"
+               ; "dataset", `String "memory_health"; "keeper", `String "alpha" ] in
+  (match Masc.Workspace_dataset_event.of_fields fields with
+   | Ok (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
+       check string "the changed Keeper is preserved" "alpha" keeper
+   | Ok _ | Error _ -> fail "a Memory health push lost its Keeper");
+  List.iter
+    (fun frame ->
+      match decode_all [ frame ] with
+      | [ Observer.Undecodable _ ] -> ()
+      | decoded -> failf "a Memory health push without a valid Keeper was read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"\"}\n\n" ]
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -1558,6 +1575,8 @@ let () =
             test_a_repository_push_reads_the_list
         ; test_case "Lane inventory pushes decode with their scope" `Quick
             test_lane_inventory_pushes_decode_with_their_scope
+        ; test_case "Memory health pushes require their Keeper" `Quick
+            test_memory_health_pushes_require_their_keeper
         ; test_case "a queue push names its Keeper" `Quick
             test_a_queue_push_names_its_keeper
         ; test_case "only a confirmation change reads the confirmations" `Quick

@@ -1069,6 +1069,12 @@ let observe_recall_append path (observation : Fs_compat.private_jsonl_append_obs
 (* Every journal writer and receipt recovery uses the canonical path mutex
    and stable sibling lock. A data-file lock can be released by an unrelated
    reader closing the journal; the sibling lock remains held through append. *)
+let commit_observer = ref (fun ~keepers_dir:_ ~keeper_id:_ -> ())
+let install_commit_observer observer =
+  let previous = !commit_observer in
+  commit_observer := observer;
+  fun () -> commit_observer := previous
+
 let append_journal_line_strict ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let suffix = Yojson.Safe.to_string json ^ "\n" in
@@ -1078,6 +1084,7 @@ let append_journal_line_strict ~keepers_dir ~keeper_id json =
      | None -> publish_recall_cache path None
      | Some observation -> observe_recall_append path observation json);
     Keeper_memory_journal_broadcast.appended ~keeper_name:keeper_id;
+    !commit_observer ~keepers_dir ~keeper_id;
     Ok ()
   | Error error ->
     Error

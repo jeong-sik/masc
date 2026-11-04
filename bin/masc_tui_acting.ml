@@ -513,6 +513,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe -> "runtime probe"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics -> "runtime history"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> "add-ons"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
@@ -698,6 +699,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "the runtime history took or dropped a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the Lane inventory changed" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
+      { at; keeper; glyph = Quiet; label; detail = "the Memory health projection changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Keeper_event_queue_changed { keeper } ->

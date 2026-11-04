@@ -274,9 +274,18 @@ let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Flo
   "package_read",`Assoc ["directory",str t.directory;"complete",`Bool t.complete;
     "owner_present",`Bool t.owner_present;"issues",`List (List.map (fun (path,detail) ->
       `Assoc ["source_path",str path;"message",str detail]) t.issues)]]
+let without_fields names fields =
+  List.filter (fun (name, _) -> not (List.mem name names)) fields
+
 let display_json t =
   match to_json t with
-  | `Assoc fields -> `Assoc (List.filter (fun (name, _) -> name <> "observed_at") fields)
+  | `Assoc fields ->
+      let fields = without_fields ["observed_at"] fields in
+      `Assoc (List.map (fun (name, json) ->
+        name, match name, json with
+          | "exact_snapshot", `Assoc exact ->
+              `Assoc (without_fields ["generated_at"; "observed_at_unix"] exact)
+          | _, _ -> json) fields)
   | _ -> assert false
 
 let publish_if_changed ~base_path before after =
@@ -290,6 +299,7 @@ let publish_if_changed ~base_path before after =
 type cache = {
   mutex : Eio.Mutex.t;
   mutable previous : t option;
+  mutable announced : t option;
   mutable sources : cached_sources option;
 }
 
@@ -302,32 +312,46 @@ let with_workspace_cache base_path f =
       match Hashtbl.find_opt caches base_path with
       | Some cache -> cache
       | None ->
-          let cache = { mutex = Eio.Mutex.create (); previous = None; sources = None } in
+          let cache = { mutex = Eio.Mutex.create (); previous = None; announced = None; sources = None } in
           Hashtbl.add caches base_path cache;
           cache) in
   Eio.Mutex.use_rw ~protect:true cache.mutex (fun () -> f cache)
 
-let refresh_full ~base_path ~announce cache ~config =
-  let sources, next = read_snapshot_parts ~config in
-  cache.sources <- Some sources;
-  let changed = match cache.previous with
+let merge_inventory ~(live : Addon.inventory) ~(retained : Addon.inventory) =
+  let live_ids = List.map (fun (item : Addon.inventory_instance) -> item.instance_id) live.instances in
+  let retained = List.filter (fun (item : Addon.inventory_instance) ->
+    item.presence = Addon.Retained && not (List.mem item.instance_id live_ids)) retained.instances in
+  { owner_present = live.owner_present
+  ; instances = List.sort (fun (left : Addon.inventory_instance) right ->
+      String.compare left.instance_id right.instance_id) (live.instances @ retained)
+  ; issues = live.issues @ retained.issues
+  ; complete = live.complete && retained.complete
+  ; applications = [] }
+
+let publish_projection ~base_path ~announce cache next =
+  let changed = match cache.announced with
     | Some previous -> not (Yojson.Safe.equal (display_json previous) (display_json next))
     | None -> true in
   cache.previous <- Some next;
-  if announce && changed then
+  if announce && changed then begin
+    cache.announced <- Some next;
     Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Lanes
+  end
+
+let refresh_full ~base_path ~announce cache ~config =
+  let sources, next = read_snapshot_parts ~config in
+  cache.sources <- Some sources;
+  publish_projection ~base_path ~announce cache next
 
 let refresh_live ~base_path ~announce cache ~config =
   match cache.sources with
   | None -> refresh_full ~base_path ~announce cache ~config
   | Some sources ->
-      let retained = List.filter (fun (item : Addon.inventory_instance) ->
-        item.presence = Addon.Retained) sources.inventory.instances in
+      let retained = { sources.inventory with instances =
+        List.filter (fun (item : Addon.inventory_instance) ->
+          item.presence = Addon.Retained) sources.inventory.instances } in
       let live = Addon.inventory_live ~config in
-      let inventory = { live with
-        instances = live.instances @ retained;
-        issues = live.issues @ sources.inventory.issues;
-        complete = live.complete && sources.inventory.complete } in
+      let inventory = merge_inventory ~live ~retained in
       let applications = Addon.configuration_applications ~config ~inventory in
       let browser_observations = Addon.browser_observations ~config
           ~access:Lane_addon_sources.Operator_configuration in
@@ -335,12 +359,7 @@ let refresh_live ~base_path ~announce cache ~config =
           ~machine_configuration:sources.machine_configuration
           ~directory:sources.directory ~declarations:sources.declarations
           ~inventory:{ inventory with applications } ~browser_observations in
-      let changed = match cache.previous with
-        | Some previous -> not (Yojson.Safe.equal (display_json previous) (display_json next))
-        | None -> true in
-      cache.previous <- Some next;
-      if announce && changed then
-        Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Lanes
+      publish_projection ~base_path ~announce cache next
 
 let refresh ~base_path kind =
   let config = Workspace.default_config base_path in
@@ -352,7 +371,9 @@ let refresh ~base_path kind =
 
 let snapshot ~config =
   with_workspace_cache config.Workspace.base_path (fun cache ->
+    let cold = Option.is_none cache.previous in
     refresh_full ~base_path:config.base_path ~announce:false cache ~config;
+    if cold && Option.is_none cache.announced then cache.announced <- cache.previous;
     Option.get cache.previous)
 
 let install () =
@@ -365,6 +386,7 @@ module For_testing = struct
       ~machine_configuration:(Runtime.machine_configuration ())
       ~directory ~declarations ~inventory ~browser_observations
   let publish_if_changed = publish_if_changed
+  let merge_inventory = merge_inventory
   let machine_publication = machine_publication
   let browser_state = browser_state
   let package_rows = package_rows

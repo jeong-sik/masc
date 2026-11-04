@@ -3244,7 +3244,7 @@ let historical_detach ~sw ?(wait = false) m fields =
           raise exn
       | exn -> Error (Printexc.to_string exn) in
     let* () = match intent with
-      | Ok () -> Ok ()
+      | Ok () -> notify_inventory m Retained_changed; Ok ()
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
     let backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
     let finished = ref None in

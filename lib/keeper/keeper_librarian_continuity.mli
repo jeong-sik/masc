@@ -62,6 +62,9 @@ val previous_working_state : prepared -> string option
     message-by-message inference. This does not grant publication authority. *)
 val previous_unread_messages : prepared -> Keeper_librarian_unread.t list
 (** Exact prior holes retained only when the previous snapshot fits. *)
+val install_commit_observer :
+  (config:Workspace.config -> keeper_name:string -> unit) -> (unit -> unit)
+
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   new_unread_messages:Keeper_librarian_unread.t list -> working_state:string ->
   (Librarian_continuity_snapshot.t, string) result

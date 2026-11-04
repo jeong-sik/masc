@@ -149,6 +149,16 @@ type workspace_store =
      verifier's observations. *)
   | Goal_projection
 
+(* A whole-projection push. The TUI re-reads what [Transport_health]
+   measures; the others are named for the Acting row only. *)
+type projection =
+  | Transport_health
+  | Unread_projection of string
+
+let projection_name = function
+  | Transport_health -> Masc.Dashboard_event_slices.transport_health_snapshot_type
+  | Unread_projection name -> name
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -211,7 +221,7 @@ type event =
      could not be shown removed. It rides the agent-core family on the wire,
      but it is the lane runtime's fact, not an agent's. *)
   | Lane_resource of lane_resource
-  | Snapshot of string
+  | Snapshot of projection
   (* The execution snapshot: a backlog or goal index write, or the server's
      periodic refresh. Readers of the Work surface and the Verification queue
      read again on it. *)
@@ -379,6 +389,23 @@ let goal_projection_changed = function
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
+      false
+
+let transport_health_measured = function
+  | Snapshot Transport_health -> true
+  | Snapshot (Unread_projection _)
+  | Dataset_changed _
+  | Internal_agent_runs_changed _
+  | Workspace_store_changed _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _ | Keeper_metrics_appended _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Gate_connector_changed _ | Keeper_event_queue_changed _
+  | Board_changed _ | Approval_change _
+  | Lane_resource _ | Execution_snapshot | Other _ ->
       false
 
 let roster_change = function
@@ -1008,6 +1035,8 @@ let reading_of_type type_name =
           | None -> Error (event ^ " carries no name"))
   | event when String.equal event Masc.Dashboard_event_slices.execution_snapshot_type ->
       Named Execution_snapshot
+  | event when String.equal event Masc.Dashboard_event_slices.transport_health_snapshot_type ->
+      Named (Snapshot Transport_health)
   | other -> (
       (* Which event types are whole-projection pushes is the wire's
          business, not this decoder's. Three were named here and the
@@ -1023,7 +1052,7 @@ let reading_of_type type_name =
          the keeper events, including the one delta with a slice, are
          matched above and never reach here anyway. *)
       match Masc.Dashboard_event_slices.carries_whole_projection other with
-      | true -> Named (Snapshot other)
+      | true -> Named (Snapshot (Unread_projection other))
       | false -> Named (Other other))
 
 (* The server sends Board writes as a JSON-RPC notification, so the event

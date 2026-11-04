@@ -348,11 +348,17 @@ On the Task Review list one more item fits in them: `h:queue / history`.
 
 On the Changes list the footer did not start with the `ACTION NEEDED` row
 before layer 16 and does now, like the Goals, Schedules, Logs and Runtime lists.
-The row takes 66 of the 120 cells while the fixture reports three reasons, so
-`j/k:move`, `[ / ]:keeper`, `PgUp/PgDn:page` and `Home/End:top/bottom` no longer
-fit and are left out of the line above. They stay in the `?` cheat sheet. Those
-four lists already left their movement items out on both sides. The Board, Task
-Review and Task Verdicts footers carry no such row on either side.
+The footer never drops `Right / Enter:written diff`, `Esc:back`, `q:quit` and the
+`…?` help mark, and it gives up the other keys before it gives up the notice.
+Those items take 55 cells with `Left / Esc:back` and 48 with `Esc:back`. With the
+65-cell notice and a gap of two cells that is 122 cells against 115, in a row of
+120. So the notice did not fit before and fits now, and `j/k:move`,
+`[ / ]:keeper`, `PgUp/PgDn:page` and `Home/End:top/bottom` no longer fit beside
+it and are left out of the line above. They stay in the `?` cheat sheet. The
+widths come from the footer strings shown above, not from a measurement of the
+fitting code. The Goals, Schedules, Logs and Runtime lists already left their
+movement items out on both sides. The Board, Task Review and Task Verdicts
+footers carry no such row on either side.
 
 With a detail open the footer still names `Left / Esc`, on both sides:
 

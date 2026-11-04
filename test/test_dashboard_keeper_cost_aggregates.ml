@@ -640,6 +640,96 @@ let test_window_bounds () =
       | Ok minutes -> failf "window %S was accepted as %d" raw minutes)
     [ "0"; "-1"; string_of_int (max + 1); string_of_int max_int; "1e12"; "abc"; "" ]
 
+(* Several reads of one workspace, as the server makes them. *)
+let with_workspace prefix f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let config = Workspace.default_config (temp_dir prefix) in
+  ignore (Workspace.init config ~agent_name:None);
+  f config
+
+let aggregate_at config ~keeper_name ~now_ts =
+  Dashboard_http_keeper.keeper_cost_aggregates_json
+    ~config ~keepers:[ make_meta keeper_name ] ~window_minutes:default_window_minutes ~now_ts
+  |> keeper_item
+
+let default_window_seconds = float_of_int default_window_minutes *. 60.0
+
+let replace_once ~sub ~by text =
+  let n = String.length sub in
+  let rec find i =
+    if i + n > String.length text then fail ("no " ^ sub ^ " in the day file")
+    else if String.equal (String.sub text i n) sub then i
+    else find (i + 1)
+  in
+  let at = find 0 in
+  String.sub text 0 at ^ by ^ String.sub text (at + n) (String.length text - at - n)
+
+(* The day files are kept between reads: a second read folds the rows a file
+   gained, not the file again. A row rewritten in place, same length, while
+   the file grows is outside the append-only contract, and shows which read
+   ran: a second whole read would sum the rewrite. *)
+let test_a_second_read_folds_only_the_rows_appended () =
+  with_workspace "keeper_cost_kept" (fun config ->
+    let now = fixed_now in
+    let first = now -. 2.0 and second = now -. 1.0 in
+    write_dated_rows config "kept" [ (first, turn_json ~ts:first ~tokens:10) ];
+    check int "the first read takes the row" 10
+      (int_field "total_tokens" (aggregate_at config ~keeper_name:"kept" ~now_ts:now));
+    let location = Keeper_types_support.keeper_store_location config "kept" Metrics in
+    let path = (Dated_jsonl.Store.dated_path location ~ts:first).path in
+    let rewritten =
+      replace_once ~sub:{|"total_tokens":10|} ~by:{|"total_tokens":90|}
+        (In_channel.with_open_bin path In_channel.input_all)
+    in
+    Out_channel.with_open_gen [ Open_wronly; Open_binary ] 0o644 path (fun oc ->
+      output_string oc rewritten);
+    write_dated_rows config "kept" [ (second, turn_json ~ts:second ~tokens:5) ];
+    let aggregate = aggregate_at config ~keeper_name:"kept" ~now_ts:now in
+    check int "the second read adds only the appended row" 15 (int_field "total_tokens" aggregate);
+    check int "both turns are samples" 2 (int_field "sample_count" aggregate))
+
+(* With no new row the answer changes when a kept row leaves the window: at
+   the first instant after its time plus the window, which is what the
+   server sleeps until before it announces the change. *)
+let test_the_next_change_is_when_a_kept_row_leaves () =
+  with_workspace "keeper_cost_next_change" (fun config ->
+    let now = fixed_now in
+    let ts = now -. 60.0 in
+    write_dated_rows config "leaving" [ (ts, turn_json ~ts ~tokens:10) ];
+    ignore (aggregate_at config ~keeper_name:"leaving" ~now_ts:now);
+    let leaves = Float.succ (ts +. default_window_seconds) in
+    check (option (float 0.)) "the row is the next change" (Some leaves)
+      (Dashboard_http_keeper_feeds.keeper_costs_next_change
+         ~base_path:config.Workspace.base_path ~now);
+    check int "the instant before, it counts" 1
+      (int_field "sample_count"
+         (aggregate_at config ~keeper_name:"leaving" ~now_ts:(ts +. default_window_seconds)));
+    check int "from that instant, it does not" 0
+      (int_field "sample_count" (aggregate_at config ~keeper_name:"leaving" ~now_ts:leaves));
+    let today_starts = now -. Float.rem now seconds_per_day in
+    check (option (float 0.)) "then its day file leaving is the next change"
+      (Some (today_starts +. seconds_per_day +. default_window_seconds))
+      (Dashboard_http_keeper_feeds.keeper_costs_next_change
+         ~base_path:config.Workspace.base_path ~now:leaves))
+
+(* A row no time places counts while its day file is in the window, and
+   stops when that day leaves it. *)
+let test_an_unplaced_row_leaves_with_its_day () =
+  with_workspace "keeper_cost_unplaced" (fun config ->
+    let now = fixed_now in
+    write_dated_rows config "torn" [ (now, "{\"ts_unix\":") ];
+    let read now_ts = metrics_read (aggregate_at config ~keeper_name:"torn" ~now_ts) in
+    check int "the torn row counts today" 1 (int_field "malformed_rows" (read now));
+    let today_starts = now -. Float.rem now seconds_per_day in
+    let leaves = today_starts +. seconds_per_day +. default_window_seconds in
+    check (option (float 0.)) "its day leaving is the next change" (Some leaves)
+      (Dashboard_http_keeper_feeds.keeper_costs_next_change
+         ~base_path:config.Workspace.base_path ~now);
+    check int "the instant before, it counts" 1 (int_field "malformed_rows" (read (leaves -. 1.0)));
+    check int "from that instant, it does not" 0 (int_field "malformed_rows" (read leaves)))
+
 let () =
   run "dashboard_keeper_cost_aggregates"
     [
@@ -655,6 +745,12 @@ let () =
           test_case "an unreadable store is a failure" `Quick
             test_an_unreadable_store_is_a_failure;
           test_case "window bounds" `Quick test_window_bounds;
+          test_case "a second read folds only the rows appended" `Quick
+            test_a_second_read_folds_only_the_rows_appended;
+          test_case "the next change is when a kept row leaves" `Quick
+            test_the_next_change_is_when_a_kept_row_leaves;
+          test_case "an unplaced row leaves with its day" `Quick
+            test_an_unplaced_row_leaves_with_its_day;
           test_case "accepts only current turn rows" `Quick
             test_only_current_turn_rows_count_as_cost_samples;
           test_case "unreported cost is counted, not summed as zero" `Quick

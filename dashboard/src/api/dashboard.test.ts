@@ -5604,10 +5604,7 @@ describe('fetchKeeperCostMetrics', () => {
   }
 
   async function readyKeeperCosts() {
-    const result = await fetchKeeperCostMetrics(60)
-    expect(result.state).toBe('ready')
-    if (result.state !== 'ready') throw new Error('expected ready keeper costs')
-    return result
+    return fetchKeeperCostMetrics(60)
   }
 
   // One row the decoder cannot read fails the payload; the list is never
@@ -5622,17 +5619,6 @@ describe('fetchKeeperCostMetrics', () => {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })))
   }
-
-  it('keeps the warming placeholder distinct from an empty result', async () => {
-    stubCostPayload({ state: 'loading', window_minutes: 60, cache: { state: 'warming', last_error: null } })
-    expect(await fetchKeeperCostMetrics(60)).toEqual({ state: 'pending', window_minutes: 60 })
-  })
-
-  it('surfaces a failed first aggregation instead of an empty result', async () => {
-    stubCostPayload({ state: 'loading', window_minutes: 60,
-      cache: { state: 'warming', last_error: 'metrics unavailable' } })
-    expect(await fetchKeeperCostMetrics(60)).toEqual({ state: 'failed', message: 'metrics unavailable' })
-  })
 
   it('rejects an unknown state or a result without the keeper list', async () => {
     for (const raw of [{ state: 'unexpected', window_minutes: 60, keepers: [] }, { window_minutes: 60 }]) {

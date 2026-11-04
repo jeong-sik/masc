@@ -7,7 +7,7 @@ updated: 2026-11-04
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["0477", "0481", "0482", "0461", "observe-by-waking-not-polling"]
+related: ["0477", "0481", "0482", "0485", "0461", "observe-by-waking-not-polling"]
 ---
 
 # RFC-0480 — TUI 는 서버가 알릴 때 읽는다
@@ -267,4 +267,4 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 
 1. SSE 버퍼에 들어가기 전에 실패한 알림(§3.4 끝)을 클라이언트가 알 방법. 서버가 실패를 세는 것만으로는 화면이 멈춘 것을 메우지 못한다.
 
-정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0482 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 와 Add-ons 는 서버가 2초마다 그리는 값을 비교한다(§7). Add-ons 알림은 instance id 를 싣고, TUI 는 그 instance 를 보여 줄 때만 읽는다. Skill 원장 쓰기는 Keeper 이름을 받는다. Home Health 줄은 서버가 정한 간격으로 다시 계산해 바뀔 때만 알린다. Runtime probe 는 서버가 루프를 갖고 결과가 바뀔 때 알린다. ask follow-up 은 완료에서 끝나고 실패는 백오프로 다시 읽으며 Approvals 를 떠나면 멈춘다.
+정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0485 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 와 Add-ons 는 서버가 2초마다 그리는 값을 비교한다(§7). Add-ons 알림은 instance id 를 싣고, TUI 는 그 instance 를 보여 줄 때만 읽는다. Skill 원장 쓰기는 Keeper 이름을 받는다. Home Health 줄은 서버가 정한 간격으로 다시 계산해 바뀔 때만 알린다. Runtime probe 는 서버가 루프를 갖고 결과가 바뀔 때 알린다. ask follow-up 은 완료에서 끝나고 실패는 백오프로 다시 읽으며 Approvals 를 떠나면 멈춘다.

@@ -532,8 +532,11 @@ type auth_config = {
   workspace_secret_hash : string option;
   require_token : bool;
   token_expiry_hours : int;     (* 기본값: 24 *)
+  account_mode : account_mode option;  (* 기본값: None. Single_user | Multi_account *)
 }
 ```
+
+`account_mode`는 요청이다. 서버가 어떤 모드로 뜰지는 부팅 때 `Authz_boot_mode.judge`가 권한 기록(authz log)의 마지막 모드 이벤트와 외부 high-water mark를 함께 보고 정한다.
 
 ### 9.5 Rate Limit
 

@@ -2559,6 +2559,88 @@ let keeper_workspace_headers (identity : Masc.Tui_decode.server_identity) =
   ; Masc.Request_workspace_precondition.expected_masc_root_header,
     Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ]
 
+(* RFC-0482 §3.1: the terminal's [tui] table lives in the runtime.toml the
+   server writes. Both calls carry this terminal's own workspace paths, so a
+   server of another workspace on the port refuses (409) instead of answering
+   with, or storing into, its own settings. *)
+let tui_preferences_path = "/api/v1/tui/preferences"
+
+let own_workspace_headers ~base_path ~masc_root =
+  [ Masc.Request_workspace_precondition.expected_base_path_header,
+    Masc.Tui_decode.Canonical_path.to_string base_path
+  ; Masc.Request_workspace_precondition.expected_masc_root_header,
+    Masc.Tui_decode.Canonical_path.to_string masc_root ]
+
+let fetch_tui_preferences ~host ~port ~base_path ~masc_root =
+  match
+    http_get_response ~host ~port ~path:tui_preferences_path
+      ~headers:(own_workspace_headers ~base_path ~masc_root)
+  with
+  | Error detail -> Error detail
+  | Ok { Masc_http_client.status; body; headers = _ } ->
+    if Masc.Tui_decode.is_success_http_status status then
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_preference.settings_of_yojson json
+      | exception Yojson.Json_error detail -> Error ("The settings answer is not JSON: " ^ detail)
+    else Error (refusal ~status_code:status ~body)
+
+let string_list_of_json = function
+  | `List values ->
+    List.fold_right
+      (fun value acc ->
+         match value, acc with
+         | `String text, Ok texts -> Ok (text :: texts)
+         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), Error e ->
+           Error e
+         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _), Ok _ ->
+           Error "a list entry is not a string")
+      values (Ok [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Error "not a list"
+
+(* The answer of a stored pick: committed with its receipt, or unchanged. *)
+let tui_preference_answer body : (Masc_tui_preference_writer.saved, string) result =
+  let open Result.Syntax in
+  let* json =
+    match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error detail -> Error ("not JSON: " ^ detail)
+  in
+  let member name = Yojson.Safe.Util.member name json in
+  match member "state" with
+  | `String "unchanged" -> Ok Masc_tui_preference_writer.Unchanged
+  | `String "committed" ->
+    let commit name = Yojson.Safe.Util.member name (member "commit") in
+    let* durability =
+      match commit "durability", commit "durability_detail" with
+      | `String "durable", `Null -> Ok Runtime.Durable
+      | `String "unconfirmed", `String detail -> Ok (Runtime.Durability_unconfirmed { detail })
+      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), _ ->
+        Error "the commit does not say whether it is durable"
+    in
+    let* ignored_legacy_keys = string_list_of_json (commit "ignored_legacy_keys") in
+    Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys })
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+    Error "the answer names no state"
+
+let post_tui_preference ~host ~port ~base_path ~masc_root change :
+    (Masc_tui_preference_writer.saved, Masc_tui_preference_writer.failure) result =
+  match
+    http_post
+      ~headers:(own_workspace_headers ~base_path ~masc_root @ auth_headers ())
+      ~host ~port ~path:tui_preferences_path
+      ~body:(Yojson.Safe.to_string (Masc.Tui_preference.change_to_yojson change))
+  with
+  | Error detail -> Error (Masc_tui_preference_writer.Unobserved detail)
+  | Ok (status, body) when Masc.Tui_decode.is_success_http_status status ->
+    (* The server answered 2xx, so the pick was handled; an answer this client
+       cannot read leaves only whether it was stored unknown. *)
+    Result.map_error
+      (fun detail -> Masc_tui_preference_writer.Unobserved ("Saved, but the answer is unreadable: " ^ detail))
+      (tui_preference_answer body)
+  | Ok ((401 | 403) as status_code, body) ->
+    Error (Masc_tui_preference_writer.Not_permitted (refusal ~status_code ~body))
+  | Ok (status_code, body) -> Error (Masc_tui_preference_writer.Refused (refusal ~status_code ~body))
+
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
     Returns the HTTP status alongside the body: a paused owner refuses [boot]

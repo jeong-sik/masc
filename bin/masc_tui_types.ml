@@ -4195,6 +4195,14 @@ type board_sort =
   | Board_updated
   | Board_discussed
 
+(* The server's own order for the same choice; the [tui] table stores that. *)
+let board_sort_order = function
+  | Board_hot -> Masc.Board_dispatch.Hot
+  | Board_trending -> Masc.Board_dispatch.Trending
+  | Board_recent -> Masc.Board_dispatch.Recent
+  | Board_updated -> Masc.Board_dispatch.Updated
+  | Board_discussed -> Masc.Board_dispatch.Discussed
+
 let board_sort_label = function
   | Board_hot -> "hot"
   | Board_trending -> "trending"
@@ -5641,7 +5649,7 @@ let config_panes =
     Defaults to [Lang_ko], is stored as [tui].language in runtime.toml, and is
     switchable at runtime via the command palette ([:language]), the System
     sub-navigation bar, or the Themes pane. *)
-type ui_language =
+type ui_language = Masc.Tui_preference.language =
   | Lang_ko
   | Lang_en
 
@@ -5662,15 +5670,8 @@ let next_ui_language = function
 (* The [tui].language spelling in runtime.toml. Unknown values read as [None]
    rather than as a forced default: the caller says the stored value back so
    the operator sees their file did not take. *)
-let ui_language_of_string value =
-  match String.lowercase_ascii (String.trim value) with
-  | "ko" -> Some Lang_ko
-  | "en" -> Some Lang_en
-  | _ -> None
-
-let ui_language_to_string = function
-  | Lang_ko -> "ko"
-  | Lang_en -> "en"
+let ui_language_of_string = Masc.Tui_preference.language_of_string
+let ui_language_to_string = Masc.Tui_preference.language_to_string
 
 let surface_ring_display_label ~lang (surface : surface) fallback =
   match lang with
@@ -9313,10 +9314,14 @@ type state = {
   mutable home_decision_receipt : (home_request * string) option;
   mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
-  home_chat_writer : Masc_tui_chat_visit.t;
+  preference_writer : Masc_tui_preference_writer.t;
+  (* The [tui] picks on their way to the server, in the order they were made. *)
   keeper_preference_writer : Masc_tui_config.keeper_preference_writer;
   credential_preparation : Masc_tui_credential_preparation.t;
-  mutable home_chat_visit : Masc_tui_chat_visit.request option;
+  mutable home_chat_visit : Masc_tui_preference_writer.request option;
+  mutable preference_refusal_said : bool;
+  (* A terminal whose credential may not write runtime.toml is told once,
+     not on every pick. *)
   mutable metrics_scroll: int;
   mutable metrics_content_height: int;
   mutable metrics_scroll_card_rows: int option;
@@ -15255,8 +15260,10 @@ let remember_local_chat_visit (state : state) ~sw keeper =
   | Workspace_identity_match, Some identity
     when workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
            (Ok identity) = Workspace_identity_match ->
-      let request = Masc_tui_chat_visit.submit state.home_chat_writer
-          ~sw ~base_path:state.local_base_path keeper in
+      let request =
+        Masc_tui_preference_writer.submit state.preference_writer ~sw
+          (Masc.Tui_preference.Chat_visited keeper)
+      in
       state.home_chat_visit <- Some request;
       state.home_last_chat <- Saving_chat keeper;
       true
@@ -15266,18 +15273,25 @@ let remember_local_chat_visit (state : state) ~sw keeper =
 
 (* The latest explicit visit owns the Home receipt. The same name can be
    visited again before an older write settles, so compare the request too. *)
-let accept_chat_visit (state : state) (completion : Masc_tui_chat_visit.completion) =
-  let current = String.equal completion.request.base_path state.local_base_path
-    && Option.exists (Masc_tui_chat_visit.same_request completion.request) state.home_chat_visit in
+let accept_chat_visit (state : state) (completion : Masc_tui_preference_writer.completion) keeper =
+  let current =
+    Option.exists (Masc_tui_preference_writer.same_request completion.request) state.home_chat_visit
+  in
   if current then begin
     state.home_chat_visit <- None;
-    let keeper = completion.request.keeper in
     state.home_last_chat <-
-      match completion.outcome with
-      | Masc_tui_chat_visit.Saved Runtime.Durable -> Recorded_chat keeper
-      | Saved (Runtime.Durability_unconfirmed { detail }) -> Unconfirmed_chat { keeper; detail }
-      | Refused save_error | Not_started save_error -> Session_chat { keeper; save_error }
-      | Unobserved detail -> Unobserved_chat { keeper; detail }
+      (match completion.outcome with
+       | Ok (Masc_tui_preference_writer.Committed { durability = Runtime.Durable; _ })
+       | Ok Masc_tui_preference_writer.Unchanged -> Recorded_chat keeper
+       | Ok (Masc_tui_preference_writer.Committed
+               { durability = Runtime.Durability_unconfirmed { detail }; _ }) ->
+         Unconfirmed_chat { keeper; detail }
+       | Error
+           ( Masc_tui_preference_writer.Refused save_error
+           | Masc_tui_preference_writer.Not_permitted save_error
+           | Masc_tui_preference_writer.Not_started save_error ) ->
+         Session_chat { keeper; save_error }
+       | Error (Masc_tui_preference_writer.Unobserved detail) -> Unobserved_chat { keeper; detail })
   end;
   current
 
@@ -19224,6 +19238,9 @@ let create_state
     ?(tool_visibility = Tools_compact)
     ~workspace
     ?(local_base_path = "")
+    ?(preference_send =
+      fun (_ : Masc.Tui_preference.change) ->
+        Error (Masc_tui_preference_writer.Not_started "This session has no server to store picks"))
     ~port
     ~refresh_interval
     ()
@@ -19239,10 +19256,11 @@ let create_state
   home_decision_receipt = None;
   home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
-  home_chat_writer = Masc_tui_chat_visit.create ();
+  preference_writer = Masc_tui_preference_writer.create ~send:preference_send;
   keeper_preference_writer = Masc_tui_config.create_keeper_preference_writer ();
   credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
+  preference_refusal_said = false;
   metrics_scroll = 0;
   metrics_content_height = 0;
   metrics_scroll_card_rows = None;

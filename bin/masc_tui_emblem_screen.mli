@@ -2,8 +2,9 @@
     {!Masc_tui_portrait_view} chooses real pixels, a half-block mosaic,
     or no picture from the terminal capabilities. *)
 
-(** How the candle is drawn. The reader picks one on [/about]. *)
-type style =
+(** How the candle is drawn. The reader picks one on [/about], and the pick is
+    stored in the [tui] table through {!Masc.Tui_preference}. *)
+type style = Masc.Tui_preference.candle =
   | Painted
       (** The 2D portrait ({!Keeper_portrait_draw}): smooth shading, the
           flame flickering and the eyes blinking. *)

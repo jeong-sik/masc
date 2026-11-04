@@ -4,4 +4,4 @@
 
 (test
  (name test_voice_send_on_stop_seam)
- (libraries alcotest masc.voice_setup masc.runtime masc.voice_config masc_tui_config unix))
+ (libraries alcotest masc masc.voice_setup masc.runtime masc.voice_config unix))

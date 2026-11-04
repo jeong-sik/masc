@@ -223,6 +223,14 @@ and quote the input size beside any count — `lines=41703 grep=0` means the
 symbol is absent, `lines=0 grep=0` means the read failed. A count on an empty
 input is not evidence of absence.
 
+Elapsed time is arithmetic, not an impression. Subtract the run's `createdAt`
+from the current UTC time and quote the result; a run started 17:44 was called
+"four and a half hours in" at 18:28, when it was 43 minutes in and still had over
+two hours of its 180 minute timeout left. Three separate judgements — "stalled",
+"past the timeout", "still has 96 minutes" — were built on that misread clock.
+A run's own `createdAt` and `timeout-minutes` give both the elapsed and the
+remaining time; state which one is quoted.
+
 Counting a long `Counter(...)` or argument list by eye is the same mistake in a
 different shape. A failure message listed 17 keys over 98 requests; reading it
 by eye missed `('setup', '/api/v1/dashboard/scheduled-automation'): 5`, and two

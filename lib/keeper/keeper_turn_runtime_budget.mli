@@ -17,7 +17,7 @@ type runtime_execution = {
   temperature : float;
 }
 
-type turn_event_bus_summary = {
+type turn_event_bus_summary = Keeper_turn_runtime_budget_event_bus.turn_event_bus_summary = {
   correlation_id : string option;
   run_id : string option;
   caused_by : string option;

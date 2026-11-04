@@ -58,7 +58,7 @@ val retry_task_deletion_r : config -> deletion_id:string ->
     (e.g. release on an already-Todo task): status unchanged, no
     write/events. RFC-0088 §1 follow-up — callers must branch on this
     field, not on the message string. *)
-type transition_outcome =
+type transition_outcome = Workspace_task_transitions.transition_outcome =
   { message : string
   ; noop : bool
   }

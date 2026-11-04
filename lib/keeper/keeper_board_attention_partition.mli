@@ -18,12 +18,12 @@ module Worker_epoch : sig
   val equal : t -> t -> bool
 end
 
-type completed_item =
+type completed_item = Keeper_board_attention_partition_types.completed_item =
   { candidate_id : string
   ; judgment : Candidate.judgment
   }
 
-type exact_provenance =
+type exact_provenance = Keeper_board_attention_partition_types.exact_provenance =
   { slot_id : string
   ; call_id : string
   ; plan_fingerprint : string

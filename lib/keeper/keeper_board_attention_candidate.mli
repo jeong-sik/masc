@@ -20,7 +20,7 @@ type delivery_failure =
   ; failed_at : float
   }
 
-type system_one_provenance =
+type system_one_provenance = Keeper_board_attention_candidate_wire.system_one_provenance =
   { destination_uri : string
   ; answering_model_id : string
   ; request_body_sha256 : string

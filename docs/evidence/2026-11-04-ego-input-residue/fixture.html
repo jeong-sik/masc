@@ -1,0 +1,23 @@
+<!doctype html><title>input residue probe</title>
+<style>button,input,div.box{display:block;margin:8px;width:220px;height:40px}#src,#dst{border:1px solid #888}</style>
+<button id="target">target</button>
+<input id="editor" value="">
+<div id="src" class="box" draggable="true">src</div>
+<div id="dst" class="box">dst</div>
+<button id="probe">probe</button>
+<input id="probeInput" value="">
+<a id="leave" href="about:blank">leave</a>
+<script>
+window.log = []; window.trap = null;
+const record = e => log.push({t: e.type, id: (e.target && e.target.id) || '', b: e.buttons, btn: e.button,
+  sh: !!e.shiftKey, ct: !!e.ctrlKey, al: !!e.altKey, me: !!e.metaKey, rp: !!e.repeat, k: e.key, tr: e.isTrusted});
+for (const type of ['pointerdown','pointerup','mousedown','mouseup','click','dblclick','keydown','keyup','dragstart','drop','mousemove'])
+  document.addEventListener(type, e => {
+    if (type !== 'mousemove' || e.buttons) record(e);
+    const trap = window.trap;
+    if (trap && trap.event === type && (!trap.id || e.target.id === trap.id) && (!trap.key || e.key === trap.key)) {
+      window.trap = null;
+      if (trap.type === 'alert') alert('trap'); else if (trap.type === 'confirm') confirm('trap'); else prompt('trap', 'x');
+    }
+  }, true);
+</script>

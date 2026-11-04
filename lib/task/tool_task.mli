@@ -1,7 +1,7 @@
 
 (** Tool_task - Core task CRUD operations *)
 
-type context = {
+type context = Tool_task_handlers.context = {
   config: Workspace_core.config;
   agent_name: string;
   sw: Eio.Switch.t option;

@@ -1,0 +1,1071 @@
+{
+  "ego_browser": "0.6.2.5",
+  "chromium": "156.0.8078.74",
+  "measured_at": "2026-11-04",
+  "runs": [
+    {
+      "cases": [
+        {
+          "label": "baseline",
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 click cut by alert on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "alert",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 24,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 click cut by confirm on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "confirm",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 27,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 click cut by prompt on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "prompt",
+              "hasBrowserHandler": true,
+              "defaultPrompt": "x"
+            }
+          },
+          "ms": 17,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 dblclick cut by alert on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "alert",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 35,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 dblclick cut by confirm on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "confirm",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 19,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 dblclick cut by prompt on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "prompt",
+              "hasBrowserHandler": true,
+              "defaultPrompt": "x"
+            }
+          },
+          "ms": 20,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 dragAndDrop cut by alert on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "alert",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 68,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 dragAndDrop cut by confirm on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "confirm",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 72,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 dragAndDrop cut by prompt on mousedown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "prompt",
+              "hasBrowserHandler": true,
+              "defaultPrompt": "x"
+            }
+          },
+          "ms": 73,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 press Shift+a cut by alert on keydown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "alert",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 12,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 press Shift+a cut by confirm on keydown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "confirm",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 8,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 press Shift+a cut by prompt on keydown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "prompt",
+              "hasBrowserHandler": true,
+              "defaultPrompt": "x"
+            }
+          },
+          "ms": 9,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 keyboard.press Shift+a cut by alert on keydown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "alert",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 10,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 keyboard.press Shift+a cut by confirm on keydown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "confirm",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 8,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 keyboard.press Shift+a cut by prompt on keydown",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "prompt",
+              "hasBrowserHandler": true,
+              "defaultPrompt": "x"
+            }
+          },
+          "ms": 16,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 keyboard.type ab cut by alert on keydown",
+          "answer": "void",
+          "ms": 7,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [
+              "a"
+            ],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": true
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 keyboard.type ab cut by confirm on keydown",
+          "answer": "void",
+          "ms": 8,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [
+              "a"
+            ],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": true
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M1/M2 keyboard.type ab cut by prompt on keydown",
+          "answer": "void",
+          "ms": 5,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [
+              "a"
+            ],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": true
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M3 click cut by confirm on mouseup",
+          "answer": {
+            "dialog": {
+              "url": "<fixture>/fixture.html?p=1",
+              "frameId": "01140E0D6E535AD1F6FCA8ED665AAA1B",
+              "message": "trap",
+              "type": "confirm",
+              "hasBrowserHandler": true,
+              "defaultPrompt": ""
+            }
+          },
+          "ms": 24,
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "interrupted": true,
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M3 beforeunload on link click, dismissed",
+          "answer": {},
+          "dialogOpenAfter": false,
+          "dismissed": false,
+          "url": "about:blank",
+          "error": "JavaScript evaluation failed at line 0, column 0: TypeError: Cannot set properties of null (setting 'value')\n    at <anonymous>:2:92\n    at __egoPageEvaluate (<"
+        },
+        {
+          "label": "M3 raw mouse.down cut by alert, then E mouse.up",
+          "error": "JavaScript evaluation failed at line 0, column 0: TypeError: Cannot set properties of null (setting 'value')\n    at <anonymous>:4:80\n    at __egoPageEvaluate (<"
+        },
+        {
+          "label": "E keyboard.type cut by alert, then keyboard.up(a)",
+          "error": "JavaScript evaluation failed at line 0, column 0: TypeError: Cannot set properties of null (setting 'value')\n    at <anonymous>:4:80\n    at __egoPageEvaluate (<"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "cases": [
+        {
+          "label": "baseline",
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M3 beforeunload via link click",
+          "answer": {},
+          "dialogOpenAfter": false,
+          "dismissed": false,
+          "url": "about:blank",
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M3 beforeunload via goto",
+          "answer": {},
+          "dialogOpenAfter": false,
+          "dismissed": false,
+          "url": "<fixture>/fixture.html?p=moved",
+          "samePage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "M3 raw mouse.down cut by alert, then E mouse.up",
+          "downAnswer": "void",
+          "dialogOpenAfter": true,
+          "accepted": true,
+          "coordinateClickBeforeRelease": [
+            "mousemove:probe:b1",
+            "pointerdown:probe:b1",
+            "mousedown:probe:b1",
+            "mouseup:probe:b0",
+            "click:probe:b0"
+          ],
+          "selectorProbeBeforeRelease": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          },
+          "released": true,
+          "coordinateClickAfterRelease": [
+            "pointerdown:probe:b1",
+            "mousedown:probe:b1",
+            "mouseup:probe:b0",
+            "click:probe:b0"
+          ],
+          "otherPage": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        },
+        {
+          "label": "E keyboard.type cut by alert, then keyboard.up(a)",
+          "accepted": true,
+          "beforeRelease": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [
+              "a"
+            ],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": true
+          },
+          "released": true,
+          "releaseEvents": [
+            "keyup:editor:a"
+          ],
+          "afterRelease": {
+            "clickError": null,
+            "typeError": null,
+            "value": "ab",
+            "mousedownButtons": [
+              1
+            ],
+            "clicks": 1,
+            "modifierEvents": [],
+            "repeats": [],
+            "heldMoves": 0,
+            "mask": 0,
+            "residue": false
+          }
+        }
+      ],
+      "errors": []
+    }
+  ]
+}

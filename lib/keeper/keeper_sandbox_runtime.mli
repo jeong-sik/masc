@@ -9,7 +9,7 @@
     Pure leaf module — no upward dependencies on other [Keeper_*]
     modules. *)
 
-type docker_preflight =
+type docker_preflight = Keeper_sandbox_runtime_setup.docker_preflight =
   { ok : bool
   ; image : (string, string) result
       (** The tag checked, or why the Keeper's image name did not resolve
@@ -25,7 +25,7 @@ type docker_preflight =
   ; next_actions : string list
   }
 
-type classified_error =
+type classified_error = Keeper_sandbox_runtime_setup.classified_error =
   { message : string
   ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
   }

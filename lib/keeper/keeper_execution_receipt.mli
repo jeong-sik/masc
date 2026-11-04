@@ -65,7 +65,7 @@ val assert_receipt_authoritative
   -> turn_state:string
   -> (unit, receipt_authority_violation) result
 
-type tool_surface =
+type tool_surface = Keeper_execution_receipt_types.tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
 (** Receipt-level summary of how the in-turn runtime attempt sequence

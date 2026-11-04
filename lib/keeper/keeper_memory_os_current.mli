@@ -89,7 +89,7 @@ type retraction =
   ; reason : string
   }
 
-type retract_batch_error =
+type retract_batch_error = Keeper_memory_os_current_types.retract_batch_error =
   | Retract_batch_empty
   | Retract_batch_memory_id_invalid of { index : int }
   | Retract_batch_reason_empty of { index : int }
@@ -141,8 +141,10 @@ type read_classified =
 
 (** Identity of one selected durable completed-turn range. Boundary row
     identities distinguish restarted histories that reuse atom numbers and
-    checkpoint digests. *)
-type durable_range_id =
+    checkpoint digests. [receipt_scope] is a stable scope: the runtime
+    keepers directory the receipt belongs to. Receipts under another scope
+    share the sidecar and remain independently recoverable. *)
+type durable_range_id = Keeper_memory_os_current_types.durable_range_id =
   { receipt_scope : string
       (** Stable scope: the runtime keepers directory the receipt belongs to.
           Receipts under another scope share the sidecar and remain
@@ -160,7 +162,7 @@ type durable_range_id =
 (** Exact official-client boundaries consumed by one Memory commit. [turns]
     is nonempty, strictly ordered after [after_boundary_line]; its final row
     identifies the consumed end. *)
-type official_range_id =
+type official_range_id = Keeper_memory_os_current_types.official_range_id =
   { receipt_scope : string
   ; after_boundary_line : int
   ; turns : (int * Ids.Turn_ref.t) list
@@ -183,7 +185,7 @@ val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memo
     SHA-256 is lowercase hexadecimal. The caller binds the digest to the exact
     candidate payload. Neither request IDs nor sequence numbers may be reused
     within a generation, including with a changed digest. *)
-type explicit_candidate_id =
+type explicit_candidate_id = Keeper_memory_os_current_types.explicit_candidate_id =
   { queue_generation : string
   ; request_id : string
   ; sequence : int

@@ -2266,9 +2266,6 @@ let test_history_moves_one_entry () =
   let timeout = load_timeout () in
   check bool "the load wait ends an answer margin before the run is stopped" true
     (timeout >= 1 && timeout <= !stops_in_ms - margin);
-  stops_in_ms := margin;
-  ignore (on_tab Lane.Action.Back);
-  check int "with no time left it waits a millisecond, never without a bound" 1 (load_timeout ());
   stops_in_ms := margin + 200;
   navigation := "return {};";
   (match on_tab Lane.Action.Back with

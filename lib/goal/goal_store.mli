@@ -36,7 +36,7 @@ val validate_goal_id : string -> (unit, goal_id_error) result
 
 (** {1 Goal record} *)
 
-type goal = {
+type goal = Goal_document.goal = {
   id : string;
   criterion_revision : string;
   title : string;

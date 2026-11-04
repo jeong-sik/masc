@@ -12,6 +12,7 @@ type tree_node = {
   latest_turn_ref : int option;
   activity_observation : string;
 }
+(** Per-goal projection node returned by [build_forest]. *)
 
 type goal_detail_keeper = {
   meta : Keeper_meta_contract.keeper_meta;

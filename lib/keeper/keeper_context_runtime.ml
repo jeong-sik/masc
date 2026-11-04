@@ -167,8 +167,6 @@ let dispatch_keeper_phase_event ~config ~keeper_name event =
 (* Remaining functions (not extracted — small utilities)              *)
 (* ================================================================ *)
 
-let generate_trace_id = Keeper_identity.generate_trace_id
-
 let resolve_max_context_resolution_for_runtime
       ~requested_override
       (runtime : Runtime_instance.t)

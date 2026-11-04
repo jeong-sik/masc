@@ -170,7 +170,6 @@ type options =
   ; trace_link : (string * string) option
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
-  ; mcp_clients : Mcp.managed list
   ; event_bus : Event_bus.t option
   ; skill_registry : Skill_registry.t option
     (** Discovery/metadata path only.  Surfaced via {!Agent.card} for
@@ -327,4 +326,3 @@ val set_lifecycle
 
 val last_raw_trace_run : t -> Raw_trace.run_ref option
 val lifecycle_snapshot : t -> lifecycle_snapshot option
-val close : t -> unit

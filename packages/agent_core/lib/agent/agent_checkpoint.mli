@@ -73,6 +73,5 @@ val build_checkpoint
   -> state:Types.agent_state
   -> tools:Tool_set.t
   -> context:Context.t
-  -> mcp_clients:Mcp.managed list
   -> unit
   -> Checkpoint.t

@@ -12,7 +12,6 @@ let persist_caller_owned agent stage ~pending_input state =
         ~state
         ~tools:agent.tools
         ~context:agent.context
-        ~mcp_clients:agent.options.mcp_clients
         ()
     in
     let timestamp = checkpoint.created_at in
@@ -52,7 +51,7 @@ let persist_for_state agent stage ~pending_input state =
     | Some scope ->
       let open Result_syntax in
       let checkpoint=Agent_checkpoint.build_checkpoint ~pending_input ~state
-          ~tools:agent.tools ~context:agent.context ~mcp_clients:agent.options.mcp_clients () in
+          ~tools:agent.tools ~context:agent.context () in
       let* fact=Checkpoint_snapshot.create ~stage checkpoint
           |> Result.map_error (fun error -> Error.Internal (Checkpoint_snapshot.error_to_string error)) in
       Execution_agent_scope.record_checkpoint scope fact

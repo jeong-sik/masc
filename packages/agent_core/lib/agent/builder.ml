@@ -202,13 +202,6 @@ let with_periodic_callbacks cbs b =
 
 let build b =
   let tools = b.tools in
-  (* Agent Core can hold managed MCP clients, and nothing hands it any: the
-     builder setter that was the only way in had no caller anywhere in the
-     repo and is gone (#34871). [Agent.close] and the agent card's MCP
-     capability read this list, so both have always answered for an empty
-     one. A caller that wants managed clients adds the setter back with
-     itself. *)
-  let mcp_clients = [] in
   let context = Contract.context_with_contract ?context:b.context b.contract in
   let config =
     { name = b.name
@@ -246,7 +239,6 @@ let build b =
     ; trace_link = None
     ; raw_trace = b.raw_trace
     ; context_injector = b.context_injector
-    ; mcp_clients
     ; event_bus = b.event_bus
     ; skill_registry = b.skill_registry
     ; elicitation = b.elicitation

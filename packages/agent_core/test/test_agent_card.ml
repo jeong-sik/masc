@@ -48,7 +48,6 @@ let base_info : Agent_card.agent_info =
           ()
       ]
   ; supported_providers = []
-  ; mcp_clients_count = 0
   ; has_elicitation = false
   ; skills = []
   ; supported_interfaces = jsonrpc_interfaces "https://agent.example/a2a"
@@ -92,12 +91,6 @@ let test_capabilities_no_thinking () =
     "no Thinking"
     false
     (Agent_card.has_capability card Agent_card.Thinking)
-;;
-
-let test_capabilities_mcp () =
-  let info = { base_info with mcp_clients_count = 2 } in
-  let card = Agent_card.of_info info in
-  Alcotest.(check bool) "has MCP" true (Agent_card.has_capability card Agent_card.MCP)
 ;;
 
 let test_capabilities_elicitation () =
@@ -625,7 +618,6 @@ let () =
         ; test_case "streaming cap" `Quick test_capabilities_streaming
         ; test_case "thinking cap" `Quick test_capabilities_thinking
         ; test_case "no thinking" `Quick test_capabilities_no_thinking
-        ; test_case "mcp cap" `Quick test_capabilities_mcp
         ; test_case "elicitation cap" `Quick test_capabilities_elicitation
         ; test_case "no elicitation" `Quick test_capabilities_no_elicitation
         ; test_case "no tools" `Quick test_no_tools

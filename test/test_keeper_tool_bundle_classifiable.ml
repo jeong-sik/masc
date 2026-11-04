@@ -750,7 +750,7 @@ let test_per_candidate_image_projection () =
             ~config:(Agent_core.Types.default_config ~model:"image-projection-uncatalogued")
             ~net ~tools:view.agent_core_tools ~options () in
         cell := Some agent;
-        Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+        (
           (match Agent_core.Agent.run ~sw agent "Load the native image tool once." with
            | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
           check int "only injected completion callbacks ran" 2 !requests;

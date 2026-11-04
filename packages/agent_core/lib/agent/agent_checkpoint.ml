@@ -128,7 +128,6 @@ let build_checkpoint
       ~(state : agent_state)
       ~(tools : Tool_set.t)
       ~(context : Context.t)
-      ~(mcp_clients : Mcp.managed list)
       ()
   =
   let tool_list = Tool_set.to_list tools in
@@ -155,7 +154,7 @@ let build_checkpoint
   ; reasoning_effort = state.config.reasoning_effort
   ; cache_system_prompt = state.config.cache_system_prompt
   ; context = Context.copy context
-  ; mcp_sessions = Mcp_session.capture_all mcp_clients
+  ; mcp_sessions = []
   ; working_context
   ; pending_input
   }

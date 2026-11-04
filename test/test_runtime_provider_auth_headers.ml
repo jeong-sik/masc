@@ -2107,7 +2107,6 @@ let test_runtime_agent_terminal_error_preserves_uncaptured_failure () =
 
 let test_runtime_agent_context_preserves_max_tokens_intent () =
   Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
       let check_builder_max_tokens expected max_tokens =
         let config =
           Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
@@ -2124,11 +2123,10 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
             ()
         in
         check (option int) "fresh agent max_tokens intent" expected
-          (Agent_core.Agent.state agent).config.max_tokens;
-        Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent)
+          (Agent_core.Agent.state agent).config.max_tokens
       in
       check_builder_max_tokens None None;
-      check_builder_max_tokens (Some 2048) (Some 2048)))
+      check_builder_max_tokens (Some 2048) (Some 2048))
 
 let test_runtime_agent_context_preserves_provider_sampling_config () =
   let provider_cfg =
@@ -2149,7 +2147,6 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
   check (option int) "config top_k" (Some 42) config.top_k;
   check (option (float 0.0001)) "config min_p" (Some 0.07) config.min_p;
   Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
       let agent =
         Runtime_agent_context.create_agent
           ~net:(Eio.Stdenv.net env)
@@ -2161,9 +2158,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
         agent_config.top_p;
       check (option int) "fresh agent top_k" (Some 42) agent_config.top_k;
       check (option (float 0.0001)) "fresh agent min_p" (Some 0.07)
-        agent_config.min_p;
-      Eio.Switch.on_release sw (fun () ->
-        Agent_core.Agent.close agent)));
+        agent_config.min_p);
   let checkpoint =
     { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
@@ -2241,14 +2236,12 @@ let test_runtime_agent_context_fresh_and_resumed_agents_share_options () =
       Runtime_agent_context.set_agent_core_tracer Agent_core.Tracing.null)
     (fun () ->
        Eio_main.run (fun env ->
-         Eio.Switch.run (fun sw ->
            let agent =
              Runtime_agent_context.create_agent
                ~net:(Eio.Stdenv.net env)
                ~config
                ()
            in
-           Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent);
            check_options "fresh" (Agent_core.Agent.options agent);
            let prepared =
              Runtime_agent_context.prepare_resume
@@ -2256,7 +2249,7 @@ let test_runtime_agent_context_fresh_and_resumed_agents_share_options () =
                ~checkpoint:(Agent_core.Agent.checkpoint agent)
                ~transport:None
            in
-           check_options "resumed" prepared.options)))
+           check_options "resumed" prepared.options))
 
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
   let provider_cfg_with_response_format =
@@ -2323,7 +2316,6 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
       ~tools:[ tool ]
   in
   Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
       let agent =
         Runtime_agent_context.create_agent
           ~net:(Eio.Stdenv.net env)
@@ -2335,9 +2327,7 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
         (option string)
         "tool_choice remains unset"
         None
-        (Option.map Agent_core.Types.show_tool_choice agent_config.tool_choice);
-      Eio.Switch.on_release sw (fun () ->
-        Agent_core.Agent.close agent)))
+        (Option.map Agent_core.Types.show_tool_choice agent_config.tool_choice))
 
 let fresh_loopback_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -2740,9 +2730,7 @@ let test_runtime_agent_fresh_build_enforces_native_context_fit () =
       | Ok agent -> agent
       | Error error -> fail (Agent_core.Error.to_string error)
     in
-    Fun.protect
-      ~finally:(fun () -> Agent_core.Agent.close agent)
-      (fun () -> Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+    ( Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
 
@@ -2762,9 +2750,7 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
       | Ok agent -> agent
       | Error error -> fail (Agent_core.Error.to_string error)
     in
-    Fun.protect
-      ~finally:(fun () -> Agent_core.Agent.close agent)
-      (fun () -> Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+    ( Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
@@ -2910,7 +2896,7 @@ let test_runtime_source_change_preserves_history () =
              else Runtime_agent.build ~sw ~net ~config) with
             | Ok agent -> agent
             | Error error -> fail (Agent_core.Error.to_string error) in
-          Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+          (
             let result = if stream then
                 Agent_core.Agent.run_stream ~sw ~on_event:ignore agent "new query"
               else Agent_core.Agent.run ~sw agent "new query" in
@@ -3059,7 +3045,7 @@ let test_runtime_trimmed_reasoning_boundary () =
              else Runtime_agent.build ~sw ~net ~config) with
             | Ok agent -> agent
             | Error error -> fail (Agent_core.Error.to_string error) in
-          Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+          (
             let api_strategy = if stream then
                 Agent_core.Agent.Stream {on_event=ignore; on_telemetry=None}
               else Agent_core.Agent.Sync in
@@ -3145,9 +3131,7 @@ let run_projection_case ~resume =
       | Ok agent -> agent
       | Error error -> fail (Agent_core.Error.to_string error)
     in
-    Fun.protect
-      ~finally:(fun () -> Agent_core.Agent.close agent)
-      (fun () ->
+    (
          match Agent_core.Agent.run ~sw agent canonical_marker with
          | Ok _ -> ()
          | Error error -> fail (Agent_core.Error.to_string error))
@@ -3203,9 +3187,7 @@ let run_pre_dispatch_serialization_observer_case ~resume =
       | Ok agent -> agent
       | Error error -> fail (Agent_core.Error.to_string error)
     in
-    Fun.protect
-      ~finally:(fun () -> Agent_core.Agent.close agent)
-      (fun () ->
+    (
          match Agent_core.Agent.run ~sw agent "observe exact request bytes" with
          | Ok _ -> ()
          | Error error -> fail (Agent_core.Error.to_string error))
@@ -3361,7 +3343,6 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
     ]
   in
   Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
   List.iter (fun (provider_id, protocol, model_id, body, wire_policy, disabled) ->
     List.iter (fun (policy, expected) ->
       let cfg, binding = parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy in
@@ -3377,7 +3358,6 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
       let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
           ~name:"parallel-policy" ~provider_cfg ~system_prompt:"inspect" ~tools:[] in
       let agent = Runtime_agent_context.create_agent ~net:(Eio.Stdenv.net env) ~config () in
-      Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent);
       let check_wire label agent_config =
         let request = Agent_core.Agent_turn.provider_config_with_agent_config
             ~config:agent_config provider_cfg |> body in

@@ -228,7 +228,6 @@ let test_agent_elicit_input_without_callback_pauses () =
     let pending = Option.get (Agent.pending_input agent) in
     Alcotest.(check string) "owned request identity" input.request_id pending.request.request_id;
     let persisted = Checkpoint.to_string (Agent.checkpoint agent) in
-    Agent.close agent;
     let restored = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net
       ~checkpoint:(Result.get_ok (Checkpoint.of_string persisted))
       ~options () |> Result.get_ok) in
@@ -395,7 +394,6 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
       ~config:(Types.default_config ~model:"input-only") ~options () in
   ignore (Agent.run ~sw agent "original");
   let pending = Option.get (Agent.pending_input agent) in
-  Agent.close agent;
   let checkpoint = read_input_checkpoint path in
   Alcotest.(check bool) "first pause is durable without an AfterTurn" true
     (checkpoint.pending_input = Some pending);
@@ -409,8 +407,7 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
     (current.pending_input = None && current.messages = (Agent.state restored).messages);
   let last = List.hd (List.rev current.messages) in
   Alcotest.(check bool) "saved answer uses the canonical question" true
-    (last.content = [Types.Text "[User input] canonical question: \"yes\""]);
-  Agent.close restored
+    (last.content = [Types.Text "[User input] canonical question: \"yes\""])
 ;;
 
 let test_callback_and_restored_response_prepare_same_model_input () =
@@ -438,7 +435,6 @@ let test_callback_and_restored_response_prepare_same_model_input () =
         before_turn_params=Some (capture_input callback_input)}} in
     let live=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
     check_stopped (Agent.run ~sw live "original");
-    Agent.close live;
     let options={Agent.default_options with hooks={Hooks.empty with
       before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
     let waiting=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options
@@ -448,13 +444,11 @@ let test_callback_and_restored_response_prepare_same_model_input () =
      | Error error -> Alcotest.fail (Error.to_string error)
      | Ok _ -> Alcotest.fail "expected original input wait");
     let pending=Option.get (Agent.pending_input waiting) in
-    Agent.close waiting;
     let restored=(Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:(read_input_checkpoint path)
         ~checkpoint_sink:(save_input_checkpoint path) () |> Result.get_ok) in
     let forged={pending with request={pending.request with question="foreign question"}} in
     Alcotest.(check bool) "typed response is durably accepted for the owned question" true
       (Agent.provide_input restored forged response=Ok ());
-    Agent.close restored;
     let committed=read_input_checkpoint path in
     let expected=[Types.user_msg "original";expected_message] in
     Alcotest.(check bool) "settlement and distinct canonical observation survive close/reopen" true
@@ -464,7 +458,6 @@ let test_callback_and_restored_response_prepare_same_model_input () =
       before_turn_params=Some (capture_input restored_input)}} in
     let continued=(Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:committed ~options () |> Result.get_ok) in
     check_stopped (Agent.run_turn_stream ~sw ~on_event:ignore continued);
-    Agent.close continued;
     let expected_input=Result.get_ok
         (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ()) expected) in
     Alcotest.(check bool) "callback and reopened continuation prepare identical model input" true
@@ -491,11 +484,9 @@ let test_accepted_resume_persists_before_parameter_failure () =
   waiting := false;
   let result = Agent.run_turn_stream ~sw ~on_event:ignore agent in
   Alcotest.(check bool) "parameter failure remains a failure" true (Result.is_error result);
-  Agent.close agent;
   let restored = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:(read_input_checkpoint path) () |> Result.get_ok) in
   Alcotest.(check bool) "cleanup and restore cannot resurrect the old wait" true
-    (Agent.pending_input restored = None);
-  Agent.close restored
+    (Agent.pending_input restored = None)
 ;;
 
 let test_input_sink_failure_preserves_owned_state () =
@@ -524,8 +515,7 @@ let test_input_sink_failure_preserves_owned_state () =
      | Error (Error.Agent (Error.InputRequired _)) | Ok _ -> false
      | Error _ -> true);
   Alcotest.(check bool) "original durable request remains" true
-    ((read_input_checkpoint path).pending_input = Some pending && Agent.pending_input agent = Some pending);
-  Agent.close agent
+    ((read_input_checkpoint path).pending_input = Some pending && Agent.pending_input agent = Some pending)
 ;;
 
 let test_uncertain_input_commit_is_not_a_stale_response () =
@@ -548,8 +538,7 @@ let test_uncertain_input_commit_is_not_a_stale_response () =
      | Error (Agent.Input_checkpoint_failed _) -> true
      | Error (Agent.Input_not_current _) | Ok () -> false);
   Alcotest.(check bool) "an error does not assert external storage unchanged" true
-    ((read_input_checkpoint path).pending_input = None && Agent.pending_input agent = Some pending);
-  Agent.close agent
+    ((read_input_checkpoint path).pending_input = None && Agent.pending_input agent = Some pending)
 ;;
 
 let () =

@@ -159,24 +159,6 @@ let test_agent_type_lifecycle_status_show () =
     [ Accepted; Ready; Running; Completed; Failed ]
 ;;
 
-let test_agent_type_create_merges_mcp_tools () =
-  Eio_main.run
-  @@ fun env ->
-  let managed : Mcp.managed =
-    { tools = [ echo_tool ]
-    ; skipped_tools = []
-    ; name = "coverage-mcp"
-    ; transport =
-        Mcp.Http
-          { close_fn = (fun () -> ()); base_url = "http://127.0.0.1"; headers = [] }
-    }
-  in
-  let options = { Internal_agent.default_options with mcp_clients = [ managed ] } in
-  let config = Types.default_config ~model:"test-model" in
-  let agent = Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
-  check_bool "mcp tool merged" true (Tool_set.mem "echo" (Internal_agent.tools agent))
-;;
-
 let test_agent_type_lifecycle_rejects_invalid_transition () =
   Eio_main.run
   @@ fun env ->
@@ -285,10 +267,6 @@ let () =
             "agent lifecycle status show"
             `Quick
             test_agent_type_lifecycle_status_show
-        ; Alcotest.test_case
-            "agent create merges mcp tools"
-            `Quick
-            test_agent_type_create_merges_mcp_tools
         ; Alcotest.test_case
             "agent lifecycle rejects invalid transition"
             `Quick

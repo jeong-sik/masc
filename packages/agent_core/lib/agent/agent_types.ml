@@ -65,7 +65,6 @@ type options =
         Used to connect AGENT_CORE agent turns to an external trace root. *)
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
-  ; mcp_clients : Mcp.managed list
   ; event_bus : Event_bus.t option
   ; skill_registry : Skill_registry.t option
   ; elicitation : Hooks.elicitation_callback option
@@ -132,7 +131,6 @@ let default_options =
   ; trace_link = None
   ; raw_trace = None
   ; context_injector = None
-  ; mcp_clients = []
   ; event_bus = None
   ; skill_registry = None
   ; elicitation = None
@@ -310,7 +308,6 @@ let card ~supported_interfaces t =
     ; tool_schemas =
         List.map (fun (tool : Tool.t) -> tool.schema) (Tool_set.to_list t.tools)
     ; supported_providers
-    ; mcp_clients_count = List.length t.options.mcp_clients
     ; has_elicitation =
         Option.is_some t.options.elicitation || Option.is_some t.options.tool_approval
     ; skills
@@ -393,10 +390,7 @@ let create
       ?checkpoint_sink
       ()
   =
-  let mcp_tools =
-    List.concat_map (fun (m : Mcp.managed) -> m.tools) options.mcp_clients
-  in
-  let all_tools = Tool_set.merge (Tool_set.of_list tools) (Tool_set.of_list mcp_tools) in
+  let all_tools = Tool_set.of_list tools in
   let state =
     { config; provider_binding = None; messages = config.initial_messages; turn_count = 0; usage = empty_usage }
   in
@@ -455,4 +449,3 @@ let last_raw_trace_run agent =
 ;;
 
 let lifecycle_snapshot agent = agent.lifecycle
-let close agent = Mcp.close_all agent.options.mcp_clients

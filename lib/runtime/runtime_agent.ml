@@ -1006,17 +1006,6 @@ let record_dashboard_agent_core_response ~config ~total_duration_ms ?serializati
         "%s: dashboard agent record failed: %s"
         config.name (Printexc.to_string exn)
 
-let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
-  try Agent_core.Agent.close agent with
-  | Eio.Cancel.Cancelled _ as e ->
-      Log.Runtime_agent.warn
-        "%s: agent close cancelled during cleanup"
-        config.name;
-      if propagate_cancel then raise e
-  | close_exn ->
-      Log.Runtime_agent.warn "%s: agent close failed during cleanup: %s"
-        config.name (Printexc.to_string close_exn)
-
 (* ================================================================ *)
 (* Resume from checkpoint                                            *)
 (* ================================================================ *)
@@ -1328,9 +1317,6 @@ let run_blocks_internal_in_scope
     in
     let turns = (Agent_core.Agent.state agent).turn_count in
     let trace_ref = Agent_core.Agent.last_raw_trace_run agent in
-    let close_after_success () =
-      close_agent_for_cleanup ~propagate_cancel:false ~config agent
-    in
     let run_validation =
       match trace_ref with
       | Some ref_ ->
@@ -1344,7 +1330,6 @@ let run_blocks_internal_in_scope
     in
     (match result with
     | Ok (`Completed { Agent_core.Agent.Advanced.response; provider_turn_ordinal }) ->
-      close_after_success ();
       record_dashboard_agent_core_response ~config
         ~total_duration_ms:run_total_duration_ms
         ~status:Dashboard_agent_core_bridge.Success response;
@@ -1370,7 +1355,6 @@ let run_blocks_internal_in_scope
           stop_reason = Completed { provider_turn_ordinal };
         }
     | Ok (`Yielded (decision, yielded, response)) ->
-      close_after_success ();
       let stop_reason =
         stop_reason_of_cooperative_yield
           ~provider_turn_ordinal:yielded.provider_turn_ordinal
@@ -1407,7 +1391,6 @@ let run_blocks_internal_in_scope
         }
     | Error
         (Agent_core.Error.Agent (Agent_core.Error.InputRequired request)) ->
-      close_after_success ();
       let stop_reason = InputRequired { turns_used = turns; request } in
       let partial_response =
         partial_response_of_stop ~session_id ~text:request.question
@@ -1471,15 +1454,11 @@ let run_blocks_internal_in_scope
          recovered runtimes.  The runtime layer logs [runtime-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)
       Log.Runtime_agent.debug "agent errored: %s" detail;
-      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
       Error err)
   with
-  | Eio.Cancel.Cancelled _ as exn ->
-    close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-    raise exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     let bt = Printexc.get_backtrace () in
-    close_agent_for_cleanup ~config agent;
     let detail =
       Printf.sprintf "execution exception: %s" (Printexc.to_string exn)
     in

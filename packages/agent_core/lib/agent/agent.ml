@@ -822,7 +822,6 @@ let checkpoint ?(session_id = "") ?working_context agent =
     ~state
     ~tools:agent.tools
     ~context:agent.context
-    ~mcp_clients:agent.options.mcp_clients
     ()
 ;;
 

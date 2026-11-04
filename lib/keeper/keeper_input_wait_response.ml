@@ -25,7 +25,7 @@ let prepare ~net ~expected_source_ref ~source ~pending ~response =
       Agent_core.Agent.resume ~net ~media_store:(Agent_core.History.Memory_store.create ())
         ~checkpoint ()
       |> Result.map_error (fun error -> Resume_refused error) in
-    Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+    (
       match Agent_core.Agent.provide_input agent pending response with
       | Error (Agent_core.Agent.Input_not_current error) ->
         Error (Input_not_current error)

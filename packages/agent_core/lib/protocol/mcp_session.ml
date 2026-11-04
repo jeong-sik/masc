@@ -1,14 +1,6 @@
-(** MCP session capture for the checkpoint record.
-
-    MCP connections (OS process + stdio pipes) cannot be serialized. This
-    module captures the serializable parts -- server specification and
-    discovered tool schemas -- which [Agent_checkpoint.build_checkpoint] puts
-    on [Checkpoint.mcp_sessions].
-
-    Resume does not go through here. [Agent.resume] takes its tools from the
-    caller ([~tools]), and masc's own resume site passes [config.tools]
-    (lib/runtime/runtime_agent.ml), so the captured specs are written and never
-    read back into a connection. *)
+(** JSON codec for the [Checkpoint.mcp_sessions] field.
+    [Agent_checkpoint.build_checkpoint] writes an empty list, and
+    [Agent.resume] takes its tools from the caller ([~tools]). *)
 
 open Types
 open Result_syntax
@@ -30,38 +22,6 @@ type info =
   ; transport_kind : transport_kind
   }
 
-(** Capture session info from a connected managed server. *)
-let capture (m : Mcp.managed) : info =
-  let tool_schemas = List.map (fun (t : Tool.t) -> t.schema) m.tools in
-  match m.transport with
-  | Mcp.Stdio { spec; _ } ->
-    { server_name = m.name
-    ; command = spec.command
-    ; args = spec.args
-    ; env = spec.env
-    ; http_base_url = None
-    ; http_headers = []
-    ; tool_schemas
-    ; transport_kind = Stdio
-    }
-  | Mcp.Http { base_url; headers; _ } ->
-    { server_name = m.name
-    ; command = "http"
-    ; args = []
-    ; env = []
-    ; http_base_url = Some base_url
-    ; http_headers = headers
-    ; tool_schemas
-    ; transport_kind = Http
-    }
-;;
-
-(** Capture session info from all connected managed servers. *)
-let capture_all (managed_list : Mcp.managed list) : info list =
-  List.map capture managed_list
-;;
-
-(** Convert session info back to a server_spec for reconnection. *)
 (* ── JSON serialization ─────────────────────────────────────────── *)
 
 let env_pair_to_json (k, v) = `Assoc [ "key", `String k; "value", `String v ]

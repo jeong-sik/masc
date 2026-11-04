@@ -119,10 +119,16 @@ Ego Space는 같은 브라우저 안의 작업 공간이다. 작업할 때마다
 
 ## 사용자 소유로 남은 Space 회수
 
-인계 뒤 task가 끝나면(운영자가 끝내거나 `finish` 후) 그 Space의 소유권은
-사용자에게 남는다. 이때 live lane은 그 Space를 열지 않으므로 연결 목록이
-비고, `inventoryIssues`에 `ego_user_owned_space`(Space 이름, 관찰 시각)가
-올라온다. 이유 없이 비어 있는 게 아니라 거부 중이다.
+인계(Take over)와 소유 확정은 다르다. 인계만 하면 Space는
+`agentDelegatedToUser` 상태로 운영자에게 위임일 뿐이고, worker는 이 상태를
+막지 않고 다시 연결한다. Space 안에서 클릭하거나 새 탭을 열어도, worker가
+쥔 채로 서버를 재시작해도 소유는 넘어가지 않는다(2026-11-04 실측). 소유가
+사용자로 확정되는 건 task가 끝날 때다. 운영자가 Return to agent나 Stop로
+task를 끝내면(또는 `finish` 후) 그때 `ownership: user`가 된다.
+
+task가 끝나 사용자 소유로 남으면 live lane은 그 Space를 열지 않으므로 연결
+목록이 비고, `inventoryIssues`에 `ego_user_owned_space`(Space 이름, 관찰
+시각)가 올라온다. 이유 없이 비어 있는 게 아니라 거부 중이다.
 
 운영자가 그 Space에서 계속하겠다고 말한 뒤에만 BrowserAct `take_over`를
 `lane: "live"`로, clientId 없이 부른다. worker가 `claimTaskSpace`로 소유권을

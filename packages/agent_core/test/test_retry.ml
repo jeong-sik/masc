@@ -121,7 +121,7 @@ let test_classify_error_402_payment_required () =
   check
     string
     "402 error_message rendering"
-    "Payment required: Insufficient Balance (retry_after: none)"
+    "Payment required: Insufficient Balance"
     (Retry.error_message err)
 ;;
 
@@ -353,12 +353,11 @@ let test_error_message_all_variants () =
       , "Rate limited: slow (retry_after: none)" )
     ; ( Retry.RateLimited { retry_after = Some 123.5; message = "slow" }
       , "Rate limited: slow (retry_after: 123.500s)" )
-    ; Retry.Overloaded { message = "busy" }, "Overloaded: busy (retry_after: none)"
+    ; Retry.Overloaded { message = "busy" }, "Overloaded: busy"
     ; Retry.ServerError { status = 503; message = "down" }, "Server error 503: down"
     ; Retry.AuthError { message = "bad key" }, "Auth error: bad key"
     ; Retry.AuthorizationError { message = "forbidden" }, "Authorization error: forbidden"
-    ; ( Retry.PaymentRequired { message = "Insufficient Balance" }
-      , "Payment required: Insufficient Balance (retry_after: none)" )
+    ; Retry.PaymentRequired { message = "Insufficient Balance" }, "Payment required: Insufficient Balance"
     ; ( Retry.InvalidRequest { message = "wrong"; reason = Unknown_invalid_request }
       , "Invalid request (unknown): wrong" )
     ; Retry.NotFound { message = "no model" }, "Not found: no model"
